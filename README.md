@@ -39,3 +39,8 @@ The template for creating new repositories.
 No documentations.
 
 <!-- This section must link to the docs which are in the root of the repository in /docs -->
+
+## Environment Contract
+
+Use root `.env.example` as the source of truth for runtime config and secrets.
+Missing or empty required values must fail loudly.

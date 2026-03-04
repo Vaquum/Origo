@@ -1,0 +1,109 @@
+{
+  "fixture_window": [
+    "spot_trades:2017-08",
+    "spot_agg_trades:2019-01",
+    "futures_trades:2019-09"
+  ],
+  "source_checksums": {
+    "spot_daily_2017-08-17": {
+      "zip_sha256": "a23fe0dae54b7143d5cffb42184e1a05afe7124aaca641cd438297ce83c9f9ec",
+      "csv_sha256": "f1ca7241eba6cf27aac03ac32bea5c4e8a7c88b725b8f2f6276e6b178230d557"
+    },
+    "spot_daily_2017-08-18": {
+      "zip_sha256": "7f1328d09ff839d498506be281306305f453da632e18a7a15437b78df14bc198",
+      "csv_sha256": "949cdfd7fe2e81a04fed327d39841bf2e74ab4e2849fb386a298ae6c20be894c"
+    },
+    "spot_daily_2017-08-19": {
+      "zip_sha256": "ff74fae2822aea541f55e68c9b3c7c6387f636827f403239869aa2be7578d6a6",
+      "csv_sha256": "51503dcf2df972ca42e2dad390599f18d11aa8d541744ffd411b1403db03f59c"
+    },
+    "spot_monthly_agg_2019-01": {
+      "zip_sha256": "588bff60b17e906ad4b654d0f615d838a2b2ec36b7790e5db40c6d2a03556355",
+      "csv_sha256": "2fb1282a567610509962567c7f9f304e0d8346dd9985524f73ff36e7cdcead5d"
+    },
+    "futures_monthly_trades_2019-09": {
+      "zip_sha256": "5b03122bd54d65a65bc06817da8557cbfd53fdba95ccdc0cd24a836a7adc63c3",
+      "csv_sha256": "82da59befd44dc8b4f08062c433ccbd3e1f4be8870cfee52a2a1b95f43779bb9"
+    }
+  },
+  "run_1_fingerprint": [
+    {
+      "window_id": "spot_trades_month_2017-08",
+      "dataset": "spot_trades",
+      "row_count": 10813,
+      "offset_min_id": 0,
+      "offset_max_id": 10812,
+      "volume_sum": 2376.348404,
+      "price_sum": 45840415.13,
+      "row_hash_sha256_csv": "0e5c39c21e783ee58c7782c0edc2ee68304cb1cca94bdaf24ee48a3935ec054b"
+    },
+    {
+      "window_id": "spot_agg_trades_month_2019-01",
+      "dataset": "spot_agg_trades",
+      "row_count": 500,
+      "offset_min_id": 82541550,
+      "offset_max_id": 82542049,
+      "volume_sum": 79.881634,
+      "price_sum": 1849726.0300000003,
+      "row_hash_sha256_csv": "cdb813ed7faff3f74ae1f42850b2da8019ae1322031c8eddbfb9b0649141684e"
+    },
+    {
+      "window_id": "futures_trades_month_2019-09",
+      "dataset": "futures_trades",
+      "row_count": 500,
+      "offset_min_id": 1,
+      "offset_max_id": 500,
+      "volume_sum": 417.48199999999997,
+      "price_sum": 5172690.56,
+      "row_hash_sha256_csv": "f9795988c78d29cb367f24341c3308110f49b178b2c6850cb5773473f74bf6f8"
+    }
+  ],
+  "run_2_fingerprint": [
+    {
+      "window_id": "spot_trades_month_2017-08",
+      "dataset": "spot_trades",
+      "row_count": 10813,
+      "offset_min_id": 0,
+      "offset_max_id": 10812,
+      "volume_sum": 2376.348404,
+      "price_sum": 45840415.13,
+      "row_hash_sha256_csv": "0e5c39c21e783ee58c7782c0edc2ee68304cb1cca94bdaf24ee48a3935ec054b"
+    },
+    {
+      "window_id": "spot_agg_trades_month_2019-01",
+      "dataset": "spot_agg_trades",
+      "row_count": 500,
+      "offset_min_id": 82541550,
+      "offset_max_id": 82542049,
+      "volume_sum": 79.881634,
+      "price_sum": 1849726.0300000003,
+      "row_hash_sha256_csv": "cdb813ed7faff3f74ae1f42850b2da8019ae1322031c8eddbfb9b0649141684e"
+    },
+    {
+      "window_id": "futures_trades_month_2019-09",
+      "dataset": "futures_trades",
+      "row_count": 500,
+      "offset_min_id": 1,
+      "offset_max_id": 500,
+      "volume_sum": 417.48199999999997,
+      "price_sum": 5172690.56,
+      "row_hash_sha256_csv": "f9795988c78d29cb367f24341c3308110f49b178b2c6850cb5773473f74bf6f8"
+    }
+  ],
+  "deterministic_match": true,
+  "deterministic_match_by_window": {
+    "spot_trades_month_2017-08": true,
+    "spot_agg_trades_month_2019-01": true,
+    "futures_trades_month_2019-09": true
+  },
+  "column_key": {
+    "window_id": "Unique fixture window identifier.",
+    "dataset": "Binance native dataset name queried.",
+    "row_count": "Number of rows returned for the window.",
+    "offset_min_id": "Minimum ID offset in returned window (dataset primary ID).",
+    "offset_max_id": "Maximum ID offset in returned window (dataset primary ID).",
+    "volume_sum": "Sum of quantity column for returned rows.",
+    "price_sum": "Sum of price column for returned rows.",
+    "row_hash_sha256_csv": "SHA256 hash of deterministic CSV serialization of returned rows."
+  }
+}

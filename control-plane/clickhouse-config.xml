@@ -1,0 +1,54 @@
+<clickhouse>
+  <profiles>
+    <default>
+      <max_memory_usage>200000000000</max_memory_usage>
+      <max_bytes_before_external_sort>100000000000</max_bytes_before_external_sort>
+      <max_bytes_before_external_group_by>100000000000</max_bytes_before_external_group_by>
+
+      <max_threads>20</max_threads>
+      <background_pool_size>20</background_pool_size>
+      <max_block_size>65536</max_block_size>
+      <min_insert_block_size_rows>1000000</min_insert_block_size_rows>
+
+      <use_query_cache>1</use_query_cache>
+      <query_cache_system_table_handling>save</query_cache_system_table_handling>
+
+      <max_execution_time>60</max_execution_time>
+      <max_result_rows>100000</max_result_rows>
+
+      <receive_timeout>900</receive_timeout>
+      <send_timeout>900</send_timeout>
+      <idle_connection_timeout>600</idle_connection_timeout>
+      <connect_timeout>10</connect_timeout>
+
+      <log_queries>1</log_queries>
+      <log_queries_min_type>QUERY_START</log_queries_min_type>
+      <log_queries_min_query_duration_ms>1000</log_queries_min_query_duration_ms>
+      <log_query_threads>1</log_query_threads>
+      <log_query_views>1</log_query_views>
+
+      <max_memory_usage_for_all_queries>180000000000</max_memory_usage_for_all_queries>
+      <max_bytes_to_read>0</max_bytes_to_read>
+
+      <optimize_move_to_prewhere>1</optimize_move_to_prewhere>
+      <enable_optimize_predicate_expression>1</enable_optimize_predicate_expression>
+      <allow_experimental_analyzer>1</allow_experimental_analyzer>
+
+    </default>
+
+  </profiles>
+
+  <max_server_memory_usage>230000000000</max_server_memory_usage>
+  <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+
+  <background_pool_task_schedule_size>128</background_pool_task_schedule_size>
+  <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+  <users>
+    <default>
+      <settings>
+        <async_insert>1</async_insert>
+      </settings>
+    </default>
+  </users>
+
+</clickhouse>

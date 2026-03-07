@@ -1,0 +1,4 @@
+locations:
+- code_source:
+    module_name: origo_control_plane.definitions
+  location_name: origo-control-plane

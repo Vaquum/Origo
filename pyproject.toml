@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Origo"
+version = "0.1.0"
+description = "Bitcoin-only data API and platform"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+
+[project.urls]
+Repository = "https://github.com/origo/origo"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["origo*"]
+exclude = ["tests*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "control-plane/.venv",
+  "control-plane/origo_control_plane.egg-info",
+  "origo/__pycache__",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort
+  "UP",   # pyupgrade
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "E501",    # SQL and long URL strings in legacy code paths
+  "S101",    # assert in tests is fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "BLE001", "PLR2004", "ANN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["origo"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = [
+  "api",
+  "origo",
+  "control-plane/origo_control_plane",
+]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  "control-plane/.venv",
+  "control-plane/origo_control_plane.egg-info",
+]
+venvPath = "control-plane"
+venv = ".venv"
+reportMissingImports = true

@@ -1,0 +1,2 @@
+load_from:
+  - python_module: origo_control_plane.definitions

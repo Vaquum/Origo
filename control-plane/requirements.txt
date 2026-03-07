@@ -1,0 +1,13 @@
+dagster
+dagster-webserver
+dagster-cloud
+boto3
+pandas
+requests
+matplotlib
+clickhouse-driver
+clickhouse-connect
+pyarrow
+polars
+lz4>=4.0.0
+clickhouse-cityhash>=1.0.2

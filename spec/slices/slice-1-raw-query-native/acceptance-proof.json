@@ -1,0 +1,368 @@
+{
+  "generated_at_utc": "2026-03-04T20:21:31.440571+00:00",
+  "proof_scope": "Slice 1 native query internal core + Binance planner + envelope-ready outputs",
+  "acceptance_non_empty_rows_all_cases": true,
+  "replay_deterministic_all_cases": true,
+  "cases": [
+    {
+      "case_id": "spot_trades_month_2017_08",
+      "dataset": "spot_trades",
+      "fields": [
+        "trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "month_year": [
+          8,
+          2017
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 10813,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "11d85ec2f4f52d498449ca1503657b012115b401957d623b4197f812bb24847c",
+        "first_datetime": "2017-08-17 04:00:28+00:00",
+        "last_datetime": "2017-08-19 23:46:59+00:00"
+      },
+      "run2": {
+        "rows": 10813,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "11d85ec2f4f52d498449ca1503657b012115b401957d623b4197f812bb24847c",
+        "first_datetime": "2017-08-17 04:00:28+00:00",
+        "last_datetime": "2017-08-19 23:46:59+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "spot_agg_trades_month_2019_01",
+      "dataset": "spot_agg_trades",
+      "fields": [
+        "agg_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "month_year": [
+          1,
+          2019
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 500,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "149c9f4e3e12e281ba0dc63e0158ee9bb13d6c97948e24e6a23b0843de3bceda",
+        "first_datetime": "2019-01-01 00:00:00+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "run2": {
+        "rows": 500,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "149c9f4e3e12e281ba0dc63e0158ee9bb13d6c97948e24e6a23b0843de3bceda",
+        "first_datetime": "2019-01-01 00:00:00+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "futures_trades_month_2019_09",
+      "dataset": "futures_trades",
+      "fields": [
+        "futures_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "month_year": [
+          9,
+          2019
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 500,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "766bcbd8f22e35e6fb408507d687c5f52911004889b7a4dac12467b0e3f12c5c",
+        "first_datetime": "2019-09-08 17:57:50+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "run2": {
+        "rows": 500,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "766bcbd8f22e35e6fb408507d687c5f52911004889b7a4dac12467b0e3f12c5c",
+        "first_datetime": "2019-09-08 17:57:50+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "spot_trades_n_rows_50",
+      "dataset": "spot_trades",
+      "fields": [
+        "trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "n_rows": 50,
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 50,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "faeaf86e848469eeb3dbaa82589febb667c757e572e68f4ba41cfad71019305f",
+        "first_datetime": "2017-08-19 21:55:34+00:00",
+        "last_datetime": "2017-08-19 23:46:59+00:00"
+      },
+      "run2": {
+        "rows": 50,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "faeaf86e848469eeb3dbaa82589febb667c757e572e68f4ba41cfad71019305f",
+        "first_datetime": "2017-08-19 21:55:34+00:00",
+        "last_datetime": "2017-08-19 23:46:59+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "spot_agg_trades_n_rows_50",
+      "dataset": "spot_agg_trades",
+      "fields": [
+        "agg_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "n_rows": 50,
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 50,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "04bbe1cc65dfae2d8ac3775cab43d70a40b9e9a2cec2ff848f1e1076837e15b8",
+        "first_datetime": "2019-01-01 00:03:47+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "run2": {
+        "rows": 50,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "04bbe1cc65dfae2d8ac3775cab43d70a40b9e9a2cec2ff848f1e1076837e15b8",
+        "first_datetime": "2019-01-01 00:03:47+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "futures_trades_n_rows_50",
+      "dataset": "futures_trades",
+      "fields": [
+        "futures_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "n_rows": 50,
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 50,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "69ca5b0c4e33fec485d50391b7757e1db4b846a19c18a6d16cd5cd7ebf41e85a",
+        "first_datetime": "2019-09-08 19:51:15+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "run2": {
+        "rows": 50,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "69ca5b0c4e33fec485d50391b7757e1db4b846a19c18a6d16cd5cd7ebf41e85a",
+        "first_datetime": "2019-09-08 19:51:15+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "spot_trades_time_range_1h",
+      "dataset": "spot_trades",
+      "fields": [
+        "trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "time_range": [
+          "2017-08-17T04:00:00Z",
+          "2017-08-17T05:00:00Z"
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 171,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "75d3ad1736d09aed52cb18ab9e3bc68c73abeaace3eecc045fdfa3e6644e5f42",
+        "first_datetime": "2017-08-17 04:00:28+00:00",
+        "last_datetime": "2017-08-17 04:59:56+00:00"
+      },
+      "run2": {
+        "rows": 171,
+        "columns": [
+          "trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "75d3ad1736d09aed52cb18ab9e3bc68c73abeaace3eecc045fdfa3e6644e5f42",
+        "first_datetime": "2017-08-17 04:00:28+00:00",
+        "last_datetime": "2017-08-17 04:59:56+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "spot_agg_trades_time_range_5m",
+      "dataset": "spot_agg_trades",
+      "fields": [
+        "agg_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "time_range": [
+          "2019-01-01T00:00:00Z",
+          "2019-01-01T00:05:00Z"
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 500,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "149c9f4e3e12e281ba0dc63e0158ee9bb13d6c97948e24e6a23b0843de3bceda",
+        "first_datetime": "2019-01-01 00:00:00+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "run2": {
+        "rows": 500,
+        "columns": [
+          "agg_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "149c9f4e3e12e281ba0dc63e0158ee9bb13d6c97948e24e6a23b0843de3bceda",
+        "first_datetime": "2019-01-01 00:00:00+00:00",
+        "last_datetime": "2019-01-01 00:04:07+00:00"
+      },
+      "deterministic_match": true
+    },
+    {
+      "case_id": "futures_trades_time_range_3h",
+      "dataset": "futures_trades",
+      "fields": [
+        "futures_trade_id",
+        "timestamp",
+        "price"
+      ],
+      "kwargs": {
+        "time_range": [
+          "2019-09-08T17:00:00Z",
+          "2019-09-08T20:00:00Z"
+        ],
+        "include_datetime_col": true
+      },
+      "run1": {
+        "rows": 500,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "766bcbd8f22e35e6fb408507d687c5f52911004889b7a4dac12467b0e3f12c5c",
+        "first_datetime": "2019-09-08 17:57:50+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "run2": {
+        "rows": 500,
+        "columns": [
+          "futures_trade_id",
+          "timestamp",
+          "price",
+          "datetime"
+        ],
+        "hash_sha256_csv": "766bcbd8f22e35e6fb408507d687c5f52911004889b7a4dac12467b0e3f12c5c",
+        "first_datetime": "2019-09-08 17:57:50+00:00",
+        "last_datetime": "2019-09-08 19:54:59+00:00"
+      },
+      "deterministic_match": true
+    }
+  ]
+}

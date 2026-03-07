@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "origo_control_plane"
+version = "1.2.6"
+description = "Origo Control Plane"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "dagster",
+  "dagster-webserver",
+  "dagster-cloud",
+  "boto3",
+  "pandas",
+  "requests",
+  "matplotlib",
+  "clickhouse-driver",
+  "clickhouse-connect",
+  "pyarrow",
+  "polars",
+  "lz4>=4.0.0",
+  "clickhouse-cityhash>=1.0.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["origo_control_plane*"]
+exclude = ["origo_control_plane_tests*"]
+
+[tool.dagster]
+module_name = "origo_control_plane.definitions"
+code_location_name = "origo_control_plane"

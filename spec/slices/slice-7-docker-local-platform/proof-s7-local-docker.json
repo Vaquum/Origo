@@ -4,9 +4,9 @@
       "checksum_sha256": "432c9311e966bf4924f3b72cd6cbb0bc81ae81f8a59d73c86bf4287dffdd9dea",
       "format": "csv",
       "row_count": 2080,
-      "uri": "/workspace/storage/exports/59c85408-3fdb-443b-aefe-686eda3b4027/raw_export.csv"
+      "uri": "/workspace/storage/exports/7a3d8507-12ec-4617-83e3-115a3c2acefe/raw_export.csv"
     },
-    "export_id": "59c85408-3fdb-443b-aefe-686eda3b4027",
+    "export_id": "7a3d8507-12ec-4617-83e3-115a3c2acefe",
     "status": "succeeded"
   },
   "aligned_query_row_count": 2080,
@@ -16,9 +16,9 @@
       "checksum_sha256": "f994f40efd3d1d5bfd556c390138f8aff3d38ae96fff6eb69ae0296dd91866bf",
       "format": "parquet",
       "row_count": 8660,
-      "uri": "/workspace/storage/exports/d6039eec-bb7e-4f6a-9b2c-295913fc8339/raw_export.parquet"
+      "uri": "/workspace/storage/exports/a7c310f4-bf0c-49e7-9c94-10397c8dfd38/raw_export.parquet"
     },
-    "export_id": "d6039eec-bb7e-4f6a-9b2c-295913fc8339",
+    "export_id": "a7c310f4-bf0c-49e7-9c94-10397c8dfd38",
     "status": "succeeded"
   },
   "native_query_replay_deterministic": true,
@@ -45,7 +45,7 @@
     }
   },
   "post_restart_matches_run_1": true,
-  "proof_timestamp_utc": "2026-03-07T20:01:41.651546+00:00",
+  "proof_timestamp_utc": "2026-03-07T20:04:24.789019+00:00",
   "seed_days": [
     "2017-08-17",
     "2017-08-18"

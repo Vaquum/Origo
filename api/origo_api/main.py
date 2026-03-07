@@ -177,12 +177,12 @@ if ALIGNED_FRESHNESS_MAX_AGE_SECONDS <= 0:
     raise RuntimeError('ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS must be > 0')
 
 _query_semaphore = asyncio.Semaphore(QUERY_MAX_CONCURRENCY)
-_pending_requests = 0
-_pending_lock = asyncio.Lock()
+_queued_requests = 0
+_queue_lock = asyncio.Lock()
 
 _aligned_query_semaphore = asyncio.Semaphore(ALIGNED_QUERY_MAX_CONCURRENCY)
-_pending_aligned_requests = 0
-_pending_aligned_lock = asyncio.Lock()
+_queued_aligned_requests = 0
+_queue_aligned_lock = asyncio.Lock()
 
 _export_dispatch_semaphore = asyncio.Semaphore(EXPORT_MAX_CONCURRENCY)
 _pending_export_dispatch_requests = 0
@@ -485,47 +485,68 @@ def health() -> dict[str, str]:
 @app.post('/v1/raw/query', response_model=RawQueryResponse)
 async def query_raw(
     request: RawQueryRequest,
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
     _: None = Depends(_require_internal_api_key),
 ) -> RawQueryResponse:
-    global _pending_requests, _pending_aligned_requests
+    global _queued_requests, _queued_aligned_requests
 
     is_aligned_mode = request.mode == 'aligned_1s'
-    if is_aligned_mode:
-        async with _pending_aligned_lock:
-            if _pending_aligned_requests >= ALIGNED_QUERY_MAX_QUEUE:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        'code': 'ALIGNED_QUERY_QUEUE_LIMIT_REACHED',
-                        'message': 'Aligned query queue limit reached',
-                    },
-                )
-            _pending_aligned_requests += 1
-    else:
-        async with _pending_lock:
-            if _pending_requests >= QUERY_MAX_QUEUE:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        'code': 'QUERY_QUEUE_LIMIT_REACHED',
-                        'message': 'Query queue limit reached',
-                    },
-                )
-            _pending_requests += 1
+    queue_limit = ALIGNED_QUERY_MAX_QUEUE if is_aligned_mode else QUERY_MAX_QUEUE
+    queue_error_code = (
+        'ALIGNED_QUERY_QUEUE_LIMIT_REACHED'
+        if is_aligned_mode
+        else 'QUERY_QUEUE_LIMIT_REACHED'
+    )
+    queue_error_message = (
+        'Aligned query queue limit reached'
+        if is_aligned_mode
+        else 'Query queue limit reached'
+    )
+    queue_lock = _queue_aligned_lock if is_aligned_mode else _queue_lock
+    request_is_queued = False
+
+    async with queue_lock:
+        current_queue_size = (
+            _queued_aligned_requests if is_aligned_mode else _queued_requests
+        )
+        if current_queue_size >= queue_limit:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    'code': queue_error_code,
+                    'message': queue_error_message,
+                },
+            )
+        if is_aligned_mode:
+            _queued_aligned_requests += 1
+        else:
+            _queued_requests += 1
+        request_is_queued = True
 
     try:
         semaphore = _aligned_query_semaphore if is_aligned_mode else _query_semaphore
         async with semaphore:
+            async with queue_lock:
+                if request_is_queued:
+                    if is_aligned_mode:
+                        _queued_aligned_requests -= 1
+                    else:
+                        _queued_requests -= 1
+                    request_is_queued = False
+
             query_source = _resolve_single_source_or_raise(request)
             filters_payload = (
-                [filter_clause.model_dump(mode='json') for filter_clause in request.filters]
+                [
+                    filter_clause.model_dump(mode='json')
+                    for filter_clause in request.filters
+                ]
                 if request.filters is not None
                 else None
             )
             try:
                 resolve_query_rights(
                     dataset=query_source,
-                    auth_token=request.auth_token,
+                    auth_token=x_clickhouse_token,
                 )
             except RightsGateError as exc:
                 raise HTTPException(
@@ -541,7 +562,7 @@ async def query_raw(
                         n_rows=request.n_rows,
                         n_random=request.n_random,
                         time_range=request.time_range,
-                        auth_token=request.auth_token,
+                        auth_token=x_clickhouse_token,
                         filters=filters_payload,
                     )
                 elif request.mode == 'aligned_1s':
@@ -563,7 +584,7 @@ async def query_raw(
                         n_rows=request.n_rows,
                         n_random=request.n_random,
                         time_range=request.time_range,
-                        auth_token=request.auth_token,
+                        auth_token=x_clickhouse_token,
                         filters=filters_payload,
                     )
                 else:
@@ -595,23 +616,32 @@ async def query_raw(
                 try:
                     etf_quality_warnings = await run_in_threadpool(
                         build_etf_daily_quality_warnings,
-                        request.auth_token,
+                        x_clickhouse_token,
                         ETF_DAILY_STALE_MAX_AGE_DAYS,
                     )
                 except RuntimeError as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_RUNTIME_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_RUNTIME_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 except DatabaseError as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_BACKEND_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_BACKEND_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 except Exception as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_UNKNOWN_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_UNKNOWN_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 warnings.extend(etf_quality_warnings)
 
@@ -619,23 +649,32 @@ async def query_raw(
                 try:
                     fred_publish_warnings = await run_in_threadpool(
                         build_fred_publish_freshness_warnings,
-                        request.auth_token,
+                        x_clickhouse_token,
                         FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS,
                     )
                 except RuntimeError as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_RUNTIME_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_RUNTIME_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 except DatabaseError as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_BACKEND_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_BACKEND_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 except Exception as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_WARNING_UNKNOWN_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_WARNING_UNKNOWN_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 warnings.extend(fred_publish_warnings)
 
@@ -651,12 +690,18 @@ async def query_raw(
                 except RuntimeError as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_ALERT_AUDIT_RUNTIME_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_ALERT_AUDIT_RUNTIME_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
                 except Exception as exc:
                     raise HTTPException(
                         status_code=503,
-                        detail={'code': 'QUERY_ALERT_AUDIT_UNKNOWN_ERROR', 'message': str(exc)},
+                        detail={
+                            'code': 'QUERY_ALERT_AUDIT_UNKNOWN_ERROR',
+                            'message': str(exc),
+                        },
                     ) from exc
 
             if request.mode == 'aligned_1s':
@@ -691,12 +736,12 @@ async def query_raw(
             )
             return RawQueryResponse.model_validate(envelope)
     finally:
-        if is_aligned_mode:
-            async with _pending_aligned_lock:
-                _pending_aligned_requests -= 1
-        else:
-            async with _pending_lock:
-                _pending_requests -= 1
+        if request_is_queued:
+            async with queue_lock:
+                if is_aligned_mode:
+                    _queued_aligned_requests -= 1
+                else:
+                    _queued_requests -= 1
 
 
 @app.post('/v1/raw/export', response_model=RawExportSubmitResponse, status_code=202)

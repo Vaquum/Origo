@@ -26,7 +26,7 @@ Does **not** own feature engineering, indicators, or model training.
 ## Dependencies
 
 - **Internal:** none — this is a leaf module
-- **External:** `polars`, `pandas` (test helper only)
+- **External:** `polars`
 
 ## Quick orientation
 ```text
@@ -45,7 +45,7 @@ data/
 
 ## Gotchas / things to know
 
-- `HistoricalData._get_data_for_test()` reads from `datasets/klines_2h_2020_2025.csv`; this file must exist relative to the working directory when `LOOP_ENV=test`.
+- `HistoricalData._get_data_for_test()` reads from `<repo>/datasets/klines_2h_2020_2025.csv`; this file must exist in the repository root.
 - `get_binance_file()` normalises millisecond timestamps to seconds automatically if the value exceeds `10^13`.
 - The `auth_token` parameter is forwarded to `generic_endpoints` for authenticated database queries; leave `None` for public Binance file access.
 - `generic_endpoints` is fail-loud for env config: set either `ORIGO_CLICKHOUSE_*` vars or the generic `CLICKHOUSE_*` equivalents (`HOST`, `HTTP_PORT`, `USER`, `PASSWORD`, `DATABASE`) before calling DB query helpers.

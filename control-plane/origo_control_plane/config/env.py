@@ -6,14 +6,14 @@ def require_env(name: str) -> str:
     value = os.environ.get(name)
     if value is None or value.strip() == '':
         raise RuntimeError(f'{name} must be set and non-empty')
-    return value
+    return value.strip()
 
 
 def require_any_env(*names: str) -> str:
     for name in names:
         value = os.environ.get(name)
         if value is not None and value.strip() != '':
-            return value
+            return value.strip()
     joined = ', '.join(names)
     raise RuntimeError(f'At least one env var must be set and non-empty: {joined}')
 

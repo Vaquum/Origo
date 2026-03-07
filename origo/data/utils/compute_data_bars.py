@@ -39,4 +39,4 @@ def compute_data_bars(data: pl.DataFrame, **params: Any) -> pl.DataFrame:
             )
         return liquidity_bars(data, params['liquidity_threshold'])
 
-    return data
+    raise ValueError(f'Unsupported bar_type: {bar_type}')

@@ -454,5 +454,3 @@ defs = Definitions(
         origo_raw_export_native_job,
     ],
 )
-
-# TODO: Put everything in to same order in all segments of the code

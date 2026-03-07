@@ -19,5 +19,6 @@ def build_wide_rows_envelope(
         'source': source,
         'row_count': frame.height,
         'schema': _schema_items(frame),
+        'warnings': [],
         'rows': frame.to_dicts(),
     }

@@ -1,4 +1,11 @@
+import re
+
+_IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
 def get_origo_monthly_table_config(id_col: str) -> str:
+    if not _IDENTIFIER_PATTERN.match(id_col):
+        raise ValueError(f'Invalid SQL identifier for id_col: {id_col}')
 
     db_config = f"""ENGINE = MergeTree()
                     PARTITION BY toYYYYMM(datetime)

@@ -16,7 +16,7 @@
   - `mode`: `native | aligned_1s`
   - `sources`: must include `["etf_daily_metrics"]` for ETF queries
   - one window selector: `time_range | n_rows | n_random`
-  - optional `fields`, `filters`, `strict`, `auth_token`
+  - optional `fields`, `filters`, `strict`
 - Response shape:
   - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
 

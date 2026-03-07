@@ -11,12 +11,13 @@
 
 ## Inputs and outputs with contract shape
 - Query endpoint: `POST /v1/raw/query`
+- Export endpoint: `POST /v1/raw/export` (`dataset="fred_series_metrics"` supported)
 - Source key: `fred_series_metrics`
 - Request shape:
   - `mode`: `native | aligned_1s`
   - `sources`: must include `["fred_series_metrics"]`
   - one window selector: `time_range | n_rows | n_random`
-  - optional `fields`, `filters`, `strict`, `auth_token`
+  - optional `fields`, `filters`, `strict`
 - Response shape:
   - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
 

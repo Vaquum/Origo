@@ -12,6 +12,7 @@ from dagster import OpExecutionContext
 from origo.query.aligned_core import query_aligned_data
 from origo.query.binance_native import BinanceDataset, query_binance_native_data
 from origo.query.etf_native import ETFDataset, query_etf_native_data
+from origo.query.fred_native import FREDDataset, query_fred_native_data
 from origo.query.native_core import (
     LatestRowsWindow,
     MonthWindow,
@@ -22,7 +23,7 @@ from origo.query.native_core import (
 
 job: Any = getattr(dg, 'job')
 op: Any = getattr(dg, 'op')
-type ExportDataset = BinanceDataset | ETFDataset
+type ExportDataset = BinanceDataset | ETFDataset | FREDDataset
 type ExportMode = Literal['native', 'aligned_1s']
 
 
@@ -57,6 +58,7 @@ def _read_dataset(value: Any) -> ExportDataset:
         'spot_agg_trades',
         'futures_trades',
         'etf_daily_metrics',
+        'fred_series_metrics',
     }:
         raise RuntimeError(f'Unsupported export dataset: {value}')
     return cast(ExportDataset, value)
@@ -246,6 +248,16 @@ def origo_raw_export_native_step(context: OpExecutionContext) -> None:
             if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
                 frame = query_binance_native_data(
                     dataset=cast(BinanceDataset, dataset),
+                    select_columns=select_columns,
+                    window=window,
+                    include_datetime=include_datetime,
+                    datetime_iso_output=False,
+                    auth_token=None,
+                    show_summary=False,
+                )
+            elif dataset == 'fred_series_metrics':
+                frame = query_fred_native_data(
+                    dataset=dataset,
                     select_columns=select_columns,
                     window=window,
                     include_datetime=include_datetime,

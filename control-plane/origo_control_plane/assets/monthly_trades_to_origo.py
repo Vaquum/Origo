@@ -279,14 +279,12 @@ def _process_month(
         context.log.info(f'Successfully processed {month_str}')
         return result_data
 
-    except Exception:
-        raise
     finally:
         # Ensure client is disconnected and resources are cleaned up
         if client:
             try:
                 client.disconnect()
             except Exception as exc:
-                context.log.warning(
+                raise RuntimeError(
                     f'Failed to disconnect ClickHouse client cleanly: {exc}'
                 )

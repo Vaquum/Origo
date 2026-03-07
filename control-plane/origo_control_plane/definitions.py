@@ -18,40 +18,11 @@ import dagster as dg
 import requests
 from dagster import Definitions
 
-from .assets.create_binance_agg_trades_table import create_binance_agg_trades_table
-from .assets.create_binance_futures_trades_table import (
-    create_binance_futures_trades_table,
-)
-from .assets.create_binance_trades_daily_summary import (
-    create_binance_trades_daily_summary,
-)
-from .assets.create_binance_trades_day_of_month_summary import (
-    create_binance_trades_day_of_month_summary,
-)
-from .assets.create_binance_trades_hour_of_day_summary import (
-    create_binance_trades_hour_of_day_summary,
-)
-from .assets.create_binance_trades_hourly_summary import (
-    create_binance_trades_hourly_summary,
-)
-from .assets.create_binance_trades_month_of_year_summary import (
-    create_binance_trades_month_of_year_summary,
-)
-from .assets.create_binance_trades_monthly_summary import (
-    create_binance_trades_monthly_summary,
-)
-from .assets.create_binance_trades_table import create_binance_trades_table
-from .assets.create_binance_trades_table_origo import create_binance_trades_table_origo
-from .assets.create_binance_trades_week_of_year_summary import (
-    create_binance_trades_week_of_year_summary,
-)
-from .assets.create_origo_database import create_origo_database
 from .assets.daily_trades_to_origo import insert_daily_binance_trades_to_origo
 from .assets.monthly_agg_trades_to_origo import (
     insert_monthly_binance_agg_trades_to_origo,
 )
 from .assets.monthly_futures_agg_trades_to_origo import (
-    create_binance_futures_agg_trades_table,
     insert_monthly_binance_futures_agg_trades_to_origo,
 )
 from .assets.monthly_futures_trades_to_origo import (
@@ -67,36 +38,6 @@ run_failure_sensor: Any = getattr(dg, 'run_failure_sensor')
 RunRequest: Any = getattr(dg, 'RunRequest')
 RunsFilter: Any = getattr(dg, 'RunsFilter')
 SkipReason: Any = getattr(dg, 'SkipReason')
-
-# Database Maintenance Jobs
-
-create_origo_database_job = define_asset_job(
-    name='create_origo_database_job', selection=['create_origo_database']
-)
-
-create_binance_trades_table_job = define_asset_job(
-    name='create_binance_trades_table_job', selection=['create_binance_trades_table']
-)
-
-create_binance_trades_table_origo_job = define_asset_job(
-    name='create_binance_trades_table_origo_job',
-    selection=['create_binance_trades_table_origo'],
-)
-
-create_binance_agg_trades_table_job = define_asset_job(
-    name='create_binance_agg_trades_table_job',
-    selection=['create_binance_agg_trades_table'],
-)
-
-create_binance_futures_trades_table_job = define_asset_job(
-    name='create_binance_futures_trades_table_job',
-    selection=['create_binance_futures_trades_table'],
-)
-
-create_binance_futures_agg_trades_table_job = define_asset_job(
-    name='create_binance_futures_agg_trades_table_job',
-    selection=['create_binance_futures_agg_trades_table'],
-)
 
 # Data Insertion Jobs
 
@@ -123,43 +64,6 @@ insert_monthly_binance_futures_trades_job = define_asset_job(
 insert_monthly_binance_futures_agg_trades_job = define_asset_job(
     name='insert_monthly_futures_agg_trades_to_origo_job',
     selection=['insert_monthly_binance_futures_agg_trades_to_origo'],
-)
-
-# summary Table Creation Jobs
-
-create_binance_trades_monthly_summary_job = define_asset_job(
-    name='create_binance_trades_monthly_summary_job',
-    selection=['create_binance_trades_monthly_summary'],
-)
-
-create_binance_trades_daily_summary_job = define_asset_job(
-    name='create_binance_trades_daily_summary_job',
-    selection=['create_binance_trades_daily_summary'],
-)
-
-create_binance_trades_hourly_summary_job = define_asset_job(
-    name='create_binance_trades_hourly_summary_job',
-    selection=['create_binance_trades_hourly_summary'],
-)
-
-create_binance_trades_hour_of_day_summary_job = define_asset_job(
-    name='create_binance_trades_hour_of_day_summary_job',
-    selection=['create_binance_trades_hour_of_day_summary'],
-)
-
-create_binance_trades_day_of_month_summary_job = define_asset_job(
-    name='create_binance_trades_day_of_month_summary_job',
-    selection=['create_binance_trades_day_of_month_summary'],
-)
-
-create_binance_trades_week_of_year_summary_job = define_asset_job(
-    name='create_binance_trades_week_of_year_summary_job',
-    selection=['create_binance_trades_week_of_year_summary'],
-)
-
-create_binance_trades_month_of_year_summary_job = define_asset_job(
-    name='create_binance_trades_month_of_year_summary_job',
-    selection=['create_binance_trades_month_of_year_summary'],
 )
 
 
@@ -410,45 +314,19 @@ def origo_etf_ingest_anomaly_alert_sensor(context: Any) -> Any:
 
 defs = Definitions(
     assets=[
-        create_origo_database,
-        create_binance_trades_table,
-        create_binance_trades_table_origo,
         insert_monthly_binance_trades_to_origo,
         insert_daily_binance_trades_to_origo,
-        create_binance_trades_monthly_summary,
-        create_binance_trades_daily_summary,
-        create_binance_trades_hourly_summary,
-        create_binance_trades_hour_of_day_summary,
-        create_binance_trades_day_of_month_summary,
-        create_binance_trades_week_of_year_summary,
-        create_binance_trades_month_of_year_summary,
-        create_binance_agg_trades_table,
         insert_monthly_binance_agg_trades_to_origo,
-        create_binance_futures_trades_table,
         insert_monthly_binance_futures_trades_to_origo,
-        create_binance_futures_agg_trades_table,
         insert_monthly_binance_futures_agg_trades_to_origo,
     ],
     schedules=[daily_pipeline_schedule, origo_etf_daily_ingest_schedule],
     sensors=[origo_etf_daily_retry_sensor, origo_etf_ingest_anomaly_alert_sensor],
     jobs=[
-        create_origo_database_job,
-        create_binance_trades_table_job,
-        create_binance_trades_table_origo_job,
         insert_monthly_binance_trades_job,
         insert_daily_binance_trades_job,
-        create_binance_trades_monthly_summary_job,
-        create_binance_trades_daily_summary_job,
-        create_binance_trades_hourly_summary_job,
-        create_binance_trades_hour_of_day_summary_job,
-        create_binance_trades_day_of_month_summary_job,
-        create_binance_trades_week_of_year_summary_job,
-        create_binance_trades_month_of_year_summary_job,
-        create_binance_agg_trades_table_job,
         insert_monthly_binance_agg_trades_job,
-        create_binance_futures_trades_table_job,
         insert_monthly_binance_futures_trades_job,
-        create_binance_futures_agg_trades_table_job,
         insert_monthly_binance_futures_agg_trades_job,
         origo_etf_daily_ingest_job,
         origo_raw_export_native_job,

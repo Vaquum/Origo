@@ -2,12 +2,12 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-05
+- Last updated: 2026-03-07
 - Slice reference: S2 (`S2-C1` to `S2-C6`, `S2-G1` to `S2-G3`)
 
 ## Purpose and scope
 - Defines the native raw export API flow for `POST /v1/raw/export` and `GET /v1/raw/export/{export_id}`.
-- Scope is native-mode Binance datasets and Dagster-dispatched async export jobs.
+- Scope includes `native` and `aligned_1s` modes for Binance, ETF, and FRED datasets through Dagster-dispatched async export jobs.
 
 ## Inputs and outputs
 - Input model: `RawExportRequest` in `api/origo_api/schemas.py`.
@@ -16,9 +16,9 @@
 - Header contract: `X-API-Key` required for internal auth.
 
 ## Data definitions
-- `mode`: `native`.
+- `mode`: `native | aligned_1s`.
 - `format`: `parquet | csv`.
-- `dataset`: `spot_trades | spot_agg_trades | futures_trades`.
+- `dataset`: `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`.
 - Window selector: exactly one of `month_year | n_rows | n_random | time_range`.
 - Status lifecycle: `queued | running | succeeded | failed`.
 - Artifact metadata: `uri`, `row_count`, `checksum_sha256`.
@@ -33,6 +33,7 @@
 - `404`: export id not found.
 - `409`: auth/rights/contract failures (`AUTH_INVALID_API_KEY`, rights gate codes, `EXPORT_AUTH_TOKEN_UNSUPPORTED`).
 - `503`: Dagster dispatch/status problems, queue backpressure, audit-write failures, artifact metadata read failures.
+- `202`: submit accepted (`POST /v1/raw/export`).
 - `200`: status payloads for active and terminal exports, including classified terminal failure payloads.
 
 ## Determinism and replay notes

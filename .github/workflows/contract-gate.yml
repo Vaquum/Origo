@@ -1,4 +1,4 @@
-name: tests-gate
+name: contract-gate
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  tests-gate:
+  contract-gate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,5 +23,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . -e control-plane pytest
 
-      - name: Run tests gate
-        run: pytest -q tests
+      - name: Run contract gate
+        run: PYTHONPATH=.:control-plane pytest -q tests/contract

@@ -48,5 +48,5 @@ data/
 - `HistoricalData._get_data_for_test()` reads from `<repo>/datasets/klines_2h_2020_2025.csv`; this file must exist in the repository root.
 - `get_binance_file()` normalises millisecond timestamps to seconds automatically if the value exceeds `10^13`.
 - The `auth_token` parameter is forwarded to `generic_endpoints` for authenticated database queries; leave `None` for public Binance file access.
-- `generic_endpoints` is fail-loud for env config: set either `ORIGO_CLICKHOUSE_*` vars or the generic `CLICKHOUSE_*` equivalents (`HOST`, `HTTP_PORT`, `USER`, `PASSWORD`, `DATABASE`) before calling DB query helpers.
+- `generic_endpoints` is fail-loud for env config: set `CLICKHOUSE_HOST`, `CLICKHOUSE_HTTP_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, and `CLICKHOUSE_DATABASE` before calling DB query helpers.
 - `split_data_to_prep_output` expects all splits to share the same column schema.

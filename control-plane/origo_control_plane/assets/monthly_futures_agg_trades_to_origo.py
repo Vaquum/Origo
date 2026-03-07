@@ -8,9 +8,8 @@ from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_frame,
 )
 from origo_control_plane.utils.get_clickhouse_client import get_clickhouse_client
-from origo_control_plane.utils.get_origo_monthly_table_config import (
-    get_origo_monthly_table_config,
-)
+
+from .schema_migration_only import raise_schema_migration_only
 
 ## CONFIG STARTS ##
 
@@ -46,27 +45,11 @@ DATA_COLS = [
     group_name=f'create_db_table_{CLICKHOUSE_TABLE}',
     description=f'Creates the db table for {CLICKHOUSE_TABLE}',
 )
-def create_binance_futures_agg_trades_table(context: AssetExecutionContext):
-    settings = resolve_clickhouse_native_settings()
-    client = get_clickhouse_client()
-    try:
-        client.command(f"""
-            CREATE TABLE {settings.database}.{CLICKHOUSE_TABLE} (
-                {ID_COL}        UInt64  CODEC(Delta(8), ZSTD(3)),
-                price           Float64 CODEC(Delta, ZSTD(3)),
-                quantity        Float64 CODEC(ZSTD(3)),
-                first_trade_id  UInt64  CODEC(Delta(8), ZSTD(3)),
-                last_trade_id   UInt64  CODEC(Delta(8), ZSTD(3)),
-                timestamp       UInt64  CODEC(Delta, ZSTD(3)),
-                is_buyer_maker  UInt8   CODEC(ZSTD(1)),
-                datetime        DateTime CODEC(Delta, ZSTD(3))
-            )
-            {get_origo_monthly_table_config(ID_COL)}""")
-        context.log.info(
-            f'Created database table {settings.database}.{CLICKHOUSE_TABLE}.'
-        )
-    finally:
-        client.close()
+def create_binance_futures_agg_trades_table(context: AssetExecutionContext) -> None:
+    raise_schema_migration_only(
+        context=context,
+        asset_name='create_binance_futures_agg_trades_table',
+    )
 
 
 @asset(

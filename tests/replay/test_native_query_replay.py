@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import polars as pl
+
+from origo.query.native_core import (
+    NativeQuerySpec,
+    TimeRangeWindow,
+    _compile_native_query,
+    _shape_native_frame,
+)
+
+
+def test_compile_native_query_is_deterministic() -> None:
+    spec = NativeQuerySpec(
+        table_name='binance_trades',
+        id_column='trade_id',
+        select_columns=('trade_id', 'price', 'quantity', 'trade_id'),
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+    )
+
+    compiled_run_1 = _compile_native_query(spec, 'origo')
+    compiled_run_2 = _compile_native_query(spec, 'origo')
+
+    assert compiled_run_1 == compiled_run_2
+    assert compiled_run_1.sql == compiled_run_2.sql
+
+
+def test_shape_native_frame_is_deterministic() -> None:
+    spec = NativeQuerySpec(
+        table_name='binance_trades',
+        id_column='trade_id',
+        select_columns=('trade_id', 'price'),
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+    )
+    compiled = _compile_native_query(spec, 'origo')
+
+    frame = pl.DataFrame(
+        {
+            '__origo_datetime_ms': [1704067201000, 1704067200000],
+            'trade_id': [2, 1],
+            'price': [100.0, 99.0],
+        }
+    )
+
+    shaped_run_1 = _shape_native_frame(frame, spec.id_column, compiled)
+    shaped_run_2 = _shape_native_frame(frame, spec.id_column, compiled)
+
+    assert shaped_run_1.to_dict(as_series=False) == shaped_run_2.to_dict(as_series=False)

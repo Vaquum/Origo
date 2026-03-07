@@ -35,7 +35,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S0-G6` Enforce env contract (`.env.example` source of truth + fail-loud required vars + no deployment defaults in runtime paths).
 - [ ] `S0-G7` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [ ] `S0-G8` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
-- [x] `S0-G9` Add CI hard quality gates (repo-wide `ruff`, strict `pyright`, and integrity tests on pull requests).
+- [x] `S0-G9` Add CI hard quality gates (repo-wide `ruff`, strict `pyright`, plus split `contract`, `replay`, and `integrity` gates on pull requests).
 - [x] `S0-G10` Implement exchange integrity suite in Binance ingestion paths (schema/type, sequence-gap, anomaly checks).
 
 ## Slice 1: Raw Query API (`mode=native`) Minimal Path
@@ -246,7 +246,7 @@ Done looks like: `docs/` contains updated user-facing reference and taxonomy for
 Constraints: documentation only; no feature changes.
 13. `S0-13`
 Action: Add CI hard quality gates.
-Done looks like: pull-request workflow enforces repo-wide `ruff`, strict `pyright`, and integrity tests.
+Done looks like: pull-request workflows enforce repo-wide `ruff`, strict `pyright`, and separate `contract-gate`, `replay-gate`, and `integrity-gate`.
 Constraints: quality gate only; no capability expansion.
 14. `S0-14`
 Action: Implement exchange integrity suite in Binance ingestion paths.

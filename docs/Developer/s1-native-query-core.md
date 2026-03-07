@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-04
+- Last updated: 2026-03-07
 - Slice reference: S1 (`S1-C1` to `S1-C6`)
 
 ## Purpose and scope
@@ -26,6 +26,7 @@
   - `binance_trades`
   - `binance_agg_trades`
   - `binance_futures_trades`
+- Table DDL is migration-managed only (`control-plane/migrations/sql`); legacy Dagster `create_*` assets are intentionally disabled.
 - Freshness is inherited from loaded Binance file cadence.
 
 ## Failure modes and errors
@@ -40,11 +41,9 @@
 ## Environment and required config
 - Required env vars (effective):
   - `CLICKHOUSE_HOST`, `CLICKHOUSE_HTTP_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`
-  - or `ORIGO_CLICKHOUSE_*` aliases for data client paths
 
 ## Minimal example
 - See `origo/query/binance_native.py`:
   - build `NativeQuerySpec`
   - call `execute_native_query(...)`
   - receive `polars.DataFrame`
-

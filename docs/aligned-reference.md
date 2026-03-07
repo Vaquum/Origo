@@ -73,7 +73,7 @@
 - `ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS`
 - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
-- ClickHouse credentials (`CLICKHOUSE_*` or `ORIGO_CLICKHOUSE_*`)
+- ClickHouse credentials (`CLICKHOUSE_*`)
 
 ## Minimal examples
 - Binance aligned query:

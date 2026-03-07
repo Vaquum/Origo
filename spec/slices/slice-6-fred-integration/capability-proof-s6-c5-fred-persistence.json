@@ -1,0 +1,47 @@
+{
+  "generated_at_utc": "2026-03-07T07:19:39.493473+00:00",
+  "inserted_row_count": 74,
+  "persisted_artifact_count": 4,
+  "persisted_artifacts": [
+    {
+      "artifact_id": "0df9e4d20922fc37bdee283ada5f7205190d3c24642441ebac86223a7b8946e3",
+      "manifest_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_fedfunds/0df9e4d20922fc37bdee283ada5f7205190d3c24642441ebac86223a7b8946e3/manifest.json",
+      "persisted_at_utc": "2026-03-07T07:19:39.434203+00:00",
+      "storage_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_fedfunds/0df9e4d20922fc37bdee283ada5f7205190d3c24642441ebac86223a7b8946e3/artifact.json"
+    },
+    {
+      "artifact_id": "0e8384d3c599274433e03a92350436be652ac519b9a0ad7c2acb9e9f2dc8074f",
+      "manifest_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_cpiaucsl/0e8384d3c599274433e03a92350436be652ac519b9a0ad7c2acb9e9f2dc8074f/manifest.json",
+      "persisted_at_utc": "2026-03-07T07:19:39.454595+00:00",
+      "storage_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_cpiaucsl/0e8384d3c599274433e03a92350436be652ac519b9a0ad7c2acb9e9f2dc8074f/artifact.json"
+    },
+    {
+      "artifact_id": "9b6f610eb914505c3bbf715d382dcbc66fa487e6b671e1217f29eb7c15f836eb",
+      "manifest_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_dgs10/9b6f610eb914505c3bbf715d382dcbc66fa487e6b671e1217f29eb7c15f836eb/manifest.json",
+      "persisted_at_utc": "2026-03-07T07:19:39.488453+00:00",
+      "storage_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_dgs10/9b6f610eb914505c3bbf715d382dcbc66fa487e6b671e1217f29eb7c15f836eb/artifact.json"
+    },
+    {
+      "artifact_id": "da618a2466224dd5727e6432111ea500d83174ca7dbdb55d0e9827b9e8a2cdb7",
+      "manifest_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_unrate/da618a2466224dd5727e6432111ea500d83174ca7dbdb55d0e9827b9e8a2cdb7/manifest.json",
+      "persisted_at_utc": "2026-03-07T07:19:39.471498+00:00",
+      "storage_uri": "s3://origo-raw-artifacts/raw-artifacts/s6-c5-proof-20260307T071934Z/fred_unrate/da618a2466224dd5727e6432111ea500d83174ca7dbdb55d0e9827b9e8a2cdb7/artifact.json"
+    }
+  ],
+  "proof_scope": "Slice 6 S6-C5 persist native FRED data to ClickHouse and raw artifacts to object store",
+  "raw_bundle_count": 4,
+  "registry_version": "2026-03-06-s6-c1",
+  "row_count": 74,
+  "rows_hash_sha256": "ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e",
+  "run_id": "s6-c5-proof-20260307T071934Z",
+  "source_ids": [
+    "fred_cpiaucsl",
+    "fred_dgs10",
+    "fred_fedfunds",
+    "fred_unrate"
+  ],
+  "window": {
+    "observation_end": "2024-03-31",
+    "observation_start": "2024-01-01"
+  }
+}

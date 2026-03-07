@@ -1,0 +1,107 @@
+{
+  "first_row": {
+    "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+    "dimensions_json": "{\"row_index\":\"1\"}",
+    "latest_ingested_at_utc": "2026-03-06T10:09:51.974000+00:00",
+    "metric_name": "as_of_date",
+    "metric_unit": null,
+    "metric_value_bool": null,
+    "metric_value_float": null,
+    "metric_value_int": null,
+    "metric_value_string": "2026-03-05",
+    "provenance_json": "{\"artifact_id\":\"c89453b0aa56f71b05f11048b2896febd80fb1abe418b744cb04989b1e4fab3e\",\"artifact_sha256\":\"d1b68751fb9b3db8e79b1f0c71e911c156ad6022cd0bee1cce7a1bcf6726ddef\",\"fetch_method\":\"http\",\"fetched_at_utc\":\"2026-03-06T10:09:23.075665+00:00\",\"normalized_at_utc\":\"2026-03-06T10:09:51.960763+00:00\",\"parsed_at_utc\":\"2026-03-06T10:09:51.960702+00:00\",\"parser_name\":\"ark_arkb_parser\",\"parser_version\":\"1.0.0\",\"source_id\":\"etf_ark_arkb_daily\",\"source_uri\":\"https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_21SHARES_BITCOIN_ETF_ARKB_HOLDINGS.csv\"}",
+    "records_in_bucket": 3,
+    "source_id": "etf_ark_arkb_daily",
+    "valid_from_utc": "2026-03-05T12:00:00+00:00",
+    "valid_to_utc_exclusive": "2026-03-07T12:00:00+00:00"
+  },
+  "generated_at_utc": "2026-03-06T17:31:34.545022+00:00",
+  "last_row": {
+    "aligned_at_utc": "2026-03-04T00:00:00+00:00",
+    "dimensions_json": "{\"row_index\":\"1\"}",
+    "latest_ingested_at_utc": "2026-03-06T10:09:51.997000+00:00",
+    "metric_name": "total_net_assets_usd",
+    "metric_unit": "USD",
+    "metric_value_bool": null,
+    "metric_value_float": 1255149481.0,
+    "metric_value_int": null,
+    "metric_value_string": "1255149481.0",
+    "provenance_json": "{\"artifact_id\":\"24b64e85eb9dfb40048a5389fe87ef7f0d67ac946ec5e903bfde8d4ab762953f\",\"artifact_sha256\":\"e3a7a15d4358aceae173e77340714c8fb1cc9d3b7adab6f43760b845b8c98997\",\"fetch_method\":\"http\",\"fetched_at_utc\":\"2026-03-06T10:09:23.502429+00:00\",\"normalized_at_utc\":\"2026-03-06T10:09:51.983743+00:00\",\"parsed_at_utc\":\"2026-03-06T10:09:51.983669+00:00\",\"parser_name\":\"vaneck_hodl_parser\",\"parser_version\":\"1.0.0\",\"source_id\":\"etf_vaneck_hodl_daily\",\"source_uri\":\"https://www.vaneck.com/Main/HoldingsBlock/GetDataset/?blockId=348327&pageId=243755&ticker=HODL\"}",
+    "records_in_bucket": 3,
+    "source_id": "etf_vaneck_hodl_daily",
+    "valid_from_utc": "2026-03-05T12:00:00+00:00",
+    "valid_to_utc_exclusive": "2026-03-07T12:00:00+00:00"
+  },
+  "proof_scope": "Slice 5 S5-C3 ETF aligned forward-fill semantics",
+  "row_count": 125,
+  "rows_hash_sha256": "4d83fc92c6d64e430ef73fc25a3d8f50ef693054f431450879d09284547682e2",
+  "schema": [
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "aligned_at_utc"
+    },
+    {
+      "dtype": "String",
+      "name": "source_id"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_name"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_unit"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_value_string"
+    },
+    {
+      "dtype": "Int64",
+      "name": "metric_value_int"
+    },
+    {
+      "dtype": "Float64",
+      "name": "metric_value_float"
+    },
+    {
+      "dtype": "UInt8",
+      "name": "metric_value_bool"
+    },
+    {
+      "dtype": "String",
+      "name": "dimensions_json"
+    },
+    {
+      "dtype": "String",
+      "name": "provenance_json"
+    },
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "latest_ingested_at_utc"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "records_in_bucket"
+    },
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "valid_from_utc"
+    },
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "valid_to_utc_exclusive"
+    }
+  ],
+  "source_count": 10,
+  "utc_day_boundary_end_count": 9,
+  "utc_day_boundary_start_count": 9,
+  "window": {
+    "time_range": [
+      "2026-03-05T12:00:00Z",
+      "2026-03-07T12:00:00Z"
+    ]
+  },
+  "window_end_clip_count": 116,
+  "window_start_carry_count": 116
+}

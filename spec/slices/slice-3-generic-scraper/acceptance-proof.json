@@ -1,0 +1,25 @@
+{
+  "generated_at_utc": "2026-03-05T08:55:26.804975+00:00",
+  "persisted_artifacts": [
+    {
+      "artifact_id": "e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a",
+      "manifest_uri": "s3://proof-bucket/raw/s3-proof-run-1/e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a/manifest.json",
+      "persisted_at_utc": "2026-03-05T09:10:00+00:00",
+      "storage_uri": "s3://proof-bucket/raw/s3-proof-run-1/e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a"
+    },
+    {
+      "artifact_id": "e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a",
+      "manifest_uri": "s3://proof-bucket/raw/s3-proof-run-2/e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a/manifest.json",
+      "persisted_at_utc": "2026-03-05T09:10:00+00:00",
+      "storage_uri": "s3://proof-bucket/raw/s3-proof-run-2/e7446a07f48f5776d387f4c0d4184bb0e049f220ee86c6503ecc4977f4906c6a"
+    }
+  ],
+  "proof_scope": "Slice 3 P1 end-to-end sample target pipeline",
+  "run_summary": {
+    "total_inserted_rows": 8,
+    "total_normalized_records": 8,
+    "total_parsed_records": 2,
+    "total_sources": 1
+  },
+  "sample_target": "http://127.0.0.1:56118/sample-etf.csv"
+}

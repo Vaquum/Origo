@@ -1,0 +1,11 @@
+{
+  "emitted_anomaly_code": "ETF_DAILY_INGEST_RUN_FAILURE",
+  "emitted_run_id": "run-s4-g7-proof-1",
+  "log_line_count": 1,
+  "missing_webhook_env_error": "ORIGO_ETF_DISCORD_WEBHOOK_URL must be set and non-empty",
+  "proof_scope": "Slice 4 S4-G7 ETF anomaly logs and Discord alerts",
+  "sensor_min_interval_seconds": 45,
+  "sensor_name": "origo_etf_ingest_anomaly_alert_sensor",
+  "webhook_status_code": 204,
+  "webhook_url": "https://discord.example/webhook"
+}

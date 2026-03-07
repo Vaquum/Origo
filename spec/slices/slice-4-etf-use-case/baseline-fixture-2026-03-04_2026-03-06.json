@@ -1,0 +1,153 @@
+{
+  "fixture_window": {
+    "start_date": "2026-03-04",
+    "end_date": "2026-03-06",
+    "as_of_dates": [
+      "2026-03-04",
+      "2026-03-05",
+      "2026-03-06"
+    ]
+  },
+  "source_checksums": [
+    {
+      "as_of_date": "2026-03-04",
+      "source_id": "etf_ishares_ibit_daily",
+      "artifact_format": "csv",
+      "zip_sha256": null,
+      "csv_sha256": "78094b969de57d00676bd1f44b3d9fb2aa6ceba5dcf4e8d3cdbc6878d79ae3a0",
+      "artifact_sha256": "78094b969de57d00676bd1f44b3d9fb2aa6ceba5dcf4e8d3cdbc6878d79ae3a0"
+    },
+    {
+      "as_of_date": "2026-03-04",
+      "source_id": "etf_invesco_btco_daily",
+      "artifact_format": "json",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "61baac36197af1aa7a2fcc110ee79c6c87852863903b89384b26c43486267a09"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "source_id": "etf_bitwise_bitb_daily",
+      "artifact_format": "json",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "b5d076cdac15e507dfbe498dc852ccfe5cb8a5f997b485f2f37dbf581bb39ee1"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "source_id": "etf_ark_arkb_daily",
+      "artifact_format": "csv",
+      "zip_sha256": null,
+      "csv_sha256": "d1b68751fb9b3db8e79b1f0c71e911c156ad6022cd0bee1cce7a1bcf6726ddef",
+      "artifact_sha256": "d1b68751fb9b3db8e79b1f0c71e911c156ad6022cd0bee1cce7a1bcf6726ddef"
+    },
+    {
+      "as_of_date": "2026-03-04",
+      "source_id": "etf_vaneck_hodl_daily",
+      "artifact_format": "json",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "e3a7a15d4358aceae173e77340714c8fb1cc9d3b7adab6f43760b845b8c98997"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "source_id": "etf_franklin_ezbc_daily",
+      "artifact_format": "json",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "85a7a619fbce0e857bd035b83025fa80090e3d68b1b525297bb670fdb1ab24c4"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "source_id": "etf_grayscale_gbtc_daily",
+      "artifact_format": "html",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "0257acd653fc5517c23e5c165e7ec8b5841599c7c3f259687534c27c40011183"
+    },
+    {
+      "as_of_date": "2026-03-04",
+      "source_id": "etf_fidelity_fbtc_daily",
+      "artifact_format": "html",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "85fde5e1eaeec082e2c8f1a215eaeb0a266bb000a5293900437ce8438f05724d"
+    },
+    {
+      "as_of_date": "2026-03-06",
+      "source_id": "etf_coinshares_brrr_daily",
+      "artifact_format": "html",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "1e3999d8e13eb286a74ef0ad8ad01ef76f69b8091cf927bd78ade877e05c4164"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "source_id": "etf_hashdex_defi_daily",
+      "artifact_format": "json",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "artifact_sha256": "78977d4acd88c2ae9b7103d297e9513a60c48c1b3b03f1e024641f1273d78dab"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "as_of_date": "2026-03-04",
+      "row_count": 42,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "fa06ca0d23226192f3c383d669ddee65e8a216163e53fd705d226d4c2ae3282c"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "row_count": 65,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "6130bb04b32b1d76917f29b6877d076904c5d173e02b3c37d01ea11085dba02e"
+    },
+    {
+      "as_of_date": "2026-03-06",
+      "row_count": 9,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "7e96c8d2a47bf845548067a5a78a6b9586a0127f66c56cd328126f5c38936349"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "as_of_date": "2026-03-04",
+      "row_count": 42,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "fa06ca0d23226192f3c383d669ddee65e8a216163e53fd705d226d4c2ae3282c"
+    },
+    {
+      "as_of_date": "2026-03-05",
+      "row_count": 65,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "6130bb04b32b1d76917f29b6877d076904c5d173e02b3c37d01ea11085dba02e"
+    },
+    {
+      "as_of_date": "2026-03-06",
+      "row_count": 9,
+      "offsets": null,
+      "volume_sums": null,
+      "fingerprint_sha256": "7e96c8d2a47bf845548067a5a78a6b9586a0127f66c56cd328126f5c38936349"
+    }
+  ],
+  "deterministic_match": true,
+  "column_key": {
+    "as_of_date": "UTC source business day represented by ETF normalized records.",
+    "source_id": "Canonical ETF source identifier.",
+    "artifact_format": "Raw artifact media type captured during fetch.",
+    "zip_sha256": "SHA256 of source ZIP artifact for the day when present; null when source artifact is not ZIP.",
+    "csv_sha256": "SHA256 of source CSV artifact for the day when present; null when source artifact is not CSV.",
+    "artifact_sha256": "SHA256 of the persisted raw artifact payload.",
+    "row_count": "Canonical ETF long-metric rows inserted for the day.",
+    "offsets": "Not applicable for ETF daily metric ingest; retained for fixture schema compatibility.",
+    "volume_sums": "Not applicable for ETF daily metric ingest; retained for fixture schema compatibility.",
+    "fingerprint_sha256": "Deterministic day-level hash derived from sorted source normalized fingerprints in the proof window.",
+    "deterministic_match": "True when run_1_fingerprints and run_2_fingerprints match exactly."
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "case_count": 2,
+  "cases": [
+    {
+      "case_id": "fred_forward_fill_time_range",
+      "columns": [
+        "source_id",
+        "metric_name",
+        "valid_from_utc",
+        "valid_to_utc_exclusive",
+        "metric_value_string"
+      ],
+      "dataset": "fred_series_metrics",
+      "execution_path": "fred_aligned_forward_fill",
+      "first_row": {
+        "metric_name": "consumer_price_index_all_items",
+        "metric_value_string": "309.698",
+        "source_id": "fred_cpiaucsl",
+        "valid_from_utc": "2024-01-01T00:00:00+00:00",
+        "valid_to_utc_exclusive": "2024-02-01T00:00:00+00:00"
+      },
+      "last_row": {
+        "metric_name": "unemployment_rate",
+        "metric_value_string": "3.9",
+        "source_id": "fred_unrate",
+        "valid_from_utc": "2024-03-01T00:00:00+00:00",
+        "valid_to_utc_exclusive": "2024-04-01T00:00:00+00:00"
+      },
+      "row_count": 74,
+      "rows_hash_sha256": "918ea6ed63d71f44451f7f74e20ff90b38f3497c3bf8cd4b93462a9dc3088b8f",
+      "window": {
+        "end_iso": "2024-04-01T00:00:00Z",
+        "kind": "time_range",
+        "start_iso": "2024-01-01T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "fred_observation_latest_rows",
+      "columns": [
+        "aligned_at_utc",
+        "source_id",
+        "metric_name",
+        "metric_value_string"
+      ],
+      "dataset": "fred_series_metrics",
+      "execution_path": "fred_aligned_observation",
+      "first_row": {
+        "aligned_at_utc": "2024-02-29T00:00:00+00:00",
+        "metric_name": "treasury_yield_10y",
+        "metric_value_string": "4.25",
+        "source_id": "fred_dgs10"
+      },
+      "last_row": {
+        "aligned_at_utc": "2024-03-29T00:00:00+00:00",
+        "metric_name": "treasury_yield_10y",
+        "metric_value_string": ".",
+        "source_id": "fred_dgs10"
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "425694586e06f54122c2ce7442f995a813283269d2012a4813d1bab043276689",
+      "window": {
+        "kind": "latest_rows",
+        "rows": 25
+      }
+    }
+  ],
+  "generated_at_utc": "2026-03-07T07:29:56.337599+00:00",
+  "proof_scope": "Slice 6 S6-C7 integrate FRED into aligned-1s materialization path"
+}

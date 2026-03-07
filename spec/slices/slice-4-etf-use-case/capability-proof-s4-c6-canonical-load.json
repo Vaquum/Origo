@@ -1,0 +1,280 @@
+{
+  "canonical_table": "etf_daily_metrics_long",
+  "database": "origo",
+  "db_rows_by_source": [
+    {
+      "row_count": 9,
+      "source_id": "etf_ark_arkb_daily"
+    },
+    {
+      "row_count": 15,
+      "source_id": "etf_bitwise_bitb_daily"
+    },
+    {
+      "row_count": 9,
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "row_count": 11,
+      "source_id": "etf_fidelity_fbtc_daily"
+    },
+    {
+      "row_count": 15,
+      "source_id": "etf_franklin_ezbc_daily"
+    },
+    {
+      "row_count": 14,
+      "source_id": "etf_grayscale_gbtc_daily"
+    },
+    {
+      "row_count": 12,
+      "source_id": "etf_hashdex_defi_daily"
+    },
+    {
+      "row_count": 10,
+      "source_id": "etf_invesco_btco_daily"
+    },
+    {
+      "row_count": 11,
+      "source_id": "etf_ishares_ibit_daily"
+    },
+    {
+      "row_count": 10,
+      "source_id": "etf_vaneck_hodl_daily"
+    }
+  ],
+  "db_total_inserted_rows": 116,
+  "generated_at_utc": "2026-03-06T08:18:02.963538+00:00",
+  "proof_scope": "Slice 4 S4-C6 ETF canonical daily ClickHouse load",
+  "row_count_match": true,
+  "run_id": "s4-06-proof-20260306T081729Z",
+  "source_results": [
+    {
+      "adapter_name": "etf_ishares_ibit",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "inserted_row_count": 11,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "cash_market_value_usd",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "shares_outstanding",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 11,
+      "source_id": "etf_ishares_ibit_daily"
+    },
+    {
+      "adapter_name": "etf_invesco_btco",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "inserted_row_count": 10,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "source_cusip",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 10,
+      "source_id": "etf_invesco_btco_daily"
+    },
+    {
+      "adapter_name": "etf_bitwise_bitb",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 15,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "fund_data_updated_at_utc",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "proof_of_reserves_timestamp_utc",
+        "proof_of_reserves_total_btc",
+        "shares_outstanding",
+        "ticker",
+        "total_holdings_market_value_usd",
+        "total_net_assets_usd",
+        "wallet_balance_total_btc",
+        "wallet_count"
+      ],
+      "normalized_record_count": 15,
+      "source_id": "etf_bitwise_bitb_daily"
+    },
+    {
+      "adapter_name": "etf_ark_arkb",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 9,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 9,
+      "source_id": "etf_ark_arkb_daily"
+    },
+    {
+      "adapter_name": "etf_vaneck_hodl",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "inserted_row_count": 10,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "source_cusip",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 10,
+      "source_id": "etf_vaneck_hodl_daily"
+    },
+    {
+      "adapter_name": "etf_franklin_ezbc",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 15,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_row_count",
+        "issuer",
+        "market_price_per_share_usd",
+        "nav_per_share_usd",
+        "observed_at_utc",
+        "source_cusip",
+        "source_fund_id",
+        "source_isin",
+        "ticker",
+        "total_net_assets_reported_usd",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 15,
+      "source_id": "etf_franklin_ezbc_daily"
+    },
+    {
+      "adapter_name": "etf_grayscale_gbtc",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 14,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_row_count",
+        "issuer",
+        "market_price_per_share_usd",
+        "nav_per_share_usd",
+        "observed_at_utc",
+        "premium_discount_pct",
+        "shares_outstanding",
+        "source_cusip",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 14,
+      "source_id": "etf_grayscale_gbtc_daily"
+    },
+    {
+      "adapter_name": "etf_fidelity_fbtc",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "inserted_row_count": 11,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "holdings_row_count",
+        "issuer",
+        "nav_per_share_usd",
+        "net_assets_as_of_date",
+        "observed_at_utc",
+        "shares_outstanding",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 11,
+      "source_id": "etf_fidelity_fbtc_daily"
+    },
+    {
+      "adapter_name": "etf_coinshares_brrr",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 9,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_units",
+        "holdings_row_count",
+        "issuer",
+        "nav_per_share_usd",
+        "observed_at_utc",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 9,
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "adapter_name": "etf_hashdex_defi",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "inserted_row_count": 12,
+      "metric_names": [
+        "as_of_date",
+        "btc_market_value_usd",
+        "btc_price_usd",
+        "btc_units",
+        "btc_weight_pct",
+        "holdings_download_url",
+        "holdings_row_count",
+        "issuer",
+        "observed_at_utc",
+        "shares_outstanding",
+        "ticker",
+        "total_net_assets_usd"
+      ],
+      "normalized_record_count": 12,
+      "source_id": "etf_hashdex_defi_daily"
+    }
+  ],
+  "total_inserted_rows": 116
+}

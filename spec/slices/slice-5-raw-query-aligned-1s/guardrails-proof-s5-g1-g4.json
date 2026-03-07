@@ -1,0 +1,29 @@
+{
+  "g1_strict_warning_failure": {
+    "error_code": "STRICT_MODE_WARNING_FAILURE",
+    "status_code": 409
+  },
+  "g2_freshness_warning": {
+    "freshness": {
+      "as_of_utc": "2017-08-17T12:54:47.000Z",
+      "lag_seconds": 269845236
+    },
+    "status_code": 200,
+    "warning_codes": [
+      "ALIGNED_FRESHNESS_STALE"
+    ]
+  },
+  "g3_aligned_queue_limit": {
+    "error_code": "ALIGNED_QUERY_QUEUE_LIMIT_REACHED",
+    "status_code": 503
+  },
+  "g4_aligned_export_rights_audit": {
+    "audit_event_count": 1,
+    "error_code": "EXPORT_RIGHTS_INGEST_ONLY",
+    "last_event_mode": "aligned_1s",
+    "last_event_type": "export_submit_rejected",
+    "status_code": 409
+  },
+  "generated_at_utc": "2026-03-06T17:55:23.860160+00:00",
+  "proof_scope": "Slice 5 G1-G4 aligned query/export guardrails"
+}

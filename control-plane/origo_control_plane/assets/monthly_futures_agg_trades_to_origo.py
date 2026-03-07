@@ -4,6 +4,9 @@ from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.asset_insert_to_origo import asset_insert_to_origo
 from origo_control_plane.utils.binance_file_to_polars import binance_file_to_polars
 from origo_control_plane.utils.check_if_has_header import check_if_has_header
+from origo_control_plane.utils.exchange_integrity import (
+    run_exchange_integrity_suite_frame,
+)
 from origo_control_plane.utils.get_clickhouse_client import get_clickhouse_client
 from origo_control_plane.utils.get_origo_monthly_table_config import (
     get_origo_monthly_table_config,
@@ -99,6 +102,14 @@ def insert_monthly_binance_futures_agg_trades_to_origo(
     data = binance_file_to_polars(full_url, has_header=check_if_has_header(full_url))
     data.columns = DATA_COLS
     context.log.info(f'Completed reading {BASE_URL} into a DataFrame.')
+
+    integrity_report = run_exchange_integrity_suite_frame(
+        dataset='futures_agg_trades',
+        frame=data,
+    )
+    context.log.info(
+        f'Exchange integrity suite passed: {integrity_report.to_dict()}'
+    )
 
     asset_insert_to_origo(
         data, client, context, file_url, CLICKHOUSE_DATABASE, CLICKHOUSE_TABLE

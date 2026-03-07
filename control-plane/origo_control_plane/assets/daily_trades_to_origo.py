@@ -10,6 +10,9 @@ from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.utils.exchange_integrity import (
+    run_exchange_integrity_suite_rows,
+)
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
 CLICKHOUSE_HOST = _CLICKHOUSE.host
@@ -137,6 +140,14 @@ def _process_day(
         )
 
     context.log.info(f'Parsed {row_count} rows from CSV')
+
+    integrity_report = run_exchange_integrity_suite_rows(
+        dataset='spot_trades',
+        rows=data,
+    )
+    context.log.info(
+        f'Exchange integrity suite passed: {integrity_report.to_dict()}'
+    )
 
     # Clear large variables to help garbage collection
     del csv_text, csv_content, zip_data

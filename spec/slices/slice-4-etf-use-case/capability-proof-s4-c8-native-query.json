@@ -1,0 +1,121 @@
+{
+  "generated_at_utc": "2026-03-06T09:06:36.266115+00:00",
+  "proof_scope": "Slice 4 S4-C8 ETF native raw query exposure",
+  "queries": {
+    "historical_time_range": {
+      "summary": {
+        "first_row": {
+          "metric_name": "total_net_assets_usd",
+          "metric_value_float": 51162657113.51,
+          "metric_value_int": null,
+          "metric_value_string": "51162657113.51",
+          "observed_at_utc": "2025-01-09T00:00:00.000Z",
+          "source_id": "etf_ishares_ibit_daily"
+        },
+        "last_row": {
+          "metric_name": "holdings_row_count",
+          "metric_value_float": 4.0,
+          "metric_value_int": 4,
+          "metric_value_string": "4",
+          "observed_at_utc": "2025-01-10T00:00:00.000Z",
+          "source_id": "etf_ishares_ibit_daily"
+        },
+        "mode": "native",
+        "row_count": 22,
+        "rows_hash_sha256": "59e3b4763176d48263938d75c6cc5172313ea4723eec6fa01eb974b356360e06",
+        "schema": [
+          {
+            "dtype": "String",
+            "name": "source_id"
+          },
+          {
+            "dtype": "String",
+            "name": "metric_name"
+          },
+          {
+            "dtype": "Float64",
+            "name": "metric_value_float"
+          },
+          {
+            "dtype": "Int64",
+            "name": "metric_value_int"
+          },
+          {
+            "dtype": "String",
+            "name": "metric_value_string"
+          },
+          {
+            "dtype": "String",
+            "name": "observed_at_utc"
+          }
+        ],
+        "source": "etf_daily_metrics"
+      },
+      "window": {
+        "time_range": [
+          "2025-01-09T00:00:00Z",
+          "2025-01-12T00:00:00Z"
+        ]
+      }
+    },
+    "latest_rows": {
+      "summary": {
+        "first_row": {
+          "metric_name": "issuer",
+          "metric_unit": null,
+          "metric_value_float": null,
+          "metric_value_int": null,
+          "metric_value_string": "ark",
+          "observed_at_utc": "2026-03-05T00:00:00.000Z",
+          "source_id": "etf_ark_arkb_daily"
+        },
+        "last_row": {
+          "metric_name": "ticker",
+          "metric_unit": null,
+          "metric_value_float": null,
+          "metric_value_int": null,
+          "metric_value_string": "BRRR",
+          "observed_at_utc": "2026-03-05T00:00:00.000Z",
+          "source_id": "etf_coinshares_brrr_daily"
+        },
+        "mode": "native",
+        "row_count": 50,
+        "rows_hash_sha256": "fa17aae548441ce26010fe4c86d7cee37f78344d942db22017ef627311cafd31",
+        "schema": [
+          {
+            "dtype": "String",
+            "name": "source_id"
+          },
+          {
+            "dtype": "String",
+            "name": "metric_name"
+          },
+          {
+            "dtype": "String",
+            "name": "metric_unit"
+          },
+          {
+            "dtype": "Float64",
+            "name": "metric_value_float"
+          },
+          {
+            "dtype": "Int64",
+            "name": "metric_value_int"
+          },
+          {
+            "dtype": "String",
+            "name": "metric_value_string"
+          },
+          {
+            "dtype": "String",
+            "name": "observed_at_utc"
+          }
+        ],
+        "source": "etf_daily_metrics"
+      },
+      "window": {
+        "n_rows": 50
+      }
+    }
+  }
+}

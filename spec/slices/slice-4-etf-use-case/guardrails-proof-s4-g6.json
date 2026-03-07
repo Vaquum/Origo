@@ -1,0 +1,13 @@
+{
+  "clean_warning_codes": [],
+  "degraded_warning_codes": [
+    "ETF_DAILY_INCOMPLETE_RECORDS",
+    "ETF_DAILY_MISSING_RECORDS",
+    "ETF_DAILY_STALE_RECORDS"
+  ],
+  "degraded_warning_count": 3,
+  "missing_only_warning_codes": [
+    "ETF_DAILY_MISSING_RECORDS"
+  ],
+  "proof_scope": "Slice 4 S4-G6 ETF stale/missing/incomplete warning generation"
+}

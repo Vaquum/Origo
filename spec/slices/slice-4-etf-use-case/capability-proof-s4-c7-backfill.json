@@ -1,0 +1,167 @@
+{
+  "backfill_end_date": "2026-03-06",
+  "generated_at_utc": "2026-03-06T08:59:37.751481+00:00",
+  "ishares_backfill_start_date": "2024-01-01",
+  "per_source_results": [
+    {
+      "adapter_name": "etf_ishares_ibit",
+      "inserted_days_count": 287,
+      "inserted_days_first": "2025-01-09",
+      "inserted_days_last": "2026-03-03",
+      "mode": "date_parameter_backfill",
+      "requested_calendar_days": 796,
+      "requested_end_date": "2026-03-06",
+      "requested_start_date": "2024-01-01",
+      "requested_weekdays": 570,
+      "skipped_existing_days": 255,
+      "skipped_no_data_days": 28,
+      "source_id": "etf_ishares_ibit_daily"
+    },
+    {
+      "adapter_name": "etf_invesco_btco",
+      "as_of_date": "2026-03-04",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_invesco_btco_daily"
+    },
+    {
+      "adapter_name": "etf_bitwise_bitb",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_bitwise_bitb_daily"
+    },
+    {
+      "adapter_name": "etf_ark_arkb",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_ark_arkb_daily"
+    },
+    {
+      "adapter_name": "etf_vaneck_hodl",
+      "as_of_date": "2026-03-04",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_vaneck_hodl_daily"
+    },
+    {
+      "adapter_name": "etf_franklin_ezbc",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_franklin_ezbc_daily"
+    },
+    {
+      "adapter_name": "etf_grayscale_gbtc",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_grayscale_gbtc_daily"
+    },
+    {
+      "adapter_name": "etf_fidelity_fbtc",
+      "as_of_date": "2026-03-04",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_fidelity_fbtc_daily"
+    },
+    {
+      "adapter_name": "etf_coinshares_brrr",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "adapter_name": "etf_hashdex_defi",
+      "as_of_date": "2026-03-05",
+      "inserted_rows": 0,
+      "mode": "snapshot_backfill",
+      "skipped_existing_days": 1,
+      "source_id": "etf_hashdex_defi_daily"
+    }
+  ],
+  "proof_scope": "Slice 4 S4-C7 full available-history backfill per issuer",
+  "run_id": "s4-07-backfill-20260306T085155Z",
+  "source_coverage": [
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_ark_arkb_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_bitwise_bitb_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_coinshares_brrr_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-04",
+      "latest_as_of_date": "2026-03-04",
+      "source_id": "etf_fidelity_fbtc_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_franklin_ezbc_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_grayscale_gbtc_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-05",
+      "latest_as_of_date": "2026-03-05",
+      "source_id": "etf_hashdex_defi_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-04",
+      "latest_as_of_date": "2026-03-04",
+      "source_id": "etf_invesco_btco_daily",
+      "total_as_of_rows": 1
+    },
+    {
+      "distinct_as_of_days": 542,
+      "earliest_as_of_date": "2024-01-05",
+      "latest_as_of_date": "2026-03-04",
+      "source_id": "etf_ishares_ibit_daily",
+      "total_as_of_rows": 542
+    },
+    {
+      "distinct_as_of_days": 1,
+      "earliest_as_of_date": "2026-03-04",
+      "latest_as_of_date": "2026-03-04",
+      "source_id": "etf_vaneck_hodl_daily",
+      "total_as_of_rows": 1
+    }
+  ]
+}

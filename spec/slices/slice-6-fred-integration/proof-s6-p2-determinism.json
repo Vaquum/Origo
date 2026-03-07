@@ -1,0 +1,46 @@
+{
+  "case_count": 2,
+  "cases": [
+    {
+      "case_id": "fred_native_fixed_window",
+      "deterministic_match": true,
+      "mode": "native",
+      "run_1": {
+        "row_count": 74,
+        "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499",
+        "schema_hash_sha256": "69b867e1b9e37f98c013d2a10f6b18de43f0ee99377bf84a36e4e5a9ede0cd85"
+      },
+      "run_2": {
+        "row_count": 74,
+        "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499",
+        "schema_hash_sha256": "69b867e1b9e37f98c013d2a10f6b18de43f0ee99377bf84a36e4e5a9ede0cd85"
+      },
+      "window": {
+        "end_iso": "2024-04-01T00:00:00Z",
+        "start_iso": "2024-01-01T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "fred_aligned_fixed_window",
+      "deterministic_match": true,
+      "mode": "aligned_1s",
+      "run_1": {
+        "row_count": 74,
+        "rows_hash_sha256": "851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381",
+        "schema_hash_sha256": "3694f9f6e4dd0346f7a4b6a86dfa2b1853dac6182e794eff7db07409e1edcb87"
+      },
+      "run_2": {
+        "row_count": 74,
+        "rows_hash_sha256": "851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381",
+        "schema_hash_sha256": "3694f9f6e4dd0346f7a4b6a86dfa2b1853dac6182e794eff7db07409e1edcb87"
+      },
+      "window": {
+        "end_iso": "2024-04-01T00:00:00Z",
+        "start_iso": "2024-01-01T00:00:00Z"
+      }
+    }
+  ],
+  "deterministic_match_all": true,
+  "generated_at_utc": "2026-03-07T07:42:18.350278+00:00",
+  "proof_scope": "Slice 6 P2 replay fixed windows and verify deterministic outputs"
+}

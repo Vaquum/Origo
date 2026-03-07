@@ -1,0 +1,61 @@
+{
+  "aligned_case_count": 1,
+  "aligned_cases": [
+    {
+      "case_id": "aligned_forward_fill_time_range_window",
+      "execution_path": "fred_aligned_forward_fill",
+      "first_row": {
+        "metric_name": "consumer_price_index_all_items",
+        "metric_value_string": "309.698",
+        "source_id": "fred_cpiaucsl",
+        "valid_from_utc": "2024-01-01T00:00:00.000Z",
+        "valid_to_utc_exclusive": "2024-02-01T00:00:00.000Z"
+      },
+      "last_row": {
+        "metric_name": "unemployment_rate",
+        "metric_value_string": "3.9",
+        "source_id": "fred_unrate",
+        "valid_from_utc": "2024-03-01T00:00:00.000Z",
+        "valid_to_utc_exclusive": "2024-04-01T00:00:00.000Z"
+      },
+      "mode": "aligned_1s",
+      "row_count": 74,
+      "rows_hash_sha256": "851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381",
+      "window": {
+        "end_iso": "2024-04-01T00:00:00Z",
+        "start_iso": "2024-01-01T00:00:00Z"
+      }
+    }
+  ],
+  "generated_at_utc": "2026-03-07T07:39:01.750834+00:00",
+  "native_case_count": 1,
+  "native_cases": [
+    {
+      "case_id": "native_time_range_window",
+      "first_row": {
+        "metric_name": "effective_federal_funds_rate",
+        "metric_unit": "Percent",
+        "metric_value_float": 5.33,
+        "metric_value_string": "5.33",
+        "observed_at_utc": "2024-01-01T00:00:00.000Z",
+        "source_id": "fred_fedfunds"
+      },
+      "last_row": {
+        "metric_name": "treasury_yield_10y",
+        "metric_unit": "Percent",
+        "metric_value_float": null,
+        "metric_value_string": ".",
+        "observed_at_utc": "2024-03-29T00:00:00.000Z",
+        "source_id": "fred_dgs10"
+      },
+      "mode": "native",
+      "row_count": 74,
+      "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499",
+      "window": {
+        "end_iso": "2024-04-01T00:00:00Z",
+        "start_iso": "2024-01-01T00:00:00Z"
+      }
+    }
+  ],
+  "proof_scope": "Slice 6 P1 acceptance scenarios for FRED native and aligned paths"
+}

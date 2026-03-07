@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "artifact_path": "/tmp/origo-s2p3-exports/44444444-4444-4444-8444-444444444441/raw_export.parquet",
+      "case_id": "native_parquet_spot_trades_month_2017_08",
+      "expected": {
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp"
+        ],
+        "row_count": 4,
+        "rows_hash_sha256": "58b0a2e4ca528af7cf24801f3783accd306af4bf76a2c706bc1676bf65f72579"
+      },
+      "exported": {
+        "artifact_checksum_sha256": "8270cbc6efd637120c99abe6be10a05261e4e2df1b99bcde1514763f4dc7d306",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp"
+        ],
+        "row_count": 4,
+        "rows_hash_sha256": "58b0a2e4ca528af7cf24801f3783accd306af4bf76a2c706bc1676bf65f72579"
+      },
+      "format": "parquet",
+      "metadata_path": "/tmp/origo-s2p3-exports/44444444-4444-4444-8444-444444444441/metadata.json",
+      "parity": {
+        "all": true,
+        "columns": true,
+        "content": true,
+        "row_count": true
+      },
+      "run_id": "44444444-4444-4444-8444-444444444441",
+      "window": {
+        "month_year": [
+          8,
+          2017
+        ]
+      }
+    },
+    {
+      "artifact_path": "/tmp/origo-s2p3-exports/55555555-5555-4555-8555-555555555551/raw_export.csv",
+      "case_id": "native_csv_spot_trades_month_2017_08",
+      "expected": {
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp"
+        ],
+        "row_count": 4,
+        "rows_hash_sha256": "58b0a2e4ca528af7cf24801f3783accd306af4bf76a2c706bc1676bf65f72579"
+      },
+      "exported": {
+        "artifact_checksum_sha256": "394ee431cc75676bf4754e51c191a2408fc8d53285826492c407edf07cb2d62c",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp"
+        ],
+        "row_count": 4,
+        "rows_hash_sha256": "58b0a2e4ca528af7cf24801f3783accd306af4bf76a2c706bc1676bf65f72579"
+      },
+      "format": "csv",
+      "metadata_path": "/tmp/origo-s2p3-exports/55555555-5555-4555-8555-555555555551/metadata.json",
+      "parity": {
+        "all": true,
+        "columns": true,
+        "content": true,
+        "row_count": true
+      },
+      "run_id": "55555555-5555-4555-8555-555555555551",
+      "window": {
+        "month_year": [
+          8,
+          2017
+        ]
+      }
+    }
+  ],
+  "column_key": {
+    "expected.rows_hash_sha256": "SHA256 hash of canonicalized query result rows",
+    "exported.artifact_checksum_sha256": "Checksum recorded by export metadata for artifact bytes",
+    "exported.rows_hash_sha256": "SHA256 hash of canonicalized exported rows",
+    "parity.columns": "True if column names/order match expected query output",
+    "parity.content": "True if canonicalized row payload hash matches expected",
+    "parity.row_count": "True if row counts match expected query output"
+  },
+  "fixture_window": [
+    "spot_trades:month_year=[8,2017]"
+  ],
+  "generated_at_utc": "2026-03-05T08:11:08.171247+00:00",
+  "parity_match": true,
+  "parity_match_by_format": {
+    "csv": true,
+    "parquet": true
+  },
+  "proof_scope": "Slice 2 P3 export parity against query results"
+}

@@ -1,0 +1,128 @@
+{
+  "case_count": 4,
+  "cases": [
+    {
+      "case_id": "binance_spot_time_range",
+      "columns": [
+        "aligned_at_utc",
+        "open_price",
+        "close_price",
+        "trade_count"
+      ],
+      "dataset": "spot_trades",
+      "execution_path": "binance_aligned",
+      "first_row": {
+        "aligned_at_utc": "2017-08-17T12:01:48+00:00",
+        "close_price": 4436.06,
+        "open_price": 4436.06,
+        "trade_count": 1
+      },
+      "last_row": {
+        "aligned_at_utc": "2017-08-17T12:54:47+00:00",
+        "close_price": 4411.0,
+        "open_price": 4411.0,
+        "trade_count": 1
+      },
+      "row_count": 75,
+      "rows_hash_sha256": "9e735d6bc4ef1b9dacc0d67bbacaf5830955192c8b2bc43766943e4b9d541729",
+      "window": {
+        "end_iso": "2017-08-17T13:00:00Z",
+        "kind": "time_range",
+        "start_iso": "2017-08-17T12:00:00Z"
+      }
+    },
+    {
+      "case_id": "binance_futures_latest_rows",
+      "columns": [
+        "aligned_at_utc",
+        "high_price",
+        "low_price",
+        "quote_volume_sum"
+      ],
+      "dataset": "futures_trades",
+      "execution_path": "binance_aligned",
+      "first_row": {
+        "aligned_at_utc": "2019-09-08T19:52:45+00:00",
+        "high_price": 10344.04,
+        "low_price": 10343.62,
+        "quote_volume_sum": 7064.831480000001
+      },
+      "last_row": {
+        "aligned_at_utc": "2019-09-08T19:54:59+00:00",
+        "high_price": 10342.13,
+        "low_price": 10341.46,
+        "quote_volume_sum": 8562.968739999998
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "20ed91053e88e674c1eec1e1a4a2e435b960815049d482ba1c9fa480933cfe77",
+      "window": {
+        "kind": "latest_rows",
+        "rows": 25
+      }
+    },
+    {
+      "case_id": "etf_forward_fill_time_range",
+      "columns": [
+        "source_id",
+        "metric_name",
+        "valid_from_utc",
+        "valid_to_utc_exclusive",
+        "metric_value_string"
+      ],
+      "dataset": "etf_daily_metrics",
+      "execution_path": "etf_aligned_forward_fill",
+      "first_row": {
+        "metric_name": "as_of_date",
+        "metric_value_string": "2026-03-05",
+        "source_id": "etf_ark_arkb_daily",
+        "valid_from_utc": "2026-03-05T12:00:00+00:00",
+        "valid_to_utc_exclusive": "2026-03-07T12:00:00+00:00"
+      },
+      "last_row": {
+        "metric_name": "total_net_assets_usd",
+        "metric_value_string": "1255149481.0",
+        "source_id": "etf_vaneck_hodl_daily",
+        "valid_from_utc": "2026-03-05T12:00:00+00:00",
+        "valid_to_utc_exclusive": "2026-03-07T12:00:00+00:00"
+      },
+      "row_count": 125,
+      "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28",
+      "window": {
+        "end_iso": "2026-03-07T12:00:00Z",
+        "kind": "time_range",
+        "start_iso": "2026-03-05T12:00:00Z"
+      }
+    },
+    {
+      "case_id": "etf_observation_latest_rows",
+      "columns": [
+        "aligned_at_utc",
+        "source_id",
+        "metric_name",
+        "metric_value_string"
+      ],
+      "dataset": "etf_daily_metrics",
+      "execution_path": "etf_aligned_observation",
+      "first_row": {
+        "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+        "metric_name": "as_of_date",
+        "metric_value_string": "2026-03-05",
+        "source_id": "etf_ark_arkb_daily"
+      },
+      "last_row": {
+        "aligned_at_utc": "2026-03-06T00:00:00+00:00",
+        "metric_name": "total_net_assets_usd",
+        "metric_value_string": "456454708.0",
+        "source_id": "etf_coinshares_brrr_daily"
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "d747909487037fee790c5f56c55409d63dd4e3fa3ee131a61b970219ad802522",
+      "window": {
+        "kind": "latest_rows",
+        "rows": 25
+      }
+    }
+  ],
+  "generated_at_utc": "2026-03-06T17:49:38.102404+00:00",
+  "proof_scope": "Slice 5 P1 aligned acceptance scenarios across Binance + ETF windows"
+}

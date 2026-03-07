@@ -1,0 +1,111 @@
+{
+  "cases": [
+    {
+      "case_id": "native_parquet_spot_trades_month_2017_08",
+      "deterministic_match": true,
+      "format": "parquet",
+      "run1": {
+        "artifact_bytes": 1648,
+        "artifact_checksum_sha256": "69b8a7b2b0c6eb41265055ff7f3d6efad823f13fde01e70bb51aabbb96d07dd3",
+        "artifact_path": "/tmp/origo-s2p2-exports/22222222-2222-4222-8222-222222222221/raw_export.parquet",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp",
+          "datetime"
+        ],
+        "metadata_checksum_sha256": "69b8a7b2b0c6eb41265055ff7f3d6efad823f13fde01e70bb51aabbb96d07dd3",
+        "metadata_path": "/tmp/origo-s2p2-exports/22222222-2222-4222-8222-222222222221/metadata.json",
+        "row_count": 4,
+        "run_id": "22222222-2222-4222-8222-222222222221",
+        "status": "succeeded"
+      },
+      "run2": {
+        "artifact_bytes": 1648,
+        "artifact_checksum_sha256": "69b8a7b2b0c6eb41265055ff7f3d6efad823f13fde01e70bb51aabbb96d07dd3",
+        "artifact_path": "/tmp/origo-s2p2-exports/22222222-2222-4222-8222-222222222222/raw_export.parquet",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp",
+          "datetime"
+        ],
+        "metadata_checksum_sha256": "69b8a7b2b0c6eb41265055ff7f3d6efad823f13fde01e70bb51aabbb96d07dd3",
+        "metadata_path": "/tmp/origo-s2p2-exports/22222222-2222-4222-8222-222222222222/metadata.json",
+        "row_count": 4,
+        "run_id": "22222222-2222-4222-8222-222222222222",
+        "status": "succeeded"
+      },
+      "window": {
+        "month_year": [
+          8,
+          2017
+        ]
+      }
+    },
+    {
+      "case_id": "native_csv_spot_trades_month_2017_08",
+      "deterministic_match": true,
+      "format": "csv",
+      "run1": {
+        "artifact_bytes": 268,
+        "artifact_checksum_sha256": "0f3a2a3dc391c42e21c0a7fc197b54ad0d26294fc7431ede61bbb7dc77e2646a",
+        "artifact_path": "/tmp/origo-s2p2-exports/33333333-3333-4333-8333-333333333331/raw_export.csv",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp",
+          "datetime"
+        ],
+        "metadata_checksum_sha256": "0f3a2a3dc391c42e21c0a7fc197b54ad0d26294fc7431ede61bbb7dc77e2646a",
+        "metadata_path": "/tmp/origo-s2p2-exports/33333333-3333-4333-8333-333333333331/metadata.json",
+        "row_count": 4,
+        "run_id": "33333333-3333-4333-8333-333333333331",
+        "status": "succeeded"
+      },
+      "run2": {
+        "artifact_bytes": 268,
+        "artifact_checksum_sha256": "0f3a2a3dc391c42e21c0a7fc197b54ad0d26294fc7431ede61bbb7dc77e2646a",
+        "artifact_path": "/tmp/origo-s2p2-exports/33333333-3333-4333-8333-333333333332/raw_export.csv",
+        "columns": [
+          "trade_id",
+          "price",
+          "timestamp",
+          "datetime"
+        ],
+        "metadata_checksum_sha256": "0f3a2a3dc391c42e21c0a7fc197b54ad0d26294fc7431ede61bbb7dc77e2646a",
+        "metadata_path": "/tmp/origo-s2p2-exports/33333333-3333-4333-8333-333333333332/metadata.json",
+        "row_count": 4,
+        "run_id": "33333333-3333-4333-8333-333333333332",
+        "status": "succeeded"
+      },
+      "window": {
+        "month_year": [
+          8,
+          2017
+        ]
+      }
+    }
+  ],
+  "column_key": {
+    "artifact_bytes": "Exported artifact size in bytes",
+    "artifact_checksum_sha256": "SHA256 hash of exported artifact bytes",
+    "columns": "Column order recorded in metadata.json",
+    "metadata_checksum_sha256": "Checksum recorded by export job metadata.json",
+    "row_count": "Row count recorded in metadata.json"
+  },
+  "deterministic_match": true,
+  "deterministic_match_by_format": {
+    "csv": true,
+    "parquet": true
+  },
+  "fixture_window": [
+    "spot_trades:month_year=[8,2017]"
+  ],
+  "generated_at_utc": "2026-03-05T08:08:09.008409+00:00",
+  "proof_scope": "Slice 2 P2 deterministic export artifacts on fixed window",
+  "source_checksums": {
+    "mode": "synthetic_fixed_fixture",
+    "note": "Deterministic in-process fixture used to isolate export artifact determinism"
+  }
+}

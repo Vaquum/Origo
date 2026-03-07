@@ -1,0 +1,13 @@
+{
+  "chained_retry_run_key": "origo-etf-retry-origin-1-2",
+  "max_attempts_skip_message": "ETF retry skipped: max retry attempts reached (current_retry_attempt=2, max_retry_attempts=2)",
+  "missing_retry_max_env_error": "ORIGO_ETF_DAILY_RETRY_MAX_ATTEMPTS must be set and non-empty",
+  "outside_window_skip_message": "ETF retry skipped: outside retry window (created_at_utc=2026-03-05T11:00:00+00:00, retry_window_end_utc=2026-03-06T11:00:00+00:00, now_utc=2026-03-06T12:00:00+00:00)",
+  "proof_scope": "Slice 4 S4-G4 ETF retry window behavior",
+  "sensor_min_interval_seconds": 60,
+  "sensor_name": "origo_etf_daily_retry_sensor",
+  "within_window_retry_attempt_tag": "1",
+  "within_window_retry_origin_tag": "run-1",
+  "within_window_retry_parent_tag": "run-1",
+  "within_window_retry_run_key": "origo-etf-retry-run-1-1"
+}

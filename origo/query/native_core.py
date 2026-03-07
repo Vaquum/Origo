@@ -17,6 +17,7 @@ get_client = cast(Any, _raw_get_client)
 logger = logging.getLogger(__name__)
 
 IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_DATETIME_MS_ALIAS = '__origo_datetime_ms'
 
 
 def _require_any_env(*names: str) -> str:
@@ -155,10 +156,14 @@ class NativeQuerySpec:
     select_columns: tuple[str, ...]
     window: QueryWindow
     include_datetime: bool = True
+    datetime_column: str = 'datetime'
+    random_seed_column: str = 'timestamp'
 
     def __post_init__(self) -> None:
         _validate_identifier(self.table_name, 'table_name')
         _validate_identifier(self.id_column, 'id_column')
+        _validate_identifier(self.datetime_column, 'datetime_column')
+        _validate_identifier(self.random_seed_column, 'random_seed_column')
         if not self.select_columns:
             raise ValueError('select_columns must be non-empty')
         for column in self.select_columns:
@@ -169,9 +174,11 @@ class NativeQuerySpec:
 class _CompiledNativeQuery:
     sql: str
     id_requested: bool
-    timestamp_requested: bool
+    random_seed_requested: bool
     datetime_requested: bool
     datetime_materialized: bool
+    datetime_column: str
+    random_seed_column: str
 
 
 def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNativeQuery:
@@ -179,8 +186,8 @@ def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNati
 
     requested_columns = _dedupe_preserve_order(spec.select_columns)
     id_requested = spec.id_column in requested_columns
-    timestamp_requested = 'timestamp' in requested_columns
-    datetime_requested = spec.include_datetime or 'datetime' in requested_columns
+    random_seed_requested = spec.random_seed_column in requested_columns
+    datetime_requested = spec.include_datetime or spec.datetime_column in requested_columns
 
     projected_columns = requested_columns.copy()
 
@@ -188,39 +195,46 @@ def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNati
         projected_columns.append(spec.id_column)
 
     if datetime_requested or isinstance(spec.window, (MonthWindow, LatestRowsWindow)):
-        if 'datetime' not in projected_columns:
-            projected_columns.append('datetime')
+        if spec.datetime_column not in projected_columns:
+            projected_columns.append(spec.datetime_column)
 
     if isinstance(spec.window, RandomRowsWindow):
-        if 'timestamp' not in projected_columns:
-            projected_columns.append('timestamp')
+        if spec.random_seed_column not in projected_columns:
+            projected_columns.append(spec.random_seed_column)
 
     if isinstance(spec.window, MonthWindow):
         where_clause = (
-            f"WHERE datetime >= toDateTime('{spec.window.year:04d}-{spec.window.month:02d}-01 00:00:00') "
-            f"AND datetime < addMonths(toDateTime('{spec.window.year:04d}-{spec.window.month:02d}-01 00:00:00'), 1)"
+            f"WHERE {spec.datetime_column} >= toDateTime('{spec.window.year:04d}-{spec.window.month:02d}-01 00:00:00') "
+            f"AND {spec.datetime_column} < addMonths(toDateTime('{spec.window.year:04d}-{spec.window.month:02d}-01 00:00:00'), 1)"
         )
-        tail = f'{where_clause} ORDER BY datetime ASC, {spec.id_column} ASC'
+        tail = f'{where_clause} ORDER BY {spec.datetime_column} ASC, {spec.id_column} ASC'
     elif isinstance(spec.window, TimeRangeWindow):
         start_ch = _to_clickhouse_datetime64_literal(spec.window.start_iso)
         end_ch = _to_clickhouse_datetime64_literal(spec.window.end_iso)
         where_clause = (
-            f"WHERE datetime >= toDateTime64('{start_ch}', 3, 'UTC') "
-            f"AND datetime < toDateTime64('{end_ch}', 3, 'UTC')"
+            f"WHERE {spec.datetime_column} >= toDateTime64('{start_ch}', 3, 'UTC') "
+            f"AND {spec.datetime_column} < toDateTime64('{end_ch}', 3, 'UTC')"
         )
-        tail = f'{where_clause} ORDER BY datetime ASC, {spec.id_column} ASC'
+        tail = f'{where_clause} ORDER BY {spec.datetime_column} ASC, {spec.id_column} ASC'
     elif isinstance(spec.window, LatestRowsWindow):
-        tail = f'ORDER BY toStartOfDay(datetime) DESC, {spec.id_column} DESC LIMIT {spec.window.rows}'
+        tail = (
+            f'ORDER BY toStartOfDay({spec.datetime_column}) DESC, '
+            f'{spec.id_column} DESC LIMIT {spec.window.rows}'
+        )
     else:
-        tail = f'ORDER BY sipHash64(tuple({spec.id_column}, timestamp)) LIMIT {spec.window.rows}'
+        tail = (
+            f'ORDER BY sipHash64(tuple({spec.id_column}, {spec.random_seed_column})) '
+            f'LIMIT {spec.window.rows}'
+        )
 
     projected_expressions: list[str] = []
     datetime_materialized = False
 
     for column in projected_columns:
-        if column == 'datetime':
+        if column == spec.datetime_column:
             projected_expressions.append(
-                "toUnixTimestamp64Milli(toDateTime64(datetime, 3, 'UTC')) AS datetime_ms"
+                f"toUnixTimestamp64Milli(toDateTime64({spec.datetime_column}, 3, 'UTC')) "
+                f'AS {_DATETIME_MS_ALIAS}'
             )
             datetime_materialized = True
             continue
@@ -231,26 +245,28 @@ def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNati
     return _CompiledNativeQuery(
         sql=sql,
         id_requested=id_requested,
-        timestamp_requested=timestamp_requested,
+        random_seed_requested=random_seed_requested,
         datetime_requested=datetime_requested,
         datetime_materialized=datetime_materialized,
+        datetime_column=spec.datetime_column,
+        random_seed_column=spec.random_seed_column,
     )
 
 
 def _shape_native_frame(
     frame: pl.DataFrame, id_column: str, compiled: _CompiledNativeQuery
 ) -> pl.DataFrame:
-    if compiled.datetime_materialized and 'datetime_ms' in frame.columns:
+    if compiled.datetime_materialized and _DATETIME_MS_ALIAS in frame.columns:
         frame = frame.with_columns(
             [
-                pl.col('datetime_ms')
+                pl.col(_DATETIME_MS_ALIAS)
                 .cast(pl.UInt64)
                 .cast(pl.Datetime('ms', time_zone='UTC'))
-                .alias('datetime')
+                .alias(compiled.datetime_column)
             ]
-        ).drop('datetime_ms')
+        ).drop(_DATETIME_MS_ALIAS)
 
-    if 'timestamp' in frame.columns:
+    if compiled.random_seed_column == 'timestamp' and 'timestamp' in frame.columns:
         frame = frame.with_columns(
             [
                 pl.when(pl.col('timestamp') < 10**13)
@@ -261,17 +277,17 @@ def _shape_native_frame(
             ]
         )
 
-    if 'datetime' in frame.columns:
+    if compiled.datetime_column in frame.columns:
         frame = frame.with_columns(
             [
-                pl.col('datetime')
+                pl.col(compiled.datetime_column)
                 .cast(pl.Datetime('ms', time_zone='UTC'))
-                .alias('datetime')
+                .alias(compiled.datetime_column)
             ]
         )
 
-    if 'datetime' in frame.columns:
-        frame = frame.sort(['datetime', id_column])
+    if compiled.datetime_column in frame.columns:
+        frame = frame.sort([compiled.datetime_column, id_column])
     elif id_column in frame.columns:
         frame = frame.sort(id_column)
 
@@ -286,11 +302,15 @@ def _drop_internal_columns(
     if not compiled.id_requested and id_column in frame.columns:
         drop_cols.append(id_column)
 
-    if not compiled.datetime_requested and 'datetime' in frame.columns:
-        drop_cols.append('datetime')
+    if not compiled.datetime_requested and compiled.datetime_column in frame.columns:
+        drop_cols.append(compiled.datetime_column)
 
-    if not compiled.timestamp_requested and 'timestamp' in frame.columns:
-        drop_cols.append('timestamp')
+    if (
+        not compiled.random_seed_requested
+        and compiled.random_seed_column != compiled.datetime_column
+        and compiled.random_seed_column in frame.columns
+    ):
+        drop_cols.append(compiled.random_seed_column)
 
     if drop_cols:
         frame = frame.drop(drop_cols)
@@ -331,9 +351,13 @@ def execute_native_query(
     frame = _shape_native_frame(frame, id_column=spec.id_column, compiled=compiled)
     frame = _drop_internal_columns(frame, compiled=compiled, id_column=spec.id_column)
 
-    if datetime_iso_output and 'datetime' in frame.columns:
+    if datetime_iso_output and compiled.datetime_column in frame.columns:
         frame = frame.with_columns(
-            [pl.col('datetime').dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ').alias('datetime')]
+            [
+                pl.col(compiled.datetime_column)
+                .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
+                .alias(compiled.datetime_column)
+            ]
         )
 
     if show_summary:

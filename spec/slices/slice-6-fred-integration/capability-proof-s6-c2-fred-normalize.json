@@ -1,0 +1,49 @@
+{
+  "expected_row_count": 32,
+  "first_row": {
+    "dimensions_json": "{\"frequency\":\"Monthly\",\"observation_date\":\"2025-06-01\",\"seasonal_adjustment\":\"Seasonally Adjusted\",\"series_id\":\"CPIAUCSL\"}",
+    "metric_id": "3d96c7debaf139713a6174da34cbf84d539c5efe16f02ea0fe7ba96a41d9641b",
+    "metric_name": "consumer_price_index_all_items",
+    "metric_unit": "Index 1982-1984=100",
+    "metric_value_bool": null,
+    "metric_value_float": 321.435,
+    "metric_value_int": null,
+    "metric_value_string": "321.435",
+    "observed_at_utc": "2025-06-01T00:00:00+00:00",
+    "provenance_json": "{\"fetched_from\":\"fred_api\",\"frequency\":\"Monthly\",\"last_updated_utc\":\"2026-02-13T14:05:50+00:00\",\"realtime_end\":\"2026-02-17\",\"realtime_start\":\"2026-02-17\",\"registry_version\":\"2026-03-06-s6-c1\",\"seasonal_adjustment\":\"Seasonally Adjusted\",\"series_id\":\"CPIAUCSL\",\"source_uri\":\"fred://series/CPIAUCSL\",\"units\":\"Index 1982-1984=100\"}",
+    "source_id": "fred_cpiaucsl"
+  },
+  "generated_at_utc": "2026-03-07T07:09:45.885862+00:00",
+  "last_row": {
+    "dimensions_json": "{\"frequency\":\"Monthly\",\"observation_date\":\"2026-02-01\",\"seasonal_adjustment\":\"Seasonally Adjusted\",\"series_id\":\"UNRATE\"}",
+    "metric_id": "a782b183753d5f06c6dabd0b85d81e9aa87d4f665f5b56a9ccaae0e970c0795d",
+    "metric_name": "unemployment_rate",
+    "metric_unit": "Percent",
+    "metric_value_bool": null,
+    "metric_value_float": 4.4,
+    "metric_value_int": null,
+    "metric_value_string": "4.4",
+    "observed_at_utc": "2026-02-01T00:00:00+00:00",
+    "provenance_json": "{\"fetched_from\":\"fred_api\",\"frequency\":\"Monthly\",\"last_updated_utc\":\"2026-03-06T14:12:35+00:00\",\"realtime_end\":\"2026-03-06\",\"realtime_start\":\"2026-03-06\",\"registry_version\":\"2026-03-06-s6-c1\",\"seasonal_adjustment\":\"Seasonally Adjusted\",\"series_id\":\"UNRATE\",\"source_uri\":\"fred://series/UNRATE\",\"units\":\"Percent\"}",
+    "source_id": "fred_unrate"
+  },
+  "observation_limit": 8,
+  "proof_scope": "Slice 6 S6-C2 normalize FRED records into long-metric schema",
+  "registry_version": "2026-03-06-s6-c1",
+  "row_count": 32,
+  "rows_hash_sha256": "55594af4eec42413711a3d0764278dccf16f93c24810c52d0ea1a689f4d8f932",
+  "rows_per_source": {
+    "fred_cpiaucsl": 8,
+    "fred_dgs10": 8,
+    "fred_fedfunds": 8,
+    "fred_unrate": 8
+  },
+  "series_count": 4,
+  "source_count": 4,
+  "source_ids": [
+    "fred_cpiaucsl",
+    "fred_dgs10",
+    "fred_fedfunds",
+    "fred_unrate"
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "adapter_results": [
+    {
+      "adapter_name": "etf_ishares_ibit",
+      "artifact_format": "csv",
+      "artifact_id": "43d55e91526a693e1382c1ab04d694d82d923bfbe3576583116d66864d84f3f2",
+      "artifact_sha256": "216ad2351959cf15f4dceb4562ae39890cb58e6c55ecf7aa2fa8b0b5e9e7dcad",
+      "as_of_dates": [
+        "2026-03-03"
+      ],
+      "normalized_fingerprint_sha256": "3497d667ced56481eeef245da4336b0d3694d44bc3069209b62f75d640c07b4d",
+      "normalized_record_count": 11,
+      "observed_at_utc_values": [
+        "2026-03-03T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_ishares_ibit_daily",
+      "source_uri": "https://www.ishares.com/us/products/333011/fund/1467271812596.ajax?dataType=fund&fileName=IBIT_holdings&fileType=csv"
+    },
+    {
+      "adapter_name": "etf_invesco_btco",
+      "artifact_format": "json",
+      "artifact_id": "977844ac7109f917fa6d19315c1b05747bc132a8eefc1540c4a5da04342a641b",
+      "artifact_sha256": "438a6723c831b69cf9ee0fe151339d7cf950b44cd3eb2f35fb3b3b0425aec537",
+      "as_of_dates": [
+        "2026-03-03"
+      ],
+      "normalized_fingerprint_sha256": "0669e2258b094d1b215039d18aa1ef5e7147ced4125e3e32a9ab02904b3277df",
+      "normalized_record_count": 10,
+      "observed_at_utc_values": [
+        "2026-03-03T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_invesco_btco_daily",
+      "source_uri": "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46091J101/holdings/fund?idType=cusip&productType=ETF"
+    },
+    {
+      "adapter_name": "etf_bitwise_bitb",
+      "artifact_format": "json",
+      "artifact_id": "84b7c6678e51b44d176353359a31a1b2b32b42ee520e4c66c9c690a193997e05",
+      "artifact_sha256": "87e3a7148a5b5f697fb7bacbe54ece97547f53112c874690098770e53ea9f2ce",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "normalized_fingerprint_sha256": "bbc3329a6d99b02501618bd008438e97054b2324bdf92e09c9a9b502af7bc011",
+      "normalized_record_count": 15,
+      "observed_at_utc_values": [
+        "2026-03-04T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_bitwise_bitb_daily",
+      "source_uri": "https://bitbetf.com/_next/data/z7Q3cqCSjmGwwddIjvL45/index.json"
+    }
+  ],
+  "generated_at_utc": "2026-03-05T09:22:22.959303+00:00",
+  "proof_scope": "Slice 4 S4-01 issuer adapters 1-3 capability proof",
+  "run_id": "s4-01-proof-20260305T092221Z"
+}

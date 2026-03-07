@@ -1,0 +1,8 @@
+{
+  "cron_schedule": "17 6 * * *",
+  "execution_timezone": "UTC",
+  "job_name": "origo_etf_daily_ingest_job",
+  "missing_cron_env_error": "ORIGO_ETF_DAILY_SCHEDULE_CRON must be set and non-empty",
+  "proof_scope": "Slice 4 S4-G3 ETF daily schedule wiring",
+  "schedule_name": "origo_etf_daily_ingest_schedule"
+}

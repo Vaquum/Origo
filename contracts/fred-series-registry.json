@@ -1,0 +1,37 @@
+{
+  "version": "2026-03-06-s6-c1",
+  "series": [
+    {
+      "series_id": "FEDFUNDS",
+      "source_id": "fred_fedfunds",
+      "metric_name": "effective_federal_funds_rate",
+      "metric_unit": "Percent",
+      "frequency_hint": "Monthly",
+      "notes": "Effective Federal Funds Rate."
+    },
+    {
+      "series_id": "CPIAUCSL",
+      "source_id": "fred_cpiaucsl",
+      "metric_name": "consumer_price_index_all_items",
+      "metric_unit": "Index 1982-1984=100",
+      "frequency_hint": "Monthly",
+      "notes": "Consumer Price Index for All Urban Consumers: All Items."
+    },
+    {
+      "series_id": "UNRATE",
+      "source_id": "fred_unrate",
+      "metric_name": "unemployment_rate",
+      "metric_unit": "Percent",
+      "frequency_hint": "Monthly",
+      "notes": "Civilian Unemployment Rate."
+    },
+    {
+      "series_id": "DGS10",
+      "source_id": "fred_dgs10",
+      "metric_name": "treasury_yield_10y",
+      "metric_unit": "Percent",
+      "frequency_hint": "Daily",
+      "notes": "10-Year Treasury Constant Maturity Rate."
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "first_row": {
+    "aligned_at_utc": "2026-03-04T00:00:00+00:00",
+    "dimensions_json": "{\"row_index\":\"1\"}",
+    "latest_ingested_at_utc": "2026-03-06T10:09:52.105000+00:00",
+    "metric_name": "as_of_date",
+    "metric_unit": null,
+    "metric_value_bool": null,
+    "metric_value_float": null,
+    "metric_value_int": null,
+    "metric_value_string": "2026-03-04",
+    "provenance_json": "{\"artifact_id\":\"7474e696b5788086534fd537feb5384ee82ddf277b48373b29f6d2d7ff9827c8\",\"artifact_sha256\":\"85fde5e1eaeec082e2c8f1a215eaeb0a266bb000a5293900437ce8438f05724d\",\"fetch_method\":\"browser\",\"fetched_at_utc\":\"2026-03-06T10:09:43.171996+00:00\",\"normalized_at_utc\":\"2026-03-06T10:09:52.091900+00:00\",\"parsed_at_utc\":\"2026-03-06T10:09:52.091824+00:00\",\"parser_name\":\"fidelity_fbtc_parser\",\"parser_version\":\"1.0.0\",\"source_id\":\"etf_fidelity_fbtc_daily\",\"source_uri\":\"https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=FBTC\"}",
+    "records_in_bucket": 3,
+    "source_id": "etf_fidelity_fbtc_daily"
+  },
+  "generated_at_utc": "2026-03-06T12:20:30.213742+00:00",
+  "last_row": {
+    "aligned_at_utc": "2026-03-06T00:00:00+00:00",
+    "dimensions_json": "{\"row_index\":\"1\"}",
+    "latest_ingested_at_utc": "2026-03-06T10:09:52.137000+00:00",
+    "metric_name": "total_net_assets_usd",
+    "metric_unit": "USD",
+    "metric_value_bool": null,
+    "metric_value_float": 456454708.0,
+    "metric_value_int": null,
+    "metric_value_string": "456454708.0",
+    "provenance_json": "{\"artifact_id\":\"45f92186a9ae81b33baff0278ca167aa64d05cde61a4c9e573ed0605d2ffc3d1\",\"artifact_sha256\":\"1e3999d8e13eb286a74ef0ad8ad01ef76f69b8091cf927bd78ade877e05c4164\",\"fetch_method\":\"browser\",\"fetched_at_utc\":\"2026-03-06T10:09:51.190717+00:00\",\"normalized_at_utc\":\"2026-03-06T10:09:52.124324+00:00\",\"parsed_at_utc\":\"2026-03-06T10:09:52.124272+00:00\",\"parser_name\":\"coinshares_brrr_parser\",\"parser_version\":\"1.0.0\",\"source_id\":\"etf_coinshares_brrr_daily\",\"source_uri\":\"https://coinshares.com/us/etf/brrr/\"}",
+    "records_in_bucket": 2,
+    "source_id": "etf_coinshares_brrr_daily"
+  },
+  "max_records_in_bucket": 3,
+  "proof_scope": "Slice 5 S5-C2 ETF aligned-1s materialization definitions",
+  "row_count": 125,
+  "rows_hash_sha256": "31ef57d7d602f8521b17aeff7218d48ccd2636236c5d11aa4bf3cf60cedfbc1a",
+  "schema": [
+    {
+      "dtype": "String",
+      "name": "source_id"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_name"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_unit"
+    },
+    {
+      "dtype": "String",
+      "name": "metric_value_string"
+    },
+    {
+      "dtype": "Int64",
+      "name": "metric_value_int"
+    },
+    {
+      "dtype": "Float64",
+      "name": "metric_value_float"
+    },
+    {
+      "dtype": "UInt8",
+      "name": "metric_value_bool"
+    },
+    {
+      "dtype": "String",
+      "name": "dimensions_json"
+    },
+    {
+      "dtype": "String",
+      "name": "provenance_json"
+    },
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "latest_ingested_at_utc"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "records_in_bucket"
+    },
+    {
+      "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+      "name": "aligned_at_utc"
+    }
+  ],
+  "source_count": 10,
+  "window": {
+    "time_range": [
+      "2026-03-04T00:00:00Z",
+      "2026-03-07T00:00:00Z"
+    ]
+  }
+}

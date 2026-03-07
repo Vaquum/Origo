@@ -1,0 +1,7 @@
+{
+  "export_missing_signoff_error_code": "EXPORT_RIGHTS_LEGAL_SIGNOFF_MISSING",
+  "export_valid_signoff_passed": true,
+  "proof_scope": "Slice 4 S4-G1 legal sign-off gating for external serving/export",
+  "query_missing_signoff_error_code": "QUERY_RIGHTS_LEGAL_SIGNOFF_MISSING",
+  "query_valid_signoff_passed": true
+}

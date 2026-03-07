@@ -1,0 +1,113 @@
+{
+  "generated_at_utc": "2026-03-06T17:46:21.265672+00:00",
+  "parity_match": true,
+  "parity_match_by_format": {
+    "csv": true,
+    "parquet": true
+  },
+  "proof_scope": "Slice 5 S5-C6/S5-C7 aligned exports (parquet/csv)",
+  "results": [
+    {
+      "artifact_checksum_sha256": "b638eebe91e432508f0e3ea2603087f8d7f4c0d48990bf78b7021c55dc53919f",
+      "artifact_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/7ee310cd-cbf3-481b-b4f5-91cd0167a369/raw_export.parquet",
+      "case_id": "spot_trades_time_range",
+      "columns": [
+        "aligned_at_utc",
+        "open_price",
+        "close_price",
+        "trade_count"
+      ],
+      "dataset": "spot_trades",
+      "expected_rows_hash_sha256": "dfc229358b43e69a7b48697537df3129fb254c267c1b50b21ae05fa9a5d8a9b7",
+      "exported_rows_hash_sha256": "dfc229358b43e69a7b48697537df3129fb254c267c1b50b21ae05fa9a5d8a9b7",
+      "format": "parquet",
+      "metadata_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/7ee310cd-cbf3-481b-b4f5-91cd0167a369/metadata.json",
+      "parity_match": true,
+      "row_count": 75,
+      "run_id": "7ee310cd-cbf3-481b-b4f5-91cd0167a369",
+      "window": {
+        "time_range": [
+          "2017-08-17T12:00:00Z",
+          "2017-08-17T13:00:00Z"
+        ]
+      }
+    },
+    {
+      "artifact_checksum_sha256": "72cdfc73c1d278a4cb224c3f45e6a98512e6e34ede1e0e14a5b478cb50e08641",
+      "artifact_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/ee323baa-8119-44ad-8b1f-1b598b27979e/raw_export.csv",
+      "case_id": "spot_trades_time_range",
+      "columns": [
+        "aligned_at_utc",
+        "open_price",
+        "close_price",
+        "trade_count"
+      ],
+      "dataset": "spot_trades",
+      "expected_rows_hash_sha256": "53b9add73a61e985b85f72f403913b5ef46111357edc5ab156c184d980545c95",
+      "exported_rows_hash_sha256": "53b9add73a61e985b85f72f403913b5ef46111357edc5ab156c184d980545c95",
+      "format": "csv",
+      "metadata_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/ee323baa-8119-44ad-8b1f-1b598b27979e/metadata.json",
+      "parity_match": true,
+      "row_count": 75,
+      "run_id": "ee323baa-8119-44ad-8b1f-1b598b27979e",
+      "window": {
+        "time_range": [
+          "2017-08-17T12:00:00Z",
+          "2017-08-17T13:00:00Z"
+        ]
+      }
+    },
+    {
+      "artifact_checksum_sha256": "812d46a078f3b65e767ab5a9fd5fa5d8bf9bffed32b5dec0ef920d291589459c",
+      "artifact_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/eb56afdc-ea10-4261-ac84-26b3b70fa882/raw_export.parquet",
+      "case_id": "etf_daily_metrics_time_range",
+      "columns": [
+        "source_id",
+        "metric_name",
+        "valid_from_utc",
+        "valid_to_utc_exclusive",
+        "metric_value_string"
+      ],
+      "dataset": "etf_daily_metrics",
+      "expected_rows_hash_sha256": "014af82ed60d4b4d154f0c6e774cd6b377e2c0b3c2d1cd849360777020da58d1",
+      "exported_rows_hash_sha256": "014af82ed60d4b4d154f0c6e774cd6b377e2c0b3c2d1cd849360777020da58d1",
+      "format": "parquet",
+      "metadata_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/eb56afdc-ea10-4261-ac84-26b3b70fa882/metadata.json",
+      "parity_match": true,
+      "row_count": 125,
+      "run_id": "eb56afdc-ea10-4261-ac84-26b3b70fa882",
+      "window": {
+        "time_range": [
+          "2026-03-05T12:00:00Z",
+          "2026-03-07T12:00:00Z"
+        ]
+      }
+    },
+    {
+      "artifact_checksum_sha256": "79891f6f1103ebc6430a6adccad48f8421082f0b3633985df2ab01fc58e45a71",
+      "artifact_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/29d75e1f-8813-419e-ab11-3a479cf46d52/raw_export.csv",
+      "case_id": "etf_daily_metrics_time_range",
+      "columns": [
+        "source_id",
+        "metric_name",
+        "valid_from_utc",
+        "valid_to_utc_exclusive",
+        "metric_value_string"
+      ],
+      "dataset": "etf_daily_metrics",
+      "expected_rows_hash_sha256": "afc3b99b824ba3968f1295379fc5f25a17b2b1a07e493d47d5c6d1406b5b663c",
+      "exported_rows_hash_sha256": "afc3b99b824ba3968f1295379fc5f25a17b2b1a07e493d47d5c6d1406b5b663c",
+      "format": "csv",
+      "metadata_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/origo-s5-aligned-export-m19mkz3j/29d75e1f-8813-419e-ab11-3a479cf46d52/metadata.json",
+      "parity_match": true,
+      "row_count": 125,
+      "run_id": "29d75e1f-8813-419e-ab11-3a479cf46d52",
+      "window": {
+        "time_range": [
+          "2026-03-05T12:00:00Z",
+          "2026-03-07T12:00:00Z"
+        ]
+      }
+    }
+  ]
+}

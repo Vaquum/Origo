@@ -1,0 +1,146 @@
+{
+  "generated_at_utc": "2026-03-07T07:07:34.846345+00:00",
+  "observation_limit": 5,
+  "proof_hash_sha256": "a857c693c78d4a42a09716e67f245a815ddb1ba60d38acd97dd59369370050a7",
+  "proof_scope": "Slice 6 S6-C1 FRED connector and series registry mapping",
+  "registry_version": "2026-03-06-s6-c1",
+  "series": [
+    {
+      "frequency_hint": "Monthly",
+      "latest_observation": {
+        "observation_date": "2026-02-01",
+        "raw_value": "3.64",
+        "realtime_end": "2026-03-02",
+        "realtime_start": "2026-03-02",
+        "value": 3.64
+      },
+      "metadata": {
+        "frequency": "Monthly",
+        "last_updated_utc": "2026-03-02T21:17:32+00:00",
+        "observation_end": "2026-02-01",
+        "observation_start": "1954-07-01",
+        "popularity": 99,
+        "seasonal_adjustment": "Not Seasonally Adjusted",
+        "title": "Federal Funds Effective Rate",
+        "units": "Percent"
+      },
+      "metric_name": "effective_federal_funds_rate",
+      "metric_unit": "Percent",
+      "non_null_value_count": 5,
+      "observation_count": 5,
+      "observation_window_hash_sha256": "a64c62959777f5d61d7e1ded68c993d6e0dd18b8c4a377ad09a0f4b2f9005746",
+      "oldest_observation_in_window": {
+        "observation_date": "2025-10-01",
+        "raw_value": "4.09",
+        "realtime_end": "2026-03-02",
+        "realtime_start": "2026-03-02",
+        "value": 4.09
+      },
+      "series_id": "FEDFUNDS",
+      "source_id": "fred_fedfunds"
+    },
+    {
+      "frequency_hint": "Monthly",
+      "latest_observation": {
+        "observation_date": "2026-01-01",
+        "raw_value": "326.588",
+        "realtime_end": "2026-02-13",
+        "realtime_start": "2026-02-13",
+        "value": 326.588
+      },
+      "metadata": {
+        "frequency": "Monthly",
+        "last_updated_utc": "2026-02-13T14:05:50+00:00",
+        "observation_end": "2026-01-01",
+        "observation_start": "1947-01-01",
+        "popularity": 98,
+        "seasonal_adjustment": "Seasonally Adjusted",
+        "title": "Consumer Price Index for All Urban Consumers: All Items in U.S. City Average",
+        "units": "Index 1982-1984=100"
+      },
+      "metric_name": "consumer_price_index_all_items",
+      "metric_unit": "Index 1982-1984=100",
+      "non_null_value_count": 4,
+      "observation_count": 5,
+      "observation_window_hash_sha256": "098d439462a9958bcbbde7c0fdcd0c344df3b5c52df20cf466d67f8506d58a78",
+      "oldest_observation_in_window": {
+        "observation_date": "2025-09-01",
+        "raw_value": "324.245",
+        "realtime_end": "2026-02-13",
+        "realtime_start": "2026-02-13",
+        "value": 324.245
+      },
+      "series_id": "CPIAUCSL",
+      "source_id": "fred_cpiaucsl"
+    },
+    {
+      "frequency_hint": "Monthly",
+      "latest_observation": {
+        "observation_date": "2026-02-01",
+        "raw_value": "4.4",
+        "realtime_end": "2026-03-06",
+        "realtime_start": "2026-03-06",
+        "value": 4.4
+      },
+      "metadata": {
+        "frequency": "Monthly",
+        "last_updated_utc": "2026-03-06T14:12:35+00:00",
+        "observation_end": "2026-02-01",
+        "observation_start": "1948-01-01",
+        "popularity": 98,
+        "seasonal_adjustment": "Seasonally Adjusted",
+        "title": "Unemployment Rate",
+        "units": "Percent"
+      },
+      "metric_name": "unemployment_rate",
+      "metric_unit": "Percent",
+      "non_null_value_count": 4,
+      "observation_count": 5,
+      "observation_window_hash_sha256": "d22b2c98067489b6af94ec7d7db2b768388b61ac34ca504c4176dfe8fc587208",
+      "oldest_observation_in_window": {
+        "observation_date": "2025-10-01",
+        "raw_value": ".",
+        "realtime_end": "2026-03-06",
+        "realtime_start": "2026-03-06",
+        "value": null
+      },
+      "series_id": "UNRATE",
+      "source_id": "fred_unrate"
+    },
+    {
+      "frequency_hint": "Daily",
+      "latest_observation": {
+        "observation_date": "2026-03-05",
+        "raw_value": "4.13",
+        "realtime_end": "2026-03-06",
+        "realtime_start": "2026-03-06",
+        "value": 4.13
+      },
+      "metadata": {
+        "frequency": "Daily",
+        "last_updated_utc": "2026-03-06T21:18:01+00:00",
+        "observation_end": "2026-03-05",
+        "observation_start": "1962-01-02",
+        "popularity": 99,
+        "seasonal_adjustment": "Not Seasonally Adjusted",
+        "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis",
+        "units": "Percent"
+      },
+      "metric_name": "treasury_yield_10y",
+      "metric_unit": "Percent",
+      "non_null_value_count": 5,
+      "observation_count": 5,
+      "observation_window_hash_sha256": "c459521181d04c58407e546944c89633bb7471de90d93c354bf33e40d6b19ecc",
+      "oldest_observation_in_window": {
+        "observation_date": "2026-02-27",
+        "raw_value": "3.97",
+        "realtime_end": "2026-03-06",
+        "realtime_start": "2026-03-06",
+        "value": 3.97
+      },
+      "series_id": "DGS10",
+      "source_id": "fred_dgs10"
+    }
+  ],
+  "series_count": 4
+}

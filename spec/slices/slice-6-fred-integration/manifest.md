@@ -1,0 +1,178 @@
+## What was done
+- Completed `S6-C1` FRED connector + registry mapping capability with live proof artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c1-fred-connector.json`
+- Completed `S6-C2` normalization capability:
+  - `origo/fred/normalize.py`
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c2-fred-normalize.json`
+- Completed `S6-C3` historical backfill capability:
+  - `origo/fred/ingest.py` (`run_fred_historical_backfill`)
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c3-fred-backfill.json`
+- Completed `S6-C4` incremental update capability:
+  - `origo/fred/ingest.py` (`run_fred_incremental_update`)
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c4-fred-incremental.json`
+- Completed `S6-C5` persistence capability:
+  - added SQL migration:
+    - `control-plane/migrations/sql/0003__create_fred_series_metrics_long.sql`
+  - added persistence module:
+    - `origo/fred/persistence.py`
+  - added persistence proof artifact:
+    - `spec/slices/slice-6-fred-integration/capability-proof-s6-c5-fred-persistence.json`
+- Completed `S6-C6` native query exposure capability:
+  - added native FRED planner:
+    - `origo/query/fred_native.py`
+  - updated API/native dispatch contracts:
+    - `api/origo_api/schemas.py`
+    - `api/origo_api/main.py`
+    - `origo/data/_internal/generic_endpoints.py`
+  - added native query proof artifact:
+    - `spec/slices/slice-6-fred-integration/capability-proof-s6-c6-fred-native-query.json`
+  - proof fingerprint:
+    - `rows_hash_sha256=d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+- Completed `S6-C7` aligned query integration capability:
+  - added aligned FRED materialization module:
+    - `origo/query/fred_aligned_1s.py`
+  - extended aligned planner/router:
+    - `origo/query/aligned_core.py`
+    - `origo/query/__init__.py`
+    - `api/origo_api/main.py`
+  - added aligned query proof artifact:
+    - `spec/slices/slice-6-fred-integration/capability-proof-s6-c7-fred-aligned-query.json`
+  - proof fingerprints:
+    - forward-fill `rows_hash_sha256=918ea6ed63d71f44451f7f74e20ff90b38f3497c3bf8cd4b93462a9dc3088b8f`
+    - observation `rows_hash_sha256=425694586e06f54122c2ce7442f995a813283269d2012a4813d1bab043276689`
+- Completed `S6-P1` proof step:
+  - added acceptance proof harness:
+    - `origo/query/fred_s6_p1_acceptance_proof.py`
+  - added acceptance proof artifact:
+    - `spec/slices/slice-6-fred-integration/proof-s6-p1-acceptance.json`
+  - proof fingerprints:
+    - native `rows_hash_sha256=d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+    - aligned `rows_hash_sha256=851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381`
+- Completed `S6-P2` proof step:
+  - added determinism proof harness:
+    - `origo/query/fred_s6_p2_determinism_proof.py`
+  - added determinism proof artifact:
+    - `spec/slices/slice-6-fred-integration/proof-s6-p2-determinism.json`
+  - deterministic replay fingerprints:
+    - native rows hash `d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+    - aligned rows hash `851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381`
+    - native schema hash `69b867e1b9e37f98c013d2a10f6b18de43f0ee99377bf84a36e4e5a9ede0cd85`
+    - aligned schema hash `3694f9f6e4dd0346f7a4b6a86dfa2b1853dac6182e794eff7db07409e1edcb87`
+- Completed `S6-P3` proof step:
+  - added metadata/version reproducibility proof harness:
+    - `origo/fred/s6_p3_proof.py`
+  - added reproducibility proof artifact:
+    - `spec/slices/slice-6-fred-integration/proof-s6-p3-metadata-version-reproducibility.json`
+  - replay reproducibility fingerprints:
+    - rows hash `ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e`
+    - metadata hash `984fa3bc176c19b8131d595fe49c600fd06371923a19a63928cc1400983c39bf`
+    - provenance hash `74d0f70976290e221b3f8d282a4d2d02696d4b4698d2c6854d79a6effb40703b`
+    - registry version `2026-03-06-s6-c1`
+    - registry file sha256 `3970cf51d3f8c477be344b9d87cba7ee41e851dc9396b5958065dc17d400de85`
+- Completed `S6-G1` guardrail step:
+  - added FRED rights classification to source rights matrix:
+    - `contracts/source-rights-matrix.json`
+  - added FRED Hosted Allowed legal signoff artifact:
+    - `contracts/legal/fred-hosted-allowed.md`
+  - extended query-rights dataset allowlist for FRED:
+    - `api/origo_api/rights.py`
+  - added guardrail proof harness + artifact:
+    - `api/origo_api/s6_g1_fred_rights_proof.py`
+    - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g1-fred-rights.json`
+  - proof outcomes:
+    - missing legal signoff -> `QUERY_RIGHTS_LEGAL_SIGNOFF_MISSING`
+    - valid legal signoff -> pass
+    - missing classification -> `QUERY_RIGHTS_MISSING_STATE`
+- Completed `S6-G2` guardrail step:
+  - added FRED publish freshness warning module:
+    - `api/origo_api/fred_warnings.py`
+  - wired FRED publish freshness warnings into API query warning path:
+    - `api/origo_api/main.py`
+  - added freshness guardrail proof harness + artifact:
+    - `api/origo_api/s6_g2_fred_freshness_proof.py`
+    - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g2-fred-freshness.json`
+  - proof outcomes:
+    - synthetic missing-source timestamp -> `FRED_SOURCE_PUBLISH_MISSING`
+    - live stale publish timestamp -> `FRED_SOURCE_PUBLISH_STALE`
+  - added required env contract:
+    - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS` (updated `.env.example`)
+- Completed `S6-G3` guardrail step:
+  - extended query serving state gate to include FRED:
+    - `api/origo_api/rights.py`
+    - required env var: `ORIGO_FRED_QUERY_SERVING_STATE`
+    - allowed values: `shadow`, `promoted`
+  - serving-state gate behavior:
+    - `shadow` blocks query rights with `QUERY_SERVING_SHADOW_MODE`
+    - `promoted` allows rights resolution to continue
+  - added guardrail proof harness + artifact:
+    - `api/origo_api/s6_g3_fred_shadow_promote_proof.py`
+    - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g3-fred-shadow-promote.json`
+  - added required env contract:
+    - `ORIGO_FRED_QUERY_SERVING_STATE` (updated `.env.example`)
+- Completed `S6-G4` guardrail step:
+  - added immutable FRED warning audit log module:
+    - `api/origo_api/fred_alert_audit.py`
+    - hash-chained JSONL audit events (`event_type=fred_query_warning`)
+  - wired FRED warning alert + audit emission into API query path:
+    - `api/origo_api/main.py`
+  - added guardrail proof harness + artifact:
+    - `api/origo_api/s6_g4_fred_alerts_audit_proof.py`
+    - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g4-fred-alerts-audit.json`
+  - added required env contract:
+    - `ORIGO_FRED_ALERT_AUDIT_LOG_PATH`
+    - `ORIGO_FRED_DISCORD_WEBHOOK_URL`
+    - `ORIGO_FRED_DISCORD_TIMEOUT_SECONDS`
+    - updated `.env.example`
+- Completed `S6-G5` guardrail step:
+  - added short-form developer docs for FRED contracts, ingest/persistence flow, and guardrails:
+    - `docs/Developer/s6-fred-connector-contracts.md`
+    - `docs/Developer/s6-fred-ingest-persistence.md`
+    - `docs/Developer/s6-fred-guardrails-runbook.md`
+- Completed `S6-G6` guardrail step:
+  - added and updated user-facing FRED references and taxonomy:
+    - `docs/fred-reference.md`
+    - `docs/raw-query-reference.md`
+    - `docs/aligned-reference.md`
+    - `docs/data-taxonomy.md`
+    - `docs/raw-export-reference.md`
+- Added slice baseline fixture artifact:
+  - `spec/slices/slice-6-fred-integration/baseline-fixture-2024-01-01_2024-03-31.json`
+  - deterministic replay fingerprint result: `deterministic_match=true`
+- Updated FRED API key naming contract to `FRED_API_KEY` (no `ORIGO_` prefix), including runtime code and env contract docs.
+- Updated closeout bookkeeping:
+  - checked `S6-C1..S6-C7`, `S6-P1..S6-P3`, and `S6-G1..S6-G6` in `spec/2-itemized-work-plan.md`
+  - bumped `control-plane` version to `1.2.50`
+  - appended `v1.2.38`, `v1.2.39`, `v1.2.40`, `v1.2.41`, `v1.2.42`, `v1.2.43`, `v1.2.44`, `v1.2.45`, `v1.2.46`, `v1.2.47`, `v1.2.48`, `v1.2.49`, and `v1.2.50` changelog entries
+
+## Current state
+- Slice 6 capability progress:
+  - `S6-C1` complete
+  - `S6-C2` complete
+  - `S6-C3` complete
+  - `S6-C4` complete
+  - `S6-C5` complete
+  - `S6-C6` complete
+  - `S6-C7` complete
+- FRED integration now has deterministic source fetch, normalization, historical backfill, incremental update, ClickHouse persistence, raw artifact object-store persistence, native raw-query exposure, and aligned-1s query exposure with live proof artifacts.
+- Slice 6 capability stage is complete (`S6-C1..S6-C7`).
+- Slice 6 proof progress:
+  - `S6-P1` complete
+  - `S6-P2` complete
+  - `S6-P3` complete
+- Slice 6 proof stage is complete (`S6-P1..S6-P3`).
+- Slice 6 guardrail progress:
+  - `S6-G1` complete
+  - `S6-G2` complete
+  - `S6-G3` complete
+  - `S6-G4` complete
+  - `S6-G5` complete
+  - `S6-G6` complete
+- Hard gates are green (`ruff`, `pyright`).
+
+## Watch out
+- FRED runtime key contract is `FRED_API_KEY`; missing/invalid key fails loudly by design.
+- Local proof run created side effects:
+  - applied migration `0003`
+  - inserted rows into `origo.fred_series_metrics_long`
+  - started local MinIO container `origo-minio` and wrote proof artifacts to `origo-raw-artifacts`
+- Slice 6 capability, proof, and guardrails are complete.

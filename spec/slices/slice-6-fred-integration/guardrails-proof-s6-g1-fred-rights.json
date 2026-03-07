@@ -1,0 +1,6 @@
+{
+  "proof_scope": "Slice 6 S6-G1 rights classification and legal gating for FRED query serving",
+  "query_missing_legal_signoff_error_code": "QUERY_RIGHTS_LEGAL_SIGNOFF_MISSING",
+  "query_missing_state_error_code": "QUERY_RIGHTS_MISSING_STATE",
+  "query_valid_legal_signoff_passed": true
+}

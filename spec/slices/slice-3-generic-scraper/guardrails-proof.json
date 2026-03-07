@@ -1,0 +1,37 @@
+{
+  "assertions": {
+    "audit_chain_valid": true,
+    "audit_run_completed_present": true,
+    "retry_hook_emitted": true,
+    "rights_fail_closed": true
+  },
+  "audit": {
+    "event_count": 10,
+    "event_types": [
+      "scraper_run_started",
+      "scraper_source_discovered",
+      "scraper_rights_resolved",
+      "scraper_retry",
+      "scraper_fetch_succeeded",
+      "scraper_source_completed",
+      "scraper_run_completed",
+      "scraper_run_started",
+      "scraper_source_discovered",
+      "scraper_run_failed"
+    ],
+    "last_event_hash": "9886ecf734c27136c7b54aa6d93f016980f48c2ee273a341494d9805bf1adba8",
+    "log_path": "/tmp/origo-s3-guardrails-proof/scraper-events.jsonl"
+  },
+  "generated_at_utc": "2026-03-05T08:52:27.962141+00:00",
+  "proof_scope": "Slice 3 Guardrails (S3-G1..S3-G4)",
+  "rights_missing_failure": {
+    "error_code": "SCRAPER_RIGHTS_MISSING_STATE",
+    "error_message": "No rights state found for source_key=proof_etf_csv"
+  },
+  "success_run_summary": {
+    "total_inserted_rows": 8,
+    "total_normalized_records": 8,
+    "total_parsed_records": 2,
+    "total_sources": 1
+  }
+}

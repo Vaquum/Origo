@@ -1,0 +1,8 @@
+Applied 7 migration(s):
+0001 create_migration_probe
+0002 create_etf_daily_metrics_long
+0003 create_fred_series_metrics_long
+0004 create_binance_trades
+0005 create_binance_agg_trades
+0006 create_binance_futures_trades
+0007 create_binance_futures_agg_trades

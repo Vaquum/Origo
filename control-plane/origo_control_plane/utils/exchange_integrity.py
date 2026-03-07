@@ -194,10 +194,10 @@ def run_exchange_integrity_suite_rows(
             value=row[spec.id_index],
             label=f'{dataset}.row[{row_number}].id',
         )
-        if id_value <= 0:
+        if id_value < 0:
             raise ValueError(
                 f'Exchange integrity anomaly check failed for {dataset}.row[{row_number}].id: '
-                f'expected > 0, got={id_value}'
+                f'expected >= 0, got={id_value}'
             )
 
         if previous_id is not None:
@@ -257,7 +257,7 @@ def run_exchange_integrity_suite_rows(
                 value=row[spec.first_last_trade_indices[1]],
                 label=f'{dataset}.row[{row_number}].last_trade_id',
             )
-            if first_trade_id <= 0 or last_trade_id <= 0 or first_trade_id > last_trade_id:
+            if first_trade_id < 0 or last_trade_id < 0 or first_trade_id > last_trade_id:
                 raise ValueError(
                     f'Exchange integrity anomaly check failed for {dataset}.row[{row_number}]: '
                     f'first_trade_id={first_trade_id}, last_trade_id={last_trade_id}'

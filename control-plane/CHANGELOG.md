@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.52 on 7th of March, 2026
+- Completed Slice 7 full Docker local-platform proof path:
+  - Added root Docker stack and service images:
+    - `docker-compose.yml`
+    - `docker/Dockerfile.api`
+    - `docker/Dockerfile.control-plane`
+    - `.dockerignore`
+  - Added deterministic lifecycle commands and proof runners:
+    - `scripts/s7_docker_stack.sh`
+    - `scripts/s7_docker_bootstrap.sh`
+    - `scripts/s7_docker_local_proof.sh`
+  - Added slice artifacts and deterministic baseline:
+    - `spec/slices/slice-7-docker-local-platform/proof-s7-local-docker.json`
+    - `spec/slices/slice-7-docker-local-platform/baseline-fixture-2017-08-17_2017-08-18.json`
+    - `spec/slices/slice-7-docker-local-platform/smoke-result.json`
+  - Fixed Docker proof blockers:
+    - Binance integrity allows first-day `trade_id=0`
+    - Dagster status parsing supports `Run` typename with strict timestamps
+    - healthcheck commands aligned with container runtime tools
+- Marked `S7-C1..S7-C5`, `S7-P1..S7-P4`, and `S7-G1..S7-G4` complete in `spec/2-itemized-work-plan.md`.
+
 ## v1.2.50 on 7th of March, 2026
 - Completed Slice 6 guardrail docs closeout:
   - `S6-G5` developer docs:

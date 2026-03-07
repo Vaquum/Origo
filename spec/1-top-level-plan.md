@@ -186,6 +186,8 @@ Every slice must pass:
 5. Slice 4: ETF scraper use-case on generic platform (10 issuers).
 6. Slice 5: Raw query `aligned_1s` capability.
 7. Slice 6: FRED integration.
+8. Slice 7: Full platform Docker wrapping and local end-to-end proof.
+9. Slice 8: OKX spot trades daily-file ingest capability.
 
 ## Slice 4 (ETF) Locked Details
 1. Coverage: all 10 issuers.

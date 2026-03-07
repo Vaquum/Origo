@@ -1,0 +1,5 @@
+NAME                        COMMAND                  SERVICE             STATUS              PORTS
+origo-api-1                 "uvicorn api.origo_a…"   api                 running (healthy)   0.0.0.0:18000->8000/tcp
+origo-clickhouse-1          "/entrypoint.sh"         clickhouse          running (healthy)   8123/tcp, 9000/tcp, 9009/tcp
+origo-dagster-daemon-1      "dagster-daemon run …"   dagster-daemon      running             
+origo-dagster-webserver-1   "dagster-webserver -…"   dagster-webserver   running (healthy)   0.0.0.0:14000->3000/tcp

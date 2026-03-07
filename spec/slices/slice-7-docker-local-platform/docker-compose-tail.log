@@ -1,0 +1,124 @@
+origo-clickhouse-1  | /entrypoint.sh: create new user 'default' instead 'default'
+origo-clickhouse-1  | Processing configuration file '/etc/clickhouse-server/config.xml'.
+origo-clickhouse-1  | Merging configuration file '/etc/clickhouse-server/config.d/clickhouse-config.xml'.
+origo-clickhouse-1  | Merging configuration file '/etc/clickhouse-server/config.d/docker_related_config.xml'.
+origo-clickhouse-1  | Logging trace to /var/log/clickhouse-server/clickhouse-server.log
+origo-clickhouse-1  | Logging errors to /var/log/clickhouse-server/clickhouse-server.err.log
+origo-clickhouse-1  | /entrypoint.sh: create new user 'default' instead 'default'
+origo-clickhouse-1  | ClickHouse Database directory appears to contain a database; Skipping initialization
+origo-clickhouse-1  | Processing configuration file '/etc/clickhouse-server/config.xml'.
+origo-clickhouse-1  | Merging configuration file '/etc/clickhouse-server/config.d/clickhouse-config.xml'.
+origo-clickhouse-1  | Merging configuration file '/etc/clickhouse-server/config.d/docker_related_config.xml'.
+origo-clickhouse-1  | Logging trace to /var/log/clickhouse-server/clickhouse-server.log
+origo-clickhouse-1  | Logging errors to /var/log/clickhouse-server/clickhouse-server.err.log
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   Telemetry:
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   As an open-source project, we collect usage statistics to inform development priorities. For more
+origo-dagster-daemon-1  |   information, read https://docs.dagster.io/about/telemetry.
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   We will not see or store any data that is processed by your code.
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   To opt-out, add the following to $DAGSTER_HOME/dagster.yaml, creating that file if necessary:
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |     telemetry:
+origo-dagster-daemon-1  |       enabled: false
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   Welcome to Dagster!
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  |   If you have any questions or would like to engage with the Dagster team, please join us on Slack
+origo-dagster-daemon-1  |   (https://bit.ly/39dvSsF).
+origo-dagster-daemon-1  | 
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:10 +0000[0m - dagster.daemon - [34mINFO[0m - Instance is configured with the following daemons: ['AssetDaemon', 'BackfillDaemon', 'FreshnessDaemon', 'QueuedRunCoordinatorDaemon', 'SchedulerDaemon', 'SensorDaemon']
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:25 +0000[0m - dagster.daemon.QueuedRunCoordinatorDaemon - [34mINFO[0m - Priority sorting and checking tag concurrency limits for queued runs.
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:26 +0000[0m - dagster.daemon.QueuedRunCoordinatorDaemon - [34mINFO[0m - Launched 1 runs.
+origo-dagster-daemon-1  | 2026-03-07 20:01:27 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 177 - RUN_START - Started execution of run for "origo_raw_export_native_job".
+origo-dagster-daemon-1  | 2026-03-07 20:01:27 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 177 - ENGINE_EVENT - Executing steps using multiprocess executor: parent process (pid: 177)
+origo-dagster-daemon-1  | 2026-03-07 20:01:27 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 177 - origo_raw_export_native_step - STEP_WORKER_STARTING - Launching subprocess for "origo_raw_export_native_step".
+origo-dagster-daemon-1  | 2026-03-07 20:01:28 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 196 - origo_raw_export_native_step - STEP_WORKER_STARTED - Executing step "origo_raw_export_native_step" in subprocess.
+origo-dagster-daemon-1  | 2026-03-07 20:01:29 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 196 - origo_raw_export_native_step - RESOURCE_INIT_STARTED - Starting initialization of resources [io_manager].
+origo-dagster-daemon-1  | 2026-03-07 20:01:29 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 196 - origo_raw_export_native_step - RESOURCE_INIT_SUCCESS - Finished initialization of resources [io_manager].
+origo-dagster-daemon-1  | 2026-03-07 20:01:29 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 177 - ENGINE_EVENT - Multiprocess executor: parent process exiting after 2.2s (pid: 177)
+origo-dagster-daemon-1  | 2026-03-07 20:01:29 +0000 - dagster - DEBUG - origo_raw_export_native_job - d6039eec-bb7e-4f6a-9b2c-295913fc8339 - 177 - RUN_SUCCESS - Finished execution of run for "origo_raw_export_native_job".
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:35 +0000[0m - dagster.daemon.QueuedRunCoordinatorDaemon - [34mINFO[0m - Priority sorting and checking tag concurrency limits for queued runs.
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:36 +0000[0m - dagster.daemon.QueuedRunCoordinatorDaemon - [34mINFO[0m - Launched 1 runs.
+origo-dagster-daemon-1  | 2026-03-07 20:01:37 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 303 - RUN_START - Started execution of run for "origo_raw_export_native_job".
+origo-dagster-daemon-1  | 2026-03-07 20:01:37 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 303 - ENGINE_EVENT - Executing steps using multiprocess executor: parent process (pid: 303)
+origo-dagster-daemon-1  | 2026-03-07 20:01:37 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 303 - origo_raw_export_native_step - STEP_WORKER_STARTING - Launching subprocess for "origo_raw_export_native_step".
+origo-dagster-daemon-1  | 2026-03-07 20:01:38 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 322 - origo_raw_export_native_step - STEP_WORKER_STARTED - Executing step "origo_raw_export_native_step" in subprocess.
+origo-dagster-daemon-1  | 2026-03-07 20:01:39 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 322 - origo_raw_export_native_step - RESOURCE_INIT_STARTED - Starting initialization of resources [io_manager].
+origo-dagster-daemon-1  | 2026-03-07 20:01:39 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 322 - origo_raw_export_native_step - RESOURCE_INIT_SUCCESS - Finished initialization of resources [io_manager].
+origo-dagster-daemon-1  | 2026-03-07 20:01:39 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 303 - ENGINE_EVENT - Multiprocess executor: parent process exiting after 2.14s (pid: 303)
+origo-dagster-daemon-1  | 2026-03-07 20:01:39 +0000 - dagster - DEBUG - origo_raw_export_native_job - 59c85408-3fdb-443b-aefe-686eda3b4027 - 303 - RUN_SUCCESS - Finished execution of run for "origo_raw_export_native_job".
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:45 +0000[0m - dagster.daemon - [34mINFO[0m - Received interrupt, shutting down daemon threads...
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:45 +0000[0m - dagster.daemon - [34mINFO[0m - Daemon threads shut down.
+origo-dagster-daemon-1  | [32m2026-03-07 20:01:49 +0000[0m - dagster.daemon - [34mINFO[0m - Instance is configured with the following daemons: ['AssetDaemon', 'BackfillDaemon', 'FreshnessDaemon', 'QueuedRunCoordinatorDaemon', 'SchedulerDaemon', 'SensorDaemon']
+origo-api-1             | INFO:     Started server process [1]
+origo-api-1             | INFO:     Waiting for application startup.
+origo-api-1             | INFO:     Application startup complete.
+origo-api-1             | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+origo-api-1             | INFO:     127.0.0.1:40462 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:60492 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56826 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56828 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56830 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56832 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56834 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56836 - "POST /v1/raw/export HTTP/1.1" 202 Accepted
+origo-api-1             | INFO:     172.21.0.1:56838 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:60496 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56840 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:56842 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:59414 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:52568 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:59416 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:59418 - "GET /v1/raw/export/d6039eec-bb7e-4f6a-9b2c-295913fc8339 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:59420 - "POST /v1/raw/export HTTP/1.1" 202 Accepted
+origo-api-1             | INFO:     172.21.0.1:59422 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:52572 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:59424 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:63636 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:63638 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:47448 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:63640 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:63642 - "GET /v1/raw/export/59c85408-3fdb-443b-aefe-686eda3b4027 HTTP/1.1" 200 OK
+origo-api-1             | INFO:     127.0.0.1:47452 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     Shutting down
+origo-api-1             | INFO:     Waiting for application shutdown.
+origo-api-1             | INFO:     Application shutdown complete.
+origo-api-1             | INFO:     Finished server process [1]
+origo-api-1             | INFO:     Started server process [1]
+origo-api-1             | INFO:     Waiting for application startup.
+origo-api-1             | INFO:     Application startup complete.
+origo-api-1             | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+origo-api-1             | INFO:     127.0.0.1:41306 - "GET /health HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:60536 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-api-1             | INFO:     172.21.0.1:60538 - "POST /v1/raw/query HTTP/1.1" 200 OK
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:04 +0000[0m - dagster.code_server - [34mINFO[0m - Starting Dagster code server for module origo_control_plane.definitions in process 9
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:04 +0000[0m - dagster.code_server - [34mINFO[0m - Started Dagster code server for module origo_control_plane.definitions in process 9
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   Telemetry:
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   As an open-source project, we collect usage statistics to inform development priorities. For more
+origo-dagster-webserver-1  |   information, read https://docs.dagster.io/about/telemetry.
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   We will not see or store any data that is processed by your code.
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   To opt-out, add the following to $DAGSTER_HOME/dagster.yaml, creating that file if necessary:
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |     telemetry:
+origo-dagster-webserver-1  |       enabled: false
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   Welcome to Dagster!
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  |   If you have any questions or would like to engage with the Dagster team, please join us on Slack
+origo-dagster-webserver-1  |   (https://bit.ly/39dvSsF).
+origo-dagster-webserver-1  | 
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:05 +0000[0m - dagster-webserver - [34mINFO[0m - Serving dagster-webserver on http://0.0.0.0:3000 in process 1
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:44 +0000[0m - dagster.code_server - [34mINFO[0m - Stopping server once all current RPC calls terminate or 60 seconds pass
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:44 +0000[0m - dagster.code_server - [34mINFO[0m - Shutting down Dagster code server for module origo_control_plane.definitions in process 9
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:48 +0000[0m - dagster.code_server - [34mINFO[0m - Starting Dagster code server for module origo_control_plane.definitions in process 8
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:49 +0000[0m - dagster.code_server - [34mINFO[0m - Started Dagster code server for module origo_control_plane.definitions in process 8
+origo-dagster-webserver-1  | [32m2026-03-07 20:01:49 +0000[0m - dagster-webserver - [34mINFO[0m - Serving dagster-webserver on http://0.0.0.0:3000 in process 1

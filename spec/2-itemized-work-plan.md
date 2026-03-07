@@ -191,6 +191,45 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S6-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S6-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
+## Slice 7: Full Platform Docker Wrapping and Local Proof
+
+### Capability
+- [x] `S7-C1` Add root-level Docker stack for `clickhouse`, `dagster-webserver`, `dagster-daemon`, and `api`.
+- [x] `S7-C2` Add monorepo Dockerfiles for API and control-plane runtimes (no missing package imports at runtime).
+- [x] `S7-C3` Add deterministic Docker bootstrap path for migrations and fixed-window seed ingest.
+- [x] `S7-C4` Wire API + Dagster connectivity through Docker network with explicit env contract.
+- [x] `S7-C5` Add operational commands for stack lifecycle (`up/down/logs/bootstrap/proof`).
+
+### Proof
+- [x] `S7-P1` Start full stack from clean state and verify service health checks pass.
+- [x] `S7-P2` Run migrations + fixed Binance daily ingest inside Docker and verify loaded rows.
+- [x] `S7-P3` Execute `/v1/raw/query` and `/v1/raw/export` lifecycle against Docker API and capture deterministic replay fingerprints.
+- [x] `S7-P4` Restart stack and verify ClickHouse data + Dagster SQLite metadata persist.
+
+### Guardrails
+- [x] `S7-G1` Enforce Docker env contract: no deployment-specific hardcoded runtime values.
+- [x] `S7-G2` Add repeatable Docker local-proof smoke runner and failure-classified outputs.
+- [x] `S7-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S7-G4` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 8: OKX Spot Trades Daily Ingest (Binance-Mirror Pattern)
+
+### Capability
+- [ ] `S8-C1` Implement OKX daily source fetch/checksum/parse ingest path mirroring Binance daily ingest behavior.
+- [ ] `S8-C2` Add ClickHouse migration-backed OKX raw table schema and deterministic write path.
+- [ ] `S8-C3` Integrate OKX dataset into native raw query planner and response contracts.
+
+### Proof
+- [ ] `S8-P1` Execute fixed-window OKX ingest acceptance runs against original source files.
+- [ ] `S8-P2` Replay same fixtures and verify deterministic output fingerprints.
+- [ ] `S8-P3` Validate loaded data checksums/row stats against source artifacts.
+
+### Guardrails
+- [ ] `S8-G1` Add rights/legal classification artifacts for OKX serving/export decisions.
+- [ ] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, sequence-gap, anomaly checks).
+- [ ] `S8-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S8-G4` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
 ---
 
 ## One-Day Sub-Slices
@@ -475,4 +514,80 @@ Constraints: documentation only; no feature changes.
 8. `S6-08`
 Action: User docs closeout for Slice 6.
 Done looks like: `docs/` contains complete FRED reference/taxonomy (series coverage, field semantics, cadence, revisions, freshness and warnings).
+Constraints: documentation only; no feature changes.
+
+## Slice 7 Sub-Slices
+1. `S7-01`
+Action: Scaffold root Docker stack and monorepo Dockerfiles for API + control-plane services.
+Done looks like: `docker compose up` boots `clickhouse`, `dagster-webserver`, `dagster-daemon`, and `api` containers without import/runtime crashes.
+Constraints: capability wiring only; no feature-scope expansion.
+2. `S7-02`
+Action: Wire Docker env contract and network routing for API<->Dagster<->ClickHouse.
+Done looks like: all required env vars are explicit; no deployment-specific values hard-coded in runtime code paths.
+Constraints: fail-loud env contract only.
+3. `S7-03`
+Action: Add deterministic bootstrap runner for migrations and fixed Binance daily seed ingest inside Docker.
+Done looks like: bootstrap command applies migrations and loads deterministic seed window.
+Constraints: bootstrap path only.
+4. `S7-04`
+Action: Execute clean-state stack health proof.
+Done looks like: health checks pass for all services and startup is reproducible.
+Constraints: fixed environment.
+5. `S7-05`
+Action: Execute API query/export lifecycle proof on Docker stack.
+Done looks like: `/v1/raw/query` and `/v1/raw/export` succeed on seeded data, and export artifacts are materialized.
+Constraints: fixed test windows.
+6. `S7-06`
+Action: Execute replay and restart-persistence proof.
+Done looks like: repeated proof runs produce deterministic fingerprints; data/metadata persist across restart.
+Constraints: same fixtures and config.
+7. `S7-07`
+Action: Add Docker smoke runner and failure-classified output artifacts.
+Done looks like: one command reruns bootstrap+proof and emits structured pass/fail evidence.
+Constraints: guardrail only.
+8. `S7-08`
+Action: Developer docs closeout for Slice 7.
+Done looks like: `docs/Developer/` has short files for Docker stack architecture, bootstrap/proof workflow, and troubleshooting.
+Constraints: documentation only; no feature changes.
+9. `S7-09`
+Action: User docs closeout for Slice 7.
+Done looks like: `docs/` includes Docker local run/reference docs with required env vars, endpoints, and expected outcomes.
+Constraints: documentation only; no feature changes.
+
+## Slice 8 Sub-Slices
+1. `S8-01`
+Action: Define OKX source contract and table migration plan mirroring Binance daily ingest semantics.
+Done looks like: source URL/checksum/columns/timestamps contract is explicit and migration files are staged.
+Constraints: capability prep only.
+2. `S8-02`
+Action: Implement OKX daily fetch + checksum + parse + load capability path.
+Done looks like: fixed daily file ingests into OKX raw table with deterministic writes.
+Constraints: no query/API expansion yet.
+3. `S8-03`
+Action: Integrate OKX native query planner path and field allowlists.
+Done looks like: native query endpoint can return OKX rows for fixed windows.
+Constraints: native mode only.
+4. `S8-04`
+Action: Execute acceptance ingest/query proof on fixed OKX windows.
+Done looks like: capability acceptance suite passes.
+Constraints: fixed fixtures.
+5. `S8-05`
+Action: Execute replay determinism proof.
+Done looks like: repeated runs match fingerprints exactly.
+Constraints: unchanged source artifacts.
+6. `S8-06`
+Action: Add rights/legal/integrity guardrails for OKX.
+Done looks like: rights gate, legal artifact, and integrity suite all enforced fail-loud.
+Constraints: guardrails only.
+7. `S8-07`
+Action: Add operational monitoring and queue/backpressure checks for OKX paths.
+Done looks like: alerts/audit coverage and overload controls are in place.
+Constraints: no capability expansion.
+8. `S8-08`
+Action: Developer docs closeout for Slice 8.
+Done looks like: `docs/Developer/` has short files for OKX ingest/query contracts and guardrail operations.
+Constraints: documentation only; no feature changes.
+9. `S8-09`
+Action: User docs closeout for Slice 8.
+Done looks like: `docs/` includes complete OKX dataset reference and taxonomy updates.
 Constraints: documentation only; no feature changes.

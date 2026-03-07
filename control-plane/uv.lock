@@ -1975,7 +1975,7 @@ wheels = [
 
 [[package]]
 name = "origo-control-plane"
-version = "1.2.39"
+version = "1.2.52"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

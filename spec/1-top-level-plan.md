@@ -165,6 +165,11 @@ Every slice must pass:
 2. Supports `parquet|csv` outputs.
 3. Async lifecycle: submit, poll status, retrieve artifact metadata.
 
+## Source Onboarding Completion Rule
+1. Every new source slice must deliver both `native` and `aligned_1s` integration before slice closeout.
+2. Source onboarding proof must include acceptance and replay determinism for both modes.
+3. Source onboarding is incomplete if either mode is missing from query/export paths for that source.
+
 ## Source Prioritization
 1. Source order is decided by scoring, not fixed upfront.
 2. Candidate pool includes all Phase-1 sources.
@@ -187,7 +192,7 @@ Every slice must pass:
 6. Slice 5: Raw query `aligned_1s` capability.
 7. Slice 6: FRED integration.
 8. Slice 7: Full platform Docker wrapping and local end-to-end proof.
-9. Slice 8: OKX spot trades daily-file ingest capability.
+9. Slice 8: OKX spot trades daily-file ingest plus `aligned_1s` integration capability.
 
 ## Slice 4 (ETF) Locked Details
 1. Coverage: all 10 issuers.

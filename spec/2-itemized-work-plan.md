@@ -212,23 +212,26 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S7-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S7-G4` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
-## Slice 8: OKX Spot Trades Daily Ingest (Binance-Mirror Pattern)
+## Slice 8: OKX Spot Trades Daily Ingest + `aligned_1s` Integration (Binance-Mirror Pattern)
 
 ### Capability
 - [ ] `S8-C1` Implement OKX daily source fetch/checksum/parse ingest path mirroring Binance daily ingest behavior.
 - [ ] `S8-C2` Add ClickHouse migration-backed OKX raw table schema and deterministic write path.
 - [ ] `S8-C3` Integrate OKX dataset into native raw query planner and response contracts.
+- [ ] `S8-C4` Integrate OKX dataset into `aligned_1s` materialization/query/export paths.
 
 ### Proof
-- [ ] `S8-P1` Execute fixed-window OKX ingest acceptance runs against original source files.
-- [ ] `S8-P2` Replay same fixtures and verify deterministic output fingerprints.
-- [ ] `S8-P3` Validate loaded data checksums/row stats against source artifacts.
+- [ ] `S8-P1` Execute fixed-window OKX ingest + native query acceptance runs against original source files.
+- [ ] `S8-P2` Execute fixed-window OKX `aligned_1s` acceptance runs and validate semantics.
+- [ ] `S8-P3` Replay same fixtures and verify deterministic output fingerprints for both native and `aligned_1s`.
+- [ ] `S8-P4` Validate loaded data checksums/row stats against source artifacts.
 
 ### Guardrails
 - [ ] `S8-G1` Add rights/legal classification artifacts for OKX serving/export decisions.
 - [ ] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, sequence-gap, anomaly checks).
-- [ ] `S8-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S8-G4` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [ ] `S8-G3` Apply aligned-mode guardrails to OKX paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
+- [ ] `S8-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S8-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ---
 
@@ -568,26 +571,30 @@ Action: Integrate OKX native query planner path and field allowlists.
 Done looks like: native query endpoint can return OKX rows for fixed windows.
 Constraints: native mode only.
 4. `S8-04`
-Action: Execute acceptance ingest/query proof on fixed OKX windows.
-Done looks like: capability acceptance suite passes.
-Constraints: fixed fixtures.
+Action: Integrate OKX into `aligned_1s` materialization/query/export paths.
+Done looks like: aligned query/export can serve OKX fields for fixed windows.
+Constraints: aligned mode only.
 5. `S8-05`
-Action: Execute replay determinism proof.
-Done looks like: repeated runs match fingerprints exactly.
-Constraints: unchanged source artifacts.
+Action: Execute acceptance ingest/query proof on fixed OKX windows for native + aligned modes.
+Done looks like: capability acceptance suite passes for both modes.
+Constraints: fixed fixtures.
 6. `S8-06`
-Action: Add rights/legal/integrity guardrails for OKX.
-Done looks like: rights gate, legal artifact, and integrity suite all enforced fail-loud.
-Constraints: guardrails only.
+Action: Execute replay determinism proof for native + aligned modes.
+Done looks like: repeated runs match fingerprints exactly in both modes.
+Constraints: unchanged source artifacts.
 7. `S8-07`
+Action: Add rights/legal/integrity + aligned guardrails for OKX.
+Done looks like: rights gate, legal artifact, integrity suite, and aligned strict/warnings/freshness/audit parity are enforced fail-loud.
+Constraints: guardrails only.
+8. `S8-08`
 Action: Add operational monitoring and queue/backpressure checks for OKX paths.
 Done looks like: alerts/audit coverage and overload controls are in place.
 Constraints: no capability expansion.
-8. `S8-08`
-Action: Developer docs closeout for Slice 8.
-Done looks like: `docs/Developer/` has short files for OKX ingest/query contracts and guardrail operations.
-Constraints: documentation only; no feature changes.
 9. `S8-09`
+Action: Developer docs closeout for Slice 8.
+Done looks like: `docs/Developer/` has short files for OKX ingest/query/aligned contracts and guardrail operations.
+Constraints: documentation only; no feature changes.
+10. `S8-10`
 Action: User docs closeout for Slice 8.
 Done looks like: `docs/` includes complete OKX dataset reference and taxonomy updates.
 Constraints: documentation only; no feature changes.

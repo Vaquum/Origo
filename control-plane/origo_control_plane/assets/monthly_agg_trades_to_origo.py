@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import sys
 import zipfile
 from datetime import UTC, datetime
 from io import BytesIO
@@ -285,6 +286,15 @@ def _process_month(
             try:
                 client.disconnect()
             except Exception as exc:
-                raise RuntimeError(
-                    f'Failed to disconnect ClickHouse client cleanly: {exc}'
-                )
+                active_exception = sys.exc_info()[1]
+                if active_exception is not None:
+                    active_exception.add_note(
+                        f'ClickHouse disconnect failed during cleanup: {exc}'
+                    )
+                    context.log.warning(
+                        f'Failed to disconnect ClickHouse client cleanly: {exc}'
+                    )
+                else:
+                    raise RuntimeError(
+                        f'Failed to disconnect ClickHouse client cleanly: {exc}'
+                    ) from exc

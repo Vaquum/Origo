@@ -24,7 +24,10 @@ Control plane for Origo.
 
 ## Integrations
 
-- https://github.com/Vaquum/origo-docker
+- Monorepo root Docker stack:
+  - `docker-compose.yml`
+  - `scripts/s7_docker_stack.sh`
+  - `docs/docker-local-reference.md`
 
 ## Docs
 

@@ -4,6 +4,8 @@ import zipfile
 import polars as pl
 import requests
 
+REQUEST_TIMEOUT_SECONDS = 60
+
 
 def binance_file_to_polars(url: str, has_header: bool) -> pl.DataFrame:
     """
@@ -17,7 +19,7 @@ def binance_file_to_polars(url: str, has_header: bool) -> pl.DataFrame:
         pl.DataFrame: DataFrame with downloaded and parsed Binance data
     """
 
-    response = requests.get(url)
+    response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
 
     zip_buf = io.BytesIO(response.content)

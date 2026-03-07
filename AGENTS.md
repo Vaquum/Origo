@@ -1,4 +1,3 @@
-```markdown
 ---
 alwaysApply: true
 ---
@@ -44,4 +43,3 @@ A slice is not done until all of the following are complete. Do not report done 
    - Known warnings and why they are acceptable or not.
    - Any guardrails that were deferred, explicitly named.
    - Confirmation that work plan checkboxes, version, changelog, and `.env.example` are all updated.
-```

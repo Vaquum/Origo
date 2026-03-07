@@ -3,6 +3,7 @@ import hashlib
 import zipfile
 from datetime import UTC, datetime
 from io import BytesIO
+from itertools import chain
 from typing import Any
 
 import requests
@@ -99,9 +100,23 @@ def _process_day(
 
     csv_text = csv_content.decode('utf-8')
     reader = csv.reader(csv_text.splitlines())
+    first_row = next(reader, None)
+
+    if first_row is None:
+        raise ValueError(f'CSV payload is empty for {day_str}')
+
+    rows: Any
+    first_cell = first_row[0].strip().lower() if first_row else ''
+    if first_cell in {'id', 'trade_id'}:
+        context.log.info('Detected CSV header row and skipped it')
+        rows = reader
+    else:
+        rows = chain([first_row], reader)
 
     row_count = 0
-    for row in reader:
+    for row in rows:
+        if not row:
+            continue
         row_count += 1
         trade_id = int(row[0])
         price = float(row[1])

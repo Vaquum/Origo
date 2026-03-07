@@ -23,7 +23,7 @@ def _require_any_env(*names: str) -> str:
     for name in names:
         value = os.environ.get(name)
         if value is not None and value.strip() != '':
-            return value
+            return value.strip()
     joined = ', '.join(names)
     raise RuntimeError(f'At least one env var must be set and non-empty: {joined}')
 
@@ -261,7 +261,7 @@ def _shape_native_frame(
             ]
         )
 
-    if 'datetime' in frame.columns:
+    if 'datetime' in frame.columns and not compiled.datetime_materialized:
         frame = frame.with_columns(
             [
                 pl.col('datetime')

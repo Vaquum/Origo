@@ -203,5 +203,3 @@ defs = Definitions(
         insert_monthly_binance_futures_agg_trades_job,
     ],
 )
-
-# TODO: Put everything in to same order in all segments of the code

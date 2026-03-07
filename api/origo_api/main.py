@@ -39,8 +39,8 @@ if QUERY_MAX_QUEUE < 0:
     raise RuntimeError('ORIGO_QUERY_MAX_QUEUE must be >= 0')
 
 _query_semaphore = asyncio.Semaphore(QUERY_MAX_CONCURRENCY)
-_pending_requests = 0
-_pending_lock = asyncio.Lock()
+_queued_requests = 0
+_queue_lock = asyncio.Lock()
 
 
 def _require_internal_api_key(x_api_key: str = Header(..., alias='X-API-Key')) -> None:
@@ -81,12 +81,14 @@ def health() -> dict[str, str]:
 @app.post('/v1/raw/query', response_model=RawQueryResponse)
 async def query_raw(
     request: RawQueryRequest,
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
     _: None = Depends(_require_internal_api_key),
 ) -> RawQueryResponse:
-    global _pending_requests
+    global _queued_requests
+    request_is_queued = False
 
-    async with _pending_lock:
-        if _pending_requests >= QUERY_MAX_QUEUE:
+    async with _queue_lock:
+        if _queued_requests >= QUERY_MAX_QUEUE:
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -94,10 +96,15 @@ async def query_raw(
                     'message': 'Query queue limit reached',
                 },
             )
-        _pending_requests += 1
+        _queued_requests += 1
+        request_is_queued = True
 
     try:
         async with _query_semaphore:
+            async with _queue_lock:
+                if request_is_queued:
+                    _queued_requests -= 1
+                    request_is_queued = False
             try:
                 envelope = await run_in_threadpool(
                     query_binance_native_wide_rows_envelope,
@@ -108,7 +115,7 @@ async def query_raw(
                     n_random=request.n_random,
                     time_range=request.time_range,
                     include_datetime_col=request.include_datetime,
-                    auth_token=request.auth_token,
+                    auth_token=x_clickhouse_token,
                 )
             except ValueError as exc:
                 raise HTTPException(
@@ -154,5 +161,6 @@ async def query_raw(
             envelope['warnings'] = [warning.model_dump() for warning in warnings]
             return RawQueryResponse.model_validate(envelope)
     finally:
-        async with _pending_lock:
-            _pending_requests -= 1
+        if request_is_queued:
+            async with _queue_lock:
+                _queued_requests -= 1

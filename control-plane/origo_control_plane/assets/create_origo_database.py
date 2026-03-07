@@ -100,8 +100,6 @@ def create_origo_database(context: AssetExecutionContext):
                 'message': 'Database already exists',
             }
 
-    except Exception as e:
-        raise e
     finally:
         # Ensure client is disconnected
         if client:
@@ -109,4 +107,3 @@ def create_origo_database(context: AssetExecutionContext):
                 client.disconnect()
             except Exception as e:
                 context.log.warning(f'Error disconnecting from ClickHouse: {e!s}')
-                pass

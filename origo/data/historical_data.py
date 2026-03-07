@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import polars as pl
 
 from origo.data._internal.binance_file_to_polars import binance_file_to_polars
@@ -247,9 +249,21 @@ class HistoricalData:
             None (sets self.data with the loaded klines data)
         """
 
-        import pandas as pd
+        dataset_path = (
+            Path(__file__).resolve().parents[2] / 'datasets' / 'klines_2h_2020_2025.csv'
+        )
+        if not dataset_path.exists():
+            raise FileNotFoundError(
+                f'Test dataset file not found: {dataset_path}. '
+                'Expected file relative to repository root.'
+            )
 
-        df = pd.read_csv('datasets/klines_2h_2020_2025.csv', nrows=n_rows)
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        self.data = pl.from_pandas(df)
+        self.data = pl.read_csv(dataset_path, n_rows=n_rows)
+        if 'datetime' not in self.data.columns:
+            raise RuntimeError(
+                f'Test dataset is missing required datetime column: {dataset_path}'
+            )
+        self.data = self.data.with_columns(
+            [pl.col('datetime').str.to_datetime().alias('datetime')]
+        )
         self.data_columns = self.data.columns

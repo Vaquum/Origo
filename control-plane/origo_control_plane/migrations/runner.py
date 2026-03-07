@@ -198,11 +198,17 @@ class MigrationRunner:
                 f'Migrations directory does not exist: {self._migrations_dir}'
             )
 
-        files = sorted(self._migrations_dir.glob('*.sql'))
-        migrations: list[Migration] = []
+        files = list(self._migrations_dir.glob('*.sql'))
+        parsed_files: list[tuple[int, str, Path]] = []
 
         for migration_file in files:
             version, name = self._parse_filename(migration_file.name)
+            parsed_files.append((version, name, migration_file))
+
+        parsed_files.sort(key=lambda item: item[0])
+        migrations: list[Migration] = []
+
+        for version, name, migration_file in parsed_files:
             raw_sql = migration_file.read_text(encoding='utf-8')
             checksum = hashlib.sha256(raw_sql.encode('utf-8')).hexdigest()
             rendered_sql = self._render_sql(raw_sql)
@@ -244,10 +250,16 @@ class MigrationRunner:
                 f'Invalid migration filename: {filename}. Expected NNNN__name.sql'
             )
 
-        version = int(match.group(1))
+        version_token = match.group(1)
+        version = int(version_token)
         name = match.group(2)
         if version <= 0:
             raise RuntimeError(f'Migration version must be positive: {filename}')
+        if version_token != f'{version:04d}':
+            raise RuntimeError(
+                f'Invalid migration filename: {filename}. '
+                'Version must be zero-padded canonical form (e.g., 0001).'
+            )
         return version, name
 
     def _render_sql(self, raw_sql: str) -> str:
@@ -265,16 +277,20 @@ class MigrationRunner:
         if not statement:
             raise RuntimeError(f'Migration file is empty: {migration_file}')
 
-        semicolon_count = statement.count(';')
-        if semicolon_count > 1 or (
-            semicolon_count == 1 and not statement.endswith(';')
-        ):
+        semicolon_positions = MigrationRunner._top_level_semicolon_positions(statement)
+        if len(semicolon_positions) > 1:
             raise RuntimeError(
                 f'Migration files must contain exactly one SQL statement: {migration_file}'
             )
 
-        if statement.endswith(';'):
-            statement = statement[:-1].strip()
+        if len(semicolon_positions) == 1:
+            semicolon_index = semicolon_positions[0]
+            trailing_segment = statement[semicolon_index + 1 :].strip()
+            if trailing_segment != '':
+                raise RuntimeError(
+                    f'Migration files must contain exactly one SQL statement: {migration_file}'
+                )
+            statement = statement[:semicolon_index].strip()
 
         if not statement:
             raise RuntimeError(
@@ -282,3 +298,90 @@ class MigrationRunner:
             )
 
         return statement
+
+    @staticmethod
+    def _top_level_semicolon_positions(sql: str) -> list[int]:
+        positions: list[int] = []
+        index = 0
+        in_single_quote = False
+        in_double_quote = False
+        in_backtick = False
+        in_line_comment = False
+        in_block_comment = False
+
+        while index < len(sql):
+            ch = sql[index]
+            nxt = sql[index + 1] if index + 1 < len(sql) else ''
+
+            if in_line_comment:
+                if ch == '\n':
+                    in_line_comment = False
+                index += 1
+                continue
+
+            if in_block_comment:
+                if ch == '*' and nxt == '/':
+                    in_block_comment = False
+                    index += 2
+                    continue
+                index += 1
+                continue
+
+            if in_single_quote:
+                if ch == "'" and nxt == "'":
+                    index += 2
+                    continue
+                if ch == "'":
+                    in_single_quote = False
+                index += 1
+                continue
+
+            if in_double_quote:
+                if ch == '"' and nxt == '"':
+                    index += 2
+                    continue
+                if ch == '"':
+                    in_double_quote = False
+                index += 1
+                continue
+
+            if in_backtick:
+                if ch == '`' and nxt == '`':
+                    index += 2
+                    continue
+                if ch == '`':
+                    in_backtick = False
+                index += 1
+                continue
+
+            if ch == '-' and nxt == '-':
+                in_line_comment = True
+                index += 2
+                continue
+
+            if ch == '/' and nxt == '*':
+                in_block_comment = True
+                index += 2
+                continue
+
+            if ch == "'":
+                in_single_quote = True
+                index += 1
+                continue
+
+            if ch == '"':
+                in_double_quote = True
+                index += 1
+                continue
+
+            if ch == '`':
+                in_backtick = True
+                index += 1
+                continue
+
+            if ch == ';':
+                positions.append(index)
+
+            index += 1
+
+        return positions

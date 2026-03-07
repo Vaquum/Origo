@@ -16,7 +16,6 @@ class RawQueryRequest(BaseModel):
     time_range: tuple[str, str] | None = None
     include_datetime: bool = True
     strict: bool = False
-    auth_token: str | None = None
 
     @model_validator(mode='after')
     def validate_window_mode(self) -> RawQueryRequest:

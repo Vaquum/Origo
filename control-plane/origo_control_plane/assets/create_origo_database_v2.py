@@ -3,23 +3,25 @@ from dagster import AssetExecutionContext, asset
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.get_clickhouse_client import get_clickhouse_client
 
-_CLICKHOUSE = resolve_clickhouse_native_settings()
-CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-client = get_clickhouse_client()
-
 
 @asset(
-    group_name='create_db', description=f'Creates the database {CLICKHOUSE_DATABASE}'
+    group_name='create_db', description='Creates the configured ClickHouse database'
 )
 def create_database(context: AssetExecutionContext) -> None:
+    settings = resolve_clickhouse_native_settings()
+    client = get_clickhouse_client()
+    try:
+        res = client.query(f"SHOW DATABASES LIKE '{settings.database}'")
 
-    res = client.query(f"SHOW DATABASES LIKE '{CLICKHOUSE_DATABASE}'")
+        if not res.result_set:
+            client.command(
+                f'CREATE DATABASE IF NOT EXISTS {settings.database} ENGINE = Atomic'
+            )
+            context.log.info(f'Created database {settings.database}.')
 
-    if not res.result_set:
-        client.command(
-            f'CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DATABASE} ENGINE = Atomic'
-        )
-        context.log.info(f'Created database {CLICKHOUSE_DATABASE}.')
-
-    else:
-        context.log.info(f'Database {CLICKHOUSE_DATABASE} already exists, did nothing.')
+        else:
+            context.log.info(
+                f'Database {settings.database} already exists, did nothing.'
+            )
+    finally:
+        client.close()

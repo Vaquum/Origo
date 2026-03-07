@@ -17,7 +17,7 @@
 - Submit request contract:
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
-  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics`
+  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`
   - `fields`: optional field projection
   - Exactly one window selector:
     - `month_year`

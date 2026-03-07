@@ -347,6 +347,7 @@ def _read_export_tags(
         'spot_agg_trades',
         'futures_trades',
         'etf_daily_metrics',
+        'fred_series_metrics',
     }:
         raise RuntimeError(f'Unsupported or missing export dataset tag: {dataset}')
     return (

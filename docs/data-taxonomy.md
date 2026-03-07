@@ -66,6 +66,8 @@
   - `FRED_SOURCE_PUBLISH_STALE`
 - Query status taxonomy:
   - `200`, `404`, `409`, `503`
+- Export submit status taxonomy:
+  - `202`
 - Export lifecycle taxonomy:
   - `queued`, `running`, `succeeded`, `failed`
 - Rights state taxonomy:
@@ -91,7 +93,7 @@
   - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
   - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
 - Storage:
-  - `CLICKHOUSE_*` or `ORIGO_CLICKHOUSE_*`
+  - `CLICKHOUSE_*`
   - `ORIGO_OBJECT_STORE_*`
 
 ## Minimal examples

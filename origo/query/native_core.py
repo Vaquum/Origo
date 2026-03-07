@@ -20,24 +20,19 @@ IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 _DATETIME_MS_ALIAS = '__origo_datetime_ms'
 
 
-def _require_any_env(*names: str) -> str:
-    for name in names:
-        value = os.environ.get(name)
-        if value is not None and value.strip() != '':
-            return value.strip()
-    joined = ', '.join(names)
-    raise RuntimeError(f'At least one env var must be set and non-empty: {joined}')
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None or value.strip() == '':
+        raise RuntimeError(f'{name} must be set and non-empty')
+    return value.strip()
 
 
-def _require_any_int_env(*names: str) -> int:
-    raw = _require_any_env(*names)
+def _require_int_env(name: str) -> int:
+    raw = _require_env(name)
     try:
         return int(raw)
     except ValueError as exc:
-        joined = ', '.join(names)
-        raise RuntimeError(
-            f"Expected integer env var in [{joined}], got '{raw}'"
-        ) from exc
+        raise RuntimeError(f"{name} must be an integer, got '{raw}'") from exc
 
 
 def _validate_identifier(value: str, label: str) -> None:
@@ -81,22 +76,14 @@ def resolve_clickhouse_http_settings(
     auth_token: str | None = None,
 ) -> ClickHouseHTTPSettings:
     token = auth_token.strip() if auth_token is not None else ''
-    password = (
-        token
-        if token
-        else _require_any_env('ORIGO_CLICKHOUSE_PASSWORD', 'CLICKHOUSE_PASSWORD')
-    )
-    database = _require_any_env('ORIGO_CLICKHOUSE_DATABASE', 'CLICKHOUSE_DATABASE')
+    password = token if token else _require_env('CLICKHOUSE_PASSWORD')
+    database = _require_env('CLICKHOUSE_DATABASE')
     _validate_identifier(database, 'database')
 
     return ClickHouseHTTPSettings(
-        host=_require_any_env('ORIGO_CLICKHOUSE_HOST', 'CLICKHOUSE_HOST'),
-        port=_require_any_int_env(
-            'ORIGO_CLICKHOUSE_PORT',
-            'ORIGO_CLICKHOUSE_HTTP_PORT',
-            'CLICKHOUSE_HTTP_PORT',
-        ),
-        username=_require_any_env('ORIGO_CLICKHOUSE_USER', 'CLICKHOUSE_USER'),
+        host=_require_env('CLICKHOUSE_HOST'),
+        port=_require_int_env('CLICKHOUSE_HTTP_PORT'),
+        username=_require_env('CLICKHOUSE_USER'),
         password=password,
         database=database,
     )

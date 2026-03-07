@@ -19,9 +19,9 @@
 
 ## Watch out
 - `S0-C2` is still open because code history preservation has not been implemented in this repo state.
-- `S0-C6` is open: local infra is not yet wired to PostgreSQL-backed Dagster metadata (still SQLite-backed in current config).
+- `S0-C6` is open: local infra wiring still needs closeout checks, but Dagster metadata is already SQLite-backed on persistent volume in current config.
 - `S0-P3` is open: no formal pre-migration baseline comparison has been completed yet.
 - `S0-G2` and `S0-G3` are open: TLS enforcement on authenticated links and immutable audit-log sink are not yet in place.
 - Migration scaffolding is currently bootstrap-level (`0001` probe table); production schema objects still need to be moved into versioned SQL over subsequent steps.
-- `create_origo_database` emits explicit warnings on unsupported `ALTER DATABASE ... MODIFY SETTING` for current ClickHouse; warnings are expected and intentionally surfaced.
+- Legacy `create_*` Dagster schema assets are now disabled and fail loudly by design; schema changes must run through `control-plane/migrations/sql`.
 - Some compose/runtime values remain intentionally fixed for local developer ergonomics (service names, public port mappings) and may need explicit env-contract treatment when infra wiring (`S0-C6`) is finalized.

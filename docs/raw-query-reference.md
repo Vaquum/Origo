@@ -12,6 +12,7 @@
 ## Inputs and outputs with contract shape
 - Endpoint: `POST /v1/raw/query`
 - Required header: `X-API-Key`
+- Optional header: `X-ClickHouse-Token` (required only for BYOK-gated sources)
 - Request contract:
   - `mode`: `native | aligned_1s` (default `native`)
   - `sources`: list of source keys (current capability requires exactly one item)
@@ -22,7 +23,6 @@
   - `filters`: optional list of filter clauses:
     - `{ "field": "<column>", "op": "eq|ne|gt|gte|lt|lte|in|not_in", "value": <any> }`
   - `strict`: boolean (default `false`)
-  - `auth_token`: optional source credential passthrough
 - Window selection rule: exactly one of `time_range`, `n_rows`, `n_random` must be provided.
 - Response contract:
   - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`

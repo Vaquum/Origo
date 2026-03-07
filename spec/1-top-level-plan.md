@@ -109,7 +109,7 @@ Every slice must pass:
 ### Serving and Error Safety
 1. Raw API default mode is `native` (source-native events).
 2. Raw API also supports `aligned_1s` mode.
-3. Typed status/error map is fixed: `200/404/409/503`.
+3. Typed status/error map is fixed: `200/202/404/409/503`.
 4. If requested data is unavailable, return error.
 5. `strict=false`: serve data with warnings.
 6. `strict=true`: fail when warnings exist.

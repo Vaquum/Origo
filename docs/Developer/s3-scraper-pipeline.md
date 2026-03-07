@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-05
+- Last updated: 2026-03-07
 - Slice reference: S3 (`S3-C4` to `S3-C12`, `S3-G1` to `S3-G4`)
 
 ## Purpose and scope
@@ -66,7 +66,7 @@
 - `ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY`
 - `ORIGO_OBJECT_STORE_BUCKET`
 - `ORIGO_OBJECT_STORE_REGION`
-- `CLICKHOUSE_*` / `ORIGO_CLICKHOUSE_*` for staging writes
+- `CLICKHOUSE_*` for staging writes
 
 ## Minimal example
 - Instantiate adapter implementing `ScraperAdapter`.

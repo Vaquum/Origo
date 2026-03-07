@@ -1,7 +1,7 @@
 # Slice 1 Raw Query Native Run Notes
 
 - Date (UTC): 2026-03-04
-- Scope: `S1-C1..C7`, `S1-P1..P3`, `S1-G1..G5`
+- Scope: `S1-C1..C7`, `S1-P1..P3`, `S1-G1..G7`
 - Fixture windows:
   - spot trades: `2017-08`
   - spot agg-trades: `2019-01`
@@ -29,11 +29,17 @@
 
 ## Deferred guardrails
 
-- None for Slice 1 (`S1-G1..G5` completed).
+- None for Slice 1 (`S1-G1..G7` completed).
 
 ## Completion confirmation
 
 - `spec/2-itemized-work-plan.md` Slice 1 checkboxes were updated.
-- `control-plane/pyproject.toml` version was bumped to `1.2.6`.
-- `control-plane/CHANGELOG.md` was updated for Slice 1.
-- `.env.example` was updated with newly required API guardrail env vars.
+- `control-plane/pyproject.toml` version was bumped to `1.2.7` after docs closeout.
+- `control-plane/CHANGELOG.md` was updated for Slice 1 docs closeout and Slice 2 kickoff.
+- `.env.example` has no additional vars required by Slice 1 docs closeout.
+- Developer docs closeout added:
+  - `docs/Developer/s1-native-query-core.md`
+  - `docs/Developer/s1-raw-query-api.md`
+- User docs closeout added:
+  - `docs/raw-query-reference.md`
+  - `docs/data-taxonomy.md`

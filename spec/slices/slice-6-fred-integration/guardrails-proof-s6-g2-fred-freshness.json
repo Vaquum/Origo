@@ -1,0 +1,9 @@
+{
+  "live_warning_codes": [
+    "FRED_SOURCE_PUBLISH_STALE"
+  ],
+  "proof_scope": "Slice 6 S6-G2 FRED publish-timestamp freshness checks",
+  "synthetic_warning_codes": [
+    "FRED_SOURCE_PUBLISH_MISSING"
+  ]
+}

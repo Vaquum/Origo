@@ -1,0 +1,7 @@
+{
+  "invalid_state_error": "ORIGO_ETF_QUERY_SERVING_STATE must be one of ['promoted', 'shadow']",
+  "missing_state_error": "ORIGO_ETF_QUERY_SERVING_STATE must be set and non-empty",
+  "promoted_state_passed": true,
+  "proof_scope": "Slice 4 S4-G5 shadow-then-promote serving gate",
+  "shadow_mode_error_code": "QUERY_SERVING_SHADOW_MODE"
+}

@@ -1,0 +1,111 @@
+{
+  "version": "2026-03-07-s6-g1",
+  "sources": {
+    "binance": {
+      "rights_state": "Hosted Allowed",
+      "datasets": [
+        "spot_trades",
+        "spot_agg_trades",
+        "futures_trades"
+      ],
+      "legal_signoff_artifact": "contracts/legal/binance-hosted-allowed.md"
+    },
+    "ishares": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_ishares_ibit_daily"
+      ]
+    },
+    "invesco": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_invesco_btco_daily"
+      ]
+    },
+    "bitwise": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_bitwise_bitb_daily"
+      ]
+    },
+    "ark": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_ark_arkb_daily"
+      ]
+    },
+    "vaneck": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_vaneck_hodl_daily"
+      ]
+    },
+    "franklin": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_franklin_ezbc_daily"
+      ]
+    },
+    "grayscale": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_grayscale_gbtc_daily"
+      ]
+    },
+    "fidelity": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_fidelity_fbtc_daily"
+      ]
+    },
+    "coinshares": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_coinshares_brrr_daily"
+      ]
+    },
+    "hashdex": {
+      "rights_state": "Ingest Only",
+      "datasets": [
+        "etf_daily_metrics"
+      ],
+      "source_ids": [
+        "etf_hashdex_defi_daily"
+      ]
+    },
+    "fred": {
+      "rights_state": "Hosted Allowed",
+      "datasets": [
+        "fred_series_metrics"
+      ],
+      "legal_signoff_artifact": "contracts/legal/fred-hosted-allowed.md"
+    }
+  }
+}

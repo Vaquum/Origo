@@ -1,0 +1,94 @@
+## What was done
+- Implemented `S5-C1` Binance aligned-1s materialization definitions:
+  - `origo/query/binance_aligned_1s.py`
+  - `origo/query/binance_aligned_s5_01_proof.py`
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c1-binance-aligned.json`
+- Implemented `S5-C2` ETF aligned-1s materialization definitions:
+  - `origo/query/etf_aligned_1s.py`
+  - `origo/query/etf_aligned_s5_02_proof.py`
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c2-etf-aligned.json`
+- Implemented `S5-C3` logical ETF forward-fill semantics:
+  - added prior-state retrieval and interval construction in `origo/query/etf_aligned_1s.py`
+  - exported `query_etf_forward_fill_intervals(...)` via `origo/query/__init__.py`
+  - added proof runner and artifact:
+    - `origo/query/etf_forward_fill_s5_03_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c3-etf-forward-fill.json`
+- Forward-fill proof confirms interval sorting, non-overlap, UTC boundary transitions, and carry/clip behavior in the fixed proof window.
+- Implemented `S5-C4` unified aligned planner path:
+  - added planner module `origo/query/aligned_core.py`
+  - unified dispatch contract:
+    - `build_aligned_query_plan(...)`
+    - `query_aligned_data(...)`
+  - planner routes Binance + ETF aligned paths with explicit execution modes and strict projection allowlists
+  - added generic endpoint adapter `query_aligned(...)` in `origo/data/_internal/generic_endpoints.py`
+  - exported planner symbols via `origo/query/__init__.py`
+  - added proof runner and artifact:
+    - `origo/query/aligned_planner_s5_04_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c4-aligned-planner.json`
+- Implemented `S5-C5` aligned response envelope and schema metadata path:
+  - added aligned envelope adapter:
+    - `origo/data/_internal/generic_endpoints.py` (`query_aligned_wide_rows_envelope(...)`)
+  - extended API query contracts for mode routing:
+    - `api/origo_api/schemas.py`
+    - `api/origo_api/main.py`
+  - added proof runner and artifact:
+    - `origo/query/aligned_envelope_s5_05_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c5-aligned-envelope.json`
+- Implemented `S5-C6` and `S5-C7` aligned export capability:
+  - extended export API contracts/types for `mode=aligned_1s`:
+    - `api/origo_api/schemas.py`
+    - `api/origo_api/main.py`
+  - extended export rights typing/gating coverage:
+    - `api/origo_api/rights.py`
+  - extended Dagster export execution step to dispatch aligned-mode queries:
+    - `control-plane/origo_control_plane/jobs/raw_export_native.py`
+  - added aligned export proof harness and artifact:
+    - `control-plane/origo_control_plane/aligned_export_s5_06_07_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c6-c7-aligned-export.json`
+- Completed Slice 5 proof stage `S5-P1..S5-P3`:
+  - acceptance proof:
+    - `origo/query/aligned_s5_p1_acceptance_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p1-acceptance.json`
+  - determinism replay proof:
+    - `origo/query/aligned_s5_p2_determinism_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p2-determinism.json`
+  - UTC boundary semantics proof:
+    - `origo/query/aligned_s5_p3_boundary_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p3-boundary.json`
+- Completed Slice 5 guardrails `S5-G1..S5-G4`:
+  - aligned strict/warning + freshness + queue-limit controls:
+    - `api/origo_api/main.py`
+    - `api/origo_api/schemas.py`
+  - aligned export rights/audit coverage and execution support:
+    - `api/origo_api/rights.py`
+    - `control-plane/origo_control_plane/jobs/raw_export_native.py`
+  - guardrail proof:
+    - `api/origo_api/s5_g1_g4_aligned_guardrails_proof.py`
+    - `spec/slices/slice-5-raw-query-aligned-1s/guardrails-proof-s5-g1-g4.json`
+- Completed Slice 5 docs closeout `S5-G5`, `S5-G6`:
+  - developer docs:
+    - `docs/Developer/s5-aligned-query-export-guardrails.md`
+  - user docs:
+    - `docs/aligned-reference.md`
+    - `docs/raw-query-reference.md`
+    - `docs/raw-export-reference.md`
+    - `docs/data-taxonomy.md`
+- Added required slice baseline fixture artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/baseline-fixture-2017-08-17_2026-03-05-2026-03-07.json`
+
+## Current state
+- Slice 5 is complete (`S5-C1..S5-G6`).
+- Capability, proof, and guardrails all passed for aligned mode.
+- Internal aligned capability now has:
+  - Binance second-bucket aligned rows (OHLC/volume/count).
+  - ETF second-bucket aligned rows keyed by `(aligned_at_utc, source_id, metric_name)`.
+  - ETF logical forward-fill interval output with `valid_from_utc` and `valid_to_utc_exclusive`.
+  - Unified aligned planner contract spanning Binance + ETF with deterministic dispatch rules.
+  - API query contract support for `mode=aligned_1s` with aligned envelope/schema output.
+  - Export support for `mode=aligned_1s` in both Parquet and CSV.
+- Native (`mode=native`) query path remains unchanged.
+
+## Watch out
+- Forward-fill currently returns logical validity intervals and intentionally does not physically explode rows to every second.
+- Export rights remain fail-closed; datasets marked `Ingest Only` are still blocked in API dispatch paths.
+- Next slice (`S6`) should reuse aligned query/export contracts rather than introducing parallel mode-specific contracts.

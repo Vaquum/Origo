@@ -1,0 +1,89 @@
+{
+  "boundary_end_count": 9,
+  "boundary_start_count": 9,
+  "boundary_transition_count": 9,
+  "generated_at_utc": "2026-03-06T17:49:38.885564+00:00",
+  "proof_scope": "Slice 5 P3 forward-fill UTC day-boundary semantics",
+  "row_count": 125,
+  "transition_samples": [
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "as_of_date",
+      "metric_value_string": "2026-03-05",
+      "metric_value_string_after": "2026-03-06",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "btc_market_value_usd",
+      "metric_value_string": "462049670.33",
+      "metric_value_string_after": "447442667.83",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "btc_units",
+      "metric_value_string": "6288.24",
+      "metric_value_string_after": "6288.2",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "holdings_row_count",
+      "metric_value_string": "2",
+      "metric_value_string_after": "2",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "issuer",
+      "metric_value_string": "coinshares",
+      "metric_value_string_after": "coinshares",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "nav_per_share_usd",
+      "metric_value_string": "20.73",
+      "metric_value_string_after": "20.73",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "observed_at_utc",
+      "metric_value_string": "2026-03-05T00:00:00+00:00",
+      "metric_value_string_after": "2026-03-06T00:00:00+00:00",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "ticker",
+      "metric_value_string": "BRRR",
+      "metric_value_string_after": "BRRR",
+      "source_id": "etf_coinshares_brrr_daily"
+    },
+    {
+      "aligned_at_utc": "2026-03-05T00:00:00+00:00",
+      "aligned_at_utc_after": "2026-03-06T00:00:00+00:00",
+      "metric_name": "total_net_assets_usd",
+      "metric_value_string": "456454708.0",
+      "metric_value_string_after": "456454708.0",
+      "source_id": "etf_coinshares_brrr_daily"
+    }
+  ],
+  "window": {
+    "boundary": "2026-03-06T00:00:00Z",
+    "time_range": [
+      "2026-03-05T12:00:00Z",
+      "2026-03-07T12:00:00Z"
+    ]
+  }
+}

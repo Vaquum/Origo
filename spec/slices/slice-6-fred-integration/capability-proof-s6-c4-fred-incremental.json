@@ -1,0 +1,60 @@
+{
+  "as_of_date": "2024-03-31",
+  "generated_at_utc": "2026-03-07T07:13:14.169162+00:00",
+  "no_new_data_source_count": 0,
+  "no_new_data_sources": [],
+  "per_series": [
+    {
+      "cursor_date": "2024-01-01",
+      "effective_end": "2024-03-01",
+      "effective_start": "2024-01-01",
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "series_id": "CPIAUCSL",
+      "source_id": "fred_cpiaucsl",
+      "status": "updated"
+    },
+    {
+      "cursor_date": "2024-02-15",
+      "effective_end": "2024-03-29",
+      "effective_start": "2024-02-16",
+      "normalized_row_count": 31,
+      "observation_count": 31,
+      "series_id": "DGS10",
+      "source_id": "fred_dgs10",
+      "status": "updated"
+    },
+    {
+      "cursor_date": "2024-01-01",
+      "effective_end": "2024-03-01",
+      "effective_start": "2024-01-01",
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "series_id": "FEDFUNDS",
+      "source_id": "fred_fedfunds",
+      "status": "updated"
+    },
+    {
+      "cursor_date": "2024-01-01",
+      "effective_end": "2024-03-01",
+      "effective_start": "2024-01-01",
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "series_id": "UNRATE",
+      "source_id": "fred_unrate",
+      "status": "updated"
+    }
+  ],
+  "proof_scope": "Slice 6 S6-C4 incremental update path",
+  "registry_version": "2026-03-06-s6-c1",
+  "row_count": 40,
+  "rows_hash_sha256": "d2665db89f639c45ae0645cc620e82d31edbce0896cf224ce20527b78c224779",
+  "series_count": 4,
+  "updated_source_count": 4,
+  "updated_sources": [
+    "fred_cpiaucsl",
+    "fred_dgs10",
+    "fred_fedfunds",
+    "fred_unrate"
+  ]
+}

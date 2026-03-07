@@ -1,0 +1,104 @@
+{
+  "assertions": {
+    "audit_chain_valid": true,
+    "audit_transition_events_present": true,
+    "failure_classification_exposed": true,
+    "queue_backpressure_enforced": true,
+    "rights_gate_enforced": true
+  },
+  "audit": {
+    "chain_valid": true,
+    "event_count": 6,
+    "event_types": [
+      "export_submit_accepted",
+      "export_status_transition",
+      "export_status_transition",
+      "export_status_transition",
+      "export_submit_rejected",
+      "export_submit_rejected"
+    ],
+    "last_event_hash": "a5a42e9ffaa571e50dd444d7443ffc26daa2f771a8b542e612aef6ace46dcbe8",
+    "log_path": "/tmp/origo-s2-guardrails-proof/audit/export-events.jsonl"
+  },
+  "generated_at_utc": "2026-03-05T08:26:44.295922+00:00",
+  "proof_scope": "Slice 2 Guardrails (S2-G1/S2-G2/S2-G3)",
+  "results": {
+    "queue_rejection": {
+      "body": {
+        "detail": {
+          "code": "EXPORT_QUEUE_LIMIT_REACHED",
+          "message": "Export queue limit reached"
+        }
+      },
+      "status_code": 503
+    },
+    "rights_rejection": {
+      "body": {
+        "detail": {
+          "code": "EXPORT_RIGHTS_INGEST_ONLY",
+          "message": "Export is blocked for source=binance dataset=spot_trades: rights state is Ingest Only"
+        }
+      },
+      "status_code": 409
+    },
+    "status_failed": {
+      "body": {
+        "artifact": null,
+        "dataset": "spot_trades",
+        "error_code": "EXPORT_STRICT_MUTABLE_WINDOW",
+        "error_message": "strict=true export rejects mutable windows",
+        "export_id": "77777777-7777-4777-8777-777777777777",
+        "format": "parquet",
+        "mode": "native",
+        "status": "failed",
+        "submitted_at": "2026-03-05T10:01:00Z",
+        "updated_at": "2026-03-05T10:01:02Z"
+      },
+      "status_code": 200
+    },
+    "status_running": {
+      "body": {
+        "artifact": null,
+        "dataset": "spot_trades",
+        "error_code": null,
+        "error_message": null,
+        "export_id": "66666666-6666-4666-8666-666666666666",
+        "format": "parquet",
+        "mode": "native",
+        "status": "running",
+        "submitted_at": "2026-03-05T10:00:00Z",
+        "updated_at": "2026-03-05T10:00:05Z"
+      },
+      "status_code": 200
+    },
+    "status_success": {
+      "body": {
+        "artifact": {
+          "checksum_sha256": "e2fcf7175860e350b0941c0de8635d137b187e37f862a8a4cf0ab2ad0466eb79",
+          "format": "parquet",
+          "row_count": 2,
+          "uri": "/private/tmp/origo-s2-guardrails-proof/exports/66666666-6666-4666-8666-666666666666/raw_export.parquet"
+        },
+        "dataset": "spot_trades",
+        "error_code": null,
+        "error_message": null,
+        "export_id": "66666666-6666-4666-8666-666666666666",
+        "format": "parquet",
+        "mode": "native",
+        "status": "succeeded",
+        "submitted_at": "2026-03-05T10:00:00Z",
+        "updated_at": "2026-03-05T10:00:12Z"
+      },
+      "status_code": 200
+    },
+    "submit": {
+      "body": {
+        "export_id": "66666666-6666-4666-8666-666666666666",
+        "status": "queued",
+        "status_path": "/v1/raw/export/66666666-6666-4666-8666-666666666666",
+        "submitted_at": "2026-03-05T10:00:00Z"
+      },
+      "status_code": 202
+    }
+  }
+}

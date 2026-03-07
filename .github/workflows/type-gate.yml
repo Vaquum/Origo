@@ -1,0 +1,28 @@
+name: type-gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  type-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create and hydrate type-check venv
+        run: |
+          python -m venv control-plane/.venv
+          control-plane/.venv/bin/python -m pip install --upgrade pip
+          control-plane/.venv/bin/python -m pip install -e . -e control-plane pyright
+
+      - name: Run type gate
+        run: control-plane/.venv/bin/pyright

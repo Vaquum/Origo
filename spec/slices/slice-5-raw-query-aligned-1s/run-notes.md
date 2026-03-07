@@ -1,0 +1,426 @@
+# Slice 5 Raw Query Aligned 1s Run Notes
+
+## S5-C1 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C1` (implement Binance aligned-1s materialization definitions)
+- Capability changes:
+  - Added Binance aligned-1s materialization module:
+    - `origo/query/binance_aligned_1s.py`
+  - Added materialization definitions for all three Binance datasets:
+    - `spot_trades` -> `binance_trades`
+    - `spot_agg_trades` -> `binance_agg_trades`
+    - `futures_trades` -> `binance_futures_trades`
+  - Added deterministic aligned aggregation outputs per second:
+    - `aligned_at_utc`
+    - `open_price`
+    - `high_price`
+    - `low_price`
+    - `close_price`
+    - `quantity_sum`
+    - `quote_volume_sum`
+    - `trade_count`
+  - Added aligned query SQL compiler for window modes:
+    - `month_year`
+    - `time_range`
+    - `n_rows` (latest aligned seconds)
+    - `n_random` (deterministic hash sampling)
+  - Exported aligned module symbols in:
+    - `origo/query/__init__.py`
+  - Added capability proof runner:
+    - `origo/query/binance_aligned_s5_01_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.binance_aligned_s5_01_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c1-binance-aligned.json`
+- Validation results:
+  - `spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+  - `spot_agg_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+  - `futures_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse Binance raw tables.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - This step introduces internal aligned materialization definitions only; API aligned mode routing is pending `S5-C4` and `S5-C5`.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C1`
+  - no deployment-specific runtime values were hard-coded in aligned materialization paths
+- Completion confirmation:
+  - `S5-C1` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.28`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.28` entry
+  - `.env.example` reviewed; no `S5-C1` env additions required
+
+## S5-C2 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C2` (implement ETF aligned-1s materialization definitions)
+- Capability changes:
+  - Added ETF aligned-1s materialization module:
+    - `origo/query/etf_aligned_1s.py`
+  - Added ETF aligned definition for dataset:
+    - `etf_daily_metrics` -> `etf_daily_metrics_long`
+  - Added deterministic aligned output on second grid with source+metric keys:
+    - `aligned_at_utc`
+    - `source_id`
+    - `metric_name`
+    - `metric_unit`
+    - `metric_value_string`
+    - `metric_value_int`
+    - `metric_value_float`
+    - `metric_value_bool`
+    - `dimensions_json`
+    - `provenance_json`
+    - `latest_ingested_at_utc`
+    - `records_in_bucket`
+  - Added deterministic value selection rule per aligned bucket:
+    - value/unit/provenance/dimensions selected by `argMax(..., ingested_at_utc)`
+  - Added aligned SQL compiler for window modes:
+    - `month_year`
+    - `time_range`
+    - `n_rows`
+    - `n_random`
+  - Exported aligned module symbols in:
+    - `origo/query/__init__.py`
+  - Added capability proof runner:
+    - `origo/query/etf_aligned_s5_02_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.etf_aligned_s5_02_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c2-etf-aligned.json`
+- Validation results:
+  - aligned ETF rows in fixed window (`2026-03-04` .. `2026-03-07`): `125`
+  - source coverage in window: `10/10` expected ETF source IDs
+  - second-alignment and sort checks passed
+  - max merged rows per aligned bucket key (`records_in_bucket`): `3`
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse ETF canonical table.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - This step defines ETF aligned materialization only; forward-fill semantics are still pending `S5-C3`.
+  - Unified multi-source aligned planner/API path is still pending `S5-C4`/`S5-C5`.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C2`
+  - no deployment-specific runtime values were hard-coded in ETF aligned materialization paths
+- Completion confirmation:
+  - `S5-C2` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.29`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.29` entry
+  - `.env.example` reviewed; no `S5-C2` env additions required
+
+## S5-C3 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C3` (implement logical forward-fill for low-frequency ETF metrics)
+- Capability changes:
+  - Extended ETF aligned query module with logical forward-fill interval builder:
+    - `origo/query/etf_aligned_1s.py`
+  - Added prior-state query path (rows before window start) to support carry-in state:
+    - `_query_etf_aligned_prior_state(...)`
+  - Added interval construction path:
+    - `_build_etf_forward_fill_intervals(...)`
+    - `query_etf_forward_fill_intervals(...)`
+  - Added deterministic interval columns:
+    - `valid_from_utc`
+    - `valid_to_utc_exclusive`
+  - Tightened prior-state selection ordering to use `(observed_at_utc, ingested_at_utc)` rank semantics.
+  - Exported forward-fill query function via:
+    - `origo/query/__init__.py`
+  - Added capability proof runner:
+    - `origo/query/etf_forward_fill_s5_03_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.etf_forward_fill_s5_03_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c3-etf-forward-fill.json`
+- Validation results:
+  - forward-fill rows in fixed window (`2026-03-05T12:00:00Z` .. `2026-03-07T12:00:00Z`): `125`
+  - source coverage in window: `10/10` expected ETF source IDs
+  - interval ordering and non-overlap checks passed for every `(source_id, metric_name)` group
+  - carry-in at window start detected (`window_start_carry_count=116`)
+  - clipping at window end detected (`window_end_clip_count=116`)
+  - UTC day-boundary transition checks passed (`utc_day_boundary_start_count=9`, `utc_day_boundary_end_count=9`)
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse ETF canonical table.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - This step implements forward-fill interval semantics only; unified aligned planner path is still pending `S5-C4`.
+  - API aligned response envelope/route integration remains pending `S5-C5`.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C3`
+  - no deployment-specific runtime values were hard-coded in forward-fill paths
+- Completion confirmation:
+  - `S5-C3` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.30`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.30` entry
+  - `.env.example` reviewed; no `S5-C3` env additions required
+
+## S5-C4 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C4` (implement unified aligned query planner path)
+- Capability changes:
+  - Added unified aligned planner module:
+    - `origo/query/aligned_core.py`
+  - Added typed planner contract and dispatch:
+    - `AlignedQueryPlan`
+    - `build_aligned_query_plan(...)`
+    - `query_aligned_data(...)`
+  - Added unified execution-path mapping:
+    - Binance datasets -> `binance_aligned`
+    - ETF `time_range`/`month_year` -> `etf_aligned_forward_fill`
+    - ETF `n_rows`/`n_random` -> `etf_aligned_observation`
+  - Added strict aligned projection validation:
+    - dataset allowlists
+    - fail-loud on unsupported fields
+    - fail-loud when field is valid but unavailable in selected planner path
+  - Added generic endpoint adapter for aligned planner:
+    - `origo/data/_internal/generic_endpoints.py` (`query_aligned(...)`)
+  - Exported aligned planner symbols:
+    - `origo/query/__init__.py`
+  - Added capability proof runner:
+    - `origo/query/aligned_planner_s5_04_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.aligned_planner_s5_04_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c4-aligned-planner.json`
+- Validation results:
+  - planner proof cases passed across Binance + ETF with deterministic rows and schema:
+    - `binance_spot_time_range` (`execution_path=binance_aligned`, rows=`75`)
+    - `binance_futures_latest_rows` (`execution_path=binance_aligned`, rows=`15`)
+    - `etf_time_range_forward_fill` (`execution_path=etf_aligned_forward_fill`, rows=`125`)
+    - `etf_latest_rows_observation` (`execution_path=etf_aligned_observation`, rows=`25`)
+  - projection enforcement passed for all cases (returned columns exactly matched requested projections).
+  - deterministic sort checks and second-grid datetime alignment checks passed.
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse Binance/ETF canonical tables.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - HTTP aligned response envelope and API mode wiring are still pending `S5-C5`.
+  - Aligned export wiring is still pending `S5-C6` and `S5-C7`.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C4`
+  - no deployment-specific runtime values were hard-coded in aligned planner paths
+- Completion confirmation:
+  - `S5-C4` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.31`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.31` entry
+  - `.env.example` reviewed; no `S5-C4` env additions required
+
+## S5-C5 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C5` (implement aligned-mode response envelope and schema metadata)
+- Capability changes:
+  - Added aligned envelope adapter:
+    - `origo/data/_internal/generic_endpoints.py`
+    - new function: `query_aligned_wide_rows_envelope(...)`
+    - envelope mode fixed to `aligned_1s`
+  - Extended raw query API request/response contracts:
+    - `api/origo_api/schemas.py`
+    - added `RawQueryMode = Literal['native', 'aligned_1s']`
+    - added `mode` field to `RawQueryRequest` (default `native`)
+    - tightened `RawQueryResponse.mode` typing to `RawQueryMode`
+    - split export mode typing (`RawExportMode = Literal['native']`) to avoid premature aligned export surface
+  - Wired `/v1/raw/query` mode dispatch:
+    - `api/origo_api/main.py`
+    - `mode=native` -> `query_native_wide_rows_envelope(...)`
+    - `mode=aligned_1s` -> `query_aligned_wide_rows_envelope(...)`
+  - Added capability proof runner:
+    - `origo/query/aligned_envelope_s5_05_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow --with fastapi --with pydantic python -m origo.query.aligned_envelope_s5_05_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c5-aligned-envelope.json`
+- Validation results:
+  - aligned envelope proofs passed for Binance + ETF aligned cases:
+    - `binance_spot_aligned_envelope`: rows=`75`
+    - `etf_forward_fill_aligned_envelope`: rows=`125`
+  - envelope `mode` validated as `aligned_1s` in both cases.
+  - schema metadata order/names validated against requested projection fields.
+  - `RawQueryResponse` model validation passed for aligned envelopes.
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse Binance/ETF canonical tables.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - Aligned exports remain pending `S5-C6` and `S5-C7`.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C5`
+  - no deployment-specific runtime values were hard-coded in aligned response paths
+- Completion confirmation:
+  - `S5-C5` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.32`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.32` entry
+  - `.env.example` reviewed; no `S5-C5` env additions required
+
+## S5-C6 and S5-C7 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C6` and `S5-C7` (enable aligned-mode export in Parquet and CSV)
+- Capability changes:
+  - Extended export contracts to accept aligned mode:
+    - `api/origo_api/schemas.py`
+    - `RawExportMode = Literal['native', 'aligned_1s']`
+    - export dataset typing widened to `RawQueryDataset`
+  - Extended export metadata/status parsing for aligned mode:
+    - `api/origo_api/main.py`
+    - `_read_export_tags(...)` now accepts `mode=aligned_1s` and dataset `etf_daily_metrics`
+  - Extended export rights typing to dataset-level query universe while keeping fail-closed behavior:
+    - `api/origo_api/rights.py`
+    - export rights now evaluate `RawQueryDataset`
+    - ingest-only and BYOK checks are enforced before source ambiguity checks
+  - Extended Dagster export worker to execute aligned exports:
+    - `control-plane/origo_control_plane/jobs/raw_export_native.py`
+    - added `mode=aligned_1s` query path using `query_aligned_data(...)`
+    - retained existing native path and strict mutable-window guard
+  - Added aligned export proof harness:
+    - `control-plane/origo_control_plane/aligned_export_s5_06_07_proof.py`
+- Validation command:
+  - `cd control-plane && PYTHONPATH=.. CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run python -m origo_control_plane.aligned_export_s5_06_07_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c6-c7-aligned-export.json`
+- Validation results:
+  - aligned export parity suite passed for both formats:
+    - `parity_match_by_format.parquet = true`
+    - `parity_match_by_format.csv = true`
+  - validated case matrix:
+    - `spot_trades` aligned time-range export (`parquet` and `csv`) with row parity (`75`)
+    - `etf_daily_metrics` aligned time-range export (`parquet` and `csv`) with row parity (`125`)
+  - metadata contract checks passed (`mode`, `format`, `checksum_sha256`, artifact path existence).
+- System changes made as a side effect of proof run:
+  - Read-only query access to local ClickHouse.
+  - Temporary Dagster export artifacts created under temp directories by proof harness.
+  - No schema migrations or persistent writes were performed.
+- Known warnings:
+  - Slice 5 capability stage is complete (`S5-C1..S5-C7`), proof stage `S5-P1..S5-P3` still pending.
+- Environment contract check:
+  - no new environment variables introduced in `S5-C6/S5-C7`
+  - no deployment-specific runtime values were hard-coded in aligned export paths
+- Completion confirmation:
+  - `S5-C6` and `S5-C7` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.33`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.33` entry
+  - `.env.example` reviewed; no `S5-C6/S5-C7` env additions required
+
+## S5-P1, S5-P2, and S5-P3 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-P1`, `S5-P2`, `S5-P3` (aligned acceptance, determinism, and UTC boundary semantics)
+- Proof harnesses added:
+  - `origo/query/aligned_s5_p1_acceptance_proof.py`
+  - `origo/query/aligned_s5_p2_determinism_proof.py`
+  - `origo/query/aligned_s5_p3_boundary_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.aligned_s5_p1_acceptance_proof`
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.aligned_s5_p2_determinism_proof`
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.aligned_s5_p3_boundary_proof`
+- Validation artifacts:
+  - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p1-acceptance.json`
+  - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p2-determinism.json`
+  - `spec/slices/slice-5-raw-query-aligned-1s/proof-s5-p3-boundary.json`
+- Validation results:
+  - `S5-P1` acceptance:
+    - `4` aligned scenarios passed across Binance + ETF windows
+    - covered both planner paths (`binance_aligned`, `etf_aligned_forward_fill`, `etf_aligned_observation`)
+  - `S5-P2` determinism:
+    - fixed-window replay deterministic for all cases (`deterministic_match_all=true`)
+    - spot aligned and ETF forward-fill hashes matched exactly across run 1 and run 2
+  - `S5-P3` UTC boundary semantics:
+    - boundary transition checks passed (`boundary_end_count=9`, `boundary_start_count=9`)
+    - one-to-one source+metric transition mapping at boundary verified (`boundary_transition_count=9`)
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse Binance/ETF tables.
+  - No schema migrations or writes were performed.
+- Known warnings:
+  - Slice 5 guardrail stage (`S5-G1..S5-G6`) remains pending.
+- Environment contract check:
+  - no new environment variables introduced in `S5-P1..S5-P3`
+  - no deployment-specific runtime values were hard-coded in proof harnesses
+- Completion confirmation:
+  - `S5-P1`, `S5-P2`, `S5-P3` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.34`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.34` entry
+  - `.env.example` reviewed; no `S5-P1..S5-P3` env additions required
+
+## S5-G1, S5-G2, S5-G3, and S5-G4 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-G1`, `S5-G2`, `S5-G3`, `S5-G4` (aligned strict/warnings, freshness, limits, and export rights/audit)
+- Guardrail changes:
+  - Applied aligned strict/warning policy in API query route:
+    - `api/origo_api/main.py`
+    - strict mode now enforces aligned warnings using existing `STRICT_MODE_WARNING_FAILURE` contract
+  - Added aligned freshness metadata + stale warning:
+    - `api/origo_api/schemas.py` (`RawQueryFreshness`, response `freshness` field)
+    - `api/origo_api/main.py` (`ALIGNED_FRESHNESS_STALE` warning and freshness metadata generation)
+    - new required env contract:
+      - `ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS`
+  - Added aligned-specific query queue/concurrency controls:
+    - `api/origo_api/main.py`
+    - new required env contracts:
+      - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
+      - `ORIGO_ALIGNED_QUERY_MAX_QUEUE`
+    - queue-limit error contract:
+      - `ALIGNED_QUERY_QUEUE_LIMIT_REACHED`
+  - Added aligned export rights/audit coverage:
+    - `api/origo_api/schemas.py` (aligned export mode support)
+    - `api/origo_api/main.py` and `api/origo_api/rights.py` (aligned export mode + dataset rights typing)
+    - `control-plane/origo_control_plane/jobs/raw_export_native.py` (aligned export execution path)
+  - Added aligned guardrail proof harness:
+    - `api/origo_api/s5_g1_g4_aligned_guardrails_proof.py`
+- Validation command:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with fastapi --with httpx --with clickhouse-connect --with polars --with pyarrow python -m api.origo_api.s5_g1_g4_aligned_guardrails_proof`
+- Validation artifact:
+  - `spec/slices/slice-5-raw-query-aligned-1s/guardrails-proof-s5-g1-g4.json`
+- Validation results:
+  - `S5-G1`: strict aligned query with mutable window rejected (`409`, `STRICT_MODE_WARNING_FAILURE`)
+  - `S5-G2`: aligned freshness metadata present and stale warning emitted (`ALIGNED_FRESHNESS_STALE`)
+  - `S5-G3`: aligned queue limit enforced (`503`, `ALIGNED_QUERY_QUEUE_LIMIT_REACHED`)
+  - `S5-G4`: aligned export rights blocked for ingest-only dataset (`409`, `EXPORT_RIGHTS_INGEST_ONLY`) and audit event captured with `mode=aligned_1s`
+- System changes made as a side effect of proof run:
+  - Read-only ClickHouse queries.
+  - Temporary proof-local rights matrix, legal signoff artifact, and export audit log under temporary directories.
+  - No schema migrations or persistent writes were performed.
+- Known warnings:
+  - Slice 5 developer/user documentation closeout (`S5-G5`, `S5-G6`) remains pending.
+- Environment contract check:
+  - `.env.example` updated with:
+    - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
+    - `ORIGO_ALIGNED_QUERY_MAX_QUEUE`
+    - `ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS`
+  - no deployment-specific runtime values were hard-coded in aligned guardrail paths
+- Completion confirmation:
+  - `S5-G1..S5-G4` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.35`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.35` entry
+  - `.env.example` updated and validated for new aligned guardrail env vars
+
+## S5-G5 and S5-G6 run notes
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-G5` and `S5-G6` (developer and user docs closeout)
+- Documentation updates:
+  - Developer docs:
+    - `docs/Developer/s5-aligned-query-export-guardrails.md`
+    - covers aligned planner/export contracts, field definitions, freshness, error taxonomy, determinism, env contract, and examples
+  - User docs:
+    - `docs/aligned-reference.md`
+    - updated `docs/raw-query-reference.md`
+    - updated `docs/raw-export-reference.md`
+    - updated `docs/data-taxonomy.md`
+    - aligned mode taxonomy, field semantics, warnings, freshness metadata, export behavior, and rights constraints now documented
+- Baseline fixture artifact (slice requirement):
+  - `spec/slices/slice-5-raw-query-aligned-1s/baseline-fixture-2017-08-17_2026-03-05-2026-03-07.json`
+  - includes fixture windows, day fingerprints, run1/run2 fingerprints, deterministic match flag, and column key
+- System changes made as a side effect:
+  - documentation-only edits and baseline fixture generation queries
+  - no schema migrations or runtime behavior changes in this step
+- Known warnings:
+  - none; Slice 5 checklist is fully complete
+- Environment contract check:
+  - `.env.example` remains current for all Slice 5 vars, including aligned guardrail vars
+  - no deployment-specific runtime values were hard-coded in documentation/baseline outputs
+- Completion confirmation:
+  - `S5-G5` and `S5-G6` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.36`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.36` entry
+  - `.env.example` reviewed and remains up to date

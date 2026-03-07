@@ -1,0 +1,56 @@
+{
+  "artifact_files": {
+    "artifact_exists": true,
+    "artifact_path": "/private/tmp/origo-s2p1-exports/11111111-1111-4111-8111-111111111111/raw_export.parquet",
+    "metadata_exists": true,
+    "metadata_path": "/tmp/origo-s2p1-exports/11111111-1111-4111-8111-111111111111/metadata.json"
+  },
+  "case_id": "native_parquet_spot_trades_month_2017_08",
+  "generated_at_utc": "2026-03-05T08:02:54.483958+00:00",
+  "lifecycle_valid": true,
+  "poll_running": {
+    "body": {
+      "artifact": null,
+      "dataset": "spot_trades",
+      "error_code": null,
+      "error_message": null,
+      "export_id": "11111111-1111-4111-8111-111111111111",
+      "format": "parquet",
+      "mode": "native",
+      "status": "running",
+      "submitted_at": "2026-03-05T07:45:00Z",
+      "updated_at": "2026-03-05T07:45:05Z"
+    },
+    "status_code": 200
+  },
+  "poll_success": {
+    "body": {
+      "artifact": {
+        "checksum_sha256": "c8a2b32378dfd362e50f3c5c8f141f762fd0e91135a61a5127734cfe040a88a1",
+        "format": "parquet",
+        "row_count": 3,
+        "uri": "/private/tmp/origo-s2p1-exports/11111111-1111-4111-8111-111111111111/raw_export.parquet"
+      },
+      "dataset": "spot_trades",
+      "error_code": null,
+      "error_message": null,
+      "export_id": "11111111-1111-4111-8111-111111111111",
+      "format": "parquet",
+      "mode": "native",
+      "status": "succeeded",
+      "submitted_at": "2026-03-05T07:45:00Z",
+      "updated_at": "2026-03-05T07:45:12Z"
+    },
+    "status_code": 200
+  },
+  "proof_scope": "Slice 2 P1 submit->poll->artifact lifecycle",
+  "submit": {
+    "body": {
+      "export_id": "11111111-1111-4111-8111-111111111111",
+      "status": "queued",
+      "status_path": "/v1/raw/export/11111111-1111-4111-8111-111111111111",
+      "submitted_at": "2026-03-05T07:45:00Z"
+    },
+    "status_code": 202
+  }
+}

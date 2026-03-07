@@ -1,0 +1,46 @@
+{
+  "generated_at_utc": "2026-03-07T07:13:07.203817+00:00",
+  "per_series": [
+    {
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "observation_end": "2024-03-01",
+      "observation_start": "2024-01-01",
+      "series_id": "CPIAUCSL",
+      "source_id": "fred_cpiaucsl"
+    },
+    {
+      "normalized_row_count": 65,
+      "observation_count": 65,
+      "observation_end": "2024-03-29",
+      "observation_start": "2024-01-01",
+      "series_id": "DGS10",
+      "source_id": "fred_dgs10"
+    },
+    {
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "observation_end": "2024-03-01",
+      "observation_start": "2024-01-01",
+      "series_id": "FEDFUNDS",
+      "source_id": "fred_fedfunds"
+    },
+    {
+      "normalized_row_count": 3,
+      "observation_count": 3,
+      "observation_end": "2024-03-01",
+      "observation_start": "2024-01-01",
+      "series_id": "UNRATE",
+      "source_id": "fred_unrate"
+    }
+  ],
+  "proof_scope": "Slice 6 S6-C3 historical backfill path",
+  "registry_version": "2026-03-06-s6-c1",
+  "row_count": 74,
+  "rows_hash_sha256": "ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e",
+  "series_count": 4,
+  "window": {
+    "observation_end": "2024-03-31",
+    "observation_start": "2024-01-01"
+  }
+}

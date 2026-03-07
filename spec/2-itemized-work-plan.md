@@ -19,7 +19,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S0-C3` Rename package/module identifiers from TDW naming to Origo naming.
 - [x] `S0-C4` Update Python project metadata and import paths.
 - [x] `S0-C5` Ensure existing Binance historical ingestion runs from monorepo.
-- [ ] `S0-C6` Wire local infra config for ClickHouse + Dagster + PostgreSQL metadata.
+- [ ] `S0-C6` Wire local infra config for ClickHouse + Dagster + persistent SQLite metadata.
 
 ### Proof
 - [x] `S0-P1` Run fixed Binance fixture window ingestion and capture baseline artifacts.
@@ -35,6 +35,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S0-G6` Enforce env contract (`.env.example` source of truth + fail-loud required vars + no deployment defaults in runtime paths).
 - [ ] `S0-G7` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [ ] `S0-G8` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S0-G9` Add CI hard quality gates (repo-wide `ruff`, strict `pyright`, and integrity tests on pull requests).
+- [x] `S0-G10` Implement exchange integrity suite in Binance ingestion paths (schema/type, sequence-gap, anomaly checks).
 
 ## Slice 1: Raw Query API (`mode=native`) Minimal Path
 
@@ -58,136 +60,136 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S1-G3` Implement structured warnings envelope.
 - [x] `S1-G4` Implement `strict=true` fail behavior.
 - [x] `S1-G5` Add concurrency and queue limits for query execution.
-- [ ] `S1-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S1-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S1-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S1-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 2: Raw Export API (`mode=native`) via Dagster
 
 ### Capability
-- [ ] `S2-C1` Define `/v1/raw/export` submit and status contracts.
-- [ ] `S2-C2` Implement API endpoint that submits Dagster export run.
-- [ ] `S2-C3` Implement export status endpoint with run-state mapping.
-- [ ] `S2-C4` Implement Parquet export path for native mode.
-- [ ] `S2-C5` Implement CSV export path for native mode.
-- [ ] `S2-C6` Persist artifact metadata and retrieval pointers.
+- [x] `S2-C1` Define `/v1/raw/export` submit and status contracts.
+- [x] `S2-C2` Implement API endpoint that submits Dagster export run.
+- [x] `S2-C3` Implement export status endpoint with run-state mapping.
+- [x] `S2-C4` Implement Parquet export path for native mode.
+- [x] `S2-C5` Implement CSV export path for native mode.
+- [x] `S2-C6` Persist artifact metadata and retrieval pointers.
 
 ### Proof
-- [ ] `S2-P1` Validate submit -> poll -> artifact metadata lifecycle.
-- [ ] `S2-P2` Verify deterministic export artifacts on fixed windows.
-- [ ] `S2-P3` Verify export parity against query results for same window.
+- [x] `S2-P1` Validate submit -> poll -> artifact metadata lifecycle.
+- [x] `S2-P2` Verify deterministic export artifacts on fixed windows.
+- [x] `S2-P3` Verify export parity against query results for same window.
 
 ### Guardrails
-- [ ] `S2-G1` Enforce source rights gate before export run execution.
-- [ ] `S2-G2` Add immutable audit events for export lifecycle transitions.
-- [ ] `S2-G3` Add export queue backpressure and failure classification.
-- [ ] `S2-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S2-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S2-G1` Enforce source rights gate before export run execution.
+- [x] `S2-G2` Add immutable audit events for export lifecycle transitions.
+- [x] `S2-G3` Add export queue backpressure and failure classification.
+- [x] `S2-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S2-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 3: Generic Scraper Platform
 
 ### Capability
-- [ ] `S3-C1` Define scraper adapter interface: `discover_sources`, `fetch`, `parse`, `normalize`.
-- [ ] `S3-C2` Define normalized long-metric schema contract.
-- [ ] `S3-C3` Define provenance metadata schema.
-- [ ] `S3-C4` Implement shared HTTP fetch module.
-- [ ] `S3-C5` Implement browser fallback fetch module.
-- [ ] `S3-C6` Implement parser for HTML (`lxml` + `BeautifulSoup`).
-- [ ] `S3-C7` Implement parser for CSV.
-- [ ] `S3-C8` Implement parser for JSON.
-- [ ] `S3-C9` Implement deterministic PDF parser path.
-- [ ] `S3-C10` Implement raw artifact persistence to object storage (always on).
-- [ ] `S3-C11` Implement normalization pipeline to long-metric records.
-- [ ] `S3-C12` Implement persistence of normalized records to ClickHouse staging.
+- [x] `S3-C1` Define scraper adapter interface: `discover_sources`, `fetch`, `parse`, `normalize`.
+- [x] `S3-C2` Define normalized long-metric schema contract.
+- [x] `S3-C3` Define provenance metadata schema.
+- [x] `S3-C4` Implement shared HTTP fetch module.
+- [x] `S3-C5` Implement browser fallback fetch module.
+- [x] `S3-C6` Implement parser for HTML (`lxml` + `BeautifulSoup`).
+- [x] `S3-C7` Implement parser for CSV.
+- [x] `S3-C8` Implement parser for JSON.
+- [x] `S3-C9` Implement deterministic PDF parser path.
+- [x] `S3-C10` Implement raw artifact persistence to object storage (always on).
+- [x] `S3-C11` Implement normalization pipeline to long-metric records.
+- [x] `S3-C12` Implement persistence of normalized records to ClickHouse staging.
 
 ### Proof
-- [ ] `S3-P1` Run end-to-end pipeline on one sample target.
-- [ ] `S3-P2` Replay sample target inputs and verify deterministic normalized outputs.
-- [ ] `S3-P3` Validate raw artifact + provenance completeness for replayability.
+- [x] `S3-P1` Run end-to-end pipeline on one sample target.
+- [x] `S3-P2` Replay sample target inputs and verify deterministic normalized outputs.
+- [x] `S3-P3` Validate raw artifact + provenance completeness for replayability.
 
 ### Guardrails
-- [ ] `S3-G1` Standardize adapter error taxonomy and failure codes.
-- [ ] `S3-G2` Add retry/backoff framework hooks.
-- [ ] `S3-G3` Add rights lookup hook (fail-closed on missing rights state).
-- [ ] `S3-G4` Add audit events for scrape runs and normalization outcomes.
-- [ ] `S3-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S3-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S3-G1` Standardize adapter error taxonomy and failure codes.
+- [x] `S3-G2` Add retry/backoff framework hooks.
+- [x] `S3-G3` Add rights lookup hook (fail-closed on missing rights state).
+- [x] `S3-G4` Add audit events for scrape runs and normalization outcomes.
+- [x] `S3-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S3-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 4: ETF Use Case on Scraper Platform (All 10 Issuers)
 
 ### Capability
-- [ ] `S4-C1` Implement adapters for ETF issuers 1-3.
-- [ ] `S4-C2` Implement adapters for ETF issuers 4-7.
-- [ ] `S4-C3` Implement adapters for ETF issuers 8-10.
-- [ ] `S4-C4` Map issuer fields into normalized ETF daily metric schema.
-- [ ] `S4-C5` Normalize all ETF records to UTC daily semantics.
-- [ ] `S4-C6` Implement canonical daily load into ClickHouse long-metric table.
-- [ ] `S4-C7` Implement full available-history backfill per issuer.
-- [ ] `S4-C8` Expose ETF fields through native raw query mode.
+- [x] `S4-C1` Implement adapters for ETF issuers 1-3.
+- [x] `S4-C2` Implement adapters for ETF issuers 4-7.
+- [x] `S4-C3` Implement adapters for ETF issuers 8-10.
+- [x] `S4-C4` Map issuer fields into normalized ETF daily metric schema.
+- [x] `S4-C5` Normalize all ETF records to UTC daily semantics.
+- [x] `S4-C6` Implement canonical daily load into ClickHouse long-metric table.
+- [x] `S4-C7` Implement full available-history backfill per issuer.
+- [x] `S4-C8` Expose ETF fields through native raw query mode.
 
 ### Proof
-- [ ] `S4-P1` Execute 10-issuer daily parity proof window against official issuer sources.
-- [ ] `S4-P2` Enforce proof threshold: >=99.5% parity on mandatory metrics.
-- [ ] `S4-P3` Replay proof window ingestion and verify deterministic outputs.
-- [ ] `S4-P4` Verify raw artifact/provenance references for all proof-window records.
+- [x] `S4-P1` Execute 10-issuer daily parity proof window against official issuer sources.
+- [x] `S4-P2` Enforce proof threshold: >=99.5% parity on mandatory metrics.
+- [x] `S4-P3` Replay proof window ingestion and verify deterministic outputs.
+- [x] `S4-P4` Verify raw artifact/provenance references for all proof-window records.
 
 ### Guardrails
-- [ ] `S4-G1` Enforce legal sign-off artifact requirement before external serving/export.
-- [ ] `S4-G2` Enforce rights matrix checks in ingestion and API paths.
-- [ ] `S4-G3` Add daily run schedule.
-- [ ] `S4-G4` Add 24h same-day retry window behavior.
-- [ ] `S4-G5` Add shadow-then-promote gating for serving enablement.
-- [ ] `S4-G6` Add warning generation for stale/missing/incomplete daily records.
-- [ ] `S4-G7` Add logs + Discord alerts for ETF ingestion anomalies.
-- [ ] `S4-G8` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S4-G9` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S4-G1` Enforce legal sign-off artifact requirement before external serving/export.
+- [x] `S4-G2` Enforce rights matrix checks in ingestion and API paths.
+- [x] `S4-G3` Add daily run schedule.
+- [x] `S4-G4` Add 24h same-day retry window behavior.
+- [x] `S4-G5` Add shadow-then-promote gating for serving enablement.
+- [x] `S4-G6` Add warning generation for stale/missing/incomplete daily records.
+- [x] `S4-G7` Add logs + Discord alerts for ETF ingestion anomalies.
+- [x] `S4-G8` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S4-G9` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 5: Raw Query `mode=aligned_1s` (Binance + ETF)
 
 ### Capability
-- [ ] `S5-C1` Implement Binance aligned-1s materialization definitions.
-- [ ] `S5-C2` Implement ETF aligned-1s materialization definitions.
-- [ ] `S5-C3` Implement logical forward-fill for low-frequency ETF metrics.
-- [ ] `S5-C4` Implement unified aligned query planner path.
-- [ ] `S5-C5` Implement aligned-mode response envelope and schema metadata.
-- [ ] `S5-C6` Enable aligned-mode export in Parquet.
-- [ ] `S5-C7` Enable aligned-mode export in CSV.
+- [x] `S5-C1` Implement Binance aligned-1s materialization definitions.
+- [x] `S5-C2` Implement ETF aligned-1s materialization definitions.
+- [x] `S5-C3` Implement logical forward-fill for low-frequency ETF metrics.
+- [x] `S5-C4` Implement unified aligned query planner path.
+- [x] `S5-C5` Implement aligned-mode response envelope and schema metadata.
+- [x] `S5-C6` Enable aligned-mode export in Parquet.
+- [x] `S5-C7` Enable aligned-mode export in CSV.
 
 ### Proof
-- [ ] `S5-P1` Execute aligned acceptance scenarios across Binance + ETF windows.
-- [ ] `S5-P2` Replay aligned windows and verify deterministic outputs.
-- [ ] `S5-P3` Validate forward-fill semantics on UTC day boundaries.
+- [x] `S5-P1` Execute aligned acceptance scenarios across Binance + ETF windows.
+- [x] `S5-P2` Replay aligned windows and verify deterministic outputs.
+- [x] `S5-P3` Validate forward-fill semantics on UTC day boundaries.
 
 ### Guardrails
-- [ ] `S5-G1` Apply strict/warning policy to aligned-mode responses.
-- [ ] `S5-G2` Add freshness metadata and warning generation for aligned mode.
-- [ ] `S5-G3` Add resource limits and queue controls for aligned queries.
-- [ ] `S5-G4` Add aligned export audit and rights checks.
-- [ ] `S5-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S5-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S5-G1` Apply strict/warning policy to aligned-mode responses.
+- [x] `S5-G2` Add freshness metadata and warning generation for aligned mode.
+- [x] `S5-G3` Add resource limits and queue controls for aligned queries.
+- [x] `S5-G4` Add aligned export audit and rights checks.
+- [x] `S5-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S5-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 6: FRED Integration
 
 ### Capability
-- [ ] `S6-C1` Implement FRED series connector and metadata fetch.
-- [ ] `S6-C2` Normalize FRED records into long-metric schema.
-- [ ] `S6-C3` Implement historical backfill path.
-- [ ] `S6-C4` Implement incremental update path.
-- [ ] `S6-C5` Persist native FRED data to ClickHouse and raw artifacts to object store.
-- [ ] `S6-C6` Expose FRED through native raw query mode.
-- [ ] `S6-C7` Integrate FRED into aligned-1s materialization path.
+- [x] `S6-C1` Implement FRED series connector and metadata fetch.
+- [x] `S6-C2` Normalize FRED records into long-metric schema.
+- [x] `S6-C3` Implement historical backfill path.
+- [x] `S6-C4` Implement incremental update path.
+- [x] `S6-C5` Persist native FRED data to ClickHouse and raw artifacts to object store.
+- [x] `S6-C6` Expose FRED through native raw query mode.
+- [x] `S6-C7` Integrate FRED into aligned-1s materialization path.
 
 ### Proof
-- [ ] `S6-P1` Execute acceptance scenarios for FRED native and aligned paths.
-- [ ] `S6-P2` Replay fixed windows and verify deterministic outputs.
-- [ ] `S6-P3` Validate metadata/version reproducibility for replay.
+- [x] `S6-P1` Execute acceptance scenarios for FRED native and aligned paths.
+- [x] `S6-P2` Replay fixed windows and verify deterministic outputs.
+- [x] `S6-P3` Validate metadata/version reproducibility for replay.
 
 ### Guardrails
-- [ ] `S6-G1` Enforce rights classification and legal gating.
-- [ ] `S6-G2` Add freshness checks based on source publish timestamps.
-- [ ] `S6-G3` Add shadow-then-promote gating.
-- [ ] `S6-G4` Add FRED alerts and audit-event coverage.
-- [ ] `S6-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S6-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S6-G1` Enforce rights classification and legal gating.
+- [x] `S6-G2` Add freshness checks based on source publish timestamps.
+- [x] `S6-G3` Add shadow-then-promote gating.
+- [x] `S6-G4` Add FRED alerts and audit-event coverage.
+- [x] `S6-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S6-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ---
 
@@ -207,8 +209,8 @@ Action: Rename TDW modules to Origo names.
 Done looks like: imports and startup pass.
 Constraints: rename-only.
 4. `S0-04`
-Action: Wire local ClickHouse + Dagster + Postgres.
-Done looks like: services boot and connect.
+Action: Wire local ClickHouse + Dagster + persistent SQLite metadata.
+Done looks like: services boot, metadata persists across restarts, and Dagster reconnects cleanly.
 Constraints: no new feature work.
 5. `S0-05`
 Action: Execute Binance fixture baseline.
@@ -242,6 +244,14 @@ Constraints: documentation only; no feature changes.
 Action: User docs closeout for Slice 0.
 Done looks like: `docs/` contains updated user-facing reference and taxonomy for currently available platform capabilities.
 Constraints: documentation only; no feature changes.
+13. `S0-13`
+Action: Add CI hard quality gates.
+Done looks like: pull-request workflow enforces repo-wide `ruff`, strict `pyright`, and integrity tests.
+Constraints: quality gate only; no capability expansion.
+14. `S0-14`
+Action: Implement exchange integrity suite in Binance ingestion paths.
+Done looks like: ingestion fails loudly on schema/type mismatches, ID sequence gaps, and anomaly checks before write.
+Constraints: guardrail only; no source expansion.
 
 ## Slice 1 Sub-Slices
 1. `S1-01`

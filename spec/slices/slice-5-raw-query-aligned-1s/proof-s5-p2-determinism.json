@@ -1,0 +1,42 @@
+{
+  "case_count": 2,
+  "cases": [
+    {
+      "case_id": "spot_trades_fixed_window",
+      "dataset": "spot_trades",
+      "deterministic_match": true,
+      "run_1": {
+        "row_count": 75,
+        "rows_hash_sha256": "9e735d6bc4ef1b9dacc0d67bbacaf5830955192c8b2bc43766943e4b9d541729"
+      },
+      "run_2": {
+        "row_count": 75,
+        "rows_hash_sha256": "9e735d6bc4ef1b9dacc0d67bbacaf5830955192c8b2bc43766943e4b9d541729"
+      },
+      "window": {
+        "end_iso": "2017-08-17T13:00:00Z",
+        "start_iso": "2017-08-17T12:00:00Z"
+      }
+    },
+    {
+      "case_id": "etf_forward_fill_fixed_window",
+      "dataset": "etf_daily_metrics",
+      "deterministic_match": true,
+      "run_1": {
+        "row_count": 125,
+        "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28"
+      },
+      "run_2": {
+        "row_count": 125,
+        "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28"
+      },
+      "window": {
+        "end_iso": "2026-03-07T12:00:00Z",
+        "start_iso": "2026-03-05T12:00:00Z"
+      }
+    }
+  ],
+  "deterministic_match_all": true,
+  "generated_at_utc": "2026-03-06T17:49:38.553654+00:00",
+  "proof_scope": "Slice 5 P2 aligned replay determinism on fixed windows"
+}

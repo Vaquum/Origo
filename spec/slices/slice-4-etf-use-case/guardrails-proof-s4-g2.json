@@ -1,0 +1,14 @@
+{
+  "api_query_ingest_only_error_code": "QUERY_RIGHTS_INGEST_ONLY",
+  "api_query_ingest_only_http_status": 409,
+  "export_byok_required_error_code": "EXPORT_RIGHTS_BYOK_REQUIRED",
+  "export_hosted_allowed_passed": true,
+  "proof_scope": "Slice 4 S4-G2 rights matrix enforcement in ingestion and API paths",
+  "query_byok_required_error_code": "QUERY_RIGHTS_BYOK_REQUIRED",
+  "query_hosted_allowed_passed": true,
+  "query_ingest_only_error_code": "QUERY_RIGHTS_INGEST_ONLY",
+  "query_missing_state_error_code": "QUERY_RIGHTS_MISSING_STATE",
+  "scraper_missing_source_id_contract_error_code": "SCRAPER_RIGHTS_SOURCE_ID_UNCLASSIFIED",
+  "scraper_source_id_check_passed": true,
+  "scraper_unclassified_source_id_error_code": "SCRAPER_RIGHTS_SOURCE_ID_UNCLASSIFIED"
+}

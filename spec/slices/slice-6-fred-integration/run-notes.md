@@ -1,0 +1,636 @@
+# Slice 6 FRED Integration Run Notes
+
+## S6-C1 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C1` (implement FRED connector and series registry mapping)
+- Capability changes:
+  - Added FRED contract models:
+    - `origo/fred/contracts.py`
+  - Added FRED registry loader with strict schema validation:
+    - `origo/fred/registry.py`
+  - Added raw FRED API client (no third-party API wrapper), strict env contract, and typed payload normalization:
+    - `origo/fred/client.py`
+  - Added FRED module exports:
+    - `origo/fred/__init__.py`
+  - Added series registry contract:
+    - `contracts/fred-series-registry.json`
+  - Added capability proof harness:
+    - `origo/fred/s6_c1_proof.py`
+- Validation commands:
+  - `uv run python -m origo.fred.s6_c1_proof`
+  - `set -a; source .env; set +a; ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run python -m origo.fred.s6_c1_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c1-fred-connector.json`
+- Validation results:
+  - Fail-loud env contract confirmed: missing `FRED_API_KEY` raises a runtime error.
+  - Live source proof succeeded with provided key and produced deterministic proof payload hash:
+    - `proof_hash_sha256=a857c693c78d4a42a09716e67f245a815ddb1ba60d38acd97dd59369370050a7`
+  - Series coverage validated (`4/4` registry entries):
+    - `FEDFUNDS`, `CPIAUCSL`, `UNRATE`, `DGS10`
+  - Static hard gates passed (`ruff` and `pyright` both green).
+- System changes made as a side effect of proof run:
+  - Read-only outbound HTTP calls to FRED API endpoints (`/fred/series`, `/fred/series/observations`).
+  - No ClickHouse writes, no schema migrations, and no object-store writes were performed.
+- Known warnings:
+  - none for `S6-C1`
+- Environment contract check:
+  - Required env vars for this capability:
+    - `FRED_API_KEY`
+    - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
+  - `.env` currently stores `FRED_API_KEY`; this matches the runtime key contract.
+  - No deployment-specific runtime value was hard-coded in the new FRED connector path.
+- Completion confirmation:
+  - `S6-C1` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.37`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.37` entry
+  - `.env.example` includes FRED env contract entries
+
+## S6-C2 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C2` (normalize FRED records into long-metric schema)
+- Capability changes:
+  - Added FRED long-metric normalization module:
+    - `origo/fred/normalize.py`
+  - Added normalization exports:
+    - `origo/fred/__init__.py`
+  - Added capability proof harness:
+    - `origo/fred/s6_c2_proof.py`
+- Validation commands:
+  - `set -a; source .env; set +a; ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run python -m origo.fred.s6_c2_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c2-fred-normalize.json`
+- Validation results:
+  - normalization proof succeeded against live source API
+  - normalized row count matched expected observation total (`32`)
+  - source coverage matched registry (`4/4` source IDs)
+  - UTC midnight observation timestamps validated for all rows
+  - deterministic normalized rows fingerprint:
+    - `rows_hash_sha256=55594af4eec42413711a3d0764278dccf16f93c24810c52d0ea1a689f4d8f932`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only outbound HTTP calls to FRED API endpoints (`/fred/series`, `/fred/series/observations`).
+  - No ClickHouse writes, no schema migrations, and no object-store writes were performed.
+- Known warnings:
+  - none for `S6-C2`
+- Environment contract check:
+  - API key naming updated to `FRED_API_KEY` (no `ORIGO_` prefix)
+  - timeout contract remains `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
+  - no deployment-specific runtime values were hard-coded in normalization paths
+- Completion confirmation:
+  - `S6-C2` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.38`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.38` entry
+  - `.env.example` reflects updated FRED API key naming
+
+## S6-C3 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C3` (implement historical backfill path)
+- Capability changes:
+  - Added historical backfill runner in:
+    - `origo/fred/ingest.py` (`run_fred_historical_backfill`)
+  - Added backfill proof harness:
+    - `origo/fred/s6_c3_proof.py`
+- Validation command:
+  - `set -a; source .env; set +a; ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run python -m origo.fred.s6_c3_proof`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c3-fred-backfill.json`
+- Validation results:
+  - fixed backfill window (`2024-01-01` .. `2024-03-31`) passed for all registry series
+  - row count: `74`
+  - deterministic rows hash:
+    - `ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e`
+- System changes made as a side effect of proof run:
+  - Read-only outbound HTTP calls to FRED API endpoints.
+  - No ClickHouse writes, no schema migrations, and no object-store writes were performed.
+- Known warnings:
+  - none for `S6-C3`
+
+## S6-C4 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C4` (implement incremental update path)
+- Capability changes:
+  - Added incremental update runner in:
+    - `origo/fred/ingest.py` (`run_fred_incremental_update`)
+  - Added incremental proof harness:
+    - `origo/fred/s6_c4_proof.py`
+  - Exported ingest contracts/functions in:
+    - `origo/fred/__init__.py`
+- Validation command:
+  - `set -a; source .env; set +a; ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run python -m origo.fred.s6_c4_proof`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c4-fred-incremental.json`
+- Validation results:
+  - fixed as-of incremental run (`as_of_date=2024-03-31`) passed for all registry series
+  - updated sources: `4/4`
+  - row count: `40`
+  - deterministic rows hash:
+    - `d2665db89f639c45ae0645cc620e82d31edbce0896cf224ce20527b78c224779`
+- System changes made as a side effect of proof run:
+  - Read-only outbound HTTP calls to FRED API endpoints.
+  - No ClickHouse writes, no schema migrations, and no object-store writes were performed.
+- Known warnings:
+  - none for `S6-C4`
+
+## S6-C3 and S6-C4 completion confirmation
+
+- `S6-C3` and `S6-C4` checked in `spec/2-itemized-work-plan.md`
+- `control-plane/pyproject.toml` version bumped to `1.2.39`
+- `control-plane/CHANGELOG.md` updated with `v1.2.39` entry
+- `.env.example` reviewed; no new env vars were introduced in `S6-C3/S6-C4`
+
+## S6-C5 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C5` (persist native FRED data to ClickHouse and raw artifacts to object store)
+- Capability changes:
+  - Added versioned SQL migration:
+    - `control-plane/migrations/sql/0003__create_fred_series_metrics_long.sql`
+  - Added persistence module:
+    - `origo/fred/persistence.py`
+  - Added capability proof harness:
+    - `origo/fred/s6_c5_proof.py`
+  - Added payload fetch methods for raw-source artifact capture:
+    - `origo/fred/client.py`
+  - Exported new persistence/incremental symbols:
+    - `origo/fred/__init__.py`
+- Validation commands:
+  - `cd control-plane && CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run python -m origo_control_plane.migrations migrate`
+  - `docker run -d --name origo-minio -p 19000:9000 -e MINIO_ROOT_USER=origo -e MINIO_ROOT_PASSWORD=origo-secret quay.io/minio/minio server /data`
+  - `uv run --with boto3 python - <<'PY' ... create bucket origo-raw-artifacts ... PY`
+  - `set -a; source .env; set +a; CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo ORIGO_OBJECT_STORE_ENDPOINT_URL=http://localhost:19000 ORIGO_OBJECT_STORE_ACCESS_KEY_ID=origo ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=origo-secret ORIGO_OBJECT_STORE_BUCKET=origo-raw-artifacts ORIGO_OBJECT_STORE_REGION=us-east-1 ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run --with clickhouse-connect --with boto3 --with polars --with pyarrow python -m origo.fred.s6_c5_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c5-fred-persistence.json`
+- Validation results:
+  - ClickHouse migration `0003` applied successfully.
+  - persistence proof succeeded:
+    - inserted rows: `74`
+    - persisted raw artifacts: `4`
+    - run id: `s6-c5-proof-20260307T071934Z`
+    - rows hash: `ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e`
+  - static hard gates passed (`ruff`, `pyright`).
+- System changes made as a side effect of proof run:
+  - Applied ClickHouse migration `0003` in local environment.
+  - Inserted `74` FRED rows into `origo.fred_series_metrics_long` in local ClickHouse.
+  - Started local MinIO container `origo-minio` on `localhost:19000`.
+  - Created bucket `origo-raw-artifacts` in local MinIO.
+  - Persisted 4 raw artifact objects (+ manifests) to local object store.
+- Known warnings:
+  - none for `S6-C5`
+- Environment contract check:
+  - no new environment variables introduced in `S6-C5`
+  - no deployment-specific runtime values were hard-coded in persistence paths
+- Completion confirmation:
+  - `S6-C5` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.40`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.40` entry
+  - `.env.example` reviewed; no `S6-C5` additions required
+
+## S6-C6 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C6` (expose FRED through native raw query mode)
+- Capability changes:
+  - Added native FRED query planner module:
+    - `origo/query/fred_native.py`
+  - Exported FRED native query symbols:
+    - `origo/query/__init__.py`
+  - Extended native endpoint dispatch to include FRED dataset:
+    - `origo/data/_internal/generic_endpoints.py`
+  - Extended API query dataset contract:
+    - `api/origo_api/schemas.py`
+  - Updated API query route validation/dispatch for `fred_series_metrics` in native mode:
+    - `api/origo_api/main.py`
+  - Added capability proof harness:
+    - `origo/query/fred_s6_c6_query_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.fred_s6_c6_query_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c6-fred-native-query.json`
+- Validation results:
+  - native FRED query proof succeeded with fixed window (`2024-01-01T00:00:00Z` .. `2024-04-01T00:00:00Z`)
+  - row count: `74`
+  - source coverage matched expected registry IDs:
+    - `fred_cpiaucsl`, `fred_dgs10`, `fred_fedfunds`, `fred_unrate`
+  - deterministic rows hash:
+    - `d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only query execution against local ClickHouse table `origo.fred_series_metrics_long`.
+  - No schema migrations, inserts, updates, or object-store writes were performed.
+- Known warnings:
+  - none for `S6-C6`
+- Environment contract check:
+  - no new environment variables introduced in `S6-C6`
+  - no deployment-specific runtime values were hard-coded in the new native query path
+- Completion confirmation:
+  - `S6-C6` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.41`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.41` entry
+  - `.env.example` reviewed; no `S6-C6` additions required
+
+## S6-C7 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C7` (integrate FRED into aligned-1s materialization path)
+- Capability changes:
+  - Added FRED aligned materialization module:
+    - `origo/query/fred_aligned_1s.py`
+  - Extended aligned query planner and execution routing:
+    - `origo/query/aligned_core.py`
+  - Exported aligned FRED query symbols:
+    - `origo/query/__init__.py`
+  - Extended API aligned dataset allowlist:
+    - `api/origo_api/main.py`
+  - Added capability proof harness:
+    - `origo/query/fred_s6_c7_aligned_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.fred_s6_c7_aligned_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/capability-proof-s6-c7-fred-aligned-query.json`
+- Validation results:
+  - aligned FRED proof succeeded for both planner paths:
+    - `fred_aligned_forward_fill` (`time_range`) row count: `74`
+    - `fred_aligned_observation` (`latest_rows`) row count: `25`
+  - source coverage matched expected registry IDs across both cases:
+    - `fred_cpiaucsl`, `fred_dgs10`, `fred_fedfunds`, `fred_unrate`
+  - deterministic rows hashes:
+    - forward-fill: `918ea6ed63d71f44451f7f74e20ff90b38f3497c3bf8cd4b93462a9dc3088b8f`
+    - observation: `425694586e06f54122c2ce7442f995a813283269d2012a4813d1bab043276689`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only aligned queries against local ClickHouse table `origo.fred_series_metrics_long`.
+  - No schema migrations, inserts, updates, or object-store writes were performed.
+- Known warnings:
+  - none for `S6-C7`
+- Environment contract check:
+  - no new environment variables introduced in `S6-C7`
+  - no deployment-specific runtime values were hard-coded in the new aligned query path
+- Completion confirmation:
+  - `S6-C7` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.42`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.42` entry
+  - `.env.example` reviewed; no `S6-C7` additions required
+
+## S6-P1 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-P1` (acceptance scenarios for FRED native and aligned paths)
+- Proof changes:
+  - Added acceptance proof harness:
+    - `origo/query/fred_s6_p1_acceptance_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow --with fastapi --with pydantic python -m origo.query.fred_s6_p1_acceptance_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/proof-s6-p1-acceptance.json`
+- Validation results:
+  - native acceptance case (`fred_series_metrics`, fixed time-range) passed:
+    - row count: `74`
+    - rows hash: `d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+  - aligned acceptance case (`fred_series_metrics`, fixed time-range forward-fill) passed:
+    - execution path: `fred_aligned_forward_fill`
+    - row count: `74`
+    - rows hash: `851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381`
+  - source coverage validated in both paths:
+    - `fred_cpiaucsl`, `fred_dgs10`, `fred_fedfunds`, `fred_unrate`
+  - `RawQueryResponse` contract validation passed for both native and aligned envelopes.
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse table `origo.fred_series_metrics_long`.
+  - No schema migrations, inserts, updates, or object-store writes were performed.
+- Known warnings:
+  - none for `S6-P1`
+- Environment contract check:
+  - no new environment variables introduced in `S6-P1`
+  - no deployment-specific runtime values were hard-coded in acceptance proof path
+- Completion confirmation:
+  - `S6-P1` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.43`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.43` entry
+  - `.env.example` reviewed; no `S6-P1` additions required
+
+## S6-P2 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-P2` (replay fixed windows and verify deterministic outputs)
+- Proof changes:
+  - Added determinism proof harness:
+    - `origo/query/fred_s6_p2_determinism_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with clickhouse-connect --with polars --with pyarrow python -m origo.query.fred_s6_p2_determinism_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/proof-s6-p2-determinism.json`
+- Validation results:
+  - deterministic replay passed for both fixed-window cases:
+    - native `fred_series_metrics`:
+      - run-1 rows hash: `d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+      - run-2 rows hash: `d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499`
+      - run-1/run-2 schema hash: `69b867e1b9e37f98c013d2a10f6b18de43f0ee99377bf84a36e4e5a9ede0cd85`
+      - row count: `74`
+    - aligned `fred_series_metrics`:
+      - run-1 rows hash: `851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381`
+      - run-2 rows hash: `851110d60f32b6603dd725b7e92d3dba5e28b78160337bce27546caab64ad381`
+      - run-1/run-2 schema hash: `3694f9f6e4dd0346f7a4b6a86dfa2b1853dac6182e794eff7db07409e1edcb87`
+      - row count: `74`
+  - `deterministic_match_all=true`
+  - source coverage validated in both cases:
+    - `fred_cpiaucsl`, `fred_dgs10`, `fred_fedfunds`, `fred_unrate`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only queries against local ClickHouse table `origo.fred_series_metrics_long`.
+  - No schema migrations, inserts, updates, or object-store writes were performed.
+- Known warnings:
+  - none for `S6-P2`
+- Environment contract check:
+  - no new environment variables introduced in `S6-P2`
+  - no deployment-specific runtime values were hard-coded in determinism proof path
+- Completion confirmation:
+  - `S6-P2` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.44`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.44` entry
+  - `.env.example` reviewed; no `S6-P2` additions required
+
+## S6-P3 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-P3` (validate metadata/version reproducibility for replay)
+- Proof changes:
+  - Added metadata/version reproducibility proof harness:
+    - `origo/fred/s6_p3_proof.py`
+- Validation commands:
+  - `set -a; source .env; set +a; ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20 uv run --with clickhouse-connect --with boto3 --with pyarrow --with polars python -m origo.fred.s6_p3_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/proof-s6-p3-metadata-version-reproducibility.json`
+- Validation results:
+  - metadata/version replay reproducibility passed:
+    - `deterministic_match=true`
+    - run-1 and run-2 rows hash:
+      - `ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e`
+    - run-1 and run-2 metadata hash:
+      - `984fa3bc176c19b8131d595fe49c600fd06371923a19a63928cc1400983c39bf`
+    - run-1 and run-2 provenance hash:
+      - `74d0f70976290e221b3f8d282a4d2d02696d4b4698d2c6854d79a6effb40703b`
+    - run-1 and run-2 per-series counts:
+      - `fred_cpiaucsl=3`
+      - `fred_dgs10=65`
+      - `fred_fedfunds=3`
+      - `fred_unrate=3`
+  - registry/version fingerprint captured:
+    - `registry_version=2026-03-06-s6-c1`
+    - `registry_file_sha256=3970cf51d3f8c477be344b9d87cba7ee41e851dc9396b5958065dc17d400de85`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only outbound HTTP calls to FRED API endpoints (`/fred/series`, `/fred/series/observations`).
+  - No ClickHouse writes, no schema migrations, and no object-store writes were performed.
+- Known warnings:
+  - none for `S6-P3`
+- Environment contract check:
+  - no new environment variables introduced in `S6-P3`
+  - no deployment-specific runtime values were hard-coded in metadata/version proof path
+- Completion confirmation:
+  - `S6-P3` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.45`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.45` entry
+  - `.env.example` reviewed; no `S6-P3` additions required
+
+## S6-G1 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G1` (enforce rights classification and legal gating)
+- Guardrail changes:
+  - Added FRED rights classification in source rights matrix:
+    - `contracts/source-rights-matrix.json`
+  - Added FRED legal signoff artifact:
+    - `contracts/legal/fred-hosted-allowed.md`
+  - Extended query-rights dataset allowlist for FRED:
+    - `api/origo_api/rights.py`
+  - Added guardrail proof harness:
+    - `api/origo_api/s6_g1_fred_rights_proof.py`
+- Validation commands:
+  - `uv run --with pydantic --with fastapi python -m api.origo_api.s6_g1_fred_rights_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g1-fred-rights.json`
+- Validation results:
+  - legal gating and rights classification checks passed for FRED query serving:
+    - missing legal signoff returns `QUERY_RIGHTS_LEGAL_SIGNOFF_MISSING`
+    - valid legal signoff allows FRED query rights
+    - missing FRED classification returns `QUERY_RIGHTS_MISSING_STATE`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - none (no ClickHouse writes, no schema migrations, no object-store writes)
+- Known warnings:
+  - none for `S6-G1`
+- Environment contract check:
+  - no new environment variables introduced in `S6-G1`
+  - no deployment-specific runtime values were hard-coded in rights/guardrail paths
+- Completion confirmation:
+  - `S6-G1` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.46`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.46` entry
+  - `.env.example` reviewed; no `S6-G1` additions required
+
+## S6-G2 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G2` (add freshness checks based on source publish timestamps)
+- Guardrail changes:
+  - Added FRED publish freshness warning module:
+    - `api/origo_api/fred_warnings.py`
+  - Wired FRED publish freshness warning generation into query API path:
+    - `api/origo_api/main.py`
+  - Added guardrail proof harness:
+    - `api/origo_api/s6_g2_fred_freshness_proof.py`
+- Validation commands:
+  - `CLICKHOUSE_HOST=localhost CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=origo CLICKHOUSE_DATABASE=origo uv run --with pydantic --with fastapi --with clickhouse-connect --with polars --with pyarrow python -m api.origo_api.s6_g2_fred_freshness_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g2-fred-freshness.json`
+- Validation results:
+  - publish freshness checks passed:
+    - synthetic snapshot missing-source check produced `FRED_SOURCE_PUBLISH_MISSING`
+    - live snapshot stale publish-timestamp check produced `FRED_SOURCE_PUBLISH_STALE`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - Read-only query against local ClickHouse table `origo.fred_series_metrics_long`.
+  - No schema migrations, inserts, updates, or object-store writes were performed.
+- Known warnings:
+  - none for `S6-G2`
+- Environment contract check:
+  - added required env var:
+    - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
+  - `.env.example` updated accordingly.
+  - no deployment-specific runtime values were hard-coded in freshness guardrail paths.
+- Completion confirmation:
+  - `S6-G2` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.47`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.47` entry
+  - `.env.example` updated for `S6-G2` env contract
+
+## S6-G3 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G3` (add shadow-then-promote gating)
+- Guardrail changes:
+  - Extended query serving-state gate to include FRED dataset:
+    - `api/origo_api/rights.py`
+    - added required env var: `ORIGO_FRED_QUERY_SERVING_STATE`
+    - allowed values: `shadow`, `promoted`
+  - Added guardrail proof harness:
+    - `api/origo_api/s6_g3_fred_shadow_promote_proof.py`
+- Validation commands:
+  - `uv run --with pydantic python -m api.origo_api.s6_g3_fred_shadow_promote_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g3-fred-shadow-promote.json`
+- Validation results:
+  - serving-state gate checks passed for FRED query serving:
+    - missing env fails loudly: `ORIGO_FRED_QUERY_SERVING_STATE must be set and non-empty`
+    - `shadow` blocks query rights: `QUERY_SERVING_SHADOW_MODE`
+    - `promoted` allows query rights resolution to continue
+    - invalid state fails loudly (`must be one of ['promoted', 'shadow']`)
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - none (no ClickHouse writes, no schema migrations, no object-store writes)
+- Known warnings:
+  - none for `S6-G3`
+- Environment contract check:
+  - added required env var:
+    - `ORIGO_FRED_QUERY_SERVING_STATE`
+  - `.env.example` updated accordingly.
+  - no deployment-specific runtime values were hard-coded in serving-state guardrail paths.
+- Completion confirmation:
+  - `S6-G3` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.48`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.48` entry
+  - `.env.example` updated for `S6-G3` env contract
+
+## S6-G4 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G4` (add FRED alerts and audit-event coverage)
+- Guardrail changes:
+  - Added immutable FRED warning audit module:
+    - `api/origo_api/fred_alert_audit.py`
+    - hash-chained JSONL events with strict chain validation
+  - Wired FRED warning alert + audit emission into API query path:
+    - `api/origo_api/main.py`
+    - alert/audit emits when FRED warnings are present
+  - Added guardrail proof harness:
+    - `api/origo_api/s6_g4_fred_alerts_audit_proof.py`
+- Validation commands:
+  - `uv run --with pydantic python -m api.origo_api.s6_g4_fred_alerts_audit_proof`
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation artifact:
+  - `spec/slices/slice-6-fred-integration/guardrails-proof-s6-g4-fred-alerts-audit.json`
+- Validation results:
+  - missing webhook env fails loudly:
+    - `ORIGO_FRED_DISCORD_WEBHOOK_URL must be set and non-empty`
+  - alert/audit path passed:
+    - warning code emitted: `FRED_SOURCE_PUBLISH_STALE`
+    - webhook URL: `https://discord.example/webhook` (mocked), status `204`
+    - audit log lines written: `2`
+    - last event type: `fred_query_warning`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - none in production systems. Proof harness used temporary local audit log path and mocked webhook sender.
+- Known warnings:
+  - none for `S6-G4`
+- Environment contract check:
+  - added required env vars:
+    - `ORIGO_FRED_ALERT_AUDIT_LOG_PATH`
+    - `ORIGO_FRED_DISCORD_WEBHOOK_URL`
+    - `ORIGO_FRED_DISCORD_TIMEOUT_SECONDS`
+  - `.env.example` updated accordingly.
+  - no deployment-specific runtime values were hard-coded in alert/audit paths.
+- Completion confirmation:
+  - `S6-G4` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.49`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.49` entry
+  - `.env.example` updated for `S6-G4` env contract
+
+## S6-G5 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G5` (developer docs closeout for Slice 6)
+- Guardrail changes:
+  - Added short, slice-scoped developer docs:
+    - `docs/Developer/s6-fred-connector-contracts.md`
+    - `docs/Developer/s6-fred-ingest-persistence.md`
+    - `docs/Developer/s6-fred-guardrails-runbook.md`
+- Validation commands:
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation results:
+  - Developer docs now cover connector contracts, ingest/persistence flow, and guardrail operations with explicit env/failure/determinism sections.
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - none (documentation-only step)
+- Known warnings:
+  - none for `S6-G5`
+- Environment contract check:
+  - docs include all active FRED env vars used by capability and guardrails
+  - no deployment-specific runtime values were hard-coded
+- Completion confirmation:
+  - `S6-G5` checked in `spec/2-itemized-work-plan.md`
+  - docs updated in `docs/Developer/`
+  - version/changelog/env closeout is completed in `S6-G6` for the combined docs closeout release (`v1.2.50`)
+
+## S6-G6 run notes
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-G6` (user docs closeout for Slice 6)
+- Guardrail changes:
+  - Added/updated user-facing reference docs:
+    - `docs/fred-reference.md`
+    - `docs/raw-query-reference.md`
+    - `docs/aligned-reference.md`
+    - `docs/data-taxonomy.md`
+    - `docs/raw-export-reference.md`
+  - Added required baseline fixture artifact for slice handoff:
+    - `spec/slices/slice-6-fred-integration/baseline-fixture-2024-01-01_2024-03-31.json`
+- Validation commands:
+  - `uv run --with ruff ruff check .`
+  - `uv run --with pyright pyright`
+- Validation results:
+  - user docs now include complete FRED dataset reference for `native` and `aligned_1s`, warning/error semantics, serving gates, and taxonomy updates.
+  - baseline fixture artifact generated from two fixed-window runs with deterministic match:
+    - `deterministic_match=true`
+  - static hard gates passed (`ruff`, `pyright`)
+- System changes made as a side effect of proof run:
+  - none (documentation-only step)
+- Known warnings:
+  - none for `S6-G6`
+- Guardrails deferred:
+  - none
+- Environment contract check:
+  - `.env.example` was reviewed and already includes all active FRED env vars.
+  - no deployment-specific runtime values were hard-coded.
+- Completion confirmation:
+  - `S6-G6` checked in `spec/2-itemized-work-plan.md`
+  - `control-plane/pyproject.toml` version bumped to `1.2.50`
+  - `control-plane/CHANGELOG.md` updated with `v1.2.50` entry
+  - user docs and taxonomy updated in `docs/`

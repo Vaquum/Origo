@@ -1,0 +1,32 @@
+{
+  "first_row": {
+    "metric_name": "effective_federal_funds_rate",
+    "metric_unit": "Percent",
+    "metric_value_float": 5.33,
+    "metric_value_string": "5.33",
+    "observed_at_utc": "2024-01-01T00:00:00.000Z",
+    "source_id": "fred_fedfunds"
+  },
+  "generated_at_utc": "2026-03-07T07:25:12.860314+00:00",
+  "last_row": {
+    "metric_name": "treasury_yield_10y",
+    "metric_unit": "Percent",
+    "metric_value_float": null,
+    "metric_value_string": ".",
+    "observed_at_utc": "2024-03-29T00:00:00.000Z",
+    "source_id": "fred_dgs10"
+  },
+  "proof_scope": "Slice 6 S6-C6 expose FRED through native raw query mode",
+  "row_count": 74,
+  "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499",
+  "source_ids": [
+    "fred_cpiaucsl",
+    "fred_dgs10",
+    "fred_fedfunds",
+    "fred_unrate"
+  ],
+  "window": {
+    "end": "2024-04-01T00:00:00Z",
+    "start": "2024-01-01T00:00:00Z"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "last_event_type": "fred_query_warning",
+  "last_event_warning_codes": [
+    "FRED_SOURCE_PUBLISH_STALE"
+  ],
+  "log_line_count": 2,
+  "missing_webhook_env_error": "ORIGO_FRED_DISCORD_WEBHOOK_URL must be set and non-empty",
+  "proof_scope": "Slice 6 S6-G4 FRED warning alerts and audit-event coverage",
+  "warning_codes": [
+    "FRED_SOURCE_PUBLISH_STALE"
+  ],
+  "webhook_status_code": 204,
+  "webhook_url": "https://discord.example/webhook"
+}

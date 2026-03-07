@@ -5,7 +5,10 @@ from typing import Any, cast
 import polars as pl
 from clickhouse_connect import get_client as _raw_get_client
 
+from origo.query.aligned_core import AlignedDataset, query_aligned_data
 from origo.query.binance_native import BinanceDataset, query_binance_native_data
+from origo.query.etf_native import ETFDataset, query_etf_native_data
+from origo.query.fred_native import FREDDataset, query_fred_native_data
 from origo.query.native_core import (
     LatestRowsWindow,
     MonthWindow,
@@ -20,6 +23,11 @@ from origo.query.response import build_wide_rows_envelope
 
 logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
+_ALLOWED_FILTER_OPS: frozenset[str] = frozenset(
+    {'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'not_in'}
+)
+
+type NativeQueryDataset = BinanceDataset | ETFDataset | FREDDataset
 
 
 def _resolve_window(
@@ -54,6 +62,88 @@ def _resolve_window(
     return RandomRowsWindow(rows=n_random)  # n_random is guaranteed non-None here
 
 
+def _normalize_filters(filters: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    normalized_filters: list[dict[str, Any]] = []
+    for idx, raw_filter in enumerate(filters):
+        field_obj = raw_filter.get('field')
+        if not isinstance(field_obj, str) or field_obj.strip() == '':
+            raise ValueError(f'filters[{idx}].field must be a non-empty string')
+        field = field_obj.strip()
+
+        op_obj = raw_filter.get('op')
+        if not isinstance(op_obj, str) or op_obj not in _ALLOWED_FILTER_OPS:
+            raise ValueError(
+                f'filters[{idx}].op must be one of {sorted(_ALLOWED_FILTER_OPS)}'
+            )
+        op = op_obj
+
+        if 'value' not in raw_filter:
+            raise ValueError(f'filters[{idx}].value must be provided')
+        value = raw_filter['value']
+
+        if op in {'in', 'not_in'}:
+            if not isinstance(value, list):
+                raise ValueError(
+                    f'filters[{idx}].value must be a non-empty list when op={op}'
+                )
+            values = cast(list[Any], value)
+            if len(values) == 0:
+                raise ValueError(
+                    f'filters[{idx}].value must be a non-empty list when op={op}'
+                )
+
+        normalized_filters.append({'field': field, 'op': op, 'value': value})
+    return normalized_filters
+
+
+def _filter_expression(*, field: str, op: str, value: Any) -> pl.Expr:
+    if op == 'eq':
+        return pl.col(field) == value
+    if op == 'ne':
+        return pl.col(field) != value
+    if op == 'gt':
+        return pl.col(field) > value
+    if op == 'gte':
+        return pl.col(field) >= value
+    if op == 'lt':
+        return pl.col(field) < value
+    if op == 'lte':
+        return pl.col(field) <= value
+    if op == 'in':
+        return pl.col(field).is_in(cast(list[Any], value))
+    if op == 'not_in':
+        return ~pl.col(field).is_in(cast(list[Any], value))
+    raise ValueError(f'Unsupported filter op: {op}')
+
+
+def _apply_filters(
+    *,
+    frame: pl.DataFrame,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+) -> pl.DataFrame:
+    if filters is None or len(filters) == 0:
+        return frame
+
+    normalized_filters = _normalize_filters(filters)
+
+    for idx, clause in enumerate(normalized_filters):
+        field = cast(str, clause['field'])
+        if field not in frame.columns:
+            raise ValueError(
+                f'filters[{idx}].field is not available in result columns: {field}'
+            )
+        op = cast(str, clause['op'])
+        value = clause['value']
+        try:
+            frame = frame.filter(_filter_expression(field=field, op=op, value=value))
+        except Exception as exc:
+            raise ValueError(
+                f'Invalid filter at filters[{idx}] for field={field}, op={op}: {exc}'
+            ) from exc
+
+    return frame
+
+
 def query_binance_native(
     dataset: BinanceDataset,
     select_cols: list[str] | tuple[str, ...] | None,
@@ -65,11 +155,12 @@ def query_binance_native(
     datetime_iso_output: bool = False,
     show_summary: bool = False,
     auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
 ) -> pl.DataFrame:
     window = _resolve_window(
         month_year=month_year, n_rows=n_rows, n_random=n_random, time_range=time_range
     )
-    return query_binance_native_data(
+    frame = query_binance_native_data(
         dataset=dataset,
         select_columns=select_cols,
         window=window,
@@ -78,6 +169,92 @@ def query_binance_native(
         auth_token=auth_token,
         show_summary=show_summary,
     )
+    return _apply_filters(frame=frame, filters=filters)
+
+
+def query_native(
+    dataset: NativeQueryDataset,
+    select_cols: list[str] | tuple[str, ...] | None,
+    month_year: tuple[int, int] | None = None,
+    n_rows: int | None = None,
+    n_random: int | None = None,
+    time_range: tuple[str, str] | None = None,
+    include_datetime_col: bool = True,
+    datetime_iso_output: bool = False,
+    show_summary: bool = False,
+    auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> pl.DataFrame:
+    window = _resolve_window(
+        month_year=month_year, n_rows=n_rows, n_random=n_random, time_range=time_range
+    )
+
+    if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
+        frame = query_binance_native_data(
+            dataset=cast(BinanceDataset, dataset),
+            select_columns=select_cols,
+            window=window,
+            include_datetime=include_datetime_col,
+            datetime_iso_output=datetime_iso_output,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        return _apply_filters(frame=frame, filters=filters)
+
+    if dataset == 'etf_daily_metrics':
+        frame = query_etf_native_data(
+            dataset=dataset,
+            select_columns=select_cols,
+            window=window,
+            include_datetime=include_datetime_col,
+            datetime_iso_output=datetime_iso_output,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        return _apply_filters(frame=frame, filters=filters)
+
+    if dataset == 'fred_series_metrics':
+        frame = query_fred_native_data(
+            dataset=dataset,
+            select_columns=select_cols,
+            window=window,
+            include_datetime=include_datetime_col,
+            datetime_iso_output=datetime_iso_output,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        return _apply_filters(frame=frame, filters=filters)
+
+    raise ValueError(f'Unsupported dataset: {dataset}')
+
+
+def query_aligned(
+    dataset: AlignedDataset,
+    select_cols: list[str] | tuple[str, ...] | None,
+    month_year: tuple[int, int] | None = None,
+    n_rows: int | None = None,
+    n_random: int | None = None,
+    time_range: tuple[str, str] | None = None,
+    datetime_iso_output: bool = False,
+    show_summary: bool = False,
+    auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> pl.DataFrame:
+    window = _resolve_window(
+        month_year=month_year,
+        n_rows=n_rows,
+        n_random=n_random,
+        time_range=time_range,
+    )
+    frame = query_aligned_data(
+        dataset=dataset,
+        window=window,
+        selected_columns=select_cols,
+        datetime_iso_output=datetime_iso_output,
+        show_summary=show_summary,
+        auth_token=auth_token,
+    )
+    return _apply_filters(frame=frame, filters=filters)
 
 
 def query_raw_data(
@@ -120,6 +297,7 @@ def query_binance_native_wide_rows_envelope(
     time_range: tuple[str, str] | None = None,
     include_datetime_col: bool = True,
     auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
 ) -> dict[str, Any]:
     frame = query_binance_native(
         dataset=dataset,
@@ -131,9 +309,62 @@ def query_binance_native_wide_rows_envelope(
         include_datetime_col=include_datetime_col,
         datetime_iso_output=True,
         auth_token=auth_token,
+        filters=filters,
         show_summary=False,
     )
     return build_wide_rows_envelope(frame=frame, mode='native', source=dataset)
+
+
+def query_native_wide_rows_envelope(
+    dataset: NativeQueryDataset,
+    select_cols: list[str] | tuple[str, ...] | None,
+    month_year: tuple[int, int] | None = None,
+    n_rows: int | None = None,
+    n_random: int | None = None,
+    time_range: tuple[str, str] | None = None,
+    include_datetime_col: bool = True,
+    auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> dict[str, Any]:
+    frame = query_native(
+        dataset=dataset,
+        select_cols=select_cols,
+        month_year=month_year,
+        n_rows=n_rows,
+        n_random=n_random,
+        time_range=time_range,
+        include_datetime_col=include_datetime_col,
+        datetime_iso_output=True,
+        auth_token=auth_token,
+        filters=filters,
+        show_summary=False,
+    )
+    return build_wide_rows_envelope(frame=frame, mode='native', source=dataset)
+
+
+def query_aligned_wide_rows_envelope(
+    dataset: AlignedDataset,
+    select_cols: list[str] | tuple[str, ...] | None,
+    month_year: tuple[int, int] | None = None,
+    n_rows: int | None = None,
+    n_random: int | None = None,
+    time_range: tuple[str, str] | None = None,
+    auth_token: str | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> dict[str, Any]:
+    frame = query_aligned(
+        dataset=dataset,
+        select_cols=select_cols,
+        month_year=month_year,
+        n_rows=n_rows,
+        n_random=n_random,
+        time_range=time_range,
+        datetime_iso_output=True,
+        auth_token=auth_token,
+        filters=filters,
+        show_summary=False,
+    )
+    return build_wide_rows_envelope(frame=frame, mode='aligned_1s', source=dataset)
 
 
 def query_klines_data(

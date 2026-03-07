@@ -1,0 +1,177 @@
+{
+  "adapter_results": [
+    {
+      "adapter_name": "etf_ishares_ibit",
+      "artifact_format": "csv",
+      "artifact_id": "89b4b248e384453daaa3248b9c710d7b07f42ae2e8f5e97c7e19106aecf7c84c",
+      "artifact_sha256": "78094b969de57d00676bd1f44b3d9fb2aa6ceba5dcf4e8d3cdbc6878d79ae3a0",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "normalized_fingerprint_sha256": "302e5e60c4aadc8fa5790e9afca974ac50f0aeeb3164f5b20d1a5a2de0950066",
+      "normalized_record_count": 11,
+      "observed_at_utc_values": [
+        "2026-03-04T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_ishares_ibit_daily",
+      "source_uri": "https://www.ishares.com/us/products/333011/fund/1467271812596.ajax?dataType=fund&fileName=IBIT_holdings&fileType=csv"
+    },
+    {
+      "adapter_name": "etf_invesco_btco",
+      "artifact_format": "json",
+      "artifact_id": "00fc75d2f9692b1c80b6668d7c1700f0f033d611af2d156683b30c2101108108",
+      "artifact_sha256": "61baac36197af1aa7a2fcc110ee79c6c87852863903b89384b26c43486267a09",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "normalized_fingerprint_sha256": "a82ccddfee70b74eefe2e0751693be87803185599652b9f855c04d15e5d46e68",
+      "normalized_record_count": 10,
+      "observed_at_utc_values": [
+        "2026-03-04T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_invesco_btco_daily",
+      "source_uri": "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46091J101/holdings/fund?idType=cusip&productType=ETF"
+    },
+    {
+      "adapter_name": "etf_bitwise_bitb",
+      "artifact_format": "json",
+      "artifact_id": "1849d46e5df55c3b7b0549f137a39cfdff750ed406b6e82d10b424b28d378346",
+      "artifact_sha256": "427035bac12d8715b2b898e4f7bd807b3ad4e0162d4631593a6d78411ca49900",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "d6617dfb01a9151897fb24bbfa592d8de3114ae4178e645334b30974acc00473",
+      "normalized_record_count": 15,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_bitwise_bitb_daily",
+      "source_uri": "https://bitbetf.com/_next/data/z7Q3cqCSjmGwwddIjvL45/index.json"
+    },
+    {
+      "adapter_name": "etf_ark_arkb",
+      "artifact_format": "csv",
+      "artifact_id": "c89453b0aa56f71b05f11048b2896febd80fb1abe418b744cb04989b1e4fab3e",
+      "artifact_sha256": "d1b68751fb9b3db8e79b1f0c71e911c156ad6022cd0bee1cce7a1bcf6726ddef",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "a414cc9b90e998780f334313748087b53cd42703af22c02e9dc3a3a805e4cf4c",
+      "normalized_record_count": 9,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_ark_arkb_daily",
+      "source_uri": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_21SHARES_BITCOIN_ETF_ARKB_HOLDINGS.csv"
+    },
+    {
+      "adapter_name": "etf_vaneck_hodl",
+      "artifact_format": "json",
+      "artifact_id": "24b64e85eb9dfb40048a5389fe87ef7f0d67ac946ec5e903bfde8d4ab762953f",
+      "artifact_sha256": "e3a7a15d4358aceae173e77340714c8fb1cc9d3b7adab6f43760b845b8c98997",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "normalized_fingerprint_sha256": "34b693b9b0fddd418b2690f432b4fe08f3b678e59d02d58e4ec16fda1e93eac9",
+      "normalized_record_count": 10,
+      "observed_at_utc_values": [
+        "2026-03-04T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_vaneck_hodl_daily",
+      "source_uri": "https://www.vaneck.com/Main/HoldingsBlock/GetDataset/?blockId=348327&pageId=243755&ticker=HODL"
+    },
+    {
+      "adapter_name": "etf_franklin_ezbc",
+      "artifact_format": "json",
+      "artifact_id": "c2be3480ba37fa982311e4219fb7efda206d62ae4ae810ba58e99cd9cefec4bf",
+      "artifact_sha256": "ecbb231c66e344405e216ead19dfb47fcdcd4d795a7e59329b6fa3a52b7000b1",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "e44ea215253a9bb1481c0ee01045073bdf3a39b06c15b65ec95088276f7bdf94",
+      "normalized_record_count": 15,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_franklin_ezbc_daily",
+      "source_uri": "https://www.franklintempleton.com/investments/options/exchange-traded-funds/products/39639/SINGLCLASS"
+    },
+    {
+      "adapter_name": "etf_grayscale_gbtc",
+      "artifact_format": "html",
+      "artifact_id": "8cc90fd24079e1c746cf19fbc506dd5400b9c29428a901538db8592c5a8c94a9",
+      "artifact_sha256": "7e08b8797327067102cdada477ddbd7a9508b18acce9d865b506d2d3ae4b50ce",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "208c7e874646102f49b40daf5135d307b68935112e29339a39598fdad125849a",
+      "normalized_record_count": 14,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_grayscale_gbtc_daily",
+      "source_uri": "https://etfs.grayscale.com/gbtc"
+    },
+    {
+      "adapter_name": "etf_fidelity_fbtc",
+      "artifact_format": "html",
+      "artifact_id": "9a6974b4cc01bd47a214e3f13a104a6a4dd440ac95fa03a5822fe86cbf69dfde",
+      "artifact_sha256": "6515c5b863449f8edd6a5d7494cfd1ae6d89c12b56bfdd394bfb1e617b9243d4",
+      "as_of_dates": [
+        "2026-03-04"
+      ],
+      "normalized_fingerprint_sha256": "25169968a93ffc9d42ee93d8a090d25c834e1ef9df53ac152e38c73204ba816b",
+      "normalized_record_count": 11,
+      "observed_at_utc_values": [
+        "2026-03-04T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_fidelity_fbtc_daily",
+      "source_uri": "https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=FBTC"
+    },
+    {
+      "adapter_name": "etf_coinshares_brrr",
+      "artifact_format": "html",
+      "artifact_id": "94f54e7cac9930fa96ad4b1aed94a5f0c9796033be5533216acd236bc3aa2a21",
+      "artifact_sha256": "0a1506115b5b4508507dd086f804da77dc010dd7606d816b51d909a290e8eb13",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "f15ae812a7aab52a797d26ecff56239d199fa41218475f8d17403242dbeae152",
+      "normalized_record_count": 9,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_coinshares_brrr_daily",
+      "source_uri": "https://coinshares.com/us/etf/brrr/"
+    },
+    {
+      "adapter_name": "etf_hashdex_defi",
+      "artifact_format": "json",
+      "artifact_id": "b829251a560550a9a0ea59cbfa368e3326f1f64739d283f97c75a3ec8c9e48d9",
+      "artifact_sha256": "78977d4acd88c2ae9b7103d297e9513a60c48c1b3b03f1e024641f1273d78dab",
+      "as_of_dates": [
+        "2026-03-05"
+      ],
+      "normalized_fingerprint_sha256": "44eacae02b6fdc02b6d3e3ee59a2c4817c0bd5ead5e6f87c830b96ef7e8c369c",
+      "normalized_record_count": 12,
+      "observed_at_utc_values": [
+        "2026-03-05T00:00:00+00:00"
+      ],
+      "parsed_record_count": 1,
+      "source_id": "etf_hashdex_defi_daily",
+      "source_uri": "https://hashdex.com/en-US/_payload.json"
+    }
+  ],
+  "generated_at_utc": "2026-03-06T08:10:38.824376+00:00",
+  "proof_scope": "Slice 4 S4-03 issuer adapters 1-10 capability proof",
+  "run_id": "s4-03-proof-20260306T081003Z"
+}

@@ -67,7 +67,7 @@ Every slice must pass:
 ### Orchestration and Jobs
 1. Dagster for all orchestration.
 2. API async workflows dispatch Dagster runs.
-3. Dagster metadata backend is PostgreSQL.
+3. Dagster metadata backend is SQLite on persistent storage.
 
 ### Data and Storage
 1. ClickHouse for serving/query and materialized views.
@@ -154,10 +154,11 @@ Every slice must pass:
 
 ### `POST /v1/raw/query`
 1. Modes: `native` and `aligned_1s`.
-2. Inputs: `sources`, `fields`, `time`, `filters`, `strict`.
+2. Inputs: `sources`, `fields`, `time_range`, `filters`, `strict`, `n_rows`, `n_random`.
 3. Query DSL scope: projection + filters only.
 4. Output shape: wide rows + schema metadata.
 5. Timestamp format: ISO only.
+6. Current capability executes one source per request (`sources` list size must be exactly 1).
 
 ### `POST /v1/raw/export`
 1. Supports `mode=native|aligned_1s`.

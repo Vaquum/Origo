@@ -61,9 +61,10 @@ def split_random(
     total_ratio = sum(ratios)
     bounds = [int(total * c / total_ratio) for c in accumulate(ratios)]
     starts = [0, *bounds[:-1]]
+    shuffled = data.sample(fraction=1.0, seed=seed, shuffle=True)
 
     return [
-        data.sample(fraction=1.0, seed=seed, shuffle=True).slice(start, end - start)
+        shuffled.slice(start, end - start)
         for start, end in zip(starts, bounds, strict=True)
     ]
 

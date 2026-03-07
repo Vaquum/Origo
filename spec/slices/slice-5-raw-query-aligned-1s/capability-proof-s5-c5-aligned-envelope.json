@@ -1,0 +1,96 @@
+{
+  "cases": [
+    {
+      "case": "binance_spot_aligned_envelope",
+      "dataset": "spot_trades",
+      "first_row": {
+        "aligned_at_utc": "2017-08-17T12:01:48.000Z",
+        "close_price": 4436.06,
+        "open_price": 4436.06,
+        "trade_count": 1
+      },
+      "last_row": {
+        "aligned_at_utc": "2017-08-17T12:54:47.000Z",
+        "close_price": 4411.0,
+        "open_price": 4411.0,
+        "trade_count": 1
+      },
+      "row_count": 75,
+      "rows_hash_sha256": "97c13113121fb08f4ba42f23b85420c097e59a53be0c6e04f2acf43fe6261835",
+      "schema": [
+        {
+          "dtype": "String",
+          "name": "aligned_at_utc"
+        },
+        {
+          "dtype": "Float64",
+          "name": "open_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "close_price"
+        },
+        {
+          "dtype": "UInt64",
+          "name": "trade_count"
+        }
+      ],
+      "window": {
+        "time_range": [
+          "2017-08-17T12:00:00Z",
+          "2017-08-17T13:00:00Z"
+        ]
+      }
+    },
+    {
+      "case": "etf_forward_fill_aligned_envelope",
+      "dataset": "etf_daily_metrics",
+      "first_row": {
+        "metric_name": "as_of_date",
+        "metric_value_string": "2026-03-05",
+        "source_id": "etf_ark_arkb_daily",
+        "valid_from_utc": "2026-03-05T12:00:00.000Z",
+        "valid_to_utc_exclusive": "2026-03-07T12:00:00.000Z"
+      },
+      "last_row": {
+        "metric_name": "total_net_assets_usd",
+        "metric_value_string": "1255149481.0",
+        "source_id": "etf_vaneck_hodl_daily",
+        "valid_from_utc": "2026-03-05T12:00:00.000Z",
+        "valid_to_utc_exclusive": "2026-03-07T12:00:00.000Z"
+      },
+      "row_count": 125,
+      "rows_hash_sha256": "9e3dbbff49b013342ba34d44b852a2c8ca3197ab7eda8debd30425e00e9a9c2c",
+      "schema": [
+        {
+          "dtype": "String",
+          "name": "source_id"
+        },
+        {
+          "dtype": "String",
+          "name": "metric_name"
+        },
+        {
+          "dtype": "String",
+          "name": "valid_from_utc"
+        },
+        {
+          "dtype": "String",
+          "name": "valid_to_utc_exclusive"
+        },
+        {
+          "dtype": "String",
+          "name": "metric_value_string"
+        }
+      ],
+      "window": {
+        "time_range": [
+          "2026-03-05T12:00:00Z",
+          "2026-03-07T12:00:00Z"
+        ]
+      }
+    }
+  ],
+  "generated_at_utc": "2026-03-06T17:39:45.146338+00:00",
+  "proof_scope": "Slice 5 S5-C5 aligned response envelope and schema metadata"
+}

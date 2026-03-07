@@ -1,0 +1,36 @@
+{
+  "deterministic_match": true,
+  "generated_at_utc": "2026-03-07T07:49:43.351558+00:00",
+  "proof_scope": "Slice 6 P3 metadata/version reproducibility for replay",
+  "registry_file_sha256": "3970cf51d3f8c477be344b9d87cba7ee41e851dc9396b5958065dc17d400de85",
+  "registry_path": "/Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo/contracts/fred-series-registry.json",
+  "registry_version": "2026-03-06-s6-c1",
+  "run_1": {
+    "metadata_hash_sha256": "984fa3bc176c19b8131d595fe49c600fd06371923a19a63928cc1400983c39bf",
+    "per_series_counts": {
+      "fred_cpiaucsl": 3,
+      "fred_dgs10": 65,
+      "fred_fedfunds": 3,
+      "fred_unrate": 3
+    },
+    "provenance_hash_sha256": "74d0f70976290e221b3f8d282a4d2d02696d4b4698d2c6854d79a6effb40703b",
+    "row_count": 74,
+    "rows_hash_sha256": "ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e"
+  },
+  "run_2": {
+    "metadata_hash_sha256": "984fa3bc176c19b8131d595fe49c600fd06371923a19a63928cc1400983c39bf",
+    "per_series_counts": {
+      "fred_cpiaucsl": 3,
+      "fred_dgs10": 65,
+      "fred_fedfunds": 3,
+      "fred_unrate": 3
+    },
+    "provenance_hash_sha256": "74d0f70976290e221b3f8d282a4d2d02696d4b4698d2c6854d79a6effb40703b",
+    "row_count": 74,
+    "rows_hash_sha256": "ae7e8f20ce8d72b18bc250a50b36168b092b1949df96e129149bd2fe5cacea4e"
+  },
+  "window": {
+    "end": "2024-03-31",
+    "start": "2024-01-01"
+  }
+}

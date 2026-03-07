@@ -9,6 +9,11 @@ description = "Bitcoin-only data API and platform"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1.0",
+  "pydantic>=2.12,<3.0",
+  "uvicorn>=0.41,<1.0",
+]
 
 [project.urls]
 Repository = "https://github.com/origo/origo"

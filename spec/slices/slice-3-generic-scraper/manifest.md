@@ -1,0 +1,53 @@
+## What was done
+- Implemented generic scraper capability stack (`S3-C1` to `S3-C12`):
+  - Typed adapter + data contracts (`origo/scraper/contracts.py`).
+  - Fetch modules:
+    - `origo/scraper/http_fetch.py`
+    - `origo/scraper/browser_fetch.py`
+  - Parser modules:
+    - `origo/scraper/parse_html.py`
+    - `origo/scraper/parse_csv.py`
+    - `origo/scraper/parse_json.py`
+    - `origo/scraper/parse_pdf.py`
+    - `origo/scraper/parse_dispatch.py`
+  - Normalization and persistence:
+    - `origo/scraper/normalize.py`
+    - `origo/scraper/object_store.py`
+    - `origo/scraper/clickhouse_staging.py`
+  - Pipeline orchestration:
+    - `origo/scraper/pipeline.py`
+- Completed proof stage (`S3-P1` to `S3-P3`) with artifacts:
+  - `spec/slices/slice-3-generic-scraper/acceptance-proof.json`
+  - `spec/slices/slice-3-generic-scraper/baseline-fixture-proof_etf_csv-2026-03-01_2026-03-02.json`
+  - `spec/slices/slice-3-generic-scraper/replayability-proof.json`
+- Completed guardrails (`S3-G1` to `S3-G4`):
+  - Error taxonomy: `origo/scraper/errors.py`
+  - Retry/backoff hooks: `origo/scraper/retry.py`
+  - Rights fail-closed lookup hook: `origo/scraper/rights.py`
+  - Immutable audit events: `origo/scraper/audit.py`
+  - Guardrail proof: `spec/slices/slice-3-generic-scraper/guardrails-proof.json`
+- Completed docs closeout (`S3-G5`, `S3-G6`):
+  - Developer docs:
+    - `docs/Developer/s3-scraper-contracts.md`
+    - `docs/Developer/s3-scraper-pipeline.md`
+  - User docs:
+    - `docs/scraper-reference.md`
+    - `docs/data-taxonomy.md` update
+
+## Current state
+- Slice 3 is complete (capability + proof + guardrails + docs).
+- Scraper runtime now supports:
+  - deterministic artifact IDs,
+  - source discovery/fetch/parse/normalize flow,
+  - raw artifact persistence to S3-compatible object store,
+  - normalized long-metric staging writes in ClickHouse,
+  - fail-closed rights classification,
+  - retry hooks with explicit backoff policy,
+  - append-only hash-chained audit log.
+- Itemized plan reflects Slice 3 completion in `spec/2-itemized-work-plan.md`.
+
+## Watch out
+- Browser and PDF paths require optional runtime dependencies (`playwright`, `pypdf`); they fail loudly when missing.
+- HTML parsing requires `beautifulsoup4` and `lxml`; runtime fails loudly if either is unavailable.
+- Pipeline runtime requires guardrail env contract values (retry + rights + audit + object-store + ClickHouse).
+- Current rights matrix contains Binance defaults; new scraper sources must be added to `contracts/source-rights-matrix.json` before pipeline execution.

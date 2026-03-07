@@ -1,0 +1,186 @@
+{
+  "datasets": [
+    {
+      "dataset": "spot_trades",
+      "first_row": {
+        "aligned_at_utc": "2017-08-19T22:19:02+00:00",
+        "close_price": 4101.59,
+        "high_price": 4101.59,
+        "low_price": 4101.59,
+        "open_price": 4101.59,
+        "quantity_sum": 0.012,
+        "quote_volume_sum": 49.219080000000005,
+        "trade_count": 1
+      },
+      "last_row": {
+        "aligned_at_utc": "2017-08-19T23:46:59+00:00",
+        "close_price": 4139.98,
+        "high_price": 4139.98,
+        "low_price": 4139.98,
+        "open_price": 4139.98,
+        "quantity_sum": 0.000455,
+        "quote_volume_sum": 1.8836908999999997,
+        "trade_count": 1
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "20f4ca289f4e16e30f831d253a55a1e83cd2a3a45212ad3454d05195ea32301c",
+      "schema": [
+        {
+          "dtype": "Float64",
+          "name": "open_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "high_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "low_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "close_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quantity_sum"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quote_volume_sum"
+        },
+        {
+          "dtype": "UInt64",
+          "name": "trade_count"
+        },
+        {
+          "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+          "name": "aligned_at_utc"
+        }
+      ]
+    },
+    {
+      "dataset": "spot_agg_trades",
+      "first_row": {
+        "aligned_at_utc": "2019-01-01T00:03:20+00:00",
+        "close_price": 3697.59,
+        "high_price": 3697.59,
+        "low_price": 3697.59,
+        "open_price": 3697.59,
+        "quantity_sum": 0.069217,
+        "quote_volume_sum": 255.93608703,
+        "trade_count": 1
+      },
+      "last_row": {
+        "aligned_at_utc": "2019-01-01T00:04:07+00:00",
+        "close_price": 3696.0,
+        "high_price": 3696.0,
+        "low_price": 3695.77,
+        "open_price": 3695.77,
+        "quantity_sum": 11.550884,
+        "quote_volume_sum": 42692.06443132,
+        "trade_count": 3
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "3c88e2bd1d6ad89179978f647ed6a28acc23bb863b3e79e4d4650b97f6d06b60",
+      "schema": [
+        {
+          "dtype": "Float64",
+          "name": "open_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "high_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "low_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "close_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quantity_sum"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quote_volume_sum"
+        },
+        {
+          "dtype": "UInt64",
+          "name": "trade_count"
+        },
+        {
+          "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+          "name": "aligned_at_utc"
+        }
+      ]
+    },
+    {
+      "dataset": "futures_trades",
+      "first_row": {
+        "aligned_at_utc": "2019-09-08T19:52:45+00:00",
+        "close_price": 10343.62,
+        "high_price": 10344.04,
+        "low_price": 10343.62,
+        "open_price": 10344.04,
+        "quantity_sum": 0.683,
+        "quote_volume_sum": 7064.831480000001,
+        "trade_count": 2
+      },
+      "last_row": {
+        "aligned_at_utc": "2019-09-08T19:54:59+00:00",
+        "close_price": 10341.46,
+        "high_price": 10342.13,
+        "low_price": 10341.46,
+        "open_price": 10342.13,
+        "quantity_sum": 0.828,
+        "quote_volume_sum": 8562.968739999998,
+        "trade_count": 2
+      },
+      "row_count": 25,
+      "rows_hash_sha256": "65d8d4faa08c77418466010264296faaa1ccf0262b8913f70d3870e7b27eafa0",
+      "schema": [
+        {
+          "dtype": "Float64",
+          "name": "open_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "high_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "low_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "close_price"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quantity_sum"
+        },
+        {
+          "dtype": "Float64",
+          "name": "quote_volume_sum"
+        },
+        {
+          "dtype": "UInt64",
+          "name": "trade_count"
+        },
+        {
+          "dtype": "Datetime(time_unit='ms', time_zone='UTC')",
+          "name": "aligned_at_utc"
+        }
+      ]
+    }
+  ],
+  "generated_at_utc": "2026-03-06T12:03:04.579275+00:00",
+  "proof_scope": "Slice 5 S5-C1 Binance aligned-1s materialization definitions",
+  "window": {
+    "latest_rows": 25
+  }
+}

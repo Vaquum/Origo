@@ -314,17 +314,81 @@ jobs:
 
           refresh_sudo_ticket
 
+          read_env_value() {
+            local key="$1"
+            run_privileged awk -F= -v key="${key}" '
+              $1 == key {
+                sub(/^[^=]*=/, "", $0)
+                print $0
+                exit
+              }
+            ' /opt/origo/deploy/.env
+          }
+
+          bitcoin_core_rpc_url="$(read_env_value ORIGO_BITCOIN_CORE_RPC_URL || true)"
+          if [[ -z "${bitcoin_core_rpc_url}" ]]; then
+            bitcoin_core_rpc_url='http://bitcoin-core:8332'
+          fi
+
+          bitcoin_core_rpc_user="$(read_env_value ORIGO_BITCOIN_CORE_RPC_USER || true)"
+          if [[ -z "${bitcoin_core_rpc_user}" ]]; then
+            bitcoin_core_rpc_user='origo-bitcoin-rpc'
+          fi
+
+          bitcoin_core_rpc_password="$(read_env_value ORIGO_BITCOIN_CORE_RPC_PASSWORD || true)"
+          if [[ -z "${bitcoin_core_rpc_password}" ]]; then
+            if ! command -v openssl >/dev/null 2>&1; then
+              echo "ERROR: openssl is required to generate ORIGO_BITCOIN_CORE_RPC_PASSWORD." >&2
+              exit 1
+            fi
+            bitcoin_core_rpc_password="$(openssl rand -hex 32)"
+          fi
+
+          bitcoin_core_network="$(read_env_value ORIGO_BITCOIN_CORE_NETWORK || true)"
+          if [[ -z "${bitcoin_core_network}" ]]; then
+            bitcoin_core_network='main'
+          fi
+
+          bitcoin_core_rpc_timeout_seconds="$(read_env_value ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS || true)"
+          if [[ -z "${bitcoin_core_rpc_timeout_seconds}" ]]; then
+            bitcoin_core_rpc_timeout_seconds='30'
+          fi
+
+          bitcoin_core_headers_start_height="$(read_env_value ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT || true)"
+          if [[ -z "${bitcoin_core_headers_start_height}" ]]; then
+            bitcoin_core_headers_start_height='0'
+          fi
+
+          bitcoin_core_headers_end_height="$(read_env_value ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT || true)"
+          if [[ -z "${bitcoin_core_headers_end_height}" ]]; then
+            bitcoin_core_headers_end_height='100'
+          fi
+
           tmp_env_next="$(mktemp)"
           run_privileged awk '
             $0 !~ /^ORIGO_API_IMAGE=/ &&
             $0 !~ /^ORIGO_CONTROL_PLANE_IMAGE=/ &&
-            $0 !~ /^ORIGO_DOCKER_API_PORT=/
+            $0 !~ /^ORIGO_DOCKER_API_PORT=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_RPC_URL=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_RPC_USER=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_RPC_PASSWORD=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_NETWORK=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=/
           ' /opt/origo/deploy/.env > "${tmp_env_next}"
           {
             cat "${tmp_env_next}"
             echo "ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
             echo "ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
             echo "ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
+            echo "ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
+            echo "ORIGO_BITCOIN_CORE_RPC_USER=${bitcoin_core_rpc_user}"
+            echo "ORIGO_BITCOIN_CORE_RPC_PASSWORD=${bitcoin_core_rpc_password}"
+            echo "ORIGO_BITCOIN_CORE_NETWORK=${bitcoin_core_network}"
+            echo "ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS=${bitcoin_core_rpc_timeout_seconds}"
+            echo "ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"
+            echo "ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=${bitcoin_core_headers_end_height}"
           } | run_privileged tee /opt/origo/deploy/.env >/dev/null
           rm -f -- "${tmp_env_next}"
           tmp_env_next=''
@@ -334,13 +398,17 @@ jobs:
           echo "  ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
           echo "  ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
           echo "  ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
+          echo "  ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
+          echo "  ORIGO_BITCOIN_CORE_NETWORK=${bitcoin_core_network}"
+          echo "  ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"
+          echo "  ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=${bitcoin_core_headers_end_height}"
 
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
           echo "Pulling compose service images."
           compose_cmd pull
-          echo "Starting ClickHouse before migrations."
-          compose_cmd up -d clickhouse
+          echo "Starting ClickHouse and Bitcoin Core before migrations."
+          compose_cmd up -d clickhouse bitcoin-core
 
           clickhouse_container_id="$(compose_cmd ps -q clickhouse)"
           if [[ -z "${clickhouse_container_id}" ]]; then
@@ -370,8 +438,8 @@ jobs:
           compose_cmd run --rm -T dagster-webserver python -m origo_control_plane.migrations.cli migrate </dev/null
           echo "Migrations completed."
 
-          echo "Applying ClickHouse update without forced recreation."
-          compose_cmd up -d --remove-orphans clickhouse
+          echo "Applying ClickHouse and Bitcoin Core update without forced recreation."
+          compose_cmd up -d --remove-orphans clickhouse bitcoin-core
 
           echo "Applying runtime stack update with forced recreation for application services."
           compose_cmd up -d --remove-orphans --force-recreate dagster-webserver dagster-daemon api
@@ -440,11 +508,13 @@ jobs:
           }
 
           clickhouse_container_id="$(require_container_for_service clickhouse)"
+          bitcoin_core_container_id="$(require_container_for_service bitcoin-core)"
           dagster_webserver_container_id="$(require_container_for_service dagster-webserver)"
           dagster_daemon_container_id="$(require_container_for_service dagster-daemon)"
           api_container_id="$(require_container_for_service api)"
 
           wait_for_service_state clickhouse "${clickhouse_container_id}" healthy
+          wait_for_service_state bitcoin-core "${bitcoin_core_container_id}" healthy
           wait_for_service_state dagster-webserver "${dagster_webserver_container_id}" healthy
           wait_for_service_state dagster-daemon "${dagster_daemon_container_id}" running
           wait_for_service_state api "${api_container_id}" healthy

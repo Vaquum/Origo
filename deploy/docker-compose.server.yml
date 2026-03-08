@@ -15,6 +15,43 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  bitcoin-core:
+    image: bitcoin/bitcoin:27.1
+    volumes:
+      - origo-bitcoin-core-data:/home/bitcoin/.bitcoin
+    command:
+      - -server=1
+      - -chain=${ORIGO_BITCOIN_CORE_NETWORK:?ORIGO_BITCOIN_CORE_NETWORK must be set}
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=8332
+      - -port=8333
+      - -rpcuser=${ORIGO_BITCOIN_CORE_RPC_USER:?ORIGO_BITCOIN_CORE_RPC_USER must be set}
+      - -rpcpassword=${ORIGO_BITCOIN_CORE_RPC_PASSWORD:?ORIGO_BITCOIN_CORE_RPC_PASSWORD must be set}
+      - -txindex=1
+      - -prune=0
+      - -disablewallet=1
+      - -dbcache=1024
+      - -printtoconsole=1
+    ports:
+      - '127.0.0.1:8332:8332'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/opt/bitcoin/bin/bitcoin-cli',
+          '-rpcconnect=127.0.0.1',
+          '-rpcport=8332',
+          '-rpcuser=${ORIGO_BITCOIN_CORE_RPC_USER:?ORIGO_BITCOIN_CORE_RPC_USER must be set}',
+          '-rpcpassword=${ORIGO_BITCOIN_CORE_RPC_PASSWORD:?ORIGO_BITCOIN_CORE_RPC_PASSWORD must be set}',
+          'getblockchaininfo',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
   dagster-webserver:
     image: ${ORIGO_CONTROL_PLANE_IMAGE:?ORIGO_CONTROL_PLANE_IMAGE must be set}
     working_dir: /workspace/control-plane
@@ -45,6 +82,8 @@ services:
       - origo-storage:/workspace/storage
     depends_on:
       clickhouse:
+        condition: service_healthy
+      bitcoin-core:
         condition: service_healthy
     command: dagster-webserver -h 0.0.0.0 -p 3000 -w /workspace/control-plane/workspace.yaml
     healthcheck:
@@ -83,6 +122,8 @@ services:
       - origo-storage:/workspace/storage
     depends_on:
       clickhouse:
+        condition: service_healthy
+      bitcoin-core:
         condition: service_healthy
       dagster-webserver:
         condition: service_healthy
@@ -144,5 +185,6 @@ services:
 
 volumes:
   origo-clickhouse-data:
+  origo-bitcoin-core-data:
   origo-dagster-instance:
   origo-storage:

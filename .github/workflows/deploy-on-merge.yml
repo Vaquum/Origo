@@ -197,6 +197,18 @@ jobs:
             fi
           }
 
+          tmp_env=''
+          tmp_env_next=''
+          cleanup_tmp_files() {
+            if [[ -n "${tmp_env}" ]]; then
+              rm -f -- "${tmp_env}"
+            fi
+            if [[ -n "${tmp_env_next}" ]]; then
+              rm -f -- "${tmp_env_next}"
+            fi
+          }
+          trap cleanup_tmp_files EXIT
+
           run_privileged mkdir -p /opt/origo/deploy /opt/origo/config
 
           if [[ ! -f /opt/origo/deploy/.env ]]; then
@@ -213,6 +225,7 @@ jobs:
             fi
             run_privileged mv "${tmp_env}" /opt/origo/deploy/.env
             run_privileged chmod 0600 /opt/origo/deploy/.env
+            tmp_env=''
           fi
 
           if [[ ! -s /opt/origo/deploy/.env ]]; then
@@ -278,13 +291,16 @@ jobs:
           run_privileged docker info >/dev/null
 
           tmp_env_next="$(mktemp)"
-          grep -v '^ORIGO_API_IMAGE=' /opt/origo/deploy/.env | grep -v '^ORIGO_CONTROL_PLANE_IMAGE=' > "${tmp_env_next}" || true
+          run_privileged awk '
+            $0 !~ /^ORIGO_API_IMAGE=/ && $0 !~ /^ORIGO_CONTROL_PLANE_IMAGE=/
+          ' /opt/origo/deploy/.env > "${tmp_env_next}"
           {
             cat "${tmp_env_next}"
             echo "ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
             echo "ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
           } | run_privileged tee /opt/origo/deploy/.env >/dev/null
-          rm -f "${tmp_env_next}"
+          rm -f -- "${tmp_env_next}"
+          tmp_env_next=''
           run_privileged chmod 0600 /opt/origo/deploy/.env
 
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
@@ -346,6 +362,11 @@ jobs:
             local status=''
             while [[ "${attempt}" -le 90 ]]; do
               status="$(container_runtime_status "${container_id}")"
+              if [[ "${status}" == "exited" || "${status}" == "dead" ]]; then
+                echo "ERROR: service ${service} entered terminal state ${status}" >&2
+                compose_cmd logs --no-color "${service}" >&2 || true
+                exit 1
+              fi
               if [[ "${status}" == "${expected}" ]]; then
                 return 0
               fi

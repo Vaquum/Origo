@@ -86,6 +86,7 @@ jobs:
           ORIGO_SERVER_USER: ${{ secrets.ORIGO_SERVER_USER }}
           ORIGO_SERVER_PASSWORD: ${{ secrets.ORIGO_SERVER_PASSWORD }}
           ORIGO_SERVER_ENV_B64: ${{ secrets.ORIGO_SERVER_ENV_B64 }}
+          ORIGO_DEPLOY_API_PORT: '80'
           ORIGO_API_IMAGE: ${{ steps.images.outputs.api_image }}
           ORIGO_CONTROL_PLANE_IMAGE: ${{ steps.images.outputs.control_plane_image }}
           GHCR_USER: ${{ github.actor }}
@@ -104,6 +105,7 @@ jobs:
           require_env ORIGO_SERVER_IP
           require_env ORIGO_SERVER_USER
           require_env ORIGO_SERVER_PASSWORD
+          require_env ORIGO_DEPLOY_API_PORT
           require_env ORIGO_API_IMAGE
           require_env ORIGO_CONTROL_PLANE_IMAGE
           require_env GHCR_USER
@@ -120,6 +122,7 @@ jobs:
 
           origo_server_password_b64="$(printf '%s' "${ORIGO_SERVER_PASSWORD}" | base64 -w0)"
           origo_server_env_b64_b64="$(printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 -w0)"
+          origo_deploy_api_port_b64="$(printf '%s' "${ORIGO_DEPLOY_API_PORT}" | base64 -w0)"
           origo_api_image_b64="$(printf '%s' "${ORIGO_API_IMAGE}" | base64 -w0)"
           origo_control_plane_image_b64="$(printf '%s' "${ORIGO_CONTROL_PLANE_IMAGE}" | base64 -w0)"
           origo_deploy_compose_b64="$(base64 -w0 deploy/docker-compose.server.yml)"
@@ -130,6 +133,7 @@ jobs:
           sshpass -e ssh "${ssh_opts[@]}" "${remote}" \
             "ORIGO_SERVER_PASSWORD_B64='${origo_server_password_b64}' \
              ORIGO_SERVER_ENV_B64_B64='${origo_server_env_b64_b64}' \
+             ORIGO_DEPLOY_API_PORT_B64='${origo_deploy_api_port_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
              ORIGO_CONTROL_PLANE_IMAGE_B64='${origo_control_plane_image_b64}' \
              ORIGO_DEPLOY_COMPOSE_B64='${origo_deploy_compose_b64}' \
@@ -153,6 +157,7 @@ jobs:
           }
 
           decode_env_b64_required ORIGO_SERVER_PASSWORD_B64 ORIGO_SERVER_PASSWORD
+          decode_env_b64_required ORIGO_DEPLOY_API_PORT_B64 ORIGO_DEPLOY_API_PORT
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
           decode_env_b64_required ORIGO_CONTROL_PLANE_IMAGE_B64 ORIGO_CONTROL_PLANE_IMAGE
           decode_env_b64_required ORIGO_DEPLOY_COMPOSE_B64 ORIGO_DEPLOY_COMPOSE_CONTENT
@@ -174,12 +179,22 @@ jobs:
           }
 
           require_env ORIGO_SERVER_PASSWORD
+          require_env ORIGO_DEPLOY_API_PORT
           require_env ORIGO_API_IMAGE
           require_env ORIGO_CONTROL_PLANE_IMAGE
           require_env ORIGO_DEPLOY_COMPOSE_CONTENT
           require_env ORIGO_CLICKHOUSE_CONFIG_CONTENT
           require_env GHCR_USER
           require_env GHCR_TOKEN
+
+          if [[ ! "${ORIGO_DEPLOY_API_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_DEPLOY_API_PORT must be an integer in range 1..65535." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_DEPLOY_API_PORT}" -lt 1 || "${ORIGO_DEPLOY_API_PORT}" -gt 65535 ]]; then
+            echo "ERROR: ORIGO_DEPLOY_API_PORT must be in range 1..65535." >&2
+            exit 1
+          fi
 
           if [[ "$(id -u)" -ne 0 ]]; then
             if ! command -v sudo >/dev/null 2>&1; then
@@ -301,12 +316,15 @@ jobs:
 
           tmp_env_next="$(mktemp)"
           run_privileged awk '
-            $0 !~ /^ORIGO_API_IMAGE=/ && $0 !~ /^ORIGO_CONTROL_PLANE_IMAGE=/
+            $0 !~ /^ORIGO_API_IMAGE=/ &&
+            $0 !~ /^ORIGO_CONTROL_PLANE_IMAGE=/ &&
+            $0 !~ /^ORIGO_DOCKER_API_PORT=/
           ' /opt/origo/deploy/.env > "${tmp_env_next}"
           {
             cat "${tmp_env_next}"
             echo "ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
             echo "ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
+            echo "ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
           } | run_privileged tee /opt/origo/deploy/.env >/dev/null
           rm -f -- "${tmp_env_next}"
           tmp_env_next=''
@@ -315,6 +333,7 @@ jobs:
           echo "Deploy target images:"
           echo "  ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
           echo "  ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
+          echo "  ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
 
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 

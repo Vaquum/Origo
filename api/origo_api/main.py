@@ -50,6 +50,7 @@ _ALIGNED_QUERY_DATASETS = {
     'spot_agg_trades',
     'futures_trades',
     'okx_spot_trades',
+    'bybit_spot_trades',
     'etf_daily_metrics',
     'fred_series_metrics',
 }
@@ -348,6 +349,7 @@ def _read_export_tags(
         'spot_agg_trades',
         'futures_trades',
         'okx_spot_trades',
+        'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
     }:

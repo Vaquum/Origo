@@ -1,0 +1,93 @@
+{
+  "deterministic_match": true,
+  "generated_at_utc": "2026-03-08T11:40:07.831664+00:00",
+  "proof_scope": "Slice 11 P3 native + aligned determinism replay",
+  "run_1": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 79123.43899999975,
+        "quote_volume_sum_total": 3416032597.2287993,
+        "row_count": 61202,
+        "rows_hash_sha256": "4e76334465e7c9fc0f89c9929295d2233195f0815354daa961e895d6de6791ad",
+        "trade_count_total": 849355
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 180530.08299999984,
+        "quote_volume_sum_total": 8166222223.795203,
+        "row_count": 79705,
+        "rows_hash_sha256": "6bd8c257e1118af7217d7a549378a0d5b6cb6f983e6dff71ab76afa4fb998057",
+        "trade_count_total": 1796207
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 235,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 93,
+        "last_trade_id": 849355,
+        "quote_quantity_sum": 3416032597.2288003,
+        "row_count": 849355,
+        "rows_hash_sha256": "f4b5f88d75dcc3f3ca9ce2d5c953e6fbe95c985565345fafa9e77e5537a7d841",
+        "size_sum": 79123.43900000001
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 183,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 282,
+        "last_trade_id": 1796207,
+        "quote_quantity_sum": 8166222223.795199,
+        "row_count": 1796207,
+        "rows_hash_sha256": "2d043bde90c424170a9f53ca2e0cd8573bf4a8366988118d5e462b09fca534ca",
+        "size_sum": 180530.083
+      }
+    }
+  },
+  "run_2": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 79123.43899999975,
+        "quote_volume_sum_total": 3416032597.2287993,
+        "row_count": 61202,
+        "rows_hash_sha256": "4e76334465e7c9fc0f89c9929295d2233195f0815354daa961e895d6de6791ad",
+        "trade_count_total": 849355
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 180530.08299999984,
+        "quote_volume_sum_total": 8166222223.795203,
+        "row_count": 79705,
+        "rows_hash_sha256": "6bd8c257e1118af7217d7a549378a0d5b6cb6f983e6dff71ab76afa4fb998057",
+        "trade_count_total": 1796207
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 235,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 93,
+        "last_trade_id": 849355,
+        "quote_quantity_sum": 3416032597.2288003,
+        "row_count": 849355,
+        "rows_hash_sha256": "f4b5f88d75dcc3f3ca9ce2d5c953e6fbe95c985565345fafa9e77e5537a7d841",
+        "size_sum": 79123.43900000001
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 183,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 282,
+        "last_trade_id": 1796207,
+        "quote_quantity_sum": 8166222223.795199,
+        "row_count": 1796207,
+        "rows_hash_sha256": "2d043bde90c424170a9f53ca2e0cd8573bf4a8366988118d5e462b09fca534ca",
+        "size_sum": 180530.083
+      }
+    }
+  }
+}

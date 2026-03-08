@@ -23,6 +23,7 @@ _ALLOWED_EXPORT_DATASETS: frozenset[RawQueryDataset] = frozenset(
         'spot_agg_trades',
         'futures_trades',
         'okx_spot_trades',
+        'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
     }
@@ -33,6 +34,7 @@ _ALLOWED_QUERY_DATASETS: frozenset[RawQueryDataset] = frozenset(
         'spot_agg_trades',
         'futures_trades',
         'okx_spot_trades',
+        'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
     }

@@ -1,0 +1,47 @@
+{
+  "dataset": "bybit_spot_trades",
+  "generated_at_utc": "2026-03-08T11:40:07.217716+00:00",
+  "proof_scope": "Slice 11 P2 aligned acceptance",
+  "row_count": 79705,
+  "rows_hash_sha256": "41443ae5e86d633f8ea9b8b42bb4fceb1bda07ad1874624e19934ddbfaae32b9",
+  "schema": [
+    {
+      "dtype": "String",
+      "name": "aligned_at_utc"
+    },
+    {
+      "dtype": "Float64",
+      "name": "open_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "high_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "low_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "close_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "quantity_sum"
+    },
+    {
+      "dtype": "Float64",
+      "name": "quote_volume_sum"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "trade_count"
+    }
+  ],
+  "trade_count_total": 1796207,
+  "window": {
+    "day": "2024-01-02",
+    "end_utc": "2024-01-03T00:00:00Z",
+    "start_utc": "2024-01-02T00:00:00Z"
+  }
+}

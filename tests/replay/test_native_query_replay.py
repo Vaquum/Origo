@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import polars as pl
 
+from origo.query.bybit_aligned_1s import build_bybit_aligned_1s_sql
+from origo.query.bybit_native import build_bybit_native_query_spec
 from origo.query.native_core import (
     NativeQuerySpec,
     TimeRangeWindow,
@@ -84,6 +86,43 @@ def test_compile_okx_aligned_sql_is_deterministic() -> None:
     )
     sql_run_2 = build_okx_aligned_1s_sql(
         dataset='okx_spot_trades',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    assert sql_run_1 == sql_run_2
+
+
+def test_compile_bybit_native_query_is_deterministic() -> None:
+    spec = build_bybit_native_query_spec(
+        dataset='bybit_spot_trades',
+        select_columns=('trade_id', 'price', 'size', 'trade_id'),
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+    )
+
+    compiled_run_1 = _compile_native_query(spec, 'origo')
+    compiled_run_2 = _compile_native_query(spec, 'origo')
+
+    assert compiled_run_1 == compiled_run_2
+    assert compiled_run_1.sql == compiled_run_2.sql
+
+
+def test_compile_bybit_aligned_sql_is_deterministic() -> None:
+    sql_run_1 = build_bybit_aligned_1s_sql(
+        dataset='bybit_spot_trades',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    sql_run_2 = build_bybit_aligned_1s_sql(
+        dataset='bybit_spot_trades',
         window=TimeRangeWindow(
             start_iso='2024-01-01T00:00:00Z',
             end_iso='2024-01-01T01:00:00Z',

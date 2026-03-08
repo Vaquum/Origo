@@ -205,6 +205,7 @@ Every slice must pass:
 8. Slice 7: Full platform Docker wrapping and local end-to-end proof.
 9. Slice 8: OKX spot trades daily-file ingest plus `aligned_1s` integration capability.
 10. Slice 10: Image-based merge-to-server deployment with first-run host bootstrap.
+11. Slice 11: Bybit spot trades daily-file ingest plus `aligned_1s` integration capability.
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -228,6 +229,15 @@ Every slice must pass:
 7. Raw artifact persistence: always on.
 8. Retry policy: daily run with 24h same-day retry window.
 9. Proof threshold: >=99.5% parity on mandatory metrics in proof window.
+
+## Slice 11 (Bybit) Locked Details
+1. Source must be first-party Bybit historical files only (no third-party APIs).
+2. Canonical source path for BTCUSDT daily spot trades is `https://public.bybit.com/trading/BTCUSDT/BTCUSDTYYYY-MM-DD.csv.gz`.
+3. Ingest must mirror existing exchange daily ingest semantics:
+   1. deterministic file selection by UTC partition day
+   2. deterministic parse and normalized write contract
+   3. explicit source artifact fingerprints in proof outputs
+4. Bybit onboarding follows source completion rule: `native` + `aligned_1s` before slice closeout.
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

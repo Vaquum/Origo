@@ -1,0 +1,136 @@
+{
+  "column_key": {
+    "first_event_offset_ms": "First event timestamp offset in milliseconds from window start.",
+    "first_trade_id": "Minimum trade_id in native rows for the window.",
+    "last_event_offset_ms": "Milliseconds from last event timestamp to window end.",
+    "last_trade_id": "Maximum trade_id in native rows for the window.",
+    "quantity_sum_total": "Sum of aligned quantity_sum across rows in the window.",
+    "quote_quantity_sum": "Sum of native quote_quantity across rows in the window.",
+    "quote_volume_sum_total": "Sum of aligned quote_volume_sum across rows in the window.",
+    "row_count": "Number of rows returned for the exact window.",
+    "rows_hash_sha256": "SHA256 of canonicalized rows for the window.",
+    "size_sum": "Sum of native size across rows in the window.",
+    "trade_count_total": "Sum of aligned trade_count across rows in the window."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "days": [
+      "2024-01-01",
+      "2024-01-02"
+    ],
+    "windows_utc": {
+      "2024-01-01": {
+        "end_utc": "2024-01-02T00:00:00Z",
+        "start_utc": "2024-01-01T00:00:00Z"
+      },
+      "2024-01-02": {
+        "end_utc": "2024-01-03T00:00:00Z",
+        "start_utc": "2024-01-02T00:00:00Z"
+      }
+    }
+  },
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 79123.43899999975,
+        "quote_volume_sum_total": 3416032597.2287993,
+        "row_count": 61202,
+        "rows_hash_sha256": "4e76334465e7c9fc0f89c9929295d2233195f0815354daa961e895d6de6791ad",
+        "trade_count_total": 849355
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 180530.08299999984,
+        "quote_volume_sum_total": 8166222223.795203,
+        "row_count": 79705,
+        "rows_hash_sha256": "6bd8c257e1118af7217d7a549378a0d5b6cb6f983e6dff71ab76afa4fb998057",
+        "trade_count_total": 1796207
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 235,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 93,
+        "last_trade_id": 849355,
+        "quote_quantity_sum": 3416032597.2288003,
+        "row_count": 849355,
+        "rows_hash_sha256": "f4b5f88d75dcc3f3ca9ce2d5c953e6fbe95c985565345fafa9e77e5537a7d841",
+        "size_sum": 79123.43900000001
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 183,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 282,
+        "last_trade_id": 1796207,
+        "quote_quantity_sum": 8166222223.795199,
+        "row_count": 1796207,
+        "rows_hash_sha256": "2d043bde90c424170a9f53ca2e0cd8573bf4a8366988118d5e462b09fca534ca",
+        "size_sum": 180530.083
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 79123.43899999975,
+        "quote_volume_sum_total": 3416032597.2287993,
+        "row_count": 61202,
+        "rows_hash_sha256": "4e76334465e7c9fc0f89c9929295d2233195f0815354daa961e895d6de6791ad",
+        "trade_count_total": 849355
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 1000,
+        "quantity_sum_total": 180530.08299999984,
+        "quote_volume_sum_total": 8166222223.795203,
+        "row_count": 79705,
+        "rows_hash_sha256": "6bd8c257e1118af7217d7a549378a0d5b6cb6f983e6dff71ab76afa4fb998057",
+        "trade_count_total": 1796207
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 235,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 93,
+        "last_trade_id": 849355,
+        "quote_quantity_sum": 3416032597.2288003,
+        "row_count": 849355,
+        "rows_hash_sha256": "f4b5f88d75dcc3f3ca9ce2d5c953e6fbe95c985565345fafa9e77e5537a7d841",
+        "size_sum": 79123.43900000001
+      },
+      "2024-01-02": {
+        "first_event_offset_ms": 183,
+        "first_trade_id": 1,
+        "last_event_offset_ms": 282,
+        "last_trade_id": 1796207,
+        "quote_quantity_sum": 8166222223.795199,
+        "row_count": 1796207,
+        "rows_hash_sha256": "2d043bde90c424170a9f53ca2e0cd8573bf4a8366988118d5e462b09fca534ca",
+        "size_sum": 180530.083
+      }
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "97ea9d48329057990899e2f9775b87203fd7850341d74a9b142efa77dc3fbb76",
+      "gzip_sha256": "cc74c2be7df6dfe742cfd4c3b25eb27a7270f0e4172d0d666a1c587d575c232b",
+      "partition_day": "2024-01-01",
+      "rows_inserted": 849355,
+      "source_etag": "\"0636f7536293717f56905a79786c268f-4\""
+    },
+    {
+      "csv_sha256": "9505e330bd34700e30906da2c6df2f5f81a4541fff296068c6463c91c161466f",
+      "gzip_sha256": "2aebeecd0226b4e40959ac7966717147ade3b9e99c56d47cd5155cecf4009b27",
+      "partition_day": "2024-01-02",
+      "rows_inserted": 1796207,
+      "source_etag": "\"4b0b0b9d8f47ddc8cc3de43dde318767-8\""
+    }
+  ]
+}

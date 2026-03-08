@@ -1,0 +1,42 @@
+{
+  "dataset": "bybit_spot_trades",
+  "generated_at_utc": "2026-03-08T11:40:04.244114+00:00",
+  "proof_scope": "Slice 11 P1 native acceptance",
+  "row_count": 1796207,
+  "rows_hash_sha256": "fddabd5b09a8a584f498ac8d2affbfc70797b406930f645f7c16d0f3b8fc6f0a",
+  "schema": [
+    {
+      "dtype": "UInt64",
+      "name": "trade_id"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "timestamp"
+    },
+    {
+      "dtype": "Float64",
+      "name": "price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "size"
+    },
+    {
+      "dtype": "String",
+      "name": "side"
+    },
+    {
+      "dtype": "String",
+      "name": "trd_match_id"
+    },
+    {
+      "dtype": "String",
+      "name": "datetime"
+    }
+  ],
+  "window": {
+    "day": "2024-01-02",
+    "end_utc": "2024-01-03T00:00:00Z",
+    "start_utc": "2024-01-02T00:00:00Z"
+  }
+}

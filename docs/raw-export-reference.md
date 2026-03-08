@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S2, S5, S6, S8 (API v0.1.3)
+- Last updated: 2026-03-08
+- Slice/version reference: S2, S5, S6, S8, S11 (API v0.1.4)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -17,7 +17,7 @@
 - Submit request contract:
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
-  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | etf_daily_metrics | fred_series_metrics`
+  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics`
   - `fields`: optional field projection
   - Exactly one window selector:
     - `month_year`
@@ -64,6 +64,7 @@
   - `spec/slices/slice-2-raw-export-native/`
   - `spec/slices/slice-5-raw-query-aligned-1s/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
+  - `spec/slices/slice-11-bybit-spot-trades-aligned/`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`
@@ -82,6 +83,8 @@
   - `{ "mode":"native", "format":"parquet", "dataset":"spot_trades", "month_year":[8,2017], "strict":false }`
 - Submit OKX native export:
   - `{ "mode":"native", "format":"csv", "dataset":"okx_spot_trades", "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
+- Submit Bybit native export:
+  - `{ "mode":"native", "format":"csv", "dataset":"bybit_spot_trades", "time_range":["2024-01-02T00:00:00Z","2024-01-03T00:00:00Z"], "strict":false }`
 - Submit aligned export:
   - `{ "mode":"aligned_1s", "format":"csv", "dataset":"etf_daily_metrics", "time_range":["2026-03-05T00:00:00Z","2026-03-07T00:00:00Z"], "strict":false }`
 - Poll status:

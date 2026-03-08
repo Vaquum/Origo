@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S1-S8 (platform v0.1.3)
+- Last updated: 2026-03-08
+- Slice/version reference: S1-S8, S11 (platform v0.1.4)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -23,6 +23,7 @@
   - `spot_agg_trades`
   - `futures_trades`
   - `okx_spot_trades`
+  - `bybit_spot_trades`
   - `etf_daily_metrics`
   - `fred_series_metrics`
 - Core cross-dataset fields:
@@ -55,10 +56,23 @@
   - `price`: execution price
   - `size`: base-asset quantity
   - `quote_quantity`: quote-asset quantity (`price * size`)
+- Bybit native trade fields:
+  - `symbol`: symbol (`BTCUSDT`)
+  - `trade_id`: deterministic per-file sequence identifier
+  - `trd_match_id`: source match identifier
+  - `side`: `buy|sell`
+  - `price`: execution price
+  - `size`: base-asset quantity
+  - `quote_quantity`: quote-asset quantity
+  - `tick_direction`: source tick direction label
+  - `gross_value`: source gross value
+  - `home_notional`: source home notional
+  - `foreign_notional`: source foreign notional
 
 ## Source/provenance and freshness semantics
 - Binance canonical historical truth source is exchange-hosted daily/monthly files.
 - OKX canonical historical truth source is exchange-hosted daily files resolved from OKX first-party API.
+- Bybit canonical historical truth source is exchange-hosted daily csv.gz files.
 - ETF canonical source hierarchy is issuer official sources.
 - FRED canonical source is direct API calls to FRED.
 - Provenance fields (`provenance_json`, checksums, source keys) are replay-critical.
@@ -110,6 +124,8 @@
   - `sources=["spot_trades"]`
 - OKX source list example:
   - `sources=["okx_spot_trades"]`
+- Bybit source list example:
+  - `sources=["bybit_spot_trades"]`
 - Query filter clause example:
   - `{ "field":"price", "op":"gt", "value":1000 }`
 - Export status artifact fields:

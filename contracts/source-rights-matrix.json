@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-07-s8-g1",
+  "version": "2026-03-08-s11-c1",
   "sources": {
     "binance": {
       "rights_state": "Hosted Allowed",
@@ -113,6 +113,13 @@
         "okx_spot_trades"
       ],
       "legal_signoff_artifact": "contracts/legal/okx-hosted-allowed.md"
+    },
+    "bybit": {
+      "rights_state": "Hosted Allowed",
+      "datasets": [
+        "bybit_spot_trades"
+      ],
+      "legal_signoff_artifact": "contracts/legal/bybit-hosted-allowed.md"
     }
   }
 }

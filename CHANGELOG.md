@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-08
+- Completed Slice 11 Bybit capability/proof/guardrails: added first-party Bybit daily ingest, migration-backed `bybit_spot_trades` table, native + aligned query integration, export support, and fixed-window deterministic proof artifacts.
+- Added Bybit rights/legal artifacts (`Hosted Allowed`) and exchange integrity coverage for schema/type, sequence, monotonic-time, and anomaly checks.
+- Added S11 developer/user documentation and full taxonomy updates for Bybit source/query/export contracts.
+- Updated versions to `Origo API v0.1.4` and `control-plane v1.2.54`.
+
 ## 2026-03-07
 - Completed Slice 8 OKX capability/proof/guardrails: added first-party OKX daily ingest, migration-backed `okx_spot_trades` table, native + aligned query integration, export support, and fixed-window deterministic proof artifacts.
 - Added OKX rights/legal artifacts (`Hosted Allowed`) and integrity-suite coverage for schema/type, sequence-gap, and side anomaly checks.

@@ -2,12 +2,12 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S1, S4, S5, S6, S8 (API v0.1.3)
+- Last updated: 2026-03-08
+- Slice/version reference: S1, S4, S5, S6, S8, S11 (API v0.1.4)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.
-- Scope includes `native` and `aligned_1s` query modes over Binance, OKX, ETF, and FRED datasets.
+- Scope includes `native` and `aligned_1s` query modes over Binance, OKX, Bybit, ETF, and FRED datasets.
 
 ## Inputs and outputs with contract shape
 - Endpoint: `POST /v1/raw/query`
@@ -35,12 +35,14 @@
   - `spot_agg_trades`
   - `futures_trades`
   - `okx_spot_trades`
+  - `bybit_spot_trades`
   - `etf_daily_metrics`
   - `fred_series_metrics`
 - Field-level definitions are maintained in:
   - `docs/data-taxonomy.md`
   - `docs/aligned-reference.md`
   - `docs/okx-reference.md`
+  - `docs/bybit-reference.md`
   - `docs/etf-reference.md`
   - `docs/fred-reference.md`
 
@@ -75,6 +77,7 @@
   - `spec/slices/slice-5-raw-query-aligned-1s/`
   - `spec/slices/slice-6-fred-integration/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
+  - `spec/slices/slice-11-bybit-spot-trades-aligned/`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`
@@ -92,5 +95,7 @@
   - `{ "mode":"native", "sources":["spot_trades"], "fields":["trade_id","price","timestamp"], "time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "filters":[{"field":"price","op":"gt","value":1000}], "strict":false }`
 - Native OKX query:
   - `{ "mode":"native", "sources":["okx_spot_trades"], "fields":["trade_id","timestamp","price","size","side"], "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
+- Native Bybit query:
+  - `{ "mode":"native", "sources":["bybit_spot_trades"], "fields":["trade_id","timestamp","price","size","side"], "time_range":["2024-01-02T00:00:00Z","2024-01-03T00:00:00Z"], "strict":false }`
 - Aligned latest rows query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "fields":["aligned_at_utc","metric_name","metric_value_float"], "n_rows":100, "strict":false }`

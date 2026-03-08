@@ -1,0 +1,34 @@
+{
+  "generated_at_utc": "2026-03-07T20:53:02.582816+00:00",
+  "proof_scope": "Slice 8 P4 source checksum and row stats",
+  "row_stats_by_day": {
+    "2024-01-01": {
+      "aligned_row_count": 38210,
+      "aligned_rows_hash_sha256": "f2c14b4c038c723a293eda782eda88406ab3dcb1e263f8ed99cf881b80b5d66a",
+      "native_row_count": 195390,
+      "native_rows_hash_sha256": "73c3799bc70a30d2e1d0206b5b723d118351d67afc8b32e01d9833d46d7745e2"
+    },
+    "2024-01-02": {
+      "aligned_row_count": 61860,
+      "aligned_rows_hash_sha256": "1da19d2959a2641844f367579788deb92da7944d77a9b1722a893ef8053f40fc",
+      "native_row_count": 541624,
+      "native_rows_hash_sha256": "a8bc2012aecf080d7e8ece78f13c014f32a615743bbe0d536108f4e8e8d343ae"
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "892ec6691ad17093413ff23fbd46314ab46d3be057b13060f282126d899de6c2",
+      "partition_day": "2024-01-01",
+      "rows_inserted": 195390,
+      "source_content_md5": "P5UzO55VIi1sGsEIeVy7pw==",
+      "zip_sha256": "766795f1e4663e2abfbcc5953a2eebf7027006b5d75f84538c6a7cf72978cc08"
+    },
+    {
+      "csv_sha256": "32c849ad2ece03d1e4bdec82e4965881a9c6f2442014f9534124baf881fe40e1",
+      "partition_day": "2024-01-02",
+      "rows_inserted": 541624,
+      "source_content_md5": "eUbwc3sWc7q7RNRjhUnHmg==",
+      "zip_sha256": "12812c36e215a4f1341a35d1d4296d2c437fe6b13a1a3be253247868fa7472a4"
+    }
+  ]
+}

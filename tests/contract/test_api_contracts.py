@@ -32,6 +32,15 @@ def test_raw_query_requires_single_source() -> None:
         )
 
 
+def test_raw_query_request_accepts_okx_source() -> None:
+    request = RawQueryRequest(
+        mode='native',
+        sources=['okx_spot_trades'],
+        n_rows=10,
+    )
+    assert request.sources == ['okx_spot_trades']
+
+
 def test_raw_export_request_accepts_fred_dataset() -> None:
     request = RawExportRequest(
         mode='native',
@@ -40,6 +49,16 @@ def test_raw_export_request_accepts_fred_dataset() -> None:
         time_range=('2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'),
     )
     assert request.dataset == 'fred_series_metrics'
+
+
+def test_raw_export_request_accepts_okx_dataset() -> None:
+    request = RawExportRequest(
+        mode='native',
+        format='parquet',
+        dataset='okx_spot_trades',
+        time_range=('2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'),
+    )
+    assert request.dataset == 'okx_spot_trades'
 
 
 def test_export_rights_supports_fred_dataset(
@@ -62,4 +81,29 @@ def test_export_rights_supports_fred_dataset(
     decision = resolve_export_rights(dataset='fred_series_metrics', auth_token=None)
     assert decision.source == 'fred'
     assert decision.dataset == 'fred_series_metrics'
+    assert decision.rights_state == 'Hosted Allowed'
+
+
+def test_export_rights_supports_okx_dataset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    legal_artifact = tmp_path / 'okx-legal-signoff.md'
+    legal_artifact.write_text('# legal', encoding='utf-8')
+    matrix_path = tmp_path / 'rights.json'
+    matrix_payload = {
+        'version': 'test',
+        'sources': {
+            'okx': {
+                'rights_state': 'Hosted Allowed',
+                'datasets': ['okx_spot_trades'],
+                'legal_signoff_artifact': str(legal_artifact),
+            }
+        },
+    }
+    matrix_path.write_text(json.dumps(matrix_payload), encoding='utf-8')
+    monkeypatch.setenv('ORIGO_SOURCE_RIGHTS_MATRIX_PATH', str(matrix_path))
+
+    decision = resolve_export_rights(dataset='okx_spot_trades', auth_token=None)
+    assert decision.source == 'okx'
+    assert decision.dataset == 'okx_spot_trades'
     assert decision.rights_state == 'Hosted Allowed'

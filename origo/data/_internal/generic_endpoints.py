@@ -19,6 +19,7 @@ from origo.query.native_core import (
     execute_native_query,
     resolve_clickhouse_http_settings,
 )
+from origo.query.okx_native import OKXDataset, query_okx_native_data
 from origo.query.response import build_wide_rows_envelope
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ _ALLOWED_FILTER_OPS: frozenset[str] = frozenset(
     {'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'not_in'}
 )
 
-type NativeQueryDataset = BinanceDataset | ETFDataset | FREDDataset
+type NativeQueryDataset = BinanceDataset | ETFDataset | FREDDataset | OKXDataset
 
 
 def _resolve_window(
@@ -192,6 +193,18 @@ def query_native(
     if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
         frame = query_binance_native_data(
             dataset=cast(BinanceDataset, dataset),
+            select_columns=select_cols,
+            window=window,
+            include_datetime=include_datetime_col,
+            datetime_iso_output=datetime_iso_output,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        return _apply_filters(frame=frame, filters=filters)
+
+    if dataset == 'okx_spot_trades':
+        frame = query_okx_native_data(
+            dataset=dataset,
             select_columns=select_cols,
             window=window,
             include_datetime=include_datetime_col,

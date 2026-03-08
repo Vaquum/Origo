@@ -8,6 +8,8 @@ from origo.query.native_core import (
     _compile_native_query,
     _shape_native_frame,
 )
+from origo.query.okx_aligned_1s import build_okx_aligned_1s_sql
+from origo.query.okx_native import build_okx_native_query_spec
 
 
 def test_compile_native_query_is_deterministic() -> None:
@@ -52,3 +54,40 @@ def test_shape_native_frame_is_deterministic() -> None:
     shaped_run_2 = _shape_native_frame(frame, spec.id_column, compiled)
 
     assert shaped_run_1.to_dict(as_series=False) == shaped_run_2.to_dict(as_series=False)
+
+
+def test_compile_okx_native_query_is_deterministic() -> None:
+    spec = build_okx_native_query_spec(
+        dataset='okx_spot_trades',
+        select_columns=('trade_id', 'price', 'size', 'trade_id'),
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+    )
+
+    compiled_run_1 = _compile_native_query(spec, 'origo')
+    compiled_run_2 = _compile_native_query(spec, 'origo')
+
+    assert compiled_run_1 == compiled_run_2
+    assert compiled_run_1.sql == compiled_run_2.sql
+
+
+def test_compile_okx_aligned_sql_is_deterministic() -> None:
+    sql_run_1 = build_okx_aligned_1s_sql(
+        dataset='okx_spot_trades',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    sql_run_2 = build_okx_aligned_1s_sql(
+        dataset='okx_spot_trades',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    assert sql_run_1 == sql_run_2

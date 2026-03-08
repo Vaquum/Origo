@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-07-s6-g1",
+  "version": "2026-03-07-s8-g1",
   "sources": {
     "binance": {
       "rights_state": "Hosted Allowed",
@@ -106,6 +106,13 @@
         "fred_series_metrics"
       ],
       "legal_signoff_artifact": "contracts/legal/fred-hosted-allowed.md"
+    },
+    "okx": {
+      "rights_state": "Hosted Allowed",
+      "datasets": [
+        "okx_spot_trades"
+      ],
+      "legal_signoff_artifact": "contracts/legal/okx-hosted-allowed.md"
     }
   }
 }

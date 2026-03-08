@@ -1,0 +1,47 @@
+{
+  "dataset": "okx_spot_trades",
+  "generated_at_utc": "2026-03-07T20:53:02.342542+00:00",
+  "proof_scope": "Slice 8 P2 aligned acceptance",
+  "row_count": 61860,
+  "rows_hash_sha256": "cdfa344e893a54d8a0266103d25dfce1c01f82b6ef3f3cfc91e35fbd76b6a12f",
+  "schema": [
+    {
+      "dtype": "String",
+      "name": "aligned_at_utc"
+    },
+    {
+      "dtype": "Float64",
+      "name": "open_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "high_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "low_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "close_price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "quantity_sum"
+    },
+    {
+      "dtype": "Float64",
+      "name": "quote_volume_sum"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "trade_count"
+    }
+  ],
+  "trade_count_total": 541624,
+  "window": {
+    "day": "2024-01-02",
+    "end_utc": "2024-01-02T16:00:00Z",
+    "start_utc": "2024-01-01T16:00:00Z"
+  }
+}

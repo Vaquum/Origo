@@ -12,6 +12,7 @@ type ExchangeDataset = Literal[
     'spot_agg_trades',
     'futures_trades',
     'futures_agg_trades',
+    'okx_spot_trades',
 ]
 
 
@@ -23,6 +24,7 @@ class _ExchangeIntegritySpec:
     price_index: int
     quantity_index: int
     quote_quantity_index: int | None
+    side_index: int | None
     bool_indices: tuple[int, ...]
     first_last_trade_indices: tuple[int, int] | None
     datetime_index: int | None
@@ -57,6 +59,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         price_index=1,
         quantity_index=2,
         quote_quantity_index=3,
+        side_index=None,
         bool_indices=(5, 6),
         first_last_trade_indices=None,
         datetime_index=7,
@@ -78,6 +81,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         price_index=1,
         quantity_index=2,
         quote_quantity_index=None,
+        side_index=None,
         bool_indices=(6,),
         first_last_trade_indices=(3, 4),
         datetime_index=7,
@@ -99,6 +103,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         price_index=1,
         quantity_index=2,
         quote_quantity_index=3,
+        side_index=None,
         bool_indices=(5,),
         first_last_trade_indices=None,
         datetime_index=6,
@@ -119,6 +124,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         price_index=1,
         quantity_index=2,
         quote_quantity_index=None,
+        side_index=None,
         bool_indices=(6,),
         first_last_trade_indices=(3, 4),
         datetime_index=None,
@@ -130,6 +136,28 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
             'last_trade_id',
             'timestamp',
             'is_buyer_maker',
+        ),
+    ),
+    'okx_spot_trades': _ExchangeIntegritySpec(
+        tuple_size=8,
+        id_index=1,
+        timestamp_index=6,
+        price_index=3,
+        quantity_index=4,
+        quote_quantity_index=5,
+        side_index=2,
+        bool_indices=(),
+        first_last_trade_indices=None,
+        datetime_index=7,
+        frame_columns=(
+            'instrument_name',
+            'trade_id',
+            'side',
+            'price',
+            'size',
+            'quote_quantity',
+            'timestamp',
+            'datetime',
         ),
     ),
 }
@@ -169,6 +197,16 @@ def _expect_boolean_like(*, value: Any, label: str) -> None:
     if isinstance(value, str) and value.lower() in {'true', 'false', '0', '1'}:
         return
     raise ValueError(f'Exchange integrity schema/type check failed for {label}')
+
+
+def _expect_side(*, value: Any, label: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f'Exchange integrity schema/type check failed for {label}')
+    if value not in {'buy', 'sell'}:
+        raise ValueError(
+            f'Exchange integrity anomaly check failed for {label}: '
+            f'expected one of [buy, sell], got={value}'
+        )
 
 
 def _expect_datetime(*, value: Any, label: str) -> None:
@@ -245,6 +283,13 @@ def run_exchange_integrity_suite_rows(
             _expect_positive_number(
                 value=row[spec.quote_quantity_index],
                 label=f'{dataset}.row[{row_number}].quote_quantity',
+            )
+            anomaly_checks_performed += 1
+
+        if spec.side_index is not None:
+            _expect_side(
+                value=row[spec.side_index],
+                label=f'{dataset}.row[{row_number}].side',
             )
             anomaly_checks_performed += 1
 

@@ -215,23 +215,23 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 8: OKX Spot Trades Daily Ingest + `aligned_1s` Integration (Binance-Mirror Pattern)
 
 ### Capability
-- [ ] `S8-C1` Implement OKX daily source fetch/checksum/parse ingest path mirroring Binance daily ingest behavior.
-- [ ] `S8-C2` Add ClickHouse migration-backed OKX raw table schema and deterministic write path.
-- [ ] `S8-C3` Integrate OKX dataset into native raw query planner and response contracts.
-- [ ] `S8-C4` Integrate OKX dataset into `aligned_1s` materialization/query/export paths.
+- [x] `S8-C1` Implement OKX daily source fetch/checksum/parse ingest path mirroring Binance daily ingest behavior.
+- [x] `S8-C2` Add ClickHouse migration-backed OKX raw table schema and deterministic write path.
+- [x] `S8-C3` Integrate OKX dataset into native raw query planner and response contracts.
+- [x] `S8-C4` Integrate OKX dataset into `aligned_1s` materialization/query/export paths.
 
 ### Proof
-- [ ] `S8-P1` Execute fixed-window OKX ingest + native query acceptance runs against original source files.
-- [ ] `S8-P2` Execute fixed-window OKX `aligned_1s` acceptance runs and validate semantics.
-- [ ] `S8-P3` Replay same fixtures and verify deterministic output fingerprints for both native and `aligned_1s`.
-- [ ] `S8-P4` Validate loaded data checksums/row stats against source artifacts.
+- [x] `S8-P1` Execute fixed-window OKX ingest + native query acceptance runs against original source files.
+- [x] `S8-P2` Execute fixed-window OKX `aligned_1s` acceptance runs and validate semantics.
+- [x] `S8-P3` Replay same fixtures and verify deterministic output fingerprints for both native and `aligned_1s`.
+- [x] `S8-P4` Validate loaded data checksums/row stats against source artifacts.
 
 ### Guardrails
-- [ ] `S8-G1` Add rights/legal classification artifacts for OKX serving/export decisions.
-- [ ] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, sequence-gap, anomaly checks).
-- [ ] `S8-G3` Apply aligned-mode guardrails to OKX paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
-- [ ] `S8-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S8-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S8-G1` Add rights/legal classification artifacts for OKX serving/export decisions.
+- [x] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, sequence-gap, anomaly checks).
+- [x] `S8-G3` Apply aligned-mode guardrails to OKX paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
+- [x] `S8-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S8-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ---
 

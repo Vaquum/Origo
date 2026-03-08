@@ -303,9 +303,15 @@ jobs:
           tmp_env_next=''
           run_privileged chmod 0600 /opt/origo/deploy/.env
 
+          echo "Deploy target images:"
+          echo "  ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
+          echo "  ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
+
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
+          echo "Pulling compose service images."
           compose_cmd pull
+          echo "Starting ClickHouse before migrations."
           compose_cmd up -d clickhouse
 
           clickhouse_container_id="$(compose_cmd ps -q clickhouse)"
@@ -331,9 +337,12 @@ jobs:
             exit 1
           fi
 
+          echo "Running ClickHouse SQL migrations."
           compose_cmd run --rm dagster-webserver python -m origo_control_plane.migrations.cli migrate
+          echo "Migrations completed."
 
-          compose_cmd up -d --remove-orphans clickhouse dagster-webserver dagster-daemon api
+          echo "Applying runtime stack update with forced recreation."
+          compose_cmd up -d --remove-orphans --force-recreate clickhouse dagster-webserver dagster-daemon api
 
           require_container_for_service() {
             local service="$1"
@@ -345,6 +354,26 @@ jobs:
               exit 1
             fi
             printf '%s' "${container_id}"
+          }
+
+          container_image_ref() {
+            local container_id="$1"
+            run_privileged docker inspect --format '{{.Config.Image}}' "${container_id}"
+          }
+
+          assert_service_image() {
+            local service="$1"
+            local container_id="$2"
+            local expected_image="$3"
+            local actual_image
+            actual_image="$(container_image_ref "${container_id}")"
+            if [[ "${actual_image}" != "${expected_image}" ]]; then
+              echo "ERROR: service ${service} image mismatch: expected=${expected_image} actual=${actual_image}" >&2
+              compose_cmd ps >&2 || true
+              compose_cmd logs --no-color "${service}" >&2 || true
+              exit 1
+            fi
+            echo "Verified service ${service} image=${actual_image}"
           }
 
           container_runtime_status() {
@@ -387,6 +416,10 @@ jobs:
           wait_for_service_state dagster-webserver "${dagster_webserver_container_id}" healthy
           wait_for_service_state dagster-daemon "${dagster_daemon_container_id}" running
           wait_for_service_state api "${api_container_id}" healthy
+
+          assert_service_image api "${api_container_id}" "${ORIGO_API_IMAGE}"
+          assert_service_image dagster-webserver "${dagster_webserver_container_id}" "${ORIGO_CONTROL_PLANE_IMAGE}"
+          assert_service_image dagster-daemon "${dagster_daemon_container_id}" "${ORIGO_CONTROL_PLANE_IMAGE}"
 
           compose_cmd ps
           REMOTE_SCRIPT

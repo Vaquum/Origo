@@ -1,6 +1,6 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server@sha256:0b2d7824347397b2ba6fcb216f0ae772568105f1f47e19f0d3247e24c79bc10a
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./control-plane/clickhouse-config.xml:/etc/clickhouse-server/config.d/clickhouse-config.xml

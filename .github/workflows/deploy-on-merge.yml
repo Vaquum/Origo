@@ -193,8 +193,15 @@ jobs:
             if [[ "$(id -u)" -eq 0 ]]; then
               "$@"
             else
-              sudo "$@"
+              sudo -n "$@"
             fi
+          }
+
+          refresh_sudo_ticket() {
+            if [[ "$(id -u)" -eq 0 ]]; then
+              return 0
+            fi
+            printf '%s\n' "${ORIGO_SERVER_PASSWORD}" | sudo -S -v
           }
 
           tmp_env=''
@@ -290,6 +297,8 @@ jobs:
           fi
           run_privileged docker info >/dev/null
 
+          refresh_sudo_ticket
+
           tmp_env_next="$(mktemp)"
           run_privileged awk '
             $0 !~ /^ORIGO_API_IMAGE=/ && $0 !~ /^ORIGO_CONTROL_PLANE_IMAGE=/
@@ -338,11 +347,15 @@ jobs:
           fi
 
           echo "Running ClickHouse SQL migrations."
+          refresh_sudo_ticket
           compose_cmd run --rm -T dagster-webserver python -m origo_control_plane.migrations.cli migrate </dev/null
           echo "Migrations completed."
 
-          echo "Applying runtime stack update with forced recreation."
-          compose_cmd up -d --remove-orphans --force-recreate clickhouse dagster-webserver dagster-daemon api
+          echo "Applying ClickHouse update without forced recreation."
+          compose_cmd up -d --remove-orphans clickhouse
+
+          echo "Applying runtime stack update with forced recreation for application services."
+          compose_cmd up -d --remove-orphans --force-recreate dagster-webserver dagster-daemon api
 
           require_container_for_service() {
             local service="$1"

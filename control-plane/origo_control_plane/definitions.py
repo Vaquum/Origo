@@ -18,6 +18,9 @@ import dagster as dg
 import requests
 from dagster import Definitions
 
+from .assets.daily_bybit_spot_trades_to_origo import (
+    insert_daily_bybit_spot_trades_to_origo,
+)
 from .assets.daily_okx_spot_trades_to_origo import (
     insert_daily_okx_spot_trades_to_origo,
 )
@@ -57,6 +60,11 @@ insert_daily_binance_trades_job = define_asset_job(
 insert_daily_okx_spot_trades_job = define_asset_job(
     name='insert_daily_okx_spot_trades_to_origo_job',
     selection=['insert_daily_okx_spot_trades_to_origo'],
+)
+
+insert_daily_bybit_spot_trades_job = define_asset_job(
+    name='insert_daily_bybit_spot_trades_to_origo_job',
+    selection=['insert_daily_bybit_spot_trades_to_origo'],
 )
 
 insert_monthly_binance_agg_trades_job = define_asset_job(
@@ -325,6 +333,7 @@ defs = Definitions(
         insert_monthly_binance_trades_to_origo,
         insert_daily_binance_trades_to_origo,
         insert_daily_okx_spot_trades_to_origo,
+        insert_daily_bybit_spot_trades_to_origo,
         insert_monthly_binance_agg_trades_to_origo,
         insert_monthly_binance_futures_trades_to_origo,
         insert_monthly_binance_futures_agg_trades_to_origo,
@@ -335,6 +344,7 @@ defs = Definitions(
         insert_monthly_binance_trades_job,
         insert_daily_binance_trades_job,
         insert_daily_okx_spot_trades_job,
+        insert_daily_bybit_spot_trades_job,
         insert_monthly_binance_agg_trades_job,
         insert_monthly_binance_futures_trades_job,
         insert_monthly_binance_futures_agg_trades_job,

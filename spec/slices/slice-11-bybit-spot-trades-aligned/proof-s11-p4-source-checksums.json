@@ -1,0 +1,34 @@
+{
+  "generated_at_utc": "2026-03-08T11:40:07.831686+00:00",
+  "proof_scope": "Slice 11 P4 source checksum and row stats",
+  "row_stats_by_day": {
+    "2024-01-01": {
+      "aligned_row_count": 61202,
+      "aligned_rows_hash_sha256": "4e76334465e7c9fc0f89c9929295d2233195f0815354daa961e895d6de6791ad",
+      "native_row_count": 849355,
+      "native_rows_hash_sha256": "f4b5f88d75dcc3f3ca9ce2d5c953e6fbe95c985565345fafa9e77e5537a7d841"
+    },
+    "2024-01-02": {
+      "aligned_row_count": 79705,
+      "aligned_rows_hash_sha256": "6bd8c257e1118af7217d7a549378a0d5b6cb6f983e6dff71ab76afa4fb998057",
+      "native_row_count": 1796207,
+      "native_rows_hash_sha256": "2d043bde90c424170a9f53ca2e0cd8573bf4a8366988118d5e462b09fca534ca"
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "97ea9d48329057990899e2f9775b87203fd7850341d74a9b142efa77dc3fbb76",
+      "gzip_sha256": "cc74c2be7df6dfe742cfd4c3b25eb27a7270f0e4172d0d666a1c587d575c232b",
+      "partition_day": "2024-01-01",
+      "rows_inserted": 849355,
+      "source_etag": "\"0636f7536293717f56905a79786c268f-4\""
+    },
+    {
+      "csv_sha256": "9505e330bd34700e30906da2c6df2f5f81a4541fff296068c6463c91c161466f",
+      "gzip_sha256": "2aebeecd0226b4e40959ac7966717147ade3b9e99c56d47cd5155cecf4009b27",
+      "partition_day": "2024-01-02",
+      "rows_inserted": 1796207,
+      "source_etag": "\"4b0b0b9d8f47ddc8cc3de43dde318767-8\""
+    }
+  ]
+}

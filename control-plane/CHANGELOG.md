@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.2.54 on 8th of March, 2026
+- Completed Slice 11 Bybit source onboarding (`Capability -> Proof -> Guardrails`):
+  - Added migration-backed raw table schema:
+    - `control-plane/migrations/sql/0009__create_bybit_spot_trades.sql`
+  - Added Bybit daily ingest asset and Dagster job:
+    - `control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py`
+    - `insert_daily_bybit_spot_trades_to_origo_job`
+  - Enforced strict first-party source checks:
+    - deterministic source URL by partition day
+    - required `ETag` header
+    - recorded `gzip_sha256` and `csv_sha256`
+    - fail-loud CSV contract parsing and deterministic writes
+  - Extended exchange integrity suite for Bybit:
+    - schema/type checks
+    - sequence/uniqueness checks
+    - monotonic-time checks
+    - side/price/quantity anomaly checks
+  - Integrated Bybit into query/export paths:
+    - native planner
+    - aligned-1s planner
+    - raw export dispatch
+    - API contracts and rights gates
+  - Added rights/legal artifacts:
+    - `contracts/source-rights-matrix.json` (`bybit` as `Hosted Allowed`)
+    - `contracts/legal/bybit-hosted-allowed.md`
+  - Produced Slice 11 artifacts:
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/ingest-results.json`
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p1-acceptance.json`
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p2-aligned-acceptance.json`
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p3-determinism.json`
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p4-source-checksums.json`
+    - `spec/slices/slice-11-bybit-spot-trades-aligned/baseline-fixture-2024-01-01_2024-01-02.json`
+- Marked `S11-C1..S11-C4`, `S11-P1..S11-P4`, and `S11-G1..S11-G5` complete in `spec/2-itemized-work-plan.md`.
+
 ## v1.2.53 on 7th of March, 2026
 - Completed Slice 8 OKX source onboarding (`Capability -> Proof -> Guardrails`):
   - Added migration-backed raw table schema:

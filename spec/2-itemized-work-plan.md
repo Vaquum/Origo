@@ -253,6 +253,27 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S10-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [ ] `S10-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
+## Slice 11: Bybit Spot Trades Daily Ingest + `aligned_1s` Integration (Binance-Mirror Pattern)
+
+### Capability
+- [x] `S11-C1` Implement Bybit daily source fetch/checksum/parse ingest path mirroring Binance daily ingest behavior.
+- [x] `S11-C2` Add ClickHouse migration-backed Bybit raw table schema and deterministic write path.
+- [x] `S11-C3` Integrate Bybit dataset into native raw query planner and response contracts.
+- [x] `S11-C4` Integrate Bybit dataset into `aligned_1s` materialization/query/export paths.
+
+### Proof
+- [x] `S11-P1` Execute fixed-window Bybit ingest + native query acceptance runs against original source files.
+- [x] `S11-P2` Execute fixed-window Bybit `aligned_1s` acceptance runs and validate semantics.
+- [x] `S11-P3` Replay same fixtures and verify deterministic output fingerprints for both native and `aligned_1s`.
+- [x] `S11-P4` Validate loaded data checksums/row stats against source artifacts.
+
+### Guardrails
+- [x] `S11-G1` Add rights/legal classification artifacts for Bybit serving/export decisions.
+- [x] `S11-G2` Apply exchange integrity suite profile for Bybit dataset (schema/type, monotonic-time and uniqueness checks, anomaly checks).
+- [x] `S11-G3` Apply aligned-mode guardrails to Bybit paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
+- [x] `S11-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S11-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
 ---
 
 ## One-Day Sub-Slices
@@ -655,4 +676,46 @@ Constraints: documentation only; no feature changes.
 9. `S10-09`
 Action: User docs closeout for Slice 10.
 Done looks like: `docs/` contains deployment reference for release behavior, operational expectations, and failure semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 11 Sub-Slices
+1. `S11-01`
+Action: Define Bybit source contract and table migration plan mirroring Binance daily ingest semantics.
+Done looks like: source URL/file/header/timestamp contract is explicit and migration files are staged.
+Constraints: capability prep only.
+2. `S11-02`
+Action: Implement Bybit daily fetch + parse + load capability path.
+Done looks like: fixed daily file ingests into Bybit raw table with deterministic writes.
+Constraints: no query/API expansion yet.
+3. `S11-03`
+Action: Integrate Bybit native query planner path and field allowlists.
+Done looks like: native query endpoint can return Bybit rows for fixed windows.
+Constraints: native mode only.
+4. `S11-04`
+Action: Integrate Bybit into `aligned_1s` materialization/query/export paths.
+Done looks like: aligned query/export can serve Bybit fields for fixed windows.
+Constraints: aligned mode only.
+5. `S11-05`
+Action: Execute acceptance ingest/query proof on fixed Bybit windows for native + aligned modes.
+Done looks like: capability acceptance suite passes for both modes.
+Constraints: fixed fixtures.
+6. `S11-06`
+Action: Execute replay determinism proof for native + aligned modes.
+Done looks like: repeated runs match fingerprints exactly in both modes.
+Constraints: unchanged source artifacts.
+7. `S11-07`
+Action: Add rights/legal/integrity + aligned guardrails for Bybit.
+Done looks like: rights gate, legal artifact, integrity suite, and aligned strict/warnings/freshness/audit parity are enforced fail-loud.
+Constraints: guardrails only.
+8. `S11-08`
+Action: Add operational monitoring and queue/backpressure checks for Bybit paths.
+Done looks like: alerts/audit coverage and overload controls are in place.
+Constraints: no capability expansion.
+9. `S11-09`
+Action: Developer docs closeout for Slice 11.
+Done looks like: `docs/Developer/` has short files for Bybit ingest/query/aligned contracts and guardrail operations.
+Constraints: documentation only; no feature changes.
+10. `S11-10`
+Action: User docs closeout for Slice 11.
+Done looks like: `docs/` includes complete Bybit dataset reference and taxonomy updates.
 Constraints: documentation only; no feature changes.

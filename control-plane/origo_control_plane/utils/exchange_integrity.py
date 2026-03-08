@@ -13,6 +13,7 @@ type ExchangeDataset = Literal[
     'futures_trades',
     'futures_agg_trades',
     'okx_spot_trades',
+    'bybit_spot_trades',
 ]
 
 
@@ -28,6 +29,7 @@ class _ExchangeIntegritySpec:
     bool_indices: tuple[int, ...]
     first_last_trade_indices: tuple[int, int] | None
     datetime_index: int | None
+    enforce_monotonic_timestamp: bool
     frame_columns: tuple[str, ...]
 
 
@@ -63,6 +65,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         bool_indices=(5, 6),
         first_last_trade_indices=None,
         datetime_index=7,
+        enforce_monotonic_timestamp=False,
         frame_columns=(
             'trade_id',
             'price',
@@ -85,6 +88,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         bool_indices=(6,),
         first_last_trade_indices=(3, 4),
         datetime_index=7,
+        enforce_monotonic_timestamp=False,
         frame_columns=(
             'agg_trade_id',
             'price',
@@ -107,6 +111,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         bool_indices=(5,),
         first_last_trade_indices=None,
         datetime_index=6,
+        enforce_monotonic_timestamp=False,
         frame_columns=(
             'futures_trade_id',
             'price',
@@ -128,6 +133,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         bool_indices=(6,),
         first_last_trade_indices=(3, 4),
         datetime_index=None,
+        enforce_monotonic_timestamp=False,
         frame_columns=(
             'futures_agg_trades_id',
             'price',
@@ -149,6 +155,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         bool_indices=(),
         first_last_trade_indices=None,
         datetime_index=7,
+        enforce_monotonic_timestamp=False,
         frame_columns=(
             'instrument_name',
             'trade_id',
@@ -158,6 +165,34 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
             'quote_quantity',
             'timestamp',
             'datetime',
+        ),
+    ),
+    'bybit_spot_trades': _ExchangeIntegritySpec(
+        tuple_size=13,
+        id_index=1,
+        timestamp_index=7,
+        price_index=4,
+        quantity_index=5,
+        quote_quantity_index=6,
+        side_index=3,
+        bool_indices=(),
+        first_last_trade_indices=None,
+        datetime_index=8,
+        enforce_monotonic_timestamp=True,
+        frame_columns=(
+            'symbol',
+            'trade_id',
+            'trd_match_id',
+            'side',
+            'price',
+            'size',
+            'quote_quantity',
+            'timestamp',
+            'datetime',
+            'tick_direction',
+            'gross_value',
+            'home_notional',
+            'foreign_notional',
         ),
     ),
 }
@@ -222,6 +257,7 @@ def run_exchange_integrity_suite_rows(
     min_id: int | None = None
     max_id: int | None = None
     previous_id: int | None = None
+    previous_timestamp: int | None = None
     rows_checked = 0
     anomaly_checks_performed = 0
 
@@ -266,6 +302,15 @@ def run_exchange_integrity_suite_rows(
                 f'expected > 0, got={timestamp_value}'
             )
         anomaly_checks_performed += 1
+        if spec.enforce_monotonic_timestamp and previous_timestamp is not None:
+            if timestamp_value < previous_timestamp:
+                raise ValueError(
+                    f'Exchange integrity monotonic-time check failed for {dataset}: '
+                    f'row={row_number}, previous_timestamp={previous_timestamp}, '
+                    f'current_timestamp={timestamp_value}'
+                )
+            anomaly_checks_performed += 1
+        previous_timestamp = timestamp_value
 
         _expect_positive_number(
             value=row[spec.price_index],

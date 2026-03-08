@@ -15,6 +15,17 @@ from .binance_native import (
     build_binance_native_query_spec,
     query_binance_native_data,
 )
+from .bybit_aligned_1s import (
+    BybitAligned1sMaterialization,
+    BybitAlignedDataset,
+    build_bybit_aligned_1s_sql,
+    query_bybit_aligned_1s_data,
+)
+from .bybit_native import (
+    BybitDataset,
+    build_bybit_native_query_spec,
+    query_bybit_native_data,
+)
 from .etf_aligned_1s import (
     ETFAligned1sMaterialization,
     ETFAlignedDataset,
@@ -62,6 +73,9 @@ __all__ = [
     'BinanceAligned1sMaterialization',
     'BinanceAlignedDataset',
     'BinanceDataset',
+    'BybitAligned1sMaterialization',
+    'BybitAlignedDataset',
+    'BybitDataset',
     'ETFAligned1sMaterialization',
     'ETFAlignedDataset',
     'ETFDataset',
@@ -79,6 +93,8 @@ __all__ = [
     'build_aligned_query_plan',
     'build_binance_aligned_1s_sql',
     'build_binance_native_query_spec',
+    'build_bybit_aligned_1s_sql',
+    'build_bybit_native_query_spec',
     'build_etf_aligned_1s_sql',
     'build_etf_native_query_spec',
     'build_fred_aligned_1s_sql',
@@ -90,6 +106,8 @@ __all__ = [
     'query_aligned_data',
     'query_binance_aligned_1s_data',
     'query_binance_native_data',
+    'query_bybit_aligned_1s_data',
+    'query_bybit_native_data',
     'query_etf_aligned_1s_data',
     'query_etf_forward_fill_intervals',
     'query_etf_native_data',

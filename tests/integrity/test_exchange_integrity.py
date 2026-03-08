@@ -116,3 +116,102 @@ def test_okx_spot_trades_integrity_fails_on_invalid_side() -> None:
     ]
     with pytest.raises(ValueError, match='expected one of \\[buy, sell\\]'):
         run_exchange_integrity_suite_rows(dataset='okx_spot_trades', rows=rows)
+
+
+def test_bybit_spot_trades_integrity_passes_for_valid_rows() -> None:
+    rows = [
+        (
+            'BTCUSDT',
+            1,
+            '3b55416a-1b32-502f-b282-419772dea4fe',
+            'sell',
+            42324.9,
+            0.002,
+            84.6498,
+            1704067200235,
+            datetime(2024, 1, 1, 0, 0, 0, 235000, tzinfo=UTC),
+            'PlusTick',
+            8.46498e9,
+            0.002,
+            84.6498,
+        ),
+        (
+            'BTCUSDT',
+            2,
+            '0449d2db-fd95-5f37-90ad-649ae284acd0',
+            'buy',
+            42325.0,
+            0.001,
+            42.325,
+            1704067200327,
+            datetime(2024, 1, 1, 0, 0, 0, 327000, tzinfo=UTC),
+            'PlusTick',
+            4.2325e9,
+            0.001,
+            42.325,
+        ),
+    ]
+    report = run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
+    assert report.rows_checked == 2
+    assert report.sequence_gap_count == 0
+    assert report.min_id == 1
+    assert report.max_id == 2
+
+
+def test_bybit_spot_trades_integrity_fails_on_invalid_side() -> None:
+    rows = [
+        (
+            'BTCUSDT',
+            1,
+            '3b55416a-1b32-502f-b282-419772dea4fe',
+            'maker',
+            42324.9,
+            0.002,
+            84.6498,
+            1704067200235,
+            datetime(2024, 1, 1, 0, 0, 0, 235000, tzinfo=UTC),
+            'PlusTick',
+            8.46498e9,
+            0.002,
+            84.6498,
+        ),
+    ]
+    with pytest.raises(ValueError, match='expected one of \\[buy, sell\\]'):
+        run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
+
+
+def test_bybit_spot_trades_integrity_fails_on_non_monotonic_timestamp() -> None:
+    rows = [
+        (
+            'BTCUSDT',
+            1,
+            '3b55416a-1b32-502f-b282-419772dea4fe',
+            'sell',
+            42324.9,
+            0.002,
+            84.6498,
+            1704067200235,
+            datetime(2024, 1, 1, 0, 0, 0, 235000, tzinfo=UTC),
+            'PlusTick',
+            8.46498e9,
+            0.002,
+            84.6498,
+        ),
+        (
+            'BTCUSDT',
+            2,
+            '0449d2db-fd95-5f37-90ad-649ae284acd0',
+            'buy',
+            42325.0,
+            0.001,
+            42.325,
+            1704067200200,
+            datetime(2024, 1, 1, 0, 0, 0, 200000, tzinfo=UTC),
+            'PlusTick',
+            4.2325e9,
+            0.001,
+            42.325,
+        ),
+    ]
+    with pytest.raises(ValueError, match='monotonic-time check failed'):
+        run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)

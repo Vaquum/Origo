@@ -198,6 +198,28 @@ jobs:
           }
 
           run_privileged mkdir -p /opt/origo/deploy /opt/origo/config
+
+          if [[ ! -f /opt/origo/deploy/.env ]]; then
+            if [[ -z "${ORIGO_SERVER_ENV_B64:-}" ]]; then
+              echo "ERROR: first-run bootstrap requires ORIGO_SERVER_ENV_B64 because /opt/origo/deploy/.env is missing." >&2
+              exit 1
+            fi
+            tmp_env="$(mktemp)"
+            printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 --decode > "${tmp_env}"
+            if [[ ! -s "${tmp_env}" ]]; then
+              rm -f "${tmp_env}"
+              echo "ERROR: decoded ORIGO_SERVER_ENV_B64 produced an empty env file." >&2
+              exit 1
+            fi
+            run_privileged mv "${tmp_env}" /opt/origo/deploy/.env
+            run_privileged chmod 0600 /opt/origo/deploy/.env
+          fi
+
+          if [[ ! -s /opt/origo/deploy/.env ]]; then
+            echo "ERROR: /opt/origo/deploy/.env must be present and non-empty." >&2
+            exit 1
+          fi
+
           printf '%s' "${ORIGO_DEPLOY_COMPOSE_CONTENT}" \
             | run_privileged tee /opt/origo/deploy/docker-compose.yml >/dev/null
           printf '%s' "${ORIGO_CLICKHOUSE_CONFIG_CONTENT}" \
@@ -255,34 +277,15 @@ jobs:
           fi
           run_privileged docker info >/dev/null
 
-          if [[ ! -f /opt/origo/deploy/.env ]]; then
-            if [[ -z "${ORIGO_SERVER_ENV_B64:-}" ]]; then
-              echo "ERROR: /opt/origo/deploy/.env is missing and ORIGO_SERVER_ENV_B64 was not provided." >&2
-              exit 1
-            fi
-            tmp_env="$(mktemp)"
-            printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 --decode > "${tmp_env}"
-            if [[ ! -s "${tmp_env}" ]]; then
-              rm -f "${tmp_env}"
-              echo "ERROR: decoded ORIGO_SERVER_ENV_B64 produced an empty env file." >&2
-              exit 1
-            fi
-            mv "${tmp_env}" /opt/origo/deploy/.env
-          fi
-
-          if [[ ! -s /opt/origo/deploy/.env ]]; then
-            echo "ERROR: /opt/origo/deploy/.env must be present and non-empty." >&2
-            exit 1
-          fi
-
           tmp_env_next="$(mktemp)"
           grep -v '^ORIGO_API_IMAGE=' /opt/origo/deploy/.env | grep -v '^ORIGO_CONTROL_PLANE_IMAGE=' > "${tmp_env_next}" || true
           {
             cat "${tmp_env_next}"
             echo "ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
             echo "ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
-          } > /opt/origo/deploy/.env
+          } | run_privileged tee /opt/origo/deploy/.env >/dev/null
           rm -f "${tmp_env_next}"
+          run_privileged chmod 0600 /opt/origo/deploy/.env
 
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
@@ -313,6 +316,56 @@ jobs:
           fi
 
           compose_cmd run --rm dagster-webserver python -m origo_control_plane.migrations.cli migrate
-          compose_cmd up -d --remove-orphans
+
+          compose_cmd up -d --remove-orphans clickhouse dagster-webserver dagster-daemon api
+
+          require_container_for_service() {
+            local service="$1"
+            local container_id
+            container_id="$(compose_cmd ps -q "${service}")"
+            if [[ -z "${container_id}" ]]; then
+              echo "ERROR: service ${service} has no container id after compose up." >&2
+              compose_cmd ps -a >&2 || true
+              exit 1
+            fi
+            printf '%s' "${container_id}"
+          }
+
+          container_runtime_status() {
+            local container_id="$1"
+            run_privileged docker inspect \
+              --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              "${container_id}"
+          }
+
+          wait_for_service_state() {
+            local service="$1"
+            local container_id="$2"
+            local expected="$3"
+            local attempt=1
+            local status=''
+            while [[ "${attempt}" -le 90 ]]; do
+              status="$(container_runtime_status "${container_id}")"
+              if [[ "${status}" == "${expected}" ]]; then
+                return 0
+              fi
+              sleep 2
+              attempt=$((attempt + 1))
+            done
+            echo "ERROR: service ${service} did not reach expected state ${expected}; final=${status}" >&2
+            compose_cmd logs --no-color "${service}" >&2 || true
+            exit 1
+          }
+
+          clickhouse_container_id="$(require_container_for_service clickhouse)"
+          dagster_webserver_container_id="$(require_container_for_service dagster-webserver)"
+          dagster_daemon_container_id="$(require_container_for_service dagster-daemon)"
+          api_container_id="$(require_container_for_service api)"
+
+          wait_for_service_state clickhouse "${clickhouse_container_id}" healthy
+          wait_for_service_state dagster-webserver "${dagster_webserver_container_id}" healthy
+          wait_for_service_state dagster-daemon "${dagster_daemon_container_id}" running
+          wait_for_service_state api "${api_container_id}" healthy
+
           compose_cmd ps
           REMOTE_SCRIPT

@@ -39,7 +39,7 @@ services:
       test:
         [
           'CMD',
-          '/opt/bitcoin/bin/bitcoin-cli',
+          '/opt/bitcoin-27.1/bin/bitcoin-cli',
           '-rpcconnect=127.0.0.1',
           '-rpcport=8332',
           '-rpcuser=${ORIGO_BITCOIN_CORE_RPC_USER:?ORIGO_BITCOIN_CORE_RPC_USER must be set}',

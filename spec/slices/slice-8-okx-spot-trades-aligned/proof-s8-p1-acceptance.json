@@ -1,0 +1,38 @@
+{
+  "dataset": "okx_spot_trades",
+  "generated_at_utc": "2026-03-07T20:53:01.556828+00:00",
+  "proof_scope": "Slice 8 P1 native acceptance",
+  "row_count": 541624,
+  "rows_hash_sha256": "bc69432eae9ae7b85db8fb24b4922fe62c9b042118325d2a3c6cda3b48fe9e07",
+  "schema": [
+    {
+      "dtype": "UInt64",
+      "name": "trade_id"
+    },
+    {
+      "dtype": "UInt64",
+      "name": "timestamp"
+    },
+    {
+      "dtype": "Float64",
+      "name": "price"
+    },
+    {
+      "dtype": "Float64",
+      "name": "size"
+    },
+    {
+      "dtype": "String",
+      "name": "side"
+    },
+    {
+      "dtype": "String",
+      "name": "datetime"
+    }
+  ],
+  "window": {
+    "day": "2024-01-02",
+    "end_utc": "2024-01-02T16:00:00Z",
+    "start_utc": "2024-01-01T16:00:00Z"
+  }
+}

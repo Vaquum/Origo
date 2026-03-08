@@ -38,21 +38,19 @@ mutation GraphQLClientSubmitRun($executionParams: ExecutionParams!) {
 
 GET_PIPELINE_RUN_STATUS_QUERY = """
 query GraphQLClientGetRunStatus($runId: ID!) {
-  pipelineRunOrError(runId: $runId) {
+  runOrError(runId: $runId) {
     __typename
-    ... on PipelineRun {
+    ... on Run {
       runId
       status
       tags {
         key
         value
       }
-    }
-    ... on Run {
       creationTime
       updateTime
     }
-    ... on PipelineRunNotFoundError {
+    ... on RunNotFoundError {
       message
     }
     ... on PythonError {
@@ -223,18 +221,16 @@ def get_run_snapshot(run_id: str) -> DagsterRunSnapshot:
         query=GET_PIPELINE_RUN_STATUS_QUERY,
         variables={'runId': run_id},
     )
-    run_payload = _expect_dict(
-        data.get('pipelineRunOrError'), 'pipelineRunOrError payload'
-    )
+    run_payload = _expect_dict(data.get('runOrError'), 'runOrError payload')
 
     typename = run_payload.get('__typename')
-    if typename == 'PipelineRunNotFoundError':
+    if typename == 'RunNotFoundError':
         message = run_payload.get('message')
         if isinstance(message, str) and message.strip() != '':
             raise DagsterRunNotFoundError(message)
         raise DagsterRunNotFoundError(f'Run not found: {run_id}')
 
-    if typename != 'PipelineRun':
+    if typename != 'Run':
         message = run_payload.get('message')
         if isinstance(message, str) and message.strip() != '':
             raise DagsterGraphQLError(
@@ -244,35 +240,34 @@ def get_run_snapshot(run_id: str) -> DagsterRunSnapshot:
 
     status = run_payload.get('status')
     if not isinstance(status, str) or status.strip() == '':
-        raise DagsterGraphQLError('PipelineRun status must be a non-empty string')
+        raise DagsterGraphQLError('Run status must be a non-empty string')
 
-    tags_payload = _expect_list(run_payload.get('tags'), 'PipelineRun tags')
+    tags_payload = _expect_list(run_payload.get('tags'), 'Run tags')
 
     tags: dict[str, str] = {}
     for entry in tags_payload:
-        entry_dict = _expect_dict(entry, 'PipelineRun tag entry')
+        entry_dict = _expect_dict(entry, 'Run tag entry')
         key = entry_dict.get('key')
         value = entry_dict.get('value')
         if not isinstance(key, str) or key.strip() == '':
-            raise DagsterGraphQLError('PipelineRun tag key must be a non-empty string')
+            raise DagsterGraphQLError('Run tag key must be a non-empty string')
         if not isinstance(value, str):
-            raise DagsterGraphQLError('PipelineRun tag value must be a string')
+            raise DagsterGraphQLError('Run tag value must be a string')
         tags[key] = value
 
     payload_run_id = run_payload.get('runId')
     if not isinstance(payload_run_id, str) or payload_run_id.strip() == '':
-        raise DagsterGraphQLError('PipelineRun runId must be a non-empty string')
+        raise DagsterGraphQLError('Run runId must be a non-empty string')
 
+    raw_creation_time = run_payload.get('creationTime')
     creation_time = _parse_epoch_seconds_to_utc(
-        run_payload.get('creationTime'), 'PipelineRun creationTime'
+        raw_creation_time, 'Run creationTime'
     )
     raw_update_time = run_payload.get('updateTime')
     if raw_update_time is None:
         update_time = creation_time
     else:
-        update_time = _parse_epoch_seconds_to_utc(
-            raw_update_time, 'PipelineRun updateTime'
-        )
+        update_time = _parse_epoch_seconds_to_utc(raw_update_time, 'Run updateTime')
 
     return DagsterRunSnapshot(
         run_id=payload_run_id,

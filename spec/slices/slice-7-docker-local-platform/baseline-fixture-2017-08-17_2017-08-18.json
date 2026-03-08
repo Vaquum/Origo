@@ -1,0 +1,101 @@
+{
+  "column_key": {
+    "first_event_offset_ms": "First event timestamp offset in milliseconds from day start.",
+    "first_trade_id": "Minimum trade_id in the day window.",
+    "last_event_offset_ms": "Milliseconds from last event timestamp to day end.",
+    "last_trade_id": "Maximum trade_id in the day window.",
+    "quantity_sum": "Sum of quantity across rows in the day window.",
+    "quote_quantity_sum": "Sum of quote_quantity across rows in the day window.",
+    "row_count": "Number of rows returned for the exact day window.",
+    "rows_hash_sha256": "SHA256 of canonicalized (timestamp_ms, trade_id, quantity, quote_quantity) row set."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "days": [
+      "2017-08-17",
+      "2017-08-18"
+    ],
+    "end_utc": "2017-08-19T00:00:00Z",
+    "start_utc": "2017-08-17T00:00:00Z"
+  },
+  "run_1_fingerprints": {
+    "2017-08-17": {
+      "first_event_offset_ms": 14428322,
+      "first_trade_id": 0,
+      "last_event_offset_ms": 79281,
+      "last_trade_id": 3426,
+      "quantity_sum": 795.150376999997,
+      "quote_quantity_sum": 3454770.050732071,
+      "row_count": 3427,
+      "rows_hash_sha256": "a65e0a599c8725672bbb865ce2911029fd52c79f55e5fe94c91a12356edd4cb0"
+    },
+    "2017-08-18": {
+      "first_event_offset_ms": 48072,
+      "first_trade_id": 3427,
+      "last_event_offset_ms": 51117,
+      "last_trade_id": 8659,
+      "quantity_sum": 1199.888264000002,
+      "quote_quantity_sum": 5086958.30617149,
+      "row_count": 5233,
+      "rows_hash_sha256": "1c28efca08f32ca70fc96046c317876f28635fd1c9c7a40548ff1b4dffcfa2bc"
+    }
+  },
+  "run_2_fingerprints": {
+    "2017-08-17": {
+      "first_event_offset_ms": 14428322,
+      "first_trade_id": 0,
+      "last_event_offset_ms": 79281,
+      "last_trade_id": 3426,
+      "quantity_sum": 795.150376999997,
+      "quote_quantity_sum": 3454770.050732071,
+      "row_count": 3427,
+      "rows_hash_sha256": "a65e0a599c8725672bbb865ce2911029fd52c79f55e5fe94c91a12356edd4cb0"
+    },
+    "2017-08-18": {
+      "first_event_offset_ms": 48072,
+      "first_trade_id": 3427,
+      "last_event_offset_ms": 51117,
+      "last_trade_id": 8659,
+      "quantity_sum": 1199.888264000002,
+      "quote_quantity_sum": 5086958.30617149,
+      "row_count": 5233,
+      "rows_hash_sha256": "1c28efca08f32ca70fc96046c317876f28635fd1c9c7a40548ff1b4dffcfa2bc"
+    }
+  },
+  "run_3_post_restart_fingerprints": {
+    "2017-08-17": {
+      "first_event_offset_ms": 14428322,
+      "first_trade_id": 0,
+      "last_event_offset_ms": 79281,
+      "last_trade_id": 3426,
+      "quantity_sum": 795.150376999997,
+      "quote_quantity_sum": 3454770.050732071,
+      "row_count": 3427,
+      "rows_hash_sha256": "a65e0a599c8725672bbb865ce2911029fd52c79f55e5fe94c91a12356edd4cb0"
+    },
+    "2017-08-18": {
+      "first_event_offset_ms": 48072,
+      "first_trade_id": 3427,
+      "last_event_offset_ms": 51117,
+      "last_trade_id": 8659,
+      "quantity_sum": 1199.888264000002,
+      "quote_quantity_sum": 5086958.30617149,
+      "row_count": 5233,
+      "rows_hash_sha256": "1c28efca08f32ca70fc96046c317876f28635fd1c9c7a40548ff1b4dffcfa2bc"
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "f1ca7241eba6cf27aac03ac32bea5c4e8a7c88b725b8f2f6276e6b178230d557",
+      "day": "2017-08-17",
+      "rows_inserted": 3427,
+      "zip_sha256": "a23fe0dae54b7143d5cffb42184e1a05afe7124aaca641cd438297ce83c9f9ec"
+    },
+    {
+      "csv_sha256": "949cdfd7fe2e81a04fed327d39841bf2e74ab4e2849fb386a298ae6c20be894c",
+      "day": "2017-08-18",
+      "rows_inserted": 5233,
+      "zip_sha256": "7f1328d09ff839d498506be281306305f453da632e18a7a15437b78df14bc198"
+    }
+  ]
+}

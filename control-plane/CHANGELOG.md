@@ -1,5 +1,58 @@
 # Changelog
 
+## v1.2.53 on 7th of March, 2026
+- Completed Slice 8 OKX source onboarding (`Capability -> Proof -> Guardrails`):
+  - Added migration-backed raw table schema:
+    - `control-plane/migrations/sql/0008__create_okx_spot_trades.sql`
+  - Added OKX daily ingest asset and Dagster job:
+    - `control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py`
+    - `insert_daily_okx_spot_trades_to_origo_job`
+  - Enforced strict first-party source checks:
+    - resolved daily file via OKX API
+    - verified `Content-MD5`
+    - recorded `zip_sha256` and `csv_sha256`
+    - fail-loud CSV contract parsing and deterministic writes
+  - Added OKX integrity profile in exchange integrity suite:
+    - schema/type checks
+    - sequence-gap checks
+    - side anomaly checks (`buy|sell`)
+  - Integrated OKX into query/export paths:
+    - native planner
+    - aligned-1s planner
+    - raw export dispatch
+    - API contracts and rights gates
+  - Added rights/legal artifacts:
+    - `contracts/source-rights-matrix.json` (`okx` as `Hosted Allowed`)
+    - `contracts/legal/okx-hosted-allowed.md`
+  - Produced Slice 8 artifacts:
+    - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p1-acceptance.json`
+    - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p2-aligned-acceptance.json`
+    - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p3-determinism.json`
+    - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p4-source-checksums.json`
+    - `spec/slices/slice-8-okx-spot-trades-aligned/baseline-fixture-2024-01-01_2024-01-02.json`
+- Marked `S8-C1..S8-C4`, `S8-P1..S8-P4`, and `S8-G1..S8-G5` complete in `spec/2-itemized-work-plan.md`.
+
+## v1.2.52 on 7th of March, 2026
+- Completed Slice 7 full Docker local-platform proof path:
+  - Added root Docker stack and service images:
+    - `docker-compose.yml`
+    - `docker/Dockerfile.api`
+    - `docker/Dockerfile.control-plane`
+    - `.dockerignore`
+  - Added deterministic lifecycle commands and proof runners:
+    - `scripts/s7_docker_stack.sh`
+    - `scripts/s7_docker_bootstrap.sh`
+    - `scripts/s7_docker_local_proof.sh`
+  - Added slice artifacts and deterministic baseline:
+    - `spec/slices/slice-7-docker-local-platform/proof-s7-local-docker.json`
+    - `spec/slices/slice-7-docker-local-platform/baseline-fixture-2017-08-17_2017-08-18.json`
+    - `spec/slices/slice-7-docker-local-platform/smoke-result.json`
+  - Fixed Docker proof blockers:
+    - Binance integrity allows first-day `trade_id=0`
+    - Dagster status parsing supports `Run` typename with strict timestamps
+    - healthcheck commands aligned with container runtime tools
+- Marked `S7-C1..S7-C5`, `S7-P1..S7-P4`, and `S7-G1..S7-G4` complete in `spec/2-itemized-work-plan.md`.
+
 ## v1.2.50 on 7th of March, 2026
 - Completed Slice 6 guardrail docs closeout:
   - `S6-G5` developer docs:

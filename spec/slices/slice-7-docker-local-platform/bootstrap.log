@@ -1,0 +1,75 @@
+[2026-03-07T20:03:37Z] docker compose down -v --remove-orphans
+[2026-03-07T20:03:42Z] docker compose up -d --build
+#1 [origo/control-plane:local internal] load build definition from Dockerfile.control-plane
+#1 transferring dockerfile: 83B done
+#1 DONE 0.0s
+
+#2 [origo/api:local internal] load build definition from Dockerfile.api
+#2 transferring dockerfile: 73B done
+#2 DONE 0.0s
+
+#3 [origo/api:local internal] load .dockerignore
+#3 transferring context: 71B done
+#3 DONE 0.0s
+
+#4 [origo/control-plane:local internal] load .dockerignore
+#4 transferring context: 71B done
+#4 DONE 0.0s
+
+#5 [origo/control-plane:local internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 0.9s
+
+#6 [origo/api:local 1/8] FROM docker.io/library/python:3.12-slim@sha256:ccc7089399c8bb65dd1fb3ed6d55efa538a3f5e7fca3f5988ac3b5b87e593bf0
+#6 DONE 0.0s
+
+#7 [origo/api:local internal] load build context
+#7 transferring context: 24.70kB 0.0s done
+#7 DONE 0.1s
+
+#8 [origo/control-plane:local internal] load build context
+#8 transferring context: 40.63kB 0.0s done
+#8 DONE 0.1s
+
+#9 [origo/control-plane:local 6/8] COPY control-plane /workspace/control-plane
+#9 CACHED
+
+#10 [origo/control-plane:local 7/8] COPY contracts /workspace/contracts
+#10 CACHED
+
+#11 [origo/control-plane:local 4/8] COPY pyproject.toml README.md /workspace/
+#11 CACHED
+
+#12 [origo/control-plane:local 5/8] COPY origo /workspace/origo
+#12 CACHED
+
+#13 [origo/control-plane:local 8/8] RUN python -m pip install --upgrade pip     && python -m pip install --no-cache-dir       -e /workspace       -e /workspace/control-plane
+#13 CACHED
+
+#14 [origo/api:local 7/8] COPY contracts /workspace/contracts
+#14 CACHED
+
+#15 [origo/api:local 5/8] COPY api /workspace/api
+#15 CACHED
+
+#16 [origo/api:local 4/8] COPY pyproject.toml README.md /workspace/
+#16 CACHED
+
+#17 [origo/control-plane:local 2/8] WORKDIR /workspace
+#17 CACHED
+
+#18 [origo/control-plane:local 3/8] RUN apt-get update     && apt-get install -y --no-install-recommends ca-certificates curl     && rm -rf /var/lib/apt/lists/*
+#18 CACHED
+
+#19 [origo/api:local 6/8] COPY origo /workspace/origo
+#19 CACHED
+
+#20 [origo/api:local 8/8] RUN python -m pip install --upgrade pip     && python -m pip install --no-cache-dir       -e /workspace       clickhouse-driver       clickhouse-connect       polars       pyarrow       requests
+#20 CACHED
+
+#21 [origo/control-plane:local] exporting to image
+#21 exporting layers done
+#21 writing image sha256:40b91c1b8eca17239a15f76d02b9a51a502d713c6e8bff9eeec4224ed5e5e2f4 done
+#21 naming to docker.io/origo/api:local done
+#21 writing image sha256:08697237d47ddb03fcededf96f1cd4187e70ab73bedf59b2540741fdd2dc0a22 done
+#21 naming to docker.io/origo/control-plane:local done
+#21 DONE 0.0s

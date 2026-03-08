@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Origo"
-version = "0.1.1"
+version = "0.1.3"
 description = "Bitcoin-only data API and platform"
 readme = "README.md"
 license = { text = "MIT" }

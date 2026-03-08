@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.ruff_cache
+.venv
+control-plane/.venv
+storage
+spec/slices

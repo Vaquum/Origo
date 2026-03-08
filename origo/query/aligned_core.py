@@ -22,10 +22,14 @@ from .native_core import (
     QueryWindow,
     TimeRangeWindow,
 )
+from .okx_aligned_1s import OKXAlignedDataset, query_okx_aligned_1s_data
 
-type AlignedDataset = BinanceAlignedDataset | ETFAlignedDataset | FREDAlignedDataset
+type AlignedDataset = (
+    BinanceAlignedDataset | ETFAlignedDataset | FREDAlignedDataset | OKXAlignedDataset
+)
 type AlignedExecutionPath = Literal[
     'binance_aligned',
+    'okx_aligned',
     'etf_aligned_observation',
     'etf_aligned_forward_fill',
     'fred_aligned_observation',
@@ -35,7 +39,20 @@ type AlignedExecutionPath = Literal[
 _BINANCE_DATASETS: frozenset[str] = frozenset(
     {'spot_trades', 'spot_agg_trades', 'futures_trades'}
 )
+_OKX_DATASETS: frozenset[str] = frozenset({'okx_spot_trades'})
 _BINANCE_ALIGNED_COLUMNS: frozenset[str] = frozenset(
+    {
+        'aligned_at_utc',
+        'open_price',
+        'high_price',
+        'low_price',
+        'close_price',
+        'quantity_sum',
+        'quote_volume_sum',
+        'trade_count',
+    }
+)
+_OKX_ALIGNED_COLUMNS: frozenset[str] = frozenset(
     {
         'aligned_at_utc',
         'open_price',
@@ -122,6 +139,13 @@ def build_aligned_query_plan(*, dataset: AlignedDataset, window: QueryWindow) ->
             window=window,
         )
 
+    if dataset in _OKX_DATASETS:
+        return AlignedQueryPlan(
+            dataset=dataset,
+            execution_path='okx_aligned',
+            window=window,
+        )
+
     if dataset == 'etf_daily_metrics':
         if isinstance(window, MonthWindow):
             return AlignedQueryPlan(
@@ -172,6 +196,8 @@ def _validate_selected_columns(
 
     if dataset in _BINANCE_DATASETS:
         allowed_columns = _BINANCE_ALIGNED_COLUMNS
+    elif dataset in _OKX_DATASETS:
+        allowed_columns = _OKX_ALIGNED_COLUMNS
     elif dataset == 'etf_daily_metrics':
         allowed_columns = _ETF_ALIGNED_COLUMNS
     elif dataset == 'fred_series_metrics':
@@ -222,6 +248,14 @@ def query_aligned_data(
     if plan.execution_path == 'binance_aligned':
         frame = query_binance_aligned_1s_data(
             dataset=cast(BinanceAlignedDataset, plan.dataset),
+            window=plan.window,
+            auth_token=auth_token,
+            show_summary=show_summary,
+            datetime_iso_output=datetime_iso_output,
+        )
+    elif plan.execution_path == 'okx_aligned':
+        frame = query_okx_aligned_1s_data(
+            dataset=cast(OKXAlignedDataset, plan.dataset),
             window=plan.window,
             auth_token=auth_token,
             show_summary=show_summary,

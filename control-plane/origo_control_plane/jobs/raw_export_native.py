@@ -20,10 +20,11 @@ from origo.query.native_core import (
     RandomRowsWindow,
     TimeRangeWindow,
 )
+from origo.query.okx_native import OKXDataset, query_okx_native_data
 
 job: Any = getattr(dg, 'job')
 op: Any = getattr(dg, 'op')
-type ExportDataset = BinanceDataset | ETFDataset | FREDDataset
+type ExportDataset = BinanceDataset | ETFDataset | FREDDataset | OKXDataset
 type ExportMode = Literal['native', 'aligned_1s']
 
 
@@ -57,6 +58,7 @@ def _read_dataset(value: Any) -> ExportDataset:
         'spot_trades',
         'spot_agg_trades',
         'futures_trades',
+        'okx_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
     }:
@@ -248,6 +250,16 @@ def origo_raw_export_native_step(context: OpExecutionContext) -> None:
             if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
                 frame = query_binance_native_data(
                     dataset=cast(BinanceDataset, dataset),
+                    select_columns=select_columns,
+                    window=window,
+                    include_datetime=include_datetime,
+                    datetime_iso_output=False,
+                    auth_token=None,
+                    show_summary=False,
+                )
+            elif dataset == 'okx_spot_trades':
+                frame = query_okx_native_data(
+                    dataset=dataset,
                     select_columns=select_columns,
                     window=window,
                     include_datetime=include_datetime,

@@ -43,6 +43,17 @@ from .native_core import (
     TimeRangeWindow,
     execute_native_query,
 )
+from .okx_aligned_1s import (
+    OKXAligned1sMaterialization,
+    OKXAlignedDataset,
+    build_okx_aligned_1s_sql,
+    query_okx_aligned_1s_data,
+)
+from .okx_native import (
+    OKXDataset,
+    build_okx_native_query_spec,
+    query_okx_native_data,
+)
 from .response import build_wide_rows_envelope
 
 __all__ = [
@@ -60,6 +71,9 @@ __all__ = [
     'LatestRowsWindow',
     'MonthWindow',
     'NativeQuerySpec',
+    'OKXAligned1sMaterialization',
+    'OKXAlignedDataset',
+    'OKXDataset',
     'RandomRowsWindow',
     'TimeRangeWindow',
     'build_aligned_query_plan',
@@ -69,6 +83,8 @@ __all__ = [
     'build_etf_native_query_spec',
     'build_fred_aligned_1s_sql',
     'build_fred_native_query_spec',
+    'build_okx_aligned_1s_sql',
+    'build_okx_native_query_spec',
     'build_wide_rows_envelope',
     'execute_native_query',
     'query_aligned_data',
@@ -80,4 +96,6 @@ __all__ = [
     'query_fred_aligned_1s_data',
     'query_fred_forward_fill_intervals',
     'query_fred_native_data',
+    'query_okx_aligned_1s_data',
+    'query_okx_native_data',
 ]

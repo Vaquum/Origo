@@ -1,0 +1,318 @@
+name: deploy-on-merge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-on-merge
+  cancel-in-progress: true
+
+jobs:
+  deploy-on-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tags
+        id: images
+        run: |
+          set -euo pipefail
+          owner_lower="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "api_image=ghcr.io/${owner_lower}/origo-api:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "control_plane_image=ghcr.io/${owner_lower}/origo-control-plane:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: ${{ steps.images.outputs.api_image }}
+
+      - name: Build and push control-plane image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.control-plane
+          push: true
+          tags: ${{ steps.images.outputs.control_plane_image }}
+
+      - name: Install SSH tooling on runner
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sshpass
+
+      - name: Prepare SSH known_hosts
+        env:
+          ORIGO_SERVER_KNOWN_HOSTS: ${{ secrets.ORIGO_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "ERROR: ${name} must be set and non-empty." >&2
+              exit 1
+            fi
+          }
+
+          require_env ORIGO_SERVER_KNOWN_HOSTS
+          install -m 0700 -d "${HOME}/.ssh"
+          printf '%s\n' "${ORIGO_SERVER_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 0600 "${HOME}/.ssh/known_hosts"
+
+      - name: Bootstrap host and deploy images
+        env:
+          ORIGO_SERVER_IP: ${{ secrets.ORIGO_SERVER_IP }}
+          ORIGO_SERVER_USER: ${{ secrets.ORIGO_SERVER_USER }}
+          ORIGO_SERVER_PASSWORD: ${{ secrets.ORIGO_SERVER_PASSWORD }}
+          ORIGO_SERVER_ENV_B64: ${{ secrets.ORIGO_SERVER_ENV_B64 }}
+          ORIGO_API_IMAGE: ${{ steps.images.outputs.api_image }}
+          ORIGO_CONTROL_PLANE_IMAGE: ${{ steps.images.outputs.control_plane_image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "ERROR: ${name} must be set and non-empty." >&2
+              exit 1
+            fi
+          }
+
+          require_env ORIGO_SERVER_IP
+          require_env ORIGO_SERVER_USER
+          require_env ORIGO_SERVER_PASSWORD
+          require_env ORIGO_API_IMAGE
+          require_env ORIGO_CONTROL_PLANE_IMAGE
+          require_env GHCR_USER
+          require_env GHCR_TOKEN
+
+          export SSHPASS="${ORIGO_SERVER_PASSWORD}"
+          ssh_known_hosts_path="${HOME}/.ssh/known_hosts"
+          if [[ ! -s "${ssh_known_hosts_path}" ]]; then
+            echo "ERROR: SSH known_hosts file missing at ${ssh_known_hosts_path}." >&2
+            exit 1
+          fi
+          ssh_opts=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="${ssh_known_hosts_path}")
+          remote="${ORIGO_SERVER_USER}@${ORIGO_SERVER_IP}"
+
+          origo_server_password_b64="$(printf '%s' "${ORIGO_SERVER_PASSWORD}" | base64 -w0)"
+          origo_server_env_b64_b64="$(printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 -w0)"
+          origo_api_image_b64="$(printf '%s' "${ORIGO_API_IMAGE}" | base64 -w0)"
+          origo_control_plane_image_b64="$(printf '%s' "${ORIGO_CONTROL_PLANE_IMAGE}" | base64 -w0)"
+          origo_deploy_compose_b64="$(base64 -w0 deploy/docker-compose.server.yml)"
+          origo_clickhouse_config_b64="$(base64 -w0 control-plane/clickhouse-config.xml)"
+          ghcr_user_b64="$(printf '%s' "${GHCR_USER}" | base64 -w0)"
+          ghcr_token_b64="$(printf '%s' "${GHCR_TOKEN}" | base64 -w0)"
+
+          sshpass -e ssh "${ssh_opts[@]}" "${remote}" \
+            "ORIGO_SERVER_PASSWORD_B64='${origo_server_password_b64}' \
+             ORIGO_SERVER_ENV_B64_B64='${origo_server_env_b64_b64}' \
+             ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
+             ORIGO_CONTROL_PLANE_IMAGE_B64='${origo_control_plane_image_b64}' \
+             ORIGO_DEPLOY_COMPOSE_B64='${origo_deploy_compose_b64}' \
+             ORIGO_CLICKHOUSE_CONFIG_B64='${origo_clickhouse_config_b64}' \
+             GHCR_USER_B64='${ghcr_user_b64}' \
+             GHCR_TOKEN_B64='${ghcr_token_b64}' \
+             bash -s" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          decode_env_b64_required() {
+            local encoded_name="$1"
+            local target_name="$2"
+            local encoded_value="${!encoded_name:-}"
+            if [[ -z "${encoded_value}" ]]; then
+              echo "ERROR: ${encoded_name} must be set and non-empty." >&2
+              exit 1
+            fi
+            local decoded_value
+            decoded_value="$(printf '%s' "${encoded_value}" | base64 --decode)"
+            export "${target_name}=${decoded_value}"
+          }
+
+          decode_env_b64_required ORIGO_SERVER_PASSWORD_B64 ORIGO_SERVER_PASSWORD
+          decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
+          decode_env_b64_required ORIGO_CONTROL_PLANE_IMAGE_B64 ORIGO_CONTROL_PLANE_IMAGE
+          decode_env_b64_required ORIGO_DEPLOY_COMPOSE_B64 ORIGO_DEPLOY_COMPOSE_CONTENT
+          decode_env_b64_required ORIGO_CLICKHOUSE_CONFIG_B64 ORIGO_CLICKHOUSE_CONFIG_CONTENT
+          decode_env_b64_required GHCR_USER_B64 GHCR_USER
+          decode_env_b64_required GHCR_TOKEN_B64 GHCR_TOKEN
+          if [[ -n "${ORIGO_SERVER_ENV_B64_B64:-}" ]]; then
+            export ORIGO_SERVER_ENV_B64="$(printf '%s' "${ORIGO_SERVER_ENV_B64_B64}" | base64 --decode)"
+          else
+            export ORIGO_SERVER_ENV_B64=''
+          fi
+
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "ERROR: ${name} must be set and non-empty." >&2
+              exit 1
+            fi
+          }
+
+          require_env ORIGO_SERVER_PASSWORD
+          require_env ORIGO_API_IMAGE
+          require_env ORIGO_CONTROL_PLANE_IMAGE
+          require_env ORIGO_DEPLOY_COMPOSE_CONTENT
+          require_env ORIGO_CLICKHOUSE_CONFIG_CONTENT
+          require_env GHCR_USER
+          require_env GHCR_TOKEN
+
+          if [[ "$(id -u)" -ne 0 ]]; then
+            if ! command -v sudo >/dev/null 2>&1; then
+              echo "ERROR: sudo is required for non-root deployments." >&2
+              exit 1
+            fi
+            printf '%s\n' "${ORIGO_SERVER_PASSWORD}" | sudo -S -v
+          fi
+
+          run_privileged() {
+            if [[ "$(id -u)" -eq 0 ]]; then
+              "$@"
+            else
+              sudo "$@"
+            fi
+          }
+
+          run_privileged mkdir -p /opt/origo/deploy /opt/origo/config
+          printf '%s' "${ORIGO_DEPLOY_COMPOSE_CONTENT}" \
+            | run_privileged tee /opt/origo/deploy/docker-compose.yml >/dev/null
+          printf '%s' "${ORIGO_CLICKHOUSE_CONFIG_CONTENT}" \
+            | run_privileged tee /opt/origo/config/clickhouse-config.xml >/dev/null
+          run_privileged chmod 0644 \
+            /opt/origo/deploy/docker-compose.yml \
+            /opt/origo/config/clickhouse-config.xml
+
+          compose_cmd() {
+            run_privileged docker compose \
+              -f /opt/origo/deploy/docker-compose.yml \
+              --env-file /opt/origo/deploy/.env \
+              "$@"
+          }
+
+          if ! command -v docker >/dev/null 2>&1; then
+            run_privileged apt-get update
+            run_privileged apt-get install -y ca-certificates curl gnupg lsb-release
+            run_privileged install -m 0755 -d /etc/apt/keyrings
+            distro_id="$(. /etc/os-release && echo "${ID}")"
+            if [[ "${distro_id}" != "ubuntu" && "${distro_id}" != "debian" ]]; then
+              echo "ERROR: unsupported distro for automated Docker bootstrap: ${distro_id}" >&2
+              exit 1
+            fi
+            distro_codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}")"
+            if [[ -z "${distro_codename}" ]]; then
+              echo "ERROR: could not resolve distro codename for Docker apt repository." >&2
+              exit 1
+            fi
+
+            if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+              curl -fsSL "https://download.docker.com/linux/${distro_id}/gpg" \
+                | run_privileged gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              run_privileged chmod a+r /etc/apt/keyrings/docker.gpg
+            fi
+            distro_arch="$(dpkg --print-architecture)"
+            printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/%s %s stable\n' \
+              "${distro_arch}" "${distro_id}" "${distro_codename}" \
+              | run_privileged tee /etc/apt/sources.list.d/docker.list >/dev/null
+            run_privileged apt-get update
+            run_privileged apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          fi
+
+          if ! run_privileged docker compose version >/dev/null 2>&1; then
+            run_privileged apt-get update
+            run_privileged apt-get install -y docker-compose-plugin
+          fi
+
+          if ! run_privileged docker info >/dev/null 2>&1; then
+            if command -v systemctl >/dev/null 2>&1; then
+              run_privileged systemctl enable --now docker
+            else
+              run_privileged service docker start
+            fi
+          fi
+          run_privileged docker info >/dev/null
+
+          if [[ ! -f /opt/origo/deploy/.env ]]; then
+            if [[ -z "${ORIGO_SERVER_ENV_B64:-}" ]]; then
+              echo "ERROR: /opt/origo/deploy/.env is missing and ORIGO_SERVER_ENV_B64 was not provided." >&2
+              exit 1
+            fi
+            tmp_env="$(mktemp)"
+            printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 --decode > "${tmp_env}"
+            if [[ ! -s "${tmp_env}" ]]; then
+              rm -f "${tmp_env}"
+              echo "ERROR: decoded ORIGO_SERVER_ENV_B64 produced an empty env file." >&2
+              exit 1
+            fi
+            mv "${tmp_env}" /opt/origo/deploy/.env
+          fi
+
+          if [[ ! -s /opt/origo/deploy/.env ]]; then
+            echo "ERROR: /opt/origo/deploy/.env must be present and non-empty." >&2
+            exit 1
+          fi
+
+          tmp_env_next="$(mktemp)"
+          grep -v '^ORIGO_API_IMAGE=' /opt/origo/deploy/.env | grep -v '^ORIGO_CONTROL_PLANE_IMAGE=' > "${tmp_env_next}" || true
+          {
+            cat "${tmp_env_next}"
+            echo "ORIGO_API_IMAGE=${ORIGO_API_IMAGE}"
+            echo "ORIGO_CONTROL_PLANE_IMAGE=${ORIGO_CONTROL_PLANE_IMAGE}"
+          } > /opt/origo/deploy/.env
+          rm -f "${tmp_env_next}"
+
+          printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+          compose_cmd pull
+          compose_cmd up -d clickhouse
+
+          clickhouse_container_id="$(compose_cmd ps -q clickhouse)"
+          if [[ -z "${clickhouse_container_id}" ]]; then
+            echo "ERROR: clickhouse container id missing after compose up." >&2
+            exit 1
+          fi
+
+          health_attempt=1
+          while [[ "${health_attempt}" -le 90 ]]; do
+            health_status="$(run_privileged docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${clickhouse_container_id}")"
+            if [[ "${health_status}" == "healthy" || "${health_status}" == "running" ]]; then
+              break
+            fi
+            sleep 2
+            health_attempt=$((health_attempt + 1))
+          done
+
+          final_health_status="$(run_privileged docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${clickhouse_container_id}")"
+          if [[ "${final_health_status}" != "healthy" && "${final_health_status}" != "running" ]]; then
+            echo "ERROR: clickhouse failed health wait, status=${final_health_status}" >&2
+            compose_cmd logs --no-color clickhouse >&2
+            exit 1
+          fi
+
+          compose_cmd run --rm dagster-webserver python -m origo_control_plane.migrations.cli migrate
+          compose_cmd up -d --remove-orphans
+          compose_cmd ps
+          REMOTE_SCRIPT

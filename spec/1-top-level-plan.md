@@ -84,6 +84,17 @@ Every slice must pass:
 1. Async export endpoint.
 2. Export formats: Parquet and CSV.
 
+### Deployment
+1. Image-based deployment on merge to `main`.
+2. Runtime deploy target is remote Linux server over SSH using repo secrets:
+   1. `ORIGO_SERVER_IP`
+   2. `ORIGO_SERVER_USER`
+   3. `ORIGO_SERVER_PASSWORD`
+   4. `ORIGO_SERVER_ENV_B64` (base64-encoded `/opt/origo/deploy/.env`; required on first deploy when server env file does not yet exist)
+   5. `ORIGO_SERVER_KNOWN_HOSTS` (pinned host-key entries for strict SSH host verification)
+3. First deploy must bootstrap missing host dependencies (Docker engine + compose plugin + core OS deps) via install-if-missing checks in CI workflow.
+4. Deployment flow remains single-workflow driven (no manual server bootstrap).
+
 ## ClickHouse Query and Migration Policy
 1. ClickHouse schema and query logic is SQL-first and versioned.
 2. Migrations are authored as ordered SQL files and tracked in a migration ledger table.
@@ -193,6 +204,19 @@ Every slice must pass:
 7. Slice 6: FRED integration.
 8. Slice 7: Full platform Docker wrapping and local end-to-end proof.
 9. Slice 8: OKX spot trades daily-file ingest plus `aligned_1s` integration capability.
+10. Slice 10: Image-based merge-to-server deployment with first-run host bootstrap.
+
+## Slice 10 (Deployment) Locked Details
+1. Trigger: merge to `main` (implemented as push to `main`).
+2. Build source: monorepo Dockerfiles (`api`, `control-plane`) from merge commit.
+3. Distribution: prebuilt images are deployed to server (no server-side image build).
+4. Bootstrap policy: deployment job installs missing host dependencies idempotently.
+5. Runtime apply path:
+   1. login to image registry
+   2. pull commit-pinned image tags
+   3. run migrations
+   4. restart stack via `docker compose`
+6. Failure policy: fail loudly on missing server credentials, missing runtime env file, bootstrap/install failures, registry auth failures, compose failures, or migration failures.
 
 ## Slice 4 (ETF) Locked Details
 1. Coverage: all 10 issuers.

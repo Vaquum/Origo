@@ -338,7 +338,7 @@ jobs:
           fi
 
           echo "Running ClickHouse SQL migrations."
-          compose_cmd run --rm -T dagster-webserver python -m origo_control_plane.migrations.cli migrate
+          compose_cmd run --rm -T dagster-webserver python -m origo_control_plane.migrations.cli migrate </dev/null
           echo "Migrations completed."
 
           echo "Applying runtime stack update with forced recreation."

@@ -341,6 +341,7 @@ def insert_daily_bybit_spot_trades_to_origo(
 
         result_data: dict[str, Any] = {
             'date': date_str,
+            'partition_day': date_str,
             'source_filename': filename,
             'source_url': file_url,
             'rows_inserted': inserted_count,

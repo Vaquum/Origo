@@ -90,6 +90,8 @@ Every slice must pass:
    1. `ORIGO_SERVER_IP`
    2. `ORIGO_SERVER_USER`
    3. `ORIGO_SERVER_PASSWORD`
+   4. `ORIGO_SERVER_ENV_B64` (base64-encoded `/opt/origo/deploy/.env`; required on first deploy when server env file does not yet exist)
+   5. `ORIGO_SERVER_KNOWN_HOSTS` (pinned host-key entries for strict SSH host verification)
 3. First deploy must bootstrap missing host dependencies (Docker engine + compose plugin + core OS deps) via install-if-missing checks in CI workflow.
 4. Deployment flow remains single-workflow driven (no manual server bootstrap).
 

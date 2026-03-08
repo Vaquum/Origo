@@ -10,6 +10,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: deploy-on-merge
+  cancel-in-progress: true
+
 jobs:
   deploy-on-merge:
     runs-on: ubuntu-latest
@@ -57,11 +61,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends sshpass
 
-      - name: Sync deploy manifests to server
+      - name: Prepare SSH known_hosts
         env:
-          ORIGO_SERVER_IP: ${{ secrets.ORIGO_SERVER_IP }}
-          ORIGO_SERVER_USER: ${{ secrets.ORIGO_SERVER_USER }}
-          ORIGO_SERVER_PASSWORD: ${{ secrets.ORIGO_SERVER_PASSWORD }}
+          ORIGO_SERVER_KNOWN_HOSTS: ${{ secrets.ORIGO_SERVER_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
 
@@ -73,22 +75,10 @@ jobs:
             fi
           }
 
-          require_env ORIGO_SERVER_IP
-          require_env ORIGO_SERVER_USER
-          require_env ORIGO_SERVER_PASSWORD
-
-          export SSHPASS="${ORIGO_SERVER_PASSWORD}"
-          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
-          remote="${ORIGO_SERVER_USER}@${ORIGO_SERVER_IP}"
-
-          sshpass -e ssh "${ssh_opts[@]}" "${remote}" \
-            "mkdir -p /opt/origo/deploy /opt/origo/config"
-          sshpass -e scp "${ssh_opts[@]}" \
-            deploy/docker-compose.server.yml \
-            "${remote}:/opt/origo/deploy/docker-compose.yml"
-          sshpass -e scp "${ssh_opts[@]}" \
-            control-plane/clickhouse-config.xml \
-            "${remote}:/opt/origo/config/clickhouse-config.xml"
+          require_env ORIGO_SERVER_KNOWN_HOSTS
+          install -m 0700 -d "${HOME}/.ssh"
+          printf '%s\n' "${ORIGO_SERVER_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 0600 "${HOME}/.ssh/known_hosts"
 
       - name: Bootstrap host and deploy images
         env:
@@ -120,13 +110,20 @@ jobs:
           require_env GHCR_TOKEN
 
           export SSHPASS="${ORIGO_SERVER_PASSWORD}"
-          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          ssh_known_hosts_path="${HOME}/.ssh/known_hosts"
+          if [[ ! -s "${ssh_known_hosts_path}" ]]; then
+            echo "ERROR: SSH known_hosts file missing at ${ssh_known_hosts_path}." >&2
+            exit 1
+          fi
+          ssh_opts=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="${ssh_known_hosts_path}")
           remote="${ORIGO_SERVER_USER}@${ORIGO_SERVER_IP}"
 
           origo_server_password_b64="$(printf '%s' "${ORIGO_SERVER_PASSWORD}" | base64 -w0)"
           origo_server_env_b64_b64="$(printf '%s' "${ORIGO_SERVER_ENV_B64}" | base64 -w0)"
           origo_api_image_b64="$(printf '%s' "${ORIGO_API_IMAGE}" | base64 -w0)"
           origo_control_plane_image_b64="$(printf '%s' "${ORIGO_CONTROL_PLANE_IMAGE}" | base64 -w0)"
+          origo_deploy_compose_b64="$(base64 -w0 deploy/docker-compose.server.yml)"
+          origo_clickhouse_config_b64="$(base64 -w0 control-plane/clickhouse-config.xml)"
           ghcr_user_b64="$(printf '%s' "${GHCR_USER}" | base64 -w0)"
           ghcr_token_b64="$(printf '%s' "${GHCR_TOKEN}" | base64 -w0)"
 
@@ -135,6 +132,8 @@ jobs:
              ORIGO_SERVER_ENV_B64_B64='${origo_server_env_b64_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
              ORIGO_CONTROL_PLANE_IMAGE_B64='${origo_control_plane_image_b64}' \
+             ORIGO_DEPLOY_COMPOSE_B64='${origo_deploy_compose_b64}' \
+             ORIGO_CLICKHOUSE_CONFIG_B64='${origo_clickhouse_config_b64}' \
              GHCR_USER_B64='${ghcr_user_b64}' \
              GHCR_TOKEN_B64='${ghcr_token_b64}' \
              bash -s" <<'REMOTE_SCRIPT'
@@ -156,6 +155,8 @@ jobs:
           decode_env_b64_required ORIGO_SERVER_PASSWORD_B64 ORIGO_SERVER_PASSWORD
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
           decode_env_b64_required ORIGO_CONTROL_PLANE_IMAGE_B64 ORIGO_CONTROL_PLANE_IMAGE
+          decode_env_b64_required ORIGO_DEPLOY_COMPOSE_B64 ORIGO_DEPLOY_COMPOSE_CONTENT
+          decode_env_b64_required ORIGO_CLICKHOUSE_CONFIG_B64 ORIGO_CLICKHOUSE_CONFIG_CONTENT
           decode_env_b64_required GHCR_USER_B64 GHCR_USER
           decode_env_b64_required GHCR_TOKEN_B64 GHCR_TOKEN
           if [[ -n "${ORIGO_SERVER_ENV_B64_B64:-}" ]]; then
@@ -175,6 +176,8 @@ jobs:
           require_env ORIGO_SERVER_PASSWORD
           require_env ORIGO_API_IMAGE
           require_env ORIGO_CONTROL_PLANE_IMAGE
+          require_env ORIGO_DEPLOY_COMPOSE_CONTENT
+          require_env ORIGO_CLICKHOUSE_CONFIG_CONTENT
           require_env GHCR_USER
           require_env GHCR_TOKEN
 
@@ -193,6 +196,15 @@ jobs:
               sudo "$@"
             fi
           }
+
+          run_privileged mkdir -p /opt/origo/deploy /opt/origo/config
+          printf '%s' "${ORIGO_DEPLOY_COMPOSE_CONTENT}" \
+            | run_privileged tee /opt/origo/deploy/docker-compose.yml >/dev/null
+          printf '%s' "${ORIGO_CLICKHOUSE_CONFIG_CONTENT}" \
+            | run_privileged tee /opt/origo/config/clickhouse-config.xml >/dev/null
+          run_privileged chmod 0644 \
+            /opt/origo/deploy/docker-compose.yml \
+            /opt/origo/config/clickhouse-config.xml
 
           compose_cmd() {
             run_privileged docker compose \

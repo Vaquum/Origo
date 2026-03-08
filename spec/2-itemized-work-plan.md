@@ -247,9 +247,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S10-P3` Verify replay deployment determinism: same commit tag yields same runtime image set and stable compose state.
 
 ### Guardrails
-- [ ] `S10-G1` Enforce fail-loud secret/env checks for server credentials and runtime env-file contract.
+- [x] `S10-G1` Enforce fail-loud secret/env checks for server credentials and runtime env-file contract.
 - [ ] `S10-G2` Enforce deployment audit artifacts in workflow logs (image tags, migration step, compose status).
-- [ ] `S10-G3` Add deployment safety controls (serialized deploy concurrency and branch/environment restrictions).
+- [x] `S10-G3` Add deployment safety controls (serialized deploy concurrency and branch/environment restrictions).
 - [ ] `S10-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [ ] `S10-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 

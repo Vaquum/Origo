@@ -16,9 +16,9 @@ services:
     restart: unless-stopped
 
   bitcoin-core:
-    image: kylemanna/bitcoind@sha256:8396d4f819a8b1c4bbb97f3d9700ff658365d0e89d4413c50762a18ce23b84ab
+    image: bitcoin/bitcoin:27.1
     volumes:
-      - origo-bitcoin-core-data:/bitcoin/.bitcoin
+      - origo-bitcoin-core-data:/home/bitcoin/.bitcoin
     command:
       - -server=1
       - -chain=${ORIGO_BITCOIN_CORE_NETWORK:?ORIGO_BITCOIN_CORE_NETWORK must be set}
@@ -38,8 +38,13 @@ services:
     healthcheck:
       test:
         [
-          'CMD-SHELL',
-          'bitcoin-cli -rpcconnect=127.0.0.1 -rpcport=8332 -rpcuser=${ORIGO_BITCOIN_CORE_RPC_USER:?ORIGO_BITCOIN_CORE_RPC_USER must be set} -rpcpassword=${ORIGO_BITCOIN_CORE_RPC_PASSWORD:?ORIGO_BITCOIN_CORE_RPC_PASSWORD must be set} getblockchaininfo >/dev/null',
+          'CMD',
+          '/opt/bitcoin/bin/bitcoin-cli',
+          '-rpcconnect=127.0.0.1',
+          '-rpcport=8332',
+          '-rpcuser=${ORIGO_BITCOIN_CORE_RPC_USER:?ORIGO_BITCOIN_CORE_RPC_USER must be set}',
+          '-rpcpassword=${ORIGO_BITCOIN_CORE_RPC_PASSWORD:?ORIGO_BITCOIN_CORE_RPC_PASSWORD must be set}',
+          'getblockchaininfo',
         ]
       interval: 15s
       timeout: 10s

@@ -233,6 +233,26 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S8-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S8-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
+## Slice 10: Image-Based Merge Deployment (Server Bootstrap Included)
+
+### Capability
+- [x] `S10-C1` Add CI workflow that triggers on push to `main` and builds commit-pinned API/control-plane images.
+- [x] `S10-C2` Publish built images to registry with deterministic commit tags.
+- [x] `S10-C3` Add remote deploy compose contract that uses prebuilt images only (no server-side build).
+- [x] `S10-C4` Implement remote apply path in CI: copy deploy manifests, pull images, run migrations, restart stack.
+
+### Proof
+- [ ] `S10-P1` Execute deployment workflow on a merged commit and verify successful server apply.
+- [ ] `S10-P2` Verify first-run bootstrap path installs missing Docker/compose dependencies and proceeds to deploy.
+- [ ] `S10-P3` Verify replay deployment determinism: same commit tag yields same runtime image set and stable compose state.
+
+### Guardrails
+- [ ] `S10-G1` Enforce fail-loud secret/env checks for server credentials and runtime env-file contract.
+- [ ] `S10-G2` Enforce deployment audit artifacts in workflow logs (image tags, migration step, compose status).
+- [ ] `S10-G3` Add deployment safety controls (serialized deploy concurrency and branch/environment restrictions).
+- [ ] `S10-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S10-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
 ---
 
 ## One-Day Sub-Slices
@@ -597,4 +617,42 @@ Constraints: documentation only; no feature changes.
 10. `S8-10`
 Action: User docs closeout for Slice 8.
 Done looks like: `docs/` includes complete OKX dataset reference and taxonomy updates.
+Constraints: documentation only; no feature changes.
+
+## Slice 10 Sub-Slices
+1. `S10-01`
+Action: Define deployment contract and runtime compose manifest for image-only server apply.
+Done looks like: server deploy compose file exists and references only prebuilt image tags.
+Constraints: no source/build execution on server.
+2. `S10-02`
+Action: Implement merge-triggered image build + publish workflow.
+Done looks like: push to `main` builds API/control-plane images and publishes commit-pinned tags.
+Constraints: deterministic tagging only.
+3. `S10-03`
+Action: Implement remote bootstrap/install-if-missing checks for Docker engine and compose plugin.
+Done looks like: first deploy on a clean host installs dependencies and continues automatically.
+Constraints: idempotent bootstrap.
+4. `S10-04`
+Action: Implement remote deployment apply path (manifest sync, image pull, migration run, compose restart).
+Done looks like: deployed stack updates to merged commit images and migrations run before full restart.
+Constraints: fail-loud on any step failure.
+5. `S10-05`
+Action: Execute deployment acceptance proof on merge path.
+Done looks like: workflow run evidence confirms successful deploy and running services.
+Constraints: fixed merge commit proof.
+6. `S10-06`
+Action: Execute first-run bootstrap proof and replay deployment proof.
+Done looks like: clean-host bootstrap works and repeated deploy of same commit is stable.
+Constraints: same commit/image tags.
+7. `S10-07`
+Action: Add deployment guardrails (secret/env contract checks, concurrency lock, restricted triggers).
+Done looks like: unsafe trigger paths blocked and missing env/secret conditions fail immediately.
+Constraints: guardrails only.
+8. `S10-08`
+Action: Developer docs closeout for Slice 10.
+Done looks like: `docs/Developer/` has short files for deployment workflow contract, bootstrap behavior, and troubleshooting.
+Constraints: documentation only; no feature changes.
+9. `S10-09`
+Action: User docs closeout for Slice 10.
+Done looks like: `docs/` contains deployment reference for release behavior, operational expectations, and failure semantics.
 Constraints: documentation only; no feature changes.

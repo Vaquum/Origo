@@ -431,6 +431,8 @@ jobs:
             local disk_path
             local disk_type
             local disk_size
+            local disk_table_type
+            local partition_count
             local max_free_gib
             while IFS= read -r link_name; do
               [[ "${link_name}" == *-part* ]] && continue
@@ -441,20 +443,29 @@ jobs:
               read -r disk_type disk_size < <(run_privileged lsblk -dnbo TYPE,SIZE "${disk_path}")
               [[ "${disk_type}" == "disk" ]] || continue
               [[ "${disk_size}" -ge 3000000000000 ]] || continue
-              max_free_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
-                $5 ~ /^free/ {
-                  gsub("GiB", "", $4)
-                  if (($4 + 0) > max) {
-                    max = $4 + 0
+              disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
+              partition_count="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | wc -l | tr -d ' ')"
+              if [[ "${disk_table_type}" != "gpt" && "${partition_count}" != "0" ]]; then
+                continue
+              fi
+              if [[ "${partition_count}" == "0" ]]; then
+                max_free_gib="$((disk_size / 1024 / 1024 / 1024))"
+              else
+                max_free_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
+                  $5 ~ /^free/ {
+                    gsub("GiB", "", $4)
+                    if (($4 + 0) > max) {
+                      max = $4 + 0
+                    }
                   }
-                }
-                END {
-                  if (max == "") {
-                    max = 0
+                  END {
+                    if (max == "") {
+                      max = 0
+                    }
+                    printf "%.0f", max
                   }
-                  printf "%.0f", max
-                }
-              ')"
+                ')"
+              fi
               if [[ "${max_free_gib}" -ge 500 ]]; then
                 printf '%s' "${link_path}"
                 return 0

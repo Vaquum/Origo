@@ -496,8 +496,24 @@ jobs:
               exit 1
             fi
 
-            local partition_by_id="${disk_by_id}-part4"
-            if [[ ! -b "${partition_by_id}" ]]; then
+            local partition_device=''
+            local mounted_source=''
+            if run_privileged mountpoint -q "${target_dir}"; then
+              mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
+              if [[ -n "${mounted_source}" && -b "${mounted_source}" ]]; then
+                local parent_kname
+                parent_kname="$(run_privileged lsblk -nro PKNAME "${mounted_source}" | head -n 1 || true)"
+                if [[ -n "${parent_kname}" && "/dev/${parent_kname}" == "${disk_path}" ]]; then
+                  partition_device="${mounted_source}"
+                fi
+              fi
+            fi
+
+            if [[ -z "${partition_device}" ]]; then
+              partition_device="$(run_privileged lsblk -npo NAME,LABEL "${disk_path}" | awk '$2 == "origo-bitcoin-core" { print $1; exit }')"
+            fi
+
+            if [[ -z "${partition_device}" ]]; then
               local free_start_gib
               free_start_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
                 $5 == "free" {
@@ -519,31 +535,49 @@ jobs:
                 echo "ERROR: could not resolve free partition start for ${disk_path}." >&2
                 exit 1
               fi
+
+              local before_parts
+              local after_parts
+              local new_partition_device
+              before_parts="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | sort)"
               run_privileged parted -s "${disk_path}" mkpart primary ext4 "${free_start_gib}GiB" 100%
               run_privileged partprobe "${disk_path}"
+              sleep 1
+              after_parts="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | sort)"
+              new_partition_device="$(comm -13 <(printf '%s\n' "${before_parts}") <(printf '%s\n' "${after_parts}") | head -n 1)"
+              if [[ -z "${new_partition_device}" ]]; then
+                echo "ERROR: failed to detect newly created partition on ${disk_path}." >&2
+                exit 1
+              fi
+              partition_device="${new_partition_device}"
             fi
 
             local partition_attempt=1
             while [[ "${partition_attempt}" -le 20 ]]; do
-              if [[ -b "${partition_by_id}" ]]; then
+              if [[ -b "${partition_device}" ]]; then
                 break
               fi
               sleep 1
               partition_attempt=$((partition_attempt + 1))
             done
-            if [[ ! -b "${partition_by_id}" ]]; then
-              echo "ERROR: expected partition device not present after provisioning: ${partition_by_id}" >&2
+            if [[ ! -b "${partition_device}" ]]; then
+              echo "ERROR: expected partition device not present after provisioning: ${partition_device}" >&2
               exit 1
             fi
 
-            if ! run_privileged blkid "${partition_by_id}" >/dev/null 2>&1; then
-              run_privileged mkfs.ext4 -F -L origo-bitcoin-core "${partition_by_id}"
+            local partition_type
+            partition_type="$(run_privileged blkid -s TYPE -o value "${partition_device}" || true)"
+            if [[ -z "${partition_type}" ]]; then
+              run_privileged mkfs.ext4 -F -L origo-bitcoin-core "${partition_device}"
+            elif [[ "${partition_type}" != "ext4" ]]; then
+              echo "ERROR: expected ext4 filesystem on ${partition_device}, found ${partition_type}." >&2
+              exit 1
             fi
 
             local partition_uuid
-            partition_uuid="$(run_privileged blkid -s UUID -o value "${partition_by_id}")"
+            partition_uuid="$(run_privileged blkid -s UUID -o value "${partition_device}")"
             if [[ -z "${partition_uuid}" ]]; then
-              echo "ERROR: failed to resolve UUID for ${partition_by_id}." >&2
+              echo "ERROR: failed to resolve UUID for ${partition_device}." >&2
               exit 1
             fi
 
@@ -556,10 +590,13 @@ jobs:
             run_privileged cp "${fstab_tmp}" /etc/fstab
             rm -f -- "${fstab_tmp}"
 
+            local resolved_partition_device
+            resolved_partition_device="$(readlink -f "${partition_device}")"
             if run_privileged mountpoint -q "${target_dir}"; then
-              local mounted_source
               mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
-              if [[ "${mounted_source}" != "${partition_by_id}" && "${mounted_source}" != "$(readlink -f "${partition_by_id}")" ]]; then
+              local resolved_mounted_source
+              resolved_mounted_source="$(readlink -f "${mounted_source}" || printf '%s' "${mounted_source}")"
+              if [[ "${resolved_mounted_source}" != "${resolved_partition_device}" ]]; then
                 run_privileged umount "${target_dir}"
               fi
             fi
@@ -568,7 +605,6 @@ jobs:
               run_privileged mount "${target_dir}"
             fi
 
-            local mounted_source
             mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
             echo "Bitcoin Core data mount ready: target=${target_dir} source=${mounted_source} disk=${disk_by_id}"
           }

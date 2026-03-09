@@ -433,6 +433,7 @@ jobs:
             local disk_size
             local disk_table_type
             local partition_count
+            local child_device_count
             local partition_device
             local max_free_gib
             local free_start_gib
@@ -449,11 +450,15 @@ jobs:
               [[ "${disk_type}" == "disk" ]] || continue
               [[ "${disk_size}" -ge 3000000000000 ]] || continue
               disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
-              partition_count="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | wc -l | tr -d ' ')"
-              partition_device="$(run_privileged lsblk -npo NAME,LABEL "${disk_path}" | awk '$2 == "origo-bitcoin-core" { print $1; exit }')"
+              partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
+              child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
+              partition_device="$(run_privileged lsblk -nrpo NAME,TYPE,LABEL "${disk_path}" | awk '$2 == "part" && $3 == "origo-bitcoin-core" { print $1; exit }')"
               if [[ -n "${partition_device}" ]]; then
                 printf '%s' "${link_path}"
                 return 0
+              fi
+              if [[ "${partition_count}" == "0" && "${child_device_count}" != "0" ]]; then
+                continue
               fi
               if [[ "${partition_count}" != "0" && "${disk_table_type}" != "gpt" && "${disk_table_type}" != "dos" && "${disk_table_type}" != "msdos" ]]; then
                 continue
@@ -535,6 +540,7 @@ jobs:
               echo "ERROR: resolved disk path is not a block device: ${disk_path}" >&2
               exit 1
             fi
+            echo "Selected Bitcoin Core data disk candidate: by-id=${disk_by_id} path=${disk_path}"
 
             local partition_device=''
             local mounted_source=''
@@ -550,20 +556,26 @@ jobs:
             fi
 
             if [[ -z "${partition_device}" ]]; then
-              partition_device="$(run_privileged lsblk -npo NAME,LABEL "${disk_path}" | awk '$2 == "origo-bitcoin-core" { print $1; exit }')"
+              partition_device="$(run_privileged lsblk -nrpo NAME,TYPE,LABEL "${disk_path}" | awk '$2 == "part" && $3 == "origo-bitcoin-core" { print $1; exit }')"
             fi
 
             if [[ -z "${partition_device}" ]]; then
               local disk_table_type
               local existing_partition_count
+              local child_device_count
               local dos_cap_end_gib='2000'
               local free_start_gib
               local free_end_gib
               local partition_end_gib
               disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
-              existing_partition_count="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | wc -l | tr -d ' ')"
+              existing_partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
+              child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
               if [[ "${disk_table_type}" != "gpt" ]]; then
                 if [[ "${existing_partition_count}" == "0" ]]; then
+                  if [[ "${child_device_count}" != "0" ]]; then
+                    echo "ERROR: disk ${disk_path} has non-partition child devices and cannot be relabeled safely." >&2
+                    exit 1
+                  fi
                   run_privileged parted -s "${disk_path}" mklabel gpt
                   run_privileged partprobe "${disk_path}"
                   sleep 1
@@ -614,12 +626,12 @@ jobs:
               local before_parts
               local after_parts
               local new_partition_device
-              before_parts="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | sort)"
+              before_parts="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { print $1 }' | sort)"
               run_privileged parted -s "${disk_path}" mkpart primary ext4 "${free_start_gib}GiB" "${partition_end_gib}GiB"
               run_privileged partprobe "${disk_path}"
               sleep 1
-              after_parts="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | sort)"
-              new_partition_device="$(comm -13 <(printf '%s\n' "${before_parts}") <(printf '%s\n' "${after_parts}") | head -n 1)"
+              after_parts="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { print $1 }' | sort)"
+              new_partition_device="$(comm -13 <(printf '%s\n' "${before_parts}" | sed '/^$/d') <(printf '%s\n' "${after_parts}" | sed '/^$/d') | head -n 1)"
               if [[ -z "${new_partition_device}" ]]; then
                 echo "ERROR: failed to detect newly created partition on ${disk_path}." >&2
                 exit 1

@@ -18,7 +18,7 @@ services:
   bitcoin-core:
     image: bitcoin/bitcoin:27.1
     volumes:
-      - origo-bitcoin-core-data:/home/bitcoin/.bitcoin
+      - ${ORIGO_BITCOIN_CORE_DATA_DIR:?ORIGO_BITCOIN_CORE_DATA_DIR must be set}:/home/bitcoin/.bitcoin
     command:
       - -server=1
       - -chain=${ORIGO_BITCOIN_CORE_NETWORK:?ORIGO_BITCOIN_CORE_NETWORK must be set}
@@ -185,6 +185,5 @@ services:
 
 volumes:
   origo-clickhouse-data:
-  origo-bitcoin-core-data:
   origo-dagster-instance:
   origo-storage:

@@ -312,6 +312,11 @@ jobs:
           fi
           run_privileged docker info >/dev/null
 
+          if ! command -v parted >/dev/null 2>&1 || ! command -v mkfs.ext4 >/dev/null 2>&1 || ! command -v blkid >/dev/null 2>&1; then
+            run_privileged apt-get update
+            run_privileged apt-get install -y parted e2fsprogs util-linux
+          fi
+
           refresh_sudo_ticket
 
           read_env_value() {
@@ -364,6 +369,13 @@ jobs:
             bitcoin_core_headers_end_height='100'
           fi
 
+          bitcoin_core_data_dir="$(read_env_value ORIGO_BITCOIN_CORE_DATA_DIR || true)"
+          if [[ -z "${bitcoin_core_data_dir}" ]]; then
+            bitcoin_core_data_dir='/mnt/origo-bitcoin-core-data'
+          fi
+
+          bitcoin_core_data_disk_by_id="$(read_env_value ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID || true)"
+
           tmp_env_next="$(mktemp)"
           run_privileged awk '
             $0 !~ /^ORIGO_API_IMAGE=/ &&
@@ -375,7 +387,9 @@ jobs:
             $0 !~ /^ORIGO_BITCOIN_CORE_NETWORK=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=/ &&
-            $0 !~ /^ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=/
+            $0 !~ /^ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_DATA_DIR=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=/
           ' /opt/origo/deploy/.env > "${tmp_env_next}"
           {
             cat "${tmp_env_next}"
@@ -389,6 +403,8 @@ jobs:
             echo "ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS=${bitcoin_core_rpc_timeout_seconds}"
             echo "ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"
             echo "ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=${bitcoin_core_headers_end_height}"
+            echo "ORIGO_BITCOIN_CORE_DATA_DIR=${bitcoin_core_data_dir}"
+            echo "ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=${bitcoin_core_data_disk_by_id}"
           } | run_privileged tee /opt/origo/deploy/.env >/dev/null
           rm -f -- "${tmp_env_next}"
           tmp_env_next=''
@@ -402,6 +418,176 @@ jobs:
           echo "  ORIGO_BITCOIN_CORE_NETWORK=${bitcoin_core_network}"
           echo "  ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"
           echo "  ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT=${bitcoin_core_headers_end_height}"
+          echo "  ORIGO_BITCOIN_CORE_DATA_DIR=${bitcoin_core_data_dir}"
+          if [[ -n "${bitcoin_core_data_disk_by_id}" ]]; then
+            echo "  ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=${bitcoin_core_data_disk_by_id}"
+          else
+            echo "  ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=<auto-detect>"
+          fi
+
+          detect_bitcoin_core_data_disk_by_id() {
+            local link_name
+            local link_path
+            local disk_path
+            local disk_type
+            local disk_size
+            local max_free_gib
+            while IFS= read -r link_name; do
+              [[ "${link_name}" == *-part* ]] && continue
+              link_path="/dev/disk/by-id/${link_name}"
+              [[ -L "${link_path}" ]] || continue
+              disk_path="$(readlink -f "${link_path}")"
+              [[ -b "${disk_path}" ]] || continue
+              read -r disk_type disk_size < <(run_privileged lsblk -dnbo TYPE,SIZE "${disk_path}")
+              [[ "${disk_type}" == "disk" ]] || continue
+              [[ "${disk_size}" -ge 3000000000000 ]] || continue
+              max_free_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
+                $5 == "free" {
+                  gsub("GiB", "", $4)
+                  if (($4 + 0) > max) {
+                    max = $4 + 0
+                  }
+                }
+                END {
+                  if (max == "") {
+                    max = 0
+                  }
+                  printf "%.0f", max
+                }
+              ')"
+              if [[ "${max_free_gib}" -ge 500 ]]; then
+                printf '%s' "${link_path}"
+                return 0
+              fi
+            done < <(ls -1 /dev/disk/by-id | sort)
+            return 1
+          }
+
+          ensure_bitcoin_core_data_mount() {
+            local target_dir="${bitcoin_core_data_dir}"
+            if [[ -z "${target_dir}" ]]; then
+              echo "ERROR: ORIGO_BITCOIN_CORE_DATA_DIR must be set." >&2
+              exit 1
+            fi
+            if [[ "${target_dir}" != /* ]]; then
+              echo "ERROR: ORIGO_BITCOIN_CORE_DATA_DIR must be an absolute path: ${target_dir}" >&2
+              exit 1
+            fi
+
+            local disk_by_id="${bitcoin_core_data_disk_by_id}"
+            if [[ -z "${disk_by_id}" ]]; then
+              disk_by_id="$(detect_bitcoin_core_data_disk_by_id || true)"
+              if [[ -z "${disk_by_id}" ]]; then
+                echo "ERROR: no >=3TB disk with >=500GiB free space found for Bitcoin Core data mount." >&2
+                exit 1
+              fi
+              bitcoin_core_data_disk_by_id="${disk_by_id}"
+            fi
+
+            if [[ ! -L "${disk_by_id}" ]]; then
+              echo "ERROR: ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID must be a valid /dev/disk/by-id symlink: ${disk_by_id}" >&2
+              exit 1
+            fi
+
+            local disk_path
+            disk_path="$(readlink -f "${disk_by_id}")"
+            if [[ ! -b "${disk_path}" ]]; then
+              echo "ERROR: resolved disk path is not a block device: ${disk_path}" >&2
+              exit 1
+            fi
+
+            local partition_by_id="${disk_by_id}-part4"
+            if [[ ! -b "${partition_by_id}" ]]; then
+              local free_start_gib
+              free_start_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
+                $5 == "free" {
+                  gsub("GiB", "", $2)
+                  gsub("GiB", "", $4)
+                  if (($4 + 0) > max) {
+                    max = $4 + 0
+                    start = $2 + 0
+                  }
+                }
+                END {
+                  if (max < 500) {
+                    exit 1
+                  }
+                  printf "%.0f", start
+                }
+              ')"
+              if [[ -z "${free_start_gib}" ]]; then
+                echo "ERROR: could not resolve free partition start for ${disk_path}." >&2
+                exit 1
+              fi
+              run_privileged parted -s "${disk_path}" mkpart primary ext4 "${free_start_gib}GiB" 100%
+              run_privileged partprobe "${disk_path}"
+            fi
+
+            local partition_attempt=1
+            while [[ "${partition_attempt}" -le 20 ]]; do
+              if [[ -b "${partition_by_id}" ]]; then
+                break
+              fi
+              sleep 1
+              partition_attempt=$((partition_attempt + 1))
+            done
+            if [[ ! -b "${partition_by_id}" ]]; then
+              echo "ERROR: expected partition device not present after provisioning: ${partition_by_id}" >&2
+              exit 1
+            fi
+
+            if ! run_privileged blkid "${partition_by_id}" >/dev/null 2>&1; then
+              run_privileged mkfs.ext4 -F -L origo-bitcoin-core "${partition_by_id}"
+            fi
+
+            local partition_uuid
+            partition_uuid="$(run_privileged blkid -s UUID -o value "${partition_by_id}")"
+            if [[ -z "${partition_uuid}" ]]; then
+              echo "ERROR: failed to resolve UUID for ${partition_by_id}." >&2
+              exit 1
+            fi
+
+            run_privileged install -d -m 0755 "${target_dir}"
+
+            local fstab_tmp
+            fstab_tmp="$(mktemp)"
+            run_privileged awk -v mountpoint="${target_dir}" '$2 != mountpoint { print }' /etc/fstab > "${fstab_tmp}"
+            printf 'UUID=%s %s ext4 defaults,nofail 0 2\n' "${partition_uuid}" "${target_dir}" >> "${fstab_tmp}"
+            run_privileged cp "${fstab_tmp}" /etc/fstab
+            rm -f -- "${fstab_tmp}"
+
+            if run_privileged mountpoint -q "${target_dir}"; then
+              local mounted_source
+              mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
+              if [[ "${mounted_source}" != "${partition_by_id}" && "${mounted_source}" != "$(readlink -f "${partition_by_id}")" ]]; then
+                run_privileged umount "${target_dir}"
+              fi
+            fi
+
+            if ! run_privileged mountpoint -q "${target_dir}"; then
+              run_privileged mount "${target_dir}"
+            fi
+
+            local mounted_source
+            mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
+            echo "Bitcoin Core data mount ready: target=${target_dir} source=${mounted_source} disk=${disk_by_id}"
+          }
+
+          ensure_bitcoin_core_data_mount
+
+          tmp_env_next="$(mktemp)"
+          run_privileged awk '
+            $0 !~ /^ORIGO_BITCOIN_CORE_DATA_DIR=/ &&
+            $0 !~ /^ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=/
+          ' /opt/origo/deploy/.env > "${tmp_env_next}"
+          {
+            cat "${tmp_env_next}"
+            echo "ORIGO_BITCOIN_CORE_DATA_DIR=${bitcoin_core_data_dir}"
+            echo "ORIGO_BITCOIN_CORE_DATA_DISK_BY_ID=${bitcoin_core_data_disk_by_id}"
+          } | run_privileged tee /opt/origo/deploy/.env >/dev/null
+          rm -f -- "${tmp_env_next}"
+          tmp_env_next=''
+          run_privileged chmod 0600 /opt/origo/deploy/.env
 
           printf '%s' "${GHCR_TOKEN}" | run_privileged docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 

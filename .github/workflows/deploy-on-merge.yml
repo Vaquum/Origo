@@ -442,7 +442,7 @@ jobs:
               [[ "${disk_type}" == "disk" ]] || continue
               [[ "${disk_size}" -ge 3000000000000 ]] || continue
               max_free_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
-                $5 == "free" {
+                $5 ~ /^free/ {
                   gsub("GiB", "", $4)
                   if (($4 + 0) > max) {
                     max = $4 + 0
@@ -516,7 +516,7 @@ jobs:
             if [[ -z "${partition_device}" ]]; then
               local free_start_gib
               free_start_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
-                $5 == "free" {
+                $5 ~ /^free/ {
                   gsub("GiB", "", $2)
                   gsub("GiB", "", $4)
                   if (($4 + 0) > max) {

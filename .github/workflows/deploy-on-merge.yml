@@ -514,6 +514,20 @@ jobs:
             fi
 
             if [[ -z "${partition_device}" ]]; then
+              local disk_table_type
+              disk_table_type="$(run_privileged parted -m "${disk_path}" print | awk -F: 'NR == 2 { print $6 }')"
+              if [[ "${disk_table_type}" != "gpt" ]]; then
+                local existing_partition_count
+                existing_partition_count="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | wc -l | tr -d ' ')"
+                if [[ "${existing_partition_count}" != "0" ]]; then
+                  echo "ERROR: disk ${disk_path} uses ${disk_table_type:-unknown} partition table with existing partitions; cannot auto-convert to GPT." >&2
+                  exit 1
+                fi
+                run_privileged parted -s "${disk_path}" mklabel gpt
+                run_privileged partprobe "${disk_path}"
+                sleep 1
+              fi
+
               local free_start_gib
               free_start_gib="$(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
                 $5 ~ /^free/ {

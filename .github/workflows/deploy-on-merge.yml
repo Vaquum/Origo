@@ -433,6 +433,7 @@ jobs:
             local disk_size
             local disk_table_type
             local partition_count
+            local child_device_count
             local partition_device
             local max_free_gib
             local free_start_gib
@@ -450,10 +451,14 @@ jobs:
               [[ "${disk_size}" -ge 3000000000000 ]] || continue
               disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
               partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
+              child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
               partition_device="$(run_privileged lsblk -nrpo NAME,TYPE,LABEL "${disk_path}" | awk '$2 == "part" && $3 == "origo-bitcoin-core" { print $1; exit }')"
               if [[ -n "${partition_device}" ]]; then
                 printf '%s' "${link_path}"
                 return 0
+              fi
+              if [[ "${partition_count}" == "0" && "${child_device_count}" != "0" ]]; then
+                continue
               fi
               if [[ "${partition_count}" != "0" && "${disk_table_type}" != "gpt" && "${disk_table_type}" != "dos" && "${disk_table_type}" != "msdos" ]]; then
                 continue
@@ -557,14 +562,20 @@ jobs:
             if [[ -z "${partition_device}" ]]; then
               local disk_table_type
               local existing_partition_count
+              local child_device_count
               local dos_cap_end_gib='2000'
               local free_start_gib
               local free_end_gib
               local partition_end_gib
               disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
               existing_partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
+              child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
               if [[ "${disk_table_type}" != "gpt" ]]; then
                 if [[ "${existing_partition_count}" == "0" ]]; then
+                  if [[ "${child_device_count}" != "0" ]]; then
+                    echo "ERROR: disk ${disk_path} has non-partition child devices and cannot be relabeled safely." >&2
+                    exit 1
+                  fi
                   run_privileged parted -s "${disk_path}" mklabel gpt
                   run_privileged partprobe "${disk_path}"
                   sleep 1

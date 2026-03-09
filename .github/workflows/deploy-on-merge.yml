@@ -515,7 +515,7 @@ jobs:
 
             if [[ -z "${partition_device}" ]]; then
               local disk_table_type
-              disk_table_type="$(run_privileged parted -m "${disk_path}" print | awk -F: 'NR == 2 { print $6 }')"
+              disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
               if [[ "${disk_table_type}" != "gpt" ]]; then
                 local existing_partition_count
                 existing_partition_count="$(run_privileged lsblk -npo NAME "${disk_path}" | tail -n +2 | sed '/^$/d' | wc -l | tr -d ' ')"

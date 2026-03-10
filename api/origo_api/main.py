@@ -45,7 +45,7 @@ from .schemas import (
     RawQueryWarning,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.5')
+app = FastAPI(title='Origo Raw API', version='0.1.6')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',
@@ -130,6 +130,17 @@ if ORIGO_EXPORT_AUDIT_LOG_PATH is None or ORIGO_EXPORT_AUDIT_LOG_PATH.strip() ==
     raise RuntimeError('ORIGO_EXPORT_AUDIT_LOG_PATH must be set and non-empty')
 
 try:
+    AUDIT_LOG_RETENTION_DAYS = int(os.environ['ORIGO_AUDIT_LOG_RETENTION_DAYS'])
+except KeyError as exc:
+    raise RuntimeError(
+        'ORIGO_AUDIT_LOG_RETENTION_DAYS must be set and non-empty'
+    ) from exc
+except ValueError as exc:
+    raise RuntimeError(
+        'ORIGO_AUDIT_LOG_RETENTION_DAYS must be an integer'
+    ) from exc
+
+try:
     ETF_DAILY_STALE_MAX_AGE_DAYS = int(os.environ['ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS'])
 except KeyError as exc:
     raise RuntimeError(
@@ -178,6 +189,8 @@ if EXPORT_MAX_CONCURRENCY <= 0:
     raise RuntimeError('ORIGO_EXPORT_MAX_CONCURRENCY must be > 0')
 if EXPORT_MAX_QUEUE < 0:
     raise RuntimeError('ORIGO_EXPORT_MAX_QUEUE must be >= 0')
+if AUDIT_LOG_RETENTION_DAYS < 365:
+    raise RuntimeError('ORIGO_AUDIT_LOG_RETENTION_DAYS must be >= 365')
 if ETF_DAILY_STALE_MAX_AGE_DAYS <= 0:
     raise RuntimeError('ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS must be > 0')
 if FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS <= 0:

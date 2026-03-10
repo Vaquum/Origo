@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-06
+- Last updated: 2026-03-10
 - Slice reference: S5 (`S5-C1..S5-G4`)
 - Version reference: `control-plane v1.2.35`
 
@@ -82,6 +82,7 @@
 - Required rights/audit env:
   - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
   - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
   - `ORIGO_ETF_QUERY_SERVING_STATE`
 
 ## Minimal examples

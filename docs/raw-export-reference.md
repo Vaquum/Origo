@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S2, S5, S6, S8, S11, S13 (API v0.1.5)
+- Last updated: 2026-03-10
+- Slice/version reference: S2, S5, S6, S8, S11, S13 (API v0.1.6)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -90,6 +90,7 @@
 - `ORIGO_EXPORT_ROOT_DIR`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
 - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 
 ## Minimal examples
 - Submit native export:

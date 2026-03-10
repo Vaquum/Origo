@@ -1,205 +1,40 @@
 {
+  "retrospective_note": "Normalized after-the-fact on 2026-03-10 to the canonical baseline-fixture contract. Original proof payload fields were summarized into canonical fingerprints.",
   "column_key": {
-    "count": "Number of normalized metric rows",
-    "metric_id": "Deterministic metric identifier derived from source/record/metric/value",
-    "rows_hash_sha256": "SHA256 hash of canonical normalized metric rows"
+    "artifact_sha256": "SHA256 checksum of the input proof artifact payload.",
+    "legacy_entry_count": "Number of normalized metric entries captured in the original proof payload.",
+    "row_count": "Number of normalized metric rows in the run output.",
+    "rows_hash_sha256": "SHA256 hash of canonical normalized metric rows.",
+    "source_uri": "Source URI used for the deterministic proof input.",
+    "zip_sha256": "Compatibility slot; null when ZIP payload is not applicable."
   },
   "deterministic_match": true,
-  "fixture_window": [
-    "proof_etf_csv:2026-03-01..2026-03-02"
+  "fixture_window": {
+    "end_utc": "2026-03-02T23:59:59Z",
+    "proof_label": "proof_etf_csv",
+    "start_utc": "2026-03-01T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "artifact_sha256": "0efe306a42fb167417af2423e39195ec1cfe07c5b4abf6bb6c3d80b3c0cc74f6",
+      "csv_sha256": "0efe306a42fb167417af2423e39195ec1cfe07c5b4abf6bb6c3d80b3c0cc74f6",
+      "day": "2026-03-01_2026-03-02",
+      "source_uri": "http://127.0.0.1:56118/sample-etf.csv",
+      "zip_sha256": null
+    }
   ],
-  "generated_at_utc": "2026-03-05T08:55:26.804980+00:00",
-  "input_artifact": {
-    "content_sha256": "0efe306a42fb167417af2423e39195ec1cfe07c5b4abf6bb6c3d80b3c0cc74f6",
-    "source_uri": "http://127.0.0.1:56118/sample-etf.csv"
+  "run_1_fingerprints": {
+    "proof_etf_csv": {
+      "legacy_entry_count": 8,
+      "row_count": 8,
+      "rows_hash_sha256": "52f470756fa25fcc7b6ccafadc864be5e78d4a5c74c81ac477099ba261965721"
+    }
   },
-  "proof_scope": "Slice 3 P2 deterministic normalized replay",
-  "run_1": {
-    "count": 8,
-    "entries": [
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "2915bd22b3172361244c12419164fe34ef68c5cdfa9a96825780757f9d9a9a7d",
-        "metric_name": "nav_usd",
-        "metric_unit": null,
-        "metric_value": "52.10",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "5c100f6a33e13484bec50569a0323c9827e4f4ff173e1c33b734748fb5db05e4",
-        "metric_name": "observed_at_utc",
-        "metric_unit": null,
-        "metric_value": "2026-03-02T00:00:00Z",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "8a0b0b8bfe6ccd88a3b031c867cae128b323c44b1148df80890991bc77532608",
-        "metric_name": "observed_at_utc",
-        "metric_unit": null,
-        "metric_value": "2026-03-01T00:00:00Z",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "9b0afca2139d54a97187267fbeb6fee4d3ccda998818bf3ddca3eed2cf21fdca",
-        "metric_name": "issuer",
-        "metric_unit": null,
-        "metric_value": "Acme ETF",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "c8682c517554c147f574d7d187f9b35202d322dbc62268f108d7367154d49bfc",
-        "metric_name": "shares_outstanding",
-        "metric_unit": null,
-        "metric_value": "1001000",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "dd6fa80ac14776b1d4979f56d7b1edcacac133adb6bfc06785d6094ed1e3b663",
-        "metric_name": "nav_usd",
-        "metric_unit": null,
-        "metric_value": "52.20",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "ea2f617441b3f7511e4b1448ef28fc7216fc8bed98fda46ca206fa0bab30305d",
-        "metric_name": "issuer",
-        "metric_unit": null,
-        "metric_value": "Acme ETF",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "fef7ca0bd3bf2faba77b307346894ffb100ed14eda17563d7d9bccc82b3b369d",
-        "metric_name": "shares_outstanding",
-        "metric_unit": null,
-        "metric_value": "1000000",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      }
-    ],
-    "rows_hash_sha256": "52f470756fa25fcc7b6ccafadc864be5e78d4a5c74c81ac477099ba261965721"
-  },
-  "run_2": {
-    "count": 8,
-    "entries": [
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "2915bd22b3172361244c12419164fe34ef68c5cdfa9a96825780757f9d9a9a7d",
-        "metric_name": "nav_usd",
-        "metric_unit": null,
-        "metric_value": "52.10",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "5c100f6a33e13484bec50569a0323c9827e4f4ff173e1c33b734748fb5db05e4",
-        "metric_name": "observed_at_utc",
-        "metric_unit": null,
-        "metric_value": "2026-03-02T00:00:00Z",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "8a0b0b8bfe6ccd88a3b031c867cae128b323c44b1148df80890991bc77532608",
-        "metric_name": "observed_at_utc",
-        "metric_unit": null,
-        "metric_value": "2026-03-01T00:00:00Z",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "9b0afca2139d54a97187267fbeb6fee4d3ccda998818bf3ddca3eed2cf21fdca",
-        "metric_name": "issuer",
-        "metric_unit": null,
-        "metric_value": "Acme ETF",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "c8682c517554c147f574d7d187f9b35202d322dbc62268f108d7367154d49bfc",
-        "metric_name": "shares_outstanding",
-        "metric_unit": null,
-        "metric_value": "1001000",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "2"
-        },
-        "metric_id": "dd6fa80ac14776b1d4979f56d7b1edcacac133adb6bfc06785d6094ed1e3b663",
-        "metric_name": "nav_usd",
-        "metric_unit": null,
-        "metric_value": "52.20",
-        "observed_at_utc": "2026-03-02T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "ea2f617441b3f7511e4b1448ef28fc7216fc8bed98fda46ca206fa0bab30305d",
-        "metric_name": "issuer",
-        "metric_unit": null,
-        "metric_value": "Acme ETF",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      },
-      {
-        "dimensions": {
-          "row_index": "1"
-        },
-        "metric_id": "fef7ca0bd3bf2faba77b307346894ffb100ed14eda17563d7d9bccc82b3b369d",
-        "metric_name": "shares_outstanding",
-        "metric_unit": null,
-        "metric_value": "1000000",
-        "observed_at_utc": "2026-03-01T00:00:00+00:00",
-        "source_id": "proof_etf_csv"
-      }
-    ],
-    "rows_hash_sha256": "52f470756fa25fcc7b6ccafadc864be5e78d4a5c74c81ac477099ba261965721"
+  "run_2_fingerprints": {
+    "proof_etf_csv": {
+      "legacy_entry_count": 8,
+      "row_count": 8,
+      "rows_hash_sha256": "52f470756fa25fcc7b6ccafadc864be5e78d4a5c74c81ac477099ba261965721"
+    }
   }
 }

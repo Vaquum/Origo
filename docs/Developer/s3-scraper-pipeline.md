@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-10
 - Slice reference: S3 (`S3-C4` to `S3-C12`, `S3-G1` to `S3-G4`)
 
 ## Purpose and scope
@@ -53,6 +53,7 @@
 ## Determinism and replay notes
 - Deterministic replay checks are recorded in `spec/slices/slice-3-generic-scraper/`.
 - Audit log is append-only hash-chained JSONL and sequence-validated before append.
+- Audit state sidecar (`<log>.state.json`) detects tamper/truncation across restarts.
 - Missing rights state fails closed.
 
 ## Environment and required config
@@ -61,6 +62,7 @@
 - `ORIGO_SCRAPER_FETCH_BACKOFF_INITIAL_SECONDS`
 - `ORIGO_SCRAPER_FETCH_BACKOFF_MULTIPLIER`
 - `ORIGO_SCRAPER_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 - `ORIGO_OBJECT_STORE_ENDPOINT_URL`
 - `ORIGO_OBJECT_STORE_ACCESS_KEY_ID`
 - `ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY`

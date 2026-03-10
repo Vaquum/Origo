@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-10
+- Closed Slice 0 guardrail `S0-G3` (immutable audit-log sink with 1-year retention policy):
+  - introduced shared immutable audit sink used by export, FRED alert, and scraper audit writers
+  - enforced append-only hash chain with state sidecar continuity checks (`<log>.state.json`) to fail loudly on tamper/truncation
+  - enforced retention env contract with `ORIGO_AUDIT_LOG_RETENTION_DAYS >= 365`
+  - added proof harness and artifact: `api/origo_api/s0_g3_immutable_audit_proof.py` -> `spec/slices/slice-0-bootstrap/guardrails-proof-s0-g3-immutable-audit.json`
+- Added repo-wide integrity tests for immutable audit sink behavior and retention guardrails.
+- Updated versions to `Origo API v0.1.6` and `control-plane v1.2.56`.
+
 ## 2026-03-08
 - Completed Slice 13 Bitcoin Core capability/proof/guardrails:
   - added Bitcoin Core stream datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`)

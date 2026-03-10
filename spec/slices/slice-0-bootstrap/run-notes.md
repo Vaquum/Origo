@@ -1,17 +1,36 @@
-# Slice 0 Bootstrap Run Notes
+# Slice 0 Run Notes
 
-- Date (UTC): 2026-03-04
-- Scope: Control-plane migration bootstrap, TDW -> Origo rename pass, Binance ingest smoke + replay proof
-- Fixture window: 2017-08-17 to 2017-08-19 (`BTCUSDT` spot daily files)
-- ClickHouse runtime: container `control-plane-clickhouse-1` with `CLICKHOUSE_PASSWORD=origo`
-- Config hardening applied during proof run: `docker-compose.yml` now requires `CLICKHOUSE_PASSWORD` explicitly (fail-fast).
-- Evidence artifact: `spec/slices/slice-0-bootstrap/baseline-fixture-2017-08-17_2017-08-19.json`
-- Determinism: two replay runs produced identical row counts and fingerprints (`deterministic_match=true`)
-- Known warnings: `ALTER DATABASE ... MODIFY SETTING` not supported for Atomic DB engine on current ClickHouse; warnings surfaced intentionally.
-- Open guardrails in Slice 0: TLS enforcement and immutable audit-log sink not yet implemented.
-- Guardrail update: `S0-G4` completed by adopting `uv.lock` in `control-plane`, validating `uv sync --frozen`, and wiring Docker builds to the lockfile.
-- Follow-up fix during `S0-G4`: runtime image no longer exposed `dagit`; resolved by making `dagster-webserver` a runtime dependency and updating compose command accordingly.
-- Guardrail update: `S0-G5` completed by scaffolding SQL migrations (`control-plane/migrations/sql`), adding strict `status`/`migrate` runner (`origo_control_plane.migrations`), and validating migration apply + ledger state on ClickHouse.
-- Guardrail update: `S0-G6` completed by introducing root `.env.example`, centralizing fail-loud env validation, and removing deployment-default ClickHouse fallbacks from runtime code paths.
-- `S0-G6` closeout question: "was any deployment-specific value hard-coded?" -> fixed in active runtime paths for ClickHouse host/port/user/password/database.
-- Confirmation: `spec/2-itemized-work-plan.md` checkboxes, `control-plane` version, `control-plane/CHANGELOG.md`, and `.env.example` were updated for `S0-G6`.
+## Run metadata
+- Date (UTC): original proof window on 2026-03-04; run-notes format normalized retrospectively on 2026-03-10.
+- Scope: Slice 0 (`S0-C1..S0-C6`, `S0-P1..S0-P3`, `S0-G1..S0-G10`) bootstrap migration and early guardrail setup.
+- Fixture window:
+  - ingest/replay days: `2017-08-17`, `2017-08-18`, `2017-08-19`
+  - symbol: `BTCUSDT`
+- Runtime environment:
+  - local Docker Compose stack with ClickHouse + Dagster runtime services
+  - control-plane migration and ingestion runners executed against local ClickHouse
+
+## System changes made as proof side effects
+- Imported and renamed control-plane code into monorepo runtime paths.
+- Executed fixed-window Binance ingest and replay determinism runs.
+- Added `uv.lock` workflow for deterministic dependency resolution in control-plane.
+- Added SQL migration scaffold and ledger-enforced migration runner.
+- Enforced root env contract (`.env.example`) and fail-loud runtime env checks.
+- Implemented shared immutable audit sink for export/FRED/scraper logs with append-only hash chain, continuity state sidecar, and retention policy contract.
+- Generated S0-G3 proof artifact:
+  - `spec/slices/slice-0-bootstrap/guardrails-proof-s0-g3-immutable-audit.json`
+- Generated/updated baseline fixture artifact:
+  - `spec/slices/slice-0-bootstrap/baseline-fixture-2017-08-17_2017-08-19.json`
+
+## Known warnings and disposition
+- ClickHouse emitted `ALTER DATABASE ... MODIFY SETTING` warnings for unsupported Atomic-engine behavior in the proof environment; warnings were surfaced and not silently ignored.
+- Historical note: this run-notes file was reformatted after-the-fact to the standardized section contract; no proof payload values were changed by the formatting pass.
+
+## Deferred guardrails
+- `S0-G2` TLS enforcement deferred (crossed over in planning; TLS to be handled at Cloudflare layer later).
+
+## Closeout confirmation
+- Work-plan checkboxes updated: yes (`spec/2-itemized-work-plan.md` updated for Slice 0 status decisions).
+- Version bumped: yes (Origo API `0.1.6`, control-plane `1.2.56`).
+- Changelog updated: yes (2026-03-10 entry for S0-G3 immutable audit sink closeout).
+- `.env.example` updated/reviewed: yes (`ORIGO_AUDIT_LOG_RETENTION_DAYS` added; audit sink env contract enforced fail-loud).

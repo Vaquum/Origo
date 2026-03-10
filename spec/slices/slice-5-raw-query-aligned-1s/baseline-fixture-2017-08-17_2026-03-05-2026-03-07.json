@@ -1,4 +1,5 @@
 {
+  "retrospective_note": "Normalized after-the-fact on 2026-03-10 to canonical fixture_window/run_fingerprint naming.",
   "column_key": {
     "csv_sha256": "Canonical row-hash proxy for day-level source payload in this proof environment.",
     "date": "UTC date bucket derived from timestamp column for fingerprinting.",
@@ -10,48 +11,15 @@
     "zip_sha256": "Source zip checksum by day when available; null when raw zip artifact is not available in this proof environment."
   },
   "deterministic_match": true,
-  "fixture_window_dates": {
-    "etf_forward_fill_aligned": [
-      "2026-03-05T12:00:00Z",
-      "2026-03-07T12:00:00Z"
-    ],
+  "fixture_window": {
     "spot_trades_aligned": [
       "2017-08-17T12:00:00Z",
       "2017-08-17T13:00:00Z"
+    ],
+    "etf_forward_fill_aligned": [
+      "2026-03-05T12:00:00Z",
+      "2026-03-07T12:00:00Z"
     ]
-  },
-  "generated_at_utc": "2026-03-06T17:59:46.245931+00:00",
-  "run_1_fingerprints": {
-    "etf_daily_metrics": {
-      "end_offset": "2026-03-05T12:00:00+00:00",
-      "row_count": 125,
-      "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28",
-      "start_offset": "2026-03-05T12:00:00+00:00",
-      "volume_sum": null
-    },
-    "spot_trades": {
-      "end_offset": "2017-08-17T12:54:47+00:00",
-      "row_count": 75,
-      "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
-      "start_offset": "2017-08-17T12:01:48+00:00",
-      "volume_sum": 23.032398
-    }
-  },
-  "run_2_fingerprints": {
-    "etf_daily_metrics": {
-      "end_offset": "2026-03-05T12:00:00+00:00",
-      "row_count": 125,
-      "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28",
-      "start_offset": "2026-03-05T12:00:00+00:00",
-      "volume_sum": null
-    },
-    "spot_trades": {
-      "end_offset": "2017-08-17T12:54:47+00:00",
-      "row_count": 75,
-      "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
-      "start_offset": "2017-08-17T12:01:48+00:00",
-      "volume_sum": 23.032398
-    }
   },
   "source_checksums": {
     "etf_daily_metrics": [
@@ -88,5 +56,37 @@
         "zip_sha256": null
       }
     ]
+  },
+  "run_1_fingerprints": {
+    "etf_daily_metrics": {
+      "end_offset": "2026-03-05T12:00:00+00:00",
+      "row_count": 125,
+      "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28",
+      "start_offset": "2026-03-05T12:00:00+00:00",
+      "volume_sum": null
+    },
+    "spot_trades": {
+      "end_offset": "2017-08-17T12:54:47+00:00",
+      "row_count": 75,
+      "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
+      "start_offset": "2017-08-17T12:01:48+00:00",
+      "volume_sum": 23.032398
+    }
+  },
+  "run_2_fingerprints": {
+    "etf_daily_metrics": {
+      "end_offset": "2026-03-05T12:00:00+00:00",
+      "row_count": 125,
+      "rows_hash_sha256": "031e251b009949e19fac47e4ec5b1734c0058f3b538189243ae1b98068165e28",
+      "start_offset": "2026-03-05T12:00:00+00:00",
+      "volume_sum": null
+    },
+    "spot_trades": {
+      "end_offset": "2017-08-17T12:54:47+00:00",
+      "row_count": 75,
+      "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
+      "start_offset": "2017-08-17T12:01:48+00:00",
+      "volume_sum": 23.032398
+    }
   }
 }

@@ -1,0 +1,62 @@
+{
+  "retrospective_note": "Retrospective artifact assembled on 2026-03-10 from preserved CI run evidence. Contains partial first-run-path evidence.",
+  "column_key": {
+    "api_image_digest_sha256": "Build output digest for API image in the referenced run attempt.",
+    "api_image_tag": "Commit-pinned API image tag used during deploy apply.",
+    "control_plane_image_digest_sha256": "Build output digest for control-plane image in the referenced run attempt.",
+    "control_plane_image_tag": "Commit-pinned control-plane image tag used during deploy apply.",
+    "run_attempt": "GitHub Actions run attempt number.",
+    "run_id": "GitHub Actions run id.",
+    "service_count": "Number of runtime services explicitly verified by deploy workflow image checks.",
+    "verified_services_hash_sha256": "SHA256 hash of sorted verified service-image pairs emitted by workflow logs."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "commit_sha": "16916cee0e49f66024657377d74f7cc883e820fd",
+    "end_utc": "2026-03-10T08:05:03Z",
+    "reference_runs": [
+      22816272808,
+      22818201845,
+      22892668220
+    ],
+    "replay_run_attempts": [
+      1,
+      2
+    ],
+    "start_utc": "2026-03-08T07:14:17Z"
+  },
+  "source_checksums": [
+    {
+      "api_image_digest_sha256": "sha256:2f4f5fc8a70ecb0255b406913c8634af15b33ad53cd483729e0b754221a4ce86",
+      "api_image_tag": "ghcr.io/vaquum/origo-api:16916cee0e49f66024657377d74f7cc883e820fd",
+      "control_plane_image_digest_sha256": "sha256:23f0355a25a72b38feef025f73b9b63827b4b895c0289fbc5a5c1c0b0b27a8f1",
+      "control_plane_image_tag": "ghcr.io/vaquum/origo-control-plane:16916cee0e49f66024657377d74f7cc883e820fd",
+      "run_attempt": 1,
+      "run_id": 22892668220
+    },
+    {
+      "api_image_digest_sha256": "sha256:3c09fc9dd51413634092f70bc0dadfe89f31d93c977261c44e0ab868903b0759",
+      "api_image_tag": "ghcr.io/vaquum/origo-api:16916cee0e49f66024657377d74f7cc883e820fd",
+      "control_plane_image_digest_sha256": "sha256:6197280b3e79d6ff5987d6a049baf748a45f1fb37209112c4b28440da1d67bf3",
+      "control_plane_image_tag": "ghcr.io/vaquum/origo-control-plane:16916cee0e49f66024657377d74f7cc883e820fd",
+      "run_attempt": 2,
+      "run_id": 22892668220
+    }
+  ],
+  "run_1_fingerprints": {
+    "api_image_tag": "ghcr.io/vaquum/origo-api:16916cee0e49f66024657377d74f7cc883e820fd",
+    "control_plane_image_tag": "ghcr.io/vaquum/origo-control-plane:16916cee0e49f66024657377d74f7cc883e820fd",
+    "run_attempt": 1,
+    "run_id": 22892668220,
+    "service_count": 3,
+    "verified_services_hash_sha256": "5cd2ffcbf1efb91ce4b23d26f0dd99d9fe5c1e7d3b113df6499f8b600ec2a296"
+  },
+  "run_2_fingerprints": {
+    "api_image_tag": "ghcr.io/vaquum/origo-api:16916cee0e49f66024657377d74f7cc883e820fd",
+    "control_plane_image_tag": "ghcr.io/vaquum/origo-control-plane:16916cee0e49f66024657377d74f7cc883e820fd",
+    "run_attempt": 2,
+    "run_id": 22892668220,
+    "service_count": 3,
+    "verified_services_hash_sha256": "5cd2ffcbf1efb91ce4b23d26f0dd99d9fe5c1e7d3b113df6499f8b600ec2a296"
+  }
+}

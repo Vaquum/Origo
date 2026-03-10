@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
+- Last updated: 2026-03-10
 - Slice reference: S11 (`S11-C3`, `S11-C4`, `S11-P2`, `S11-P3`, `S11-G1`, `S11-G3`)
 - Version reference: `Origo API v0.1.4`
 
@@ -64,6 +64,7 @@
 - Rights/audit:
   - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
   - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 - ClickHouse:
   - `CLICKHOUSE_HOST`
   - `CLICKHOUSE_HTTP_PORT`

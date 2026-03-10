@@ -1,15 +1,22 @@
 # Slice 13 Run Notes
 
 ## Run metadata
-- Date (UTC): 2026-03-08
+- Dates (UTC):
+  - 2026-03-08 (fixture proof tranche)
+  - 2026-03-10 (live-node proof tranche)
 - Scope: Slice 13 (`S13-C1..S13-C7`, `S13-P1..S13-P4`, `S13-G1..S13-G6`)
 - Fixture window:
   - `2024-04-20T00:00:00Z` to `2024-04-22T00:00:00Z`
   - partition days: `2024-04-20`, `2024-04-21`
+- Live-node window:
+  - `2009-01-03T00:00:00Z` to `2009-01-12T00:00:00Z`
+  - partition days: `2009-01-03` through `2009-01-11`
 - Runtime environment:
-  - Local repository runtime using `.ci-tests-venv`
+  - Local repository runtime using `.ci-tests-venv` and `.venv-local`
   - `PYTHONPATH=.:control-plane`
-  - deterministic fixture/proof generator: `scripts/s13_generate_proof_artifacts.py`
+  - fixture generator: `scripts/s13_generate_proof_artifacts.py`
+  - live-node generator: `scripts/s13_generate_live_node_proof_artifacts.py`
+  - SSH tunnel to remote node RPC for live-node run (`localhost:18332 -> server:127.0.0.1:8332`)
 
 ## System changes made as proof side effects
 - Added migration files:
@@ -34,27 +41,27 @@
   - `proof-s13-p3-determinism.json`
   - `proof-s13-p4-parity.json`
   - `baseline-fixture-2024-04-20_2024-04-21.json`
+- Generated Slice-13 live-node artifacts:
+  - `proof-s13-live-node-p1-acceptance.json`
+  - `proof-s13-live-node-p2-derived-native-aligned-acceptance.json`
+  - `proof-s13-live-node-p3-determinism.json`
+  - `proof-s13-live-node-p4-parity.json`
+  - `baseline-fixture-live-node-2009-01-03_2009-01-11.json`
+- Remote runtime validation completed after deploy:
+  - mainnet node contract satisfied (`chain=main`, `pruned=false`, `initialblockdownload=false`)
+  - S13 Dagster ingest jobs executed end-to-end on server (`headers`, `transactions`, `mempool`, `fees`, `subsidy`, `hashrate`, `supply`)
+  - `/v1/raw/query` and `/v1/raw/export` validated for S13 datasets in `native` and `aligned_1s` (derived scope for aligned)
 
 ## Known warnings and disposition
 - No unresolved quality-gate warnings.
 - Explicit note:
-  - acceptance/proof artifacts are still fixture-based, not live-node runtime captures.
-  - initial local live-node attempt failed due missing Bitcoin Core node contract vars:
-    - `ORIGO_BITCOIN_CORE_RPC_URL`
-    - `ORIGO_BITCOIN_CORE_RPC_USER`
-    - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
-    - `ORIGO_BITCOIN_CORE_NETWORK`
-    - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
-    - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
-    - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
-  - after setting the env contract and starting a local mainnet node, live-node proof failed loudly with:
-    - `RuntimeError: Bitcoin Core node is in initial block download mode; deterministic S13 ingest is blocked until sync completes`
-  - deployment server check showed `ORIGO_BITCOIN_CORE_*` was initially missing in `/opt/origo/deploy/.env`; deploy now fails loudly until these vars are explicitly provided.
-  - this is documented in `manifest.md` and should be followed by live-node proof when credentials are available.
+  - initial live-node attempts failed loudly as designed (`missing env` and then `initialblockdownload=true`).
+  - after node sync completion and env-contract alignment, live-node proofs were generated successfully.
+  - deploy remains fail-loud on missing `ORIGO_BITCOIN_CORE_*` in `/opt/origo/deploy/.env` (no fallback generation).
 
 ## Deferred guardrails
 - None deferred in Slice-13 code/doc/test scope.
-- Operational live-node replay proof against a running unpruned non-IBD mainnet node is pending chain sync completion.
+- Operational live-node replay proof is completed for the configured header window.
 
 ## Closeout confirmation
 - Work-plan checkboxes updated: yes (`spec/2-itemized-work-plan.md`, S13 capability/proof/guardrails marked complete).

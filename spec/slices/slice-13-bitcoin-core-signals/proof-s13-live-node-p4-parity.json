@@ -1,0 +1,153 @@
+{
+  "aligned_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 0.0,
+      "row_count": 101,
+      "rows_hash_sha256": "05275d1aecc5e844bea057fe7cf75f1960c5241a9ebc16fd5de08691a0f82c12"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 5050.0,
+      "row_count": 101,
+      "rows_hash_sha256": "a6399b16f897c036263909e7fd229b445c231a45396efc99b802964c42c582fb"
+    },
+    "bitcoin_circulating_supply": {
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 257550.0,
+      "row_count": 101,
+      "rows_hash_sha256": "88e9c9bb67ebfb16a1f8db2259ff6ef8ab0bd982958d67685cd182f7671caa40"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 1451236009.843554,
+      "row_count": 101,
+      "rows_hash_sha256": "4097e3a7023c2b319da44eb09a6b819939442da86e50d18fd92e2c4bfc73e45b"
+    }
+  },
+  "generated_at_utc": "2026-03-10T07:18:53.750Z",
+  "native_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "block_height_max": 100,
+      "block_height_min": 0,
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 57575000,
+      "row_count": 101,
+      "rows_hash_sha256": "73291d3a0386491c0c628bb53a4706253cf90c1424ffed42490aa5242a7aa528"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "block_height_max": 100,
+      "block_height_min": 0,
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 57575000,
+      "row_count": 101,
+      "rows_hash_sha256": "c3d64ced033cc1e2ad35e28882544d33599c49c70f38b586774588dfc7d6b7fe"
+    },
+    "bitcoin_circulating_supply": {
+      "block_height_max": 100,
+      "block_height_min": 0,
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 57575000,
+      "row_count": 101,
+      "rows_hash_sha256": "fa21b8d5301d0557575ecaaeb16d01e16d3070c187bf49d24634e4b3e4d32a46"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "block_height_max": 100,
+      "block_height_min": 0,
+      "first_event_offset_ms": 65705000,
+      "last_event_offset_ms": 57575000,
+      "row_count": 101,
+      "rows_hash_sha256": "a60a0d437d0b4f3ac2cf097afe10c97e812a09031b2f1714bb87e99e6c742251"
+    }
+  },
+  "node_capture": {
+    "captured_at_utc": "2026-03-10T07:18:53.640Z",
+    "headers_end_height": 100,
+    "headers_start_height": 0,
+    "mempool_snapshot_at_utc": "2026-03-10T07:18:53.341Z",
+    "node_tip_hash": "0000000000000000000087105863f637595eed2c632e5e354d580c5b6a3c6458",
+    "node_tip_height": 940077,
+    "source_chain": "main"
+  },
+  "parity_checks": {
+    "all_derived_datasets_have_equal_row_count": true,
+    "fee_totals_non_negative": true,
+    "hashrate_formula_consistent": true,
+    "subsidy_formula_consistent": true,
+    "supply_delta_equals_subsidy": true
+  },
+  "proof_scope": "Slice 13 P4 parity and consistency checks (live-node snapshot)",
+  "source_checksums": [
+    {
+      "csv_sha256": "d8aab2484ed217aa3d34973e45565c66276ff5474a28115b4c7fafd8a7e09d70",
+      "partition_day": "2009-01-03",
+      "rows_inserted": 4,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "d8aab2484ed217aa3d34973e45565c66276ff5474a28115b4c7fafd8a7e09d70"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-04",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-05",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-06",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-07",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-08",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "d1f1e385491c398c92ea1fc690311c24ac643ed5d31044a28062e542c75f2622",
+      "partition_day": "2009-01-09",
+      "rows_inserted": 56,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "d1f1e385491c398c92ea1fc690311c24ac643ed5d31044a28062e542c75f2622"
+    },
+    {
+      "csv_sha256": "737a4a31b90e6ec7a6de89a06fc8ceb9502b2b276cdea987c89811a7d7a08f14",
+      "partition_day": "2009-01-10",
+      "rows_inserted": 244,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "737a4a31b90e6ec7a6de89a06fc8ceb9502b2b276cdea987c89811a7d7a08f14"
+    },
+    {
+      "csv_sha256": "941bd147fcc826381b9094a20cd672bb5b9258f803ddacd4cfc399885000fe2d",
+      "partition_day": "2009-01-11",
+      "rows_inserted": 100,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "941bd147fcc826381b9094a20cd672bb5b9258f803ddacd4cfc399885000fe2d"
+    }
+  ],
+  "window": {
+    "end_utc": "2009-01-12T00:00:00.000Z",
+    "start_utc": "2009-01-03T00:00:00.000Z"
+  }
+}

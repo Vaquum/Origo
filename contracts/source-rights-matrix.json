@@ -3,6 +3,7 @@
   "sources": {
     "binance": {
       "rights_state": "Hosted Allowed",
+      "rights_provisional": false,
       "datasets": [
         "spot_trades",
         "spot_agg_trades",
@@ -12,6 +13,7 @@
     },
     "ishares": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -21,6 +23,7 @@
     },
     "invesco": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -30,6 +33,7 @@
     },
     "bitwise": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -39,6 +43,7 @@
     },
     "ark": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -48,6 +53,7 @@
     },
     "vaneck": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -57,6 +63,7 @@
     },
     "franklin": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -66,6 +73,7 @@
     },
     "grayscale": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -75,6 +83,7 @@
     },
     "fidelity": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -84,6 +93,7 @@
     },
     "coinshares": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -93,6 +103,7 @@
     },
     "hashdex": {
       "rights_state": "Ingest Only",
+      "rights_provisional": false,
       "datasets": [
         "etf_daily_metrics"
       ],
@@ -102,6 +113,7 @@
     },
     "fred": {
       "rights_state": "Hosted Allowed",
+      "rights_provisional": false,
       "datasets": [
         "fred_series_metrics"
       ],
@@ -109,6 +121,7 @@
     },
     "okx": {
       "rights_state": "Hosted Allowed",
+      "rights_provisional": false,
       "datasets": [
         "okx_spot_trades"
       ],
@@ -116,6 +129,7 @@
     },
     "bybit": {
       "rights_state": "Hosted Allowed",
+      "rights_provisional": false,
       "datasets": [
         "bybit_spot_trades"
       ],
@@ -123,6 +137,7 @@
     },
     "bitcoin_core": {
       "rights_state": "Hosted Allowed",
+      "rights_provisional": false,
       "datasets": [
         "bitcoin_block_headers",
         "bitcoin_block_transactions",

@@ -1,0 +1,48 @@
+{
+  "completeness_checkpoints": [
+    {
+      "checkpoint_id": "990d6c43-7a20-51fe-9588-3c6f4fea77a6",
+      "checkpoint_revision": 1,
+      "state": "ok",
+      "status": "recorded"
+    },
+    {
+      "checkpoint_id": "990d6c43-7a20-51fe-9588-3c6f4fea77a6",
+      "checkpoint_revision": 1,
+      "state": "ok",
+      "status": "duplicate"
+    },
+    {
+      "checkpoint_id": "6a3cd244-c280-5689-85fd-f0f00a8897d1",
+      "checkpoint_revision": 2,
+      "state": "gap_detected",
+      "status": "recorded"
+    }
+  ],
+  "cursor_advances": [
+    {
+      "cursor_revision": 1,
+      "event_id": "4af960d2-68a4-41ca-8b49-6fc7b1f0700f",
+      "offset": "1700000000001",
+      "status": "advanced"
+    },
+    {
+      "cursor_revision": 1,
+      "event_id": "4af960d2-68a4-41ca-8b49-6fc7b1f0700f",
+      "offset": "1700000000001",
+      "status": "duplicate"
+    },
+    {
+      "cursor_revision": 2,
+      "event_id": "866655f8-65c3-4889-b31e-ad8f9f82a98f",
+      "offset": "1700000000002",
+      "status": "advanced"
+    }
+  ],
+  "latest_checkpoint_revision": 2,
+  "latest_checkpoint_status": "gap_detected",
+  "latest_cursor_revision": 2,
+  "non_monotonic_error": "Cursor advance conflict: non-monotonic source offset transition from '1700000000002' to '1700000000001'",
+  "proof_database": "origo_s14_c3_proof",
+  "proof_scope": "Slice 14 S14-C3 ingest cursor/ledger and completeness checkpoints"
+}

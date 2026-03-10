@@ -1,0 +1,76 @@
+{
+  "deterministic_match": true,
+  "fixture_event_count": 4,
+  "fixture_payload_checksum_sha256": "ee16902db79dec44252355ff36980fc2b073a90842264a62f5545ba4182417a3",
+  "fixture_window_utc": {
+    "end": "2024-01-01T00:00:01.900Z",
+    "start": "2024-01-01T00:00:00.100Z"
+  },
+  "proof_scope": "Slice 14 S14-P1 canonical raw-payload hash determinism across repeated fixed-fixture ingests",
+  "run_1": {
+    "fingerprint_hash_sha256": "415347c40684efa09dd024431e148888d008917b665f0382fd2d8d5f00d9867e",
+    "fingerprint_rows": [
+      {
+        "event_id": "f9d6a361-80f8-56d5-9297-67fc1dd0ce81",
+        "payload_sha256_raw": "5a08058711d628e1bb84a29b4704e5032f73af32540fbaaf6ffee10b3974cc31",
+        "source_offset_or_equivalent": "1704067200100-101"
+      },
+      {
+        "event_id": "0ba92a1c-0671-5c30-acba-a40748b7b47b",
+        "payload_sha256_raw": "604e45943a0e9dc402fa15147beeef2c3c7af8c4ff79abb66341b7772bc966da",
+        "source_offset_or_equivalent": "1704067200800-102"
+      },
+      {
+        "event_id": "fcbb385c-9562-5949-8296-34909f074ae9",
+        "payload_sha256_raw": "8c119a3fddae331ede66f250e4e6500e5aeabab46af616928601f9e07ebb1f56",
+        "source_offset_or_equivalent": "1704067201200-103"
+      },
+      {
+        "event_id": "0407e91d-50dd-5fd5-befd-4039ee6193bb",
+        "payload_sha256_raw": "1eab7dae424c67fb7e7693f070a8af130af214ed1fda40b78dbee1f34be41750",
+        "source_offset_or_equivalent": "1704067201900-104"
+      }
+    ],
+    "proof_database": "origo_s14_p1_run_1",
+    "row_count": 4,
+    "statuses": [
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted"
+    ]
+  },
+  "run_2": {
+    "fingerprint_hash_sha256": "415347c40684efa09dd024431e148888d008917b665f0382fd2d8d5f00d9867e",
+    "fingerprint_rows": [
+      {
+        "event_id": "f9d6a361-80f8-56d5-9297-67fc1dd0ce81",
+        "payload_sha256_raw": "5a08058711d628e1bb84a29b4704e5032f73af32540fbaaf6ffee10b3974cc31",
+        "source_offset_or_equivalent": "1704067200100-101"
+      },
+      {
+        "event_id": "0ba92a1c-0671-5c30-acba-a40748b7b47b",
+        "payload_sha256_raw": "604e45943a0e9dc402fa15147beeef2c3c7af8c4ff79abb66341b7772bc966da",
+        "source_offset_or_equivalent": "1704067200800-102"
+      },
+      {
+        "event_id": "fcbb385c-9562-5949-8296-34909f074ae9",
+        "payload_sha256_raw": "8c119a3fddae331ede66f250e4e6500e5aeabab46af616928601f9e07ebb1f56",
+        "source_offset_or_equivalent": "1704067201200-103"
+      },
+      {
+        "event_id": "0407e91d-50dd-5fd5-befd-4039ee6193bb",
+        "payload_sha256_raw": "1eab7dae424c67fb7e7693f070a8af130af214ed1fda40b78dbee1f34be41750",
+        "source_offset_or_equivalent": "1704067201900-104"
+      }
+    ],
+    "proof_database": "origo_s14_p1_run_2",
+    "row_count": 4,
+    "statuses": [
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted"
+    ]
+  }
+}

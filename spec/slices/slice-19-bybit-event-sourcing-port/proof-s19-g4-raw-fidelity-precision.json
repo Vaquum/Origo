@@ -1,0 +1,10 @@
+{
+  "invalid_precision_guardrail_error": "Decimal value exceeds configured scale for field path=price source_id=bybit stream_id=bybit_spot_trades: value=42800.1234567891234567891 scale=15",
+  "proof_scope": "Slice 19 S19-G4 raw-fidelity and precision guardrail verification for Bybit canonical ingest path",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 2,
+    "rows_processed": 2
+  }
+}

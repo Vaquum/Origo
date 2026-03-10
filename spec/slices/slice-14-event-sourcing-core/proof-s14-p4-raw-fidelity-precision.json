@@ -1,0 +1,44 @@
+{
+  "fidelity_rows": [
+    {
+      "event_id": "b51b8c56-bc28-5fe0-b0a4-a3f1dcbd7a58",
+      "payload_json_sha256": "53ee539937defa599cdf9444523ba51795e54d772dc8ff3e18fc02bf4b7b34bd",
+      "payload_sha256_raw": "35adb9f75f1c6aa96990d498854ba1bb1b7d4d9775322369d231823995d9a778",
+      "price": "43123.12345678",
+      "qty": "0.01000000",
+      "quote_qty": "431.23123457",
+      "source_offset_or_equivalent": "2001",
+      "trade_id": 2001
+    },
+    {
+      "event_id": "75600a6b-bc48-5451-9807-ec1cc7298d7d",
+      "payload_json_sha256": "ed7f4e611bb125f1b5242486957982e6ed25eb61ff1ead3d5541e1043e939cdd",
+      "payload_sha256_raw": "256c1813fd760c674d03aace10445176dfd5dbb44a3a19ef92634da1ddcb259b",
+      "price": "43123.22345678",
+      "qty": "0.02000000",
+      "quote_qty": "862.46446914",
+      "source_offset_or_equivalent": "2002",
+      "trade_id": 2002
+    },
+    {
+      "event_id": "f015ef17-60a2-5163-a26f-9659e12b8afa",
+      "payload_json_sha256": "c191155cb125dd69635aa8626975738f77783eb9fd696c8ea740fc3789d17199",
+      "payload_sha256_raw": "4d9ada924d68a0c9d230cea57e51c8d7b51e249b8d396292664bb041921acd72",
+      "price": "43123.32345678",
+      "qty": "0.03000000",
+      "quote_qty": "1293.69970370",
+      "source_offset_or_equivalent": "2003",
+      "trade_id": 2003
+    }
+  ],
+  "fixture_event_count": 3,
+  "precision_round_trip_verified": true,
+  "proof_database": "origo_s14_p4_proof",
+  "proof_scope": "Slice 14 S14-P4 raw-fidelity and numeric-precision round-trip proof on fixed fixtures",
+  "raw_fidelity_verified": true,
+  "write_statuses": [
+    "inserted",
+    "inserted",
+    "inserted"
+  ]
+}

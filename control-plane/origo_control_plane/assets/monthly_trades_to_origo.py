@@ -1,4 +1,3 @@
-import csv
 import hashlib
 import sys
 import zipfile
@@ -11,6 +10,16 @@ from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, MonthlyPartitionsDefinition, asset
 
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.utils.binance_aligned_projector import (
+    project_binance_spot_trades_aligned,
+)
+from origo_control_plane.utils.binance_canonical_event_ingest import (
+    parse_binance_spot_trade_csv,
+    write_binance_spot_trades_to_canonical,
+)
+from origo_control_plane.utils.binance_native_projector import (
+    project_binance_spot_trades_native,
+)
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
 )
@@ -21,7 +30,6 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-CLICKHOUSE_TABLE = 'binance_trades'
 
 monthly_partitions = MonthlyPartitionsDefinition(start_date='2019-01-01')
 
@@ -29,37 +37,30 @@ monthly_partitions = MonthlyPartitionsDefinition(start_date='2019-01-01')
 @asset(
     partitions_def=monthly_partitions,
     group_name='binance_data',
-    description='Downloads, validates, extracts, and loads Binance BTC trade data into Clickhouse',
+    description='Downloads, validates, and writes Binance BTC monthly spot trades into canonical event log',
 )
 def insert_monthly_binance_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
-    # Get the selected partition key (YYYY-MM-DD format)
     partition_date_str = context.asset_partition_key_for_output()
-
-    # Extract just the year and month parts (first two elements)
     date_parts = partition_date_str.split('-')
     year, month = date_parts[0], date_parts[1]
-
-    # Generate the month string for the selected partition
-    month_str = f'BTCUSDT-trades-{year}-{month}.zip'
+    month_file_name = f'BTCUSDT-trades-{year}-{month}.zip'
     context.log.info(
-        f'Processing selected partition: {partition_date_str}, file: {month_str}'
+        f'Processing selected partition: {partition_date_str}, file: {month_file_name}'
     )
-
-    # Process only the selected month
-    return _process_month(context, month_str)
+    return _process_month(context, month_file_name, partition_date_str)
 
 
 def _process_month(
     context: AssetExecutionContext,
-    month_str: str,
+    month_file_name: str,
+    partition_date_str: str,
 ) -> dict[str, Any]:
     base_url = 'https://data.binance.vision/data/spot/monthly/trades/BTCUSDT/'
-    file_url = base_url + month_str
+    file_url = base_url + month_file_name
     checksum_url = file_url + '.CHECKSUM'
 
-    # Download and verify checksum
     context.log.info(f'Downloading checksum from {checksum_url}')
     checksum_response = requests.get(checksum_url, timeout=60)
     checksum_response.raise_for_status()
@@ -76,99 +77,35 @@ def _process_month(
     actual_checksum = hashlib.sha256(zip_data).hexdigest()
     context.log.info(f'Actual checksum: {actual_checksum}')
     if actual_checksum != expected_checksum:
-        context.log.error(
-            f'Checksum mismatch! Expected: {expected_checksum}, Actual: {actual_checksum}'
-        )
         raise ValueError(
             f'Checksum mismatch! Expected: {expected_checksum}, Actual: {actual_checksum}'
         )
 
-    csv_filename: str | None = None
-
-    # Extract CSV from zip file
     context.log.info('Extracting CSV from zip file')
     with zipfile.ZipFile(BytesIO(zip_data)) as zip_ref:
         csv_filename = zip_ref.namelist()[0]
         context.log.info(f'Found CSV file: {csv_filename}')
-
         with zip_ref.open(csv_filename) as csv_file:
             csv_content = csv_file.read()
 
-    # Calculate CSV checksum
     csv_checksum = hashlib.sha256(csv_content).hexdigest()
     context.log.info(f'CSV checksum: {csv_checksum}')
 
-    # Parse CSV data
-    context.log.info('Parsing CSV data')
-    data: list[tuple[int, float, float, float, int, bool, bool, datetime]] = []
+    events = parse_binance_spot_trade_csv(csv_content)
+    context.log.info(f'Parsed {len(events)} rows from CSV')
 
-    csv_text = csv_content.decode('utf-8')
-    reader = csv.reader(csv_text.splitlines())
-    _ = next(reader)
-
-    row_count = 0
-    for row in reader:
-        row_count += 1
-        trade_id = int(row[0])
-        price = float(row[1])
-        quantity = float(row[2])
-        quote_quantity = float(row[3])
-        timestamp = int(row[4])
-        is_buyer_maker = row[5].lower() == 'true'
-        is_best_match = row[6].lower() == 'true'
-
-        # Binance started with milliseconds, then switched to microseconds
-        if len(str(timestamp)) == 13:
-            dt = datetime.fromtimestamp(timestamp / 1000.0, tz=UTC)
-
-        elif len(str(timestamp)) == 16:
-            dt = datetime.fromtimestamp(timestamp / 1000000.0, tz=UTC)
-
-        else:
-            raise ValueError(f'Invalid timestamp length: {timestamp}')
-
-        data.append(
-            (
-                trade_id,
-                price,
-                quantity,
-                quote_quantity,
-                timestamp,
-                is_buyer_maker,
-                is_best_match,
-                dt,
-            )
-        )
-
-    context.log.info(f'Parsed {row_count} rows from CSV')
-
+    integrity_rows = [event.to_integrity_tuple() for event in events]
     integrity_report = run_exchange_integrity_suite_rows(
         dataset='spot_trades',
-        rows=data,
+        rows=integrity_rows,
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
 
-    # Clear large variables to help garbage collection
-    del csv_text, csv_content, zip_data
+    min_partition_id = min(event.partition_id for event in events)
+    max_partition_id = max(event.partition_id for event in events)
 
-    # Extract year and month from the filename for verification
-    # Format: BTCUSDT-trades-YYYY-MM.zip
-    year_month = month_str.split('-')[2:4]
-    if len(year_month) >= 2:
-        year, month = year_month[0], year_month[1].split('.')[0]
-    else:
-        # Handle old format: BTCUSDT-trades-YYYY-M.zip
-        filename_parts = month_str.split('-')
-        year = filename_parts[2]
-        month = filename_parts[3].split('.')[0]
-
-    month = month.zfill(2)
-    month_start = f'{year}-{month}-01'
-    context.log.info(f'Month start date: {month_start}')
-
-    # Connect to ClickHouse
     client: ClickhouseClient | None = None
     try:
         context.log.info(
@@ -184,105 +121,69 @@ def _process_month(
             send_receive_timeout=900,
         )
 
-        # Check if data already exists for this month
-        context.log.info(f'Checking for existing data for {month_start}')
-        check_result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE datetime >= toDate('{month_start}')
-            AND datetime < addMonths(toDate('{month_start}'), 1)
-        """)
-
-        existing_count = check_result[0][0]
-
-        # If data exists, delete it before inserting new data
-        if existing_count > 0:
-            context.log.info(
-                f'Found {existing_count} existing records for {month_start}. Deleting before reinserting.'
-            )
-            client.execute(f"""
-                ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE} 
-                DELETE WHERE datetime >= toDate('{month_start}')
-                AND datetime < addMonths(toDate('{month_start}'), 1)
-            """)
-            context.log.info(f'Deleted existing data for {month_start}')
-
-        # Insert data
-        context.log.info(f'Inserting {len(data)} rows into ClickHouse')
-        client.execute(
-            f"""
-            INSERT INTO {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            (
-                trade_id,
-                price,
-                quantity,
-                quote_quantity,
-                timestamp,
-                is_buyer_maker,
-                is_best_match,
-                datetime
-            ) SETTINGS async_insert=1, wait_for_async_insert=1 
-            VALUES
-            """,
-            data,
-            settings={'max_execution_time': 900},
+        write_summary = write_binance_spot_trades_to_canonical(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            events=events,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-        context.log.info('Data insertion completed')
+        context.log.info(f'Canonical write summary: {write_summary}')
 
-        # Verify insertion
-        context.log.info('Verifying data insertion')
-        result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE datetime >= toDate('{month_start}')
-            AND datetime <  addMonths(toDate('{month_start}'), 1)
-        """)
-        inserted_count = result[0][0]
-        context.log.info(f'Found {inserted_count} rows in ClickHouse after insertion')
-
-        # Get quick stats instead of expensive hash
-        context.log.info('Computing verification statistics')
-        stats_result = client.execute(f"""
-            SELECT 
-                min(trade_id),
-                max(trade_id),
-                avg(price),
-                count(distinct trade_id) % 1000 -- lightweight uniqueness check (modulo to keep it small)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE datetime >= toDate('{month_start}')
-            AND datetime <  addMonths(toDate('{month_start}'), 1)
-        """)
-
-        data_verification = {
-            'min_trade_id': stats_result[0][0],
-            'max_trade_id': stats_result[0][1],
-            'avg_price': stats_result[0][2],
-            'id_uniqueness_check': stats_result[0][3],
-        }
-        context.log.info(f'Data verification stats: {data_verification}')
-
-        if inserted_count != len(data):
-            context.log.error(
-                f'Row count mismatch! Expected: {len(data)}, Actual: {inserted_count}'
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(events):
+            raise RuntimeError(
+                'Canonical writer summary mismatch: '
+                f'rows_processed={rows_processed} expected={len(events)}'
             )
-            raise ValueError(
-                f'Row count mismatch! Expected: {len(data)}, Actual: {inserted_count}'
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'Canonical writer summary mismatch: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed}'
             )
+
+        projected_at_utc = datetime.now(UTC)
+        partition_ids = {event.partition_id for event in events}
+
+        native_projection_summary = project_binance_spot_trades_native(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
+        aligned_projection_summary = project_binance_spot_trades_aligned(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
 
         result_data: dict[str, Any] = {
-            'date': month_str,
-            'rows_inserted': inserted_count,
+            'date': month_file_name,
+            'partition_month': partition_date_str,
+            'rows_processed': rows_processed,
+            'rows_inserted': rows_inserted,
+            'rows_duplicate': rows_duplicate,
             'zip_checksum': actual_checksum,
             'csv_checksum': csv_checksum,
-            'data_verification': data_verification,
+            'source_partition_span': {
+                'first_day': min_partition_id,
+                'last_day': max_partition_id,
+            },
+            'integrity_report': integrity_report.to_dict(),
+            'native_projection_summary': native_projection_summary.to_dict(),
+            'aligned_projection_summary': aligned_projection_summary.to_dict(),
         }
 
-        context.log.info(f'Successfully processed {month_str}')
+        context.log.info(f'Successfully processed {month_file_name}')
         return result_data
-
     finally:
-        # Ensure client is disconnected and resources are cleaned up
-        if client:
+        if client is not None:
             try:
                 client.disconnect()
             except Exception as exc:

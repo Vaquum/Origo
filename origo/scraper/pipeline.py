@@ -274,7 +274,8 @@ def run_scraper_pipeline(
 
             try:
                 inserted_row_count = persist_normalized_records_to_clickhouse(
-                    records=normalized_records
+                    records=normalized_records,
+                    run_id=run_context.run_id,
                 )
             except Exception as exc:
                 raise as_scraper_error(

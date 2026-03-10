@@ -1,0 +1,228 @@
+{
+  "acceptance": {
+    "futures_trades": {
+      "aligned_1s": {
+        "row_count": 3,
+        "rows_hash_sha256": "7528e551989bad907e743e474a14448372916e947de0c519b5e44b95d7961d34",
+        "schema": [
+          {
+            "dtype": "String",
+            "name": "aligned_at_utc"
+          },
+          {
+            "dtype": "Float64",
+            "name": "open_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "high_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "low_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "close_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity_sum"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quote_volume_sum"
+          },
+          {
+            "dtype": "Int64",
+            "name": "trade_count"
+          }
+        ]
+      },
+      "native": {
+        "row_count": 4,
+        "rows_hash_sha256": "e1dd901439809082c703922e99d1138714ba8169d009f24c93a0105660123d6a",
+        "schema": [
+          {
+            "dtype": "UInt64",
+            "name": "futures_trade_id"
+          },
+          {
+            "dtype": "UInt64",
+            "name": "timestamp"
+          },
+          {
+            "dtype": "Float64",
+            "name": "price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity"
+          },
+          {
+            "dtype": "UInt8",
+            "name": "is_buyer_maker"
+          },
+          {
+            "dtype": "String",
+            "name": "datetime"
+          }
+        ]
+      }
+    },
+    "spot_agg_trades": {
+      "aligned_1s": {
+        "row_count": 3,
+        "rows_hash_sha256": "e67d967b093fd70f5fc50e879052f175f3b6ec19fa179553528f8914a759f47e",
+        "schema": [
+          {
+            "dtype": "String",
+            "name": "aligned_at_utc"
+          },
+          {
+            "dtype": "Float64",
+            "name": "open_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "high_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "low_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "close_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity_sum"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quote_volume_sum"
+          },
+          {
+            "dtype": "Int64",
+            "name": "trade_count"
+          }
+        ]
+      },
+      "native": {
+        "row_count": 4,
+        "rows_hash_sha256": "a216fba622a0a6fecc4e8711e587b8f46c02c6c741ecf8b012c4f238db237811",
+        "schema": [
+          {
+            "dtype": "UInt64",
+            "name": "agg_trade_id"
+          },
+          {
+            "dtype": "UInt64",
+            "name": "timestamp"
+          },
+          {
+            "dtype": "Float64",
+            "name": "price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity"
+          },
+          {
+            "dtype": "UInt8",
+            "name": "is_buyer_maker"
+          },
+          {
+            "dtype": "UInt64",
+            "name": "first_trade_id"
+          },
+          {
+            "dtype": "UInt64",
+            "name": "last_trade_id"
+          },
+          {
+            "dtype": "String",
+            "name": "datetime"
+          }
+        ]
+      }
+    },
+    "spot_trades": {
+      "aligned_1s": {
+        "row_count": 3,
+        "rows_hash_sha256": "e73c39c76bf546134fd05dd235f9267d7f218deef39b606acb42d4eea954d05d",
+        "schema": [
+          {
+            "dtype": "String",
+            "name": "aligned_at_utc"
+          },
+          {
+            "dtype": "Float64",
+            "name": "open_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "high_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "low_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "close_price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity_sum"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quote_volume_sum"
+          },
+          {
+            "dtype": "Int64",
+            "name": "trade_count"
+          }
+        ]
+      },
+      "native": {
+        "row_count": 5,
+        "rows_hash_sha256": "0eacca2e11f2fe8a0a7d0c91ceba7cd916f0a340e686d887dc49e60ca0aaaa62",
+        "schema": [
+          {
+            "dtype": "UInt64",
+            "name": "trade_id"
+          },
+          {
+            "dtype": "UInt64",
+            "name": "timestamp"
+          },
+          {
+            "dtype": "Float64",
+            "name": "price"
+          },
+          {
+            "dtype": "Float64",
+            "name": "quantity"
+          },
+          {
+            "dtype": "UInt8",
+            "name": "is_buyer_maker"
+          },
+          {
+            "dtype": "String",
+            "name": "datetime"
+          }
+        ]
+      }
+    }
+  },
+  "generated_at_utc": "2026-03-10T17:16:50.845853+00:00",
+  "proof_scope": "Slice 15 S15-P1 fixed-window acceptance for native + aligned_1s",
+  "window": {
+    "end_utc": "2024-01-04T00:00:03Z",
+    "start_utc": "2024-01-04T00:00:00Z"
+  }
+}

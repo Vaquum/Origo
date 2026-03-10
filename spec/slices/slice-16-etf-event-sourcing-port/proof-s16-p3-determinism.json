@@ -1,0 +1,12 @@
+{
+  "deterministic_match": true,
+  "proof_scope": "Slice 16 S16-P3 replay determinism for ETF native and aligned_1s event-driven serving projections",
+  "run_1": {
+    "aligned_rows_hash_sha256": "89d299600d54f5581506955bfebfe987f446ab671994ecbb62968ab6a7d27aa4",
+    "native_rows_hash_sha256": "e29abd5e303215280aa2ea8780702125db05aaf5eb818763788c4ca354f90420"
+  },
+  "run_2": {
+    "aligned_rows_hash_sha256": "89d299600d54f5581506955bfebfe987f446ab671994ecbb62968ab6a7d27aa4",
+    "native_rows_hash_sha256": "e29abd5e303215280aa2ea8780702125db05aaf5eb818763788c4ca354f90420"
+  }
+}

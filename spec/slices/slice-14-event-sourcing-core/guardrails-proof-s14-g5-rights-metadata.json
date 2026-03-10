@@ -1,0 +1,10 @@
+{
+  "export_missing_rights_error": "Unsupported or missing export rights_provisional tag: None",
+  "export_rights_metadata_example": {
+    "rights_provisional": false,
+    "rights_state": "Hosted Allowed"
+  },
+  "proof_scope": "Slice 14 S14-G5 provisional-rights metadata emission guardrail for query/export responses",
+  "query_missing_rights_error": "2 validation errors for RawQueryResponse\nrights_state\n  Field required [type=missing, input_value={'mode': 'native', 'sourc...-01-01T00:00:00.000Z'}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing\nrights_provisional\n  Field required [type=missing, input_value={'mode': 'native', 'sourc...-01-01T00:00:00.000Z'}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing",
+  "rights_metadata_guardrail_verified": true
+}

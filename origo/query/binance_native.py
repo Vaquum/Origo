@@ -21,7 +21,7 @@ class _BinanceSourceSpec:
 
 _BINANCE_SOURCE_SPECS: dict[BinanceDataset, _BinanceSourceSpec] = {
     'spot_trades': _BinanceSourceSpec(
-        table_name='binance_trades',
+        table_name='canonical_binance_spot_trades_native_v1',
         id_column='trade_id',
         allowed_columns=(
             'trade_id',
@@ -42,7 +42,7 @@ _BINANCE_SOURCE_SPECS: dict[BinanceDataset, _BinanceSourceSpec] = {
         ),
     ),
     'spot_agg_trades': _BinanceSourceSpec(
-        table_name='binance_agg_trades',
+        table_name='canonical_binance_spot_agg_trades_native_v1',
         id_column='agg_trade_id',
         allowed_columns=(
             'agg_trade_id',
@@ -65,7 +65,7 @@ _BINANCE_SOURCE_SPECS: dict[BinanceDataset, _BinanceSourceSpec] = {
         ),
     ),
     'futures_trades': _BinanceSourceSpec(
-        table_name='binance_futures_trades',
+        table_name='canonical_binance_futures_trades_native_v1',
         id_column='futures_trade_id',
         allowed_columns=(
             'futures_trade_id',

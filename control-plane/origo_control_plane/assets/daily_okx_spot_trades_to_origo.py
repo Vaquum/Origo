@@ -1,5 +1,4 @@
 import base64
-import csv
 import hashlib
 import json
 import sys
@@ -16,6 +15,16 @@ from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
 )
+from origo_control_plane.utils.okx_aligned_projector import (
+    project_okx_spot_trades_aligned,
+)
+from origo_control_plane.utils.okx_canonical_event_ingest import (
+    parse_okx_spot_trade_csv,
+    write_okx_spot_trades_to_canonical,
+)
+from origo_control_plane.utils.okx_native_projector import (
+    project_okx_spot_trades_native,
+)
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
 CLICKHOUSE_HOST = _CLICKHOUSE.host
@@ -23,7 +32,6 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-CLICKHOUSE_TABLE = 'okx_spot_trades'
 
 _OKX_TRADE_DATA_DOWNLOAD_LINK_ENDPOINT = (
     'https://www.okx.com/priapi/v5/broker/public/trade-data/download-link'
@@ -32,14 +40,6 @@ _OKX_SPOT_INSTRUMENT_ID = 'BTC-USDT'
 _OKX_TRADE_HISTORY_MODULE = '1'
 _OKX_SOURCE_DAY_UTC_OFFSET_HOURS = 8
 _REQUEST_TIMEOUT_SECONDS = 120
-_EXPECTED_CSV_HEADER = (
-    'instrument_name',
-    'trade_id',
-    'side',
-    'price',
-    'size',
-    'created_time',
-)
 
 daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
 
@@ -104,7 +104,6 @@ def _resolve_okx_daily_file_url(*, date_str: str) -> tuple[str, str]:
         raise RuntimeError(f'OKX download-link API returned non-zero code: {code}')
 
     raw_data = _expect_dict(body.get('data'), 'OKX download-link response.data')
-
     raw_details = _expect_list(raw_data.get('details'), 'OKX download-link response.details')
     if len(raw_details) != 1:
         raise RuntimeError(
@@ -112,7 +111,6 @@ def _resolve_okx_daily_file_url(*, date_str: str) -> tuple[str, str]:
             f'for date={date_str}, got={raw_details}'
         )
     detail = _expect_dict(raw_details[0], 'OKX download-link response.details[0]')
-
     raw_group_details = _expect_list(
         detail.get('groupDetails'),
         'OKX download-link response.details[0].groupDetails',
@@ -142,7 +140,6 @@ def _resolve_okx_daily_file_url(*, date_str: str) -> tuple[str, str]:
             'OKX download-link filename mismatch for requested day: '
             f'expected={expected_filename} got={filename}'
         )
-
     return filename, url
 
 
@@ -156,83 +153,16 @@ def _verify_source_content_md5_or_raise(*, payload: bytes, content_md5_b64: str)
         )
 
 
-def _parse_okx_csv_rows_or_raise(
-    *, csv_payload: bytes
-) -> list[tuple[str, int, str, float, float, float, int, datetime]]:
-    text = csv_payload.decode('utf-8')
-    reader = csv.reader(text.splitlines())
-
-    header = next(reader, None)
-    if header is None:
-        raise RuntimeError('OKX CSV payload is empty')
-    if tuple(header) != _EXPECTED_CSV_HEADER:
-        raise RuntimeError(
-            'OKX CSV header mismatch: '
-            f'expected={_EXPECTED_CSV_HEADER} got={tuple(header)}'
-        )
-
-    rows: list[tuple[str, int, str, float, float, float, int, datetime]] = []
-    for row_index, row in enumerate(reader, start=2):
-        if len(row) != 6:
-            raise RuntimeError(
-                f'OKX CSV row has unexpected column count at line={row_index}: '
-                f'expected=6 got={len(row)}'
-            )
-
-        instrument_name = row[0]
-        if instrument_name != _OKX_SPOT_INSTRUMENT_ID:
-            raise RuntimeError(
-                f'OKX CSV instrument_name mismatch at line={row_index}: '
-                f'expected={_OKX_SPOT_INSTRUMENT_ID} got={instrument_name}'
-            )
-
-        trade_id = int(row[1])
-        side = row[2]
-        if side not in {'buy', 'sell'}:
-            raise RuntimeError(
-                f'OKX CSV side must be buy/sell at line={row_index}, got={side}'
-            )
-
-        price = float(row[3])
-        size = float(row[4])
-        timestamp = int(row[5])
-        if len(str(timestamp)) != 13:
-            raise RuntimeError(
-                f'OKX CSV timestamp must be 13-digit ms at line={row_index}, '
-                f'got={timestamp}'
-            )
-
-        dt = datetime.fromtimestamp(timestamp / 1000.0, tz=UTC)
-        quote_quantity = price * size
-
-        rows.append(
-            (
-                instrument_name,
-                trade_id,
-                side,
-                price,
-                size,
-                quote_quantity,
-                timestamp,
-                dt,
-            )
-        )
-
-    return rows
-
-
 @asset(
     partitions_def=daily_partitions,
     group_name='okx_data',
-    description='Downloads, validates, extracts, and loads OKX BTC spot trades daily data into ClickHouse',
+    description='Downloads, validates, and writes OKX BTC spot trades into canonical event log',
 )
 def insert_daily_okx_spot_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
-    day_start_ts_utc_ms, day_end_ts_utc_ms = _okx_source_day_window_utc_ms(date_str)
-
     filename, file_url = _resolve_okx_daily_file_url(date_str=date_str)
     context.log.info(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'
@@ -246,12 +176,10 @@ def insert_daily_okx_spot_trades_to_origo(
     source_content_md5 = file_response.headers.get('Content-MD5')
     if source_content_md5 is None or source_content_md5.strip() == '':
         raise RuntimeError('OKX source response is missing Content-MD5 header')
-
     _verify_source_content_md5_or_raise(
         payload=zip_data,
         content_md5_b64=source_content_md5,
     )
-
     zip_sha256 = hashlib.sha256(zip_data).hexdigest()
 
     with zipfile.ZipFile(BytesIO(zip_data)) as zip_ref:
@@ -264,20 +192,16 @@ def insert_daily_okx_spot_trades_to_origo(
         csv_name = csv_names[0]
         with zip_ref.open(csv_name) as csv_file:
             csv_payload = csv_file.read()
-
     csv_sha256 = hashlib.sha256(csv_payload).hexdigest()
-    parsed_rows = _parse_okx_csv_rows_or_raise(csv_payload=csv_payload)
 
+    events = parse_okx_spot_trade_csv(csv_payload)
     integrity_report = run_exchange_integrity_suite_rows(
         dataset='okx_spot_trades',
-        rows=parsed_rows,
+        rows=[event.to_integrity_tuple() for event in events],
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
-
-    del csv_payload
-    del zip_data
 
     client: ClickhouseClient | None = None
     try:
@@ -294,89 +218,67 @@ def insert_daily_okx_spot_trades_to_origo(
             send_receive_timeout=900,
         )
 
-        check_result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-        existing_count = check_result[0][0]
-        if existing_count > 0:
-            context.log.info(
-                f'Found {existing_count} existing OKX records for {date_str}. Deleting before reinserting.'
-            )
-            client.execute(f"""
-                ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-                DELETE WHERE timestamp >= {day_start_ts_utc_ms}
-                       AND timestamp < {day_end_ts_utc_ms}
-            """)
-
-        client.execute(
-            f"""
-            INSERT INTO {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            (
-                instrument_name,
-                trade_id,
-                side,
-                price,
-                size,
-                quote_quantity,
-                timestamp,
-                datetime
-            ) SETTINGS async_insert=1, wait_for_async_insert=1
-            VALUES
-            """,
-            parsed_rows,
-            settings={'max_execution_time': 900},
+        write_summary = write_okx_spot_trades_to_canonical(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            events=events,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-
-        verify_result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-        inserted_count = verify_result[0][0]
-
-        stats_result = client.execute(f"""
-            SELECT
-                min(trade_id),
-                max(trade_id),
-                avg(price),
-                count(distinct trade_id) % 1000
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-
-        if inserted_count != len(parsed_rows):
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(events):
             raise RuntimeError(
-                'OKX row count mismatch after insertion: '
-                f'expected={len(parsed_rows)} actual={inserted_count}'
+                'Canonical writer summary mismatch: '
+                f'rows_processed={rows_processed} expected={len(events)}'
+            )
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'Canonical writer summary mismatch: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed}'
             )
 
-        data_verification = {
-            'min_trade_id': stats_result[0][0],
-            'max_trade_id': stats_result[0][1],
-            'avg_price': stats_result[0][2],
-            'id_uniqueness_check': stats_result[0][3],
-        }
+        projected_at_utc = datetime.now(UTC)
+        partition_ids = {event.partition_id for event in events}
+        native_projection_summary = project_okx_spot_trades_native(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
+        aligned_projection_summary = project_okx_spot_trades_aligned(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
 
         result_data: dict[str, Any] = {
             'date': date_str,
             'source_filename': filename,
             'source_url': file_url,
-            'rows_inserted': inserted_count,
+            'rows_processed': rows_processed,
+            'rows_inserted': rows_inserted,
+            'rows_duplicate': rows_duplicate,
+            'source_partition_span': {
+                'first_day': min(partition_ids),
+                'last_day': max(partition_ids),
+            },
             'zip_sha256': zip_sha256,
             'csv_sha256': csv_sha256,
             'source_content_md5': source_content_md5,
-            'data_verification': data_verification,
+            'integrity_report': integrity_report.to_dict(),
+            'native_projection_summary': native_projection_summary.to_dict(),
+            'aligned_projection_summary': aligned_projection_summary.to_dict(),
         }
-
         context.log.info('Successfully processed OKX daily file: ' + json.dumps(result_data))
         return result_data
     finally:
-        if client:
+        if client is not None:
             try:
                 client.disconnect()
             except Exception as exc:

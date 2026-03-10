@@ -1,0 +1,115 @@
+{
+  "datasets": {
+    "futures_trades": {
+      "fidelity_rows": [
+        {
+          "event_id": "54cabb44-9285-52b4-a971-fc6cf3ef520a",
+          "payload_json_sha256": "dfe70d960c0407beb609fbcb506e2130400a8eb82af099555350d353252a7d4b",
+          "payload_sha256_raw": "38e5364524635d06848159d3e7d0c7d1efb8678c18f7225f1f006dec1725f5cd",
+          "precision_fields": {
+            "price": "42310.10000000",
+            "qty": "0.21000000",
+            "quote_qty": "8885.12100000",
+            "trade_id": 11301
+          },
+          "source_offset_or_equivalent": "11301"
+        },
+        {
+          "event_id": "e9f57193-a951-5f06-87a5-380631b075b4",
+          "payload_json_sha256": "ae5187284c13bd284df2ec2cabbe99a3c103f7f781ade9033b55a5477db23e9b",
+          "payload_sha256_raw": "090b0f151740932670eae57cdfc0c0f1bb6c3babe39220553cdb8320595e6632",
+          "precision_fields": {
+            "price": "42310.20000000",
+            "qty": "0.18000000",
+            "quote_qty": "7615.83600000",
+            "trade_id": 11302
+          },
+          "source_offset_or_equivalent": "11302"
+        }
+      ],
+      "fixture_event_count": 2,
+      "precision_round_trip_verified": true,
+      "raw_fidelity_verified": true,
+      "write_statuses": [
+        "inserted",
+        "inserted"
+      ]
+    },
+    "spot_agg_trades": {
+      "fidelity_rows": [
+        {
+          "event_id": "8d59a648-c091-5647-932a-77c5dd6e247f",
+          "payload_json_sha256": "3b5acc14c1c7a38ee3aac338c465ea0f1fd67de3a8144b58bb61f4bbaee70d68",
+          "payload_sha256_raw": "ba8748a3b3dc4d599afaed4a12c4afdb3d44432ffbf02afea74506cf9bb33398",
+          "precision_fields": {
+            "agg_trade_id": 11201,
+            "first_trade_id": 11200,
+            "last_trade_id": 11201,
+            "price": "42300.05000000",
+            "qty": "0.10000000"
+          },
+          "source_offset_or_equivalent": "11201"
+        },
+        {
+          "event_id": "f1880781-d8e9-5fb9-b4fd-4e629f14cb5c",
+          "payload_json_sha256": "c7fa7bf7180d5e35150e961f9bda5eaf0cd19b6266adc125ebeb45f7dd711d07",
+          "payload_sha256_raw": "6dd79f140c86b8733092e1e4a65ef5a3367c11250abc3cec886c664ac7857ce3",
+          "precision_fields": {
+            "agg_trade_id": 11202,
+            "first_trade_id": 11202,
+            "last_trade_id": 11205,
+            "price": "42300.25000000",
+            "qty": "0.20000000"
+          },
+          "source_offset_or_equivalent": "11202"
+        }
+      ],
+      "fixture_event_count": 2,
+      "precision_round_trip_verified": true,
+      "raw_fidelity_verified": true,
+      "write_statuses": [
+        "inserted",
+        "inserted"
+      ]
+    },
+    "spot_trades": {
+      "fidelity_rows": [
+        {
+          "event_id": "36898a20-fc69-5f71-ac10-5f2a8643775d",
+          "payload_json_sha256": "1a05b53f4b7e8ce8f3434e775fa3c3c353a084293d750321fc2f854242c14900",
+          "payload_sha256_raw": "92d75abfe6a4bb0642cfb85beb7100efce16572a518eb2efb28ba2c012fefc6d",
+          "precision_fields": {
+            "price": "42300.12345678",
+            "qty": "0.01000000",
+            "quote_qty": "423.00123457",
+            "trade_id": 11101
+          },
+          "source_offset_or_equivalent": "11101"
+        },
+        {
+          "event_id": "ff11b361-0bc2-59a0-8d1a-55ef5fa511a9",
+          "payload_json_sha256": "4dcef2dbdc1097f0e186d2ebfaff0e7404180ece2b036f1a563d13e19b308104",
+          "payload_sha256_raw": "5ccae8f6766848d3fa594cb5b25778a3d2b09435d32d0e14bd9d4fd0f00b3454",
+          "precision_fields": {
+            "price": "42300.22345678",
+            "qty": "0.02000000",
+            "quote_qty": "846.00446914",
+            "trade_id": 11102
+          },
+          "source_offset_or_equivalent": "11102"
+        }
+      ],
+      "fixture_event_count": 2,
+      "precision_round_trip_verified": true,
+      "raw_fidelity_verified": true,
+      "write_statuses": [
+        "inserted",
+        "inserted"
+      ]
+    }
+  },
+  "precision_round_trip_verified": true,
+  "proof_database": "origo_s15_p6_proof",
+  "proof_scope": "Slice 15 S15-P6 raw-fidelity and numeric-precision proof for Binance spot_trades, spot_agg_trades, futures_trades",
+  "raw_fidelity_verified": true
+}

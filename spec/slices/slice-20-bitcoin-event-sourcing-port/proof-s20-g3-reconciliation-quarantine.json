@@ -1,0 +1,104 @@
+{
+  "guardrail_verified": true,
+  "proof_scope": "Slice 20 S20-G3 reconciliation/quarantine guardrail verification for Bitcoin canonical ingest (fail-loud gap detection and quarantine block)",
+  "stream_results": {
+    "bitcoin_block_fee_totals": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_block_fee_totals partition=2024-04-20 missing_offsets=['840001']",
+      "missing_offsets": [
+        "840001"
+      ],
+      "observed_offsets": [
+        "840000",
+        "840002"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_block_headers": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_block_headers partition=2024-04-20 missing_offsets=['840001']",
+      "missing_offsets": [
+        "840001"
+      ],
+      "observed_offsets": [
+        "840000",
+        "840002"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_block_subsidy_schedule partition=2024-04-20 missing_offsets=['840001']",
+      "missing_offsets": [
+        "840001"
+      ],
+      "observed_offsets": [
+        "840000",
+        "840002"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_block_transactions": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_block_transactions partition=2024-04-20 missing_offsets=['840000:1:*']",
+      "missing_offsets": [
+        "840000:1:*"
+      ],
+      "observed_offsets": [
+        "840000:0:000000000000000000000000000000000000000000000000000000000000012c",
+        "840000:2:0000000000000000000000000000000000000000000000000000000000000131"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_circulating_supply": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_circulating_supply partition=2024-04-20 missing_offsets=['840001']",
+      "missing_offsets": [
+        "840001"
+      ],
+      "observed_offsets": [
+        "840000",
+        "840002"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_mempool_state": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_mempool_state partition=2024-04-20 missing_offsets=['1713571202000:0000000000000000000000000000000000000000000000000000000000000191']",
+      "missing_offsets": [
+        "1713571202000:0000000000000000000000000000000000000000000000000000000000000191"
+      ],
+      "observed_offsets": [
+        "1713571202000:0000000000000000000000000000000000000000000000000000000000000190",
+        "1713571202000:0000000000000000000000000000000000000000000000000000000000000192"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "fail_loud_error": "No-miss reconciliation failed: source=bitcoin_core stream=bitcoin_network_hashrate_estimate partition=2024-04-20 missing_offsets=['840001']",
+      "missing_offsets": [
+        "840001"
+      ],
+      "observed_offsets": [
+        "840000",
+        "840002"
+      ],
+      "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+      "quarantine_reason": "gap_detected_from_completeness_reconciliation"
+    }
+  }
+}

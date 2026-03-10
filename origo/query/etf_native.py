@@ -23,7 +23,7 @@ class _ETFSourceSpec:
 
 _ETF_SOURCE_SPECS: dict[ETFDataset, _ETFSourceSpec] = {
     'etf_daily_metrics': _ETFSourceSpec(
-        table_name='etf_daily_metrics_long',
+        table_name='canonical_etf_daily_metrics_native_v1',
         id_column='metric_id',
         datetime_column='observed_at_utc',
         random_seed_column='observed_at_utc',

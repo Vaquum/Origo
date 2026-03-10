@@ -1,0 +1,34 @@
+{
+  "fidelity_rows": [
+    {
+      "metric_id": "etf_fidelity_fbtc_daily:2026-03-09:holdings_row_count",
+      "payload_json_sha256": "46e956158398d85de32953453f6ddbd0894c8029940c27bb87a7514d668114b8",
+      "payload_sha256_raw": "46e956158398d85de32953453f6ddbd0894c8029940c27bb87a7514d668114b8",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    },
+    {
+      "metric_id": "etf_ishares_ibit_daily:2026-03-09:as_of_date",
+      "payload_json_sha256": "1bc28deab16157645bf834a6d706f1b335d0f2a6513708097b047bdd76e04274",
+      "payload_sha256_raw": "1bc28deab16157645bf834a6d706f1b335d0f2a6513708097b047bdd76e04274",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    },
+    {
+      "metric_id": "etf_ishares_ibit_daily:2026-03-09:btc_units",
+      "payload_json_sha256": "a29d3477d5f9b10a9687fd76a22788abe23475aaf1f9bea9fa2353aa046d7b41",
+      "payload_sha256_raw": "a29d3477d5f9b10a9687fd76a22788abe23475aaf1f9bea9fa2353aa046d7b41",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    }
+  ],
+  "invalid_precision_guardrail_error": "Numeric field path=unexpected_numeric is missing precision rule for source_id=etf stream_id=etf_daily_metrics",
+  "proof_database": "origo_s16_p6_proof",
+  "proof_scope": "Slice 16 S16-P6 raw fidelity and precision proof for ETF canonical ingest",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 3,
+    "rows_processed": 3
+  }
+}

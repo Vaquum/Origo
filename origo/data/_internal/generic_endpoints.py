@@ -446,10 +446,10 @@ def query_klines_data(
     )
 
     if futures:
-        db_table = f'FROM {settings.database}.binance_futures_trades '
+        db_table = f'FROM {settings.database}.canonical_binance_futures_trades_native_v1 '
         id_col = 'futures_trade_id'
     else:
-        db_table = f'FROM {settings.database}.binance_trades '
+        db_table = f'FROM {settings.database}.canonical_binance_spot_trades_native_v1 '
         id_col = 'trade_id'
 
     query = (

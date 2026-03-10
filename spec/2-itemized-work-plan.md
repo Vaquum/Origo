@@ -330,184 +330,202 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 14: Event-Sourcing Core + Persistent Aligned Framework
 
 ### Capability
-- [ ] `S14-C1` Add canonical event envelope schema and single global append-only event log tables.
-- [ ] `S14-C2` Implement deterministic canonical event writer (typed envelope + `payload_raw` + `payload_sha256_raw` + derivative `payload_json`) with idempotency keys.
-- [ ] `S14-C3` Implement ingest cursor/ledger and source-completeness reconciliation tables.
-- [ ] `S14-C4` Implement projector runtime and ClickHouse-backed checkpoint/watermark tables.
-- [ ] `S14-C5` Implement persistent aligned aggregate framework (tiered policy).
-- [ ] `S14-C6` Upgrade Raw API contract target for multi-source queries plus explicit `view_id` / `view_version`.
-- [ ] `S14-C7` Add provisional rights metadata contract fields to query/export status responses.
-- [ ] `S14-C8` Add source precision mapping registry and canonical numeric typing rules (no float canonical storage).
-- [ ] `S14-C9` Execute minimal pilot cutover path on Binance spot trades through canonical events.
+- [x] `S14-C1` Add canonical event envelope schema and single global append-only event log tables.
+- [x] `S14-C2` Implement deterministic canonical event writer (typed envelope + `payload_raw` + `payload_sha256_raw` + derivative `payload_json`) with idempotency keys.
+- [x] `S14-C3` Implement ingest cursor/ledger and source-completeness reconciliation tables.
+- [x] `S14-C4` Implement projector runtime and ClickHouse-backed checkpoint/watermark tables.
+- [x] `S14-C5` Implement persistent aligned aggregate framework (tiered policy).
+- [x] `S14-C6` Upgrade Raw API contract target for multi-source queries plus explicit `view_id` / `view_version`.
+- [x] `S14-C7` Add provisional rights metadata contract fields to query/export status responses.
+- [x] `S14-C8` Add source precision mapping registry and canonical numeric typing rules (no float canonical storage).
+- [x] `S14-C9` Execute minimal pilot cutover path on Binance spot trades through canonical events.
 
 ### Proof
-- [ ] `S14-P1` Validate canonical raw-payload hash determinism across repeated fixed-fixture ingests.
-- [ ] `S14-P2` Validate exactly-once ingest under duplicate replay and crash/restart scenarios.
-- [ ] `S14-P3` Validate no-miss detection with injected gaps and reconciliation checks.
-- [ ] `S14-P4` Validate raw-fidelity and numeric-precision round-trip proofs on fixed fixtures.
-- [ ] `S14-P5` Validate projector replay determinism with checkpoint resume behavior.
-- [ ] `S14-P6` Validate pilot cutover acceptance and parity (`native` + `aligned_1s`) on fixed windows.
+- [x] `S14-P1` Validate canonical raw-payload hash determinism across repeated fixed-fixture ingests.
+- [x] `S14-P2` Validate exactly-once ingest under duplicate replay and crash/restart scenarios.
+- [x] `S14-P3` Validate no-miss detection with injected gaps and reconciliation checks.
+- [x] `S14-P4` Validate raw-fidelity and numeric-precision round-trip proofs on fixed fixtures.
+- [x] `S14-P5` Validate projector replay determinism with checkpoint resume behavior.
+- [x] `S14-P6` Validate pilot cutover acceptance and parity (`native` + `aligned_1s`) on fixed windows.
 
 ### Guardrails
-- [ ] `S14-G1` Add fail-loud invariant checks and typed error taxonomy for event writer/projectors.
-- [ ] `S14-G2` Add immutable audit events for event ingestion and projector checkpoint transitions.
-- [ ] `S14-G3` Enforce continuous source-completeness reconciliation with fail-loud stream quarantine on gaps.
-- [ ] `S14-G4` Enforce canonical precision guardrails (no float storage, explicit decimal scale metadata).
-- [ ] `S14-G5` Enforce provisional-rights metadata emission in API responses.
-- [ ] `S14-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S14-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S14-G1` Add fail-loud invariant checks and typed error taxonomy for event writer/projectors.
+- [x] `S14-G2` Add immutable audit events for event ingestion and projector checkpoint transitions.
+- [x] `S14-G3` Enforce continuous source-completeness reconciliation with fail-loud stream quarantine on gaps.
+- [x] `S14-G4` Enforce canonical precision guardrails (no float storage, explicit decimal scale metadata).
+- [x] `S14-G5` Enforce provisional-rights metadata emission in API responses.
+- [x] `S14-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S14-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 15: Binance Event-Sourcing Port (`spot_trades`, `spot_agg_trades`, `futures_trades`)
 
 ### Capability
-- [ ] `S15-C1` Port Binance spot trades ingest writes to canonical events.
-- [ ] `S15-C2` Port Binance agg trades ingest writes to canonical events.
-- [ ] `S15-C3` Port Binance futures trades ingest writes to canonical events.
-- [ ] `S15-C4` Implement Binance native serving projections from canonical events.
-- [ ] `S15-C5` Implement Binance persistent aligned serving projections from canonical events.
-- [ ] `S15-C6` Cut query/export serving to Binance event projections and remove legacy direct-serving path.
+- [x] `S15-C1` Port Binance spot trades ingest writes to canonical events.
+- [x] `S15-C2` Port Binance agg trades ingest writes to canonical events.
+- [x] `S15-C3` Port Binance futures trades ingest writes to canonical events.
+- [x] `S15-C4` Implement Binance native serving projections from canonical events.
+- [x] `S15-C5` Implement Binance persistent aligned serving projections from canonical events.
+- [x] `S15-C6` Cut query/export serving to Binance event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S15-P1` Execute fixed-window acceptance for Binance `native` + `aligned_1s`.
-- [ ] `S15-P2` Execute parity checks versus current Binance fixture baselines.
-- [ ] `S15-P3` Execute replay determinism for both Binance modes after cutover.
-- [ ] `S15-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for all three Binance datasets.
-- [ ] `S15-P5` Execute no-miss completeness proof (reconciliation + gap injection) for all three Binance datasets.
-- [ ] `S15-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for all three Binance datasets.
+- [x] `S15-P1` Execute fixed-window acceptance for Binance `native` + `aligned_1s`.
+- [x] `S15-P2` Execute parity checks versus current Binance fixture baselines.
+- [x] `S15-P3` Execute replay determinism for both Binance modes after cutover.
+- [x] `S15-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for all three Binance datasets.
+- [x] `S15-P5` Execute no-miss completeness proof (reconciliation + gap injection) for all three Binance datasets.
+- [x] `S15-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for all three Binance datasets.
 
 ### Guardrails
-- [ ] `S15-G1` Apply exchange integrity suite in event-ingest and projection paths.
-- [ ] `S15-G2` Apply freshness warning semantics using source-availability timestamps.
-- [ ] `S15-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Binance gaps.
-- [ ] `S15-G4` Enforce raw-fidelity and precision guardrails in Binance canonical ingest path.
-- [ ] `S15-G5` Enforce provisional rights metadata behavior for Binance responses.
-- [ ] `S15-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S15-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S15-G1` Apply exchange integrity suite in event-ingest and projection paths.
+- [x] `S15-G2` Apply freshness warning semantics using source-availability timestamps.
+- [x] `S15-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Binance gaps.
+- [x] `S15-G4` Enforce raw-fidelity and precision guardrails in Binance canonical ingest path.
+- [x] `S15-G5` Enforce provisional rights metadata behavior for Binance responses.
+- [x] `S15-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S15-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 16: ETF Event-Sourcing Port (`etf_daily_metrics`)
 
 ### Capability
-- [ ] `S16-C1` Port ETF normalized output writes to canonical events with existing provenance fidelity.
-- [ ] `S16-C2` Implement ETF native serving projections from canonical events.
-- [ ] `S16-C3` Implement ETF persistent aligned serving projections with deterministic forward-fill semantics.
-- [ ] `S16-C4` Cut query/export serving to ETF event projections and remove legacy direct-serving path.
+- [x] `S16-C1` Port ETF normalized output writes to canonical events with existing provenance fidelity.
+- [x] `S16-C2` Implement ETF native serving projections from canonical events.
+- [x] `S16-C3` Implement ETF persistent aligned serving projections with deterministic forward-fill semantics.
+- [x] `S16-C4` Cut query/export serving to ETF event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S16-P1` Execute fixed-window acceptance for ETF `native` + `aligned_1s`.
-- [ ] `S16-P2` Execute parity checks versus current ETF fixture baselines.
-- [ ] `S16-P3` Execute replay determinism for both ETF modes after cutover.
-- [ ] `S16-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for ETF records.
-- [ ] `S16-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for ETF records.
-- [ ] `S16-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for ETF records.
+- [x] `S16-P1` Execute fixed-window acceptance for ETF `native` + `aligned_1s`.
+- [x] `S16-P2` Execute parity checks versus current ETF fixture baselines.
+- [x] `S16-P3` Execute replay determinism for both ETF modes after cutover.
+- [x] `S16-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for ETF records.
+- [x] `S16-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for ETF records.
+- [x] `S16-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for ETF records.
 
 ### Guardrails
-- [ ] `S16-G1` Enforce legal/rights behavior and provisional rights metadata for ETF responses.
-- [ ] `S16-G2` Enforce stale/missing/incomplete ETF quality warnings from projection outputs.
-- [ ] `S16-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for ETF ingest.
-- [ ] `S16-G4` Enforce raw-fidelity and precision guardrails in ETF canonical ingest path.
-- [ ] `S16-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S16-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S16-G1` Enforce legal/rights behavior and provisional rights metadata for ETF responses.
+- [x] `S16-G2` Enforce stale/missing/incomplete ETF quality warnings from projection outputs.
+- [x] `S16-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for ETF ingest.
+- [x] `S16-G4` Enforce raw-fidelity and precision guardrails in ETF canonical ingest path.
+- [x] `S16-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S16-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 17: FRED Event-Sourcing Port (`fred_series_metrics`)
 
 ### Capability
-- [ ] `S17-C1` Port FRED ingest writes to canonical events.
-- [ ] `S17-C2` Implement FRED native serving projections from canonical events.
-- [ ] `S17-C3` Implement FRED persistent aligned serving projections from canonical events.
-- [ ] `S17-C4` Cut query/export serving to FRED event projections and remove legacy direct-serving path.
+- [x] `S17-C1` Port FRED ingest writes to canonical events.
+- [x] `S17-C2` Implement FRED native serving projections from canonical events.
+- [x] `S17-C3` Implement FRED persistent aligned serving projections from canonical events.
+- [x] `S17-C4` Cut query/export serving to FRED event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S17-P1` Execute fixed-window acceptance for FRED `native` + `aligned_1s`.
-- [ ] `S17-P2` Execute parity checks versus current FRED fixture baselines.
-- [ ] `S17-P3` Execute replay determinism for both FRED modes after cutover.
-- [ ] `S17-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for FRED events.
-- [ ] `S17-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for FRED events.
-- [ ] `S17-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for FRED events.
+- [x] `S17-P1` Execute fixed-window acceptance for FRED `native` + `aligned_1s`.
+- [x] `S17-P2` Execute parity checks versus current FRED fixture baselines.
+- [x] `S17-P3` Execute replay determinism for both FRED modes after cutover.
+- [x] `S17-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for FRED events.
+- [x] `S17-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for FRED events.
+- [x] `S17-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for FRED events.
 
 ### Guardrails
-- [ ] `S17-G1` Enforce publish-freshness warning behavior from canonical event timing fields.
-- [ ] `S17-G2` Enforce legal/rights behavior and provisional rights metadata for FRED responses.
-- [ ] `S17-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for FRED ingest.
-- [ ] `S17-G4` Enforce raw-fidelity and precision guardrails in FRED canonical ingest path.
-- [ ] `S17-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S17-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S17-G1` Enforce publish-freshness warning behavior from canonical event timing fields.
+- [x] `S17-G2` Enforce legal/rights behavior and provisional rights metadata for FRED responses.
+- [x] `S17-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for FRED ingest.
+- [x] `S17-G4` Enforce raw-fidelity and precision guardrails in FRED canonical ingest path.
+- [x] `S17-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S17-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 18: OKX Event-Sourcing Port (`okx_spot_trades`)
 
 ### Capability
-- [ ] `S18-C1` Port OKX ingest writes to canonical events with existing source checksum/provenance guarantees.
-- [ ] `S18-C2` Implement OKX native serving projections from canonical events.
-- [ ] `S18-C3` Implement OKX persistent aligned serving projections from canonical events.
-- [ ] `S18-C4` Cut query/export serving to OKX event projections and remove legacy direct-serving path.
+- [x] `S18-C1` Port OKX ingest writes to canonical events with existing source checksum/provenance guarantees.
+- [x] `S18-C2` Implement OKX native serving projections from canonical events.
+- [x] `S18-C3` Implement OKX persistent aligned serving projections from canonical events.
+- [x] `S18-C4` Cut query/export serving to OKX event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S18-P1` Execute fixed-window acceptance for OKX `native` + `aligned_1s`.
-- [ ] `S18-P2` Execute parity checks versus current OKX fixture baselines.
-- [ ] `S18-P3` Execute replay determinism for both OKX modes after cutover.
-- [ ] `S18-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for OKX events.
-- [ ] `S18-P5` Execute no-miss completeness proof (reconciliation + gap injection) for OKX events.
-- [ ] `S18-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for OKX events.
+- [x] `S18-P1` Execute fixed-window acceptance for OKX `native` + `aligned_1s`.
+- [x] `S18-P2` Execute parity checks versus current OKX fixture baselines.
+- [x] `S18-P3` Execute replay determinism for both OKX modes after cutover.
+- [x] `S18-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for OKX events.
+- [x] `S18-P5` Execute no-miss completeness proof (reconciliation + gap injection) for OKX events.
+- [x] `S18-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for OKX events.
 
 ### Guardrails
-- [ ] `S18-G1` Apply exchange integrity suite checks in OKX event/projection paths.
-- [ ] `S18-G2` Enforce legal/rights behavior and provisional rights metadata for OKX responses.
-- [ ] `S18-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for OKX ingest.
-- [ ] `S18-G4` Enforce raw-fidelity and precision guardrails in OKX canonical ingest path.
-- [ ] `S18-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S18-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S18-G1` Apply exchange integrity suite checks in OKX event/projection paths.
+- [x] `S18-G2` Enforce legal/rights behavior and provisional rights metadata for OKX responses.
+- [x] `S18-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for OKX ingest.
+- [x] `S18-G4` Enforce raw-fidelity and precision guardrails in OKX canonical ingest path.
+- [x] `S18-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S18-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 19: Bybit Event-Sourcing Port (`bybit_spot_trades`)
 
 ### Capability
-- [ ] `S19-C1` Port Bybit ingest writes to canonical events with existing source checksum/provenance guarantees.
-- [ ] `S19-C2` Implement Bybit native serving projections from canonical events.
-- [ ] `S19-C3` Implement Bybit persistent aligned serving projections from canonical events.
-- [ ] `S19-C4` Cut query/export serving to Bybit event projections and remove legacy direct-serving path.
+- [x] `S19-C1` Port Bybit ingest writes to canonical events with existing source checksum/provenance guarantees.
+- [x] `S19-C2` Implement Bybit native serving projections from canonical events.
+- [x] `S19-C3` Implement Bybit persistent aligned serving projections from canonical events.
+- [x] `S19-C4` Cut query/export serving to Bybit event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S19-P1` Execute fixed-window acceptance for Bybit `native` + `aligned_1s`.
-- [ ] `S19-P2` Execute parity checks versus current Bybit fixture baselines.
-- [ ] `S19-P3` Execute replay determinism for both Bybit modes after cutover.
-- [ ] `S19-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for Bybit events.
-- [ ] `S19-P5` Execute no-miss completeness proof (reconciliation + gap injection) for Bybit events.
-- [ ] `S19-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for Bybit events.
+- [x] `S19-P1` Execute fixed-window acceptance for Bybit `native` + `aligned_1s`.
+- [x] `S19-P2` Execute parity checks versus current Bybit fixture baselines.
+- [x] `S19-P3` Execute replay determinism for both Bybit modes after cutover.
+- [x] `S19-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for Bybit events.
+- [x] `S19-P5` Execute no-miss completeness proof (reconciliation + gap injection) for Bybit events.
+- [x] `S19-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for Bybit events.
 
 ### Guardrails
-- [ ] `S19-G1` Apply exchange integrity suite checks in Bybit event/projection paths.
-- [ ] `S19-G2` Enforce legal/rights behavior and provisional rights metadata for Bybit responses.
-- [ ] `S19-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bybit ingest.
-- [ ] `S19-G4` Enforce raw-fidelity and precision guardrails in Bybit canonical ingest path.
-- [ ] `S19-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S19-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S19-G1` Apply exchange integrity suite checks in Bybit event/projection paths.
+- [x] `S19-G2` Enforce legal/rights behavior and provisional rights metadata for Bybit responses.
+- [x] `S19-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bybit ingest.
+- [x] `S19-G4` Enforce raw-fidelity and precision guardrails in Bybit canonical ingest path.
+- [x] `S19-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S19-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 20: Bitcoin Event-Sourcing Port (All Onboarded Bitcoin Datasets)
 
 ### Capability
-- [ ] `S20-C1` Port Bitcoin block headers ingest writes to canonical events.
-- [ ] `S20-C2` Port Bitcoin block transactions ingest writes to canonical events.
-- [ ] `S20-C3` Port Bitcoin mempool state ingest writes to canonical events.
-- [ ] `S20-C4` Port Bitcoin derived datasets writes to canonical events.
-- [ ] `S20-C5` Implement native serving projections for all seven onboarded Bitcoin datasets.
-- [ ] `S20-C6` Implement persistent aligned serving projections for the four derived Bitcoin datasets only.
-- [ ] `S20-C7` Cut query/export serving to Bitcoin event projections and remove legacy direct-serving path.
+- [x] `S20-C1` Port Bitcoin block headers ingest writes to canonical events.
+- [x] `S20-C2` Port Bitcoin block transactions ingest writes to canonical events.
+- [x] `S20-C3` Port Bitcoin mempool state ingest writes to canonical events.
+- [x] `S20-C4` Port Bitcoin derived datasets writes to canonical events.
+- [x] `S20-C5` Implement native serving projections for all seven onboarded Bitcoin datasets.
+- [x] `S20-C6` Implement persistent aligned serving projections for the four derived Bitcoin datasets only.
+- [x] `S20-C7` Cut query/export serving to Bitcoin event projections and remove legacy direct-serving path.
 
 ### Proof
-- [ ] `S20-P1` Execute fixed-window acceptance for Bitcoin native (all seven datasets) and aligned (four derived datasets).
-- [ ] `S20-P2` Execute parity checks versus current Bitcoin fixture baselines.
-- [ ] `S20-P3` Execute replay determinism across Bitcoin event and projection paths.
-- [ ] `S20-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) across all seven Bitcoin datasets.
-- [ ] `S20-P5` Execute no-miss completeness proof (height/sequence reconciliation + gap injection) across all seven Bitcoin datasets.
-- [ ] `S20-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) across all seven Bitcoin datasets.
-- [ ] `S20-P7` Execute live-node proof gate once non-IBD conditions are met.
+- [x] `S20-P1` Execute fixed-window acceptance for Bitcoin native (all seven datasets) and aligned (four derived datasets).
+- [x] `S20-P2` Execute parity checks versus current Bitcoin fixture baselines.
+- [x] `S20-P3` Execute replay determinism across Bitcoin event and projection paths.
+- [x] `S20-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) across all seven Bitcoin datasets.
+- [x] `S20-P5` Execute no-miss completeness proof (height/sequence reconciliation + gap injection) across all seven Bitcoin datasets.
+- [x] `S20-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) across all seven Bitcoin datasets.
+- [x] `S20-P7` Execute live-node proof gate once non-IBD conditions are met.
 
 ### Guardrails
-- [ ] `S20-G1` Apply stream linkage and derived formula integrity suites in Bitcoin event/projection paths.
-- [ ] `S20-G2` Enforce freshness warning behavior from canonical event timing fields.
-- [ ] `S20-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bitcoin ingest.
-- [ ] `S20-G4` Enforce raw-fidelity and precision guardrails in Bitcoin canonical ingest path.
-- [ ] `S20-G5` Enforce legal/rights behavior and provisional rights metadata for Bitcoin responses.
-- [ ] `S20-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S20-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S20-G1` Apply stream linkage and derived formula integrity suites in Bitcoin event/projection paths.
+- [x] `S20-G2` Enforce freshness warning behavior from canonical event timing fields.
+- [x] `S20-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bitcoin ingest.
+- [x] `S20-G4` Enforce raw-fidelity and precision guardrails in Bitcoin canonical ingest path.
+- [x] `S20-G5` Enforce legal/rights behavior and provisional rights metadata for Bitcoin responses.
+- [x] `S20-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S20-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 21: Canonical `aligned_1s` Aggregate Contract Enforcement + Binance Retrofit
+
+### Capability
+- [x] `S21-C1` Enforce runtime canonical aligned storage contract checks in Binance aligned query path (`canonical_aligned_1s_aggregates` table existence + required columns/types).
+- [x] `S21-C2` Remove ad-hoc aligned table DDL from Binance proof harnesses and require migration-runner provisioning only.
+- [x] `S21-C3` Verify Binance aligned projector/query path uses canonical aligned table contract exclusively (no alternate/fallback aligned storage path).
+
+### Proof
+- [x] `S21-P1` Execute Binance aligned guardrail proof on migration-provisioned proof database (no manual table bootstrap).
+- [x] `S21-P2` Execute contract negative proofs for missing-table, missing-column, and type-drift failure modes (fail-loud expected).
+- [x] `S21-P3` Replay fixed Binance aligned windows and verify deterministic fingerprints remain stable after contract enforcement.
+
+### Guardrails
+- [x] `S21-G1` Add/extend contract-gate coverage for canonical aligned storage contract enforcement in runtime query modules.
+- [x] `S21-G2` Lock planning/docs contract language so every source slice treats canonical aligned aggregate contract as mandatory (no exceptions).
+- [x] `S21-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S21-G4` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ---
 
@@ -1407,4 +1425,30 @@ Constraints: documentation only; no feature changes.
 15. `S20-15`
 Action: User docs closeout for Slice 20.
 Done looks like: `docs/` includes complete Bitcoin taxonomy for event-driven native and aligned outputs, including derived-only aligned scope and precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 21 Sub-Slices
+1. `S21-01`
+Action: Add explicit runtime contract check for `canonical_aligned_1s_aggregates` in Binance aligned query path.
+Done looks like: aligned query fails loudly with explicit contract error when canonical table is missing or schema/type contract drifts.
+Constraints: no fallback paths.
+2. `S21-02`
+Action: Refactor Binance aligned guardrail proof harness to provision aligned storage only through migration runner.
+Done looks like: proof DB is created/migrated by `MigrationRunner`, with no manual aligned DDL in proof code.
+Constraints: proof harness only.
+3. `S21-03`
+Action: Add contract-gate tests for canonical aligned storage failure modes.
+Done looks like: tests cover missing-table, missing-column, and type-drift fail-loud behavior.
+Constraints: contract tests only.
+4. `S21-04`
+Action: Execute Binance aligned acceptance/replay proof after contract enforcement.
+Done looks like: aligned query behavior remains deterministic with unchanged approved fingerprints for fixed windows.
+Constraints: fixed fixtures only.
+5. `S21-05`
+Action: Developer docs closeout for Slice 21.
+Done looks like: `docs/Developer/` has short files for aligned storage contract, runtime enforcement path, and troubleshooting.
+Constraints: documentation only; no feature changes.
+6. `S21-06`
+Action: User docs closeout for Slice 21.
+Done looks like: `docs/` explicitly states aligned storage contract requirements and related failure semantics.
 Constraints: documentation only; no feature changes.

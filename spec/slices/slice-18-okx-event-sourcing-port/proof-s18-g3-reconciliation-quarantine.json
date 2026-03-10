@@ -1,0 +1,15 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "guardrail_verified": true,
+  "missing_offsets": [
+    "5003"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_scope": "Slice 18 S18-G3 reconciliation/quarantine guardrail verification for OKX canonical ingest (fail-loud gap detection and quarantine block)",
+  "stream_key": {
+    "partition_id": "2024-01-04",
+    "source_id": "okx",
+    "stream_id": "okx_spot_trades"
+  }
+}

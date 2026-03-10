@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S1, S4, S5, S6, S8, S11, S13 (API v0.1.5)
+- Last updated: 2026-03-10
+- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21 (API v0.1.14)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.
@@ -16,6 +16,8 @@
 - Request contract:
   - `mode`: `native | aligned_1s` (default `native`)
   - `sources`: list of source keys (current capability requires exactly one item)
+  - `view_id`: optional view identifier (must be paired with `view_version`)
+  - `view_version`: optional positive integer (must be paired with `view_id`)
   - `fields`: optional list of projected fields
   - `time_range`: optional `[start_iso, end_iso]`
   - `n_rows`: optional integer > 0
@@ -25,7 +27,9 @@
   - `strict`: boolean (default `false`)
 - Window selection rule: exactly one of `time_range`, `n_rows`, `n_random` must be provided.
 - Response contract:
-  - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
+  - `mode`, `source`, `sources`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
+  - `view_id`, `view_version`
+  - `rights_state`, `rights_provisional`
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Timestamp fields are UTC and returned as ISO-8601 strings.
@@ -46,6 +50,7 @@
   - `bitcoin_network_hashrate_estimate`
   - `bitcoin_circulating_supply`
 - Field-level definitions are maintained in:
+  - `docs/binance-reference.md`
   - `docs/data-taxonomy.md`
   - `docs/aligned-reference.md`
   - `docs/okx-reference.md`
@@ -60,6 +65,11 @@
   - `freshness.as_of_utc`
   - `freshness.lag_seconds`
 - ETF and FRED warning paths include source-specific freshness/quality checks.
+- OKX native/aligned serving is event-driven from canonical OKX projections (S18 cutover).
+- Bybit native/aligned serving is event-driven from canonical Bybit projections (S19 cutover).
+- ETF native/aligned serving is event-driven from canonical ETF projections (S16 cutover).
+- FRED native/aligned serving is event-driven from canonical FRED projections (S17 cutover).
+- Bitcoin native/aligned serving is event-driven from canonical Bitcoin projections (S20 cutover; aligned scope is derived-only datasets).
 
 ## Failure modes, warnings, and error codes
 - Status map:
@@ -77,13 +87,22 @@
   - `FRED_SOURCE_PUBLISH_MISSING`
   - `FRED_SOURCE_PUBLISH_STALE`
 - `strict=true` fails with `409` when warnings exist.
+- Binance `aligned_1s` runtime enforces canonical aligned-storage contract and fails loudly on table/schema drift.
+- OKX `aligned_1s` runtime enforces canonical aligned-storage contract and fails loudly on table/schema drift.
+- Bybit `aligned_1s` runtime enforces canonical aligned-storage contract and fails loudly on table/schema drift.
+- Missing rights metadata in response contract is fail-loud and treated as runtime error.
 
 ## Determinism/replay notes
 - Deterministic ordering is enforced for replayable windows.
 - Proof artifacts live under:
   - `spec/slices/slice-1-raw-query-native/`
   - `spec/slices/slice-5-raw-query-aligned-1s/`
-  - `spec/slices/slice-6-fred-integration/`
+  - `spec/slices/slice-15-binance-event-sourcing-port/`
+  - `spec/slices/slice-16-etf-event-sourcing-port/`
+  - `spec/slices/slice-17-fred-event-sourcing-port/`
+  - `spec/slices/slice-18-okx-event-sourcing-port/`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
   - `spec/slices/slice-13-bitcoin-core-signals/`

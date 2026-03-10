@@ -1,0 +1,81 @@
+{
+  "missing_rule_error": "Numeric field path=unexpected_numeric is missing precision rule for source_id=binance stream_id=spot_trades",
+  "normalized_payload": {
+    "price": "41000.12345678",
+    "qty": "0.01000000",
+    "quote_qty": "410.00123456",
+    "trade_id": 1
+  },
+  "proof_scope": "Slice 14 S14-C8 source precision registry and no-float canonical typing",
+  "registry_entries": [
+    {
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8
+        }
+      ],
+      "source_id": "binance",
+      "stream_id": "futures_trades"
+    },
+    {
+      "numeric_fields": [
+        {
+          "field_path": "agg_trade_id",
+          "numeric_kind": "int",
+          "scale": null
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8
+        }
+      ],
+      "source_id": "binance",
+      "stream_id": "spot_agg_trades"
+    },
+    {
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8
+        },
+        {
+          "field_path": "quote_qty",
+          "numeric_kind": "decimal",
+          "scale": 8
+        }
+      ],
+      "source_id": "binance",
+      "stream_id": "spot_trades"
+    }
+  ],
+  "registry_version": 1
+}

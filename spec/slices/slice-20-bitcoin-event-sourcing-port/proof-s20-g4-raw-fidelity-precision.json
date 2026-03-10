@@ -1,0 +1,18 @@
+{
+  "invalid_precision_guardrail_errors": {
+    "bitcoin_block_fee_totals": "Decimal value exceeds configured scale for field path=fee_total_btc source_id=bitcoin_core stream_id=bitcoin_block_fee_totals: value=0.1234567890123456789 scale=18",
+    "bitcoin_block_headers": "Decimal value exceeds configured scale for field path=difficulty source_id=bitcoin_core stream_id=bitcoin_block_headers: value=1.1234567890123456789 scale=18",
+    "bitcoin_block_subsidy_schedule": "Decimal value exceeds configured scale for field path=subsidy_btc source_id=bitcoin_core stream_id=bitcoin_block_subsidy_schedule: value=3.1234567890123456789 scale=18",
+    "bitcoin_block_transactions": "Non-integer value for int field path=block_height source_id=bitcoin_core stream_id=bitcoin_block_transactions: 840000.1",
+    "bitcoin_circulating_supply": "Decimal value exceeds configured scale for field path=circulating_supply_btc source_id=bitcoin_core stream_id=bitcoin_circulating_supply: value=100.1234567890123456789 scale=18",
+    "bitcoin_mempool_state": "Decimal value exceeds configured scale for field path=fee_rate_sat_vb source_id=bitcoin_core stream_id=bitcoin_mempool_state: value=12.1234567890123456789 scale=18",
+    "bitcoin_network_hashrate_estimate": "Decimal value exceeds configured scale for field path=hashrate_hs source_id=bitcoin_core stream_id=bitcoin_network_hashrate_estimate: value=100.1234567890123456789 scale=18"
+  },
+  "proof_scope": "Slice 20 S20-G4 raw-fidelity and precision guardrail verification for Bitcoin canonical ingest path",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 16,
+    "rows_processed": 16
+  }
+}

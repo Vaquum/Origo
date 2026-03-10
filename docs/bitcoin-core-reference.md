@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S13 (API v0.1.5)
+- Last updated: 2026-03-10
+- Slice/version reference: S13, S20 (API v0.1.14)
 
 ## Purpose and scope
 - User-facing reference for Bitcoin Core datasets available through raw query/export.
@@ -47,7 +47,8 @@
 ## Source/provenance and freshness semantics
 - Source of truth is self-hosted unpruned Bitcoin Core RPC data.
 - `source_chain` denotes node chain (e.g., `main`).
-- Aligned rows are derived from native derived tables with deterministic 1-second bucket and forward-fill semantics.
+- Native and aligned serving are event-driven from canonical Bitcoin projection paths as of Slice 20.
+- Aligned rows are derived from canonical events with deterministic 1-second bucket and forward-fill semantics.
 
 ## Failure modes, warnings, and error codes
 - Unsupported dataset for `aligned_1s` mode returns contract error (`409`).
@@ -67,6 +68,19 @@
   - `spec/slices/slice-13-bitcoin-core-signals/proof-s13-live-node-p3-determinism.json`
   - `spec/slices/slice-13-bitcoin-core-signals/proof-s13-live-node-p4-parity.json`
   - `spec/slices/slice-13-bitcoin-core-signals/baseline-fixture-live-node-<day-start>_<day-end>.json`
+- Slice-20 event-sourcing proof artifacts:
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p1-acceptance.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p2-parity.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p3-determinism.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p4-exactly-once-ingest.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p5-no-miss-completeness.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p6-raw-fidelity-precision.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-g1-bitcoin-integrity.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-g2-g5-api-guardrails.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-g3-reconciliation-quarantine.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-g4-raw-fidelity-precision.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/proof-s20-p7-live-node-gate.json`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/baseline-fixture-2024-04-20_2024-04-20.json`
 
 ## Environment variables and required config
 - API:

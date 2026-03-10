@@ -1,0 +1,24 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "fail_loud_error": "No-miss reconciliation failed: source=bybit stream=bybit_spot_trades partition=2024-01-04 missing_offsets=['5003']",
+  "missing_offsets": [
+    "5003"
+  ],
+  "no_miss_guardrail_verified": true,
+  "observed_offsets": [
+    "5001",
+    "5002",
+    "5004",
+    "5005"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_database": "origo_s19_p5_proof",
+  "proof_scope": "Slice 19 S19-P5 no-miss completeness proof with gap detection and quarantine enforcement for Bybit canonical ingest",
+  "quarantine_reason": "gap_detected_from_completeness_reconciliation",
+  "stream_key": {
+    "partition_id": "2024-01-04",
+    "source_id": "bybit",
+    "stream_id": "bybit_spot_trades"
+  }
+}

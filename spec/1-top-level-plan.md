@@ -231,6 +231,7 @@ Every slice must pass:
 10. Correction semantics in V1 are latest-truth only.
 11. Freshness SLA breach default is serve-with-warning; strict-mode behavior still fails on warnings.
 12. Temporary hosted rights may be used during legal transition and must be exposed as provisional in responses.
+13. `canonical_aligned_1s_aggregates` is the mandatory aligned projection sink contract; aligned serving paths must not use alternate storage tables.
 
 ## Public API Scope (Phase)
 
@@ -262,6 +263,7 @@ Every slice must pass:
 4. Every migrated source slice must prove exactly-once canonical ingest behavior under duplicate replay and crash/restart scenarios.
 5. Every migrated source slice must prove no-miss completeness with source-appropriate gap detection/reconciliation.
 6. Every migrated source slice must prove raw-fidelity and numeric-precision preservation against fixed fixture artifacts.
+7. Every migrated source slice with `aligned_1s` output must prove `canonical_aligned_1s_aggregates` contract compliance (migration-backed table presence + schema/type contract + fail-loud behavior on drift).
 
 ## Source Prioritization
 1. Source order is decided by scoring, not fixed upfront.
@@ -297,6 +299,7 @@ Every slice must pass:
 18. Slice 18: OKX event-sourcing port (`okx_spot_trades`) with `native` + `aligned_1s` parity.
 19. Slice 19: Bybit event-sourcing port (`bybit_spot_trades`) with `native` + `aligned_1s` parity.
 20. Slice 20: Bitcoin event-sourcing port (all current Bitcoin datasets; aligned scope remains derived-only in this tranche).
+21. Slice 21: Canonical `aligned_1s` aggregate contract enforcement and Binance retrofit.
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -440,6 +443,17 @@ Every slice must pass:
    4. `bitcoin_circulating_supply`
 4. Bitcoin remains last in migration order and retains live-node proof gating constraints.
 5. Slice closeout requires exactly-once/no-miss ingest proof and raw-fidelity/precision proof across all seven Bitcoin datasets.
+6. Execution status as of 2026-03-10:
+   1. `S20-P1..S20-P6` complete
+   2. `S20-G1..S20-G7` complete
+   3. `S20-P7` complete (executed against reachable non-IBD server node runtime)
+
+## Slice 21 (Canonical `aligned_1s` Aggregate Contract) Locked Details
+1. `canonical_aligned_1s_aggregates` is mandatory for aligned serving across all sources; no alternate aligned storage contract is permitted.
+2. Runtime aligned query paths must fail loudly with explicit contract errors when the canonical aligned table is missing or schema/type contract drifts.
+3. Proof harnesses must provision aligned storage via migration runner only; manual ad-hoc table DDL in proofs is disallowed.
+4. Slice includes Binance retrofit of aligned query/proof paths to this contract before moving to the next source migration slice.
+5. Slice closeout requires deterministic replay parity to remain unchanged after enforcing the canonical aligned contract.
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

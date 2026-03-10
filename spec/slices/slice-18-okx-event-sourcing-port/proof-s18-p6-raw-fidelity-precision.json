@@ -1,0 +1,27 @@
+{
+  "fidelity_rows": [
+    {
+      "payload_json_sha256": "49c782a77c54441b78dd270c945e5c456eab8ef75c23f27521c52f76a78a58aa",
+      "payload_sha256_raw": "49c782a77c54441b78dd270c945e5c456eab8ef75c23f27521c52f76a78a58aa",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "6001"
+    },
+    {
+      "payload_json_sha256": "1a497a2e53aaeee0ebc96369b5f1f13cbb8726c15b46f895a58fe038c405e83f",
+      "payload_sha256_raw": "1a497a2e53aaeee0ebc96369b5f1f13cbb8726c15b46f895a58fe038c405e83f",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "6002"
+    }
+  ],
+  "invalid_precision_guardrail_error": "Decimal value exceeds configured scale for field path=price source_id=okx stream_id=okx_spot_trades: value=42800.123456789 scale=8",
+  "proof_database": "origo_s18_p6_proof",
+  "proof_scope": "Slice 18 S18-P6 raw fidelity and precision proof for OKX canonical ingest",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 2,
+    "rows_processed": 2
+  }
+}

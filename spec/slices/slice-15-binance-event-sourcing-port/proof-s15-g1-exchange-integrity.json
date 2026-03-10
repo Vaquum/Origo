@@ -1,0 +1,19 @@
+{
+  "guardrail_verified": true,
+  "ingest_path_guardrail": {
+    "error": "Exchange integrity sequence-gap check failed for spot_trades: row=2, expected_next_id=2002, got=2003",
+    "events_parsed": 2
+  },
+  "projection_path_guardrail": {
+    "canonical_rows_written": 2,
+    "error": "Exchange integrity sequence-gap check failed for spot_trades: row=2, previous_id=2003, current_id=2001",
+    "projected_rows_after_failure": 0,
+    "write_summary": {
+      "rows_duplicate": 0,
+      "rows_inserted": 2,
+      "rows_processed": 2
+    }
+  },
+  "proof_database": "origo_s15_g1_proof",
+  "proof_scope": "Slice 15 S15-G1 exchange integrity suite enforcement in Binance ingest + projection paths"
+}

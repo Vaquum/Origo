@@ -1,0 +1,28 @@
+{
+  "acceptance_passed": true,
+  "aligned_projection_summary": {
+    "batches_processed": 2,
+    "events_processed": 24,
+    "partitions_processed": 2,
+    "policies_duplicate": 0,
+    "policies_recorded": 2,
+    "rows_written": 2
+  },
+  "aligned_row_count": 24,
+  "fixture_record_count": 24,
+  "native_projection_summary": {
+    "batches_processed": 2,
+    "events_processed": 24,
+    "partitions_processed": 2,
+    "rows_written": 24
+  },
+  "native_row_count": 24,
+  "proof_scope": "Slice 16 S16-P1 acceptance for ETF native and aligned_1s event-driven serving projections",
+  "window_end_utc": "2026-03-10T00:00:00Z",
+  "window_start_utc": "2026-03-08T00:00:00Z",
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 24,
+    "rows_processed": 24
+  }
+}

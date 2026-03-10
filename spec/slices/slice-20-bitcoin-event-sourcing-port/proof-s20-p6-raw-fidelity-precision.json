@@ -1,0 +1,165 @@
+{
+  "fidelity_rows": [
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "eb0730883d454cac22ab9ca5af2aed023c3ac797b2418d531196148c9a4bd4ed",
+      "payload_sha256_raw": "4a6c7303cdf6fc19d06877500e48dc0e2b5df2365670e087a6ceb0b4949ce946",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000",
+      "stream_id": "bitcoin_block_fee_totals"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "e323a381e3d6fdc5fb44962000a4505df4cab96bb1b1eb79050dfae4953c3e24",
+      "payload_sha256_raw": "f60ea266ad908288b4ecad169a7dd7b2cdf6ee60f8b1926f2a53bbeeb31bef5b",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001",
+      "stream_id": "bitcoin_block_fee_totals"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "52448e628d838d2b4ecdb10ec099b318eb1e441ee28e9d62a09b08e22978435e",
+      "payload_sha256_raw": "28e6343f88954cde0b2c3a6b76a2540f1595c39043456c0984bd7c3c4c08b8cd",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000",
+      "stream_id": "bitcoin_block_headers"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "db6bdc99b4ca1364b545bda74461cfbec8acf20e450ddfdb379b2d4b2f416900",
+      "payload_sha256_raw": "b4aa4dafa02b527fb40790a13090e8dc9a71b598b8b0d2f3c38a93460f1d2a23",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001",
+      "stream_id": "bitcoin_block_headers"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "9b61d60443cf47a629ab64ed75c6a5df82698132ea92a561e6a681b4d532534c",
+      "payload_sha256_raw": "0b6a3d7ef4930e87b9a4c17753b6bc9b44fa39992e1265d7f64f38fcd67ac9e4",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000",
+      "stream_id": "bitcoin_block_subsidy_schedule"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "9f78c588990ea58eaa657183ba445c857bdab7f2e5d21824a65b5cfe5373be81",
+      "payload_sha256_raw": "9ed59ec1f1a496ee6a2e16559219ff84f11d1709c0563c9c4525ff29cf1600f6",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001",
+      "stream_id": "bitcoin_block_subsidy_schedule"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "6257797e58214b4166c0481bb15c63aa679892fb847678a9d5cf1caa09527486",
+      "payload_sha256_raw": "6257797e58214b4166c0481bb15c63aa679892fb847678a9d5cf1caa09527486",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000:0:000000000000000000000000000000000000000000000000000000000000012c",
+      "stream_id": "bitcoin_block_transactions"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "8eae1367ba023e3cb8865ce738e67cd84cb5e002394f951fd05f1356ed58a5b8",
+      "payload_sha256_raw": "8eae1367ba023e3cb8865ce738e67cd84cb5e002394f951fd05f1356ed58a5b8",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000:1:000000000000000000000000000000000000000000000000000000000000012d",
+      "stream_id": "bitcoin_block_transactions"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "ecd39a4ebc8589878f8a1b96e07b3ba663cc45711bb4da60239e2137edc600a7",
+      "payload_sha256_raw": "ecd39a4ebc8589878f8a1b96e07b3ba663cc45711bb4da60239e2137edc600a7",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001:0:000000000000000000000000000000000000000000000000000000000000012e",
+      "stream_id": "bitcoin_block_transactions"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "5a2d2b55ab3119592145e2af86c6907f8e9054b7c6b4e999755014d43d130b61",
+      "payload_sha256_raw": "5a2d2b55ab3119592145e2af86c6907f8e9054b7c6b4e999755014d43d130b61",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001:1:000000000000000000000000000000000000000000000000000000000000012f",
+      "stream_id": "bitcoin_block_transactions"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "957a4cdc7d5122a108d0613a5f10fedda4d99c1f1211b5497c813d6aeeb7020a",
+      "payload_sha256_raw": "eaeff72b07a57cc47368768f1f8a0276b79d1b36186c5307fa7f6d8a00a36213",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000",
+      "stream_id": "bitcoin_circulating_supply"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "24a53265c88111b7a19cb68c65e7664289f6964f00695db27256b882368024f0",
+      "payload_sha256_raw": "fff260c96d13c35541534b120c3e4b72afd2e9a69712b99ba26dac40af0dd437",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001",
+      "stream_id": "bitcoin_circulating_supply"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "18d7f044d3a544cdef7881ed4fd1c3e312f3cf314a7bb202f445d8748a00a8f9",
+      "payload_sha256_raw": "336cbcdc5e15c4c723106df0162bcbcef0ec8c47583eee57e2e198e60733f5a3",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "1713571202000:0000000000000000000000000000000000000000000000000000000000000190",
+      "stream_id": "bitcoin_mempool_state"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "fd89e9ed6622ecc1c457fb44294a9c9f52d02816a5f864f044951eb91ddd361a",
+      "payload_sha256_raw": "ca86052d05835443335138c6c82d8338e77d3ffffc953722b62d0f17dbd55b6e",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "1713571202000:0000000000000000000000000000000000000000000000000000000000000191",
+      "stream_id": "bitcoin_mempool_state"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "7fe9e34dd7799668748a59e7a105c1c6fe0d4e7b0c0e69513201b71c61188b45",
+      "payload_sha256_raw": "f106326c31a2acd92e77d5c3f4832e7229b0736c57c4ab2c94960ca60027fa76",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840000",
+      "stream_id": "bitcoin_network_hashrate_estimate"
+    },
+    {
+      "partition_id": "2024-04-20",
+      "payload_json_sha256": "036ac91affaf9acb88306e5fb8e37a8482d58b5b6874eeb097fc41cd804c180c",
+      "payload_sha256_raw": "d8ffed46768eb97eb1515ca9c51fc1c4a715e1f30de66e2932cc42865da81fef",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true,
+      "source_offset_or_equivalent": "840001",
+      "stream_id": "bitcoin_network_hashrate_estimate"
+    }
+  ],
+  "invalid_precision_guardrail_errors": {
+    "bitcoin_block_fee_totals": "Decimal value exceeds configured scale for field path=fee_total_btc source_id=bitcoin_core stream_id=bitcoin_block_fee_totals: value=0.1234567890123456789 scale=18",
+    "bitcoin_block_headers": "Decimal value exceeds configured scale for field path=difficulty source_id=bitcoin_core stream_id=bitcoin_block_headers: value=1.1234567890123456789 scale=18",
+    "bitcoin_block_subsidy_schedule": "Decimal value exceeds configured scale for field path=subsidy_btc source_id=bitcoin_core stream_id=bitcoin_block_subsidy_schedule: value=3.1234567890123456789 scale=18",
+    "bitcoin_block_transactions": "Non-integer value for int field path=block_height source_id=bitcoin_core stream_id=bitcoin_block_transactions: 840000.1",
+    "bitcoin_circulating_supply": "Decimal value exceeds configured scale for field path=circulating_supply_btc source_id=bitcoin_core stream_id=bitcoin_circulating_supply: value=100.1234567890123456789 scale=18",
+    "bitcoin_mempool_state": "Decimal value exceeds configured scale for field path=fee_rate_sat_vb source_id=bitcoin_core stream_id=bitcoin_mempool_state: value=12.1234567890123456789 scale=18",
+    "bitcoin_network_hashrate_estimate": "Decimal value exceeds configured scale for field path=hashrate_hs source_id=bitcoin_core stream_id=bitcoin_network_hashrate_estimate: value=100.1234567890123456789 scale=18"
+  },
+  "proof_database": "origo_s20_p6_proof",
+  "proof_scope": "Slice 20 S20-P6 raw fidelity and precision proof for Bitcoin canonical ingest across all seven datasets",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 16,
+    "rows_processed": 16
+  }
+}

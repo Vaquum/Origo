@@ -1,0 +1,22 @@
+{
+  "deterministic_match": true,
+  "proof_scope": "Slice 14 S14-P6 pilot cutover acceptance and parity (native + aligned_1s) on fixed windows",
+  "run_1": {
+    "aligned_1s_baseline_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+    "aligned_1s_pilot_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+    "aligned_1s_row_count": 3,
+    "legacy_seed_rows": 5,
+    "native_baseline_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+    "native_pilot_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+    "native_row_count": 5
+  },
+  "run_2": {
+    "aligned_1s_baseline_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+    "aligned_1s_pilot_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+    "aligned_1s_row_count": 3,
+    "legacy_seed_rows": 5,
+    "native_baseline_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+    "native_pilot_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+    "native_row_count": 5
+  }
+}

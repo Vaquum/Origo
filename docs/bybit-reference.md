@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S11 (API v0.1.4)
+- Last updated: 2026-03-10
+- Slice/version reference: S19 (API v0.1.13)
 
 ## Purpose and scope
 - User-facing reference for `bybit_spot_trades` in Raw API query/export paths.
@@ -27,8 +27,8 @@
 ## Data definitions (field names, types, units, timezone, nullability)
 - Native fields:
   - `symbol` string (`BTCUSDT`)
-  - `trade_id` integer deterministic row sequence in source file order
-  - `trd_match_id` string source match id
+  - `trade_id` integer parsed from `trd_match_id` suffix (`m-<digits>`)
+  - `trd_match_id` string source match id (`m-<digits>`)
   - `side` string (`buy|sell`)
   - `price` float
   - `size` float (base quantity)
@@ -46,8 +46,10 @@
 
 ## Source/provenance and freshness semantics
 - Source of truth is first-party Bybit daily trade files.
-- Ingest preserves source checksum metadata per day (`gzip_sha256`, `csv_sha256`, `ETag`).
-- Aligned rows are derived directly from native rows in ClickHouse.
+- Ingest writes immutable canonical events and serves from canonical projection tables.
+- Ingest preserves source checksum metadata per day (`zip_sha256`, `csv_sha256`).
+- Canonical source bytes are preserved via `payload_raw` and `payload_sha256_raw`.
+- Aligned rows are derived from `canonical_aligned_1s_aggregates`.
 - Aligned responses include freshness metadata and may emit stale warnings.
 
 ## Failure modes, warnings, and error codes
@@ -57,17 +59,26 @@
 - Guardrail behavior:
   - rights matrix + legal artifact required for hosted query/export access
   - `strict=true` fails when warnings exist or mutable window constraints are violated
+  - no-miss reconciliation gaps fail loudly and quarantine the affected partition
+  - non-canonical Bybit identity shape (`trd_match_id` not `m-<digits>`) fails ingest
 - Common warning codes:
   - `WINDOW_LATEST_ROWS_MUTABLE`
   - `WINDOW_RANDOM_SAMPLE`
   - `ALIGNED_FRESHNESS_STALE`
 
 ## Determinism/replay notes
-- Slice-11 fixed-window proof artifacts:
-  - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p1-acceptance.json`
-  - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p2-aligned-acceptance.json`
-  - `spec/slices/slice-11-bybit-spot-trades-aligned/proof-s11-p3-determinism.json`
-  - `spec/slices/slice-11-bybit-spot-trades-aligned/baseline-fixture-2024-01-01_2024-01-02.json`
+- Slice-19 fixed-window proof artifacts:
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p1-acceptance.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p2-parity.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p3-determinism.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p4-exactly-once-ingest.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p5-no-miss-completeness.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-p6-raw-fidelity-precision.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-g1-exchange-integrity.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-g2-api-guardrails.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-g3-reconciliation-quarantine.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/proof-s19-g4-raw-fidelity-precision.json`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/baseline-fixture-2024-01-04_2024-01-04.json`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`

@@ -20,6 +20,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _build_matrix(*, legal_artifact_path: str | None) -> dict[str, Any]:
     source_payload: dict[str, Any] = {
         'rights_state': 'Hosted Allowed',
+        'rights_provisional': False,
         'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
     }
     if legal_artifact_path is not None:

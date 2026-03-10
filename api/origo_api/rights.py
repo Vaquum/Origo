@@ -67,6 +67,7 @@ class RightsGateError(RuntimeError):
 class SourceRightsDecision:
     source: str
     rights_state: RightsState
+    rights_provisional: bool
     legal_signoff_artifact: str | None
 
 
@@ -75,6 +76,7 @@ class ExportRightsDecision:
     source: str
     dataset: RawQueryDataset
     rights_state: RightsState
+    rights_provisional: bool
     legal_signoff_artifact: str | None
 
 
@@ -83,6 +85,25 @@ class QueryRightsDecision:
     dataset: RawQueryDataset
     sources: tuple[SourceRightsDecision, ...]
     serving_state: ShadowPromotionState | None
+
+    def response_metadata(self) -> tuple[RightsState, bool]:
+        if len(self.sources) == 0:
+            raise RuntimeError(
+                f'No source rights decisions found for dataset={self.dataset}'
+            )
+        first_source = self.sources[0]
+        for source in self.sources[1:]:
+            if source.rights_state != first_source.rights_state:
+                raise RuntimeError(
+                    f'Query rights_state is ambiguous for dataset={self.dataset}: '
+                    f'{sorted({entry.rights_state for entry in self.sources})}'
+                )
+            if source.rights_provisional != first_source.rights_provisional:
+                raise RuntimeError(
+                    f'Query rights_provisional is ambiguous for dataset={self.dataset}: '
+                    f'{sorted({entry.rights_provisional for entry in self.sources})}'
+                )
+        return first_source.rights_state, first_source.rights_provisional
 
 
 def _require_env(name: str) -> str:
@@ -113,6 +134,12 @@ def _expect_list(value: Any, label: str) -> list[Any]:
 def _expect_non_empty_str(value: Any, label: str) -> str:
     if not isinstance(value, str) or value.strip() == '':
         raise RuntimeError(f'{label} must be a non-empty string')
+    return value
+
+
+def _expect_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise RuntimeError(f'{label} must be a boolean')
     return value
 
 
@@ -242,6 +269,15 @@ def _collect_source_decisions_for_dataset(
             ),
             label=f'Rights matrix source[{source_name}]',
         )
+        rights_provisional = _expect_bool(
+            source_payload.get('rights_provisional'),
+            f'Rights matrix source[{source_name}].rights_provisional',
+        )
+        if rights_state != 'Hosted Allowed' and rights_provisional:
+            raise RuntimeError(
+                f'Rights matrix source[{source_name}] has rights_provisional=true '
+                'but rights_state is not Hosted Allowed'
+            )
         source_datasets = _extract_query_datasets(
             source_payload=source_payload,
             source_name=source_name,
@@ -252,6 +288,7 @@ def _collect_source_decisions_for_dataset(
             SourceRightsDecision(
                 source=source_name,
                 rights_state=rights_state,
+                rights_provisional=rights_provisional,
                 legal_signoff_artifact=_extract_legal_signoff_artifact(
                     source_payload=source_payload,
                     source_name=source_name,
@@ -401,6 +438,7 @@ def resolve_export_rights(
         source=source_decision.source,
         dataset=dataset,
         rights_state=source_decision.rights_state,
+        rights_provisional=source_decision.rights_provisional,
         legal_signoff_artifact=source_decision.legal_signoff_artifact,
     )
     _enforce_export_rights(decision=decision, auth_token=auth_token)

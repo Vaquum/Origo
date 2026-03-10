@@ -1,0 +1,31 @@
+{
+  "duplicate_identity_rows": [],
+  "exactly_once_verified": true,
+  "fixture_event_count": 16,
+  "persisted_rows_by_stream": {
+    "bitcoin_block_fee_totals": 2,
+    "bitcoin_block_headers": 2,
+    "bitcoin_block_subsidy_schedule": 2,
+    "bitcoin_block_transactions": 4,
+    "bitcoin_circulating_supply": 2,
+    "bitcoin_mempool_state": 2,
+    "bitcoin_network_hashrate_estimate": 2
+  },
+  "phase_1_pre_crash_partial_ingest": {
+    "rows_duplicate": 0,
+    "rows_inserted": 7,
+    "rows_processed": 7
+  },
+  "phase_2_after_restart_full_replay": {
+    "rows_duplicate": 7,
+    "rows_inserted": 9,
+    "rows_processed": 16
+  },
+  "phase_3_post_recovery_duplicate_replay": {
+    "rows_duplicate": 16,
+    "rows_inserted": 0,
+    "rows_processed": 16
+  },
+  "proof_database": "origo_s20_p4_proof",
+  "proof_scope": "Slice 20 S20-P4 exactly-once ingest for Bitcoin canonical events under duplicate replay and crash/restart simulation across all seven datasets"
+}

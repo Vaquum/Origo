@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S5, S6, S8, S11, S13 (API v0.1.5)
+- Last updated: 2026-03-10
+- Slice/version reference: S5, S6, S8, S11, S13, S15, S16, S17, S18, S19, S20, S21 (API v0.1.14)
 
 ## Purpose and scope
 - User-facing reference for `mode=aligned_1s` query and export behavior.
@@ -48,13 +48,24 @@
   - `valid_to_utc_exclusive` (exclusive UTC timestamp)
 
 ## Source/provenance and freshness semantics
-- Aligned data is derived from canonical native tables.
+- Binance aligned data is served from canonical aligned aggregate projections built directly from canonical event log records.
+- OKX aligned data is served from canonical aligned aggregate projections built directly from canonical OKX event rows.
+- Bybit aligned data is served from canonical aligned aggregate projections built directly from canonical Bybit event rows.
+- ETF aligned data is also served from canonical aligned aggregate projections built directly from canonical ETF event rows.
+- FRED aligned data is also served from canonical aligned aggregate projections built directly from canonical FRED event rows.
+- Bitcoin derived aligned data is served from canonical aligned aggregate projections built directly from canonical Bitcoin event rows (S20 cutover).
+- Canonical aligned storage contract is fixed to `canonical_aligned_1s_aggregates`; no alternate aligned storage path is supported.
+- Other aligned datasets remain projection-driven from their canonical serving paths in current slices.
 - Freshness payload:
   - `as_of_utc`
   - `lag_seconds`
 - Provenance from source-native rows is preserved through aligned transforms.
 
 ## Failure modes, warnings, and error codes
+- Canonical aligned storage contract violations fail loudly:
+  - missing `canonical_aligned_1s_aggregates` table
+  - missing required columns
+  - required column type drift
 - Warning codes:
   - `ALIGNED_FRESHNESS_STALE`
   - `WINDOW_LATEST_ROWS_MUTABLE`
@@ -68,9 +79,15 @@
 
 ## Determinism/replay notes
 - Fixed aligned windows are replay deterministic.
+- Slice 21 enforces storage-contract checks without changing fixed-window replay fingerprints.
 - Forward-fill boundary behavior is validated in slice proofs:
   - `spec/slices/slice-5-raw-query-aligned-1s/`
-  - `spec/slices/slice-6-fred-integration/`
+  - `spec/slices/slice-15-binance-event-sourcing-port/`
+  - `spec/slices/slice-16-etf-event-sourcing-port/`
+  - `spec/slices/slice-17-fred-event-sourcing-port/`
+  - `spec/slices/slice-18-okx-event-sourcing-port/`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
   - `spec/slices/slice-13-bitcoin-core-signals/`

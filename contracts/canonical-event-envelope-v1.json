@@ -1,0 +1,115 @@
+{
+  "envelope_version": 1,
+  "identity_fields": [
+    "source_id",
+    "stream_id",
+    "partition_id",
+    "source_offset_or_equivalent"
+  ],
+  "fields": [
+    {
+      "name": "envelope_version",
+      "logical_type": "uint16",
+      "clickhouse_type": "UInt16",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Canonical event-envelope schema version."
+    },
+    {
+      "name": "event_id",
+      "logical_type": "uuid",
+      "clickhouse_type": "UUID",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Deterministic canonical event identifier from writer contract."
+    },
+    {
+      "name": "source_id",
+      "logical_type": "string",
+      "clickhouse_type": "LowCardinality(String)",
+      "nullable": false,
+      "is_identity_key": true,
+      "description": "Canonical source key (for example binance, fred, or bitcoin_core)."
+    },
+    {
+      "name": "stream_id",
+      "logical_type": "string",
+      "clickhouse_type": "LowCardinality(String)",
+      "nullable": false,
+      "is_identity_key": true,
+      "description": "Logical source stream key inside source_id."
+    },
+    {
+      "name": "partition_id",
+      "logical_type": "string",
+      "clickhouse_type": "String",
+      "nullable": false,
+      "is_identity_key": true,
+      "description": "Source partition/shard identifier for exactly-once identity."
+    },
+    {
+      "name": "source_offset_or_equivalent",
+      "logical_type": "string",
+      "clickhouse_type": "String",
+      "nullable": false,
+      "is_identity_key": true,
+      "description": "Source offset or deterministic source event key."
+    },
+    {
+      "name": "source_event_time_utc",
+      "logical_type": "datetime64_utc_ns",
+      "clickhouse_type": "Nullable(DateTime64(9, 'UTC'))",
+      "nullable": true,
+      "is_identity_key": false,
+      "description": "Highest-precision source event timestamp when available."
+    },
+    {
+      "name": "ingested_at_utc",
+      "logical_type": "datetime64_utc_ms",
+      "clickhouse_type": "DateTime64(3, 'UTC')",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Canonical ingest timestamp written by Origo writer."
+    },
+    {
+      "name": "payload_content_type",
+      "logical_type": "string",
+      "clickhouse_type": "LowCardinality(String)",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Raw payload media type (for example application/json)."
+    },
+    {
+      "name": "payload_encoding",
+      "logical_type": "string",
+      "clickhouse_type": "LowCardinality(String)",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Raw payload text/binary encoding identifier."
+    },
+    {
+      "name": "payload_raw",
+      "logical_type": "bytes",
+      "clickhouse_type": "String",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Canonical immutable raw source payload bytes."
+    },
+    {
+      "name": "payload_sha256_raw",
+      "logical_type": "sha256_hex",
+      "clickhouse_type": "FixedString(64)",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "SHA256 digest of payload_raw bytes."
+    },
+    {
+      "name": "payload_json",
+      "logical_type": "json_string",
+      "clickhouse_type": "String",
+      "nullable": false,
+      "is_identity_key": false,
+      "description": "Deterministic parsed payload representation derived from payload_raw."
+    }
+  ]
+}

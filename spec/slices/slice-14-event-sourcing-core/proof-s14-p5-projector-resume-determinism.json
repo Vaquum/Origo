@@ -1,0 +1,115 @@
+{
+  "deterministic_match": true,
+  "fixture_event_count": 5,
+  "proof_scope": "Slice 14 S14-P5 projector replay determinism with checkpoint resume behavior",
+  "resume_run": {
+    "details": {
+      "checkpoint": {
+        "checkpoint_revision": 3,
+        "last_event_id": "ce046c71-3d1f-5b58-bc3f-c7a0001a72b9",
+        "last_ingested_at_utc": "2024-01-03T00:00:02.100000+00:00",
+        "last_source_offset_or_equivalent": "3005"
+      },
+      "fingerprint": {
+        "fingerprint_hash_sha256": "a6a2f10384c659ea3ed4610c946b03ce6e777333176ee50782bab7747752848c",
+        "row_count": 3,
+        "rows": [
+          {
+            "aligned_at_utc": "2024-01-03T00:00:00+00:00",
+            "bucket_event_count": 2,
+            "bucket_sha256": "c0ecc784f6d9d9b0b5dfd5c7b1a2f17e87bb0847022aaecc4ab42322d0b23abe",
+            "first_source_offset_or_equivalent": "3001",
+            "last_source_offset_or_equivalent": "3002"
+          },
+          {
+            "aligned_at_utc": "2024-01-03T00:00:01+00:00",
+            "bucket_event_count": 2,
+            "bucket_sha256": "beefa3a3e498805ee82df24de29ee8ca870b3ee93fcaf8c74bebbc91b216c821",
+            "first_source_offset_or_equivalent": "3003",
+            "last_source_offset_or_equivalent": "3004"
+          },
+          {
+            "aligned_at_utc": "2024-01-03T00:00:02+00:00",
+            "bucket_event_count": 1,
+            "bucket_sha256": "81ec8a10853452654efd69ad4cb77e892bafbd61f655e53e99d31fef5a378142",
+            "first_source_offset_or_equivalent": "3005",
+            "last_source_offset_or_equivalent": "3005"
+          }
+        ]
+      },
+      "phase_1_commit_status": "checkpointed",
+      "phase_2_backfill": {
+        "batches_processed": 2,
+        "events_processed": 3,
+        "last_checkpoint_status": "checkpointed",
+        "rows_written": 2
+      },
+      "policy_status": "recorded"
+    },
+    "proof_database": "origo_s14_p5_resume",
+    "seed_statuses": [
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted"
+    ]
+  },
+  "single_pass_run": {
+    "details": {
+      "backfill": {
+        "batches_processed": 3,
+        "events_processed": 5,
+        "last_checkpoint_status": "checkpointed",
+        "rows_written": 3
+      },
+      "checkpoint": {
+        "checkpoint_revision": 3,
+        "last_event_id": "ce046c71-3d1f-5b58-bc3f-c7a0001a72b9",
+        "last_ingested_at_utc": "2024-01-03T00:00:02.100000+00:00",
+        "last_source_offset_or_equivalent": "3005"
+      },
+      "fingerprint": {
+        "fingerprint_hash_sha256": "a6a2f10384c659ea3ed4610c946b03ce6e777333176ee50782bab7747752848c",
+        "row_count": 3,
+        "rows": [
+          {
+            "aligned_at_utc": "2024-01-03T00:00:00+00:00",
+            "bucket_event_count": 2,
+            "bucket_sha256": "c0ecc784f6d9d9b0b5dfd5c7b1a2f17e87bb0847022aaecc4ab42322d0b23abe",
+            "first_source_offset_or_equivalent": "3001",
+            "last_source_offset_or_equivalent": "3002"
+          },
+          {
+            "aligned_at_utc": "2024-01-03T00:00:01+00:00",
+            "bucket_event_count": 2,
+            "bucket_sha256": "beefa3a3e498805ee82df24de29ee8ca870b3ee93fcaf8c74bebbc91b216c821",
+            "first_source_offset_or_equivalent": "3003",
+            "last_source_offset_or_equivalent": "3004"
+          },
+          {
+            "aligned_at_utc": "2024-01-03T00:00:02+00:00",
+            "bucket_event_count": 1,
+            "bucket_sha256": "81ec8a10853452654efd69ad4cb77e892bafbd61f655e53e99d31fef5a378142",
+            "first_source_offset_or_equivalent": "3005",
+            "last_source_offset_or_equivalent": "3005"
+          }
+        ]
+      },
+      "policy_status": "recorded"
+    },
+    "proof_database": "origo_s14_p5_single",
+    "seed_statuses": [
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted",
+      "inserted"
+    ]
+  },
+  "stream_key": {
+    "partition_id": "btcusdt",
+    "source_id": "binance",
+    "stream_id": "spot_trades"
+  }
+}

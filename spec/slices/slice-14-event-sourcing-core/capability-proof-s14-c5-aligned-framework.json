@@ -1,0 +1,47 @@
+{
+  "aligned_rows": [
+    {
+      "aligned_at_utc": "2024-01-01T00:00:01+00:00",
+      "bucket_event_count": 2,
+      "bucket_sha256": "90e7f5d4294a8469f1357b886a715a96d00fbf7891f1eaa6a2f0c96133f601c4",
+      "first_offset": "1",
+      "last_offset": "2"
+    },
+    {
+      "aligned_at_utc": "2024-01-01T00:00:02+00:00",
+      "bucket_event_count": 2,
+      "bucket_sha256": "3cb7998672751045f15604f945d06db928efd757d41a276a6ff37f0337f9c305",
+      "first_offset": "3",
+      "last_offset": "4"
+    }
+  ],
+  "backfill_runs": {
+    "run_1": {
+      "batches_processed": 1,
+      "events_processed": 4,
+      "last_checkpoint_status": "checkpointed",
+      "rows_written": 2
+    },
+    "run_2_resume": {
+      "batches_processed": 0,
+      "events_processed": 0,
+      "last_checkpoint_status": null,
+      "rows_written": 0
+    }
+  },
+  "canonical_event_write_statuses": [
+    "inserted",
+    "inserted",
+    "inserted",
+    "inserted"
+  ],
+  "policy_record_statuses": {
+    "bucket_size_seconds": 1,
+    "duplicate": "duplicate",
+    "first": "recorded",
+    "policy_revision": 1,
+    "tier_policy": "hot_1s_warm_1m"
+  },
+  "proof_database": "origo_s14_c5_proof",
+  "proof_scope": "Slice 14 S14-C5 persistent aligned framework (policy + projector backfill)"
+}

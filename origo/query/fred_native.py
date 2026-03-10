@@ -23,7 +23,7 @@ class _FREDSourceSpec:
 
 _FRED_SOURCE_SPECS: dict[FREDDataset, _FREDSourceSpec] = {
     'fred_series_metrics': _FREDSourceSpec(
-        table_name='fred_series_metrics_long',
+        table_name='canonical_fred_series_metrics_native_v1',
         id_column='metric_id',
         datetime_column='observed_at_utc',
         random_seed_column='observed_at_utc',

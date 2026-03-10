@@ -1,0 +1,23 @@
+{
+  "duplicate_identity_rows": [],
+  "exactly_once_verified": true,
+  "fixture_event_count": 4,
+  "persisted_row_count": 4,
+  "phase_1_pre_crash_partial_ingest": {
+    "rows_duplicate": 0,
+    "rows_inserted": 2,
+    "rows_processed": 2
+  },
+  "phase_2_after_restart_full_replay": {
+    "rows_duplicate": 2,
+    "rows_inserted": 2,
+    "rows_processed": 4
+  },
+  "phase_3_post_recovery_duplicate_replay": {
+    "rows_duplicate": 4,
+    "rows_inserted": 0,
+    "rows_processed": 4
+  },
+  "proof_database": "origo_s19_p4_proof",
+  "proof_scope": "Slice 19 S19-P4 exactly-once ingest for Bybit canonical events under duplicate replay and crash/restart simulation"
+}

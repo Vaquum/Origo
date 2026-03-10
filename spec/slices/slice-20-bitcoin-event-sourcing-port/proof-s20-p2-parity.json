@@ -1,0 +1,23 @@
+{
+  "aligned_parity": {
+    "bitcoin_block_fee_totals": true,
+    "bitcoin_block_subsidy_schedule": true,
+    "bitcoin_circulating_supply": true,
+    "bitcoin_network_hashrate_estimate": true
+  },
+  "native_parity": {
+    "bitcoin_block_fee_totals": true,
+    "bitcoin_block_headers": true,
+    "bitcoin_block_subsidy_schedule": true,
+    "bitcoin_block_transactions": true,
+    "bitcoin_circulating_supply": true,
+    "bitcoin_mempool_state": true,
+    "bitcoin_network_hashrate_estimate": true
+  },
+  "parity_verified": true,
+  "proof_scope": "Slice 20 S20-P2 parity checks versus Bitcoin fixture baselines (legacy native tables + deterministic aligned fixture expectations)",
+  "window": {
+    "end_utc": "2024-04-20T00:00:03Z",
+    "start_utc": "2024-04-20T00:00:00Z"
+  }
+}

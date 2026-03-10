@@ -1,10 +1,8 @@
-import csv
 import gzip
 import hashlib
 import json
 import sys
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 import requests
@@ -12,6 +10,16 @@ from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.utils.bybit_aligned_projector import (
+    project_bybit_spot_trades_aligned,
+)
+from origo_control_plane.utils.bybit_canonical_event_ingest import (
+    parse_bybit_spot_trade_csv,
+    write_bybit_spot_trades_to_canonical,
+)
+from origo_control_plane.utils.bybit_native_projector import (
+    project_bybit_spot_trades_native,
+)
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
 )
@@ -22,23 +30,10 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-CLICKHOUSE_TABLE = 'bybit_spot_trades'
 
 _BYBIT_BASE_URL = 'https://public.bybit.com/trading/BTCUSDT/'
 _BYBIT_SYMBOL = 'BTCUSDT'
 _REQUEST_TIMEOUT_SECONDS = 120
-_EXPECTED_CSV_HEADER = (
-    'timestamp',
-    'symbol',
-    'side',
-    'size',
-    'price',
-    'tickDirection',
-    'trdMatchID',
-    'grossValue',
-    'homeNotional',
-    'foreignNotional',
-)
 
 daily_partitions = DailyPartitionsDefinition(start_date='2020-03-25')
 
@@ -58,150 +53,10 @@ def _resolve_bybit_daily_file_url(*, date_str: str) -> tuple[str, str]:
     return filename, _BYBIT_BASE_URL + filename
 
 
-def _parse_bybit_timestamp_ms_or_raise(*, raw_value: str, row_index: int) -> int:
-    try:
-        timestamp_seconds = Decimal(raw_value)
-    except InvalidOperation as exc:
-        raise RuntimeError(
-            f'Bybit CSV timestamp is invalid at line={row_index}: {raw_value}'
-        ) from exc
-    timestamp_ms = int(
-        (timestamp_seconds * Decimal(1000)).to_integral_value(
-            rounding=ROUND_HALF_UP
-        )
-    )
-    return timestamp_ms
-
-
-def _parse_bybit_csv_rows_or_raise(
-    *,
-    csv_payload: bytes,
-    date_str: str,
-    day_start_ts_utc_ms: int,
-    day_end_ts_utc_ms: int,
-) -> list[
-    tuple[
-        str,
-        int,
-        str,
-        str,
-        float,
-        float,
-        float,
-        int,
-        datetime,
-        str,
-        float,
-        float,
-        float,
-    ]
-]:
-    text = csv_payload.decode('utf-8')
-    reader = csv.reader(text.splitlines())
-
-    header = next(reader, None)
-    if header is None:
-        raise RuntimeError('Bybit CSV payload is empty')
-    if tuple(header) != _EXPECTED_CSV_HEADER:
-        raise RuntimeError(
-            'Bybit CSV header mismatch: '
-            f'expected={_EXPECTED_CSV_HEADER} got={tuple(header)}'
-        )
-
-    rows: list[
-        tuple[
-            str,
-            int,
-            str,
-            str,
-            float,
-            float,
-            float,
-            int,
-            datetime,
-            str,
-            float,
-            float,
-            float,
-        ]
-    ] = []
-    for row_index, row in enumerate(reader, start=2):
-        if len(row) != 10:
-            raise RuntimeError(
-                f'Bybit CSV row has unexpected column count at line={row_index}: '
-                f'expected=10 got={len(row)}'
-            )
-
-        timestamp_ms = _parse_bybit_timestamp_ms_or_raise(
-            raw_value=row[0],
-            row_index=row_index,
-        )
-        if timestamp_ms < day_start_ts_utc_ms or timestamp_ms >= day_end_ts_utc_ms:
-            raise RuntimeError(
-                'Bybit CSV timestamp is outside requested UTC day window '
-                f'at line={row_index}, date={date_str}, '
-                f'day_start_ts_utc_ms={day_start_ts_utc_ms}, '
-                f'day_end_ts_utc_ms={day_end_ts_utc_ms}, '
-                f'timestamp_ms={timestamp_ms}'
-            )
-
-        symbol = row[1]
-        if symbol != _BYBIT_SYMBOL:
-            raise RuntimeError(
-                f'Bybit CSV symbol mismatch at line={row_index}: '
-                f'expected={_BYBIT_SYMBOL} got={symbol}'
-            )
-
-        side = row[2].strip().lower()
-        if side not in {'buy', 'sell'}:
-            raise RuntimeError(
-                f'Bybit CSV side must be Buy/Sell at line={row_index}, got={row[2]}'
-            )
-
-        size = float(row[3])
-        price = float(row[4])
-        tick_direction = row[5].strip()
-        if tick_direction == '':
-            raise RuntimeError(
-                f'Bybit CSV tickDirection must be non-empty at line={row_index}'
-            )
-        trd_match_id = row[6].strip()
-        if trd_match_id == '':
-            raise RuntimeError(
-                f'Bybit CSV trdMatchID must be non-empty at line={row_index}'
-            )
-        gross_value = float(row[7])
-        home_notional = float(row[8])
-        foreign_notional = float(row[9])
-        quote_quantity = foreign_notional
-        dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=UTC)
-        trade_id = row_index - 1
-
-        rows.append(
-            (
-                symbol,
-                trade_id,
-                trd_match_id,
-                side,
-                price,
-                size,
-                quote_quantity,
-                timestamp_ms,
-                dt,
-                tick_direction,
-                gross_value,
-                home_notional,
-                foreign_notional,
-            )
-        )
-
-    return rows
-
-
 @asset(
     partitions_def=daily_partitions,
     group_name='bybit_data',
-    description='Downloads, validates, extracts, and loads Bybit BTC spot trades daily data into ClickHouse',
+    description='Downloads, validates, and writes Bybit BTC spot trades into canonical event log',
 )
 def insert_daily_bybit_spot_trades_to_origo(
     context: AssetExecutionContext,
@@ -233,16 +88,15 @@ def insert_daily_bybit_spot_trades_to_origo(
         raise RuntimeError(f'Bybit gzip decompression failed for {filename}') from exc
     csv_sha256 = hashlib.sha256(csv_payload).hexdigest()
 
-    parsed_rows = _parse_bybit_csv_rows_or_raise(
-        csv_payload=csv_payload,
+    events = parse_bybit_spot_trade_csv(
+        csv_content=csv_payload,
         date_str=date_str,
         day_start_ts_utc_ms=day_start_ts_utc_ms,
         day_end_ts_utc_ms=day_end_ts_utc_ms,
     )
-
     integrity_report = run_exchange_integrity_suite_rows(
         dataset='bybit_spot_trades',
-        rows=parsed_rows,
+        rows=[event.to_integrity_tuple() for event in events],
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
@@ -266,97 +120,69 @@ def insert_daily_bybit_spot_trades_to_origo(
             send_receive_timeout=900,
         )
 
-        check_result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-        existing_count = check_result[0][0]
-        if existing_count > 0:
-            context.log.info(
-                f'Found {existing_count} existing Bybit records for {date_str}. Deleting before reinserting.'
-            )
-            client.execute(f"""
-                ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-                DELETE WHERE timestamp >= {day_start_ts_utc_ms}
-                       AND timestamp < {day_end_ts_utc_ms}
-            """)
-
-        client.execute(
-            f"""
-            INSERT INTO {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            (
-                symbol,
-                trade_id,
-                trd_match_id,
-                side,
-                price,
-                size,
-                quote_quantity,
-                timestamp,
-                datetime,
-                tick_direction,
-                gross_value,
-                home_notional,
-                foreign_notional
-            ) SETTINGS async_insert=1, wait_for_async_insert=1
-            VALUES
-            """,
-            parsed_rows,
-            settings={'max_execution_time': 900},
+        write_summary = write_bybit_spot_trades_to_canonical(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            events=events,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-
-        verify_result = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-        inserted_count = verify_result[0][0]
-
-        stats_result = client.execute(f"""
-            SELECT
-                min(trade_id),
-                max(trade_id),
-                avg(price),
-                count(distinct trade_id) % 1000
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE timestamp >= {day_start_ts_utc_ms}
-              AND timestamp < {day_end_ts_utc_ms}
-        """)
-
-        if inserted_count != len(parsed_rows):
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(events):
             raise RuntimeError(
-                'Bybit row count mismatch after insertion: '
-                f'expected={len(parsed_rows)} actual={inserted_count}'
+                'Canonical writer summary mismatch: '
+                f'rows_processed={rows_processed} expected={len(events)}'
+            )
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'Canonical writer summary mismatch: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed}'
             )
 
-        data_verification = {
-            'min_trade_id': stats_result[0][0],
-            'max_trade_id': stats_result[0][1],
-            'avg_price': stats_result[0][2],
-            'id_uniqueness_check': stats_result[0][3],
-        }
+        projected_at_utc = datetime.now(UTC)
+        partition_ids = {event.partition_id for event in events}
+        native_projection_summary = project_bybit_spot_trades_native(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
+        aligned_projection_summary = project_bybit_spot_trades_aligned(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids=partition_ids,
+            run_id=context.run_id,
+            projected_at_utc=projected_at_utc,
+        )
 
         result_data: dict[str, Any] = {
             'date': date_str,
-            'partition_day': date_str,
             'source_filename': filename,
             'source_url': file_url,
-            'rows_inserted': inserted_count,
+            'rows_processed': rows_processed,
+            'rows_inserted': rows_inserted,
+            'rows_duplicate': rows_duplicate,
+            'source_partition_span': {
+                'first_day': min(partition_ids),
+                'last_day': max(partition_ids),
+            },
             'gzip_sha256': gzip_sha256,
             'csv_sha256': csv_sha256,
             'source_etag': source_etag,
-            'data_verification': data_verification,
+            'integrity_report': integrity_report.to_dict(),
+            'native_projection_summary': native_projection_summary.to_dict(),
+            'aligned_projection_summary': aligned_projection_summary.to_dict(),
         }
-
         context.log.info(
             'Successfully processed Bybit daily file: ' + json.dumps(result_data)
         )
         return result_data
     finally:
-        if client:
+        if client is not None:
             try:
                 client.disconnect()
             except Exception as exc:

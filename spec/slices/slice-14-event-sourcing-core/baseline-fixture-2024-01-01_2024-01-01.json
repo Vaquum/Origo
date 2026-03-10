@@ -1,0 +1,77 @@
+{
+  "column_key": {
+    "csv_sha256": "SHA256 checksum slot for source CSV payload by day (reused for synthetic fixture payload checksum in this slice).",
+    "first_event_offset_ms": "Milliseconds from partition start to first event timestamp.",
+    "last_event_offset_ms": "Milliseconds from last event timestamp to partition end.",
+    "quantity_sum": "Sum of trade quantity values in partition rows.",
+    "quote_volume_sum": "Sum of quote volume values in partition rows.",
+    "row_count": "Number of rows in the partition output.",
+    "rows_hash_sha256": "SHA256 hash of canonicalized partition rows for deterministic replay matching.",
+    "zip_sha256": "SHA256 checksum slot for source ZIP payload by day (reused for synthetic fixture payload checksum in this slice)."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "days": [
+      "2024-01-01"
+    ],
+    "windows_utc": {
+      "2024-01-01": {
+        "end_utc": "2024-01-02T00:00:00.000Z",
+        "start_utc": "2024-01-01T00:00:00.000Z"
+      }
+    }
+  },
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 86398000,
+        "quantity_sum": 0.075,
+        "quote_volume_sum": 3075.009,
+        "row_count": 3,
+        "rows_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0"
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 100,
+        "last_event_offset_ms": 86397900,
+        "quantity_sum": 0.075,
+        "quote_volume_sum": 3075.009,
+        "row_count": 5,
+        "rows_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6"
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "2024-01-01": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 86398000,
+        "quantity_sum": 0.075,
+        "quote_volume_sum": 3075.009,
+        "row_count": 3,
+        "rows_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0"
+      }
+    },
+    "native": {
+      "2024-01-01": {
+        "first_event_offset_ms": 100,
+        "last_event_offset_ms": 86397900,
+        "quantity_sum": 0.075,
+        "quote_volume_sum": 3075.009,
+        "row_count": 5,
+        "rows_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6"
+      }
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "ee16902db79dec44252355ff36980fc2b073a90842264a62f5545ba4182417a3",
+      "partition_day": "2024-01-01",
+      "rows_inserted": 5,
+      "source_note": "Synthetic Slice-14 pilot fixture payload checksum reused for csv/zip checksum slots (no external zip/csv artifact).",
+      "zip_sha256": "ee16902db79dec44252355ff36980fc2b073a90842264a62f5545ba4182417a3"
+    }
+  ]
+}

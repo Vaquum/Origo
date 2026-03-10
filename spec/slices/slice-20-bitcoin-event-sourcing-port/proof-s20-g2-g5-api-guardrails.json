@@ -1,0 +1,18 @@
+{
+  "aligned_rights_provisional": true,
+  "aligned_rights_state": "Hosted Allowed",
+  "aligned_status": 200,
+  "guardrails_verified": true,
+  "missing_rights_error_code": "QUERY_RIGHTS_MISSING_STATE",
+  "missing_rights_status": 409,
+  "native_rights_provisional": true,
+  "native_rights_state": "Hosted Allowed",
+  "native_status": 200,
+  "proof_database": "origo_s20_g2_g5_proof",
+  "proof_scope": "Slice 20 S20-G2/S20-G5 Bitcoin freshness warning semantics and rights/legal provisional-metadata behavior with fail-closed rights gate",
+  "strict_error_code": "STRICT_MODE_WARNING_FAILURE",
+  "strict_status": 409,
+  "warning_codes": [
+    "ALIGNED_FRESHNESS_STALE"
+  ]
+}

@@ -27,6 +27,7 @@ from .dagster_graphql import (
 )
 from .etf_warnings import build_etf_daily_quality_warnings
 from .export_audit import get_export_audit_log
+from .export_tags import read_export_tags
 from .fred_alert_audit import emit_fred_warning_alerts_and_audit
 from .fred_warnings import build_fred_publish_freshness_warnings
 from .rights import RightsGateError, resolve_export_rights, resolve_query_rights
@@ -43,9 +44,10 @@ from .schemas import (
     RawQueryRequest,
     RawQueryResponse,
     RawQueryWarning,
+    RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.6')
+app = FastAPI(title='Origo Raw API', version='0.1.14')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',
@@ -355,37 +357,17 @@ def _expect_dict(value: Any, label: str) -> dict[str, Any]:
 
 def _read_export_tags(
     tags: dict[str, str],
-) -> tuple[RawExportMode, ExportFormat, RawQueryDataset]:
-    mode = tags.get('origo.export.mode')
-    export_format = tags.get('origo.export.format')
-    dataset = tags.get('origo.export.dataset')
-
-    if mode not in {'native', 'aligned_1s'}:
-        raise RuntimeError(f'Unsupported or missing export mode tag: {mode}')
-    if export_format not in {'parquet', 'csv'}:
-        raise RuntimeError(f'Unsupported or missing export format tag: {export_format}')
-    if dataset not in {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
-        'okx_spot_trades',
-        'bybit_spot_trades',
-        'etf_daily_metrics',
-        'fred_series_metrics',
-        'bitcoin_block_headers',
-        'bitcoin_block_transactions',
-        'bitcoin_mempool_state',
-        'bitcoin_block_fee_totals',
-        'bitcoin_block_subsidy_schedule',
-        'bitcoin_network_hashrate_estimate',
-        'bitcoin_circulating_supply',
-    }:
-        raise RuntimeError(f'Unsupported or missing export dataset tag: {dataset}')
-    return (
-        cast(RawExportMode, mode),
-        cast(ExportFormat, export_format),
-        cast(RawQueryDataset, dataset),
-    )
+) -> tuple[
+    RawExportMode,
+    ExportFormat,
+    RawQueryDataset,
+    str,
+    RightsState,
+    bool,
+    str | None,
+    int | None,
+]:
+    return read_export_tags(tags)
 
 
 def _read_export_artifact(
@@ -576,7 +558,7 @@ async def query_raw(
                 else None
             )
             try:
-                resolve_query_rights(
+                query_rights_decision = resolve_query_rights(
                     dataset=query_source,
                     auth_token=x_clickhouse_token,
                 )
@@ -584,6 +566,18 @@ async def query_raw(
                 raise HTTPException(
                     status_code=409,
                     detail={'code': exc.code, 'message': str(exc)},
+                ) from exc
+            try:
+                query_rights_state, query_rights_provisional = (
+                    query_rights_decision.response_metadata()
+                )
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        'code': 'QUERY_RIGHTS_METADATA_ERROR',
+                        'message': str(exc),
+                    },
                 ) from exc
             try:
                 if request.mode == 'native':
@@ -766,6 +760,11 @@ async def query_raw(
             envelope['freshness'] = (
                 freshness.model_dump() if freshness is not None else None
             )
+            envelope['sources'] = request.sources
+            envelope['view_id'] = request.view_id
+            envelope['view_version'] = request.view_version
+            envelope['rights_state'] = query_rights_state
+            envelope['rights_provisional'] = query_rights_provisional
             return RawQueryResponse.model_validate(envelope)
     finally:
         if request_is_queued:
@@ -821,12 +820,13 @@ async def submit_raw_export(
         _audit_or_raise_http(
             event_type='export_submit_rejected',
             export_id=None,
-            payload={
-                **audit_payload,
-                'rights_state': rights_decision.rights_state,
-                'failure_code': 'EXPORT_AUTH_TOKEN_UNSUPPORTED',
-                'failure_message': (
-                    'auth_token is not supported for export dispatch in this slice'
+                payload={
+                    **audit_payload,
+                    'rights_state': rights_decision.rights_state,
+                    'rights_provisional': rights_decision.rights_provisional,
+                    'failure_code': 'EXPORT_AUTH_TOKEN_UNSUPPORTED',
+                    'failure_message': (
+                        'auth_token is not supported for export dispatch in this slice'
                 ),
             },
         )
@@ -846,6 +846,7 @@ async def submit_raw_export(
                 payload={
                     **audit_payload,
                     'rights_state': rights_decision.rights_state,
+                    'rights_provisional': rights_decision.rights_provisional,
                     'failure_code': 'EXPORT_QUEUE_LIMIT_REACHED',
                     'failure_message': 'Export queue limit reached',
                 },
@@ -871,6 +872,7 @@ async def submit_raw_export(
                     request_payload=request_payload,
                     source=rights_decision.source,
                     rights_state=rights_decision.rights_state,
+                    rights_provisional=rights_decision.rights_provisional,
                 )
             except DagsterGraphQLError as exc:
                 _audit_or_raise_http(
@@ -879,6 +881,7 @@ async def submit_raw_export(
                     payload={
                         **audit_payload,
                         'rights_state': rights_decision.rights_state,
+                        'rights_provisional': rights_decision.rights_provisional,
                         'failure_code': 'EXPORT_DISPATCH_ERROR',
                         'failure_message': str(exc),
                     },
@@ -901,6 +904,7 @@ async def submit_raw_export(
         payload={
             **audit_payload,
             'rights_state': rights_decision.rights_state,
+            'rights_provisional': rights_decision.rights_provisional,
             'source': rights_decision.source,
             'status': status,
         },
@@ -911,6 +915,10 @@ async def submit_raw_export(
         status=status,
         submitted_at=run_snapshot.creation_time,
         status_path=f'/v1/raw/export/{run_snapshot.run_id}',
+        rights_state=rights_decision.rights_state,
+        rights_provisional=rights_decision.rights_provisional,
+        view_id=request.view_id,
+        view_version=request.view_version,
     )
 
 
@@ -936,7 +944,16 @@ async def get_raw_export_status(
         ) from exc
 
     try:
-        mode, export_format, dataset = _read_export_tags(run_snapshot.tags)
+        (
+            mode,
+            export_format,
+            dataset,
+            source,
+            rights_state,
+            rights_provisional,
+            view_id,
+            view_version,
+        ) = _read_export_tags(run_snapshot.tags)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=503,
@@ -993,6 +1010,9 @@ async def get_raw_export_status(
     if should_emit_transition_event:
         transition_payload: dict[str, Any] = {
             'dataset': dataset,
+            'source': source,
+            'rights_state': rights_state,
+            'rights_provisional': rights_provisional,
             'format': export_format,
             'from_status': previous_status,
             'to_status': status,
@@ -1013,6 +1033,11 @@ async def get_raw_export_status(
         mode=mode,
         format=export_format,
         dataset=dataset,
+        source=source,
+        rights_state=rights_state,
+        rights_provisional=rights_provisional,
+        view_id=view_id,
+        view_version=view_version,
         submitted_at=run_snapshot.creation_time,
         updated_at=run_snapshot.update_time,
         artifact=artifact,

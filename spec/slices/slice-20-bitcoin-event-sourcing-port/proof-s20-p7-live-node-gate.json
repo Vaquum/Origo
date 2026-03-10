@@ -1,0 +1,16 @@
+{
+  "blocks": 940169,
+  "headers": 940169,
+  "ibd": false,
+  "live_node_gate_verified": true,
+  "node_contract": {
+    "best_block_hash": "00000000000000000000c9b24bfd4a71eac7a955b4dab98f8656fadaa5201434",
+    "best_block_height": 940169,
+    "chain": "main"
+  },
+  "parent_hash": "0000000000000000000053b2a3c512d4dfb108dc7aa0a4ac9794f2747046454f",
+  "parent_height": 940168,
+  "proof_scope": "Slice 20 S20-P7 live-node gate for Bitcoin event-sourcing proof (non-IBD precondition and live header linkage checks)",
+  "tip_hash": "00000000000000000000c9b24bfd4a71eac7a955b4dab98f8656fadaa5201434",
+  "tip_height": 940169
+}

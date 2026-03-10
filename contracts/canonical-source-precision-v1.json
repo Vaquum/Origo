@@ -1,0 +1,435 @@
+{
+  "registry_version": 1,
+  "entries": [
+    {
+      "source_id": "binance",
+      "stream_id": "futures_trades",
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Futures trade identifier."
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Futures trade execution price."
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Futures trade quantity."
+        },
+        {
+          "field_path": "quote_qty",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Futures trade quote-asset quantity."
+        }
+      ]
+    },
+    {
+      "source_id": "binance",
+      "stream_id": "spot_agg_trades",
+      "numeric_fields": [
+        {
+          "field_path": "agg_trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Exchange aggregate trade identifier."
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Aggregate trade price."
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Aggregate trade quantity."
+        },
+        {
+          "field_path": "first_trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "First underlying trade identifier in aggregate trade."
+        },
+        {
+          "field_path": "last_trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Last underlying trade identifier in aggregate trade."
+        }
+      ]
+    },
+    {
+      "source_id": "binance",
+      "stream_id": "spot_trades",
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Exchange trade identifier."
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Trade execution price."
+        },
+        {
+          "field_path": "qty",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Base-asset trade quantity."
+        },
+        {
+          "field_path": "quote_qty",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "Quote-asset trade quantity."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_fee_totals",
+      "numeric_fields": [
+        {
+          "field_path": "block_height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height."
+        },
+        {
+          "field_path": "block_timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "fee_total_btc",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Total transaction fees in BTC for block."
+        },
+        {
+          "field_path": "metric_value",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Canonical aligned metric value for block fee totals."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_headers",
+      "numeric_fields": [
+        {
+          "field_path": "height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height."
+        },
+        {
+          "field_path": "version",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block version."
+        },
+        {
+          "field_path": "nonce",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block nonce."
+        },
+        {
+          "field_path": "difficulty",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Bitcoin block difficulty."
+        },
+        {
+          "field_path": "timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_subsidy_schedule",
+      "numeric_fields": [
+        {
+          "field_path": "block_height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height."
+        },
+        {
+          "field_path": "block_timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "halving_interval",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin halving interval index."
+        },
+        {
+          "field_path": "subsidy_sats",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block subsidy in satoshis."
+        },
+        {
+          "field_path": "subsidy_btc",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Bitcoin block subsidy in BTC."
+        },
+        {
+          "field_path": "metric_value",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Canonical aligned metric value for subsidy."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_transactions",
+      "numeric_fields": [
+        {
+          "field_path": "block_height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height for transaction."
+        },
+        {
+          "field_path": "block_timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "transaction_index",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Transaction index within block."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_circulating_supply",
+      "numeric_fields": [
+        {
+          "field_path": "block_height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height."
+        },
+        {
+          "field_path": "block_timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "circulating_supply_sats",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin circulating supply in satoshis."
+        },
+        {
+          "field_path": "circulating_supply_btc",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Bitcoin circulating supply in BTC."
+        },
+        {
+          "field_path": "metric_value",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Canonical aligned metric value for circulating supply."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_mempool_state",
+      "numeric_fields": [
+        {
+          "field_path": "snapshot_at_unix_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Mempool snapshot timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "fee_rate_sat_vb",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Mempool transaction fee rate in sat/vB."
+        },
+        {
+          "field_path": "vsize",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Mempool transaction virtual size in bytes."
+        },
+        {
+          "field_path": "first_seen_timestamp",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Mempool transaction first-seen timestamp (epoch seconds)."
+        }
+      ]
+    },
+    {
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_network_hashrate_estimate",
+      "numeric_fields": [
+        {
+          "field_path": "block_height",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block height."
+        },
+        {
+          "field_path": "block_timestamp_ms",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bitcoin block timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "difficulty",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Bitcoin block difficulty."
+        },
+        {
+          "field_path": "observed_interval_seconds",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Observed block interval in seconds."
+        },
+        {
+          "field_path": "hashrate_hs",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Estimated Bitcoin network hashrate in H/s."
+        },
+        {
+          "field_path": "metric_value",
+          "numeric_kind": "decimal",
+          "scale": 18,
+          "description": "Canonical aligned metric value for hashrate."
+        }
+      ]
+    },
+    {
+      "source_id": "bybit",
+      "stream_id": "bybit_spot_trades",
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bybit trade identifier."
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit trade execution price."
+        },
+        {
+          "field_path": "size",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit base-asset trade quantity."
+        },
+        {
+          "field_path": "quote_quantity",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit quote-asset trade quantity."
+        },
+        {
+          "field_path": "timestamp",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "Bybit event timestamp in epoch milliseconds."
+        },
+        {
+          "field_path": "gross_value",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit gross value."
+        },
+        {
+          "field_path": "home_notional",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit home notional."
+        },
+        {
+          "field_path": "foreign_notional",
+          "numeric_kind": "decimal",
+          "scale": 15,
+          "description": "Bybit foreign notional."
+        }
+      ]
+    },
+    {
+      "source_id": "etf",
+      "stream_id": "etf_daily_metrics",
+      "numeric_fields": []
+    },
+    {
+      "source_id": "fred",
+      "stream_id": "fred_series_metrics",
+      "numeric_fields": []
+    },
+    {
+      "source_id": "okx",
+      "stream_id": "okx_spot_trades",
+      "numeric_fields": [
+        {
+          "field_path": "trade_id",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "OKX trade identifier."
+        },
+        {
+          "field_path": "price",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "OKX trade execution price."
+        },
+        {
+          "field_path": "size",
+          "numeric_kind": "decimal",
+          "scale": 8,
+          "description": "OKX base-asset trade quantity."
+        },
+        {
+          "field_path": "timestamp",
+          "numeric_kind": "int",
+          "scale": null,
+          "description": "OKX event timestamp in epoch milliseconds."
+        }
+      ]
+    }
+  ]
+}

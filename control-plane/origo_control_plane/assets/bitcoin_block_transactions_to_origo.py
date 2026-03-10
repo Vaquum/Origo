@@ -18,8 +18,15 @@ from origo_control_plane.bitcoin_core import (
     validate_bitcoin_core_node_contract_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.utils.bitcoin_canonical_event_ingest import (
+    BitcoinCanonicalEvent,
+    write_bitcoin_events_to_canonical,
+)
 from origo_control_plane.utils.bitcoin_integrity import (
     run_bitcoin_block_transaction_integrity,
+)
+from origo_control_plane.utils.bitcoin_native_projector import (
+    project_bitcoin_block_transactions_native,
 )
 
 _HASH_HEX_64_PATTERN = re.compile(r'^[0-9a-f]{64}$')
@@ -33,7 +40,6 @@ class _ClickHouseTarget:
     user: str
     password: str
     database: str
-    table: str
 
 
 def _resolve_clickhouse_target() -> _ClickHouseTarget:
@@ -44,7 +50,6 @@ def _resolve_clickhouse_target() -> _ClickHouseTarget:
         user=settings.user,
         password=settings.password,
         database=settings.database,
-        table='bitcoin_block_transactions',
     )
 
 
@@ -528,8 +533,19 @@ def insert_bitcoin_block_transactions_to_origo(
         rows=[row.as_canonical_map() for row in rows]
     )
     rows_sha256 = _canonical_rows_sha256(rows)
+    canonical_events = [
+        BitcoinCanonicalEvent(
+            stream_id='bitcoin_block_transactions',
+            partition_id=row.datetime_utc.date().isoformat(),
+            source_offset_or_equivalent=(
+                f'{row.block_height}:{row.transaction_index}:{row.txid}'
+            ),
+            source_event_time_utc=row.datetime_utc,
+            payload=row.as_canonical_map(),
+        )
+        for row in rows
+    ]
 
-    insert_rows = [row.as_insert_row() for row in rows]
     client: ClickhouseClient | None = None
     try:
         client = ClickhouseClient(
@@ -541,59 +557,48 @@ def insert_bitcoin_block_transactions_to_origo(
             compression=True,
             send_receive_timeout=900,
         )
-        client.execute(f"""
-            ALTER TABLE {clickhouse_target.database}.{clickhouse_target.table}
-            DELETE WHERE block_height >= {settings.headers_start_height}
-                   AND block_height <= {settings.headers_end_height}
-        """)
-        client.execute(
-            f"""
-            INSERT INTO {clickhouse_target.database}.{clickhouse_target.table}
-            (
-                block_height,
-                block_hash,
-                block_timestamp,
-                transaction_index,
-                txid,
-                inputs,
-                outputs,
-                values,
-                scripts,
-                witness_data,
-                coinbase,
-                datetime,
-                source_chain
-            ) SETTINGS async_insert=1, wait_for_async_insert=1
-            VALUES
-            """,
-            insert_rows,
-            settings={'max_execution_time': 900},
+        write_summary = write_bitcoin_events_to_canonical(
+            client=client,
+            database=clickhouse_target.database,
+            events=canonical_events,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-        verify_rows = client.execute(f"""
-            SELECT count(*)
-            FROM {clickhouse_target.database}.{clickhouse_target.table}
-            WHERE block_height >= {settings.headers_start_height}
-              AND block_height <= {settings.headers_end_height}
-        """)
-        inserted_count = _require_int(
-            cast(list[Any], verify_rows)[0][0],
-            label='inserted_count',
-            minimum=0,
-        )
-        if inserted_count != len(rows):
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(canonical_events):
             raise RuntimeError(
-                'Bitcoin block transaction row count mismatch after insertion: '
-                f'expected={len(rows)} actual={inserted_count}'
+                'Bitcoin block-transaction canonical writer summary mismatch: '
+                f'rows_processed={rows_processed} expected={len(canonical_events)}'
             )
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'Bitcoin block-transaction canonical writer summary mismatch: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed}'
+            )
+
+        native_projection_summary = project_bitcoin_block_transactions_native(
+            client=client,
+            database=clickhouse_target.database,
+            partition_ids={event.partition_id for event in canonical_events},
+            run_id=context.run_id,
+            projected_at_utc=datetime.now(UTC),
+        )
+
         result_data: dict[str, Any] = {
             'range_start_height': settings.headers_start_height,
             'range_end_height': settings.headers_end_height,
             'blocks_processed': (
                 settings.headers_end_height - settings.headers_start_height + 1
             ),
-            'rows_inserted': inserted_count,
+            'rows_processed': rows_processed,
+            'rows_inserted': rows_inserted,
+            'rows_duplicate': rows_duplicate,
             'rows_sha256': rows_sha256,
             'integrity_report': integrity_report.to_dict(),
+            'native_projection_summary': native_projection_summary.to_dict(),
             'source_chain': node_contract.chain,
             'node_best_block_height': node_contract.best_block_height,
             'node_best_block_hash': node_contract.best_block_hash,

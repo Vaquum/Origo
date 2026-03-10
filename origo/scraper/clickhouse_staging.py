@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from clickhouse_connect import get_client as _raw_get_client
+from clickhouse_driver import Client as ClickHouseNativeClient
 
 from origo.query.native_core import resolve_clickhouse_http_settings
 
 from .contracts import NormalizedMetricRecord
+from .etf_canonical_event_ingest import write_etf_normalized_records_to_canonical
 from .normalize import normalized_records_to_json_rows
 
 get_client = cast(Any, _raw_get_client)
@@ -30,6 +34,40 @@ _INSERT_COLUMN_NAMES = [
     'provenance_json',
     'ingested_at_utc',
 ]
+
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None or value.strip() == '':
+        raise RuntimeError(f'{name} must be set and non-empty')
+    return value.strip()
+
+
+def _require_int_env(name: str) -> int:
+    raw = _require_env(name)
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got '{raw}'") from exc
+
+
+@dataclass(frozen=True)
+class _ClickHouseNativeSettings:
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
+
+
+def _resolve_clickhouse_native_settings() -> _ClickHouseNativeSettings:
+    return _ClickHouseNativeSettings(
+        host=_require_env('CLICKHOUSE_HOST'),
+        port=_require_int_env('CLICKHOUSE_PORT'),
+        user=_require_env('CLICKHOUSE_USER'),
+        password=_require_env('CLICKHOUSE_PASSWORD'),
+        database=_require_env('CLICKHOUSE_DATABASE'),
+    )
 
 
 def _ensure_staging_table(client: Any, database: str) -> None:
@@ -118,6 +156,7 @@ def persist_normalized_records_to_clickhouse(
     *,
     records: list[NormalizedMetricRecord],
     auth_token: str | None = None,
+    run_id: str | None = None,
 ) -> int:
     if len(records) == 0:
         return 0
@@ -135,6 +174,29 @@ def persist_normalized_records_to_clickhouse(
     if is_etf_batch:
         _validate_etf_daily_records(records)
 
+    ingested_at_utc = datetime.now(UTC)
+    if is_etf_batch:
+        native_settings = _resolve_clickhouse_native_settings()
+        native_client = ClickHouseNativeClient(
+            host=native_settings.host,
+            port=native_settings.port,
+            user=native_settings.user,
+            password=native_settings.password,
+            database=native_settings.database,
+            compression=True,
+        )
+        try:
+            write_summary = write_etf_normalized_records_to_canonical(
+                client=native_client,
+                database=native_settings.database,
+                records=records,
+                run_id=run_id,
+                ingested_at_utc=ingested_at_utc,
+            )
+        finally:
+            native_client.disconnect()
+        return write_summary.rows_inserted
+
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
     client = get_client(
         host=settings.host,
@@ -146,17 +208,8 @@ def persist_normalized_records_to_clickhouse(
     )
 
     rows = normalized_records_to_json_rows(records=records)
-    ingested_at_utc = datetime.now(UTC)
 
     try:
-        if is_etf_batch:
-            return _insert_rows(
-                client=client,
-                table=f'{settings.database}.{_ETF_DAILY_TABLE}',
-                rows=rows,
-                ingested_at_utc=ingested_at_utc,
-            )
-
         _ensure_staging_table(client=client, database=settings.database)
         return _insert_rows(
             client=client,

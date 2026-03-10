@@ -44,6 +44,7 @@ def run_s6_g4_fred_alerts_audit_proof() -> dict[str, Any]:
         base_env = {
             'ORIGO_FRED_ALERT_AUDIT_LOG_PATH': str(audit_log_path),
             'ORIGO_FRED_DISCORD_TIMEOUT_SECONDS': '10',
+            'ORIGO_AUDIT_LOG_RETENTION_DAYS': '365',
         }
 
         original_env = _set_env(base_env)

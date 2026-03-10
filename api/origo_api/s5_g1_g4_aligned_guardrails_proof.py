@@ -93,6 +93,7 @@ def run_s5_g1_g4_proof() -> dict[str, Any]:
         os.environ['ORIGO_EXPORT_MAX_QUEUE'] = '8'
         os.environ['ORIGO_SOURCE_RIGHTS_MATRIX_PATH'] = str(rights_matrix_path)
         os.environ['ORIGO_EXPORT_AUDIT_LOG_PATH'] = str(export_audit_log_path)
+        os.environ['ORIGO_AUDIT_LOG_RETENTION_DAYS'] = '365'
         os.environ['ORIGO_ETF_QUERY_SERVING_STATE'] = 'promoted'
         os.environ['ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS'] = '2'
         os.environ['ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS'] = '1'

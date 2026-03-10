@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-10
 - Slice reference: S2 (`S2-C1` to `S2-C6`, `S2-G1` to `S2-G3`)
 
 ## Purpose and scope
@@ -53,6 +53,7 @@
 - `ORIGO_EXPORT_ROOT_DIR`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
 - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 
 ## Minimal example
 - Submit:

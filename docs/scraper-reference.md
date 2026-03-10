@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-10
 - Slice/version reference: S3, S4 (platform v0.1)
 
 ## Purpose and scope
@@ -67,6 +67,7 @@
 - `ORIGO_SCRAPER_FETCH_BACKOFF_INITIAL_SECONDS`
 - `ORIGO_SCRAPER_FETCH_BACKOFF_MULTIPLIER`
 - `ORIGO_SCRAPER_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 - `CLICKHOUSE_HOST`
 - `CLICKHOUSE_HTTP_PORT`
 - `CLICKHOUSE_USER`

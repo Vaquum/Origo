@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-10
 - Slice reference: S6 (`S6-G1`, `S6-G2`, `S6-G3`, `S6-G4`)
 - Version reference: `control-plane v1.2.49`
 
@@ -67,6 +67,7 @@
   - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
 - Alert + audit:
   - `ORIGO_FRED_ALERT_AUDIT_LOG_PATH`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
   - `ORIGO_FRED_DISCORD_WEBHOOK_URL`
   - `ORIGO_FRED_DISCORD_TIMEOUT_SECONDS`
 

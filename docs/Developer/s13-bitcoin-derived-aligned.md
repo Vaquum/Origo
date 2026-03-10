@@ -2,9 +2,9 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
+- Last updated: 2026-03-10
 - Slice reference: S13 (`S13-C5`, `S13-C6`, `S13-C7`, `S13-P2`, `S13-P4`)
-- Version reference: `Origo API v0.1.5`, `origo-control-plane v1.2.55`
+- Version reference: `Origo API v0.1.6`, `origo-control-plane v1.2.56`
 
 ## Purpose and scope
 - Defines deterministic derived metric pipelines and aligned query/export integration for:
@@ -72,6 +72,7 @@
   - `ORIGO_INTERNAL_API_KEY`
   - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
   - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
   - `ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS`
 - ClickHouse:
   - `CLICKHOUSE_HOST`

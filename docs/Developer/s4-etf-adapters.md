@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-06
+- Last updated: 2026-03-10
 - Slice reference: S4 (`S4-C1` to `S4-C3`)
 
 ## Purpose and scope
@@ -62,6 +62,7 @@
 - `ORIGO_OBJECT_STORE_*`
 - `ORIGO_SCRAPER_FETCH_*`
 - `ORIGO_SCRAPER_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 - `CLICKHOUSE_*`
 
 ## Minimal example

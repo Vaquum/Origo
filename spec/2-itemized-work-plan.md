@@ -29,7 +29,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ### Guardrails
 - [x] `S0-G1` Add migration audit record template and required run notes.
 - [x] `S0-G2` Enforce TLS on authenticated service links introduced in this slice. (crossed over for now: TLS termination deferred to Cloudflare layer)
-- [ ] `S0-G3` Enable immutable audit-log sink with 1-year retention policy.
+- [x] `S0-G3` Enable immutable audit-log sink with 1-year retention policy.
 - [x] `S0-G4` Adopt `uv.lock` for deterministic Python dependency resolution in `control-plane`.
 - [x] `S0-G5` Scaffold SQL migration framework (ordered files + ledger + checksums + runner).
 - [x] `S0-G6` Enforce env contract (`.env.example` source of truth + fail-loud required vars + no deployment defaults in runtime paths).

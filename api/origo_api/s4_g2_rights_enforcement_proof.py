@@ -63,6 +63,9 @@ def run_s4_g2_rights_enforcement_proof() -> dict[str, Any]:
             'ORIGO_EXPORT_MAX_CONCURRENCY': os.environ.get('ORIGO_EXPORT_MAX_CONCURRENCY'),
             'ORIGO_EXPORT_MAX_QUEUE': os.environ.get('ORIGO_EXPORT_MAX_QUEUE'),
             'ORIGO_EXPORT_AUDIT_LOG_PATH': os.environ.get('ORIGO_EXPORT_AUDIT_LOG_PATH'),
+            'ORIGO_AUDIT_LOG_RETENTION_DAYS': os.environ.get(
+                'ORIGO_AUDIT_LOG_RETENTION_DAYS'
+            ),
         }
         query_ingest_only_code: str | None = None
         query_hosted_allowed_ok = False
@@ -127,6 +130,7 @@ def run_s4_g2_rights_enforcement_proof() -> dict[str, Any]:
             os.environ['ORIGO_EXPORT_MAX_CONCURRENCY'] = '2'
             os.environ['ORIGO_EXPORT_MAX_QUEUE'] = '8'
             os.environ['ORIGO_EXPORT_AUDIT_LOG_PATH'] = str(export_audit_log_path)
+            os.environ['ORIGO_AUDIT_LOG_RETENTION_DAYS'] = '365'
 
             main_module = importlib.import_module('api.origo_api.main')
             reloaded_main_module = importlib.reload(main_module)

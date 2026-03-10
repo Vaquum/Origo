@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-05
+- Last updated: 2026-03-10
 - Slice reference: S2 (`S2-G1`, `S2-G2`, `S2-G3`)
 
 ## Purpose and scope
@@ -51,6 +51,7 @@
 ## Determinism and replay notes
 - Audit log is hash-chained and sequence-validated before every append.
 - Any chain mutation (sequence/hash mismatch) fails loudly and blocks writes.
+- Each audit log has a state sidecar (`<log>.state.json`) that enforces append-only continuity and retention policy metadata.
 - Guardrail proof artifact: `spec/slices/slice-2-raw-export-native/guardrails-proof.json`.
 
 ## Environment and required config
@@ -58,6 +59,7 @@
 - `ORIGO_EXPORT_MAX_QUEUE`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
 - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` (must be `>=365`)
 - `ORIGO_EXPORT_ROOT_DIR`
 
 ## Minimal example

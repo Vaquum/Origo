@@ -16,6 +16,9 @@
 - Added `uv.lock` workflow for deterministic dependency resolution in control-plane.
 - Added SQL migration scaffold and ledger-enforced migration runner.
 - Enforced root env contract (`.env.example`) and fail-loud runtime env checks.
+- Implemented shared immutable audit sink for export/FRED/scraper logs with append-only hash chain, continuity state sidecar, and retention policy contract.
+- Generated S0-G3 proof artifact:
+  - `spec/slices/slice-0-bootstrap/guardrails-proof-s0-g3-immutable-audit.json`
 - Generated/updated baseline fixture artifact:
   - `spec/slices/slice-0-bootstrap/baseline-fixture-2017-08-17_2017-08-19.json`
 
@@ -25,10 +28,9 @@
 
 ## Deferred guardrails
 - `S0-G2` TLS enforcement deferred (crossed over in planning; TLS to be handled at Cloudflare layer later).
-- `S0-G3` immutable audit-log sink remains open.
 
 ## Closeout confirmation
 - Work-plan checkboxes updated: yes (`spec/2-itemized-work-plan.md` updated for Slice 0 status decisions).
-- Version bumped: previously completed during Slice 0 implementation; no additional version bump in this retrospective formatting pass.
-- Changelog updated: previously completed during Slice 0 implementation; no additional changelog entry in this retrospective formatting pass.
-- `.env.example` updated/reviewed: yes (env contract exists; deployment-specific hardcoding removed from active runtime paths).
+- Version bumped: yes (Origo API `0.1.6`, control-plane `1.2.56`).
+- Changelog updated: yes (2026-03-10 entry for S0-G3 immutable audit sink closeout).
+- `.env.example` updated/reviewed: yes (`ORIGO_AUDIT_LOG_RETENTION_DAYS` added; audit sink env contract enforced fail-loud).

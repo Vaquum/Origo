@@ -1,0 +1,24 @@
+{
+  "export": {
+    "event_count": 2,
+    "event_hashes": [
+      "be5842e55963acd2d3667ec22448890951b788efaea8b9f550c9d6eac989bdca",
+      "232f07493d724ab45979f2d47389eb376e3c561e69d1a74125112eb0f8aa3c49"
+    ],
+    "state_retention_days": 365
+  },
+  "fred_alerts": {
+    "event_count": 1,
+    "event_hash": "baf88d7e0f86c0d5b6f98a5cbcd855988e568577be8429f63e67ad9162c73327",
+    "state_retention_days": 365
+  },
+  "invalid_retention_error": "ORIGO_AUDIT_LOG_RETENTION_DAYS must be >= 365 (1-year minimum retention)",
+  "proof_scope": "Slice 0 S0-G3 immutable audit-log sink with 1-year retention",
+  "retention_days": 365,
+  "scraper": {
+    "event_count": 1,
+    "event_hash": "5bda39202fe149f26d9ddb3ef47b429d0ee7be6befd7d0992414ec3b321ef8ed",
+    "state_retention_days": 365
+  },
+  "tamper_detection_error": "export audit mutation detected at sequence 2: expected_hash=232f07493d724ab45979f2d47389eb376e3c561e69d1a74125112eb0f8aa3c49 got=None"
+}

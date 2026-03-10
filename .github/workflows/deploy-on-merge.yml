@@ -330,44 +330,24 @@ jobs:
             ' /opt/origo/deploy/.env
           }
 
-          bitcoin_core_rpc_url="$(read_env_value ORIGO_BITCOIN_CORE_RPC_URL || true)"
-          if [[ -z "${bitcoin_core_rpc_url}" ]]; then
-            bitcoin_core_rpc_url='http://bitcoin-core:8332'
-          fi
-
-          bitcoin_core_rpc_user="$(read_env_value ORIGO_BITCOIN_CORE_RPC_USER || true)"
-          if [[ -z "${bitcoin_core_rpc_user}" ]]; then
-            bitcoin_core_rpc_user='origo-bitcoin-rpc'
-          fi
-
-          bitcoin_core_rpc_password="$(read_env_value ORIGO_BITCOIN_CORE_RPC_PASSWORD || true)"
-          if [[ -z "${bitcoin_core_rpc_password}" ]]; then
-            if ! command -v openssl >/dev/null 2>&1; then
-              echo "ERROR: openssl is required to generate ORIGO_BITCOIN_CORE_RPC_PASSWORD." >&2
+          require_env_file_value() {
+            local key="$1"
+            local value
+            value="$(read_env_value "${key}" || true)"
+            if [[ -z "${value}" ]]; then
+              echo "ERROR: ${key} must be present and non-empty in /opt/origo/deploy/.env." >&2
               exit 1
             fi
-            bitcoin_core_rpc_password="$(openssl rand -hex 32)"
-          fi
+            printf '%s' "${value}"
+          }
 
-          bitcoin_core_network="$(read_env_value ORIGO_BITCOIN_CORE_NETWORK || true)"
-          if [[ -z "${bitcoin_core_network}" ]]; then
-            bitcoin_core_network='main'
-          fi
-
-          bitcoin_core_rpc_timeout_seconds="$(read_env_value ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS || true)"
-          if [[ -z "${bitcoin_core_rpc_timeout_seconds}" ]]; then
-            bitcoin_core_rpc_timeout_seconds='30'
-          fi
-
-          bitcoin_core_headers_start_height="$(read_env_value ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT || true)"
-          if [[ -z "${bitcoin_core_headers_start_height}" ]]; then
-            bitcoin_core_headers_start_height='0'
-          fi
-
-          bitcoin_core_headers_end_height="$(read_env_value ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT || true)"
-          if [[ -z "${bitcoin_core_headers_end_height}" ]]; then
-            bitcoin_core_headers_end_height='100'
-          fi
+          bitcoin_core_rpc_url="$(require_env_file_value ORIGO_BITCOIN_CORE_RPC_URL)"
+          bitcoin_core_rpc_user="$(require_env_file_value ORIGO_BITCOIN_CORE_RPC_USER)"
+          bitcoin_core_rpc_password="$(require_env_file_value ORIGO_BITCOIN_CORE_RPC_PASSWORD)"
+          bitcoin_core_network="$(require_env_file_value ORIGO_BITCOIN_CORE_NETWORK)"
+          bitcoin_core_rpc_timeout_seconds="$(require_env_file_value ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS)"
+          bitcoin_core_headers_start_height="$(require_env_file_value ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT)"
+          bitcoin_core_headers_end_height="$(require_env_file_value ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT)"
 
           bitcoin_core_data_dir="$(read_env_value ORIGO_BITCOIN_CORE_DATA_DIR || true)"
           if [[ -z "${bitcoin_core_data_dir}" ]]; then

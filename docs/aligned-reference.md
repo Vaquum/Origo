@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-08
-- Slice/version reference: S5, S6, S8, S11 (API v0.1.4)
+- Slice/version reference: S5, S6, S8, S11, S13 (API v0.1.5)
 
 ## Purpose and scope
 - User-facing reference for `mode=aligned_1s` query and export behavior.
@@ -20,6 +20,10 @@
     - `bybit_spot_trades`
     - `etf_daily_metrics`
     - `fred_series_metrics`
+    - `bitcoin_block_fee_totals`
+    - `bitcoin_block_subsidy_schedule`
+    - `bitcoin_network_hashrate_estimate`
+    - `bitcoin_circulating_supply`
   - one window selector: `time_range | n_rows | n_random`
   - optional `fields`, `filters`, `strict`
 - Export endpoint: `POST /v1/raw/export`
@@ -35,7 +39,7 @@
 - Exchange aligned fields (Binance, OKX, and Bybit):
   - `open_price`, `high_price`, `low_price`, `close_price`
   - `quantity_sum`, `quote_volume_sum`, `trade_count`
-- ETF/FRED aligned metric fields:
+- ETF/FRED/Bitcoin-derived aligned metric fields:
   - `source_id`, `metric_name`, `metric_unit`
   - value channels (`metric_value_*`)
   - `provenance_json`, `records_in_bucket`, `latest_ingested_at_utc`
@@ -69,6 +73,7 @@
   - `spec/slices/slice-6-fred-integration/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
+  - `spec/slices/slice-13-bitcoin-core-signals/`
 
 ## Environment variables and required config
 - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
@@ -88,3 +93,5 @@
   - `{ "mode":"aligned_1s", "sources":["bybit_spot_trades"], "time_range":["2024-01-02T00:00:00Z","2024-01-03T00:00:00Z"], "fields":["aligned_at_utc","open_price","close_price","trade_count"], "strict":false }`
 - ETF aligned query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "n_rows":100, "fields":["aligned_at_utc","source_id","metric_name","metric_value_float"], "strict":false }`
+- Bitcoin derived aligned query:
+  - `{ "mode":"aligned_1s", "sources":["bitcoin_circulating_supply"], "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "fields":["aligned_at_utc","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "strict":false }`

@@ -1,0 +1,43 @@
+{
+  "datasets": {
+    "bitcoin_block_headers": {
+      "integrity": {
+        "anomaly_checks_performed": 9,
+        "dataset": "bitcoin_block_headers",
+        "max_height": 1,
+        "min_height": 0,
+        "rows_checked": 2
+      },
+      "row_count": 2,
+      "rows_hash_sha256": "147a889bee994f7c78fa4edc95022c35f35536dee2379bdff51db3e9484c6a4e"
+    },
+    "bitcoin_block_transactions": {
+      "integrity": {
+        "anomaly_checks_performed": 62,
+        "dataset": "bitcoin_block_transactions",
+        "max_height": 1,
+        "min_height": 0,
+        "rows_checked": 4
+      },
+      "row_count": 4,
+      "rows_hash_sha256": "62a768d445bf0cab6100377fcdc6198fc366b59258d25d585a970a22707d7577"
+    },
+    "bitcoin_mempool_state": {
+      "integrity": {
+        "anomaly_checks_performed": 14,
+        "dataset": "bitcoin_mempool_state",
+        "max_height": null,
+        "min_height": null,
+        "rows_checked": 2
+      },
+      "row_count": 2,
+      "rows_hash_sha256": "3ffa8f07d854e414288819ef7bc35846357ab94df8e7534e14bec9c411fc0464"
+    }
+  },
+  "generated_at_utc": "2026-03-08T14:10:01.165Z",
+  "proof_scope": "Slice 13 P1 stream acceptance (fixture-based)",
+  "window": {
+    "end_utc": "2024-04-22T00:00:00.000Z",
+    "start_utc": "2024-04-20T00:00:00.000Z"
+  }
+}

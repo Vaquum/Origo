@@ -1,0 +1,66 @@
+## What was done
+- Implemented Bitcoin Core V1 capability across stream and derived datasets:
+  - RPC connector and node contract checks (`unpruned`, chain match, sync readiness).
+  - Ingest assets for headers, transactions, and mempool snapshots.
+  - Derived assets for fee totals, subsidy schedule, hashrate estimate, and circulating supply.
+  - Migration-backed ClickHouse schemas `0010` through `0016`.
+- Implemented native + aligned integration for Slice-13 datasets:
+  - native query planner: `origo/query/bitcoin_native.py`
+  - aligned derived planner/materialization: `origo/query/bitcoin_derived_aligned_1s.py`
+  - aligned planner integration: `origo/query/aligned_core.py`
+  - API/export dataset contract integration: `api/origo_api/*`, `origo/data/_internal/generic_endpoints.py`, `control-plane/origo_control_plane/jobs/raw_export_native.py`
+- Added rights/legal + integrity guardrails:
+  - rights matrix and legal signoff: `contracts/source-rights-matrix.json`, `contracts/legal/bitcoin-core-hosted-allowed.md`
+  - stream/derived integrity suites: `control-plane/origo_control_plane/utils/bitcoin_integrity.py`
+  - integrity enforcement wired into all Slice-13 assets before writes.
+- Added proof tooling and artifacts:
+  - generator: `scripts/s13_generate_proof_artifacts.py`
+  - live-node generator: `scripts/s13_generate_live_node_proof_artifacts.py`
+  - artifacts:
+    - `proof-s13-p1-acceptance.json`
+    - `proof-s13-p2-derived-native-aligned-acceptance.json`
+    - `proof-s13-p3-determinism.json`
+    - `proof-s13-p4-parity.json`
+    - `baseline-fixture-2024-04-20_2024-04-21.json`
+- Added runtime orchestration for node maintenance:
+  - local compose service: `docker-compose.yml` -> `bitcoin-core`
+  - server compose service: `deploy/docker-compose.server.yml` -> `bitcoin-core`
+  - deploy workflow requires `ORIGO_BITCOIN_CORE_*` env contract values in `/opt/origo/deploy/.env` and fails loudly if any are missing
+- Deviation from plan:
+  - Proofs are fixture-based deterministic runs (not live-node runtime captures) because the first live mainnet node run is still in initial block download mode and S13 contract rejects IBD nodes.
+  - The fixture contract and artifact generator were made explicit to keep replay/proof deterministic and auditable until live-node proof is executed.
+
+## Current state
+- Query/export dataset coverage:
+  - `native`: all seven Bitcoin datasets are integrated.
+  - `aligned_1s`: derived datasets only (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
+- Guardrails:
+  - Rights/legal fail-closed includes Bitcoin datasets in hosted-export/query matrix checks.
+  - Stream + derived integrity suites are enforced in asset paths and covered in `tests/integrity/test_bitcoin_integrity.py`.
+  - API/export aligned-mode contract rejects unsupported Bitcoin stream datasets in `aligned_1s`.
+- Proof and determinism:
+  - Slice-13 proof artifacts and baseline fixture are present under this folder.
+  - `deterministic_match=true` in fixture replay artifact.
+  - Live-node proof generator is present and fail-loud on missing node contract env vars.
+- Documentation:
+  - Developer docs updated with S13 contracts/runbook.
+  - User docs and taxonomy updated with Bitcoin datasets and aligned/native mode semantics.
+
+## Watch out
+- Live-node proof is still required before production promotion:
+  - set all Bitcoin Core node contract vars and run real ingest windows to replace/augment fixture evidence:
+    - `ORIGO_BITCOIN_CORE_RPC_URL`
+    - `ORIGO_BITCOIN_CORE_RPC_USER`
+    - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
+    - `ORIGO_BITCOIN_CORE_NETWORK`
+    - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
+    - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
+    - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
+  - Server env must explicitly include these vars before deployment; CI does not generate missing values.
+  - Live proof remains blocked until node state is:
+    - `pruned=false`
+    - `initialblockdownload=false`
+    - `tip_height >= ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
+- `bitcoin_block_headers_to_origo.py` resolves ClickHouse settings at module import time; this can fail immediately if `CLICKHOUSE_*` is missing in some isolated tooling contexts.
+- Baseline fixture reuses `zip_sha256`/`csv_sha256` slots for node fixture payload checksums to satisfy global artifact contract; do not interpret those as exchange file formats.
+- Aligned mode intentionally excludes `bitcoin_block_headers`, `bitcoin_block_transactions`, and `bitcoin_mempool_state`; maintain this constraint unless spec changes.

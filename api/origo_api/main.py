@@ -17,6 +17,7 @@ from origo.data._internal.generic_endpoints import (
     query_aligned_wide_rows_envelope,
     query_native_wide_rows_envelope,
 )
+from origo.query.aligned_core import AlignedDataset
 
 from .dagster_graphql import (
     DagsterGraphQLError,
@@ -44,8 +45,9 @@ from .schemas import (
     RawQueryWarning,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.0')
-_ALIGNED_QUERY_DATASETS = {
+app = FastAPI(title='Origo Raw API', version='0.1.5')
+_ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
+    {
     'spot_trades',
     'spot_agg_trades',
     'futures_trades',
@@ -53,7 +55,12 @@ _ALIGNED_QUERY_DATASETS = {
     'bybit_spot_trades',
     'etf_daily_metrics',
     'fred_series_metrics',
-}
+    'bitcoin_block_fee_totals',
+    'bitcoin_block_subsidy_schedule',
+    'bitcoin_network_hashrate_estimate',
+    'bitcoin_circulating_supply',
+    }
+)
 
 ORIGO_INTERNAL_API_KEY = os.environ.get('ORIGO_INTERNAL_API_KEY')
 if ORIGO_INTERNAL_API_KEY is None or ORIGO_INTERNAL_API_KEY.strip() == '':
@@ -352,6 +359,13 @@ def _read_export_tags(
         'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
     }:
         raise RuntimeError(f'Unsupported or missing export dataset tag: {dataset}')
     return (
@@ -755,6 +769,18 @@ async def submit_raw_export(
     _: None = Depends(_require_internal_api_key),
 ) -> RawExportSubmitResponse:
     global _pending_export_dispatch_requests
+
+    if request.mode == 'aligned_1s' and request.dataset not in _ALIGNED_QUERY_DATASETS:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'EXPORT_CONTRACT_ERROR',
+                'message': (
+                    'aligned_1s mode does not support dataset='
+                    f'{request.dataset}'
+                ),
+            },
+        )
 
     audit_payload = _build_export_audit_payload(request)
 

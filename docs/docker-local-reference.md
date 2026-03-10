@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-08
 - Slice/version reference: S7 (API `v0.1.2`, control-plane `v1.2.52`)
 
 ## Purpose and scope
@@ -14,6 +14,7 @@
   - Docker runtime
 - Outputs:
   - API endpoint serving `/v1/raw/query` and `/v1/raw/export`
+  - self-hosted Bitcoin Core mainnet node service (`bitcoin-core`)
   - deterministic proof artifacts under `spec/slices/slice-7-docker-local-platform/`
 
 ## Data definitions (fields, types, units, timezone, nullability)
@@ -42,6 +43,7 @@
 - Minimal must-set groups:
   - `CLICKHOUSE_*`
   - `ORIGO_DOCKER_*`
+  - `ORIGO_BITCOIN_CORE_*`
   - `ORIGO_INTERNAL_API_KEY`
   - `ORIGO_DAGSTER_*`
   - `ORIGO_EXPORT_*`

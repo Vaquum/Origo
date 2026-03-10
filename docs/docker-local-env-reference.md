@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-08
 - Slice/version reference: S7 (API `v0.1.2`, control-plane `v1.2.52`)
 
 ## Purpose and scope
@@ -54,6 +54,14 @@
   - `ORIGO_DAGSTER_EXPORT_JOB_NAME`
   - `ORIGO_EXPORT_MAX_CONCURRENCY`
   - `ORIGO_EXPORT_MAX_QUEUE`
+- Bitcoin Core node runtime:
+  - `ORIGO_BITCOIN_CORE_RPC_URL`
+  - `ORIGO_BITCOIN_CORE_RPC_USER`
+  - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
+  - `ORIGO_BITCOIN_CORE_NETWORK`
+  - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
+  - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
+  - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
 - Core ClickHouse contract:
   - `CLICKHOUSE_HOST`
   - `CLICKHOUSE_PORT`

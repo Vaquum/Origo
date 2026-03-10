@@ -50,6 +50,15 @@ def test_raw_query_request_accepts_bybit_source() -> None:
     assert request.sources == ['bybit_spot_trades']
 
 
+def test_raw_query_request_accepts_bitcoin_source() -> None:
+    request = RawQueryRequest(
+        mode='native',
+        sources=['bitcoin_block_headers'],
+        n_rows=10,
+    )
+    assert request.sources == ['bitcoin_block_headers']
+
+
 def test_raw_export_request_accepts_fred_dataset() -> None:
     request = RawExportRequest(
         mode='native',
@@ -78,6 +87,16 @@ def test_raw_export_request_accepts_bybit_dataset() -> None:
         time_range=('2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'),
     )
     assert request.dataset == 'bybit_spot_trades'
+
+
+def test_raw_export_request_accepts_bitcoin_dataset() -> None:
+    request = RawExportRequest(
+        mode='native',
+        format='parquet',
+        dataset='bitcoin_block_fee_totals',
+        time_range=('2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'),
+    )
+    assert request.dataset == 'bitcoin_block_fee_totals'
 
 
 def test_export_rights_supports_fred_dataset(
@@ -150,4 +169,31 @@ def test_export_rights_supports_bybit_dataset(
     decision = resolve_export_rights(dataset='bybit_spot_trades', auth_token=None)
     assert decision.source == 'bybit'
     assert decision.dataset == 'bybit_spot_trades'
+    assert decision.rights_state == 'Hosted Allowed'
+
+
+def test_export_rights_supports_bitcoin_dataset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    legal_artifact = tmp_path / 'bitcoin-core-legal-signoff.md'
+    legal_artifact.write_text('# legal', encoding='utf-8')
+    matrix_path = tmp_path / 'rights.json'
+    matrix_payload = {
+        'version': 'test',
+        'sources': {
+            'bitcoin_core': {
+                'rights_state': 'Hosted Allowed',
+                'datasets': ['bitcoin_block_fee_totals'],
+                'legal_signoff_artifact': str(legal_artifact),
+            }
+        },
+    }
+    matrix_path.write_text(json.dumps(matrix_payload), encoding='utf-8')
+    monkeypatch.setenv('ORIGO_SOURCE_RIGHTS_MATRIX_PATH', str(matrix_path))
+
+    decision = resolve_export_rights(
+        dataset='bitcoin_block_fee_totals', auth_token=None
+    )
+    assert decision.source == 'bitcoin_core'
+    assert decision.dataset == 'bitcoin_block_fee_totals'
     assert decision.rights_state == 'Hosted Allowed'

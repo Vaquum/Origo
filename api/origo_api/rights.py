@@ -26,6 +26,13 @@ _ALLOWED_EXPORT_DATASETS: frozenset[RawQueryDataset] = frozenset(
         'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
     }
 )
 _ALLOWED_QUERY_DATASETS: frozenset[RawQueryDataset] = frozenset(
@@ -37,6 +44,13 @@ _ALLOWED_QUERY_DATASETS: frozenset[RawQueryDataset] = frozenset(
         'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
     }
 )
 _ETF_QUERY_SERVING_STATE_ENV = 'ORIGO_ETF_QUERY_SERVING_STATE'

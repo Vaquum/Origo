@@ -3,11 +3,11 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-08
-- Slice/version reference: S1, S4, S5, S6, S8, S11 (API v0.1.4)
+- Slice/version reference: S1, S4, S5, S6, S8, S11, S13 (API v0.1.5)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.
-- Scope includes `native` and `aligned_1s` query modes over Binance, OKX, Bybit, ETF, and FRED datasets.
+- Scope includes `native` and `aligned_1s` query modes over Binance, OKX, Bybit, ETF, FRED, and Bitcoin Core datasets.
 
 ## Inputs and outputs with contract shape
 - Endpoint: `POST /v1/raw/query`
@@ -38,6 +38,13 @@
   - `bybit_spot_trades`
   - `etf_daily_metrics`
   - `fred_series_metrics`
+  - `bitcoin_block_headers`
+  - `bitcoin_block_transactions`
+  - `bitcoin_mempool_state`
+  - `bitcoin_block_fee_totals`
+  - `bitcoin_block_subsidy_schedule`
+  - `bitcoin_network_hashrate_estimate`
+  - `bitcoin_circulating_supply`
 - Field-level definitions are maintained in:
   - `docs/data-taxonomy.md`
   - `docs/aligned-reference.md`
@@ -45,6 +52,7 @@
   - `docs/bybit-reference.md`
   - `docs/etf-reference.md`
   - `docs/fred-reference.md`
+  - `docs/bitcoin-core-reference.md`
 
 ## Source/provenance and freshness semantics
 - Query reads from ClickHouse canonical tables loaded from original sources.
@@ -78,6 +86,7 @@
   - `spec/slices/slice-6-fred-integration/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
+  - `spec/slices/slice-13-bitcoin-core-signals/`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`
@@ -97,5 +106,9 @@
   - `{ "mode":"native", "sources":["okx_spot_trades"], "fields":["trade_id","timestamp","price","size","side"], "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
 - Native Bybit query:
   - `{ "mode":"native", "sources":["bybit_spot_trades"], "fields":["trade_id","timestamp","price","size","side"], "time_range":["2024-01-02T00:00:00Z","2024-01-03T00:00:00Z"], "strict":false }`
+- Native Bitcoin headers query:
+  - `{ "mode":"native", "sources":["bitcoin_block_headers"], "fields":["height","difficulty","timestamp"], "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "strict":false }`
+- Aligned Bitcoin derived query:
+  - `{ "mode":"aligned_1s", "sources":["bitcoin_network_hashrate_estimate"], "fields":["aligned_at_utc","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "strict":false }`
 - Aligned latest rows query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "fields":["aligned_at_utc","metric_name","metric_value_float"], "n_rows":100, "strict":false }`

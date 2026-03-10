@@ -7,6 +7,11 @@ from typing import Literal, cast
 import polars as pl
 
 from .binance_aligned_1s import BinanceAlignedDataset, query_binance_aligned_1s_data
+from .bitcoin_derived_aligned_1s import (
+    BitcoinDerivedAlignedDataset,
+    query_bitcoin_derived_aligned_1s_data,
+    query_bitcoin_derived_forward_fill_intervals,
+)
 from .bybit_aligned_1s import BybitAlignedDataset, query_bybit_aligned_1s_data
 from .etf_aligned_1s import (
     ETFAlignedDataset,
@@ -27,6 +32,7 @@ from .okx_aligned_1s import OKXAlignedDataset, query_okx_aligned_1s_data
 
 type AlignedDataset = (
     BinanceAlignedDataset
+    | BitcoinDerivedAlignedDataset
     | BybitAlignedDataset
     | ETFAlignedDataset
     | FREDAlignedDataset
@@ -36,6 +42,8 @@ type AlignedExecutionPath = Literal[
     'binance_aligned',
     'bybit_aligned',
     'okx_aligned',
+    'bitcoin_derived_aligned_observation',
+    'bitcoin_derived_aligned_forward_fill',
     'etf_aligned_observation',
     'etf_aligned_forward_fill',
     'fred_aligned_observation',
@@ -47,6 +55,14 @@ _BINANCE_DATASETS: frozenset[str] = frozenset(
 )
 _OKX_DATASETS: frozenset[str] = frozenset({'okx_spot_trades'})
 _BYBIT_DATASETS: frozenset[str] = frozenset({'bybit_spot_trades'})
+_BITCOIN_DERIVED_DATASETS: frozenset[str] = frozenset(
+    {
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
+    }
+)
 _BINANCE_ALIGNED_COLUMNS: frozenset[str] = frozenset(
     {
         'aligned_at_utc',
@@ -81,6 +97,24 @@ _BYBIT_ALIGNED_COLUMNS: frozenset[str] = frozenset(
         'quantity_sum',
         'quote_volume_sum',
         'trade_count',
+    }
+)
+_BITCOIN_DERIVED_ALIGNED_COLUMNS: frozenset[str] = frozenset(
+    {
+        'aligned_at_utc',
+        'source_id',
+        'metric_name',
+        'metric_unit',
+        'metric_value_string',
+        'metric_value_int',
+        'metric_value_float',
+        'metric_value_bool',
+        'dimensions_json',
+        'provenance_json',
+        'latest_ingested_at_utc',
+        'records_in_bucket',
+        'valid_from_utc',
+        'valid_to_utc_exclusive',
     }
 )
 _ETF_ALIGNED_COLUMNS: frozenset[str] = frozenset(
@@ -171,6 +205,25 @@ def build_aligned_query_plan(*, dataset: AlignedDataset, window: QueryWindow) ->
             window=window,
         )
 
+    if dataset in _BITCOIN_DERIVED_DATASETS:
+        if isinstance(window, MonthWindow):
+            return AlignedQueryPlan(
+                dataset=dataset,
+                execution_path='bitcoin_derived_aligned_forward_fill',
+                window=_month_window_to_time_range(window),
+            )
+        if isinstance(window, TimeRangeWindow):
+            return AlignedQueryPlan(
+                dataset=dataset,
+                execution_path='bitcoin_derived_aligned_forward_fill',
+                window=window,
+            )
+        return AlignedQueryPlan(
+            dataset=dataset,
+            execution_path='bitcoin_derived_aligned_observation',
+            window=window,
+        )
+
     if dataset == 'etf_daily_metrics':
         if isinstance(window, MonthWindow):
             return AlignedQueryPlan(
@@ -225,6 +278,8 @@ def _validate_selected_columns(
         allowed_columns = _OKX_ALIGNED_COLUMNS
     elif dataset in _BYBIT_DATASETS:
         allowed_columns = _BYBIT_ALIGNED_COLUMNS
+    elif dataset in _BITCOIN_DERIVED_DATASETS:
+        allowed_columns = _BITCOIN_DERIVED_ALIGNED_COLUMNS
     elif dataset == 'etf_daily_metrics':
         allowed_columns = _ETF_ALIGNED_COLUMNS
     elif dataset == 'fred_series_metrics':
@@ -291,6 +346,26 @@ def query_aligned_data(
     elif plan.execution_path == 'bybit_aligned':
         frame = query_bybit_aligned_1s_data(
             dataset=cast(BybitAlignedDataset, plan.dataset),
+            window=plan.window,
+            auth_token=auth_token,
+            show_summary=show_summary,
+            datetime_iso_output=datetime_iso_output,
+        )
+    elif plan.execution_path == 'bitcoin_derived_aligned_observation':
+        frame = query_bitcoin_derived_aligned_1s_data(
+            dataset=cast(BitcoinDerivedAlignedDataset, plan.dataset),
+            window=plan.window,
+            auth_token=auth_token,
+            show_summary=show_summary,
+            datetime_iso_output=datetime_iso_output,
+        )
+    elif plan.execution_path == 'bitcoin_derived_aligned_forward_fill':
+        if not isinstance(plan.window, TimeRangeWindow):
+            raise RuntimeError(
+                'Internal aligned planner error: forward-fill path requires TimeRangeWindow'
+            )
+        frame = query_bitcoin_derived_forward_fill_intervals(
+            dataset=cast(BitcoinDerivedAlignedDataset, plan.dataset),
             window=plan.window,
             auth_token=auth_token,
             show_summary=show_summary,

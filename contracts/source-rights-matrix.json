@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-08-s11-c1",
+  "version": "2026-03-08-s13-c7",
   "sources": {
     "binance": {
       "rights_state": "Hosted Allowed",
@@ -120,6 +120,19 @@
         "bybit_spot_trades"
       ],
       "legal_signoff_artifact": "contracts/legal/bybit-hosted-allowed.md"
+    },
+    "bitcoin_core": {
+      "rights_state": "Hosted Allowed",
+      "datasets": [
+        "bitcoin_block_headers",
+        "bitcoin_block_transactions",
+        "bitcoin_mempool_state",
+        "bitcoin_block_fee_totals",
+        "bitcoin_block_subsidy_schedule",
+        "bitcoin_network_hashrate_estimate",
+        "bitcoin_circulating_supply"
+      ],
+      "legal_signoff_artifact": "contracts/legal/bitcoin-core-hosted-allowed.md"
     }
   }
 }

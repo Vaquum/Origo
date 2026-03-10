@@ -1,0 +1,143 @@
+{
+  "deterministic_match": true,
+  "generated_at_utc": "2026-03-08T14:10:01.165Z",
+  "proof_scope": "Slice 13 P3 deterministic replay",
+  "run_1_aligned_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 0.060000000000000005,
+      "row_count": 2,
+      "rows_hash_sha256": "cd4c105111b1f9ff1e42b6e7da0ee3b2724832d88ae0df0cfb9d8c9c0f383b5f"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 100.0,
+      "row_count": 2,
+      "rows_hash_sha256": "94a37e21e9318bdd81bdd5e9c9fd9f562d64471e9a109110177e585226cf3d28"
+    },
+    "bitcoin_circulating_supply": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 150.0,
+      "row_count": 2,
+      "rows_hash_sha256": "779247921d1ac415a968096cde017b218f4bfea90a7ac04c4200368f8ff3ee39"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 124275.67407407408,
+      "row_count": 2,
+      "rows_hash_sha256": "750cda153627488ff41a3e4fd3e9f904580d53e06e680091d89a681d83f038e4"
+    }
+  },
+  "run_1_native_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "58b83970614bfb66a5968fab1ed22fa235e005f642156f9523ce0006f7ca867c"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "1c17d02cd0580107cd9947f27cc9d352629b82db21b495dbda96465819b7cd45"
+    },
+    "bitcoin_circulating_supply": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "e7f2049a32aa4b71ec4cfcf5d253f88e0b2b53e67d5b75268191c30a68a9206e"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "a65c49be22b3ae62dda7d104593f689e7f19bf5d2a01af56f1be6023d013c3aa"
+    }
+  },
+  "run_1_stream_hashes": {
+    "bitcoin_block_headers": "147a889bee994f7c78fa4edc95022c35f35536dee2379bdff51db3e9484c6a4e",
+    "bitcoin_block_transactions": "62a768d445bf0cab6100377fcdc6198fc366b59258d25d585a970a22707d7577",
+    "bitcoin_mempool_state": "3ffa8f07d854e414288819ef7bc35846357ab94df8e7534e14bec9c411fc0464"
+  },
+  "run_2_aligned_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 0.060000000000000005,
+      "row_count": 2,
+      "rows_hash_sha256": "cd4c105111b1f9ff1e42b6e7da0ee3b2724832d88ae0df0cfb9d8c9c0f383b5f"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 100.0,
+      "row_count": 2,
+      "rows_hash_sha256": "94a37e21e9318bdd81bdd5e9c9fd9f562d64471e9a109110177e585226cf3d28"
+    },
+    "bitcoin_circulating_supply": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 150.0,
+      "row_count": 2,
+      "rows_hash_sha256": "779247921d1ac415a968096cde017b218f4bfea90a7ac04c4200368f8ff3ee39"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 0,
+      "metric_value_float_sum": 124275.67407407408,
+      "row_count": 2,
+      "rows_hash_sha256": "750cda153627488ff41a3e4fd3e9f904580d53e06e680091d89a681d83f038e4"
+    }
+  },
+  "run_2_native_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "58b83970614bfb66a5968fab1ed22fa235e005f642156f9523ce0006f7ca867c"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "1c17d02cd0580107cd9947f27cc9d352629b82db21b495dbda96465819b7cd45"
+    },
+    "bitcoin_circulating_supply": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "e7f2049a32aa4b71ec4cfcf5d253f88e0b2b53e67d5b75268191c30a68a9206e"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "block_height_max": 1,
+      "block_height_min": 0,
+      "first_event_offset_ms": 0,
+      "last_event_offset_ms": 86400000,
+      "row_count": 2,
+      "rows_hash_sha256": "a65c49be22b3ae62dda7d104593f689e7f19bf5d2a01af56f1be6023d013c3aa"
+    }
+  },
+  "run_2_stream_hashes": {
+    "bitcoin_block_headers": "147a889bee994f7c78fa4edc95022c35f35536dee2379bdff51db3e9484c6a4e",
+    "bitcoin_block_transactions": "62a768d445bf0cab6100377fcdc6198fc366b59258d25d585a970a22707d7577",
+    "bitcoin_mempool_state": "3ffa8f07d854e414288819ef7bc35846357ab94df8e7534e14bec9c411fc0464"
+  }
+}

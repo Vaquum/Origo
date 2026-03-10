@@ -1,0 +1,52 @@
+{
+  "datasets": {
+    "bitcoin_block_headers": {
+      "integrity": {
+        "anomaly_checks_performed": 603,
+        "dataset": "bitcoin_block_headers",
+        "max_height": 100,
+        "min_height": 0,
+        "rows_checked": 101
+      },
+      "row_count": 101,
+      "rows_hash_sha256": "16a75406248d97f7d694c35e1c37bcc0ca13776b8bb69479c32787b0a6fe8ef3"
+    },
+    "bitcoin_block_transactions": {
+      "integrity": {
+        "anomaly_checks_performed": 1614,
+        "dataset": "bitcoin_block_transactions",
+        "max_height": 100,
+        "min_height": 0,
+        "rows_checked": 101
+      },
+      "row_count": 101,
+      "rows_hash_sha256": "22407e0fa2fc8fce3050315189ea38bf3c97b2ef0aaa314d23ad1a0879da6359"
+    },
+    "bitcoin_mempool_state": {
+      "integrity": {
+        "anomaly_checks_performed": 1631,
+        "dataset": "bitcoin_mempool_state",
+        "max_height": null,
+        "min_height": null,
+        "rows_checked": 233
+      },
+      "row_count": 233,
+      "rows_hash_sha256": "62acb4a0f81cf852be958d294179666941ebd5e76f94b65080c04160d94983f3"
+    }
+  },
+  "generated_at_utc": "2026-03-10T07:18:53.750Z",
+  "node_capture": {
+    "captured_at_utc": "2026-03-10T07:18:53.640Z",
+    "headers_end_height": 100,
+    "headers_start_height": 0,
+    "mempool_snapshot_at_utc": "2026-03-10T07:18:53.341Z",
+    "node_tip_hash": "0000000000000000000087105863f637595eed2c632e5e354d580c5b6a3c6458",
+    "node_tip_height": 940077,
+    "source_chain": "main"
+  },
+  "proof_scope": "Slice 13 P1 stream acceptance (live-node snapshot)",
+  "window": {
+    "end_utc": "2009-01-12T00:00:00.000Z",
+    "start_utc": "2009-01-03T00:00:00.000Z"
+  }
+}

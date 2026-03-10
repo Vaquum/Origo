@@ -22,13 +22,17 @@
     - `proof-s13-p3-determinism.json`
     - `proof-s13-p4-parity.json`
     - `baseline-fixture-2024-04-20_2024-04-21.json`
+    - `proof-s13-live-node-p1-acceptance.json`
+    - `proof-s13-live-node-p2-derived-native-aligned-acceptance.json`
+    - `proof-s13-live-node-p3-determinism.json`
+    - `proof-s13-live-node-p4-parity.json`
+    - `baseline-fixture-live-node-2009-01-03_2009-01-11.json`
 - Added runtime orchestration for node maintenance:
   - local compose service: `docker-compose.yml` -> `bitcoin-core`
   - server compose service: `deploy/docker-compose.server.yml` -> `bitcoin-core`
   - deploy workflow requires `ORIGO_BITCOIN_CORE_*` env contract values in `/opt/origo/deploy/.env` and fails loudly if any are missing
-- Deviation from plan:
-  - Proofs are fixture-based deterministic runs (not live-node runtime captures) because the first live mainnet node run is still in initial block download mode and S13 contract rejects IBD nodes.
-  - The fixture contract and artifact generator were made explicit to keep replay/proof deterministic and auditable until live-node proof is executed.
+- Post-plan completion:
+  - Live-node proof was executed after mainnet sync completion (`initialblockdownload=false`) and now complements fixture-based proof evidence.
 
 ## Current state
 - Query/export dataset coverage:
@@ -41,26 +45,23 @@
 - Proof and determinism:
   - Slice-13 proof artifacts and baseline fixture are present under this folder.
   - `deterministic_match=true` in fixture replay artifact.
-  - Live-node proof generator is present and fail-loud on missing node contract env vars.
+  - `deterministic_match=true` in live-node replay artifact (`proof-s13-live-node-p3-determinism.json`).
+  - Live-node proof generator remains fail-loud on missing/invalid node contract env vars.
+- Runtime validation:
+  - Production deploy on `main` includes S13 migrations (`0010`..`0016`) and running containers for API, Dagster, ClickHouse, and Bitcoin Core.
+  - Server-side S13 Dagster jobs were executed and populated all seven Bitcoin tables.
+  - API and export calls for S13 datasets were validated in `native` and `aligned_1s` (derived-only aligned scope).
 - Documentation:
   - Developer docs updated with S13 contracts/runbook.
   - User docs and taxonomy updated with Bitcoin datasets and aligned/native mode semantics.
 
 ## Watch out
-- Live-node proof is still required before production promotion:
-  - set all Bitcoin Core node contract vars and run real ingest windows to replace/augment fixture evidence:
-    - `ORIGO_BITCOIN_CORE_RPC_URL`
-    - `ORIGO_BITCOIN_CORE_RPC_USER`
-    - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
-    - `ORIGO_BITCOIN_CORE_NETWORK`
-    - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
-    - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
-    - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
-  - Server env must explicitly include these vars before deployment; CI does not generate missing values.
-  - Live proof remains blocked until node state is:
-    - `pruned=false`
-    - `initialblockdownload=false`
-    - `tip_height >= ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
+- Server env must explicitly include `ORIGO_BITCOIN_CORE_*` vars before deployment; CI does not generate missing values and fails loudly.
+- Live-node proof assumes header-window bounds from env (`ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`, `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`); if these change, regenerate live-node artifacts to keep proof/baseline aligned with runtime truth.
+- Runtime prerequisite for future live proofs remains strict:
+  - `pruned=false`
+  - `initialblockdownload=false`
+  - `tip_height >= ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
 - `bitcoin_block_headers_to_origo.py` resolves ClickHouse settings at module import time; this can fail immediately if `CLICKHOUSE_*` is missing in some isolated tooling contexts.
 - Baseline fixture reuses `zip_sha256`/`csv_sha256` slots for node fixture payload checksums to satisfy global artifact contract; do not interpret those as exchange file formats.
 - Aligned mode intentionally excludes `bitcoin_block_headers`, `bitcoin_block_transactions`, and `bitcoin_mempool_state`; maintain this constraint unless spec changes.

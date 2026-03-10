@@ -1,0 +1,459 @@
+{
+  "column_key": {
+    "circulating_supply_btc_sum": "Sum of circulating supply (BTC) values in native partition rows.",
+    "csv_sha256": "Checksum slot required by global fixture contract (reused for node source payload).",
+    "fee_total_btc_sum": "Sum of per-block fee totals (BTC) in native partition rows.",
+    "first_event_offset_ms": "Milliseconds from partition start to first event in partition.",
+    "hashrate_hs_sum": "Sum of hashrate estimates (H/s) in native partition rows.",
+    "last_event_offset_ms": "Milliseconds from last event in partition to partition end.",
+    "metric_value_float_sum": "Sum of aligned metric_value_float values in partition rows.",
+    "row_count": "Number of rows for the dataset/day partition.",
+    "rows_hash_sha256": "SHA256 hash of canonicalized partition rows.",
+    "subsidy_btc_sum": "Sum of per-block subsidy values (BTC) in native partition rows.",
+    "zip_sha256": "Checksum slot required by global fixture contract (reused for node source payload)."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "days": [
+      "2009-01-03",
+      "2009-01-04",
+      "2009-01-05",
+      "2009-01-06",
+      "2009-01-07",
+      "2009-01-08",
+      "2009-01-09",
+      "2009-01-10",
+      "2009-01-11"
+    ],
+    "windows_utc": {
+      "2009-01-03": {
+        "end_utc": "2009-01-04T00:00:00.000Z",
+        "start_utc": "2009-01-03T00:00:00.000Z"
+      },
+      "2009-01-04": {
+        "end_utc": "2009-01-05T00:00:00.000Z",
+        "start_utc": "2009-01-04T00:00:00.000Z"
+      },
+      "2009-01-05": {
+        "end_utc": "2009-01-06T00:00:00.000Z",
+        "start_utc": "2009-01-05T00:00:00.000Z"
+      },
+      "2009-01-06": {
+        "end_utc": "2009-01-07T00:00:00.000Z",
+        "start_utc": "2009-01-06T00:00:00.000Z"
+      },
+      "2009-01-07": {
+        "end_utc": "2009-01-08T00:00:00.000Z",
+        "start_utc": "2009-01-07T00:00:00.000Z"
+      },
+      "2009-01-08": {
+        "end_utc": "2009-01-09T00:00:00.000Z",
+        "start_utc": "2009-01-08T00:00:00.000Z"
+      },
+      "2009-01-09": {
+        "end_utc": "2009-01-10T00:00:00.000Z",
+        "start_utc": "2009-01-09T00:00:00.000Z"
+      },
+      "2009-01-10": {
+        "end_utc": "2009-01-11T00:00:00.000Z",
+        "start_utc": "2009-01-10T00:00:00.000Z"
+      },
+      "2009-01-11": {
+        "end_utc": "2009-01-12T00:00:00.000Z",
+        "start_utc": "2009-01-11T00:00:00.000Z"
+      }
+    }
+  },
+  "node_capture": {
+    "captured_at_utc": "2026-03-10T07:18:53.640Z",
+    "headers_end_height": 100,
+    "headers_start_height": 0,
+    "mempool_snapshot_at_utc": "2026-03-10T07:18:53.341Z",
+    "node_tip_hash": "0000000000000000000087105863f637595eed2c632e5e354d580c5b6a3c6458",
+    "node_tip_height": 940077,
+    "source_chain": "main"
+  },
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "2009-01-03": {
+        "first_event_offset_ms": 65705000,
+        "last_event_offset_ms": -442465000,
+        "metric_value_float_sum": 9373.182692805942,
+        "row_count": 4,
+        "rows_hash_sha256": "404bf20f900638b199cb59c9b3b6dd38a7d2e42ccba5e81a42993fb73e65a5a8"
+      },
+      "2009-01-04": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-05": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-06": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-07": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-08": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-09": {
+        "first_event_offset_ms": 10465000,
+        "last_event_offset_ms": -17146000,
+        "metric_value_float_sum": 183353781.2108009,
+        "row_count": 56,
+        "rows_hash_sha256": "fc84d81bdee85b1a32428bdeb0880ca1296876fb0ab4b67572cdf2a7835008c2"
+      },
+      "2009-01-10": {
+        "first_event_offset_ms": 17146000,
+        "last_event_offset_ms": -554000,
+        "metric_value_float_sum": 1109127550.6706126,
+        "row_count": 244,
+        "rows_hash_sha256": "bfaee17861d69c392144b5be46afe4abefbe251e3d6a9f70563c0c30527bd391"
+      },
+      "2009-01-11": {
+        "first_event_offset_ms": 554000,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 159007904.77944788,
+        "row_count": 100,
+        "rows_hash_sha256": "036c4baaa919dac9aad01ecef4742a28a8cdcb0ca223f3ed473823973b8eab42"
+      }
+    },
+    "native": {
+      "2009-01-03": {
+        "circulating_supply_btc_sum": 50.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 65705000,
+        "hashrate_hs_sum": 9273.182692805942,
+        "last_event_offset_ms": 20695000,
+        "row_count": 4,
+        "rows_hash_sha256": "104dbd9bfe09b179ea9a8e433517df7255492a82aae9aebfd750bfae1c9951a5",
+        "subsidy_btc_sum": 50.0
+      },
+      "2009-01-04": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-05": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-06": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-07": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-08": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-09": {
+        "circulating_supply_btc_sum": 5950.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 10465000,
+        "hashrate_hs_sum": 183347131.2108009,
+        "last_event_offset_ms": 70011000,
+        "row_count": 56,
+        "rows_hash_sha256": "6a2bb1372063913d75e9c51d402d4742f8a2ff0eaca6789a4a7dbc0eb46159a9",
+        "subsidy_btc_sum": 700.0
+      },
+      "2009-01-10": {
+        "circulating_supply_btc_sum": 140300.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 17146000,
+        "hashrate_hs_sum": 1108984200.6706126,
+        "last_event_offset_ms": 178000,
+        "row_count": 244,
+        "rows_hash_sha256": "6da01c671dd556114c49b1b24e4aea0a35c8fe63b91d6750a83371c0a8ac1de9",
+        "subsidy_btc_sum": 3050.0
+      },
+      "2009-01-11": {
+        "circulating_supply_btc_sum": 111250.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 554000,
+        "hashrate_hs_sum": 158895404.77944788,
+        "last_event_offset_ms": 57575000,
+        "row_count": 100,
+        "rows_hash_sha256": "badc4547402e0f0dfc69951cd65a0ff9bc9a0e0e6b158213f9f26cfa1b220c99",
+        "subsidy_btc_sum": 1250.0
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "2009-01-03": {
+        "first_event_offset_ms": 65705000,
+        "last_event_offset_ms": -442465000,
+        "metric_value_float_sum": 9373.182692805942,
+        "row_count": 4,
+        "rows_hash_sha256": "404bf20f900638b199cb59c9b3b6dd38a7d2e42ccba5e81a42993fb73e65a5a8"
+      },
+      "2009-01-04": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-05": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-06": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-07": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-08": {
+        "first_event_offset_ms": null,
+        "last_event_offset_ms": null,
+        "metric_value_float_sum": 0.0,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "2009-01-09": {
+        "first_event_offset_ms": 10465000,
+        "last_event_offset_ms": -17146000,
+        "metric_value_float_sum": 183353781.2108009,
+        "row_count": 56,
+        "rows_hash_sha256": "fc84d81bdee85b1a32428bdeb0880ca1296876fb0ab4b67572cdf2a7835008c2"
+      },
+      "2009-01-10": {
+        "first_event_offset_ms": 17146000,
+        "last_event_offset_ms": -554000,
+        "metric_value_float_sum": 1109127550.6706126,
+        "row_count": 244,
+        "rows_hash_sha256": "bfaee17861d69c392144b5be46afe4abefbe251e3d6a9f70563c0c30527bd391"
+      },
+      "2009-01-11": {
+        "first_event_offset_ms": 554000,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 159007904.77944788,
+        "row_count": 100,
+        "rows_hash_sha256": "036c4baaa919dac9aad01ecef4742a28a8cdcb0ca223f3ed473823973b8eab42"
+      }
+    },
+    "native": {
+      "2009-01-03": {
+        "circulating_supply_btc_sum": 50.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 65705000,
+        "hashrate_hs_sum": 9273.182692805942,
+        "last_event_offset_ms": 20695000,
+        "row_count": 4,
+        "rows_hash_sha256": "104dbd9bfe09b179ea9a8e433517df7255492a82aae9aebfd750bfae1c9951a5",
+        "subsidy_btc_sum": 50.0
+      },
+      "2009-01-04": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-05": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-06": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-07": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-08": {
+        "circulating_supply_btc_sum": 0.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": null,
+        "hashrate_hs_sum": 0.0,
+        "last_event_offset_ms": null,
+        "row_count": 0,
+        "rows_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "subsidy_btc_sum": 0.0
+      },
+      "2009-01-09": {
+        "circulating_supply_btc_sum": 5950.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 10465000,
+        "hashrate_hs_sum": 183347131.2108009,
+        "last_event_offset_ms": 70011000,
+        "row_count": 56,
+        "rows_hash_sha256": "6a2bb1372063913d75e9c51d402d4742f8a2ff0eaca6789a4a7dbc0eb46159a9",
+        "subsidy_btc_sum": 700.0
+      },
+      "2009-01-10": {
+        "circulating_supply_btc_sum": 140300.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 17146000,
+        "hashrate_hs_sum": 1108984200.6706126,
+        "last_event_offset_ms": 178000,
+        "row_count": 244,
+        "rows_hash_sha256": "6da01c671dd556114c49b1b24e4aea0a35c8fe63b91d6750a83371c0a8ac1de9",
+        "subsidy_btc_sum": 3050.0
+      },
+      "2009-01-11": {
+        "circulating_supply_btc_sum": 111250.0,
+        "fee_total_btc_sum": 0.0,
+        "first_event_offset_ms": 554000,
+        "hashrate_hs_sum": 158895404.77944788,
+        "last_event_offset_ms": 57575000,
+        "row_count": 100,
+        "rows_hash_sha256": "badc4547402e0f0dfc69951cd65a0ff9bc9a0e0e6b158213f9f26cfa1b220c99",
+        "subsidy_btc_sum": 1250.0
+      }
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "d8aab2484ed217aa3d34973e45565c66276ff5474a28115b4c7fafd8a7e09d70",
+      "partition_day": "2009-01-03",
+      "rows_inserted": 4,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "d8aab2484ed217aa3d34973e45565c66276ff5474a28115b4c7fafd8a7e09d70"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-04",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-05",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-06",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-07",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "partition_day": "2009-01-08",
+      "rows_inserted": 0,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "csv_sha256": "d1f1e385491c398c92ea1fc690311c24ac643ed5d31044a28062e542c75f2622",
+      "partition_day": "2009-01-09",
+      "rows_inserted": 56,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "d1f1e385491c398c92ea1fc690311c24ac643ed5d31044a28062e542c75f2622"
+    },
+    {
+      "csv_sha256": "737a4a31b90e6ec7a6de89a06fc8ceb9502b2b276cdea987c89811a7d7a08f14",
+      "partition_day": "2009-01-10",
+      "rows_inserted": 244,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "737a4a31b90e6ec7a6de89a06fc8ceb9502b2b276cdea987c89811a7d7a08f14"
+    },
+    {
+      "csv_sha256": "941bd147fcc826381b9094a20cd672bb5b9258f803ddacd4cfc399885000fe2d",
+      "partition_day": "2009-01-11",
+      "rows_inserted": 100,
+      "source_note": "bitcoin-core live-node block payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "941bd147fcc826381b9094a20cd672bb5b9258f803ddacd4cfc399885000fe2d"
+    }
+  ]
+}

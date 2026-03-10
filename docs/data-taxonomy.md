@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-08
-- Slice/version reference: S1-S8, S11, S13 (platform v0.1.5)
+- Last updated: 2026-03-10
+- Slice/version reference: S1-S8, S10, S11, S13 (platform v0.1.5)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -153,3 +153,5 @@
   - `{ "field":"price", "op":"gt", "value":1000 }`
 - Export status artifact fields:
   - `uri`, `row_count`, `checksum_sha256`
+- Operational reference:
+  - `docs/deployment-reference.md`

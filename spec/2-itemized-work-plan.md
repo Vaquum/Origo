@@ -15,26 +15,26 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Capability
 - [x] `S0-C1` Create monorepo folders: `control-plane`, `api`, `contracts`, `storage`, `docs`, `spec`.
-- [ ] `S0-C2` Import full `tdw-control-plane` code and history into `control-plane`.
+- [x] `S0-C2` Import full `tdw-control-plane` code and history into `control-plane`.
 - [x] `S0-C3` Rename package/module identifiers from TDW naming to Origo naming.
 - [x] `S0-C4` Update Python project metadata and import paths.
 - [x] `S0-C5` Ensure existing Binance historical ingestion runs from monorepo.
-- [ ] `S0-C6` Wire local infra config for ClickHouse + Dagster + persistent SQLite metadata.
+- [x] `S0-C6` Wire local infra config for ClickHouse + Dagster + persistent SQLite metadata.
 
 ### Proof
 - [x] `S0-P1` Run fixed Binance fixture window ingestion and capture baseline artifacts.
 - [x] `S0-P2` Replay same fixture window twice and verify deterministic row counts/checksums.
-- [ ] `S0-P3` Compare outputs against pre-migration baseline and confirm no regression.
+- [x] `S0-P3` Compare outputs against pre-migration baseline and confirm no regression. (crossed over: pre-migration comparable baseline was not available)
 
 ### Guardrails
 - [x] `S0-G1` Add migration audit record template and required run notes.
-- [ ] `S0-G2` Enforce TLS on authenticated service links introduced in this slice.
+- [x] `S0-G2` Enforce TLS on authenticated service links introduced in this slice. (crossed over for now: TLS termination deferred to Cloudflare layer)
 - [ ] `S0-G3` Enable immutable audit-log sink with 1-year retention policy.
 - [x] `S0-G4` Adopt `uv.lock` for deterministic Python dependency resolution in `control-plane`.
 - [x] `S0-G5` Scaffold SQL migration framework (ordered files + ledger + checksums + runner).
 - [x] `S0-G6` Enforce env contract (`.env.example` source of truth + fail-loud required vars + no deployment defaults in runtime paths).
-- [ ] `S0-G7` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S0-G8` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S0-G7` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S0-G8` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 - [x] `S0-G9` Add CI hard quality gates (repo-wide `ruff`, strict `pyright`, plus split `contract`, `replay`, and `integrity` gates on pull requests).
 - [x] `S0-G10` Implement exchange integrity suite in Binance ingestion paths (schema/type, sequence-gap, anomaly checks).
 
@@ -242,16 +242,16 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S10-C4` Implement remote apply path in CI: copy deploy manifests, pull images, run migrations, restart stack.
 
 ### Proof
-- [ ] `S10-P1` Execute deployment workflow on a merged commit and verify successful server apply.
-- [ ] `S10-P2` Verify first-run bootstrap path installs missing Docker/compose dependencies and proceeds to deploy.
-- [ ] `S10-P3` Verify replay deployment determinism: same commit tag yields same runtime image set and stable compose state.
+- [x] `S10-P1` Execute deployment workflow on a merged commit and verify successful server apply.
+- [x] `S10-P2` Verify first-run bootstrap path installs missing Docker/compose dependencies and proceeds to deploy.
+- [x] `S10-P3` Verify replay deployment determinism: same commit tag yields same runtime image set and stable compose state.
 
 ### Guardrails
 - [x] `S10-G1` Enforce fail-loud secret/env checks for server credentials and runtime env-file contract.
-- [ ] `S10-G2` Enforce deployment audit artifacts in workflow logs (image tags, migration step, compose status).
+- [x] `S10-G2` Enforce deployment audit artifacts in workflow logs (image tags, migration step, compose status).
 - [x] `S10-G3` Add deployment safety controls (serialized deploy concurrency and branch/environment restrictions).
-- [ ] `S10-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S10-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S10-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S10-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
 ## Slice 11: Bybit Spot Trades Daily Ingest + `aligned_1s` Integration (Binance-Mirror Pattern)
 
@@ -277,26 +277,26 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 12: Reddit Hourly Ingest + CryptoBERT Sentiment Signals
 
 ### Capability
-- [ ] `S12-C1` Implement official Reddit API OAuth client and subreddit fetch contract for configured subreddit set.
-- [ ] `S12-C2` Implement hourly Reddit content ingest path with deterministic raw artifact capture and checksums.
-- [ ] `S12-C3` Persist normalized Reddit content events to ClickHouse with migration-backed schema.
+- [x] `S12-C1` Implement official Reddit API OAuth client and subreddit fetch contract for configured subreddit set. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-C2` Implement hourly Reddit content ingest path with deterministic raw artifact capture and checksums. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-C3` Persist normalized Reddit content events to ClickHouse with migration-backed schema. (crossed over: blocked by Reddit access/policy constraints in current phase)
 - [ ] `S12-C4` Integrate `ElKulako/cryptobert` inference path for per-item sentiment scoring.
 - [ ] `S12-C5` Implement hourly sentiment signal aggregation dataset with explicit model/version metadata.
-- [ ] `S12-C6` Integrate Slice-12 datasets into raw query/export paths for both `native` and `aligned_1s`.
+- [x] `S12-C6` Integrate Slice-12 datasets into raw query/export paths for both `native` and `aligned_1s`. (crossed over: blocked by Reddit access/policy constraints in current phase)
 
 ### Proof
-- [ ] `S12-P1` Execute fixed-window Reddit ingest + sentiment inference acceptance runs across configured subreddit scope.
-- [ ] `S12-P2` Execute fixed-window `native` + `aligned_1s` acceptance runs for Slice-12 datasets.
-- [ ] `S12-P3` Replay fixed fixtures and verify deterministic output fingerprints (ingest, inference, and aggregation outputs).
-- [ ] `S12-P4` Validate source artifact checksums, row stats, and model-version provenance against proof artifacts.
+- [x] `S12-P1` Execute fixed-window Reddit ingest + sentiment inference acceptance runs across configured subreddit scope. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-P2` Execute fixed-window `native` + `aligned_1s` acceptance runs for Slice-12 datasets. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-P3` Replay fixed fixtures and verify deterministic output fingerprints (ingest, inference, and aggregation outputs). (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-P4` Validate source artifact checksums, row stats, and model-version provenance against proof artifacts. (crossed over: blocked by Reddit access/policy constraints in current phase)
 
 ### Guardrails
-- [ ] `S12-G1` Add rights/legal classification artifacts for Reddit API content ingestion and serving/export decisions.
-- [ ] `S12-G2` Enforce Reddit rate-limit/backoff guardrails with fail-loud quota/error classification.
-- [ ] `S12-G3` Add data integrity and freshness guardrails for subreddit coverage, duplicate detection, and hourly completeness.
-- [ ] `S12-G4` Apply aligned-mode guardrails to Slice-12 datasets (strict/warnings/freshness/rights+audit parity).
-- [ ] `S12-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S12-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+- [x] `S12-G1` Add rights/legal classification artifacts for Reddit API content ingestion and serving/export decisions. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-G2` Enforce Reddit rate-limit/backoff guardrails with fail-loud quota/error classification. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-G3` Add data integrity and freshness guardrails for subreddit coverage, duplicate detection, and hourly completeness. (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-G4` Apply aligned-mode guardrails to Slice-12 datasets (strict/warnings/freshness/rights+audit parity). (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes). (crossed over: blocked by Reddit access/policy constraints in current phase)
+- [x] `S12-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates). (crossed over: blocked by Reddit access/policy constraints in current phase)
 
 ## Slice 13: Bitcoin Core Node V1 Streams + Derived Network/Supply Signals
 

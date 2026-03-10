@@ -1,4 +1,5 @@
 {
+  "retrospective_note": "Normalized after-the-fact on 2026-03-10 to canonical source_checksums/run_fingerprints naming.",
   "column_key": {
     "csv_sha256": "SHA256 checksum of source csv artifact for day (null when not applicable)",
     "day_offset_from_window_start": "Integer day offset from fixture window start",
@@ -17,1060 +18,7 @@
     "start_utc_inclusive": "2024-01-01T00:00:00Z",
     "window_label": "2024-01-01_2024-03-31"
   },
-  "run_1_output_fingerprint": {
-    "per_day": [
-      {
-        "day_offset_from_window_start": 0,
-        "day_utc": "2024-01-01",
-        "metric_value_float_sum": 318.728,
-        "row_count": 4,
-        "row_hash_sha256": "752caecb69c1baf65a7978abbc1fe55c9259efb463a90224d7dfeec5704815b3",
-        "volume_sum": 318.728
-      },
-      {
-        "day_offset_from_window_start": 1,
-        "day_utc": "2024-01-02",
-        "metric_value_float_sum": 3.95,
-        "row_count": 1,
-        "row_hash_sha256": "33cc252ce31f69de5417c143e542fa238240f2c1a4657b30cd7389c0cb895e51",
-        "volume_sum": 3.95
-      },
-      {
-        "day_offset_from_window_start": 2,
-        "day_utc": "2024-01-03",
-        "metric_value_float_sum": 3.91,
-        "row_count": 1,
-        "row_hash_sha256": "bc7e0977bd9228472c41c199bc2fe516aee0909a6ed4b39395f80d395e7efefa",
-        "volume_sum": 3.91
-      },
-      {
-        "day_offset_from_window_start": 3,
-        "day_utc": "2024-01-04",
-        "metric_value_float_sum": 3.99,
-        "row_count": 1,
-        "row_hash_sha256": "dce84aa90a57376240740cb082cdc081df021ee746734973ef55d45edc4e3cb9",
-        "volume_sum": 3.99
-      },
-      {
-        "day_offset_from_window_start": 4,
-        "day_utc": "2024-01-05",
-        "metric_value_float_sum": 4.05,
-        "row_count": 1,
-        "row_hash_sha256": "77c63775295dc6f9ed8ec93954090689a59f153db1fbf4f7c3c400fbaacfd9d3",
-        "volume_sum": 4.05
-      },
-      {
-        "day_offset_from_window_start": 7,
-        "day_utc": "2024-01-08",
-        "metric_value_float_sum": 4.01,
-        "row_count": 1,
-        "row_hash_sha256": "df5ba593a6d20702bd136f79ccfa952f2460c008143cd2e90d452868fa085c02",
-        "volume_sum": 4.01
-      },
-      {
-        "day_offset_from_window_start": 8,
-        "day_utc": "2024-01-09",
-        "metric_value_float_sum": 4.02,
-        "row_count": 1,
-        "row_hash_sha256": "737ec8237a2ca1108fea487600ec31747a238114edc62e59f9c2aed0a5859109",
-        "volume_sum": 4.02
-      },
-      {
-        "day_offset_from_window_start": 9,
-        "day_utc": "2024-01-10",
-        "metric_value_float_sum": 4.04,
-        "row_count": 1,
-        "row_hash_sha256": "65f4fbd95fe78fcf26485894baac7a369578cf93b75018bf64ee1d14ef239556",
-        "volume_sum": 4.04
-      },
-      {
-        "day_offset_from_window_start": 10,
-        "day_utc": "2024-01-11",
-        "metric_value_float_sum": 3.98,
-        "row_count": 1,
-        "row_hash_sha256": "a1e60a3a1339c0e516232e2adbb4132e4e719bfcf0acb84e5e805ceb3b151a56",
-        "volume_sum": 3.98
-      },
-      {
-        "day_offset_from_window_start": 11,
-        "day_utc": "2024-01-12",
-        "metric_value_float_sum": 3.96,
-        "row_count": 1,
-        "row_hash_sha256": "86289c4a169ef18246121df56cd3ed3a8b345186d20a488b09edd55577adc8bb",
-        "volume_sum": 3.96
-      },
-      {
-        "day_offset_from_window_start": 14,
-        "day_utc": "2024-01-15",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "425f7ede6c8069cf444712f0718d3f0447c172eb22f8c38c870e0f68c023809c",
-        "volume_sum": 0.0
-      },
-      {
-        "day_offset_from_window_start": 15,
-        "day_utc": "2024-01-16",
-        "metric_value_float_sum": 4.07,
-        "row_count": 1,
-        "row_hash_sha256": "23f52b529bee0fb378f4f717b2da9e895dca6d2b537a73ddda80ff8ac90b7970",
-        "volume_sum": 4.07
-      },
-      {
-        "day_offset_from_window_start": 16,
-        "day_utc": "2024-01-17",
-        "metric_value_float_sum": 4.1,
-        "row_count": 1,
-        "row_hash_sha256": "4a6704fa5e8a941b95487d19b5b3869e710283b67cba05717975900b20b32b31",
-        "volume_sum": 4.1
-      },
-      {
-        "day_offset_from_window_start": 17,
-        "day_utc": "2024-01-18",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "f810f9097c788aa8af17eb2d2263555906dc051f436e62cca4f221d72bb09107",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 18,
-        "day_utc": "2024-01-19",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "57042b809b553c3a916bce4c1e50eb9c2727bb086ad60192bae6635256aee103",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 21,
-        "day_utc": "2024-01-22",
-        "metric_value_float_sum": 4.11,
-        "row_count": 1,
-        "row_hash_sha256": "453d7826e1c2d791003809b4ab47b2de89d17fc1c0ead74d9f108f8578bb72e0",
-        "volume_sum": 4.11
-      },
-      {
-        "day_offset_from_window_start": 22,
-        "day_utc": "2024-01-23",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "f220e6e4f432ab70f042f47e709bea6085cf390dea5219acfea57e7d31da6f09",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 23,
-        "day_utc": "2024-01-24",
-        "metric_value_float_sum": 4.18,
-        "row_count": 1,
-        "row_hash_sha256": "92e121e2b62af82b4ec870f2576e906c23e5f9e4bf5432e429623ab126b85643",
-        "volume_sum": 4.18
-      },
-      {
-        "day_offset_from_window_start": 24,
-        "day_utc": "2024-01-25",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "8000af3dcb2c973eecac990ac90ff65d0258b5f7f6bcb06328ba512174b8fc7f",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 25,
-        "day_utc": "2024-01-26",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "a995b669b62b4c8666d9ae11863df0bf477e84d83f9a2123b4bbe630faf832c6",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 28,
-        "day_utc": "2024-01-29",
-        "metric_value_float_sum": 4.08,
-        "row_count": 1,
-        "row_hash_sha256": "6dd46565988d9c6f104c78798ec533f103e33d93070ef4643a08281aa219b5ed",
-        "volume_sum": 4.08
-      },
-      {
-        "day_offset_from_window_start": 29,
-        "day_utc": "2024-01-30",
-        "metric_value_float_sum": 4.06,
-        "row_count": 1,
-        "row_hash_sha256": "9ba7148572b794f7b2b7bbf4fd345f33b825e0f43393a16687a6c2d7e9f5c31f",
-        "volume_sum": 4.06
-      },
-      {
-        "day_offset_from_window_start": 30,
-        "day_utc": "2024-01-31",
-        "metric_value_float_sum": 3.99,
-        "row_count": 1,
-        "row_hash_sha256": "ced9ec4cdc1715835a04b82e9a28e6b824b1e2a600dcb8d3b3973d1621b6906d",
-        "volume_sum": 3.99
-      },
-      {
-        "day_offset_from_window_start": 31,
-        "day_utc": "2024-02-01",
-        "metric_value_float_sum": 324.067,
-        "row_count": 4,
-        "row_hash_sha256": "711a34aa973e029e187d119636f2a38810b32a1cbd2b599d14771a91b4c9a776",
-        "volume_sum": 324.067
-      },
-      {
-        "day_offset_from_window_start": 32,
-        "day_utc": "2024-02-02",
-        "metric_value_float_sum": 4.03,
-        "row_count": 1,
-        "row_hash_sha256": "fb2b85906e367cd776f7311e8503ef697dd63cce019843ce4a2e60cd0fc57279",
-        "volume_sum": 4.03
-      },
-      {
-        "day_offset_from_window_start": 35,
-        "day_utc": "2024-02-05",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "fd83ffc90d03e4987c521a26d037440b2f385469332a4a9083c46c3c9202e41c",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 36,
-        "day_utc": "2024-02-06",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "7035db217296a307547c04ecc9ae22e45d07880c8214428e2ceb28d3e42ef39c",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 37,
-        "day_utc": "2024-02-07",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "57923f007e121c48a84c908d3d3905dc0354c62197f4b68aee1054e4fc319df1",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 38,
-        "day_utc": "2024-02-08",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "c1b17850b965665d639859f6aedc03bc76936daca833836d2f856589b5aaf5c4",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 39,
-        "day_utc": "2024-02-09",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "e3b7d4219b86e202d7f1649cb847c5304f0f0e617b0e4e731b2f987d54685277",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 42,
-        "day_utc": "2024-02-12",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "b4796941826e8b8eb4e65059a4a9a13ef38f9d2aa86e2b31289979c4c7576506",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 43,
-        "day_utc": "2024-02-13",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "a94f2bd57d902ffe33824ca4a95da41a8f8eace9a43eae0f0e27f1627c030150",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 44,
-        "day_utc": "2024-02-14",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "53e226c62b5597fa77fb21362011069bde3920d03156d05dc23dd5019e9025ce",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 45,
-        "day_utc": "2024-02-15",
-        "metric_value_float_sum": 4.24,
-        "row_count": 1,
-        "row_hash_sha256": "9b2f692b583095f5b96c40069ac3bf21284eb6b8571088ec84e9aa7651cbe4cf",
-        "volume_sum": 4.24
-      },
-      {
-        "day_offset_from_window_start": 46,
-        "day_utc": "2024-02-16",
-        "metric_value_float_sum": 4.3,
-        "row_count": 1,
-        "row_hash_sha256": "35522c5a9e18aabffe56608a5bda36f73e4ec65e4d30dbf25ad2ad8531561136",
-        "volume_sum": 4.3
-      },
-      {
-        "day_offset_from_window_start": 49,
-        "day_utc": "2024-02-19",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "c0b36424aaa42a737d30c3e530e4687798a19a8734eec4f34a4c1e1bda0c36a8",
-        "volume_sum": 0.0
-      },
-      {
-        "day_offset_from_window_start": 50,
-        "day_utc": "2024-02-20",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "c3738dd12471eaf31fb54e65c589a8b87ca38dd89d941f54ff34653cfdb9bb06",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 51,
-        "day_utc": "2024-02-21",
-        "metric_value_float_sum": 4.32,
-        "row_count": 1,
-        "row_hash_sha256": "3cffcccd9d9c5bb3af985c7c2f5aa22edc645610e9103d57321411f02470230c",
-        "volume_sum": 4.32
-      },
-      {
-        "day_offset_from_window_start": 52,
-        "day_utc": "2024-02-22",
-        "metric_value_float_sum": 4.33,
-        "row_count": 1,
-        "row_hash_sha256": "84d811b968cd4c7f1a0a2ff45e0668d8cd68e23cce8be0c23fe10b47d791cb87",
-        "volume_sum": 4.33
-      },
-      {
-        "day_offset_from_window_start": 53,
-        "day_utc": "2024-02-23",
-        "metric_value_float_sum": 4.26,
-        "row_count": 1,
-        "row_hash_sha256": "740684e9f81187cb3314cd48b42aa09ad45b70c4302c236772a0eca098ac8d46",
-        "volume_sum": 4.26
-      },
-      {
-        "day_offset_from_window_start": 56,
-        "day_utc": "2024-02-26",
-        "metric_value_float_sum": 4.28,
-        "row_count": 1,
-        "row_hash_sha256": "3d3d91e65ce794b0d66e758a9a01d8144d3f671a207fcb8418fda0dca67e848b",
-        "volume_sum": 4.28
-      },
-      {
-        "day_offset_from_window_start": 57,
-        "day_utc": "2024-02-27",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "288b0cf23d18f7094e361515eb4e5ced13986e6d5c0745f869db99ea67df6d82",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 58,
-        "day_utc": "2024-02-28",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "6d33fb9cff42e2c7c3082536a0e312eee1b92a68af734b39e05a040614ed36e0",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 59,
-        "day_utc": "2024-02-29",
-        "metric_value_float_sum": 4.25,
-        "row_count": 1,
-        "row_hash_sha256": "e70bb2e6cdedf49c9112bfbb1b75b9642756d9fc3bb1b5daf2da064a4e76b8a1",
-        "volume_sum": 4.25
-      },
-      {
-        "day_offset_from_window_start": 60,
-        "day_utc": "2024-03-01",
-        "metric_value_float_sum": 325.765,
-        "row_count": 4,
-        "row_hash_sha256": "a34cd142bf255007ebbaab888e8b3bb2bb0b97a40707490e255fe21d79c69661",
-        "volume_sum": 325.765
-      },
-      {
-        "day_offset_from_window_start": 63,
-        "day_utc": "2024-03-04",
-        "metric_value_float_sum": 4.22,
-        "row_count": 1,
-        "row_hash_sha256": "d04c740c77282a419adb12012a3e43c2c3d5197026e3beaab12091a2b5e9f50b",
-        "volume_sum": 4.22
-      },
-      {
-        "day_offset_from_window_start": 64,
-        "day_utc": "2024-03-05",
-        "metric_value_float_sum": 4.13,
-        "row_count": 1,
-        "row_hash_sha256": "c7f58f97de5222f2c9ae07720b166da7aaaeaf534fa24c4ca779385edf0ce964",
-        "volume_sum": 4.13
-      },
-      {
-        "day_offset_from_window_start": 65,
-        "day_utc": "2024-03-06",
-        "metric_value_float_sum": 4.11,
-        "row_count": 1,
-        "row_hash_sha256": "8f7fb955eec75f56eaffec1895a434cf305676f32c83ba7c0725d6e400ef3ace",
-        "volume_sum": 4.11
-      },
-      {
-        "day_offset_from_window_start": 66,
-        "day_utc": "2024-03-07",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "e63f0ea6bfd6c2b80e8bba8db5ce03af3ccf0a4038e9246b36e73d574c77cf31",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 67,
-        "day_utc": "2024-03-08",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "7815614e8736879b4d1bd7203902f425b1096948b117c9d6603c1c12a529aed2",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 70,
-        "day_utc": "2024-03-11",
-        "metric_value_float_sum": 4.1,
-        "row_count": 1,
-        "row_hash_sha256": "967466a7ed68ef36f4183511f7492dd031ab5691ea0409455db9ad5436087463",
-        "volume_sum": 4.1
-      },
-      {
-        "day_offset_from_window_start": 71,
-        "day_utc": "2024-03-12",
-        "metric_value_float_sum": 4.16,
-        "row_count": 1,
-        "row_hash_sha256": "fa9608f257664332613a15897214a3d71e1660454d05b09143b98a2107990233",
-        "volume_sum": 4.16
-      },
-      {
-        "day_offset_from_window_start": 72,
-        "day_utc": "2024-03-13",
-        "metric_value_float_sum": 4.19,
-        "row_count": 1,
-        "row_hash_sha256": "8c46920c346575dd49d08c03209c478b86fee64228f8c1695bf8fe8a35e4f1d7",
-        "volume_sum": 4.19
-      },
-      {
-        "day_offset_from_window_start": 73,
-        "day_utc": "2024-03-14",
-        "metric_value_float_sum": 4.29,
-        "row_count": 1,
-        "row_hash_sha256": "7df3799e46aaa31910021c44db4ba4e2085caac69e1f45b8e27257f485a19001",
-        "volume_sum": 4.29
-      },
-      {
-        "day_offset_from_window_start": 74,
-        "day_utc": "2024-03-15",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "73408af327338ebc413015ea258d7f0d67d274c7890e6bdb8c77449fd3f19a44",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 77,
-        "day_utc": "2024-03-18",
-        "metric_value_float_sum": 4.34,
-        "row_count": 1,
-        "row_hash_sha256": "5a4b88a82780e760be2a7a576639860f0cac6ce2691cab9eb8672154c7634128",
-        "volume_sum": 4.34
-      },
-      {
-        "day_offset_from_window_start": 78,
-        "day_utc": "2024-03-19",
-        "metric_value_float_sum": 4.3,
-        "row_count": 1,
-        "row_hash_sha256": "d9af67419da5574a7c9b6d821605f72695d384699d12a05e22e06d4fb597599f",
-        "volume_sum": 4.3
-      },
-      {
-        "day_offset_from_window_start": 79,
-        "day_utc": "2024-03-20",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "c1f2e0544241ea848f7ab874f6a5450b88d19545341a721f77f3fa0e16bd520c",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 80,
-        "day_utc": "2024-03-21",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "f42015c28cdd49cdf8df15522bce699559497b453b71e75a8bb305c560b0d790",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 81,
-        "day_utc": "2024-03-22",
-        "metric_value_float_sum": 4.22,
-        "row_count": 1,
-        "row_hash_sha256": "b1f0e582ade38952842a9359ac298081163af283a2817d0be978a5ba76f87ed2",
-        "volume_sum": 4.22
-      },
-      {
-        "day_offset_from_window_start": 84,
-        "day_utc": "2024-03-25",
-        "metric_value_float_sum": 4.25,
-        "row_count": 1,
-        "row_hash_sha256": "a93be442f544a51c4254e2e4b86e77d7a6bf867777957215e8c2f99447e53022",
-        "volume_sum": 4.25
-      },
-      {
-        "day_offset_from_window_start": 85,
-        "day_utc": "2024-03-26",
-        "metric_value_float_sum": 4.24,
-        "row_count": 1,
-        "row_hash_sha256": "0a83fb696f386e4fde4ebf7b19772994cad4821dcec595da1393594012c6bf32",
-        "volume_sum": 4.24
-      },
-      {
-        "day_offset_from_window_start": 86,
-        "day_utc": "2024-03-27",
-        "metric_value_float_sum": 4.2,
-        "row_count": 1,
-        "row_hash_sha256": "3900f576d4f1b2d5fe7038d3e73dd7e3dec4014fb5df5fb2dc7423d65cf369fd",
-        "volume_sum": 4.2
-      },
-      {
-        "day_offset_from_window_start": 87,
-        "day_utc": "2024-03-28",
-        "metric_value_float_sum": 4.2,
-        "row_count": 1,
-        "row_hash_sha256": "0f6075a70a74a868a1f5d459d1840638d6d4e2fed185467dab5c76ca4d24ffb9",
-        "volume_sum": 4.2
-      },
-      {
-        "day_offset_from_window_start": 88,
-        "day_utc": "2024-03-29",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "f829e71825cee20f20f54b4c509b138cf434843425af88364c167be9074b4146",
-        "volume_sum": 0.0
-      }
-    ],
-    "row_count_total": 74,
-    "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499"
-  },
-  "run_2_output_fingerprint": {
-    "per_day": [
-      {
-        "day_offset_from_window_start": 0,
-        "day_utc": "2024-01-01",
-        "metric_value_float_sum": 318.728,
-        "row_count": 4,
-        "row_hash_sha256": "752caecb69c1baf65a7978abbc1fe55c9259efb463a90224d7dfeec5704815b3",
-        "volume_sum": 318.728
-      },
-      {
-        "day_offset_from_window_start": 1,
-        "day_utc": "2024-01-02",
-        "metric_value_float_sum": 3.95,
-        "row_count": 1,
-        "row_hash_sha256": "33cc252ce31f69de5417c143e542fa238240f2c1a4657b30cd7389c0cb895e51",
-        "volume_sum": 3.95
-      },
-      {
-        "day_offset_from_window_start": 2,
-        "day_utc": "2024-01-03",
-        "metric_value_float_sum": 3.91,
-        "row_count": 1,
-        "row_hash_sha256": "bc7e0977bd9228472c41c199bc2fe516aee0909a6ed4b39395f80d395e7efefa",
-        "volume_sum": 3.91
-      },
-      {
-        "day_offset_from_window_start": 3,
-        "day_utc": "2024-01-04",
-        "metric_value_float_sum": 3.99,
-        "row_count": 1,
-        "row_hash_sha256": "dce84aa90a57376240740cb082cdc081df021ee746734973ef55d45edc4e3cb9",
-        "volume_sum": 3.99
-      },
-      {
-        "day_offset_from_window_start": 4,
-        "day_utc": "2024-01-05",
-        "metric_value_float_sum": 4.05,
-        "row_count": 1,
-        "row_hash_sha256": "77c63775295dc6f9ed8ec93954090689a59f153db1fbf4f7c3c400fbaacfd9d3",
-        "volume_sum": 4.05
-      },
-      {
-        "day_offset_from_window_start": 7,
-        "day_utc": "2024-01-08",
-        "metric_value_float_sum": 4.01,
-        "row_count": 1,
-        "row_hash_sha256": "df5ba593a6d20702bd136f79ccfa952f2460c008143cd2e90d452868fa085c02",
-        "volume_sum": 4.01
-      },
-      {
-        "day_offset_from_window_start": 8,
-        "day_utc": "2024-01-09",
-        "metric_value_float_sum": 4.02,
-        "row_count": 1,
-        "row_hash_sha256": "737ec8237a2ca1108fea487600ec31747a238114edc62e59f9c2aed0a5859109",
-        "volume_sum": 4.02
-      },
-      {
-        "day_offset_from_window_start": 9,
-        "day_utc": "2024-01-10",
-        "metric_value_float_sum": 4.04,
-        "row_count": 1,
-        "row_hash_sha256": "65f4fbd95fe78fcf26485894baac7a369578cf93b75018bf64ee1d14ef239556",
-        "volume_sum": 4.04
-      },
-      {
-        "day_offset_from_window_start": 10,
-        "day_utc": "2024-01-11",
-        "metric_value_float_sum": 3.98,
-        "row_count": 1,
-        "row_hash_sha256": "a1e60a3a1339c0e516232e2adbb4132e4e719bfcf0acb84e5e805ceb3b151a56",
-        "volume_sum": 3.98
-      },
-      {
-        "day_offset_from_window_start": 11,
-        "day_utc": "2024-01-12",
-        "metric_value_float_sum": 3.96,
-        "row_count": 1,
-        "row_hash_sha256": "86289c4a169ef18246121df56cd3ed3a8b345186d20a488b09edd55577adc8bb",
-        "volume_sum": 3.96
-      },
-      {
-        "day_offset_from_window_start": 14,
-        "day_utc": "2024-01-15",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "425f7ede6c8069cf444712f0718d3f0447c172eb22f8c38c870e0f68c023809c",
-        "volume_sum": 0.0
-      },
-      {
-        "day_offset_from_window_start": 15,
-        "day_utc": "2024-01-16",
-        "metric_value_float_sum": 4.07,
-        "row_count": 1,
-        "row_hash_sha256": "23f52b529bee0fb378f4f717b2da9e895dca6d2b537a73ddda80ff8ac90b7970",
-        "volume_sum": 4.07
-      },
-      {
-        "day_offset_from_window_start": 16,
-        "day_utc": "2024-01-17",
-        "metric_value_float_sum": 4.1,
-        "row_count": 1,
-        "row_hash_sha256": "4a6704fa5e8a941b95487d19b5b3869e710283b67cba05717975900b20b32b31",
-        "volume_sum": 4.1
-      },
-      {
-        "day_offset_from_window_start": 17,
-        "day_utc": "2024-01-18",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "f810f9097c788aa8af17eb2d2263555906dc051f436e62cca4f221d72bb09107",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 18,
-        "day_utc": "2024-01-19",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "57042b809b553c3a916bce4c1e50eb9c2727bb086ad60192bae6635256aee103",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 21,
-        "day_utc": "2024-01-22",
-        "metric_value_float_sum": 4.11,
-        "row_count": 1,
-        "row_hash_sha256": "453d7826e1c2d791003809b4ab47b2de89d17fc1c0ead74d9f108f8578bb72e0",
-        "volume_sum": 4.11
-      },
-      {
-        "day_offset_from_window_start": 22,
-        "day_utc": "2024-01-23",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "f220e6e4f432ab70f042f47e709bea6085cf390dea5219acfea57e7d31da6f09",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 23,
-        "day_utc": "2024-01-24",
-        "metric_value_float_sum": 4.18,
-        "row_count": 1,
-        "row_hash_sha256": "92e121e2b62af82b4ec870f2576e906c23e5f9e4bf5432e429623ab126b85643",
-        "volume_sum": 4.18
-      },
-      {
-        "day_offset_from_window_start": 24,
-        "day_utc": "2024-01-25",
-        "metric_value_float_sum": 4.14,
-        "row_count": 1,
-        "row_hash_sha256": "8000af3dcb2c973eecac990ac90ff65d0258b5f7f6bcb06328ba512174b8fc7f",
-        "volume_sum": 4.14
-      },
-      {
-        "day_offset_from_window_start": 25,
-        "day_utc": "2024-01-26",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "a995b669b62b4c8666d9ae11863df0bf477e84d83f9a2123b4bbe630faf832c6",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 28,
-        "day_utc": "2024-01-29",
-        "metric_value_float_sum": 4.08,
-        "row_count": 1,
-        "row_hash_sha256": "6dd46565988d9c6f104c78798ec533f103e33d93070ef4643a08281aa219b5ed",
-        "volume_sum": 4.08
-      },
-      {
-        "day_offset_from_window_start": 29,
-        "day_utc": "2024-01-30",
-        "metric_value_float_sum": 4.06,
-        "row_count": 1,
-        "row_hash_sha256": "9ba7148572b794f7b2b7bbf4fd345f33b825e0f43393a16687a6c2d7e9f5c31f",
-        "volume_sum": 4.06
-      },
-      {
-        "day_offset_from_window_start": 30,
-        "day_utc": "2024-01-31",
-        "metric_value_float_sum": 3.99,
-        "row_count": 1,
-        "row_hash_sha256": "ced9ec4cdc1715835a04b82e9a28e6b824b1e2a600dcb8d3b3973d1621b6906d",
-        "volume_sum": 3.99
-      },
-      {
-        "day_offset_from_window_start": 31,
-        "day_utc": "2024-02-01",
-        "metric_value_float_sum": 324.067,
-        "row_count": 4,
-        "row_hash_sha256": "711a34aa973e029e187d119636f2a38810b32a1cbd2b599d14771a91b4c9a776",
-        "volume_sum": 324.067
-      },
-      {
-        "day_offset_from_window_start": 32,
-        "day_utc": "2024-02-02",
-        "metric_value_float_sum": 4.03,
-        "row_count": 1,
-        "row_hash_sha256": "fb2b85906e367cd776f7311e8503ef697dd63cce019843ce4a2e60cd0fc57279",
-        "volume_sum": 4.03
-      },
-      {
-        "day_offset_from_window_start": 35,
-        "day_utc": "2024-02-05",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "fd83ffc90d03e4987c521a26d037440b2f385469332a4a9083c46c3c9202e41c",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 36,
-        "day_utc": "2024-02-06",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "7035db217296a307547c04ecc9ae22e45d07880c8214428e2ceb28d3e42ef39c",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 37,
-        "day_utc": "2024-02-07",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "57923f007e121c48a84c908d3d3905dc0354c62197f4b68aee1054e4fc319df1",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 38,
-        "day_utc": "2024-02-08",
-        "metric_value_float_sum": 4.15,
-        "row_count": 1,
-        "row_hash_sha256": "c1b17850b965665d639859f6aedc03bc76936daca833836d2f856589b5aaf5c4",
-        "volume_sum": 4.15
-      },
-      {
-        "day_offset_from_window_start": 39,
-        "day_utc": "2024-02-09",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "e3b7d4219b86e202d7f1649cb847c5304f0f0e617b0e4e731b2f987d54685277",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 42,
-        "day_utc": "2024-02-12",
-        "metric_value_float_sum": 4.17,
-        "row_count": 1,
-        "row_hash_sha256": "b4796941826e8b8eb4e65059a4a9a13ef38f9d2aa86e2b31289979c4c7576506",
-        "volume_sum": 4.17
-      },
-      {
-        "day_offset_from_window_start": 43,
-        "day_utc": "2024-02-13",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "a94f2bd57d902ffe33824ca4a95da41a8f8eace9a43eae0f0e27f1627c030150",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 44,
-        "day_utc": "2024-02-14",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "53e226c62b5597fa77fb21362011069bde3920d03156d05dc23dd5019e9025ce",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 45,
-        "day_utc": "2024-02-15",
-        "metric_value_float_sum": 4.24,
-        "row_count": 1,
-        "row_hash_sha256": "9b2f692b583095f5b96c40069ac3bf21284eb6b8571088ec84e9aa7651cbe4cf",
-        "volume_sum": 4.24
-      },
-      {
-        "day_offset_from_window_start": 46,
-        "day_utc": "2024-02-16",
-        "metric_value_float_sum": 4.3,
-        "row_count": 1,
-        "row_hash_sha256": "35522c5a9e18aabffe56608a5bda36f73e4ec65e4d30dbf25ad2ad8531561136",
-        "volume_sum": 4.3
-      },
-      {
-        "day_offset_from_window_start": 49,
-        "day_utc": "2024-02-19",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "c0b36424aaa42a737d30c3e530e4687798a19a8734eec4f34a4c1e1bda0c36a8",
-        "volume_sum": 0.0
-      },
-      {
-        "day_offset_from_window_start": 50,
-        "day_utc": "2024-02-20",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "c3738dd12471eaf31fb54e65c589a8b87ca38dd89d941f54ff34653cfdb9bb06",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 51,
-        "day_utc": "2024-02-21",
-        "metric_value_float_sum": 4.32,
-        "row_count": 1,
-        "row_hash_sha256": "3cffcccd9d9c5bb3af985c7c2f5aa22edc645610e9103d57321411f02470230c",
-        "volume_sum": 4.32
-      },
-      {
-        "day_offset_from_window_start": 52,
-        "day_utc": "2024-02-22",
-        "metric_value_float_sum": 4.33,
-        "row_count": 1,
-        "row_hash_sha256": "84d811b968cd4c7f1a0a2ff45e0668d8cd68e23cce8be0c23fe10b47d791cb87",
-        "volume_sum": 4.33
-      },
-      {
-        "day_offset_from_window_start": 53,
-        "day_utc": "2024-02-23",
-        "metric_value_float_sum": 4.26,
-        "row_count": 1,
-        "row_hash_sha256": "740684e9f81187cb3314cd48b42aa09ad45b70c4302c236772a0eca098ac8d46",
-        "volume_sum": 4.26
-      },
-      {
-        "day_offset_from_window_start": 56,
-        "day_utc": "2024-02-26",
-        "metric_value_float_sum": 4.28,
-        "row_count": 1,
-        "row_hash_sha256": "3d3d91e65ce794b0d66e758a9a01d8144d3f671a207fcb8418fda0dca67e848b",
-        "volume_sum": 4.28
-      },
-      {
-        "day_offset_from_window_start": 57,
-        "day_utc": "2024-02-27",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "288b0cf23d18f7094e361515eb4e5ced13986e6d5c0745f869db99ea67df6d82",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 58,
-        "day_utc": "2024-02-28",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "6d33fb9cff42e2c7c3082536a0e312eee1b92a68af734b39e05a040614ed36e0",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 59,
-        "day_utc": "2024-02-29",
-        "metric_value_float_sum": 4.25,
-        "row_count": 1,
-        "row_hash_sha256": "e70bb2e6cdedf49c9112bfbb1b75b9642756d9fc3bb1b5daf2da064a4e76b8a1",
-        "volume_sum": 4.25
-      },
-      {
-        "day_offset_from_window_start": 60,
-        "day_utc": "2024-03-01",
-        "metric_value_float_sum": 325.765,
-        "row_count": 4,
-        "row_hash_sha256": "a34cd142bf255007ebbaab888e8b3bb2bb0b97a40707490e255fe21d79c69661",
-        "volume_sum": 325.765
-      },
-      {
-        "day_offset_from_window_start": 63,
-        "day_utc": "2024-03-04",
-        "metric_value_float_sum": 4.22,
-        "row_count": 1,
-        "row_hash_sha256": "d04c740c77282a419adb12012a3e43c2c3d5197026e3beaab12091a2b5e9f50b",
-        "volume_sum": 4.22
-      },
-      {
-        "day_offset_from_window_start": 64,
-        "day_utc": "2024-03-05",
-        "metric_value_float_sum": 4.13,
-        "row_count": 1,
-        "row_hash_sha256": "c7f58f97de5222f2c9ae07720b166da7aaaeaf534fa24c4ca779385edf0ce964",
-        "volume_sum": 4.13
-      },
-      {
-        "day_offset_from_window_start": 65,
-        "day_utc": "2024-03-06",
-        "metric_value_float_sum": 4.11,
-        "row_count": 1,
-        "row_hash_sha256": "8f7fb955eec75f56eaffec1895a434cf305676f32c83ba7c0725d6e400ef3ace",
-        "volume_sum": 4.11
-      },
-      {
-        "day_offset_from_window_start": 66,
-        "day_utc": "2024-03-07",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "e63f0ea6bfd6c2b80e8bba8db5ce03af3ccf0a4038e9246b36e73d574c77cf31",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 67,
-        "day_utc": "2024-03-08",
-        "metric_value_float_sum": 4.09,
-        "row_count": 1,
-        "row_hash_sha256": "7815614e8736879b4d1bd7203902f425b1096948b117c9d6603c1c12a529aed2",
-        "volume_sum": 4.09
-      },
-      {
-        "day_offset_from_window_start": 70,
-        "day_utc": "2024-03-11",
-        "metric_value_float_sum": 4.1,
-        "row_count": 1,
-        "row_hash_sha256": "967466a7ed68ef36f4183511f7492dd031ab5691ea0409455db9ad5436087463",
-        "volume_sum": 4.1
-      },
-      {
-        "day_offset_from_window_start": 71,
-        "day_utc": "2024-03-12",
-        "metric_value_float_sum": 4.16,
-        "row_count": 1,
-        "row_hash_sha256": "fa9608f257664332613a15897214a3d71e1660454d05b09143b98a2107990233",
-        "volume_sum": 4.16
-      },
-      {
-        "day_offset_from_window_start": 72,
-        "day_utc": "2024-03-13",
-        "metric_value_float_sum": 4.19,
-        "row_count": 1,
-        "row_hash_sha256": "8c46920c346575dd49d08c03209c478b86fee64228f8c1695bf8fe8a35e4f1d7",
-        "volume_sum": 4.19
-      },
-      {
-        "day_offset_from_window_start": 73,
-        "day_utc": "2024-03-14",
-        "metric_value_float_sum": 4.29,
-        "row_count": 1,
-        "row_hash_sha256": "7df3799e46aaa31910021c44db4ba4e2085caac69e1f45b8e27257f485a19001",
-        "volume_sum": 4.29
-      },
-      {
-        "day_offset_from_window_start": 74,
-        "day_utc": "2024-03-15",
-        "metric_value_float_sum": 4.31,
-        "row_count": 1,
-        "row_hash_sha256": "73408af327338ebc413015ea258d7f0d67d274c7890e6bdb8c77449fd3f19a44",
-        "volume_sum": 4.31
-      },
-      {
-        "day_offset_from_window_start": 77,
-        "day_utc": "2024-03-18",
-        "metric_value_float_sum": 4.34,
-        "row_count": 1,
-        "row_hash_sha256": "5a4b88a82780e760be2a7a576639860f0cac6ce2691cab9eb8672154c7634128",
-        "volume_sum": 4.34
-      },
-      {
-        "day_offset_from_window_start": 78,
-        "day_utc": "2024-03-19",
-        "metric_value_float_sum": 4.3,
-        "row_count": 1,
-        "row_hash_sha256": "d9af67419da5574a7c9b6d821605f72695d384699d12a05e22e06d4fb597599f",
-        "volume_sum": 4.3
-      },
-      {
-        "day_offset_from_window_start": 79,
-        "day_utc": "2024-03-20",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "c1f2e0544241ea848f7ab874f6a5450b88d19545341a721f77f3fa0e16bd520c",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 80,
-        "day_utc": "2024-03-21",
-        "metric_value_float_sum": 4.27,
-        "row_count": 1,
-        "row_hash_sha256": "f42015c28cdd49cdf8df15522bce699559497b453b71e75a8bb305c560b0d790",
-        "volume_sum": 4.27
-      },
-      {
-        "day_offset_from_window_start": 81,
-        "day_utc": "2024-03-22",
-        "metric_value_float_sum": 4.22,
-        "row_count": 1,
-        "row_hash_sha256": "b1f0e582ade38952842a9359ac298081163af283a2817d0be978a5ba76f87ed2",
-        "volume_sum": 4.22
-      },
-      {
-        "day_offset_from_window_start": 84,
-        "day_utc": "2024-03-25",
-        "metric_value_float_sum": 4.25,
-        "row_count": 1,
-        "row_hash_sha256": "a93be442f544a51c4254e2e4b86e77d7a6bf867777957215e8c2f99447e53022",
-        "volume_sum": 4.25
-      },
-      {
-        "day_offset_from_window_start": 85,
-        "day_utc": "2024-03-26",
-        "metric_value_float_sum": 4.24,
-        "row_count": 1,
-        "row_hash_sha256": "0a83fb696f386e4fde4ebf7b19772994cad4821dcec595da1393594012c6bf32",
-        "volume_sum": 4.24
-      },
-      {
-        "day_offset_from_window_start": 86,
-        "day_utc": "2024-03-27",
-        "metric_value_float_sum": 4.2,
-        "row_count": 1,
-        "row_hash_sha256": "3900f576d4f1b2d5fe7038d3e73dd7e3dec4014fb5df5fb2dc7423d65cf369fd",
-        "volume_sum": 4.2
-      },
-      {
-        "day_offset_from_window_start": 87,
-        "day_utc": "2024-03-28",
-        "metric_value_float_sum": 4.2,
-        "row_count": 1,
-        "row_hash_sha256": "0f6075a70a74a868a1f5d459d1840638d6d4e2fed185467dab5c76ca4d24ffb9",
-        "volume_sum": 4.2
-      },
-      {
-        "day_offset_from_window_start": 88,
-        "day_utc": "2024-03-29",
-        "metric_value_float_sum": 0.0,
-        "row_count": 1,
-        "row_hash_sha256": "f829e71825cee20f20f54b4c509b138cf434843425af88364c167be9074b4146",
-        "volume_sum": 0.0
-      }
-    ],
-    "row_count_total": 74,
-    "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499"
-  },
-  "slice_id": "slice-6-fred-integration",
-  "source_checksums_by_day": [
+  "source_checksums": [
     {
       "csv_sha256": null,
       "day_utc": "2024-01-01",
@@ -1461,5 +409,1058 @@
       "note": "FRED API source has no daily zip/csv artifacts in this slice",
       "zip_sha256": null
     }
-  ]
+  ],
+  "run_1_fingerprints": {
+    "per_day": [
+      {
+        "day_offset_from_window_start": 0,
+        "day_utc": "2024-01-01",
+        "metric_value_float_sum": 318.728,
+        "row_count": 4,
+        "row_hash_sha256": "752caecb69c1baf65a7978abbc1fe55c9259efb463a90224d7dfeec5704815b3",
+        "volume_sum": 318.728
+      },
+      {
+        "day_offset_from_window_start": 1,
+        "day_utc": "2024-01-02",
+        "metric_value_float_sum": 3.95,
+        "row_count": 1,
+        "row_hash_sha256": "33cc252ce31f69de5417c143e542fa238240f2c1a4657b30cd7389c0cb895e51",
+        "volume_sum": 3.95
+      },
+      {
+        "day_offset_from_window_start": 2,
+        "day_utc": "2024-01-03",
+        "metric_value_float_sum": 3.91,
+        "row_count": 1,
+        "row_hash_sha256": "bc7e0977bd9228472c41c199bc2fe516aee0909a6ed4b39395f80d395e7efefa",
+        "volume_sum": 3.91
+      },
+      {
+        "day_offset_from_window_start": 3,
+        "day_utc": "2024-01-04",
+        "metric_value_float_sum": 3.99,
+        "row_count": 1,
+        "row_hash_sha256": "dce84aa90a57376240740cb082cdc081df021ee746734973ef55d45edc4e3cb9",
+        "volume_sum": 3.99
+      },
+      {
+        "day_offset_from_window_start": 4,
+        "day_utc": "2024-01-05",
+        "metric_value_float_sum": 4.05,
+        "row_count": 1,
+        "row_hash_sha256": "77c63775295dc6f9ed8ec93954090689a59f153db1fbf4f7c3c400fbaacfd9d3",
+        "volume_sum": 4.05
+      },
+      {
+        "day_offset_from_window_start": 7,
+        "day_utc": "2024-01-08",
+        "metric_value_float_sum": 4.01,
+        "row_count": 1,
+        "row_hash_sha256": "df5ba593a6d20702bd136f79ccfa952f2460c008143cd2e90d452868fa085c02",
+        "volume_sum": 4.01
+      },
+      {
+        "day_offset_from_window_start": 8,
+        "day_utc": "2024-01-09",
+        "metric_value_float_sum": 4.02,
+        "row_count": 1,
+        "row_hash_sha256": "737ec8237a2ca1108fea487600ec31747a238114edc62e59f9c2aed0a5859109",
+        "volume_sum": 4.02
+      },
+      {
+        "day_offset_from_window_start": 9,
+        "day_utc": "2024-01-10",
+        "metric_value_float_sum": 4.04,
+        "row_count": 1,
+        "row_hash_sha256": "65f4fbd95fe78fcf26485894baac7a369578cf93b75018bf64ee1d14ef239556",
+        "volume_sum": 4.04
+      },
+      {
+        "day_offset_from_window_start": 10,
+        "day_utc": "2024-01-11",
+        "metric_value_float_sum": 3.98,
+        "row_count": 1,
+        "row_hash_sha256": "a1e60a3a1339c0e516232e2adbb4132e4e719bfcf0acb84e5e805ceb3b151a56",
+        "volume_sum": 3.98
+      },
+      {
+        "day_offset_from_window_start": 11,
+        "day_utc": "2024-01-12",
+        "metric_value_float_sum": 3.96,
+        "row_count": 1,
+        "row_hash_sha256": "86289c4a169ef18246121df56cd3ed3a8b345186d20a488b09edd55577adc8bb",
+        "volume_sum": 3.96
+      },
+      {
+        "day_offset_from_window_start": 14,
+        "day_utc": "2024-01-15",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "425f7ede6c8069cf444712f0718d3f0447c172eb22f8c38c870e0f68c023809c",
+        "volume_sum": 0.0
+      },
+      {
+        "day_offset_from_window_start": 15,
+        "day_utc": "2024-01-16",
+        "metric_value_float_sum": 4.07,
+        "row_count": 1,
+        "row_hash_sha256": "23f52b529bee0fb378f4f717b2da9e895dca6d2b537a73ddda80ff8ac90b7970",
+        "volume_sum": 4.07
+      },
+      {
+        "day_offset_from_window_start": 16,
+        "day_utc": "2024-01-17",
+        "metric_value_float_sum": 4.1,
+        "row_count": 1,
+        "row_hash_sha256": "4a6704fa5e8a941b95487d19b5b3869e710283b67cba05717975900b20b32b31",
+        "volume_sum": 4.1
+      },
+      {
+        "day_offset_from_window_start": 17,
+        "day_utc": "2024-01-18",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "f810f9097c788aa8af17eb2d2263555906dc051f436e62cca4f221d72bb09107",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 18,
+        "day_utc": "2024-01-19",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "57042b809b553c3a916bce4c1e50eb9c2727bb086ad60192bae6635256aee103",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 21,
+        "day_utc": "2024-01-22",
+        "metric_value_float_sum": 4.11,
+        "row_count": 1,
+        "row_hash_sha256": "453d7826e1c2d791003809b4ab47b2de89d17fc1c0ead74d9f108f8578bb72e0",
+        "volume_sum": 4.11
+      },
+      {
+        "day_offset_from_window_start": 22,
+        "day_utc": "2024-01-23",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "f220e6e4f432ab70f042f47e709bea6085cf390dea5219acfea57e7d31da6f09",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 23,
+        "day_utc": "2024-01-24",
+        "metric_value_float_sum": 4.18,
+        "row_count": 1,
+        "row_hash_sha256": "92e121e2b62af82b4ec870f2576e906c23e5f9e4bf5432e429623ab126b85643",
+        "volume_sum": 4.18
+      },
+      {
+        "day_offset_from_window_start": 24,
+        "day_utc": "2024-01-25",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "8000af3dcb2c973eecac990ac90ff65d0258b5f7f6bcb06328ba512174b8fc7f",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 25,
+        "day_utc": "2024-01-26",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "a995b669b62b4c8666d9ae11863df0bf477e84d83f9a2123b4bbe630faf832c6",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 28,
+        "day_utc": "2024-01-29",
+        "metric_value_float_sum": 4.08,
+        "row_count": 1,
+        "row_hash_sha256": "6dd46565988d9c6f104c78798ec533f103e33d93070ef4643a08281aa219b5ed",
+        "volume_sum": 4.08
+      },
+      {
+        "day_offset_from_window_start": 29,
+        "day_utc": "2024-01-30",
+        "metric_value_float_sum": 4.06,
+        "row_count": 1,
+        "row_hash_sha256": "9ba7148572b794f7b2b7bbf4fd345f33b825e0f43393a16687a6c2d7e9f5c31f",
+        "volume_sum": 4.06
+      },
+      {
+        "day_offset_from_window_start": 30,
+        "day_utc": "2024-01-31",
+        "metric_value_float_sum": 3.99,
+        "row_count": 1,
+        "row_hash_sha256": "ced9ec4cdc1715835a04b82e9a28e6b824b1e2a600dcb8d3b3973d1621b6906d",
+        "volume_sum": 3.99
+      },
+      {
+        "day_offset_from_window_start": 31,
+        "day_utc": "2024-02-01",
+        "metric_value_float_sum": 324.067,
+        "row_count": 4,
+        "row_hash_sha256": "711a34aa973e029e187d119636f2a38810b32a1cbd2b599d14771a91b4c9a776",
+        "volume_sum": 324.067
+      },
+      {
+        "day_offset_from_window_start": 32,
+        "day_utc": "2024-02-02",
+        "metric_value_float_sum": 4.03,
+        "row_count": 1,
+        "row_hash_sha256": "fb2b85906e367cd776f7311e8503ef697dd63cce019843ce4a2e60cd0fc57279",
+        "volume_sum": 4.03
+      },
+      {
+        "day_offset_from_window_start": 35,
+        "day_utc": "2024-02-05",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "fd83ffc90d03e4987c521a26d037440b2f385469332a4a9083c46c3c9202e41c",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 36,
+        "day_utc": "2024-02-06",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "7035db217296a307547c04ecc9ae22e45d07880c8214428e2ceb28d3e42ef39c",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 37,
+        "day_utc": "2024-02-07",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "57923f007e121c48a84c908d3d3905dc0354c62197f4b68aee1054e4fc319df1",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 38,
+        "day_utc": "2024-02-08",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "c1b17850b965665d639859f6aedc03bc76936daca833836d2f856589b5aaf5c4",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 39,
+        "day_utc": "2024-02-09",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "e3b7d4219b86e202d7f1649cb847c5304f0f0e617b0e4e731b2f987d54685277",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 42,
+        "day_utc": "2024-02-12",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "b4796941826e8b8eb4e65059a4a9a13ef38f9d2aa86e2b31289979c4c7576506",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 43,
+        "day_utc": "2024-02-13",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "a94f2bd57d902ffe33824ca4a95da41a8f8eace9a43eae0f0e27f1627c030150",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 44,
+        "day_utc": "2024-02-14",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "53e226c62b5597fa77fb21362011069bde3920d03156d05dc23dd5019e9025ce",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 45,
+        "day_utc": "2024-02-15",
+        "metric_value_float_sum": 4.24,
+        "row_count": 1,
+        "row_hash_sha256": "9b2f692b583095f5b96c40069ac3bf21284eb6b8571088ec84e9aa7651cbe4cf",
+        "volume_sum": 4.24
+      },
+      {
+        "day_offset_from_window_start": 46,
+        "day_utc": "2024-02-16",
+        "metric_value_float_sum": 4.3,
+        "row_count": 1,
+        "row_hash_sha256": "35522c5a9e18aabffe56608a5bda36f73e4ec65e4d30dbf25ad2ad8531561136",
+        "volume_sum": 4.3
+      },
+      {
+        "day_offset_from_window_start": 49,
+        "day_utc": "2024-02-19",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "c0b36424aaa42a737d30c3e530e4687798a19a8734eec4f34a4c1e1bda0c36a8",
+        "volume_sum": 0.0
+      },
+      {
+        "day_offset_from_window_start": 50,
+        "day_utc": "2024-02-20",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "c3738dd12471eaf31fb54e65c589a8b87ca38dd89d941f54ff34653cfdb9bb06",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 51,
+        "day_utc": "2024-02-21",
+        "metric_value_float_sum": 4.32,
+        "row_count": 1,
+        "row_hash_sha256": "3cffcccd9d9c5bb3af985c7c2f5aa22edc645610e9103d57321411f02470230c",
+        "volume_sum": 4.32
+      },
+      {
+        "day_offset_from_window_start": 52,
+        "day_utc": "2024-02-22",
+        "metric_value_float_sum": 4.33,
+        "row_count": 1,
+        "row_hash_sha256": "84d811b968cd4c7f1a0a2ff45e0668d8cd68e23cce8be0c23fe10b47d791cb87",
+        "volume_sum": 4.33
+      },
+      {
+        "day_offset_from_window_start": 53,
+        "day_utc": "2024-02-23",
+        "metric_value_float_sum": 4.26,
+        "row_count": 1,
+        "row_hash_sha256": "740684e9f81187cb3314cd48b42aa09ad45b70c4302c236772a0eca098ac8d46",
+        "volume_sum": 4.26
+      },
+      {
+        "day_offset_from_window_start": 56,
+        "day_utc": "2024-02-26",
+        "metric_value_float_sum": 4.28,
+        "row_count": 1,
+        "row_hash_sha256": "3d3d91e65ce794b0d66e758a9a01d8144d3f671a207fcb8418fda0dca67e848b",
+        "volume_sum": 4.28
+      },
+      {
+        "day_offset_from_window_start": 57,
+        "day_utc": "2024-02-27",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "288b0cf23d18f7094e361515eb4e5ced13986e6d5c0745f869db99ea67df6d82",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 58,
+        "day_utc": "2024-02-28",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "6d33fb9cff42e2c7c3082536a0e312eee1b92a68af734b39e05a040614ed36e0",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 59,
+        "day_utc": "2024-02-29",
+        "metric_value_float_sum": 4.25,
+        "row_count": 1,
+        "row_hash_sha256": "e70bb2e6cdedf49c9112bfbb1b75b9642756d9fc3bb1b5daf2da064a4e76b8a1",
+        "volume_sum": 4.25
+      },
+      {
+        "day_offset_from_window_start": 60,
+        "day_utc": "2024-03-01",
+        "metric_value_float_sum": 325.765,
+        "row_count": 4,
+        "row_hash_sha256": "a34cd142bf255007ebbaab888e8b3bb2bb0b97a40707490e255fe21d79c69661",
+        "volume_sum": 325.765
+      },
+      {
+        "day_offset_from_window_start": 63,
+        "day_utc": "2024-03-04",
+        "metric_value_float_sum": 4.22,
+        "row_count": 1,
+        "row_hash_sha256": "d04c740c77282a419adb12012a3e43c2c3d5197026e3beaab12091a2b5e9f50b",
+        "volume_sum": 4.22
+      },
+      {
+        "day_offset_from_window_start": 64,
+        "day_utc": "2024-03-05",
+        "metric_value_float_sum": 4.13,
+        "row_count": 1,
+        "row_hash_sha256": "c7f58f97de5222f2c9ae07720b166da7aaaeaf534fa24c4ca779385edf0ce964",
+        "volume_sum": 4.13
+      },
+      {
+        "day_offset_from_window_start": 65,
+        "day_utc": "2024-03-06",
+        "metric_value_float_sum": 4.11,
+        "row_count": 1,
+        "row_hash_sha256": "8f7fb955eec75f56eaffec1895a434cf305676f32c83ba7c0725d6e400ef3ace",
+        "volume_sum": 4.11
+      },
+      {
+        "day_offset_from_window_start": 66,
+        "day_utc": "2024-03-07",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "e63f0ea6bfd6c2b80e8bba8db5ce03af3ccf0a4038e9246b36e73d574c77cf31",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 67,
+        "day_utc": "2024-03-08",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "7815614e8736879b4d1bd7203902f425b1096948b117c9d6603c1c12a529aed2",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 70,
+        "day_utc": "2024-03-11",
+        "metric_value_float_sum": 4.1,
+        "row_count": 1,
+        "row_hash_sha256": "967466a7ed68ef36f4183511f7492dd031ab5691ea0409455db9ad5436087463",
+        "volume_sum": 4.1
+      },
+      {
+        "day_offset_from_window_start": 71,
+        "day_utc": "2024-03-12",
+        "metric_value_float_sum": 4.16,
+        "row_count": 1,
+        "row_hash_sha256": "fa9608f257664332613a15897214a3d71e1660454d05b09143b98a2107990233",
+        "volume_sum": 4.16
+      },
+      {
+        "day_offset_from_window_start": 72,
+        "day_utc": "2024-03-13",
+        "metric_value_float_sum": 4.19,
+        "row_count": 1,
+        "row_hash_sha256": "8c46920c346575dd49d08c03209c478b86fee64228f8c1695bf8fe8a35e4f1d7",
+        "volume_sum": 4.19
+      },
+      {
+        "day_offset_from_window_start": 73,
+        "day_utc": "2024-03-14",
+        "metric_value_float_sum": 4.29,
+        "row_count": 1,
+        "row_hash_sha256": "7df3799e46aaa31910021c44db4ba4e2085caac69e1f45b8e27257f485a19001",
+        "volume_sum": 4.29
+      },
+      {
+        "day_offset_from_window_start": 74,
+        "day_utc": "2024-03-15",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "73408af327338ebc413015ea258d7f0d67d274c7890e6bdb8c77449fd3f19a44",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 77,
+        "day_utc": "2024-03-18",
+        "metric_value_float_sum": 4.34,
+        "row_count": 1,
+        "row_hash_sha256": "5a4b88a82780e760be2a7a576639860f0cac6ce2691cab9eb8672154c7634128",
+        "volume_sum": 4.34
+      },
+      {
+        "day_offset_from_window_start": 78,
+        "day_utc": "2024-03-19",
+        "metric_value_float_sum": 4.3,
+        "row_count": 1,
+        "row_hash_sha256": "d9af67419da5574a7c9b6d821605f72695d384699d12a05e22e06d4fb597599f",
+        "volume_sum": 4.3
+      },
+      {
+        "day_offset_from_window_start": 79,
+        "day_utc": "2024-03-20",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "c1f2e0544241ea848f7ab874f6a5450b88d19545341a721f77f3fa0e16bd520c",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 80,
+        "day_utc": "2024-03-21",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "f42015c28cdd49cdf8df15522bce699559497b453b71e75a8bb305c560b0d790",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 81,
+        "day_utc": "2024-03-22",
+        "metric_value_float_sum": 4.22,
+        "row_count": 1,
+        "row_hash_sha256": "b1f0e582ade38952842a9359ac298081163af283a2817d0be978a5ba76f87ed2",
+        "volume_sum": 4.22
+      },
+      {
+        "day_offset_from_window_start": 84,
+        "day_utc": "2024-03-25",
+        "metric_value_float_sum": 4.25,
+        "row_count": 1,
+        "row_hash_sha256": "a93be442f544a51c4254e2e4b86e77d7a6bf867777957215e8c2f99447e53022",
+        "volume_sum": 4.25
+      },
+      {
+        "day_offset_from_window_start": 85,
+        "day_utc": "2024-03-26",
+        "metric_value_float_sum": 4.24,
+        "row_count": 1,
+        "row_hash_sha256": "0a83fb696f386e4fde4ebf7b19772994cad4821dcec595da1393594012c6bf32",
+        "volume_sum": 4.24
+      },
+      {
+        "day_offset_from_window_start": 86,
+        "day_utc": "2024-03-27",
+        "metric_value_float_sum": 4.2,
+        "row_count": 1,
+        "row_hash_sha256": "3900f576d4f1b2d5fe7038d3e73dd7e3dec4014fb5df5fb2dc7423d65cf369fd",
+        "volume_sum": 4.2
+      },
+      {
+        "day_offset_from_window_start": 87,
+        "day_utc": "2024-03-28",
+        "metric_value_float_sum": 4.2,
+        "row_count": 1,
+        "row_hash_sha256": "0f6075a70a74a868a1f5d459d1840638d6d4e2fed185467dab5c76ca4d24ffb9",
+        "volume_sum": 4.2
+      },
+      {
+        "day_offset_from_window_start": 88,
+        "day_utc": "2024-03-29",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "f829e71825cee20f20f54b4c509b138cf434843425af88364c167be9074b4146",
+        "volume_sum": 0.0
+      }
+    ],
+    "row_count_total": 74,
+    "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499"
+  },
+  "run_2_fingerprints": {
+    "per_day": [
+      {
+        "day_offset_from_window_start": 0,
+        "day_utc": "2024-01-01",
+        "metric_value_float_sum": 318.728,
+        "row_count": 4,
+        "row_hash_sha256": "752caecb69c1baf65a7978abbc1fe55c9259efb463a90224d7dfeec5704815b3",
+        "volume_sum": 318.728
+      },
+      {
+        "day_offset_from_window_start": 1,
+        "day_utc": "2024-01-02",
+        "metric_value_float_sum": 3.95,
+        "row_count": 1,
+        "row_hash_sha256": "33cc252ce31f69de5417c143e542fa238240f2c1a4657b30cd7389c0cb895e51",
+        "volume_sum": 3.95
+      },
+      {
+        "day_offset_from_window_start": 2,
+        "day_utc": "2024-01-03",
+        "metric_value_float_sum": 3.91,
+        "row_count": 1,
+        "row_hash_sha256": "bc7e0977bd9228472c41c199bc2fe516aee0909a6ed4b39395f80d395e7efefa",
+        "volume_sum": 3.91
+      },
+      {
+        "day_offset_from_window_start": 3,
+        "day_utc": "2024-01-04",
+        "metric_value_float_sum": 3.99,
+        "row_count": 1,
+        "row_hash_sha256": "dce84aa90a57376240740cb082cdc081df021ee746734973ef55d45edc4e3cb9",
+        "volume_sum": 3.99
+      },
+      {
+        "day_offset_from_window_start": 4,
+        "day_utc": "2024-01-05",
+        "metric_value_float_sum": 4.05,
+        "row_count": 1,
+        "row_hash_sha256": "77c63775295dc6f9ed8ec93954090689a59f153db1fbf4f7c3c400fbaacfd9d3",
+        "volume_sum": 4.05
+      },
+      {
+        "day_offset_from_window_start": 7,
+        "day_utc": "2024-01-08",
+        "metric_value_float_sum": 4.01,
+        "row_count": 1,
+        "row_hash_sha256": "df5ba593a6d20702bd136f79ccfa952f2460c008143cd2e90d452868fa085c02",
+        "volume_sum": 4.01
+      },
+      {
+        "day_offset_from_window_start": 8,
+        "day_utc": "2024-01-09",
+        "metric_value_float_sum": 4.02,
+        "row_count": 1,
+        "row_hash_sha256": "737ec8237a2ca1108fea487600ec31747a238114edc62e59f9c2aed0a5859109",
+        "volume_sum": 4.02
+      },
+      {
+        "day_offset_from_window_start": 9,
+        "day_utc": "2024-01-10",
+        "metric_value_float_sum": 4.04,
+        "row_count": 1,
+        "row_hash_sha256": "65f4fbd95fe78fcf26485894baac7a369578cf93b75018bf64ee1d14ef239556",
+        "volume_sum": 4.04
+      },
+      {
+        "day_offset_from_window_start": 10,
+        "day_utc": "2024-01-11",
+        "metric_value_float_sum": 3.98,
+        "row_count": 1,
+        "row_hash_sha256": "a1e60a3a1339c0e516232e2adbb4132e4e719bfcf0acb84e5e805ceb3b151a56",
+        "volume_sum": 3.98
+      },
+      {
+        "day_offset_from_window_start": 11,
+        "day_utc": "2024-01-12",
+        "metric_value_float_sum": 3.96,
+        "row_count": 1,
+        "row_hash_sha256": "86289c4a169ef18246121df56cd3ed3a8b345186d20a488b09edd55577adc8bb",
+        "volume_sum": 3.96
+      },
+      {
+        "day_offset_from_window_start": 14,
+        "day_utc": "2024-01-15",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "425f7ede6c8069cf444712f0718d3f0447c172eb22f8c38c870e0f68c023809c",
+        "volume_sum": 0.0
+      },
+      {
+        "day_offset_from_window_start": 15,
+        "day_utc": "2024-01-16",
+        "metric_value_float_sum": 4.07,
+        "row_count": 1,
+        "row_hash_sha256": "23f52b529bee0fb378f4f717b2da9e895dca6d2b537a73ddda80ff8ac90b7970",
+        "volume_sum": 4.07
+      },
+      {
+        "day_offset_from_window_start": 16,
+        "day_utc": "2024-01-17",
+        "metric_value_float_sum": 4.1,
+        "row_count": 1,
+        "row_hash_sha256": "4a6704fa5e8a941b95487d19b5b3869e710283b67cba05717975900b20b32b31",
+        "volume_sum": 4.1
+      },
+      {
+        "day_offset_from_window_start": 17,
+        "day_utc": "2024-01-18",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "f810f9097c788aa8af17eb2d2263555906dc051f436e62cca4f221d72bb09107",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 18,
+        "day_utc": "2024-01-19",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "57042b809b553c3a916bce4c1e50eb9c2727bb086ad60192bae6635256aee103",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 21,
+        "day_utc": "2024-01-22",
+        "metric_value_float_sum": 4.11,
+        "row_count": 1,
+        "row_hash_sha256": "453d7826e1c2d791003809b4ab47b2de89d17fc1c0ead74d9f108f8578bb72e0",
+        "volume_sum": 4.11
+      },
+      {
+        "day_offset_from_window_start": 22,
+        "day_utc": "2024-01-23",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "f220e6e4f432ab70f042f47e709bea6085cf390dea5219acfea57e7d31da6f09",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 23,
+        "day_utc": "2024-01-24",
+        "metric_value_float_sum": 4.18,
+        "row_count": 1,
+        "row_hash_sha256": "92e121e2b62af82b4ec870f2576e906c23e5f9e4bf5432e429623ab126b85643",
+        "volume_sum": 4.18
+      },
+      {
+        "day_offset_from_window_start": 24,
+        "day_utc": "2024-01-25",
+        "metric_value_float_sum": 4.14,
+        "row_count": 1,
+        "row_hash_sha256": "8000af3dcb2c973eecac990ac90ff65d0258b5f7f6bcb06328ba512174b8fc7f",
+        "volume_sum": 4.14
+      },
+      {
+        "day_offset_from_window_start": 25,
+        "day_utc": "2024-01-26",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "a995b669b62b4c8666d9ae11863df0bf477e84d83f9a2123b4bbe630faf832c6",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 28,
+        "day_utc": "2024-01-29",
+        "metric_value_float_sum": 4.08,
+        "row_count": 1,
+        "row_hash_sha256": "6dd46565988d9c6f104c78798ec533f103e33d93070ef4643a08281aa219b5ed",
+        "volume_sum": 4.08
+      },
+      {
+        "day_offset_from_window_start": 29,
+        "day_utc": "2024-01-30",
+        "metric_value_float_sum": 4.06,
+        "row_count": 1,
+        "row_hash_sha256": "9ba7148572b794f7b2b7bbf4fd345f33b825e0f43393a16687a6c2d7e9f5c31f",
+        "volume_sum": 4.06
+      },
+      {
+        "day_offset_from_window_start": 30,
+        "day_utc": "2024-01-31",
+        "metric_value_float_sum": 3.99,
+        "row_count": 1,
+        "row_hash_sha256": "ced9ec4cdc1715835a04b82e9a28e6b824b1e2a600dcb8d3b3973d1621b6906d",
+        "volume_sum": 3.99
+      },
+      {
+        "day_offset_from_window_start": 31,
+        "day_utc": "2024-02-01",
+        "metric_value_float_sum": 324.067,
+        "row_count": 4,
+        "row_hash_sha256": "711a34aa973e029e187d119636f2a38810b32a1cbd2b599d14771a91b4c9a776",
+        "volume_sum": 324.067
+      },
+      {
+        "day_offset_from_window_start": 32,
+        "day_utc": "2024-02-02",
+        "metric_value_float_sum": 4.03,
+        "row_count": 1,
+        "row_hash_sha256": "fb2b85906e367cd776f7311e8503ef697dd63cce019843ce4a2e60cd0fc57279",
+        "volume_sum": 4.03
+      },
+      {
+        "day_offset_from_window_start": 35,
+        "day_utc": "2024-02-05",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "fd83ffc90d03e4987c521a26d037440b2f385469332a4a9083c46c3c9202e41c",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 36,
+        "day_utc": "2024-02-06",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "7035db217296a307547c04ecc9ae22e45d07880c8214428e2ceb28d3e42ef39c",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 37,
+        "day_utc": "2024-02-07",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "57923f007e121c48a84c908d3d3905dc0354c62197f4b68aee1054e4fc319df1",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 38,
+        "day_utc": "2024-02-08",
+        "metric_value_float_sum": 4.15,
+        "row_count": 1,
+        "row_hash_sha256": "c1b17850b965665d639859f6aedc03bc76936daca833836d2f856589b5aaf5c4",
+        "volume_sum": 4.15
+      },
+      {
+        "day_offset_from_window_start": 39,
+        "day_utc": "2024-02-09",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "e3b7d4219b86e202d7f1649cb847c5304f0f0e617b0e4e731b2f987d54685277",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 42,
+        "day_utc": "2024-02-12",
+        "metric_value_float_sum": 4.17,
+        "row_count": 1,
+        "row_hash_sha256": "b4796941826e8b8eb4e65059a4a9a13ef38f9d2aa86e2b31289979c4c7576506",
+        "volume_sum": 4.17
+      },
+      {
+        "day_offset_from_window_start": 43,
+        "day_utc": "2024-02-13",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "a94f2bd57d902ffe33824ca4a95da41a8f8eace9a43eae0f0e27f1627c030150",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 44,
+        "day_utc": "2024-02-14",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "53e226c62b5597fa77fb21362011069bde3920d03156d05dc23dd5019e9025ce",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 45,
+        "day_utc": "2024-02-15",
+        "metric_value_float_sum": 4.24,
+        "row_count": 1,
+        "row_hash_sha256": "9b2f692b583095f5b96c40069ac3bf21284eb6b8571088ec84e9aa7651cbe4cf",
+        "volume_sum": 4.24
+      },
+      {
+        "day_offset_from_window_start": 46,
+        "day_utc": "2024-02-16",
+        "metric_value_float_sum": 4.3,
+        "row_count": 1,
+        "row_hash_sha256": "35522c5a9e18aabffe56608a5bda36f73e4ec65e4d30dbf25ad2ad8531561136",
+        "volume_sum": 4.3
+      },
+      {
+        "day_offset_from_window_start": 49,
+        "day_utc": "2024-02-19",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "c0b36424aaa42a737d30c3e530e4687798a19a8734eec4f34a4c1e1bda0c36a8",
+        "volume_sum": 0.0
+      },
+      {
+        "day_offset_from_window_start": 50,
+        "day_utc": "2024-02-20",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "c3738dd12471eaf31fb54e65c589a8b87ca38dd89d941f54ff34653cfdb9bb06",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 51,
+        "day_utc": "2024-02-21",
+        "metric_value_float_sum": 4.32,
+        "row_count": 1,
+        "row_hash_sha256": "3cffcccd9d9c5bb3af985c7c2f5aa22edc645610e9103d57321411f02470230c",
+        "volume_sum": 4.32
+      },
+      {
+        "day_offset_from_window_start": 52,
+        "day_utc": "2024-02-22",
+        "metric_value_float_sum": 4.33,
+        "row_count": 1,
+        "row_hash_sha256": "84d811b968cd4c7f1a0a2ff45e0668d8cd68e23cce8be0c23fe10b47d791cb87",
+        "volume_sum": 4.33
+      },
+      {
+        "day_offset_from_window_start": 53,
+        "day_utc": "2024-02-23",
+        "metric_value_float_sum": 4.26,
+        "row_count": 1,
+        "row_hash_sha256": "740684e9f81187cb3314cd48b42aa09ad45b70c4302c236772a0eca098ac8d46",
+        "volume_sum": 4.26
+      },
+      {
+        "day_offset_from_window_start": 56,
+        "day_utc": "2024-02-26",
+        "metric_value_float_sum": 4.28,
+        "row_count": 1,
+        "row_hash_sha256": "3d3d91e65ce794b0d66e758a9a01d8144d3f671a207fcb8418fda0dca67e848b",
+        "volume_sum": 4.28
+      },
+      {
+        "day_offset_from_window_start": 57,
+        "day_utc": "2024-02-27",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "288b0cf23d18f7094e361515eb4e5ced13986e6d5c0745f869db99ea67df6d82",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 58,
+        "day_utc": "2024-02-28",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "6d33fb9cff42e2c7c3082536a0e312eee1b92a68af734b39e05a040614ed36e0",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 59,
+        "day_utc": "2024-02-29",
+        "metric_value_float_sum": 4.25,
+        "row_count": 1,
+        "row_hash_sha256": "e70bb2e6cdedf49c9112bfbb1b75b9642756d9fc3bb1b5daf2da064a4e76b8a1",
+        "volume_sum": 4.25
+      },
+      {
+        "day_offset_from_window_start": 60,
+        "day_utc": "2024-03-01",
+        "metric_value_float_sum": 325.765,
+        "row_count": 4,
+        "row_hash_sha256": "a34cd142bf255007ebbaab888e8b3bb2bb0b97a40707490e255fe21d79c69661",
+        "volume_sum": 325.765
+      },
+      {
+        "day_offset_from_window_start": 63,
+        "day_utc": "2024-03-04",
+        "metric_value_float_sum": 4.22,
+        "row_count": 1,
+        "row_hash_sha256": "d04c740c77282a419adb12012a3e43c2c3d5197026e3beaab12091a2b5e9f50b",
+        "volume_sum": 4.22
+      },
+      {
+        "day_offset_from_window_start": 64,
+        "day_utc": "2024-03-05",
+        "metric_value_float_sum": 4.13,
+        "row_count": 1,
+        "row_hash_sha256": "c7f58f97de5222f2c9ae07720b166da7aaaeaf534fa24c4ca779385edf0ce964",
+        "volume_sum": 4.13
+      },
+      {
+        "day_offset_from_window_start": 65,
+        "day_utc": "2024-03-06",
+        "metric_value_float_sum": 4.11,
+        "row_count": 1,
+        "row_hash_sha256": "8f7fb955eec75f56eaffec1895a434cf305676f32c83ba7c0725d6e400ef3ace",
+        "volume_sum": 4.11
+      },
+      {
+        "day_offset_from_window_start": 66,
+        "day_utc": "2024-03-07",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "e63f0ea6bfd6c2b80e8bba8db5ce03af3ccf0a4038e9246b36e73d574c77cf31",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 67,
+        "day_utc": "2024-03-08",
+        "metric_value_float_sum": 4.09,
+        "row_count": 1,
+        "row_hash_sha256": "7815614e8736879b4d1bd7203902f425b1096948b117c9d6603c1c12a529aed2",
+        "volume_sum": 4.09
+      },
+      {
+        "day_offset_from_window_start": 70,
+        "day_utc": "2024-03-11",
+        "metric_value_float_sum": 4.1,
+        "row_count": 1,
+        "row_hash_sha256": "967466a7ed68ef36f4183511f7492dd031ab5691ea0409455db9ad5436087463",
+        "volume_sum": 4.1
+      },
+      {
+        "day_offset_from_window_start": 71,
+        "day_utc": "2024-03-12",
+        "metric_value_float_sum": 4.16,
+        "row_count": 1,
+        "row_hash_sha256": "fa9608f257664332613a15897214a3d71e1660454d05b09143b98a2107990233",
+        "volume_sum": 4.16
+      },
+      {
+        "day_offset_from_window_start": 72,
+        "day_utc": "2024-03-13",
+        "metric_value_float_sum": 4.19,
+        "row_count": 1,
+        "row_hash_sha256": "8c46920c346575dd49d08c03209c478b86fee64228f8c1695bf8fe8a35e4f1d7",
+        "volume_sum": 4.19
+      },
+      {
+        "day_offset_from_window_start": 73,
+        "day_utc": "2024-03-14",
+        "metric_value_float_sum": 4.29,
+        "row_count": 1,
+        "row_hash_sha256": "7df3799e46aaa31910021c44db4ba4e2085caac69e1f45b8e27257f485a19001",
+        "volume_sum": 4.29
+      },
+      {
+        "day_offset_from_window_start": 74,
+        "day_utc": "2024-03-15",
+        "metric_value_float_sum": 4.31,
+        "row_count": 1,
+        "row_hash_sha256": "73408af327338ebc413015ea258d7f0d67d274c7890e6bdb8c77449fd3f19a44",
+        "volume_sum": 4.31
+      },
+      {
+        "day_offset_from_window_start": 77,
+        "day_utc": "2024-03-18",
+        "metric_value_float_sum": 4.34,
+        "row_count": 1,
+        "row_hash_sha256": "5a4b88a82780e760be2a7a576639860f0cac6ce2691cab9eb8672154c7634128",
+        "volume_sum": 4.34
+      },
+      {
+        "day_offset_from_window_start": 78,
+        "day_utc": "2024-03-19",
+        "metric_value_float_sum": 4.3,
+        "row_count": 1,
+        "row_hash_sha256": "d9af67419da5574a7c9b6d821605f72695d384699d12a05e22e06d4fb597599f",
+        "volume_sum": 4.3
+      },
+      {
+        "day_offset_from_window_start": 79,
+        "day_utc": "2024-03-20",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "c1f2e0544241ea848f7ab874f6a5450b88d19545341a721f77f3fa0e16bd520c",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 80,
+        "day_utc": "2024-03-21",
+        "metric_value_float_sum": 4.27,
+        "row_count": 1,
+        "row_hash_sha256": "f42015c28cdd49cdf8df15522bce699559497b453b71e75a8bb305c560b0d790",
+        "volume_sum": 4.27
+      },
+      {
+        "day_offset_from_window_start": 81,
+        "day_utc": "2024-03-22",
+        "metric_value_float_sum": 4.22,
+        "row_count": 1,
+        "row_hash_sha256": "b1f0e582ade38952842a9359ac298081163af283a2817d0be978a5ba76f87ed2",
+        "volume_sum": 4.22
+      },
+      {
+        "day_offset_from_window_start": 84,
+        "day_utc": "2024-03-25",
+        "metric_value_float_sum": 4.25,
+        "row_count": 1,
+        "row_hash_sha256": "a93be442f544a51c4254e2e4b86e77d7a6bf867777957215e8c2f99447e53022",
+        "volume_sum": 4.25
+      },
+      {
+        "day_offset_from_window_start": 85,
+        "day_utc": "2024-03-26",
+        "metric_value_float_sum": 4.24,
+        "row_count": 1,
+        "row_hash_sha256": "0a83fb696f386e4fde4ebf7b19772994cad4821dcec595da1393594012c6bf32",
+        "volume_sum": 4.24
+      },
+      {
+        "day_offset_from_window_start": 86,
+        "day_utc": "2024-03-27",
+        "metric_value_float_sum": 4.2,
+        "row_count": 1,
+        "row_hash_sha256": "3900f576d4f1b2d5fe7038d3e73dd7e3dec4014fb5df5fb2dc7423d65cf369fd",
+        "volume_sum": 4.2
+      },
+      {
+        "day_offset_from_window_start": 87,
+        "day_utc": "2024-03-28",
+        "metric_value_float_sum": 4.2,
+        "row_count": 1,
+        "row_hash_sha256": "0f6075a70a74a868a1f5d459d1840638d6d4e2fed185467dab5c76ca4d24ffb9",
+        "volume_sum": 4.2
+      },
+      {
+        "day_offset_from_window_start": 88,
+        "day_utc": "2024-03-29",
+        "metric_value_float_sum": 0.0,
+        "row_count": 1,
+        "row_hash_sha256": "f829e71825cee20f20f54b4c509b138cf434843425af88364c167be9074b4146",
+        "volume_sum": 0.0
+      }
+    ],
+    "row_count_total": 74,
+    "rows_hash_sha256": "d878b3c383dfa76ea244f2afd2b305238466fc5b26f4ee45b6bc194f727a2499"
+  },
+  "slice_id": "slice-6-fred-integration"
 }

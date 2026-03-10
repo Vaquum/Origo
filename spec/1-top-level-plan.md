@@ -52,6 +52,35 @@ Every slice must pass:
 4. A documentation entry is complete only if a new engineer can implement and debug the topic without tribal knowledge.
 5. User docs must maintain a complete current reference taxonomy of all exposed datasets, fields, modes, and meanings.
 
+## Slice Artifact Contract
+1. Every slice must leave three closeout artifacts in `spec/slices/<slice-id>/`:
+   1. `manifest.md` with exactly three sections:
+      1. `## What was done`
+      2. `## Current state`
+      3. `## Watch out`
+   2. `run-notes.md` with standardized sections:
+      1. `## Run metadata`
+      2. `## System changes made as proof side effects`
+      3. `## Known warnings and disposition`
+      4. `## Deferred guardrails`
+      5. `## Closeout confirmation`
+   3. `baseline-fixture-<window>.json` using canonical fixture schema.
+2. Canonical baseline fixture schema is:
+   1. `column_key`
+   2. `deterministic_match`
+   3. `fixture_window`
+   4. `source_checksums`
+   5. `run_1_fingerprints`
+   6. `run_2_fingerprints`
+3. Baseline fingerprint content requirements:
+   1. Fixture window dates/timestamps must be explicit UTC values.
+   2. Source checksums must include `zip_sha256` and `csv_sha256` slots when applicable to the source contract.
+   3. Run fingerprints must include row count and deterministic hash fields.
+   4. `deterministic_match` must reflect run-1/run-2 replay equality for the canonical fingerprint payload.
+4. Historical artifact drift policy:
+   1. Canonical reference format is the Slice 7+ baseline-fixture family.
+   2. Historical pre-standard artifacts may be retained for provenance but must carry an explicit warning note and must not be used as structure templates.
+
 ## Pinned Stack
 
 ### Repo and Runtime

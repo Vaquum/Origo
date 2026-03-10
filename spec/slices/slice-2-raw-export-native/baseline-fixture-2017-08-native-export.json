@@ -1,4 +1,5 @@
 {
+  "structure_warning": "Historical artifact retained for provenance. Do not use this file as the fixture structure template; use the canonical baseline fixture contract in spec/1-top-level-plan.md (reference slices 7+).",
   "cases": [
     {
       "case_id": "native_parquet_spot_trades_month_2017_08",

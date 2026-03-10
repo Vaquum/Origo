@@ -1,4 +1,5 @@
 {
+  "structure_warning": "Historical artifact retained for provenance. Do not use this file as the fixture structure template; use the canonical baseline fixture contract in spec/1-top-level-plan.md (reference slices 7+).",
   "fixture_window": [
     "spot_trades:2017-08",
     "spot_agg_trades:2019-01",

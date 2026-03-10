@@ -9,8 +9,9 @@ import dagster as dg
 import polars as pl
 from dagster import OpExecutionContext
 
-from origo.query.aligned_core import query_aligned_data
+from origo.query.aligned_core import AlignedDataset, query_aligned_data
 from origo.query.binance_native import BinanceDataset, query_binance_native_data
+from origo.query.bitcoin_native import BitcoinDataset, query_bitcoin_native_data
 from origo.query.bybit_native import BybitDataset, query_bybit_native_data
 from origo.query.etf_native import ETFDataset, query_etf_native_data
 from origo.query.fred_native import FREDDataset, query_fred_native_data
@@ -26,9 +27,29 @@ from origo.query.okx_native import OKXDataset, query_okx_native_data
 job: Any = getattr(dg, 'job')
 op: Any = getattr(dg, 'op')
 type ExportDataset = (
-    BinanceDataset | BybitDataset | ETFDataset | FREDDataset | OKXDataset
+    BinanceDataset
+    | BitcoinDataset
+    | BybitDataset
+    | ETFDataset
+    | FREDDataset
+    | OKXDataset
 )
 type ExportMode = Literal['native', 'aligned_1s']
+_ALIGNED_EXPORT_DATASETS: frozenset[AlignedDataset] = frozenset(
+    {
+        'spot_trades',
+        'spot_agg_trades',
+        'futures_trades',
+        'okx_spot_trades',
+        'bybit_spot_trades',
+        'etf_daily_metrics',
+        'fred_series_metrics',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
+    }
+)
 
 
 def _require_env(name: str) -> str:
@@ -65,6 +86,13 @@ def _read_dataset(value: Any) -> ExportDataset:
         'bybit_spot_trades',
         'etf_daily_metrics',
         'fred_series_metrics',
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
     }:
         raise RuntimeError(f'Unsupported export dataset: {value}')
     return cast(ExportDataset, value)
@@ -291,6 +319,24 @@ def origo_raw_export_native_step(context: OpExecutionContext) -> None:
                     auth_token=None,
                     show_summary=False,
                 )
+            elif dataset in {
+                'bitcoin_block_headers',
+                'bitcoin_block_transactions',
+                'bitcoin_mempool_state',
+                'bitcoin_block_fee_totals',
+                'bitcoin_block_subsidy_schedule',
+                'bitcoin_network_hashrate_estimate',
+                'bitcoin_circulating_supply',
+            }:
+                frame = query_bitcoin_native_data(
+                    dataset=cast(BitcoinDataset, dataset),
+                    select_columns=select_columns,
+                    window=window,
+                    include_datetime=include_datetime,
+                    datetime_iso_output=False,
+                    auth_token=None,
+                    show_summary=False,
+                )
             else:
                 frame = query_etf_native_data(
                     dataset=cast(ETFDataset, dataset),
@@ -302,6 +348,10 @@ def origo_raw_export_native_step(context: OpExecutionContext) -> None:
                     show_summary=False,
                 )
         elif mode == 'aligned_1s':
+            if dataset not in _ALIGNED_EXPORT_DATASETS:
+                raise RuntimeError(
+                    f'aligned_1s mode does not support dataset={dataset}'
+                )
             frame = query_aligned_data(
                 dataset=dataset,
                 window=window,

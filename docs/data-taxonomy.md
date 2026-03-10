@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-08
-- Slice/version reference: S1-S8, S11 (platform v0.1.4)
+- Slice/version reference: S1-S8, S11, S13 (platform v0.1.5)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -26,6 +26,13 @@
   - `bybit_spot_trades`
   - `etf_daily_metrics`
   - `fred_series_metrics`
+  - `bitcoin_block_headers`
+  - `bitcoin_block_transactions`
+  - `bitcoin_mempool_state`
+  - `bitcoin_block_fee_totals`
+  - `bitcoin_block_subsidy_schedule`
+  - `bitcoin_network_hashrate_estimate`
+  - `bitcoin_circulating_supply`
 - Core cross-dataset fields:
   - `datetime`: UTC timestamp
   - `timestamp`: epoch integer
@@ -68,6 +75,18 @@
   - `gross_value`: source gross value
   - `home_notional`: source home notional
   - `foreign_notional`: source foreign notional
+- Bitcoin stream fields:
+  - `bitcoin_block_headers`:
+    - `height`, `block_hash`, `prev_hash`, `merkle_root`, `version`, `nonce`, `difficulty`, `timestamp`, `datetime`, `source_chain`
+  - `bitcoin_block_transactions`:
+    - `block_height`, `block_hash`, `block_timestamp`, `transaction_index`, `txid`, `inputs`, `outputs`, `values`, `scripts`, `witness_data`, `coinbase`, `datetime`, `source_chain`
+  - `bitcoin_mempool_state`:
+    - `snapshot_at`, `snapshot_at_unix_ms`, `txid`, `fee_rate_sat_vb`, `vsize`, `first_seen_timestamp`, `rbf_flag`, `source_chain`
+- Bitcoin derived fields:
+  - `bitcoin_block_fee_totals`: `fee_total_btc`
+  - `bitcoin_block_subsidy_schedule`: `halving_interval`, `subsidy_sats`, `subsidy_btc`
+  - `bitcoin_network_hashrate_estimate`: `difficulty`, `observed_interval_seconds`, `hashrate_hs`
+  - `bitcoin_circulating_supply`: `circulating_supply_sats`, `circulating_supply_btc`
 
 ## Source/provenance and freshness semantics
 - Binance canonical historical truth source is exchange-hosted daily/monthly files.
@@ -75,6 +94,7 @@
 - Bybit canonical historical truth source is exchange-hosted daily csv.gz files.
 - ETF canonical source hierarchy is issuer official sources.
 - FRED canonical source is direct API calls to FRED.
+- Bitcoin canonical source is direct Bitcoin Core RPC from one unpruned self-hosted node.
 - Provenance fields (`provenance_json`, checksums, source keys) are replay-critical.
 
 ## Failure modes, warnings, and error codes
@@ -126,6 +146,9 @@
   - `sources=["okx_spot_trades"]`
 - Bybit source list example:
   - `sources=["bybit_spot_trades"]`
+- Bitcoin source list examples:
+  - `sources=["bitcoin_block_headers"]`
+  - `sources=["bitcoin_block_fee_totals"]`
 - Query filter clause example:
   - `{ "field":"price", "op":"gt", "value":1000 }`
 - Export status artifact fields:

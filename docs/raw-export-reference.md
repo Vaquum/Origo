@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-08
-- Slice/version reference: S2, S5, S6, S8, S11 (API v0.1.4)
+- Slice/version reference: S2, S5, S6, S8, S11, S13 (API v0.1.5)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -17,7 +17,7 @@
 - Submit request contract:
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
-  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics`
+  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics | bitcoin_block_headers | bitcoin_block_transactions | bitcoin_mempool_state | bitcoin_block_fee_totals | bitcoin_block_subsidy_schedule | bitcoin_network_hashrate_estimate | bitcoin_circulating_supply`
   - `fields`: optional field projection
   - Exactly one window selector:
     - `month_year`
@@ -46,6 +46,18 @@
 - Export payload comes from canonical ClickHouse data queried via Origo query core.
 - Dagster run tags preserve mode/format/dataset and request hash context.
 - Export freshness follows the latest successful ingestion for requested sources.
+- `mode=aligned_1s` supports only aligned-capable datasets:
+  - `spot_trades`
+  - `spot_agg_trades`
+  - `futures_trades`
+  - `okx_spot_trades`
+  - `bybit_spot_trades`
+  - `etf_daily_metrics`
+  - `fred_series_metrics`
+  - `bitcoin_block_fee_totals`
+  - `bitcoin_block_subsidy_schedule`
+  - `bitcoin_network_hashrate_estimate`
+  - `bitcoin_circulating_supply`
 
 ## Failure modes, warnings, and error codes
 - `404`: export ID not found
@@ -65,6 +77,7 @@
   - `spec/slices/slice-5-raw-query-aligned-1s/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
+  - `spec/slices/slice-13-bitcoin-core-signals/`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`
@@ -85,6 +98,10 @@
   - `{ "mode":"native", "format":"csv", "dataset":"okx_spot_trades", "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
 - Submit Bybit native export:
   - `{ "mode":"native", "format":"csv", "dataset":"bybit_spot_trades", "time_range":["2024-01-02T00:00:00Z","2024-01-03T00:00:00Z"], "strict":false }`
+- Submit Bitcoin native export:
+  - `{ "mode":"native", "format":"parquet", "dataset":"bitcoin_block_headers", "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "strict":false }`
+- Submit Bitcoin aligned export:
+  - `{ "mode":"aligned_1s", "format":"csv", "dataset":"bitcoin_block_fee_totals", "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "strict":false }`
 - Submit aligned export:
   - `{ "mode":"aligned_1s", "format":"csv", "dataset":"etf_daily_metrics", "time_range":["2026-03-05T00:00:00Z","2026-03-07T00:00:00Z"], "strict":false }`
 - Poll status:

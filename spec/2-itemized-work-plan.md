@@ -274,6 +274,241 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S11-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S11-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
+## Slice 12: Reddit Hourly Ingest + CryptoBERT Sentiment Signals
+
+### Capability
+- [ ] `S12-C1` Implement official Reddit API OAuth client and subreddit fetch contract for configured subreddit set.
+- [ ] `S12-C2` Implement hourly Reddit content ingest path with deterministic raw artifact capture and checksums.
+- [ ] `S12-C3` Persist normalized Reddit content events to ClickHouse with migration-backed schema.
+- [ ] `S12-C4` Integrate `ElKulako/cryptobert` inference path for per-item sentiment scoring.
+- [ ] `S12-C5` Implement hourly sentiment signal aggregation dataset with explicit model/version metadata.
+- [ ] `S12-C6` Integrate Slice-12 datasets into raw query/export paths for both `native` and `aligned_1s`.
+
+### Proof
+- [ ] `S12-P1` Execute fixed-window Reddit ingest + sentiment inference acceptance runs across configured subreddit scope.
+- [ ] `S12-P2` Execute fixed-window `native` + `aligned_1s` acceptance runs for Slice-12 datasets.
+- [ ] `S12-P3` Replay fixed fixtures and verify deterministic output fingerprints (ingest, inference, and aggregation outputs).
+- [ ] `S12-P4` Validate source artifact checksums, row stats, and model-version provenance against proof artifacts.
+
+### Guardrails
+- [ ] `S12-G1` Add rights/legal classification artifacts for Reddit API content ingestion and serving/export decisions.
+- [ ] `S12-G2` Enforce Reddit rate-limit/backoff guardrails with fail-loud quota/error classification.
+- [ ] `S12-G3` Add data integrity and freshness guardrails for subreddit coverage, duplicate detection, and hourly completeness.
+- [ ] `S12-G4` Apply aligned-mode guardrails to Slice-12 datasets (strict/warnings/freshness/rights+audit parity).
+- [ ] `S12-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S12-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 13: Bitcoin Core Node V1 Streams + Derived Network/Supply Signals
+
+### Capability
+- [x] `S13-C1` Stand up one unpruned Bitcoin Core node data connector and deterministic block/mempool pull contract.
+- [x] `S13-C2` Implement block header stream ingestion (`height`, `timestamp`, `difficulty`, `nonce`, `version`, `merkle_root`, `prev_hash`).
+- [x] `S13-C3` Implement block transaction stream ingestion (`inputs`, `outputs`, `values`, `scripts`, `witness_data`, `coinbase`).
+- [x] `S13-C4` Implement mempool state ingestion (`txid`, `fee_rate_sat_vb`, `vsize`, `first_seen_timestamp`, `rbf_flag`).
+- [x] `S13-C5` Implement deterministic derived datasets:
+  - block fee totals per block in BTC
+  - subsidy schedule by height/halving interval
+  - network hashrate estimate from difficulty + observed block intervals
+  - BTC circulating supply by height/time
+- [x] `S13-C6` Implement `aligned_1s` materialization/query definitions for S13 derived signals/metrics (fees, subsidy, hashrate, supply) with deterministic bucket semantics.
+- [x] `S13-C7` Integrate Slice-13 datasets into raw query/export paths for both `native` and `aligned_1s`.
+
+### Proof
+- [x] `S13-P1` Execute fixed-window acceptance runs for node ingest outputs (headers, transactions, mempool snapshots).
+- [x] `S13-P2` Execute fixed-window acceptance runs for derived datasets (fees, subsidy, hashrate, supply) in both `native` and `aligned_1s`.
+- [x] `S13-P3` Replay fixed fixtures and verify deterministic fingerprints across ingest and derived outputs.
+- [x] `S13-P4` Validate dataset parity checks (row counts/checksums/consistency constraints) against canonical block data.
+
+### Guardrails
+- [x] `S13-G1` Add rights/legal classification artifacts for Bitcoin Core node-sourced serving/export decisions.
+- [x] `S13-G2` Enforce data integrity suite for block/tx/mempool streams (schema/type, linkage, anomaly checks).
+- [x] `S13-G3` Enforce derived-metric integrity checks (fee/subsidy/hashrate/supply formula invariants).
+- [x] `S13-G4` Apply aligned-mode guardrails to Slice-13 datasets (strict/warnings/freshness/rights+audit parity).
+- [x] `S13-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S13-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 14: Event-Sourcing Core + Persistent Aligned Framework
+
+### Capability
+- [ ] `S14-C1` Add canonical event envelope schema and single global append-only event log tables.
+- [ ] `S14-C2` Implement deterministic canonical event writer (typed envelope + `payload_raw` + `payload_sha256_raw` + derivative `payload_json`) with idempotency keys.
+- [ ] `S14-C3` Implement ingest cursor/ledger and source-completeness reconciliation tables.
+- [ ] `S14-C4` Implement projector runtime and ClickHouse-backed checkpoint/watermark tables.
+- [ ] `S14-C5` Implement persistent aligned aggregate framework (tiered policy).
+- [ ] `S14-C6` Upgrade Raw API contract target for multi-source queries plus explicit `view_id` / `view_version`.
+- [ ] `S14-C7` Add provisional rights metadata contract fields to query/export status responses.
+- [ ] `S14-C8` Add source precision mapping registry and canonical numeric typing rules (no float canonical storage).
+- [ ] `S14-C9` Execute minimal pilot cutover path on Binance spot trades through canonical events.
+
+### Proof
+- [ ] `S14-P1` Validate canonical raw-payload hash determinism across repeated fixed-fixture ingests.
+- [ ] `S14-P2` Validate exactly-once ingest under duplicate replay and crash/restart scenarios.
+- [ ] `S14-P3` Validate no-miss detection with injected gaps and reconciliation checks.
+- [ ] `S14-P4` Validate raw-fidelity and numeric-precision round-trip proofs on fixed fixtures.
+- [ ] `S14-P5` Validate projector replay determinism with checkpoint resume behavior.
+- [ ] `S14-P6` Validate pilot cutover acceptance and parity (`native` + `aligned_1s`) on fixed windows.
+
+### Guardrails
+- [ ] `S14-G1` Add fail-loud invariant checks and typed error taxonomy for event writer/projectors.
+- [ ] `S14-G2` Add immutable audit events for event ingestion and projector checkpoint transitions.
+- [ ] `S14-G3` Enforce continuous source-completeness reconciliation with fail-loud stream quarantine on gaps.
+- [ ] `S14-G4` Enforce canonical precision guardrails (no float storage, explicit decimal scale metadata).
+- [ ] `S14-G5` Enforce provisional-rights metadata emission in API responses.
+- [ ] `S14-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S14-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 15: Binance Event-Sourcing Port (`spot_trades`, `spot_agg_trades`, `futures_trades`)
+
+### Capability
+- [ ] `S15-C1` Port Binance spot trades ingest writes to canonical events.
+- [ ] `S15-C2` Port Binance agg trades ingest writes to canonical events.
+- [ ] `S15-C3` Port Binance futures trades ingest writes to canonical events.
+- [ ] `S15-C4` Implement Binance native serving projections from canonical events.
+- [ ] `S15-C5` Implement Binance persistent aligned serving projections from canonical events.
+- [ ] `S15-C6` Cut query/export serving to Binance event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S15-P1` Execute fixed-window acceptance for Binance `native` + `aligned_1s`.
+- [ ] `S15-P2` Execute parity checks versus current Binance fixture baselines.
+- [ ] `S15-P3` Execute replay determinism for both Binance modes after cutover.
+- [ ] `S15-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for all three Binance datasets.
+- [ ] `S15-P5` Execute no-miss completeness proof (reconciliation + gap injection) for all three Binance datasets.
+- [ ] `S15-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for all three Binance datasets.
+
+### Guardrails
+- [ ] `S15-G1` Apply exchange integrity suite in event-ingest and projection paths.
+- [ ] `S15-G2` Apply freshness warning semantics using source-availability timestamps.
+- [ ] `S15-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Binance gaps.
+- [ ] `S15-G4` Enforce raw-fidelity and precision guardrails in Binance canonical ingest path.
+- [ ] `S15-G5` Enforce provisional rights metadata behavior for Binance responses.
+- [ ] `S15-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S15-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 16: ETF Event-Sourcing Port (`etf_daily_metrics`)
+
+### Capability
+- [ ] `S16-C1` Port ETF normalized output writes to canonical events with existing provenance fidelity.
+- [ ] `S16-C2` Implement ETF native serving projections from canonical events.
+- [ ] `S16-C3` Implement ETF persistent aligned serving projections with deterministic forward-fill semantics.
+- [ ] `S16-C4` Cut query/export serving to ETF event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S16-P1` Execute fixed-window acceptance for ETF `native` + `aligned_1s`.
+- [ ] `S16-P2` Execute parity checks versus current ETF fixture baselines.
+- [ ] `S16-P3` Execute replay determinism for both ETF modes after cutover.
+- [ ] `S16-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for ETF records.
+- [ ] `S16-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for ETF records.
+- [ ] `S16-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for ETF records.
+
+### Guardrails
+- [ ] `S16-G1` Enforce legal/rights behavior and provisional rights metadata for ETF responses.
+- [ ] `S16-G2` Enforce stale/missing/incomplete ETF quality warnings from projection outputs.
+- [ ] `S16-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for ETF ingest.
+- [ ] `S16-G4` Enforce raw-fidelity and precision guardrails in ETF canonical ingest path.
+- [ ] `S16-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S16-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 17: FRED Event-Sourcing Port (`fred_series_metrics`)
+
+### Capability
+- [ ] `S17-C1` Port FRED ingest writes to canonical events.
+- [ ] `S17-C2` Implement FRED native serving projections from canonical events.
+- [ ] `S17-C3` Implement FRED persistent aligned serving projections from canonical events.
+- [ ] `S17-C4` Cut query/export serving to FRED event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S17-P1` Execute fixed-window acceptance for FRED `native` + `aligned_1s`.
+- [ ] `S17-P2` Execute parity checks versus current FRED fixture baselines.
+- [ ] `S17-P3` Execute replay determinism for both FRED modes after cutover.
+- [ ] `S17-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for FRED events.
+- [ ] `S17-P5` Execute no-miss completeness proof (reconciliation + gap injection/cadence checks) for FRED events.
+- [ ] `S17-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for FRED events.
+
+### Guardrails
+- [ ] `S17-G1` Enforce publish-freshness warning behavior from canonical event timing fields.
+- [ ] `S17-G2` Enforce legal/rights behavior and provisional rights metadata for FRED responses.
+- [ ] `S17-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for FRED ingest.
+- [ ] `S17-G4` Enforce raw-fidelity and precision guardrails in FRED canonical ingest path.
+- [ ] `S17-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S17-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 18: OKX Event-Sourcing Port (`okx_spot_trades`)
+
+### Capability
+- [ ] `S18-C1` Port OKX ingest writes to canonical events with existing source checksum/provenance guarantees.
+- [ ] `S18-C2` Implement OKX native serving projections from canonical events.
+- [ ] `S18-C3` Implement OKX persistent aligned serving projections from canonical events.
+- [ ] `S18-C4` Cut query/export serving to OKX event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S18-P1` Execute fixed-window acceptance for OKX `native` + `aligned_1s`.
+- [ ] `S18-P2` Execute parity checks versus current OKX fixture baselines.
+- [ ] `S18-P3` Execute replay determinism for both OKX modes after cutover.
+- [ ] `S18-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for OKX events.
+- [ ] `S18-P5` Execute no-miss completeness proof (reconciliation + gap injection) for OKX events.
+- [ ] `S18-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for OKX events.
+
+### Guardrails
+- [ ] `S18-G1` Apply exchange integrity suite checks in OKX event/projection paths.
+- [ ] `S18-G2` Enforce legal/rights behavior and provisional rights metadata for OKX responses.
+- [ ] `S18-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for OKX ingest.
+- [ ] `S18-G4` Enforce raw-fidelity and precision guardrails in OKX canonical ingest path.
+- [ ] `S18-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S18-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 19: Bybit Event-Sourcing Port (`bybit_spot_trades`)
+
+### Capability
+- [ ] `S19-C1` Port Bybit ingest writes to canonical events with existing source checksum/provenance guarantees.
+- [ ] `S19-C2` Implement Bybit native serving projections from canonical events.
+- [ ] `S19-C3` Implement Bybit persistent aligned serving projections from canonical events.
+- [ ] `S19-C4` Cut query/export serving to Bybit event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S19-P1` Execute fixed-window acceptance for Bybit `native` + `aligned_1s`.
+- [ ] `S19-P2` Execute parity checks versus current Bybit fixture baselines.
+- [ ] `S19-P3` Execute replay determinism for both Bybit modes after cutover.
+- [ ] `S19-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for Bybit events.
+- [ ] `S19-P5` Execute no-miss completeness proof (reconciliation + gap injection) for Bybit events.
+- [ ] `S19-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for Bybit events.
+
+### Guardrails
+- [ ] `S19-G1` Apply exchange integrity suite checks in Bybit event/projection paths.
+- [ ] `S19-G2` Enforce legal/rights behavior and provisional rights metadata for Bybit responses.
+- [ ] `S19-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bybit ingest.
+- [ ] `S19-G4` Enforce raw-fidelity and precision guardrails in Bybit canonical ingest path.
+- [ ] `S19-G5` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S19-G6` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
+## Slice 20: Bitcoin Event-Sourcing Port (All Onboarded Bitcoin Datasets)
+
+### Capability
+- [ ] `S20-C1` Port Bitcoin block headers ingest writes to canonical events.
+- [ ] `S20-C2` Port Bitcoin block transactions ingest writes to canonical events.
+- [ ] `S20-C3` Port Bitcoin mempool state ingest writes to canonical events.
+- [ ] `S20-C4` Port Bitcoin derived datasets writes to canonical events.
+- [ ] `S20-C5` Implement native serving projections for all seven onboarded Bitcoin datasets.
+- [ ] `S20-C6` Implement persistent aligned serving projections for the four derived Bitcoin datasets only.
+- [ ] `S20-C7` Cut query/export serving to Bitcoin event projections and remove legacy direct-serving path.
+
+### Proof
+- [ ] `S20-P1` Execute fixed-window acceptance for Bitcoin native (all seven datasets) and aligned (four derived datasets).
+- [ ] `S20-P2` Execute parity checks versus current Bitcoin fixture baselines.
+- [ ] `S20-P3` Execute replay determinism across Bitcoin event and projection paths.
+- [ ] `S20-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) across all seven Bitcoin datasets.
+- [ ] `S20-P5` Execute no-miss completeness proof (height/sequence reconciliation + gap injection) across all seven Bitcoin datasets.
+- [ ] `S20-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) across all seven Bitcoin datasets.
+- [ ] `S20-P7` Execute live-node proof gate once non-IBD conditions are met.
+
+### Guardrails
+- [ ] `S20-G1` Apply stream linkage and derived formula integrity suites in Bitcoin event/projection paths.
+- [ ] `S20-G2` Enforce freshness warning behavior from canonical event timing fields.
+- [ ] `S20-G3` Enforce source-completeness reconciliation and fail-loud quarantine behavior for Bitcoin ingest.
+- [ ] `S20-G4` Enforce raw-fidelity and precision guardrails in Bitcoin canonical ingest path.
+- [ ] `S20-G5` Enforce legal/rights behavior and provisional rights metadata for Bitcoin responses.
+- [ ] `S20-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S20-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
+
 ---
 
 ## One-Day Sub-Slices
@@ -718,4 +953,458 @@ Constraints: documentation only; no feature changes.
 10. `S11-10`
 Action: User docs closeout for Slice 11.
 Done looks like: `docs/` includes complete Bybit dataset reference and taxonomy updates.
+Constraints: documentation only; no feature changes.
+
+## Slice 12 Sub-Slices
+1. `S12-01`
+Action: Define Reddit source contract, OAuth env contract, and subreddit taxonomy for Slice 12.
+Done looks like: fixed subreddit list, API contract, and required env vars are explicit in spec/docs.
+Constraints: capability prep only.
+2. `S12-02`
+Action: Implement Reddit OAuth client and hourly fetch capability using official Reddit API only.
+Done looks like: hourly fetch retrieves deterministic raw payloads for the configured subreddit set.
+Constraints: no inference/model work yet.
+3. `S12-03`
+Action: Implement normalized Reddit event schema + migration-backed ClickHouse persistence.
+Done looks like: ingested Reddit items persist with deterministic IDs/timestamps and source provenance/checksums.
+Constraints: ingest/storage only.
+4. `S12-04`
+Action: Implement `ElKulako/cryptobert` inference capability for per-item sentiment scoring.
+Done looks like: each normalized Reddit item receives deterministic sentiment output with model metadata.
+Constraints: model is fixed to CryptoBERT in this slice.
+5. `S12-05`
+Action: Implement hourly sentiment aggregation dataset and deterministic write contract.
+Done looks like: hourly subreddit-level sentiment signals are materialized with reproducible aggregation semantics.
+Constraints: no API integration yet.
+6. `S12-06`
+Action: Integrate Slice-12 datasets into raw query/export (`native` + `aligned_1s`) paths.
+Done looks like: query/export contracts can serve Reddit sentiment datasets in both modes.
+Constraints: contract parity with existing datasets.
+7. `S12-07`
+Action: Execute fixed-window acceptance proof for ingest, inference, query, and aligned paths.
+Done looks like: acceptance artifacts validate end-to-end Slice-12 behavior.
+Constraints: fixed fixtures only.
+8. `S12-08`
+Action: Execute replay determinism proof and source/model provenance validation.
+Done looks like: repeated runs match fingerprints and include source checksum + model version traces.
+Constraints: unchanged fixtures/model inputs.
+9. `S12-09`
+Action: Apply rights/rate-limit/integrity/freshness/aligned guardrails.
+Done looks like: fail-loud guardrails are enforced and covered by guardrail proof outputs.
+Constraints: guardrails only.
+10. `S12-10`
+Action: Developer docs closeout for Slice 12.
+Done looks like: `docs/Developer/` has short files for Reddit ingest, CryptoBERT inference, signal aggregation, and guardrail operations.
+Constraints: documentation only; no feature changes.
+11. `S12-11`
+Action: User docs closeout for Slice 12.
+Done looks like: `docs/` includes complete Reddit sentiment dataset reference and taxonomy updates.
+Constraints: documentation only; no feature changes.
+
+## Slice 13 Sub-Slices
+1. `S13-01`
+Action: Define Bitcoin Core source contract, node env contract, and dataset taxonomy for S13.
+Done looks like: unpruned-node requirement, output schemas, and required env vars are explicit in spec/docs.
+Constraints: capability prep only.
+2. `S13-02`
+Action: Implement Bitcoin Core connector and deterministic block-header ingest path.
+Done looks like: header stream persists with stable keys and canonical chain linkage.
+Constraints: node ingest only.
+3. `S13-03`
+Action: Implement block-transaction ingest path (inputs/outputs/values/scripts/witness/coinbase).
+Done looks like: transaction stream persists with deterministic ordering and block linkage.
+Constraints: no derived metrics yet.
+4. `S13-04`
+Action: Implement mempool state ingest snapshots (`txid`, fee rate, vsize, first-seen, RBF flag).
+Done looks like: mempool dataset updates hourly with deterministic snapshot semantics.
+Constraints: mempool only.
+5. `S13-05`
+Action: Implement block fee totals and subsidy schedule derived datasets.
+Done looks like: per-block fees and deterministic subsidy by height are materialized reproducibly.
+Constraints: deterministic formulas only.
+6. `S13-06`
+Action: Implement network hashrate estimate and BTC circulating supply derived datasets.
+Done looks like: derived series is generated from canonical chain data with stable formulas.
+Constraints: no capability expansion beyond defined S13 metrics.
+7. `S13-07`
+Action: Implement `aligned_1s` materialization/query definitions for S13 derived signals/metrics.
+Done looks like: fee/subsidy/hashrate/supply datasets are available in deterministic aligned-1s form.
+Constraints: deterministic bucket semantics only.
+8. `S13-08`
+Action: Integrate S13 datasets into raw query/export (`native` + `aligned_1s`) paths.
+Done looks like: query/export contracts can serve S13 datasets in both modes.
+Constraints: contract parity with existing datasets.
+9. `S13-09`
+Action: Execute fixed-window acceptance proof for node ingest and derived outputs.
+Done looks like: acceptance artifacts validate all S13 datasets on fixed windows, including aligned-1s derived signals.
+Constraints: fixed fixtures only.
+10. `S13-10`
+Action: Execute replay determinism proof and consistency checks.
+Done looks like: repeated runs match fingerprints and satisfy linkage/formula invariants.
+Constraints: unchanged fixtures.
+11. `S13-11`
+Action: Apply rights/integrity/freshness/aligned guardrails for S13.
+Done looks like: fail-loud guardrails are enforced and covered by guardrail proof outputs.
+Constraints: guardrails only.
+12. `S13-12`
+Action: Developer docs closeout for Slice 13.
+Done looks like: `docs/Developer/` has short files for node ingest, aligned/deterministic derived formulas, and guardrail operations.
+Constraints: documentation only; no feature changes.
+13. `S13-13`
+Action: User docs closeout for Slice 13.
+Done looks like: `docs/` includes complete Bitcoin Core stream/derived signal reference and taxonomy updates.
+Constraints: documentation only; no feature changes.
+
+## Slice 14 Sub-Slices
+1. `S14-01`
+Action: Define canonical event envelope spec and global append-only event-log table migrations.
+Done looks like: envelope fields, keys, types, and migration SQL are explicit and applied with ledger tracking.
+Constraints: schema and migration only; no source cutover.
+2. `S14-02`
+Action: Implement deterministic canonical event writer contract with `payload_raw`, `payload_sha256_raw`, and derivative `payload_json`.
+Done looks like: repeated writes of identical source events produce stable event IDs and identical raw-payload hashes.
+Constraints: single write path only; no projector changes.
+3. `S14-03`
+Action: Implement ingest cursor/ledger and source-completeness reconciliation tables.
+Done looks like: each source stream/partition has explicit ingest cursor state and completeness checkpoints.
+Constraints: ingest-state only.
+4. `S14-04`
+Action: Implement projector runtime core and ClickHouse checkpoint/watermark tables.
+Done looks like: projector can start, advance checkpoint, stop, and resume deterministically.
+Constraints: runtime scaffolding only.
+5. `S14-05`
+Action: Implement persistent aligned aggregate framework (hot/warm policy + deterministic bucket contract).
+Done looks like: aligned projection tables are created and backfilled through projector runtime.
+Constraints: aligned framework only; no source-specific optimization.
+6. `S14-06`
+Action: Extend Raw API target contracts for multi-source requests and explicit `view_id`/`view_version`.
+Done looks like: query/export schemas and validators accept the target contract shape without fallback aliases.
+Constraints: contract and validation only.
+7. `S14-07`
+Action: Add provisional rights metadata fields to query/export response contracts.
+Done looks like: response schemas include rights state and provisional flags end-to-end.
+Constraints: metadata plumbing only.
+8. `S14-08`
+Action: Add source precision mapping registry and canonical numeric typing rules.
+Done looks like: numeric fields have explicit integer/decimal+scale mappings and canonical float usage is prohibited.
+Constraints: canonical typing only.
+9. `S14-09`
+Action: Run pilot cutover on Binance `spot_trades` through canonical events into native and aligned serving.
+Done looks like: pilot window serves via projection path with deterministic parity against baseline.
+Constraints: pilot source limited to `spot_trades`.
+10. `S14-10`
+Action: Execute exactly-once/no-miss/fidelity proof suite (duplicate replay, crash/restart, injected gaps, raw/precision round-trip).
+Done looks like: proofs demonstrate idempotent writes, fail-loud gap detection, and precision-preserving round-trip behavior.
+Constraints: unchanged fixtures and controlled fault-injection only.
+11. `S14-11`
+Action: Apply event-runtime guardrails (typed errors, invariant checks, immutable audit transitions, reconciliation quarantine, precision linting).
+Done looks like: fail-loud behavior and audit coverage are enforced for writer/projector state and reconciliation outcomes.
+Constraints: guardrails only.
+12. `S14-12`
+Action: Developer docs closeout for Slice 14.
+Done looks like: `docs/Developer/` has short files for envelope contract, raw-fidelity semantics, exactly-once/no-miss mechanics, projector lifecycle, and failure handling.
+Constraints: documentation only; no feature changes.
+13. `S14-13`
+Action: User docs closeout for Slice 14.
+Done looks like: `docs/` includes event-driven serving semantics, view/version reference, exactly-once/no-miss guarantees, precision semantics, and rights metadata taxonomy updates.
+Constraints: documentation only; no feature changes.
+
+## Slice 15 Sub-Slices
+1. `S15-01`
+Action: Port Binance `spot_trades` ingest writes to canonical event log.
+Done looks like: spot-trade source writes only canonical events with source provenance and deterministic IDs.
+Constraints: no legacy write fallback.
+2. `S15-02`
+Action: Port Binance `spot_agg_trades` ingest writes to canonical event log.
+Done looks like: agg-trade source emits canonical events with deterministic envelope fields.
+Constraints: no legacy write fallback.
+3. `S15-03`
+Action: Port Binance `futures_trades` ingest writes to canonical event log.
+Done looks like: futures-trade source emits canonical events with deterministic envelope fields.
+Constraints: no legacy write fallback.
+4. `S15-04`
+Action: Implement Binance native serving projections from canonical events for all three datasets.
+Done looks like: native queries for all Binance datasets resolve only through projections.
+Constraints: native serving only.
+5. `S15-05`
+Action: Implement Binance aligned-1s projections from canonical events for all three datasets.
+Done looks like: aligned queries/exports include all Binance datasets from persistent aligned projections.
+Constraints: aligned serving only.
+6. `S15-06`
+Action: Cut query/export serving to projection path and remove legacy direct-serving path for Binance.
+Done looks like: no Binance query/export call touches legacy serving tables.
+Constraints: no fallback paths retained.
+7. `S15-07`
+Action: Execute acceptance and parity proof for Binance `native` + `aligned_1s`.
+Done looks like: fixed-window results match approved baselines for both modes.
+Constraints: fixed fixtures only.
+8. `S15-08`
+Action: Execute replay determinism proof for Binance event and projection paths.
+Done looks like: repeated runs match fingerprints across write, project, and serve.
+Constraints: unchanged fixtures/config.
+9. `S15-09`
+Action: Execute exactly-once ingest proof for Binance datasets (duplicate replay + crash/restart).
+Done looks like: idempotency holds under retries/replays and fault-injection restarts without duplicate canonical rows.
+Constraints: fixed fixtures and controlled fault injection only.
+10. `S15-10`
+Action: Execute no-miss + raw-fidelity/precision proof for Binance datasets.
+Done looks like: injected gaps are detected fail-loud and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+11. `S15-11`
+Action: Apply Binance guardrails (integrity, freshness, reconciliation/quarantine, precision checks, provisional rights metadata).
+Done looks like: integrity/freshness/reconciliation/precision/rights checks fail loudly and are visible in API behavior.
+Constraints: guardrails only.
+12. `S15-12`
+Action: Developer docs closeout for Slice 15.
+Done looks like: `docs/Developer/` has short files for Binance event schema mapping, exactly-once/no-miss mechanics, raw-fidelity/precision checks, projector flow, and troubleshooting.
+Constraints: documentation only; no feature changes.
+13. `S15-13`
+Action: User docs closeout for Slice 15.
+Done looks like: `docs/` includes complete Binance dataset taxonomy and mode behavior updates for event-driven serving plus precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 16 Sub-Slices
+1. `S16-01`
+Action: Port ETF normalized records to canonical event log with full provenance.
+Done looks like: ETF writes land as canonical events preserving issuer/source/checksum lineage.
+Constraints: no legacy write fallback.
+2. `S16-02`
+Action: Implement ETF native serving projections from canonical events.
+Done looks like: ETF native queries resolve only through event-driven projections.
+Constraints: native serving only.
+3. `S16-03`
+Action: Implement ETF aligned-1s projections with deterministic forward-fill semantics.
+Done looks like: aligned ETF rows are projection-driven with explicit carry-forward rules.
+Constraints: no implicit or undocumented fill behavior.
+4. `S16-04`
+Action: Cut ETF query/export serving to projection path and remove legacy direct-serving path.
+Done looks like: ETF query/export has a single projection-driven path for both modes.
+Constraints: no fallback paths retained.
+5. `S16-05`
+Action: Execute acceptance and parity proof for ETF `native` + `aligned_1s`.
+Done looks like: fixed-window outputs in both modes match approved ETF baselines.
+Constraints: fixed fixtures only.
+6. `S16-06`
+Action: Execute replay determinism proof for ETF event/projection paths.
+Done looks like: repeated runs match deterministic fingerprints and fill transitions.
+Constraints: unchanged fixtures/config.
+7. `S16-07`
+Action: Execute exactly-once ingest proof for ETF records (duplicate replay + crash/restart).
+Done looks like: retries/replays and fault-injection restarts do not duplicate canonical ETF events.
+Constraints: fixed fixtures and controlled fault injection only.
+8. `S16-08`
+Action: Execute no-miss + raw-fidelity/precision proof for ETF records.
+Done looks like: cadence/gap checks fail loudly on injected misses and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+9. `S16-09`
+Action: Apply ETF guardrails (rights/legal, stale/missing warnings, reconciliation/quarantine, precision checks, provisional rights metadata).
+Done looks like: ETF response behavior enforces fail-loud rights, quality, completeness, and precision semantics.
+Constraints: guardrails only.
+10. `S16-10`
+Action: Developer docs closeout for Slice 16.
+Done looks like: `docs/Developer/` has short files for ETF event contracts, aligned fill rules, exactly-once/no-miss mechanics, precision checks, and guardrail operations.
+Constraints: documentation only; no feature changes.
+11. `S16-11`
+Action: User docs closeout for Slice 16.
+Done looks like: `docs/` includes complete ETF event-driven taxonomy and aligned semantics updates plus precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 17 Sub-Slices
+1. `S17-01`
+Action: Port FRED ingest writes to canonical event log with series metadata.
+Done looks like: FRED rows and metadata revisions are persisted as canonical events.
+Constraints: no legacy write fallback.
+2. `S17-02`
+Action: Implement FRED native serving projections from canonical events.
+Done looks like: FRED native queries resolve through projections only.
+Constraints: native serving only.
+3. `S17-03`
+Action: Implement FRED aligned-1s projections from canonical events.
+Done looks like: aligned FRED series is served from persistent projections with deterministic time handling.
+Constraints: aligned serving only.
+4. `S17-04`
+Action: Cut FRED query/export serving to projection path and remove legacy direct-serving path.
+Done looks like: no FRED query/export path bypasses event-driven projections.
+Constraints: no fallback paths retained.
+5. `S17-05`
+Action: Execute acceptance and parity proof for FRED `native` + `aligned_1s`.
+Done looks like: fixed-window outputs in both modes match approved FRED baselines.
+Constraints: fixed fixtures only.
+6. `S17-06`
+Action: Execute replay determinism proof for FRED event/projection paths.
+Done looks like: repeated runs match deterministic fingerprints including metadata/version traces.
+Constraints: unchanged fixtures/config.
+7. `S17-07`
+Action: Execute exactly-once ingest proof for FRED events (duplicate replay + crash/restart).
+Done looks like: retries/replays and fault-injection restarts do not duplicate canonical FRED events.
+Constraints: fixed fixtures and controlled fault injection only.
+8. `S17-08`
+Action: Execute no-miss + raw-fidelity/precision proof for FRED events.
+Done looks like: cadence/gap checks fail loudly on injected misses and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+9. `S17-09`
+Action: Apply FRED guardrails (freshness, rights/legal, reconciliation/quarantine, precision checks, provisional rights metadata).
+Done looks like: freshness/rights/completeness/precision semantics are enforced fail-loud in API responses.
+Constraints: guardrails only.
+10. `S17-10`
+Action: Developer docs closeout for Slice 17.
+Done looks like: `docs/Developer/` has short files for FRED event mapping, projection semantics, exactly-once/no-miss mechanics, precision checks, and freshness operations.
+Constraints: documentation only; no feature changes.
+11. `S17-11`
+Action: User docs closeout for Slice 17.
+Done looks like: `docs/` includes complete FRED taxonomy updates for event-driven native/aligned behavior plus precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 18 Sub-Slices
+1. `S18-01`
+Action: Port OKX ingest writes to canonical event log with existing checksum/provenance guarantees.
+Done looks like: OKX writes flow only into canonical events with deterministic identifiers.
+Constraints: no legacy write fallback.
+2. `S18-02`
+Action: Implement OKX native serving projections from canonical events.
+Done looks like: OKX native queries resolve only through projection path.
+Constraints: native serving only.
+3. `S18-03`
+Action: Implement OKX aligned-1s projections from canonical events.
+Done looks like: aligned OKX outputs are served from persistent projections.
+Constraints: aligned serving only.
+4. `S18-04`
+Action: Cut OKX query/export serving to projection path and remove legacy direct-serving path.
+Done looks like: no OKX query/export path bypasses projections.
+Constraints: no fallback paths retained.
+5. `S18-05`
+Action: Execute acceptance and parity proof for OKX `native` + `aligned_1s`.
+Done looks like: fixed-window outputs in both modes match approved OKX baselines.
+Constraints: fixed fixtures only.
+6. `S18-06`
+Action: Execute replay determinism proof for OKX event/projection paths.
+Done looks like: repeated runs match deterministic fingerprints across both modes.
+Constraints: unchanged fixtures/config.
+7. `S18-07`
+Action: Execute exactly-once ingest proof for OKX events (duplicate replay + crash/restart).
+Done looks like: retries/replays and fault-injection restarts do not duplicate canonical OKX events.
+Constraints: fixed fixtures and controlled fault injection only.
+8. `S18-08`
+Action: Execute no-miss + raw-fidelity/precision proof for OKX events.
+Done looks like: injected gaps are detected fail-loud and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+9. `S18-09`
+Action: Apply OKX guardrails (integrity, rights/legal, reconciliation/quarantine, precision checks, provisional rights metadata).
+Done looks like: integrity/rights/completeness/precision semantics are enforced fail-loud in serving paths.
+Constraints: guardrails only.
+10. `S18-10`
+Action: Developer docs closeout for Slice 18.
+Done looks like: `docs/Developer/` has short files for OKX event contracts, projections, exactly-once/no-miss mechanics, precision checks, and guardrail runbooks.
+Constraints: documentation only; no feature changes.
+11. `S18-11`
+Action: User docs closeout for Slice 18.
+Done looks like: `docs/` includes complete OKX taxonomy and event-driven mode behavior updates plus precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 19 Sub-Slices
+1. `S19-01`
+Action: Port Bybit ingest writes to canonical event log with existing checksum/provenance guarantees.
+Done looks like: Bybit writes flow only into canonical events with deterministic identifiers.
+Constraints: no legacy write fallback.
+2. `S19-02`
+Action: Implement Bybit native serving projections from canonical events.
+Done looks like: Bybit native queries resolve only through projection path.
+Constraints: native serving only.
+3. `S19-03`
+Action: Implement Bybit aligned-1s projections from canonical events.
+Done looks like: aligned Bybit outputs are served from persistent projections.
+Constraints: aligned serving only.
+4. `S19-04`
+Action: Cut Bybit query/export serving to projection path and remove legacy direct-serving path.
+Done looks like: no Bybit query/export path bypasses projections.
+Constraints: no fallback paths retained.
+5. `S19-05`
+Action: Execute acceptance and parity proof for Bybit `native` + `aligned_1s`.
+Done looks like: fixed-window outputs in both modes match approved Bybit baselines.
+Constraints: fixed fixtures only.
+6. `S19-06`
+Action: Execute replay determinism proof for Bybit event/projection paths.
+Done looks like: repeated runs match deterministic fingerprints across both modes.
+Constraints: unchanged fixtures/config.
+7. `S19-07`
+Action: Execute exactly-once ingest proof for Bybit events (duplicate replay + crash/restart).
+Done looks like: retries/replays and fault-injection restarts do not duplicate canonical Bybit events.
+Constraints: fixed fixtures and controlled fault injection only.
+8. `S19-08`
+Action: Execute no-miss + raw-fidelity/precision proof for Bybit events.
+Done looks like: injected gaps are detected fail-loud and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+9. `S19-09`
+Action: Apply Bybit guardrails (integrity, rights/legal, reconciliation/quarantine, precision checks, provisional rights metadata).
+Done looks like: integrity/rights/completeness/precision semantics are enforced fail-loud in serving paths.
+Constraints: guardrails only.
+10. `S19-10`
+Action: Developer docs closeout for Slice 19.
+Done looks like: `docs/Developer/` has short files for Bybit event contracts, projections, exactly-once/no-miss mechanics, precision checks, and guardrail runbooks.
+Constraints: documentation only; no feature changes.
+11. `S19-11`
+Action: User docs closeout for Slice 19.
+Done looks like: `docs/` includes complete Bybit taxonomy and event-driven mode behavior updates plus precision/guarantee semantics.
+Constraints: documentation only; no feature changes.
+
+## Slice 20 Sub-Slices
+1. `S20-01`
+Action: Port Bitcoin block-header ingest writes to canonical event log.
+Done looks like: block-header stream writes canonical events with stable chain linkage keys.
+Constraints: no legacy write fallback.
+2. `S20-02`
+Action: Port Bitcoin block-transaction ingest writes to canonical event log.
+Done looks like: transaction stream writes canonical events with deterministic block linkage and ordering keys.
+Constraints: no legacy write fallback.
+3. `S20-03`
+Action: Port Bitcoin mempool-state ingest writes to canonical event log.
+Done looks like: mempool snapshots write canonical events with deterministic snapshot identity.
+Constraints: no legacy write fallback.
+4. `S20-04`
+Action: Port Bitcoin derived-signal writes (fees/subsidy/hashrate/supply) to canonical event log.
+Done looks like: derived datasets are eventized with explicit provenance back to canonical chain events.
+Constraints: no formula changes in this step.
+5. `S20-05`
+Action: Implement native serving projections for all seven onboarded Bitcoin datasets.
+Done looks like: native mode serves headers, transactions, mempool, and all four derived datasets from projections.
+Constraints: native serving only.
+6. `S20-06`
+Action: Implement aligned-1s projections for the four derived Bitcoin datasets.
+Done looks like: aligned mode serves fees/subsidy/hashrate/supply from persistent projections.
+Constraints: aligned scope remains derived-only in this tranche.
+7. `S20-07`
+Action: Cut Bitcoin query/export serving to projection path and remove legacy direct-serving path.
+Done looks like: no Bitcoin query/export path bypasses event-driven projections.
+Constraints: no fallback paths retained.
+8. `S20-08`
+Action: Execute acceptance and parity proof for Bitcoin native (7 datasets) + aligned (4 derived datasets).
+Done looks like: fixed-window outputs meet approved Bitcoin baselines for both modes.
+Constraints: fixed fixtures only.
+9. `S20-09`
+Action: Execute replay determinism proof for Bitcoin event/projection paths.
+Done looks like: repeated runs match deterministic fingerprints across event writes and serving outputs.
+Constraints: unchanged fixtures/config.
+10. `S20-10`
+Action: Execute exactly-once ingest proof for all seven Bitcoin datasets (duplicate replay + crash/restart).
+Done looks like: retries/replays and fault-injection restarts do not duplicate canonical Bitcoin events.
+Constraints: fixed fixtures and controlled fault injection only.
+11. `S20-11`
+Action: Execute no-miss + raw-fidelity/precision proof across all seven Bitcoin datasets.
+Done looks like: injected gaps are detected fail-loud and raw-hash/precision checks pass against source artifacts.
+Constraints: fixed fixtures only.
+12. `S20-12`
+Action: Execute live-node proof gate once non-IBD preconditions are met.
+Done looks like: live-node run confirms event and projection paths behave deterministically under current chain tip.
+Constraints: gate requires node out of IBD and fully stable.
+13. `S20-13`
+Action: Apply Bitcoin guardrails (linkage/invariant checks, freshness warnings, reconciliation/quarantine, precision checks, rights metadata behavior).
+Done looks like: integrity/freshness/completeness/precision/rights checks fail loudly and are reflected in API warnings/errors.
+Constraints: guardrails only.
+14. `S20-14`
+Action: Developer docs closeout for Slice 20.
+Done looks like: `docs/Developer/` has short files for Bitcoin event contracts, projection model, exactly-once/no-miss mechanics, precision checks, invariants, and operational troubleshooting.
+Constraints: documentation only; no feature changes.
+15. `S20-15`
+Action: User docs closeout for Slice 20.
+Done looks like: `docs/` includes complete Bitcoin taxonomy for event-driven native and aligned outputs, including derived-only aligned scope and precision/guarantee semantics.
 Constraints: documentation only; no feature changes.

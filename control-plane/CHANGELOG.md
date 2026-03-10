@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.2.55 on 8th of March, 2026
+- Completed Slice 13 Bitcoin Core node streams and derived signal onboarding (`Capability -> Proof -> Guardrails`):
+  - Added migration-backed Bitcoin tables:
+    - `control-plane/migrations/sql/0010__create_bitcoin_block_headers.sql`
+    - `control-plane/migrations/sql/0011__create_bitcoin_block_transactions.sql`
+    - `control-plane/migrations/sql/0012__create_bitcoin_mempool_state.sql`
+    - `control-plane/migrations/sql/0013__create_bitcoin_block_fee_totals.sql`
+    - `control-plane/migrations/sql/0014__create_bitcoin_block_subsidy_schedule.sql`
+    - `control-plane/migrations/sql/0015__create_bitcoin_network_hashrate_estimate.sql`
+    - `control-plane/migrations/sql/0016__create_bitcoin_circulating_supply.sql`
+  - Added Bitcoin stream ingest assets and Dagster jobs:
+    - `insert_bitcoin_block_headers_to_origo`
+    - `insert_bitcoin_block_transactions_to_origo`
+    - `insert_bitcoin_mempool_state_to_origo`
+  - Added deterministic derived assets and Dagster jobs:
+    - `insert_bitcoin_block_fee_totals_to_origo`
+    - `insert_bitcoin_block_subsidy_schedule_to_origo`
+    - `insert_bitcoin_network_hashrate_estimate_to_origo`
+    - `insert_bitcoin_circulating_supply_to_origo`
+  - Added Bitcoin stream + derived integrity suite with fail-loud enforcement in asset paths:
+    - `control-plane/origo_control_plane/utils/bitcoin_integrity.py`
+    - `tests/integrity/test_bitcoin_integrity.py`
+  - Added Slice-13 proof artifact generator and artifacts:
+    - `scripts/s13_generate_proof_artifacts.py`
+    - `spec/slices/slice-13-bitcoin-core-signals/*`
+- Updated query/export integration coverage via monorepo API/query changes and marked S13 work-plan items complete.
+
 ## v1.2.54 on 8th of March, 2026
 - Completed Slice 11 Bybit source onboarding (`Capability -> Proof -> Guardrails`):
   - Added migration-backed raw table schema:

@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-08
 - Slice reference: S7 (`S7-C3`, `S7-C5`, `S7-P1`, `S7-P2`, `S7-P3`, `S7-P4`, `S7-G2`)
 - Version reference: API `v0.1.2`, control-plane `v1.2.52`
 
@@ -54,6 +54,13 @@
   - `ORIGO_DOCKER_DAGSTER_GRAPHQL_URL`
   - `ORIGO_DOCKER_API_BASE_URL`
   - `ORIGO_INTERNAL_API_KEY`
+  - `ORIGO_BITCOIN_CORE_RPC_URL`
+  - `ORIGO_BITCOIN_CORE_RPC_USER`
+  - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
+  - `ORIGO_BITCOIN_CORE_NETWORK`
+  - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
+  - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
+  - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
 
 ## Minimal examples
 - Clean bootstrap (down/build/up + migrations + seed ingest):

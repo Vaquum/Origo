@@ -7,6 +7,7 @@ from clickhouse_connect import get_client as _raw_get_client
 
 from origo.query.aligned_core import AlignedDataset, query_aligned_data
 from origo.query.binance_native import BinanceDataset, query_binance_native_data
+from origo.query.bitcoin_native import BitcoinDataset, query_bitcoin_native_data
 from origo.query.bybit_native import BybitDataset, query_bybit_native_data
 from origo.query.etf_native import ETFDataset, query_etf_native_data
 from origo.query.fred_native import FREDDataset, query_fred_native_data
@@ -30,7 +31,12 @@ _ALLOWED_FILTER_OPS: frozenset[str] = frozenset(
 )
 
 type NativeQueryDataset = (
-    BinanceDataset | BybitDataset | ETFDataset | FREDDataset | OKXDataset
+    BinanceDataset
+    | BitcoinDataset
+    | BybitDataset
+    | ETFDataset
+    | FREDDataset
+    | OKXDataset
 )
 
 
@@ -244,6 +250,26 @@ def query_native(
     if dataset == 'fred_series_metrics':
         frame = query_fred_native_data(
             dataset=dataset,
+            select_columns=select_cols,
+            window=window,
+            include_datetime=include_datetime_col,
+            datetime_iso_output=datetime_iso_output,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        return _apply_filters(frame=frame, filters=filters)
+
+    if dataset in {
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
+    }:
+        frame = query_bitcoin_native_data(
+            dataset=cast(BitcoinDataset, dataset),
             select_columns=select_cols,
             window=window,
             include_datetime=include_datetime_col,

@@ -1,0 +1,128 @@
+{
+  "column_key": {
+    "circulating_supply_btc_sum": "Sum of circulating supply (BTC) values in native partition rows.",
+    "csv_sha256": "Checksum slot required by global fixture contract (reused for node fixture payload).",
+    "fee_total_btc_sum": "Sum of per-block fee totals (BTC) in native partition rows.",
+    "first_event_offset_ms": "Milliseconds from partition start to first event in partition.",
+    "hashrate_hs_sum": "Sum of hashrate estimates (H/s) in native partition rows.",
+    "last_event_offset_ms": "Milliseconds from last event in partition to partition end.",
+    "metric_value_float_sum": "Sum of aligned metric_value_float values in partition rows.",
+    "row_count": "Number of rows for the dataset/day partition.",
+    "rows_hash_sha256": "SHA256 hash of canonicalized partition rows.",
+    "subsidy_btc_sum": "Sum of per-block subsidy values (BTC) in native partition rows.",
+    "zip_sha256": "Checksum slot required by global fixture contract (reused for node fixture payload)."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "days": [
+      "2024-04-20",
+      "2024-04-21"
+    ],
+    "windows_utc": {
+      "2024-04-20": {
+        "end_utc": "2024-04-21T00:00:00.000Z",
+        "start_utc": "2024-04-20T00:00:00.000Z"
+      },
+      "2024-04-21": {
+        "end_utc": "2024-04-22T00:00:00.000Z",
+        "start_utc": "2024-04-21T00:00:00.000Z"
+      }
+    }
+  },
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "2024-04-20": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 49810.31962962963,
+        "row_count": 4,
+        "rows_hash_sha256": "093cbd46c3f8b401658585e635cd46157ce610d5316d656609417457465f9bc4"
+      },
+      "2024-04-21": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 74715.41444444444,
+        "row_count": 4,
+        "rows_hash_sha256": "653274e9ea2fb88df2b8d0f4fe1bcc91eba5987bc1e8a990938399b13e19fb5c"
+      }
+    },
+    "native": {
+      "2024-04-20": {
+        "circulating_supply_btc_sum": 50.0,
+        "fee_total_btc_sum": 0.05,
+        "first_event_offset_ms": 0,
+        "hashrate_hs_sum": 49710.26962962963,
+        "last_event_offset_ms": 86400000,
+        "row_count": 4,
+        "rows_hash_sha256": "a93abb5ca555438d0344c17275f43f0aea6dc89f6ef9deeb333b5a8fa0052270",
+        "subsidy_btc_sum": 50.0
+      },
+      "2024-04-21": {
+        "circulating_supply_btc_sum": 100.0,
+        "fee_total_btc_sum": 0.01,
+        "first_event_offset_ms": 0,
+        "hashrate_hs_sum": 74565.40444444444,
+        "last_event_offset_ms": 86400000,
+        "row_count": 4,
+        "rows_hash_sha256": "449b366c825c16cff73391bfdd0ea7963351bbbac55e1a91b257f08f9741b296",
+        "subsidy_btc_sum": 50.0
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "2024-04-20": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 49810.31962962963,
+        "row_count": 4,
+        "rows_hash_sha256": "093cbd46c3f8b401658585e635cd46157ce610d5316d656609417457465f9bc4"
+      },
+      "2024-04-21": {
+        "first_event_offset_ms": 0,
+        "last_event_offset_ms": 0,
+        "metric_value_float_sum": 74715.41444444444,
+        "row_count": 4,
+        "rows_hash_sha256": "653274e9ea2fb88df2b8d0f4fe1bcc91eba5987bc1e8a990938399b13e19fb5c"
+      }
+    },
+    "native": {
+      "2024-04-20": {
+        "circulating_supply_btc_sum": 50.0,
+        "fee_total_btc_sum": 0.05,
+        "first_event_offset_ms": 0,
+        "hashrate_hs_sum": 49710.26962962963,
+        "last_event_offset_ms": 86400000,
+        "row_count": 4,
+        "rows_hash_sha256": "a93abb5ca555438d0344c17275f43f0aea6dc89f6ef9deeb333b5a8fa0052270",
+        "subsidy_btc_sum": 50.0
+      },
+      "2024-04-21": {
+        "circulating_supply_btc_sum": 100.0,
+        "fee_total_btc_sum": 0.01,
+        "first_event_offset_ms": 0,
+        "hashrate_hs_sum": 74565.40444444444,
+        "last_event_offset_ms": 86400000,
+        "row_count": 4,
+        "rows_hash_sha256": "449b366c825c16cff73391bfdd0ea7963351bbbac55e1a91b257f08f9741b296",
+        "subsidy_btc_sum": 50.0
+      }
+    }
+  },
+  "source_checksums": [
+    {
+      "csv_sha256": "2f983a986856e02bd6ad74010b25c2781709b3c7b5485e8fe3fa398ef7dbcbdf",
+      "partition_day": "2024-04-20",
+      "rows_inserted": 4,
+      "source_note": "bitcoin-core fixture payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "2f983a986856e02bd6ad74010b25c2781709b3c7b5485e8fe3fa398ef7dbcbdf"
+    },
+    {
+      "csv_sha256": "c8823d12bd750b450b82a687ee15df8277888b5a7dd9564b3570d91d63bba715",
+      "partition_day": "2024-04-21",
+      "rows_inserted": 4,
+      "source_note": "bitcoin-core fixture payload checksum (zip/csv fields reused for node source)",
+      "zip_sha256": "c8823d12bd750b450b82a687ee15df8277888b5a7dd9564b3570d91d63bba715"
+    }
+  ]
+}

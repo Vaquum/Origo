@@ -14,6 +14,13 @@ RawQuerySource = Literal[
     'bybit_spot_trades',
     'etf_daily_metrics',
     'fred_series_metrics',
+    'bitcoin_block_headers',
+    'bitcoin_block_transactions',
+    'bitcoin_mempool_state',
+    'bitcoin_block_fee_totals',
+    'bitcoin_block_subsidy_schedule',
+    'bitcoin_network_hashrate_estimate',
+    'bitcoin_circulating_supply',
 ]
 RawQueryDataset = RawQuerySource
 RawQueryMode = Literal['native', 'aligned_1s']

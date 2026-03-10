@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
+- Last updated: 2026-03-08
 - Slice reference: S7 (`S7-C1`, `S7-C2`, `S7-C4`)
 - Version reference: API `v0.1.2`, control-plane `v1.2.52`
 
@@ -17,12 +17,12 @@
   - `docker/Dockerfile.control-plane`
   - root `.env` values required by compose variable expansion
 - Outputs:
-  - four running services: `clickhouse`, `dagster-webserver`, `dagster-daemon`, `api`
+  - five running services: `clickhouse`, `bitcoin-core`, `dagster-webserver`, `dagster-daemon`, `api`
   - API available on `http://localhost:${ORIGO_DOCKER_API_PORT}`
   - Dagster webserver available on `http://localhost:${ORIGO_DOCKER_DAGSTER_PORT}`
 
 ## Data definitions (field names, types, units, timezone, nullability)
-- Service names: string identifiers (`clickhouse`, `dagster-webserver`, `dagster-daemon`, `api`).
+- Service names: string identifiers (`clickhouse`, `bitcoin-core`, `dagster-webserver`, `dagster-daemon`, `api`).
 - Port vars: integer strings (`ORIGO_DOCKER_DAGSTER_PORT`, `ORIGO_DOCKER_API_PORT`).
 - ClickHouse credentials: non-empty strings (`ORIGO_DOCKER_CLICKHOUSE_USER`, `ORIGO_DOCKER_CLICKHOUSE_PASSWORD`).
 - Runtime URLs: absolute HTTP URL strings (`ORIGO_DOCKER_DAGSTER_GRAPHQL_URL`, `ORIGO_DOCKER_API_BASE_URL`).
@@ -31,6 +31,7 @@
 - Docker images are built from monorepo source at current git commit.
 - ClickHouse and Dagster metadata persist through named volumes:
   - `clickhouse-data`
+  - `bitcoin-core-data`
   - `dagster-instance`
   - `origo-storage`
 - Freshness semantics are unchanged from source-level ingestion/query contracts.
@@ -58,6 +59,14 @@
   - `ORIGO_DOCKER_API_PORT`
   - `ORIGO_DOCKER_EXPORT_ROOT_DIR`
   - `ORIGO_DOCKER_ETF_ANOMALY_LOG_PATH`
+- Required Bitcoin Core node vars:
+  - `ORIGO_BITCOIN_CORE_RPC_URL`
+  - `ORIGO_BITCOIN_CORE_RPC_USER`
+  - `ORIGO_BITCOIN_CORE_RPC_PASSWORD`
+  - `ORIGO_BITCOIN_CORE_NETWORK`
+  - `ORIGO_BITCOIN_CORE_RPC_TIMEOUT_SECONDS`
+  - `ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT`
+  - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
 
 ## Minimal examples
 - Build and start stack:

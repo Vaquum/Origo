@@ -18,6 +18,27 @@ import dagster as dg
 import requests
 from dagster import Definitions
 
+from .assets.bitcoin_block_fee_totals_to_origo import (
+    insert_bitcoin_block_fee_totals_to_origo,
+)
+from .assets.bitcoin_block_headers_to_origo import (
+    insert_bitcoin_block_headers_to_origo,
+)
+from .assets.bitcoin_block_subsidy_schedule_to_origo import (
+    insert_bitcoin_block_subsidy_schedule_to_origo,
+)
+from .assets.bitcoin_block_transactions_to_origo import (
+    insert_bitcoin_block_transactions_to_origo,
+)
+from .assets.bitcoin_circulating_supply_to_origo import (
+    insert_bitcoin_circulating_supply_to_origo,
+)
+from .assets.bitcoin_mempool_state_to_origo import (
+    insert_bitcoin_mempool_state_to_origo,
+)
+from .assets.bitcoin_network_hashrate_estimate_to_origo import (
+    insert_bitcoin_network_hashrate_estimate_to_origo,
+)
 from .assets.daily_bybit_spot_trades_to_origo import (
     insert_daily_bybit_spot_trades_to_origo,
 )
@@ -65,6 +86,41 @@ insert_daily_okx_spot_trades_job = define_asset_job(
 insert_daily_bybit_spot_trades_job = define_asset_job(
     name='insert_daily_bybit_spot_trades_to_origo_job',
     selection=['insert_daily_bybit_spot_trades_to_origo'],
+)
+
+insert_bitcoin_block_headers_job = define_asset_job(
+    name='insert_bitcoin_block_headers_to_origo_job',
+    selection=['insert_bitcoin_block_headers_to_origo'],
+)
+
+insert_bitcoin_block_fee_totals_job = define_asset_job(
+    name='insert_bitcoin_block_fee_totals_to_origo_job',
+    selection=['insert_bitcoin_block_fee_totals_to_origo'],
+)
+
+insert_bitcoin_block_subsidy_schedule_job = define_asset_job(
+    name='insert_bitcoin_block_subsidy_schedule_to_origo_job',
+    selection=['insert_bitcoin_block_subsidy_schedule_to_origo'],
+)
+
+insert_bitcoin_network_hashrate_estimate_job = define_asset_job(
+    name='insert_bitcoin_network_hashrate_estimate_to_origo_job',
+    selection=['insert_bitcoin_network_hashrate_estimate_to_origo'],
+)
+
+insert_bitcoin_circulating_supply_job = define_asset_job(
+    name='insert_bitcoin_circulating_supply_to_origo_job',
+    selection=['insert_bitcoin_circulating_supply_to_origo'],
+)
+
+insert_bitcoin_block_transactions_job = define_asset_job(
+    name='insert_bitcoin_block_transactions_to_origo_job',
+    selection=['insert_bitcoin_block_transactions_to_origo'],
+)
+
+insert_bitcoin_mempool_state_job = define_asset_job(
+    name='insert_bitcoin_mempool_state_to_origo_job',
+    selection=['insert_bitcoin_mempool_state_to_origo'],
 )
 
 insert_monthly_binance_agg_trades_job = define_asset_job(
@@ -334,6 +390,13 @@ defs = Definitions(
         insert_daily_binance_trades_to_origo,
         insert_daily_okx_spot_trades_to_origo,
         insert_daily_bybit_spot_trades_to_origo,
+        insert_bitcoin_block_headers_to_origo,
+        insert_bitcoin_block_fee_totals_to_origo,
+        insert_bitcoin_block_subsidy_schedule_to_origo,
+        insert_bitcoin_network_hashrate_estimate_to_origo,
+        insert_bitcoin_circulating_supply_to_origo,
+        insert_bitcoin_block_transactions_to_origo,
+        insert_bitcoin_mempool_state_to_origo,
         insert_monthly_binance_agg_trades_to_origo,
         insert_monthly_binance_futures_trades_to_origo,
         insert_monthly_binance_futures_agg_trades_to_origo,
@@ -345,6 +408,13 @@ defs = Definitions(
         insert_daily_binance_trades_job,
         insert_daily_okx_spot_trades_job,
         insert_daily_bybit_spot_trades_job,
+        insert_bitcoin_block_headers_job,
+        insert_bitcoin_block_fee_totals_job,
+        insert_bitcoin_block_subsidy_schedule_job,
+        insert_bitcoin_network_hashrate_estimate_job,
+        insert_bitcoin_circulating_supply_job,
+        insert_bitcoin_block_transactions_job,
+        insert_bitcoin_mempool_state_job,
         insert_monthly_binance_agg_trades_job,
         insert_monthly_binance_futures_trades_job,
         insert_monthly_binance_futures_agg_trades_job,

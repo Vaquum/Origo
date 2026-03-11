@@ -1,0 +1,13 @@
+{
+  "blocked_error_code": "STREAM_QUARANTINED",
+  "checkpoint_status": "recorded",
+  "proof_database": "origo_s14_g3_proof",
+  "proof_scope": "Slice 14 S14-G3 continuous reconciliation and fail-loud stream quarantine on detected gaps",
+  "quarantine_reason": "gap_detected_from_completeness_reconciliation",
+  "quarantine_state_path": "/var/folders/zg/pwnp530s7m5731gmlbhqyh_r0000gn/T/tmpvxcz123g/audit/stream-quarantine-state.json",
+  "quarantine_verified": true,
+  "write_statuses": [
+    "inserted",
+    "inserted"
+  ]
+}

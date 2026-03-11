@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
 
 import polars as pl
@@ -23,54 +25,55 @@ logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
 
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-_ALIGNED_MS_ALIAS = '__origo_aligned_ms'
+_ALIGNED_VIEW_ID = 'aligned_1s_raw'
+_ALIGNED_VIEW_VERSION = 1
+_CANONICAL_ALIGNED_TABLE = 'canonical_aligned_1s_aggregates'
+CANONICAL_ALIGNED_1S_REQUIRED_SCHEMA: dict[str, str] = {
+    'view_id': 'String',
+    'view_version': 'UInt32',
+    'source_id': 'LowCardinality(String)',
+    'stream_id': 'LowCardinality(String)',
+    'partition_id': 'String',
+    'aligned_at_utc': "DateTime64(3, 'UTC')",
+    'bucket_event_count': 'UInt32',
+    'first_event_id': 'UUID',
+    'last_event_id': 'UUID',
+    'first_source_offset_or_equivalent': 'String',
+    'last_source_offset_or_equivalent': 'String',
+    'latest_source_event_time_utc': "Nullable(DateTime64(9, 'UTC'))",
+    'latest_ingested_at_utc': "DateTime64(3, 'UTC')",
+    'payload_rows_json': 'String',
+    'bucket_sha256': 'FixedString(64)',
+    'projector_id': 'String',
+    'projected_at_utc': "DateTime64(3, 'UTC')",
+}
+
 BinanceAlignedDataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
 
 
 @dataclass(frozen=True)
 class BinanceAligned1sMaterialization:
-    table_name: str
-    id_column: str
-    datetime_column: str
-    price_column: str
-    quantity_column: str
+    stream_id: str
 
     def __post_init__(self) -> None:
-        for value, label in [
-            (self.table_name, 'table_name'),
-            (self.id_column, 'id_column'),
-            (self.datetime_column, 'datetime_column'),
-            (self.price_column, 'price_column'),
-            (self.quantity_column, 'quantity_column'),
-        ]:
-            if not _IDENTIFIER_PATTERN.match(value):
-                raise ValueError(f'Invalid {label}: {value}')
+        if not _IDENTIFIER_PATTERN.match(self.stream_id):
+            raise ValueError(f'Invalid stream_id: {self.stream_id}')
+
+
+@dataclass(frozen=True)
+class _AlignedTradeEvent:
+    order_key: tuple[int, int | str]
+    price: Decimal
+    quantity: Decimal
+    quote_quantity: Decimal
 
 
 _BINANCE_ALIGNED_1S_MATERIALIZATIONS: dict[
     BinanceAlignedDataset, BinanceAligned1sMaterialization
 ] = {
-    'spot_trades': BinanceAligned1sMaterialization(
-        table_name='binance_trades',
-        id_column='trade_id',
-        datetime_column='datetime',
-        price_column='price',
-        quantity_column='quantity',
-    ),
-    'spot_agg_trades': BinanceAligned1sMaterialization(
-        table_name='binance_agg_trades',
-        id_column='agg_trade_id',
-        datetime_column='datetime',
-        price_column='price',
-        quantity_column='quantity',
-    ),
-    'futures_trades': BinanceAligned1sMaterialization(
-        table_name='binance_futures_trades',
-        id_column='futures_trade_id',
-        datetime_column='datetime',
-        price_column='price',
-        quantity_column='quantity',
-    ),
+    'spot_trades': BinanceAligned1sMaterialization(stream_id='spot_trades'),
+    'spot_agg_trades': BinanceAligned1sMaterialization(stream_id='spot_agg_trades'),
+    'futures_trades': BinanceAligned1sMaterialization(stream_id='futures_trades'),
 }
 
 
@@ -88,47 +91,35 @@ def _to_clickhouse_datetime64_literal(value: str) -> str:
 
 
 def _build_where_clause(
-    *, datetime_column: str, window: QueryWindow
+    *,
+    stream_id: str,
+    window: QueryWindow,
 ) -> str:
+    base_predicates = (
+        "source_id = 'binance' "
+        f"AND stream_id = '{stream_id}' "
+        f"AND view_id = '{_ALIGNED_VIEW_ID}' "
+        f'AND view_version = {_ALIGNED_VIEW_VERSION}'
+    )
+
     if isinstance(window, MonthWindow):
         month_start = f'{window.year:04d}-{window.month:02d}-01'
         return (
-            f"WHERE {datetime_column} >= toDateTime('{month_start} 00:00:00') "
-            f"AND {datetime_column} < addMonths(toDateTime('{month_start} 00:00:00'), 1)"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{month_start} 00:00:00.000', 3, 'UTC') "
+            f"AND aligned_at_utc < addMonths(toDateTime64('{month_start} 00:00:00.000', 3, 'UTC'), 1)"
         )
+
     if isinstance(window, TimeRangeWindow):
         start_ch = _to_clickhouse_datetime64_literal(window.start_iso)
         end_ch = _to_clickhouse_datetime64_literal(window.end_iso)
         return (
-            f"WHERE {datetime_column} >= toDateTime64('{start_ch}', 3, 'UTC') "
-            f"AND {datetime_column} < toDateTime64('{end_ch}', 3, 'UTC')"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{start_ch}', 3, 'UTC') "
+            f"AND aligned_at_utc < toDateTime64('{end_ch}', 3, 'UTC')"
         )
-    return ''
 
-
-def _build_grouped_query(
-    *,
-    database: str,
-    materialization: BinanceAligned1sMaterialization,
-    where_clause: str,
-) -> str:
-    datetime_expr = (
-        f"toDateTime64({materialization.datetime_column}, 3, 'UTC')"
-    )
-    return (
-        'SELECT '
-        f"toUnixTimestamp64Milli(toStartOfSecond({datetime_expr})) AS {_ALIGNED_MS_ALIAS}, "
-        f'argMin({materialization.price_column}, {materialization.id_column}) AS open_price, '
-        f'max({materialization.price_column}) AS high_price, '
-        f'min({materialization.price_column}) AS low_price, '
-        f'argMax({materialization.price_column}, {materialization.id_column}) AS close_price, '
-        f'sum({materialization.quantity_column}) AS quantity_sum, '
-        f'sum({materialization.price_column} * {materialization.quantity_column}) AS quote_volume_sum, '
-        'count() AS trade_count '
-        f'FROM {database}.{materialization.table_name} '
-        f'{where_clause} '
-        f'GROUP BY {_ALIGNED_MS_ALIAS}'
-    )
+    return f'WHERE {base_predicates}'
 
 
 def build_binance_aligned_1s_sql(
@@ -142,61 +133,344 @@ def build_binance_aligned_1s_sql(
 
     materialization = _BINANCE_ALIGNED_1S_MATERIALIZATIONS[dataset]
     where_clause = _build_where_clause(
-        datetime_column=materialization.datetime_column,
+        stream_id=materialization.stream_id,
         window=window,
     )
-    grouped_query = _build_grouped_query(
-        database=database,
-        materialization=materialization,
-        where_clause=where_clause,
+
+    base_query = (
+        'SELECT '
+        'aligned_at_utc, '
+        'payload_rows_json, '
+        'first_source_offset_or_equivalent, '
+        'bucket_sha256 '
+        f'FROM {database}.canonical_aligned_1s_aggregates '
+        f'{where_clause}'
     )
 
     if isinstance(window, LatestRowsWindow):
         return (
-            'SELECT * FROM ('
-            f'SELECT * FROM ({grouped_query}) '
-            f'ORDER BY {_ALIGNED_MS_ALIAS} DESC LIMIT {window.rows}'
-            f') ORDER BY {_ALIGNED_MS_ALIAS} ASC'
+            'SELECT '
+            'aligned_at_utc, '
+            'payload_rows_json, '
+            'first_source_offset_or_equivalent, '
+            'bucket_sha256 '
+            'FROM ('
+            'SELECT '
+            'aligned_at_utc, '
+            'payload_rows_json, '
+            'first_source_offset_or_equivalent, '
+            'bucket_sha256 '
+            f'FROM ({base_query}) '
+            'ORDER BY aligned_at_utc DESC, first_source_offset_or_equivalent DESC '
+            f'LIMIT {window.rows}'
+            ') '
+            'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
         )
 
     if isinstance(window, RandomRowsWindow):
         return (
-            'SELECT * FROM ('
-            f'{grouped_query}'
-            f') ORDER BY sipHash64({_ALIGNED_MS_ALIAS}) LIMIT {window.rows}'
+            'SELECT '
+            'aligned_at_utc, '
+            'payload_rows_json, '
+            'first_source_offset_or_equivalent, '
+            'bucket_sha256 '
+            'FROM ('
+            'SELECT '
+            'aligned_at_utc, '
+            'payload_rows_json, '
+            'first_source_offset_or_equivalent, '
+            'bucket_sha256 '
+            f'FROM ({base_query}) '
+            'ORDER BY sipHash64(toUnixTimestamp64Milli(aligned_at_utc), bucket_sha256) '
+            f'LIMIT {window.rows}'
+            ') '
+            'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
         )
 
     return (
-        'SELECT * FROM ('
-        f'{grouped_query}'
-        f') ORDER BY {_ALIGNED_MS_ALIAS} ASC'
+        f'{base_query} '
+        'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
     )
 
 
-def _shape_aligned_frame(
-    *, frame: pl.DataFrame, datetime_iso_output: bool
-) -> pl.DataFrame:
-    if _ALIGNED_MS_ALIAS not in frame.columns:
+def assert_canonical_aligned_1s_storage_contract(
+    *,
+    client: Any,
+    database: str,
+) -> None:
+    if not _IDENTIFIER_PATTERN.match(database):
+        raise RuntimeError(f'Invalid database identifier: {database}')
+
+    schema_rows = client.query(
+        'SELECT name, type '
+        'FROM system.columns '
+        f"WHERE database = '{database}' "
+        f"AND table = '{_CANONICAL_ALIGNED_TABLE}'"
+    ).result_rows
+    if schema_rows == []:
         raise RuntimeError(
-            f'Aligned query result is missing expected column: {_ALIGNED_MS_ALIAS}'
+            'Canonical aligned storage contract missing: '
+            f'{database}.{_CANONICAL_ALIGNED_TABLE} does not exist. '
+            'Run SQL migrations before executing aligned_1s queries.'
         )
 
-    shaped = frame.with_columns(
-        pl.col(_ALIGNED_MS_ALIAS)
-        .cast(pl.Int64)
-        .cast(pl.Datetime('ms', time_zone='UTC'))
-        .alias('aligned_at_utc')
-    ).drop(_ALIGNED_MS_ALIAS)
-    shaped = shaped.sort('aligned_at_utc')
+    observed_schema: dict[str, str] = {}
+    for row in schema_rows:
+        if len(row) != 2:
+            raise RuntimeError(
+                'Canonical aligned storage contract check returned invalid '
+                f'row shape for {database}.{_CANONICAL_ALIGNED_TABLE}.'
+            )
+        column_name = row[0]
+        column_type = row[1]
+        if not isinstance(column_name, str) or not isinstance(column_type, str):
+            raise RuntimeError(
+                'Canonical aligned storage contract check returned non-string '
+                f'column metadata for {database}.{_CANONICAL_ALIGNED_TABLE}.'
+            )
+        observed_schema[column_name] = column_type
+
+    missing_columns = sorted(
+        set(CANONICAL_ALIGNED_1S_REQUIRED_SCHEMA).difference(observed_schema)
+    )
+    if len(missing_columns) > 0:
+        raise RuntimeError(
+            'Canonical aligned storage contract violation: missing columns in '
+            f'{database}.{_CANONICAL_ALIGNED_TABLE}: {missing_columns}.'
+        )
+
+    type_mismatches = [
+        (
+            column_name,
+            expected_type,
+            observed_schema[column_name],
+        )
+        for column_name, expected_type in CANONICAL_ALIGNED_1S_REQUIRED_SCHEMA.items()
+        if observed_schema[column_name] != expected_type
+    ]
+    if len(type_mismatches) > 0:
+        mismatch_text = ', '.join(
+            (
+                f'{column_name} expected={expected_type} '
+                f'observed={observed_type}'
+            )
+            for column_name, expected_type, observed_type in type_mismatches
+        )
+        raise RuntimeError(
+            'Canonical aligned storage contract violation: column type mismatch '
+            f'in {database}.{_CANONICAL_ALIGNED_TABLE}: {mismatch_text}.'
+        )
+
+
+def _require_decimal(value: Any, *, label: str) -> Decimal:
+    if isinstance(value, bool):
+        raise RuntimeError(f'{label} must not be bool')
+
+    if isinstance(value, Decimal):
+        return value
+
+    if isinstance(value, (int, float, str)):
+        try:
+            return Decimal(str(value))
+        except InvalidOperation as exc:
+            raise RuntimeError(f'{label} must be decimal-compatible') from exc
+
+    raise RuntimeError(f'{label} must be int|float|string|Decimal')
+
+
+def _parse_order_key(value: Any, *, label: str) -> tuple[int, int | str]:
+    if isinstance(value, bool):
+        raise RuntimeError(f'{label} must not be bool')
+
+    if isinstance(value, int):
+        return (0, value)
+
+    if not isinstance(value, str):
+        raise RuntimeError(f'{label} must be string or int')
+
+    normalized = value.strip()
+    if normalized == '':
+        raise RuntimeError(f'{label} must be non-empty')
+
+    if normalized.isdigit():
+        return (0, int(normalized))
+
+    return (1, normalized)
+
+
+def _expect_json_object(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError(f'{label} must decode to object')
+
+    raw_map = cast(dict[Any, Any], value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in raw_map.items():
+        if not isinstance(raw_key, str):
+            raise RuntimeError(f'{label} keys must be strings')
+        normalized[raw_key] = raw_value
+    return normalized
+
+
+def _expect_json_list(value: Any, *, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise RuntimeError(f'{label} must decode to list')
+    return cast(list[Any], value)
+
+
+def _extract_trade_events(payload_rows_json: str) -> list[_AlignedTradeEvent]:
+    try:
+        payload_raw = json.loads(payload_rows_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('aligned payload_rows_json must be valid JSON') from exc
+
+    payload_object = _expect_json_object(
+        payload_raw,
+        label='aligned payload_rows_json',
+    )
+    rows_raw = _expect_json_list(
+        payload_object.get('rows'),
+        label='aligned payload_rows_json rows',
+    )
+    if rows_raw == []:
+        raise RuntimeError('aligned payload_rows_json rows must be non-empty list')
+
+    events: list[_AlignedTradeEvent] = []
+    for index, row_raw_any in enumerate(rows_raw):
+        row_raw = _expect_json_object(
+            row_raw_any,
+            label=f'aligned payload row at index {index}',
+        )
+
+        payload_json_raw = row_raw.get('payload_json')
+        if not isinstance(payload_json_raw, str):
+            raise RuntimeError(
+                'aligned payload row at index '
+                f'{index} must contain payload_json string'
+            )
+
+        try:
+            payload_obj = json.loads(payload_json_raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f'aligned payload row at index {index} payload_json must be valid JSON'
+            ) from exc
+
+        payload_object = _expect_json_object(
+            payload_obj,
+            label=f'aligned payload row at index {index} payload_json',
+        )
+
+        price = _require_decimal(payload_object.get('price'), label='payload.price')
+        quantity = _require_decimal(payload_object.get('qty'), label='payload.qty')
+        quote_quantity_raw = payload_object.get('quote_qty')
+        quote_quantity = (
+            price * quantity
+            if quote_quantity_raw is None
+            else _require_decimal(quote_quantity_raw, label='payload.quote_qty')
+        )
+
+        order_key = _parse_order_key(
+            row_raw.get('source_offset_or_equivalent'),
+            label='row.source_offset_or_equivalent',
+        )
+
+        events.append(
+            _AlignedTradeEvent(
+                order_key=order_key,
+                price=price,
+                quantity=quantity,
+                quote_quantity=quote_quantity,
+            )
+        )
+
+    if events == []:
+        raise RuntimeError('aligned payload_rows_json rows must include at least one event')
+
+    return events
+
+
+def _to_utc_datetime(value: Any, *, label: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise RuntimeError(f'{label} must be datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _shape_aligned_frame(
+    *,
+    rows: list[tuple[Any, ...]],
+    datetime_iso_output: bool,
+) -> pl.DataFrame:
+    buckets: dict[datetime, list[_AlignedTradeEvent]] = {}
+
+    for row in rows:
+        aligned_at_utc = _to_utc_datetime(row[0], label='aligned_at_utc')
+        payload_rows_json = str(row[1])
+        bucket_events = _extract_trade_events(payload_rows_json)
+        existing = buckets.get(aligned_at_utc)
+        if existing is None:
+            buckets[aligned_at_utc] = bucket_events
+        else:
+            existing.extend(bucket_events)
+
+    output_rows: list[dict[str, Any]] = []
+    for aligned_at_utc in sorted(buckets):
+        ordered_events = sorted(
+            buckets[aligned_at_utc],
+            key=lambda event: event.order_key,
+        )
+
+        prices = [event.price for event in ordered_events]
+        quantity_sum = sum(
+            (event.quantity for event in ordered_events),
+            Decimal('0'),
+        )
+        quote_volume_sum = sum(
+            (event.quote_quantity for event in ordered_events),
+            Decimal('0'),
+        )
+
+        output_rows.append(
+            {
+                'aligned_at_utc': aligned_at_utc,
+                'open_price': float(prices[0]),
+                'high_price': float(max(prices)),
+                'low_price': float(min(prices)),
+                'close_price': float(prices[-1]),
+                'quantity_sum': float(quantity_sum),
+                'quote_volume_sum': float(quote_volume_sum),
+                'trade_count': len(ordered_events),
+            }
+        )
+
+    frame = pl.DataFrame(output_rows)
+
+    if frame.is_empty():
+        frame = pl.DataFrame(
+            schema={
+                'aligned_at_utc': pl.Datetime('ms', time_zone='UTC'),
+                'open_price': pl.Float64,
+                'high_price': pl.Float64,
+                'low_price': pl.Float64,
+                'close_price': pl.Float64,
+                'quantity_sum': pl.Float64,
+                'quote_volume_sum': pl.Float64,
+                'trade_count': pl.Int64,
+            }
+        )
+
+    if not frame.is_empty():
+        frame = frame.sort('aligned_at_utc')
 
     if datetime_iso_output:
-        shaped = shaped.with_columns(
+        frame = frame.with_columns(
             pl.col('aligned_at_utc')
             .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
             .alias('aligned_at_utc')
         )
 
-    return shaped
+    return frame
 
 
 def query_binance_aligned_1s_data(
@@ -224,21 +498,18 @@ def query_binance_aligned_1s_data(
 
     started_at = time.time()
     try:
-        arrow_table = client.query_arrow(sql)
+        assert_canonical_aligned_1s_storage_contract(
+            client=client,
+            database=settings.database,
+        )
+        rows = client.query(sql).result_rows
     finally:
         try:
             client.close()
         except Exception as exc:
             logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
 
-    raw_frame = pl.DataFrame(arrow_table)
-    if isinstance(raw_frame, pl.Series):
-        raise RuntimeError('Expected DataFrame from aligned query, got Series')
-
-    shaped = _shape_aligned_frame(
-        frame=raw_frame,
-        datetime_iso_output=datetime_iso_output,
-    )
+    shaped = _shape_aligned_frame(rows=rows, datetime_iso_output=datetime_iso_output)
 
     if show_summary:
         elapsed = time.time() - started_at

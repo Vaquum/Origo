@@ -1,0 +1,38 @@
+{
+  "deterministic_match": true,
+  "proof_scope": "Slice 18 S18-P3 replay determinism for OKX native and aligned_1s after event-sourcing cutover",
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "quantity_sum_total": "0.100",
+      "quote_volume_sum_total": "4250.0230",
+      "row_count": 3,
+      "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+      "trade_count_total": 5
+    },
+    "native": {
+      "first_trade_id": 3001,
+      "last_trade_id": 3005,
+      "quote_quantity_sum": "4250.0230",
+      "row_count": 5,
+      "rows_hash_sha256": "9fad36b4af10b5037c6da523fcdc9d662a59494c56cde4fe4488f408ff941d57",
+      "size_sum": "0.100"
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "quantity_sum_total": "0.100",
+      "quote_volume_sum_total": "4250.0230",
+      "row_count": 3,
+      "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+      "trade_count_total": 5
+    },
+    "native": {
+      "first_trade_id": 3001,
+      "last_trade_id": 3005,
+      "quote_quantity_sum": "4250.0230",
+      "row_count": 5,
+      "rows_hash_sha256": "9fad36b4af10b5037c6da523fcdc9d662a59494c56cde4fe4488f408ff941d57",
+      "size_sum": "0.100"
+    }
+  }
+}

@@ -149,10 +149,46 @@ def launch_export_run(
     request_payload: dict[str, Any],
     source: str,
     rights_state: str,
+    rights_provisional: bool,
 ) -> DagsterRunSnapshot:
     repository_name = _require_env('ORIGO_DAGSTER_REPOSITORY_NAME')
     repository_location_name = _require_env('ORIGO_DAGSTER_LOCATION_NAME')
     export_job_name = _require_env('ORIGO_DAGSTER_EXPORT_JOB_NAME')
+
+    tags: list[dict[str, str]] = [
+        {'key': 'origo.export.mode', 'value': mode},
+        {'key': 'origo.export.format', 'value': export_format},
+        {'key': 'origo.export.dataset', 'value': dataset},
+        {'key': 'origo.export.source', 'value': source},
+        {'key': 'origo.export.rights_state', 'value': rights_state},
+        {
+            'key': 'origo.export.rights_provisional',
+            'value': 'true' if rights_provisional else 'false',
+        },
+        {
+            'key': 'origo.export.request_json',
+            'value': json.dumps(request_payload, separators=(',', ':')),
+        },
+    ]
+    view_id = request_payload.get('view_id')
+    view_version = request_payload.get('view_version')
+    if view_id is None and view_version is None:
+        pass
+    elif isinstance(view_id, str) and isinstance(view_version, int):
+        if view_id.strip() == '':
+            raise DagsterGraphQLError('Export view_id must be non-empty when set')
+        if view_version <= 0:
+            raise DagsterGraphQLError('Export view_version must be > 0 when set')
+        tags.extend(
+            [
+                {'key': 'origo.export.view_id', 'value': view_id},
+                {'key': 'origo.export.view_version', 'value': str(view_version)},
+            ]
+        )
+    else:
+        raise DagsterGraphQLError(
+            'Export request_payload view_id/view_version must both be set or both omitted'
+        )
 
     execution_params = {
         'selector': {
@@ -163,17 +199,7 @@ def launch_export_run(
         'runConfigData': {},
         'mode': 'default',
         'executionMetadata': {
-            'tags': [
-                {'key': 'origo.export.mode', 'value': mode},
-                {'key': 'origo.export.format', 'value': export_format},
-                {'key': 'origo.export.dataset', 'value': dataset},
-                {'key': 'origo.export.source', 'value': source},
-                {'key': 'origo.export.rights_state', 'value': rights_state},
-                {
-                    'key': 'origo.export.request_json',
-                    'value': json.dumps(request_payload, separators=(',', ':')),
-                },
-            ]
+            'tags': tags
         },
     }
 

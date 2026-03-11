@@ -1,0 +1,10 @@
+{
+  "acceptance_verified": true,
+  "aligned_row_count": 4,
+  "native_row_count": 4,
+  "proof_scope": "Slice 17 S17-P1 fixed-window acceptance for FRED native and aligned_1s",
+  "window": {
+    "end_utc": "2026-03-11T00:00:00Z",
+    "start_utc": "2026-03-08T00:00:00Z"
+  }
+}

@@ -2,12 +2,12 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S8 (API v0.1.3)
+- Last updated: 2026-03-10
+- Slice/version reference: S8, S18 (API v0.1.12)
 
 ## Purpose and scope
 - User-facing reference for `okx_spot_trades` in Raw API query/export paths.
-- Scope includes native and `aligned_1s` usage, field taxonomy, provenance semantics, and guardrails.
+- Scope includes native and `aligned_1s` usage, event-driven serving semantics, provenance semantics, and guardrails.
 
 ## Inputs and outputs with contract shape
 - Query:
@@ -34,6 +34,11 @@
   - `quote_quantity` float (`price * size`)
   - `timestamp` integer epoch milliseconds UTC
   - `datetime` UTC timestamp
+  - lineage fields:
+    - `event_id` UUID
+    - `source_offset_or_equivalent` string
+    - `source_event_time_utc` nullable UTC timestamp
+    - `ingested_at_utc` UTC timestamp
 - Aligned fields (`aligned_1s`):
   - `aligned_at_utc` UTC second timestamp
   - `open_price`, `high_price`, `low_price`, `close_price`
@@ -41,8 +46,11 @@
 
 ## Source/provenance and freshness semantics
 - Source of truth is first-party OKX daily trade files resolved from OKX API.
-- Ingest preserves source checksum metadata per day (`zip_sha256`, `csv_sha256`, `Content-MD5`).
-- Aligned rows are derived directly from native rows in ClickHouse.
+- Ingest preserves source checksum metadata per day (`zip_sha256`, `csv_sha256`, `Content-MD5`) in proof artifacts.
+- Native and aligned serving paths are event-driven from canonical events as of Slice 18:
+  - native: `canonical_okx_spot_trades_native_v1`
+  - aligned: `canonical_aligned_1s_aggregates` (`view_id=aligned_1s_raw`, `view_version=1`)
+- Canonical source payload fidelity is anchored by `payload_raw` and `payload_sha256_raw`.
 - Aligned responses include freshness metadata and may emit stale warnings.
 
 ## Failure modes, warnings, and error codes
@@ -52,6 +60,7 @@
 - Guardrail behavior:
   - rights matrix + legal artifact required for hosted query/export access
   - `strict=true` fails when warnings exist or mutable window constraints are violated
+  - aligned runtime fails loudly on canonical aligned table/schema contract drift
 - Common warning codes:
   - `WINDOW_LATEST_ROWS_MUTABLE`
   - `WINDOW_RANDOM_SAMPLE`
@@ -63,6 +72,14 @@
   - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p2-aligned-acceptance.json`
   - `spec/slices/slice-8-okx-spot-trades-aligned/proof-s8-p3-determinism.json`
   - `spec/slices/slice-8-okx-spot-trades-aligned/baseline-fixture-2024-01-01_2024-01-02.json`
+- Slice-18 event-sourcing proof artifacts:
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p1-acceptance.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p2-parity.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p3-determinism.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p4-exactly-once-ingest.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p5-no-miss-completeness.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/proof-s18-p6-raw-fidelity-precision.json`
+  - `spec/slices/slice-18-okx-event-sourcing-port/baseline-fixture-2024-01-04_2024-01-04.json`
 
 ## Environment variables and required config
 - `ORIGO_INTERNAL_API_KEY`

@@ -27,6 +27,7 @@ RawQueryMode = Literal['native', 'aligned_1s']
 RawExportMode = Literal['native', 'aligned_1s']
 ExportFormat = Literal['parquet', 'csv']
 ExportStatus = Literal['queued', 'running', 'succeeded', 'failed']
+RightsState = Literal['Hosted Allowed', 'BYOK Required', 'Ingest Only']
 RawQueryFilterOp = Literal['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'not_in']
 type RawQueryFilterScalar = str | int | float | bool
 type RawQueryFilterValue = RawQueryFilterScalar | list[RawQueryFilterScalar]
@@ -100,6 +101,8 @@ class RawQueryFilter(BaseModel):
 class RawQueryRequest(BaseModel):
     mode: RawQueryMode = 'native'
     sources: list[RawQuerySource] = Field(min_length=1)
+    view_id: str | None = None
+    view_version: int | None = Field(default=None, gt=0)
     fields: list[str] | None = None
     filters: list[RawQueryFilter] | None = None
     n_rows: int | None = Field(default=None, gt=0)
@@ -114,10 +117,12 @@ class RawQueryRequest(BaseModel):
             n_random=self.n_random,
             time_range=self.time_range,
         )
-        if len(self.sources) != 1:
+        if (self.view_id is None) != (self.view_version is None):
             raise ValueError(
-                'Exactly one source is currently supported per request (sources length must be 1)'
+                'view_id and view_version must both be set or both be omitted'
             )
+        if self.view_id is not None and self.view_id.strip() == '':
+            raise ValueError('view_id must be non-empty when set')
         return self
 
 
@@ -145,12 +150,17 @@ class RawQueryResponse(BaseModel):
 
     mode: RawQueryMode
     source: str | None
+    sources: list[RawQuerySource] | None = None
+    view_id: str | None = None
+    view_version: int | None = None
     row_count: int
     schema_items: list[RawQuerySchemaField] = Field(
         validation_alias='schema',
         serialization_alias='schema',
     )
     freshness: RawQueryFreshness | None = None
+    rights_state: RightsState
+    rights_provisional: bool
     warnings: list[RawQueryWarning] = Field(default_factory=_empty_warnings)
     rows: list[dict[str, Any]]
 
@@ -159,6 +169,8 @@ class RawExportRequest(BaseModel):
     mode: RawExportMode = 'native'
     format: ExportFormat
     dataset: RawQueryDataset
+    view_id: str | None = None
+    view_version: int | None = Field(default=None, gt=0)
     fields: list[str] | None = None
     month_year: tuple[int, int] | None = None
     n_rows: int | None = Field(default=None, gt=0)
@@ -176,6 +188,12 @@ class RawExportRequest(BaseModel):
             n_random=self.n_random,
             time_range=self.time_range,
         )
+        if (self.view_id is None) != (self.view_version is None):
+            raise ValueError(
+                'view_id and view_version must both be set or both be omitted'
+            )
+        if self.view_id is not None and self.view_id.strip() == '':
+            raise ValueError('view_id must be non-empty when set')
         return self
 
 
@@ -184,6 +202,10 @@ class RawExportSubmitResponse(BaseModel):
     status: ExportStatus
     submitted_at: datetime
     status_path: str
+    rights_state: RightsState
+    rights_provisional: bool
+    view_id: str | None = None
+    view_version: int | None = None
 
 
 class RawExportArtifact(BaseModel):
@@ -199,6 +221,11 @@ class RawExportStatusResponse(BaseModel):
     mode: RawExportMode
     format: ExportFormat
     dataset: RawQueryDataset
+    source: str
+    rights_state: RightsState
+    rights_provisional: bool
+    view_id: str | None = None
+    view_version: int | None = None
     submitted_at: datetime
     updated_at: datetime
     artifact: RawExportArtifact | None = None

@@ -4,7 +4,7 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, asset
@@ -17,8 +17,16 @@ from origo_control_plane.bitcoin_core import (
     validate_bitcoin_core_node_contract_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.utils.bitcoin_canonical_event_ingest import (
+    BitcoinCanonicalEvent,
+    bitcoin_decimal_text,
+    write_bitcoin_events_to_canonical,
+)
 from origo_control_plane.utils.bitcoin_integrity import (
     run_bitcoin_block_header_integrity,
+)
+from origo_control_plane.utils.bitcoin_native_projector import (
+    project_bitcoin_block_headers_native,
 )
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
@@ -27,7 +35,6 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-CLICKHOUSE_TABLE = 'bitcoin_block_headers'
 _HASH_HEX_64_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 
 
@@ -236,7 +243,30 @@ def insert_bitcoin_block_headers_to_origo(
     )
     headers_sha256 = _canonical_headers_sha256(headers)
 
-    insert_rows = [header.as_insert_row() for header in headers]
+    canonical_events = [
+        BitcoinCanonicalEvent(
+            stream_id='bitcoin_block_headers',
+            partition_id=header.datetime_utc.date().isoformat(),
+            source_offset_or_equivalent=str(header.height),
+            source_event_time_utc=header.datetime_utc,
+            payload={
+                'height': header.height,
+                'block_hash': header.block_hash,
+                'prev_hash': header.prev_hash,
+                'merkle_root': header.merkle_root,
+                'version': header.version,
+                'nonce': header.nonce,
+                'difficulty': bitcoin_decimal_text(
+                    header.difficulty,
+                    label='header.difficulty',
+                ),
+                'timestamp_ms': header.timestamp_ms,
+                'source_chain': header.source_chain,
+            },
+        )
+        for header in headers
+    ]
+
     client: ClickhouseClient | None = None
     try:
         client = ClickhouseClient(
@@ -248,53 +278,45 @@ def insert_bitcoin_block_headers_to_origo(
             compression=True,
             send_receive_timeout=900,
         )
-        client.execute(f"""
-            ALTER TABLE {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            DELETE WHERE height >= {settings.headers_start_height}
-                   AND height <= {settings.headers_end_height}
-        """)
-        client.execute(
-            f"""
-            INSERT INTO {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            (
-                height,
-                block_hash,
-                prev_hash,
-                merkle_root,
-                version,
-                nonce,
-                difficulty,
-                timestamp,
-                datetime,
-                source_chain
-            ) SETTINGS async_insert=1, wait_for_async_insert=1
-            VALUES
-            """,
-            insert_rows,
-            settings={'max_execution_time': 900},
+        write_summary = write_bitcoin_events_to_canonical(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            events=canonical_events,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-        verify_rows = client.execute(f"""
-            SELECT count(*)
-            FROM {CLICKHOUSE_DATABASE}.{CLICKHOUSE_TABLE}
-            WHERE height >= {settings.headers_start_height}
-              AND height <= {settings.headers_end_height}
-        """)
-        inserted_count = _require_int(
-            cast(list[Any], verify_rows)[0][0],
-            label='inserted_count',
-            minimum=0,
-        )
-        if inserted_count != expected_rows:
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(canonical_events):
             raise RuntimeError(
-                'Bitcoin block header row count mismatch after insertion: '
-                f'expected={expected_rows} actual={inserted_count}'
+                'Bitcoin block-header canonical writer summary mismatch: '
+                f'rows_processed={rows_processed} expected={len(canonical_events)}'
             )
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'Bitcoin block-header canonical writer summary mismatch: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed}'
+            )
+
+        native_projection_summary = project_bitcoin_block_headers_native(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids={event.partition_id for event in canonical_events},
+            run_id=context.run_id,
+            projected_at_utc=datetime.now(UTC),
+        )
+
         result_data: dict[str, Any] = {
             'range_start_height': settings.headers_start_height,
             'range_end_height': settings.headers_end_height,
-            'rows_inserted': inserted_count,
+            'rows_processed': rows_processed,
+            'rows_inserted': rows_inserted,
+            'rows_duplicate': rows_duplicate,
             'headers_sha256': headers_sha256,
             'integrity_report': integrity_report.to_dict(),
+            'native_projection_summary': native_projection_summary.to_dict(),
             'source_chain': node_contract.chain,
             'node_best_block_height': node_contract.best_block_height,
             'node_best_block_hash': node_contract.best_block_hash,

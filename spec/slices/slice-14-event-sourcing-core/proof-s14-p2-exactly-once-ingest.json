@@ -1,0 +1,26 @@
+{
+  "duplicate_identity_rows": [],
+  "exactly_once_verified": true,
+  "fixture_event_count": 4,
+  "persisted_row_count": 4,
+  "phases": {
+    "phase_1_pre_crash_partial_ingest": [
+      "inserted",
+      "inserted"
+    ],
+    "phase_2_after_restart_full_replay": [
+      "duplicate",
+      "duplicate",
+      "inserted",
+      "inserted"
+    ],
+    "phase_3_post_recovery_duplicate_replay": [
+      "duplicate",
+      "duplicate",
+      "duplicate",
+      "duplicate"
+    ]
+  },
+  "proof_database": "origo_s14_p2_proof",
+  "proof_scope": "Slice 14 S14-P2 exactly-once ingest under duplicate replay and crash/restart scenarios"
+}

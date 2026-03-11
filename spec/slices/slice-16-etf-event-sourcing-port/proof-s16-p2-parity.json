@@ -1,0 +1,9 @@
+{
+  "aligned_parity_match": true,
+  "aligned_rows_hash_sha256": "89d299600d54f5581506955bfebfe987f446ab671994ecbb62968ab6a7d27aa4",
+  "native_parity_match": true,
+  "native_rows_hash_sha256": "e29abd5e303215280aa2ea8780702125db05aaf5eb818763788c4ca354f90420",
+  "proof_scope": "Slice 16 S16-P2 parity for ETF native and aligned_1s outputs against deterministic fixture expectations",
+  "window_end_utc": "2026-03-10T00:00:00Z",
+  "window_start_utc": "2026-03-08T00:00:00Z"
+}

@@ -1,0 +1,173 @@
+{
+  "column_key": {
+    "csv_sha256": "SHA256 of source csv artifact for fixture day when source files exist; null means not applicable in this synthetic retrofit fixture.",
+    "offset_first": "First source offset included in day/mode fingerprint.",
+    "offset_last": "Last source offset included in day/mode fingerprint.",
+    "quantity_sum": "Sum of quantity for the day and mode, represented as decimal string.",
+    "quote_volume_sum": "Sum of quote quantity for the day and mode, represented as decimal string.",
+    "row_count": "Row count in fingerprinted output for the day and mode.",
+    "rows_hash_sha256": "SHA256 of canonicalized day/mode output rows.",
+    "zip_sha256": "SHA256 of source zip artifact for fixture day when source files exist; null means not applicable in this synthetic retrofit fixture."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "end_utc": "2024-01-04T00:00:03Z",
+    "start_utc": "2024-01-04T00:00:00Z"
+  },
+  "run_1_fingerprints": {
+    "futures_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "9001",
+          "offset_last": "9004",
+          "quantity_sum": "0.83",
+          "quote_volume_sum": "34868.413",
+          "row_count": 3,
+          "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "9001",
+          "offset_last": "9004",
+          "quantity_sum": "0.83",
+          "quote_volume_sum": "34868.413",
+          "row_count": 4,
+          "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
+        }
+      }
+    },
+    "spot_agg_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "8001",
+          "offset_last": "8004",
+          "quantity_sum": "0.45",
+          "quote_volume_sum": "18900.0765",
+          "row_count": 3,
+          "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "8001",
+          "offset_last": "8004",
+          "quantity_sum": "0.45",
+          "quote_volume_sum": "18900.0765",
+          "row_count": 4,
+          "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
+        }
+      }
+    },
+    "spot_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "7001",
+          "offset_last": "7005",
+          "quantity_sum": "0.15",
+          "quote_volume_sum": "6300.033",
+          "row_count": 3,
+          "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "7001",
+          "offset_last": "7005",
+          "quantity_sum": "0.15",
+          "quote_volume_sum": "6300.033",
+          "row_count": 5,
+          "rows_hash_sha256": "9324c9b8b4a364330569ac7d47e70af5b3faf69b32b0ffec3b2c658e816dfb4d"
+        }
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "futures_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "9001",
+          "offset_last": "9004",
+          "quantity_sum": "0.83",
+          "quote_volume_sum": "34868.413",
+          "row_count": 3,
+          "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "9001",
+          "offset_last": "9004",
+          "quantity_sum": "0.83",
+          "quote_volume_sum": "34868.413",
+          "row_count": 4,
+          "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
+        }
+      }
+    },
+    "spot_agg_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "8001",
+          "offset_last": "8004",
+          "quantity_sum": "0.45",
+          "quote_volume_sum": "18900.0765",
+          "row_count": 3,
+          "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "8001",
+          "offset_last": "8004",
+          "quantity_sum": "0.45",
+          "quote_volume_sum": "18900.0765",
+          "row_count": 4,
+          "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
+        }
+      }
+    },
+    "spot_trades": {
+      "aligned_1s": {
+        "2024-01-04": {
+          "offset_first": "7001",
+          "offset_last": "7005",
+          "quantity_sum": "0.15",
+          "quote_volume_sum": "6300.033",
+          "row_count": 3,
+          "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
+        }
+      },
+      "native": {
+        "2024-01-04": {
+          "offset_first": "7001",
+          "offset_last": "7005",
+          "quantity_sum": "0.15",
+          "quote_volume_sum": "6300.033",
+          "row_count": 5,
+          "rows_hash_sha256": "9324c9b8b4a364330569ac7d47e70af5b3faf69b32b0ffec3b2c658e816dfb4d"
+        }
+      }
+    }
+  },
+  "source_checksums": {
+    "futures_trades": {
+      "2024-01-04": {
+        "csv_sha256": null,
+        "zip_sha256": null
+      }
+    },
+    "spot_agg_trades": {
+      "2024-01-04": {
+        "csv_sha256": null,
+        "zip_sha256": null
+      }
+    },
+    "spot_trades": {
+      "2024-01-04": {
+        "csv_sha256": null,
+        "zip_sha256": null
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "fail_loud_error": "No-miss cadence reconciliation failed: source=fred stream=fred_series_metrics partition=2026-03 missing_offsets=['2026-03-09']",
+  "missing_offsets": [
+    "2026-03-09"
+  ],
+  "no_miss_guardrail_verified": true,
+  "observed_offsets": [
+    "fred_fedfunds:2026-03-08:effective_federal_funds_rate",
+    "fred_fedfunds:2026-03-10:effective_federal_funds_rate"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_database": "origo_s17_p5_proof",
+  "proof_scope": "Slice 17 S17-P5 no-miss cadence completeness proof with gap detection and quarantine enforcement for FRED canonical ingest",
+  "quarantine_reason": "gap_detected_from_completeness_reconciliation",
+  "stream_key": {
+    "partition_id": "2026-03",
+    "source_id": "fred",
+    "stream_id": "fred_series_metrics"
+  }
+}

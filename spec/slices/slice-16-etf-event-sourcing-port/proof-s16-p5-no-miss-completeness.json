@@ -1,0 +1,22 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "fail_loud_error": "No-miss cadence reconciliation failed: source=etf stream=etf_daily_metrics partition=2026-03 missing_offsets=['2026-03-09']",
+  "missing_offsets": [
+    "2026-03-09"
+  ],
+  "no_miss_guardrail_verified": true,
+  "observed_offsets": [
+    "2026-03-08",
+    "2026-03-10"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_database": "origo_s16_p5_proof",
+  "proof_scope": "Slice 16 S16-P5 no-miss cadence completeness proof with gap detection and quarantine enforcement for ETF canonical ingest",
+  "quarantine_reason": "gap_detected_from_completeness_reconciliation",
+  "stream_key": {
+    "partition_id": "2026-03",
+    "source_id": "etf",
+    "stream_id": "etf_daily_metrics"
+  }
+}

@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S6 (API v0.1.0)
+- Last updated: 2026-03-10
+- Slice/version reference: S6, S17 (API v0.1.11)
 
 ## Purpose and scope
 - User-facing reference for FRED data in Origo.
@@ -39,6 +39,8 @@
 
 ## Source/provenance and freshness semantics
 - Data is fetched directly from original FRED API endpoints.
+- Native serving reads from canonical projection table `canonical_fred_series_metrics_native_v1`.
+- Aligned serving reads from canonical aligned projection table `canonical_aligned_1s_aggregates` for stream `fred_series_metrics`.
 - Freshness warnings use source publish metadata (`provenance_json.last_updated_utc`), not ingest time.
 - Source and rights state are enforced before serving.
 
@@ -58,9 +60,13 @@
 
 ## Determinism/replay notes
 - Determinism proofs and reproducibility artifacts:
-  - `spec/slices/slice-6-fred-integration/proof-s6-p1-acceptance.json`
-  - `spec/slices/slice-6-fred-integration/proof-s6-p2-determinism.json`
-  - `spec/slices/slice-6-fred-integration/proof-s6-p3-metadata-version-reproducibility.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p1-acceptance.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p2-parity.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p3-determinism.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p4-exactly-once-ingest.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p5-no-miss-completeness.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/proof-s17-p6-raw-fidelity-precision.json`
+  - `spec/slices/slice-17-fred-event-sourcing-port/baseline-fixture-2026-03-08_2026-03-10.json`
 
 ## Environment variables and required config
 - `FRED_API_KEY`

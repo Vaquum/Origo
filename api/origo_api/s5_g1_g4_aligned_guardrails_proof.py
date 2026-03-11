@@ -24,6 +24,7 @@ def _build_rights_matrix(*, legal_signoff_artifact: str) -> dict[str, Any]:
         'sources': {
             'binance': {
                 'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
                 'datasets': [
                     'spot_trades',
                     'spot_agg_trades',
@@ -33,6 +34,7 @@ def _build_rights_matrix(*, legal_signoff_artifact: str) -> dict[str, Any]:
             },
             'ishares': {
                 'rights_state': 'Ingest Only',
+                'rights_provisional': False,
                 'datasets': ['etf_daily_metrics'],
             },
         },

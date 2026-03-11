@@ -1,0 +1,39 @@
+{
+  "export_incomplete_view_pair_error": "1 validation error for RawExportRequest\n  Value error, view_id and view_version must both be set or both be omitted [type=value_error, input_value={'mode': 'native', 'forma...w_id': 'aligned_1s_raw'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/value_error",
+  "export_request": {
+    "dataset": "spot_trades",
+    "fields": null,
+    "format": "parquet",
+    "include_datetime": true,
+    "mode": "native",
+    "month_year": null,
+    "n_random": null,
+    "n_rows": 10,
+    "strict": false,
+    "time_range": null,
+    "view_id": "aligned_1s_raw",
+    "view_version": 1
+  },
+  "export_view_id": "aligned_1s_raw",
+  "export_view_version": 1,
+  "proof_scope": "Slice 14 S14-C6 multi-source + view contract schema validation",
+  "query_incomplete_view_pair_error": "1 validation error for RawQueryRequest\n  Value error, view_id and view_version must both be set or both be omitted [type=value_error, input_value={'mode': 'native', 'sourc...w_id': 'aligned_1s_raw'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/value_error",
+  "query_request": {
+    "fields": null,
+    "filters": null,
+    "mode": "native",
+    "n_random": null,
+    "n_rows": 10,
+    "sources": [
+      "spot_trades",
+      "spot_agg_trades"
+    ],
+    "strict": false,
+    "time_range": null,
+    "view_id": "aligned_1s_raw",
+    "view_version": 1
+  },
+  "query_sources_count": 2,
+  "query_view_id": "aligned_1s_raw",
+  "query_view_version": 1
+}

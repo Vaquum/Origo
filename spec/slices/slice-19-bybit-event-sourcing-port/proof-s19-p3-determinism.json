@@ -1,0 +1,38 @@
+{
+  "deterministic_match": true,
+  "proof_scope": "Slice 19 S19-P3 replay determinism for Bybit native and aligned_1s after event-sourcing cutover",
+  "run_1_fingerprints": {
+    "aligned_1s": {
+      "quantity_sum_total": "0.100",
+      "quote_volume_sum_total": "4250.0230",
+      "row_count": 3,
+      "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+      "trade_count_total": 5
+    },
+    "native": {
+      "first_trade_id": 3001,
+      "last_trade_id": 3005,
+      "quote_quantity_sum": "4250.0230",
+      "row_count": 5,
+      "rows_hash_sha256": "dc963d36aa3bb68b1253b5be14e17a8d07f57e0d24407466a833fc6a4ae29f03",
+      "size_sum": "0.100"
+    }
+  },
+  "run_2_fingerprints": {
+    "aligned_1s": {
+      "quantity_sum_total": "0.100",
+      "quote_volume_sum_total": "4250.0230",
+      "row_count": 3,
+      "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+      "trade_count_total": 5
+    },
+    "native": {
+      "first_trade_id": 3001,
+      "last_trade_id": 3005,
+      "quote_quantity_sum": "4250.0230",
+      "row_count": 5,
+      "rows_hash_sha256": "dc963d36aa3bb68b1253b5be14e17a8d07f57e0d24407466a833fc6a4ae29f03",
+      "size_sum": "0.100"
+    }
+  }
+}

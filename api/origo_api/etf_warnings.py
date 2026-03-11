@@ -14,7 +14,7 @@ from .schemas import RawQueryWarning
 logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
 
-_ETF_DAILY_TABLE = 'etf_daily_metrics_long'
+_ETF_DAILY_TABLE = 'canonical_etf_daily_metrics_native_v1'
 _ETF_EXPECTED_SOURCE_IDS: tuple[str, ...] = (
     'etf_ishares_ibit_daily',
     'etf_invesco_btco_daily',

@@ -1,0 +1,145 @@
+{
+  "acceptance_verified": true,
+  "aligned_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "first_offset": "block_fee_total_btc:2024-04-20T00:00:00+00:00",
+      "hash_per_day": {
+        "2024-04-20": "15ef4d7939f3e0318cfecb37c507ff870d76dbd4d72e885b927d4e3064ebfb5c"
+      },
+      "last_offset": "block_fee_total_btc:2024-04-20T00:00:01+00:00",
+      "row_count": 2,
+      "rows_hash_sha256": "15ef4d7939f3e0318cfecb37c507ff870d76dbd4d72e885b927d4e3064ebfb5c",
+      "value_sum": "2.0025"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "first_offset": "block_subsidy_btc:2024-04-20T00:00:00+00:00",
+      "hash_per_day": {
+        "2024-04-20": "6fba7997d82a78da17e977fb0ef94ad147cba89bae48e42a73e58acba6d109ba"
+      },
+      "last_offset": "block_subsidy_btc:2024-04-20T00:00:01+00:00",
+      "row_count": 2,
+      "rows_hash_sha256": "6fba7997d82a78da17e977fb0ef94ad147cba89bae48e42a73e58acba6d109ba",
+      "value_sum": "8.250"
+    },
+    "bitcoin_circulating_supply": {
+      "first_offset": "btc_circulating_supply_btc:2024-04-20T00:00:00+00:00",
+      "hash_per_day": {
+        "2024-04-20": "04ba30529a75a8089a327f9a22da06e208d815fa08e1a7826be5e3185a921434"
+      },
+      "last_offset": "btc_circulating_supply_btc:2024-04-20T00:00:01+00:00",
+      "row_count": 2,
+      "rows_hash_sha256": "04ba30529a75a8089a327f9a22da06e208d815fa08e1a7826be5e3185a921434",
+      "value_sum": "39375011.375"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "first_offset": "network_hashrate_hs:2024-04-20T00:00:00+00:00",
+      "hash_per_day": {
+        "2024-04-20": "21a7c1a3b65bd3970b2f11708f3605d4eff38b97a5970c805d35d2b881b861d4"
+      },
+      "last_offset": "network_hashrate_hs:2024-04-20T00:00:01+00:00",
+      "row_count": 2,
+      "rows_hash_sha256": "21a7c1a3b65bd3970b2f11708f3605d4eff38b97a5970c805d35d2b881b861d4",
+      "value_sum": "1241658132323290000002"
+    }
+  },
+  "native_fingerprints": {
+    "bitcoin_block_fee_totals": {
+      "first_offset": "840000",
+      "hash_per_day": {
+        "2024-04-20": "3cad6ae47084e8fa9247bfc9803777a9806aaededfb318e8165057f0281df2e3"
+      },
+      "last_offset": "840001",
+      "row_count": 2,
+      "rows_hash_sha256": "3cad6ae47084e8fa9247bfc9803777a9806aaededfb318e8165057f0281df2e3",
+      "value_sum": "0.0025"
+    },
+    "bitcoin_block_headers": {
+      "first_offset": "840000",
+      "hash_per_day": {
+        "2024-04-20": "7c789d5fb8aae74b114ba8b83402524bbb5924dab2de4859d01b043690dfeb58"
+      },
+      "last_offset": "840001",
+      "row_count": 2,
+      "rows_hash_sha256": "7c789d5fb8aae74b114ba8b83402524bbb5924dab2de4859d01b043690dfeb58",
+      "value_sum": "172000010000000.34"
+    },
+    "bitcoin_block_subsidy_schedule": {
+      "first_offset": "840000",
+      "hash_per_day": {
+        "2024-04-20": "b69a51aede4b8b037619e4103587d39199035dfdefd7efd431b3ce5857d726c9"
+      },
+      "last_offset": "840001",
+      "row_count": 2,
+      "rows_hash_sha256": "b69a51aede4b8b037619e4103587d39199035dfdefd7efd431b3ce5857d726c9",
+      "value_sum": "625000006.250"
+    },
+    "bitcoin_block_transactions": {
+      "first_offset": "840000:0:000000000000000000000000000000000000000000000000000000000000012c",
+      "hash_per_day": {
+        "2024-04-20": "eed62bc6d3d128726574cab8e23062c759fe99326bfe7d72b8cc838b4657bd27"
+      },
+      "last_offset": "840001:1:000000000000000000000000000000000000000000000000000000000000012f",
+      "row_count": 4,
+      "rows_hash_sha256": "eed62bc6d3d128726574cab8e23062c759fe99326bfe7d72b8cc838b4657bd27",
+      "value_sum": "2"
+    },
+    "bitcoin_circulating_supply": {
+      "first_offset": "840000",
+      "hash_per_day": {
+        "2024-04-20": "aec1015e5b0bac0c1928808b5a15d12ff59104f92b42416c1c962c4e1c9f2cf7"
+      },
+      "last_offset": "840001",
+      "row_count": 2,
+      "rows_hash_sha256": "aec1015e5b0bac0c1928808b5a15d12ff59104f92b42416c1c962c4e1c9f2cf7",
+      "value_sum": "3937500976875009.375"
+    },
+    "bitcoin_mempool_state": {
+      "first_offset": "1713571202000:0000000000000000000000000000000000000000000000000000000000000190",
+      "hash_per_day": {
+        "2024-04-20": "342ac4c2afe78b7bdd4afe05f81664f202415104de3e7ae9573fc0eaf7aa28af"
+      },
+      "last_offset": "1713571202000:0000000000000000000000000000000000000000000000000000000000000191",
+      "row_count": 2,
+      "rows_hash_sha256": "342ac4c2afe78b7bdd4afe05f81664f202415104de3e7ae9573fc0eaf7aa28af",
+      "value_sum": "392.75"
+    },
+    "bitcoin_network_hashrate_estimate": {
+      "first_offset": "840000",
+      "hash_per_day": {
+        "2024-04-20": "a778ad4ec4eb5eba760882af344856b327c4172403f8187872b1a176ec0cc084"
+      },
+      "last_offset": "840001",
+      "row_count": 2,
+      "rows_hash_sha256": "a778ad4ec4eb5eba760882af344856b327c4172403f8187872b1a176ec0cc084",
+      "value_sum": "1241658132323290000000"
+    }
+  },
+  "proof_scope": "Slice 20 S20-P1 fixed-window acceptance for Bitcoin native (all 7 datasets) and aligned_1s (4 derived datasets) from canonical projection serving paths",
+  "row_counts": {
+    "aligned_1s": {
+      "bitcoin_block_fee_totals": 2,
+      "bitcoin_block_subsidy_schedule": 2,
+      "bitcoin_circulating_supply": 2,
+      "bitcoin_network_hashrate_estimate": 2
+    },
+    "native": {
+      "bitcoin_block_fee_totals": 2,
+      "bitcoin_block_headers": 2,
+      "bitcoin_block_subsidy_schedule": 2,
+      "bitcoin_block_transactions": 4,
+      "bitcoin_circulating_supply": 2,
+      "bitcoin_mempool_state": 2,
+      "bitcoin_network_hashrate_estimate": 2
+    }
+  },
+  "source_checksums": {
+    "2024-04-20": {
+      "csv_sha256": "d555acec669e3d3a992f614a39f311290180c97eda1f1585f8d27d184d63c15d",
+      "zip_sha256": "d555acec669e3d3a992f614a39f311290180c97eda1f1585f8d27d184d63c15d"
+    }
+  },
+  "window": {
+    "end_utc": "2024-04-20T00:00:03Z",
+    "start_utc": "2024-04-20T00:00:00Z"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "projector_error_codes": [
+    "PROJECTOR_INVALID_BATCH_SIZE",
+    "PROJECTOR_NOT_STARTED",
+    "ALIGNED_POLICY_INVALID_INPUT"
+  ],
+  "proof_scope": "Slice 14 S14-G1 fail-loud invariants and typed error taxonomy for event writer/projectors",
+  "typed_error_taxonomy_verified": true,
+  "writer_error_codes": [
+    "WRITER_INVALID_TIMESTAMP"
+  ]
+}

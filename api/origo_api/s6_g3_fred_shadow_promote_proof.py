@@ -27,6 +27,7 @@ def run_s6_g3_fred_shadow_promote_proof() -> dict[str, Any]:
                 'sources': {
                     'fred': {
                         'rights_state': 'Hosted Allowed',
+                        'rights_provisional': False,
                         'datasets': ['fred_series_metrics'],
                         'legal_signoff_artifact': str(legal_artifact_path),
                     }

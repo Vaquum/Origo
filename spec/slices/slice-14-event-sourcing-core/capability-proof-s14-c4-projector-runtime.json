@@ -1,0 +1,51 @@
+{
+  "batch_offsets": {
+    "run_1": [
+      "1"
+    ],
+    "run_2": [
+      "2",
+      "3"
+    ],
+    "run_3": []
+  },
+  "canonical_event_write_statuses": [
+    "inserted",
+    "inserted",
+    "inserted"
+  ],
+  "commit_statuses": {
+    "run_1": "checkpointed",
+    "run_2": "checkpointed",
+    "run_3_duplicate_commit": "duplicate"
+  },
+  "latest_checkpoint": {
+    "event_id": "55b1d2d5-9ce5-545e-b7e7-b4581b89abbd",
+    "offset": "3",
+    "revision": 2
+  },
+  "latest_watermark": {
+    "event_id": "55b1d2d5-9ce5-545e-b7e7-b4581b89abbd",
+    "offset": "3",
+    "revision": 2
+  },
+  "proof_database": "origo_s14_c4_proof",
+  "proof_scope": "Slice 14 S14-C4 projector runtime checkpoint/watermark resume",
+  "runtime_starts": [
+    {
+      "checkpoint_revision": null,
+      "resumed": false,
+      "run": 1
+    },
+    {
+      "checkpoint_revision": 1,
+      "resumed": true,
+      "run": 2
+    },
+    {
+      "checkpoint_revision": 2,
+      "resumed": true,
+      "run": 3
+    }
+  ]
+}

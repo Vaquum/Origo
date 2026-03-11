@@ -1,0 +1,121 @@
+{
+  "applied_migration_count": 18,
+  "canonical_event_envelope_schema_columns": [
+    {
+      "clickhouse_type": "UInt16",
+      "name": "envelope_version"
+    },
+    {
+      "clickhouse_type": "UInt16",
+      "name": "field_position"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "field_name"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "logical_type"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "clickhouse_type"
+    },
+    {
+      "clickhouse_type": "UInt8",
+      "name": "nullable"
+    },
+    {
+      "clickhouse_type": "UInt8",
+      "name": "is_identity_key"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "description"
+    },
+    {
+      "clickhouse_type": "DateTime64(3, 'UTC')",
+      "name": "created_at_utc"
+    }
+  ],
+  "canonical_event_log_columns": [
+    {
+      "clickhouse_type": "UInt16",
+      "name": "envelope_version"
+    },
+    {
+      "clickhouse_type": "UUID",
+      "name": "event_id"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "source_id"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "stream_id"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "partition_id"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "source_offset_or_equivalent"
+    },
+    {
+      "clickhouse_type": "Nullable(DateTime64(9, 'UTC'))",
+      "name": "source_event_time_utc"
+    },
+    {
+      "clickhouse_type": "DateTime64(3, 'UTC')",
+      "name": "ingested_at_utc"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "payload_content_type"
+    },
+    {
+      "clickhouse_type": "LowCardinality(String)",
+      "name": "payload_encoding"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "payload_raw"
+    },
+    {
+      "clickhouse_type": "FixedString(64)",
+      "name": "payload_sha256_raw"
+    },
+    {
+      "clickhouse_type": "String",
+      "name": "payload_json"
+    }
+  ],
+  "contract_identity_fields": [
+    "source_id",
+    "stream_id",
+    "partition_id",
+    "source_offset_or_equivalent"
+  ],
+  "migration_ledger_rows_17_18": [
+    {
+      "applied_at": "2026-03-10 09:23:27",
+      "checksum": "fc1ef9c98b6544ffcd0629565fd0deca6e201cef59bdab66b19d08762c5c6335",
+      "name": "create_canonical_event_envelope_schema",
+      "version": 17
+    },
+    {
+      "applied_at": "2026-03-10 09:23:27",
+      "checksum": "c9ff31f839415bc50db4ce21279a37fe2802f77a4fdee8e8b439802915d48194",
+      "name": "create_canonical_event_log",
+      "version": 18
+    }
+  ],
+  "proof_database": "origo_s14_c1_proof",
+  "proof_scope": "Slice 14 S14-C1 canonical event envelope + append-only log migrations",
+  "required_versions_applied": [
+    17,
+    18
+  ]
+}

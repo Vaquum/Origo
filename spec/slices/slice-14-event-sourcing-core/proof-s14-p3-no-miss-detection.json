@@ -1,0 +1,36 @@
+{
+  "checkpoint": {
+    "checkpoint_id": "4c83f25b-2d05-5ca5-a160-436acba8bad8",
+    "checkpoint_revision": 1,
+    "checkpoint_state": "gap_detected",
+    "status": "recorded"
+  },
+  "duplicate_checkpoint_status": "duplicate",
+  "expected_event_count": 5,
+  "ingest_statuses": [
+    "inserted",
+    "inserted",
+    "inserted",
+    "inserted"
+  ],
+  "missing_offsets": [
+    "1003"
+  ],
+  "no_miss_detection_verified": true,
+  "observed_event_count": 4,
+  "observed_offsets": [
+    "1001",
+    "1002",
+    "1004",
+    "1005"
+  ],
+  "proof_database": "origo_s14_p3_proof",
+  "proof_scope": "Slice 14 S14-P3 no-miss detection with injected gaps and reconciliation checks",
+  "quarantine_error": "No-miss reconciliation failed: source=binance stream=spot_trades partition=btcusdt missing_offsets=['1003']",
+  "quarantine_triggered": true,
+  "stream_key": {
+    "partition_id": "btcusdt",
+    "source_id": "binance",
+    "stream_id": "spot_trades"
+  }
+}

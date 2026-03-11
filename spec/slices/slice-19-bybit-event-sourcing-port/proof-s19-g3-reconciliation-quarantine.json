@@ -1,0 +1,15 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "guardrail_verified": true,
+  "missing_offsets": [
+    "5003"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_scope": "Slice 19 S19-G3 reconciliation/quarantine guardrail verification for Bybit canonical ingest (fail-loud gap detection and quarantine block)",
+  "stream_key": {
+    "partition_id": "2024-01-04",
+    "source_id": "bybit",
+    "stream_id": "bybit_spot_trades"
+  }
+}

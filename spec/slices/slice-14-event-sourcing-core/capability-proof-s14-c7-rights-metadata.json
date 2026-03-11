@@ -1,0 +1,12 @@
+{
+  "export_status_metadata": {
+    "rights_provisional": true,
+    "rights_state": "Hosted Allowed",
+    "source": "binance"
+  },
+  "proof_scope": "Slice 14 S14-C7 provisional rights metadata contract plumbing",
+  "query_response_metadata": {
+    "rights_provisional": true,
+    "rights_state": "Hosted Allowed"
+  }
+}

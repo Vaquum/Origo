@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
 
 import polars as pl
 from clickhouse_connect import get_client as _raw_get_client
 
+from .binance_aligned_1s import assert_canonical_aligned_1s_storage_contract
 from .native_core import (
     LatestRowsWindow,
     MonthWindow,
@@ -23,7 +26,18 @@ logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
 
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-_ALIGNED_MS_ALIAS = '__origo_aligned_ms'
+_ALIGNED_VIEW_ID = 'aligned_1s_raw'
+_ALIGNED_VIEW_VERSION = 1
+_CANONICAL_SOURCE_ID = 'bitcoin_core'
+_CANONICAL_ALIGNED_TABLE = 'canonical_aligned_1s_aggregates'
+
+BitcoinDerivedAlignedDataset = Literal[
+    'bitcoin_block_fee_totals',
+    'bitcoin_block_subsidy_schedule',
+    'bitcoin_network_hashrate_estimate',
+    'bitcoin_circulating_supply',
+]
+
 _BITCOIN_DERIVED_ALIGNED_OBS_COLUMNS: tuple[str, ...] = (
     'aligned_at_utc',
     'source_id',
@@ -39,88 +53,64 @@ _BITCOIN_DERIVED_ALIGNED_OBS_COLUMNS: tuple[str, ...] = (
     'records_in_bucket',
 )
 
-BitcoinDerivedAlignedDataset = Literal[
-    'bitcoin_block_fee_totals',
-    'bitcoin_block_subsidy_schedule',
-    'bitcoin_network_hashrate_estimate',
-    'bitcoin_circulating_supply',
-]
-
 
 @dataclass(frozen=True)
 class BitcoinDerivedAligned1sMaterialization:
-    table_name: str
-    datetime_column: str
-    rank_id_column: str
+    stream_id: str
     metric_name: str
     metric_unit: str
-    metric_value_float_column: str
-    source_id: str
-    dataset_name: str
+    metric_value_payload_key: str
 
     def __post_init__(self) -> None:
         for value, label in [
-            (self.table_name, 'table_name'),
-            (self.datetime_column, 'datetime_column'),
-            (self.rank_id_column, 'rank_id_column'),
-            (self.metric_value_float_column, 'metric_value_float_column'),
-        ]:
-            if not _IDENTIFIER_PATTERN.match(value):
-                raise ValueError(f'Invalid {label}: {value}')
-        for value, label in [
+            (self.stream_id, 'stream_id'),
             (self.metric_name, 'metric_name'),
             (self.metric_unit, 'metric_unit'),
-            (self.source_id, 'source_id'),
-            (self.dataset_name, 'dataset_name'),
+            (self.metric_value_payload_key, 'metric_value_payload_key'),
         ]:
             if value.strip() == '':
                 raise ValueError(f'{label} must be non-empty')
+        if not _IDENTIFIER_PATTERN.match(self.stream_id):
+            raise ValueError(f'Invalid stream_id: {self.stream_id}')
 
 
 _BITCOIN_DERIVED_ALIGNED_1S_MATERIALIZATIONS: dict[
     BitcoinDerivedAlignedDataset, BitcoinDerivedAligned1sMaterialization
 ] = {
     'bitcoin_block_fee_totals': BitcoinDerivedAligned1sMaterialization(
-        table_name='bitcoin_block_fee_totals',
-        datetime_column='datetime',
-        rank_id_column='block_height',
+        stream_id='bitcoin_block_fee_totals',
         metric_name='block_fee_total_btc',
         metric_unit='BTC',
-        metric_value_float_column='fee_total_btc',
-        source_id='bitcoin_core',
-        dataset_name='bitcoin_block_fee_totals',
+        metric_value_payload_key='fee_total_btc',
     ),
     'bitcoin_block_subsidy_schedule': BitcoinDerivedAligned1sMaterialization(
-        table_name='bitcoin_block_subsidy_schedule',
-        datetime_column='datetime',
-        rank_id_column='block_height',
+        stream_id='bitcoin_block_subsidy_schedule',
         metric_name='block_subsidy_btc',
         metric_unit='BTC',
-        metric_value_float_column='subsidy_btc',
-        source_id='bitcoin_core',
-        dataset_name='bitcoin_block_subsidy_schedule',
+        metric_value_payload_key='subsidy_btc',
     ),
     'bitcoin_network_hashrate_estimate': BitcoinDerivedAligned1sMaterialization(
-        table_name='bitcoin_network_hashrate_estimate',
-        datetime_column='datetime',
-        rank_id_column='block_height',
+        stream_id='bitcoin_network_hashrate_estimate',
         metric_name='network_hashrate_hs',
         metric_unit='H/s',
-        metric_value_float_column='hashrate_hs',
-        source_id='bitcoin_core',
-        dataset_name='bitcoin_network_hashrate_estimate',
+        metric_value_payload_key='hashrate_hs',
     ),
     'bitcoin_circulating_supply': BitcoinDerivedAligned1sMaterialization(
-        table_name='bitcoin_circulating_supply',
-        datetime_column='datetime',
-        rank_id_column='block_height',
+        stream_id='bitcoin_circulating_supply',
         metric_name='btc_circulating_supply_btc',
         metric_unit='BTC',
-        metric_value_float_column='circulating_supply_btc',
-        source_id='bitcoin_core',
-        dataset_name='bitcoin_circulating_supply',
+        metric_value_payload_key='circulating_supply_btc',
     ),
 }
+
+
+@dataclass(frozen=True)
+class _BucketEvent:
+    source_offset_or_equivalent: str
+    source_event_time_utc: datetime
+    ingested_at_utc: datetime
+    event_id: str
+    payload: dict[str, Any]
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -136,56 +126,81 @@ def _to_clickhouse_datetime64_literal(value: str) -> str:
     return parsed.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
 
-def _build_where_clause(*, datetime_column: str, window: QueryWindow) -> str:
+def _to_utc_datetime(value: Any, *, label: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise RuntimeError(f'{label} must be datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _coerce_iso_datetime(value: Any, *, label: str) -> datetime:
+    if not isinstance(value, str):
+        raise RuntimeError(f'{label} must be ISO datetime string')
+    return _parse_iso_datetime(value)
+
+
+def _parse_decimal_float(value: Any, *, label: str) -> float:
+    if isinstance(value, bool):
+        raise RuntimeError(f'{label} must be decimal-compatible, got bool')
+    if isinstance(value, (int, float, str, Decimal)):
+        try:
+            return float(Decimal(str(value)))
+        except InvalidOperation as exc:
+            raise RuntimeError(f'{label} must be decimal-compatible') from exc
+    raise RuntimeError(f'{label} must be decimal-compatible')
+
+
+def _canonical_json_or_null(value: Any, *, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError(f'{label} must be object or null')
+    raw_map = cast(dict[Any, Any], value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in raw_map.items():
+        if not isinstance(raw_key, str):
+            raise RuntimeError(f'{label} keys must be strings')
+        normalized[raw_key] = raw_value
+    return json.dumps(
+        normalized,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+
+
+def _offset_sort_key(value: str) -> tuple[int, int | str]:
+    try:
+        return (0, int(value))
+    except ValueError:
+        return (1, value)
+
+
+def _build_where_clause(*, stream_id: str, window: QueryWindow) -> str:
+    base_predicates = (
+        f"source_id = '{_CANONICAL_SOURCE_ID}' "
+        f"AND stream_id = '{stream_id}' "
+        f"AND view_id = '{_ALIGNED_VIEW_ID}' "
+        f'AND view_version = {_ALIGNED_VIEW_VERSION}'
+    )
+
     if isinstance(window, MonthWindow):
         month_start = f'{window.year:04d}-{window.month:02d}-01'
         return (
-            f"WHERE {datetime_column} >= toDateTime('{month_start} 00:00:00') "
-            f"AND {datetime_column} < addMonths(toDateTime('{month_start} 00:00:00'), 1)"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{month_start} 00:00:00.000', 3, 'UTC') "
+            f"AND aligned_at_utc < addMonths(toDateTime64('{month_start} 00:00:00.000', 3, 'UTC'), 1)"
         )
     if isinstance(window, TimeRangeWindow):
         start_ch = _to_clickhouse_datetime64_literal(window.start_iso)
         end_ch = _to_clickhouse_datetime64_literal(window.end_iso)
         return (
-            f"WHERE {datetime_column} >= toDateTime64('{start_ch}', 3, 'UTC') "
-            f"AND {datetime_column} < toDateTime64('{end_ch}', 3, 'UTC')"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{start_ch}', 3, 'UTC') "
+            f"AND aligned_at_utc < toDateTime64('{end_ch}', 3, 'UTC')"
         )
-    return ''
-
-
-def _build_grouped_query(
-    *,
-    database: str,
-    materialization: BitcoinDerivedAligned1sMaterialization,
-    where_clause: str,
-) -> str:
-    datetime_expr = f"toDateTime64({materialization.datetime_column}, 3, 'UTC')"
-    observation_rank = f'tuple({datetime_expr}, {materialization.rank_id_column})'
-    provenance_json = (
-        '{"source":"'
-        + materialization.source_id
-        + '","dataset":"'
-        + materialization.dataset_name
-        + '"}'
-    )
-    return (
-        'SELECT '
-        f"toUnixTimestamp64Milli(toStartOfSecond({datetime_expr})) AS {_ALIGNED_MS_ALIAS}, "
-        f"'{materialization.source_id}' AS source_id, "
-        f"'{materialization.metric_name}' AS metric_name, "
-        f"'{materialization.metric_unit}' AS metric_unit, "
-        'CAST(NULL AS Nullable(String)) AS metric_value_string, '
-        'CAST(NULL AS Nullable(Int64)) AS metric_value_int, '
-        f'argMax({materialization.metric_value_float_column}, {observation_rank}) AS metric_value_float, '
-        'CAST(NULL AS Nullable(UInt8)) AS metric_value_bool, '
-        "'{}' AS dimensions_json, "
-        f"'{provenance_json}' AS provenance_json, "
-        f'max({datetime_expr}) AS latest_ingested_at_utc, '
-        'count() AS records_in_bucket '
-        f'FROM {database}.{materialization.table_name} '
-        f'{where_clause} '
-        f'GROUP BY {_ALIGNED_MS_ALIAS}, source_id, metric_name'
-    )
+    return f'WHERE {base_predicates}'
 
 
 def build_bitcoin_derived_aligned_1s_sql(
@@ -197,67 +212,229 @@ def build_bitcoin_derived_aligned_1s_sql(
     if not _IDENTIFIER_PATTERN.match(database):
         raise ValueError(f'Invalid database identifier: {database}')
 
-    materialization = _BITCOIN_DERIVED_ALIGNED_1S_MATERIALIZATIONS[dataset]
-    where_clause = _build_where_clause(
-        datetime_column=materialization.datetime_column,
-        window=window,
-    )
-    grouped_query = _build_grouped_query(
-        database=database,
-        materialization=materialization,
-        where_clause=where_clause,
+    stream_id = _BITCOIN_DERIVED_ALIGNED_1S_MATERIALIZATIONS[dataset].stream_id
+    where_clause = _build_where_clause(stream_id=stream_id, window=window)
+    base_query = (
+        'SELECT '
+        'aligned_at_utc, '
+        'payload_rows_json, '
+        'first_source_offset_or_equivalent, '
+        'bucket_sha256 '
+        f'FROM {database}.{_CANONICAL_ALIGNED_TABLE} '
+        f'{where_clause}'
     )
 
     if isinstance(window, LatestRowsWindow):
         return (
-            'SELECT * FROM ('
-            f'SELECT * FROM ({grouped_query}) '
-            f'ORDER BY {_ALIGNED_MS_ALIAS} DESC, source_id ASC, metric_name ASC LIMIT {window.rows}'
-            f') ORDER BY {_ALIGNED_MS_ALIAS} ASC, source_id ASC, metric_name ASC'
+            'SELECT aligned_at_utc, payload_rows_json, '
+            'first_source_offset_or_equivalent, bucket_sha256 '
+            'FROM ('
+            'SELECT aligned_at_utc, payload_rows_json, '
+            'first_source_offset_or_equivalent, bucket_sha256 '
+            f'FROM ({base_query}) '
+            'ORDER BY aligned_at_utc DESC, first_source_offset_or_equivalent DESC '
+            f'LIMIT {window.rows}'
+            ') '
+            'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
         )
 
     if isinstance(window, RandomRowsWindow):
         return (
-            'SELECT * FROM ('
-            f'{grouped_query}'
-            f') ORDER BY sipHash64(tuple({_ALIGNED_MS_ALIAS}, source_id, metric_name)) '
+            'SELECT aligned_at_utc, payload_rows_json, '
+            'first_source_offset_or_equivalent, bucket_sha256 '
+            'FROM ('
+            'SELECT aligned_at_utc, payload_rows_json, '
+            'first_source_offset_or_equivalent, bucket_sha256 '
+            f'FROM ({base_query}) '
+            'ORDER BY sipHash64(toUnixTimestamp64Milli(aligned_at_utc), bucket_sha256) '
             f'LIMIT {window.rows}'
+            ') '
+            'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
         )
 
     return (
-        'SELECT * FROM ('
-        f'{grouped_query}'
-        f') ORDER BY {_ALIGNED_MS_ALIAS} ASC, source_id ASC, metric_name ASC'
+        f'{base_query} '
+        'ORDER BY aligned_at_utc ASC, first_source_offset_or_equivalent ASC'
     )
 
 
-def _shape_aligned_frame(*, frame: pl.DataFrame, datetime_iso_output: bool) -> pl.DataFrame:
-    if _ALIGNED_MS_ALIAS not in frame.columns:
-        raise RuntimeError(
-            f'Aligned query result is missing expected column: {_ALIGNED_MS_ALIAS}'
-        )
+def _parse_bucket_events(payload_rows_json: Any) -> list[_BucketEvent]:
+    if not isinstance(payload_rows_json, str):
+        raise RuntimeError('payload_rows_json must be string')
+    try:
+        decoded_payload = json.loads(payload_rows_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('payload_rows_json must be valid JSON') from exc
+    if not isinstance(decoded_payload, dict):
+        raise RuntimeError('payload_rows_json must decode to object')
+    decoded_map = cast(dict[Any, Any], decoded_payload)
+    rows_any = decoded_map.get('rows')
+    if not isinstance(rows_any, list) or rows_any == []:
+        raise RuntimeError('payload_rows_json.rows must be non-empty list')
 
-    shaped = frame.with_columns(
-        pl.col(_ALIGNED_MS_ALIAS)
-        .cast(pl.Int64)
-        .cast(pl.Datetime('ms', time_zone='UTC'))
-        .alias('aligned_at_utc')
-    ).drop(_ALIGNED_MS_ALIAS)
-    shaped = shaped.sort(['aligned_at_utc', 'source_id', 'metric_name'])
+    rows = cast(list[Any], rows_any)
+    events: list[_BucketEvent] = []
+    for index, row_any in enumerate(rows):
+        if not isinstance(row_any, dict):
+            raise RuntimeError(f'payload_rows_json.rows[{index}] must be object')
+        row = cast(dict[Any, Any], row_any)
 
-    if datetime_iso_output:
-        shaped = shaped.with_columns(
-            pl.col('aligned_at_utc')
-            .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
-            .alias('aligned_at_utc')
-        )
-        if 'latest_ingested_at_utc' in shaped.columns:
-            shaped = shaped.with_columns(
-                pl.col('latest_ingested_at_utc')
-                .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
-                .alias('latest_ingested_at_utc')
+        payload_json_value = row.get('payload_json')
+        if not isinstance(payload_json_value, str):
+            raise RuntimeError(f'payload_rows_json.rows[{index}].payload_json must be string')
+        try:
+            payload_object = json.loads(payload_json_value)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f'payload_rows_json.rows[{index}].payload_json must be valid JSON'
+            ) from exc
+        if not isinstance(payload_object, dict):
+            raise RuntimeError(
+                f'payload_rows_json.rows[{index}].payload_json must decode to object'
             )
 
+        source_offset = row.get('source_offset_or_equivalent')
+        if not isinstance(source_offset, str) or source_offset.strip() == '':
+            raise RuntimeError(
+                f'payload_rows_json.rows[{index}].source_offset_or_equivalent must be string'
+            )
+        source_event_time_utc = _coerce_iso_datetime(
+            row.get('source_event_time_utc'),
+            label=f'payload_rows_json.rows[{index}].source_event_time_utc',
+        )
+        ingested_at_utc = _coerce_iso_datetime(
+            row.get('ingested_at_utc'),
+            label=f'payload_rows_json.rows[{index}].ingested_at_utc',
+        )
+        event_id = row.get('event_id')
+        if not isinstance(event_id, str) or event_id.strip() == '':
+            raise RuntimeError(
+                f'payload_rows_json.rows[{index}].event_id must be non-empty string'
+            )
+
+        payload_map = cast(dict[Any, Any], payload_object)
+        normalized_payload: dict[str, Any] = {}
+        for raw_key, raw_value in payload_map.items():
+            if not isinstance(raw_key, str):
+                raise RuntimeError(
+                    f'payload_rows_json.rows[{index}].payload_json keys must be strings'
+                )
+            normalized_payload[raw_key] = raw_value
+
+        events.append(
+            _BucketEvent(
+                source_offset_or_equivalent=source_offset,
+                source_event_time_utc=source_event_time_utc,
+                ingested_at_utc=ingested_at_utc,
+                event_id=event_id,
+                payload=normalized_payload,
+            )
+        )
+    return events
+
+
+def _bucket_to_observation_row(
+    *,
+    dataset: BitcoinDerivedAlignedDataset,
+    aligned_at_utc: Any,
+    payload_rows_json: Any,
+) -> dict[str, Any]:
+    bucket_aligned_at_utc = _to_utc_datetime(aligned_at_utc, label='aligned_at_utc')
+    materialization = _BITCOIN_DERIVED_ALIGNED_1S_MATERIALIZATIONS[dataset]
+    events = _parse_bucket_events(payload_rows_json)
+
+    selected_event = max(
+        events,
+        key=lambda event: (
+            event.source_event_time_utc,
+            _offset_sort_key(event.source_offset_or_equivalent),
+            event.event_id,
+        ),
+    )
+
+    payload = selected_event.payload
+    metric_name_raw = payload.get('metric_name')
+    metric_unit_raw = payload.get('metric_unit')
+    if isinstance(metric_name_raw, str) and metric_name_raw.strip() != '':
+        metric_name = metric_name_raw
+    else:
+        metric_name = materialization.metric_name
+    if isinstance(metric_unit_raw, str) and metric_unit_raw.strip() != '':
+        metric_unit = metric_unit_raw
+    else:
+        metric_unit = materialization.metric_unit
+
+    metric_value_raw = payload.get('metric_value')
+    if metric_value_raw is None:
+        metric_value_raw = payload.get(materialization.metric_value_payload_key)
+    metric_value_float = _parse_decimal_float(
+        metric_value_raw,
+        label='metric_value',
+    )
+
+    provenance_json = _canonical_json_or_null(payload.get('provenance'), label='provenance')
+
+    return {
+        'aligned_at_utc': bucket_aligned_at_utc,
+        'source_id': _CANONICAL_SOURCE_ID,
+        'metric_name': metric_name,
+        'metric_unit': metric_unit,
+        'metric_value_string': None,
+        'metric_value_int': None,
+        'metric_value_float': metric_value_float,
+        'metric_value_bool': None,
+        'dimensions_json': '{}',
+        'provenance_json': provenance_json,
+        'latest_ingested_at_utc': max(event.ingested_at_utc for event in events),
+        'records_in_bucket': len(events),
+    }
+
+
+def _observation_schema() -> dict[str, Any]:
+    return {
+        'aligned_at_utc': pl.Datetime('ms', time_zone='UTC'),
+        'source_id': pl.Utf8,
+        'metric_name': pl.Utf8,
+        'metric_unit': pl.Utf8,
+        'metric_value_string': pl.Utf8,
+        'metric_value_int': pl.Int64,
+        'metric_value_float': pl.Float64,
+        'metric_value_bool': pl.UInt8,
+        'dimensions_json': pl.Utf8,
+        'provenance_json': pl.Utf8,
+        'latest_ingested_at_utc': pl.Datetime('ms', time_zone='UTC'),
+        'records_in_bucket': pl.UInt64,
+    }
+
+
+def _shape_aligned_frame(*, frame: pl.DataFrame, datetime_iso_output: bool) -> pl.DataFrame:
+    if frame.height == 0:
+        empty = pl.DataFrame(schema=_observation_schema())
+        if datetime_iso_output:
+            empty = empty.with_columns(
+                [
+                    pl.col('aligned_at_utc')
+                    .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
+                    .alias('aligned_at_utc'),
+                    pl.col('latest_ingested_at_utc')
+                    .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
+                    .alias('latest_ingested_at_utc'),
+                ]
+            )
+        return empty
+
+    shaped = frame.sort(['aligned_at_utc', 'source_id', 'metric_name'])
+    if datetime_iso_output:
+        shaped = shaped.with_columns(
+            [
+                pl.col('aligned_at_utc')
+                .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
+                .alias('aligned_at_utc'),
+                pl.col('latest_ingested_at_utc')
+                .dt.strftime('%Y-%m-%dT%H:%M:%S%.3fZ')
+                .alias('latest_ingested_at_utc'),
+            ]
+        )
     return shaped
 
 
@@ -270,34 +447,17 @@ def _query_bitcoin_derived_aligned_prior_state(
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
     materialization = _BITCOIN_DERIVED_ALIGNED_1S_MATERIALIZATIONS[dataset]
     start_ch = _to_clickhouse_datetime64_literal(start_iso)
-    datetime_expr = f"toDateTime64({materialization.datetime_column}, 3, 'UTC')"
-    observation_rank = f'tuple({datetime_expr}, {materialization.rank_id_column})'
-    provenance_json = (
-        '{"source":"'
-        + materialization.source_id
-        + '","dataset":"'
-        + materialization.dataset_name
-        + '"}'
-    )
 
     sql = (
-        'SELECT '
-        f'max(toUnixTimestamp64Milli(toStartOfSecond({datetime_expr}))) AS {_ALIGNED_MS_ALIAS}, '
-        f"'{materialization.source_id}' AS source_id, "
-        f"'{materialization.metric_name}' AS metric_name, "
-        f"'{materialization.metric_unit}' AS metric_unit, "
-        'CAST(NULL AS Nullable(String)) AS metric_value_string, '
-        'CAST(NULL AS Nullable(Int64)) AS metric_value_int, '
-        f'argMax({materialization.metric_value_float_column}, {observation_rank}) AS metric_value_float, '
-        'CAST(NULL AS Nullable(UInt8)) AS metric_value_bool, '
-        "'{}' AS dimensions_json, "
-        f"'{provenance_json}' AS provenance_json, "
-        f'max({datetime_expr}) AS latest_ingested_at_utc, '
-        'count() AS records_in_bucket '
-        f'FROM {settings.database}.{materialization.table_name} '
-        f"WHERE {materialization.datetime_column} < toDateTime64('{start_ch}', 3, 'UTC') "
-        'GROUP BY source_id, metric_name '
-        f'ORDER BY source_id ASC, metric_name ASC'
+        'SELECT aligned_at_utc, payload_rows_json '
+        f'FROM {settings.database}.{_CANONICAL_ALIGNED_TABLE} '
+        f"WHERE source_id = '{_CANONICAL_SOURCE_ID}' "
+        f"AND stream_id = '{materialization.stream_id}' "
+        f"AND view_id = '{_ALIGNED_VIEW_ID}' "
+        f'AND view_version = {_ALIGNED_VIEW_VERSION} '
+        f"AND aligned_at_utc < toDateTime64('{start_ch}', 3, 'UTC') "
+        'ORDER BY aligned_at_utc DESC, first_source_offset_or_equivalent DESC '
+        'LIMIT 1'
     )
 
     client = get_client(
@@ -308,19 +468,32 @@ def _query_bitcoin_derived_aligned_prior_state(
         compression=True,
     )
     try:
-        arrow_table = client.query_arrow(sql)
+        assert_canonical_aligned_1s_storage_contract(
+            client=client,
+            database=settings.database,
+        )
+        rows = client.query(sql).result_rows
     finally:
         try:
             client.close()
         except Exception as exc:
             logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
 
-    raw_frame = pl.DataFrame(arrow_table)
-    if isinstance(raw_frame, pl.Series):
-        raise RuntimeError(
-            'Expected DataFrame from Bitcoin aligned prior-state query, got Series'
+    if rows == []:
+        return pl.DataFrame(schema=_observation_schema())
+
+    observations = [
+        _bucket_to_observation_row(
+            dataset=dataset,
+            aligned_at_utc=row[0],
+            payload_rows_json=row[1],
         )
-    return _shape_aligned_frame(frame=raw_frame, datetime_iso_output=False)
+        for row in rows
+    ]
+    return _shape_aligned_frame(
+        frame=pl.DataFrame(observations, schema=_observation_schema()),
+        datetime_iso_output=False,
+    )
 
 
 def _build_bitcoin_derived_forward_fill_intervals(
@@ -445,21 +618,27 @@ def query_bitcoin_derived_aligned_1s_data(
 
     started_at = time.time()
     try:
-        arrow_table = client.query_arrow(sql)
+        assert_canonical_aligned_1s_storage_contract(
+            client=client,
+            database=settings.database,
+        )
+        rows = client.query(sql).result_rows
     finally:
         try:
             client.close()
         except Exception as exc:
             logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
 
-    raw_frame = pl.DataFrame(arrow_table)
-    if isinstance(raw_frame, pl.Series):
-        raise RuntimeError(
-            'Expected DataFrame from Bitcoin derived aligned query, got Series'
+    observations = [
+        _bucket_to_observation_row(
+            dataset=dataset,
+            aligned_at_utc=row[0],
+            payload_rows_json=row[1],
         )
-
+        for row in rows
+    ]
     shaped = _shape_aligned_frame(
-        frame=raw_frame,
+        frame=pl.DataFrame(observations, schema=_observation_schema()),
         datetime_iso_output=datetime_iso_output,
     )
 

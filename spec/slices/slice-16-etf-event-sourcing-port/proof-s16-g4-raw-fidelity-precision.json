@@ -1,0 +1,10 @@
+{
+  "invalid_precision_guardrail_error": "Numeric field path=unexpected_numeric is missing precision rule for source_id=etf stream_id=etf_daily_metrics",
+  "proof_scope": "Slice 16 S16-G4 raw-fidelity and precision guardrail verification for ETF canonical ingest path",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 3,
+    "rows_processed": 3
+  }
+}

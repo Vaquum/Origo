@@ -1,0 +1,9 @@
+{
+  "canonical_payload_json": "{\"price\":\"43500.12345678\",\"qty\":\"0.01000000\",\"quote_qty\":\"435.00123457\",\"trade_id\":6001}",
+  "decimal_rules_missing_scale": [],
+  "float_guard_error": "Float value found in canonical payload_json field path=price source_id=binance stream_id=spot_trades",
+  "precision_guardrail_verified": true,
+  "proof_scope": "Slice 14 S14-G4 canonical precision guardrails (no float storage, explicit decimal scale metadata)",
+  "registry_entry_count": 3,
+  "registry_version": 1
+}

@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-10
-- Slice/version reference: S2, S5, S6, S8, S11, S13 (API v0.1.6)
+- Slice/version reference: S2, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20 (API v0.1.14)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -18,6 +18,8 @@
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
   - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics | bitcoin_block_headers | bitcoin_block_transactions | bitcoin_mempool_state | bitcoin_block_fee_totals | bitcoin_block_subsidy_schedule | bitcoin_network_hashrate_estimate | bitcoin_circulating_supply`
+  - `view_id`: optional view identifier (must be paired with `view_version`)
+  - `view_version`: optional positive integer (must be paired with `view_id`)
   - `fields`: optional field projection
   - Exactly one window selector:
     - `month_year`
@@ -28,8 +30,10 @@
   - `auth_token`: currently rejected for export dispatch in this slice
 - Submit response (`202`):
   - `export_id`, `status`, `submitted_at`, `status_path`
+  - `rights_state`, `rights_provisional`, `view_id`, `view_version`
 - Status response (`200`):
-  - `export_id`, `status`, `mode`, `format`, `dataset`, `submitted_at`, `updated_at`
+  - `export_id`, `status`, `mode`, `format`, `dataset`, `source`, `submitted_at`, `updated_at`
+  - `rights_state`, `rights_provisional`, `view_id`, `view_version`
   - optional `artifact` with `{format, uri, row_count, checksum_sha256}`
   - optional `error_code`, `error_message`
 
@@ -46,6 +50,9 @@
 - Export payload comes from canonical ClickHouse data queried via Origo query core.
 - Dagster run tags preserve mode/format/dataset and request hash context.
 - Export freshness follows the latest successful ingestion for requested sources.
+- OKX native/aligned exports are served from canonical OKX projection paths as of Slice 18.
+- Bybit native/aligned exports are served from canonical Bybit projection paths as of Slice 19.
+- Bitcoin native/aligned exports are served from canonical Bitcoin projection paths as of Slice 20 (aligned scope is derived-only datasets).
 - `mode=aligned_1s` supports only aligned-capable datasets:
   - `spot_trades`
   - `spot_agg_trades`
@@ -69,12 +76,19 @@
   - `EXPORT_RIGHTS_*`
   - `EXPORT_AUDIT_WRITE_ERROR`
   - `EXPORT_ARTIFACT_METADATA_ERROR`
+  - `EXPORT_STATUS_METADATA_ERROR`
   - `EXPORT_RUN_FAILED` / `EXPORT_RUN_CANCELED`
 
 ## Determinism/replay notes
 - Export determinism and query/export parity are validated in slice proof artifacts:
   - `spec/slices/slice-2-raw-export-native/`
   - `spec/slices/slice-5-raw-query-aligned-1s/`
+  - `spec/slices/slice-15-binance-event-sourcing-port/`
+  - `spec/slices/slice-16-etf-event-sourcing-port/`
+  - `spec/slices/slice-17-fred-event-sourcing-port/`
+  - `spec/slices/slice-18-okx-event-sourcing-port/`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/`
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
   - `spec/slices/slice-13-bitcoin-core-signals/`

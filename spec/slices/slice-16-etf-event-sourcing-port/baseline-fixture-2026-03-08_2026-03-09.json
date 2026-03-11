@@ -1,0 +1,105 @@
+{
+  "column_key": {
+    "rows_hash_sha256": "SHA256 of canonicalized row payload for exact window.",
+    "source_payload_sha256": "SHA256 of canonical ETF payload bytes by metric_id."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "end_utc": "2026-03-10T00:00:00Z",
+    "start_utc": "2026-03-08T00:00:00Z"
+  },
+  "run_1_fingerprints": {
+    "etf_daily_metrics": {
+      "aligned_1s": {
+        "rows_hash_sha256": "89d299600d54f5581506955bfebfe987f446ab671994ecbb62968ab6a7d27aa4"
+      },
+      "native": {
+        "rows_hash_sha256": "e29abd5e303215280aa2ea8780702125db05aaf5eb818763788c4ca354f90420"
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "etf_daily_metrics": {
+      "aligned_1s": {
+        "rows_hash_sha256": "89d299600d54f5581506955bfebfe987f446ab671994ecbb62968ab6a7d27aa4"
+      },
+      "native": {
+        "rows_hash_sha256": "e29abd5e303215280aa2ea8780702125db05aaf5eb818763788c4ca354f90420"
+      }
+    }
+  },
+  "source_checksums": {
+    "etf_fidelity_fbtc_daily:2026-03-08:as_of_date": {
+      "source_payload_sha256": "b9b2f0b72aa4dffa101dc28cf664a475e842f2238bb919568f70584ab42b0799"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-08:btc_units": {
+      "source_payload_sha256": "9548cec84614fb642fb97c939d8f5d5ab79c162414f4fdcb573c1b57f6b4b21b"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-08:holdings_row_count": {
+      "source_payload_sha256": "08dd9c52460a0e900cb722eada4e202ab853f7d292836a1455df11a0a495ecae"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-08:issuer": {
+      "source_payload_sha256": "a6caa59b6bebff52a211d344fd336bd4430fec1f6a136d0028445bb4c718d4bd"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-08:ticker": {
+      "source_payload_sha256": "18fc0f1e78c055c23ad74b1e080453f2472a778b1d12d9cd88aa0d11a159cce0"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-08:total_net_assets_usd": {
+      "source_payload_sha256": "ac419cfd2daea5aa90c01644d9eca68213070281637442e9b9beccbc261d1e3c"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:as_of_date": {
+      "source_payload_sha256": "08d24864c68816b8bf8338bf85d17606dad708aa2d785caf5e4b2b54c84902a9"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:btc_units": {
+      "source_payload_sha256": "a63dad6747156b5caa5783c06fe55baee8d7451b3a94c9f667ab091b4a6e0f09"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:holdings_row_count": {
+      "source_payload_sha256": "c8456e193599b125ce8672017271822e0dc142227fd6d8a2a42e9ca1bd6423c6"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:issuer": {
+      "source_payload_sha256": "89060f797d1214374db08ee01c795e1f64438460098e8def7af06d7f63fe1a38"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:ticker": {
+      "source_payload_sha256": "8df3bf4a4c9be52dab8c6c4f6acdd2954763f48962fad8f66ae33012d103c541"
+    },
+    "etf_fidelity_fbtc_daily:2026-03-09:total_net_assets_usd": {
+      "source_payload_sha256": "a9dc9e6d4926ec0290b9bce4f3d1a8fd21eb78084c466f21c6da0e67b697545d"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:as_of_date": {
+      "source_payload_sha256": "8533ca94e3f9eb43fa82996e574b0d9d435e69db59e6a0c5176f4c7fa4df0751"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:btc_units": {
+      "source_payload_sha256": "1f7f31eb852af9e33840d0c2c5f6cc3571b17f79b4bae739393fcbf56568c6f6"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:holdings_row_count": {
+      "source_payload_sha256": "5c80d9af1ed9c34f49097909fa99b1eccc7277b46043f47230db2728a15f71df"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:issuer": {
+      "source_payload_sha256": "3d23c835d041902a29046ca1a4ef1bb9c9633cc0e7c143006e108819cd675935"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:ticker": {
+      "source_payload_sha256": "e6c7055d8e3de627c9b7472e5f96b13719f17575d790d4d8802d6cbccae1bbdd"
+    },
+    "etf_ishares_ibit_daily:2026-03-08:total_net_assets_usd": {
+      "source_payload_sha256": "c25fc55b69ab2b371c3a0505dd29bb928f04584cc0d7082b42bbb23847c6555d"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:as_of_date": {
+      "source_payload_sha256": "fe0faf4b48f304fa669d900aaf145a05d6527a5e6e821c33ea698f726465b843"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:btc_units": {
+      "source_payload_sha256": "01fe4390d7af0c5c9794c35dbe5a7010064d523ccc8fd95f967d7240de8c6345"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:holdings_row_count": {
+      "source_payload_sha256": "ae8a4e7ce7f3335d8f4ee2d7e0a80c33ae309d1c4ded13da03455bca361f73ee"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:issuer": {
+      "source_payload_sha256": "4329edf7be6262c72a41548989bd0eed485ee43caa765478749948ee73a73195"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:ticker": {
+      "source_payload_sha256": "cb380617a5aa13fc60acfae258fd639dff1b21dea6c25af97f7467ce0af2d9ae"
+    },
+    "etf_ishares_ibit_daily:2026-03-09:total_net_assets_usd": {
+      "source_payload_sha256": "67cae0a6513907ba8127b683ea887afc81b581e8199195eae85d8949d1599d77"
+    }
+  }
+}

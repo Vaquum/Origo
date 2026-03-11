@@ -31,7 +31,7 @@ class _BitcoinSourceSpec:
 
 _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
     'bitcoin_block_headers': _BitcoinSourceSpec(
-        table_name='bitcoin_block_headers',
+        table_name='canonical_bitcoin_block_headers_native_v1',
         id_column='height',
         datetime_column='datetime',
         random_seed_column='timestamp',
@@ -58,7 +58,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_block_transactions': _BitcoinSourceSpec(
-        table_name='bitcoin_block_transactions',
+        table_name='canonical_bitcoin_block_transactions_native_v1',
         id_column='txid',
         datetime_column='datetime',
         random_seed_column='block_timestamp',
@@ -86,7 +86,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_mempool_state': _BitcoinSourceSpec(
-        table_name='bitcoin_mempool_state',
+        table_name='canonical_bitcoin_mempool_state_native_v1',
         id_column='txid',
         datetime_column='snapshot_at',
         random_seed_column='snapshot_at_unix_ms',
@@ -110,7 +110,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_block_fee_totals': _BitcoinSourceSpec(
-        table_name='bitcoin_block_fee_totals',
+        table_name='canonical_bitcoin_block_fee_totals_native_v1',
         id_column='block_height',
         datetime_column='datetime',
         random_seed_column='block_timestamp',
@@ -129,7 +129,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_block_subsidy_schedule': _BitcoinSourceSpec(
-        table_name='bitcoin_block_subsidy_schedule',
+        table_name='canonical_bitcoin_block_subsidy_schedule_native_v1',
         id_column='block_height',
         datetime_column='datetime',
         random_seed_column='block_timestamp',
@@ -152,7 +152,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_network_hashrate_estimate': _BitcoinSourceSpec(
-        table_name='bitcoin_network_hashrate_estimate',
+        table_name='canonical_bitcoin_network_hashrate_estimate_native_v1',
         id_column='block_height',
         datetime_column='datetime',
         random_seed_column='block_timestamp',
@@ -175,7 +175,7 @@ _BITCOIN_SOURCE_SPECS: dict[BitcoinDataset, _BitcoinSourceSpec] = {
         ),
     ),
     'bitcoin_circulating_supply': _BitcoinSourceSpec(
-        table_name='bitcoin_circulating_supply',
+        table_name='canonical_bitcoin_circulating_supply_native_v1',
         id_column='block_height',
         datetime_column='datetime',
         random_seed_column='block_timestamp',

@@ -1,0 +1,12 @@
+{
+  "deterministic_match": true,
+  "proof_scope": "Slice 17 S17-P3 replay determinism for FRED native and aligned_1s after cutover",
+  "run_1": {
+    "aligned_rows_hash_sha256": "4507ca0fd3086d6e296a8518a3835e9d55a2a55c79c906095dcd0dc9240f1e57",
+    "native_rows_hash_sha256": "314d71540571f7ffa4780537309cd2153c76840a1f18fbfd18ee4fd383169f4b"
+  },
+  "run_2": {
+    "aligned_rows_hash_sha256": "4507ca0fd3086d6e296a8518a3835e9d55a2a55c79c906095dcd0dc9240f1e57",
+    "native_rows_hash_sha256": "314d71540571f7ffa4780537309cd2153c76840a1f18fbfd18ee4fd383169f4b"
+  }
+}

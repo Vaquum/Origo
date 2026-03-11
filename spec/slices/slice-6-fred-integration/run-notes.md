@@ -1,5 +1,45 @@
 # Slice 6 FRED Integration Run Notes
 
+## Run metadata
+
+- Date (UTC): 2026-03-07
+- Scope: `S6-C1..S6-C7`, `S6-P1..S6-P3`, `S6-G1..S6-G6`
+- Fixture windows:
+  - FRED capability/proof windows centered on `2024-01-01` .. `2024-03-31`
+  - fixed as-of incremental window (`as_of_date=2024-03-31`)
+- Runtime environment:
+  - local ClickHouse (`origo`) and local proof harnesses via `uv run`
+  - outbound FRED API calls for connector/ingest proofs
+  - local object-store harness for persistence proof (`S6-C5`)
+
+## System changes made as proof side effects
+
+- Implemented and validated FRED connector, normalization, ingest (backfill + incremental), persistence, native query, and aligned query paths.
+- Added rights/freshness/serving-state/alerts guardrails for FRED query serving.
+- Added slice proof artifacts under `spec/slices/slice-6-fred-integration/`:
+  - capability proof artifacts (`S6-C1`..`S6-C7`)
+  - proof artifacts (`S6-P1`..`S6-P3`)
+  - guardrail proof artifacts (`S6-G1`..`S6-G4`)
+  - baseline fixture artifact (`baseline-fixture-2024-01-01_2024-03-31.json`)
+
+## Known warnings and disposition
+
+- No unresolved warnings were accepted at Slice 6 closeout.
+- Capability/proof warnings that appeared in staged execution were resolved by later sub-slices inside Slice 6.
+
+## Deferred guardrails
+
+- None for Slice 6. Guardrail checklist `S6-G1..S6-G6` is complete.
+
+## Closeout confirmation
+
+- `spec/2-itemized-work-plan.md` updated with all Slice 6 items checked.
+- `control-plane/pyproject.toml` version advanced through the slice and closed at `1.2.50`.
+- `control-plane/CHANGELOG.md` updated with Slice 6 entries through `v1.2.50`.
+- `.env.example` updated/reviewed for all FRED env contracts introduced in Slice 6.
+
+## Detailed chronological notes
+
 ## S6-C1 run notes
 
 - Date (UTC): 2026-03-07

@@ -1,0 +1,15 @@
+{
+  "checkpoint_status": "recorded",
+  "duplicate_checkpoint_status": "duplicate",
+  "guardrail_verified": true,
+  "missing_offsets": [
+    "2026-03-09"
+  ],
+  "post_quarantine_block_error_code": "STREAM_QUARANTINED",
+  "proof_scope": "Slice 17 S17-G3 reconciliation/quarantine guardrail verification for FRED canonical ingest (fail-loud gap detection + quarantine block)",
+  "stream_key": {
+    "partition_id": "2026-03",
+    "source_id": "fred",
+    "stream_id": "fred_series_metrics"
+  }
+}

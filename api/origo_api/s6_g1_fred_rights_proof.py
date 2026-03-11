@@ -17,6 +17,7 @@ def _build_matrix(*, legal_artifact_path: str | None, include_fred: bool) -> dic
     sources: dict[str, Any] = {
         'binance': {
             'rights_state': 'Hosted Allowed',
+            'rights_provisional': False,
             'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
             'legal_signoff_artifact': 'contracts/legal/binance-hosted-allowed.md',
         }
@@ -24,6 +25,7 @@ def _build_matrix(*, legal_artifact_path: str | None, include_fred: bool) -> dic
     if include_fred:
         fred_payload: dict[str, Any] = {
             'rights_state': 'Hosted Allowed',
+            'rights_provisional': False,
             'datasets': ['fred_series_metrics'],
         }
         if legal_artifact_path is not None:

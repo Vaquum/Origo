@@ -1,0 +1,19 @@
+{
+  "guardrail_verified": true,
+  "ingest_path_guardrail": {
+    "error": "Exchange integrity sequence-gap check failed for okx_spot_trades: row=2, expected_next_id=7002, got=7003",
+    "events_parsed": 2
+  },
+  "projection_path_guardrail": {
+    "canonical_rows_written": 2,
+    "error": "Exchange integrity sequence-gap check failed for okx_spot_trades: row=2, expected_next_id=7002, got=7003",
+    "projected_rows_after_failure": 0,
+    "write_summary": {
+      "rows_duplicate": 0,
+      "rows_inserted": 2,
+      "rows_processed": 2
+    }
+  },
+  "proof_database": "origo_s18_g1_proof",
+  "proof_scope": "Slice 18 S18-G1 exchange integrity suite enforcement in OKX ingest and projection paths"
+}

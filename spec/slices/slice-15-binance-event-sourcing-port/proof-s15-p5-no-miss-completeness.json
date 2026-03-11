@@ -1,0 +1,94 @@
+{
+  "datasets": {
+    "futures_trades": {
+      "checkpoint_revision": 1,
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "expected_event_count": 5,
+      "ingest_statuses": [
+        "inserted",
+        "inserted",
+        "inserted",
+        "inserted"
+      ],
+      "missing_offsets": [
+        "10303"
+      ],
+      "no_miss_error": "No-miss reconciliation failed: source=binance stream=futures_trades partition=2024-01-05 missing_offsets=['10303']",
+      "observed_event_count": 4,
+      "observed_offsets": [
+        "10301",
+        "10302",
+        "10304",
+        "10305"
+      ],
+      "quarantine_enforced": true,
+      "quarantine_state": {
+        "quarantined_at_utc": "2024-01-05T00:02:00+00:00",
+        "reason": "gap_detected_from_completeness_reconciliation",
+        "run_id": "s15-p5-futures_trades"
+      }
+    },
+    "spot_agg_trades": {
+      "checkpoint_revision": 1,
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "expected_event_count": 5,
+      "ingest_statuses": [
+        "inserted",
+        "inserted",
+        "inserted",
+        "inserted"
+      ],
+      "missing_offsets": [
+        "10203"
+      ],
+      "no_miss_error": "No-miss reconciliation failed: source=binance stream=spot_agg_trades partition=2024-01-05 missing_offsets=['10203']",
+      "observed_event_count": 4,
+      "observed_offsets": [
+        "10201",
+        "10202",
+        "10204",
+        "10205"
+      ],
+      "quarantine_enforced": true,
+      "quarantine_state": {
+        "quarantined_at_utc": "2024-01-05T00:02:00+00:00",
+        "reason": "gap_detected_from_completeness_reconciliation",
+        "run_id": "s15-p5-spot_agg_trades"
+      }
+    },
+    "spot_trades": {
+      "checkpoint_revision": 1,
+      "checkpoint_status": "recorded",
+      "duplicate_checkpoint_status": "duplicate",
+      "expected_event_count": 5,
+      "ingest_statuses": [
+        "inserted",
+        "inserted",
+        "inserted",
+        "inserted"
+      ],
+      "missing_offsets": [
+        "10103"
+      ],
+      "no_miss_error": "No-miss reconciliation failed: source=binance stream=spot_trades partition=2024-01-05 missing_offsets=['10103']",
+      "observed_event_count": 4,
+      "observed_offsets": [
+        "10101",
+        "10102",
+        "10104",
+        "10105"
+      ],
+      "quarantine_enforced": true,
+      "quarantine_state": {
+        "quarantined_at_utc": "2024-01-05T00:02:00+00:00",
+        "reason": "gap_detected_from_completeness_reconciliation",
+        "run_id": "s15-p5-spot_trades"
+      }
+    }
+  },
+  "no_miss_detection_verified": true,
+  "proof_database": "origo_s15_p5_proof",
+  "proof_scope": "Slice 15 S15-P5 no-miss completeness proof with reconciliation and gap injection for Binance spot_trades, spot_agg_trades, futures_trades"
+}

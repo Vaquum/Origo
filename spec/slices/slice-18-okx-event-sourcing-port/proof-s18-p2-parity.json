@@ -1,0 +1,10 @@
+{
+  "aligned_parity_match": true,
+  "native_parity_match": true,
+  "parity_verified": true,
+  "proof_scope": "Slice 18 S18-P2 parity checks versus legacy OKX fixture baselines (legacy table SQL projections)",
+  "window": {
+    "end_utc": "2024-01-04T00:00:03Z",
+    "start_utc": "2024-01-04T00:00:00Z"
+  }
+}

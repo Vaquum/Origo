@@ -1,0 +1,16 @@
+{
+  "guardrail_verified": true,
+  "missing_rights_error_code": "QUERY_RIGHTS_MISSING_STATE",
+  "missing_rights_status": 409,
+  "non_strict_status": 200,
+  "proof_database": "origo_s17_g1_g2_proof",
+  "proof_scope": "Slice 17 S17-G1/G2 FRED publish-freshness warnings and rights/legal guardrail behavior on canonical projection serving path",
+  "rights_provisional": true,
+  "rights_state": "Hosted Allowed",
+  "strict_error_code": "STRICT_MODE_WARNING_FAILURE",
+  "strict_status": 409,
+  "warning_codes": [
+    "FRED_SOURCE_PUBLISH_MISSING",
+    "FRED_SOURCE_PUBLISH_STALE"
+  ]
+}

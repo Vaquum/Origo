@@ -1,0 +1,34 @@
+{
+  "fidelity_rows": [
+    {
+      "metric_id": "fred_dgs10:2026-03-09:treasury_yield_10y",
+      "payload_json_sha256": "bf030071a9e82c88b26884bf503d164d4439533ac8b9c1f47f203a8037e38167",
+      "payload_sha256_raw": "bf030071a9e82c88b26884bf503d164d4439533ac8b9c1f47f203a8037e38167",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    },
+    {
+      "metric_id": "fred_dgs10:2026-03-10:treasury_yield_10y",
+      "payload_json_sha256": "1ecad1ee256c11343d48a35371ca49fb11e8d0862f8f04da5c58d6c24959b038",
+      "payload_sha256_raw": "1ecad1ee256c11343d48a35371ca49fb11e8d0862f8f04da5c58d6c24959b038",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    },
+    {
+      "metric_id": "fred_fedfunds:2026-03-09:effective_federal_funds_rate",
+      "payload_json_sha256": "65019b8fe7d97600b82bda0f8c115e77667f8b7ebfcdb2f02e2a9c3ed4bfcc8f",
+      "payload_sha256_raw": "65019b8fe7d97600b82bda0f8c115e77667f8b7ebfcdb2f02e2a9c3ed4bfcc8f",
+      "precision_roundtrip_match": true,
+      "raw_fidelity_match": true
+    }
+  ],
+  "invalid_precision_guardrail_error": "Numeric field path=unexpected_numeric is missing precision rule for source_id=fred stream_id=fred_series_metrics",
+  "proof_database": "origo_s17_p6_proof",
+  "proof_scope": "Slice 17 S17-P6 raw fidelity and precision proof for FRED canonical ingest",
+  "raw_fidelity_and_precision_verified": true,
+  "write_summary": {
+    "rows_duplicate": 0,
+    "rows_inserted": 3,
+    "rows_processed": 3
+  }
+}

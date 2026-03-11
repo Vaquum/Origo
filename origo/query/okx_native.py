@@ -21,7 +21,7 @@ class _OKXSourceSpec:
 
 _OKX_SOURCE_SPECS: dict[OKXDataset, _OKXSourceSpec] = {
     'okx_spot_trades': _OKXSourceSpec(
-        table_name='okx_spot_trades',
+        table_name='canonical_okx_spot_trades_native_v1',
         id_column='trade_id',
         allowed_columns=(
             'instrument_name',

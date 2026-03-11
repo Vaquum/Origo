@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
 
 import polars as pl
 from clickhouse_connect import get_client as _raw_get_client
 
+from .binance_aligned_1s import assert_canonical_aligned_1s_storage_contract
 from .native_core import (
     LatestRowsWindow,
     MonthWindow,
@@ -23,7 +27,10 @@ logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
 
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-_ALIGNED_MS_ALIAS = '__origo_aligned_ms'
+_ALIGNED_VIEW_ID = 'aligned_1s_raw'
+_ALIGNED_VIEW_VERSION = 1
+_CANONICAL_ALIGNED_TABLE = 'canonical_aligned_1s_aggregates'
+_CANONICAL_SOURCE_ID = 'fred'
 _FRED_ALIGNED_OBS_COLUMNS: tuple[str, ...] = (
     'aligned_at_utc',
     'source_id',
@@ -43,33 +50,35 @@ FREDAlignedDataset = Literal['fred_series_metrics']
 
 @dataclass(frozen=True)
 class FREDAligned1sMaterialization:
-    table_name: str
-    datetime_column: str
-    ingest_column: str
-    source_id_column: str
-    metric_name_column: str
+    stream_id: str
 
     def __post_init__(self) -> None:
-        for value, label in [
-            (self.table_name, 'table_name'),
-            (self.datetime_column, 'datetime_column'),
-            (self.ingest_column, 'ingest_column'),
-            (self.source_id_column, 'source_id_column'),
-            (self.metric_name_column, 'metric_name_column'),
-        ]:
-            if not _IDENTIFIER_PATTERN.match(value):
-                raise ValueError(f'Invalid {label}: {value}')
+        if not _IDENTIFIER_PATTERN.match(self.stream_id):
+            raise ValueError(f'Invalid stream_id: {self.stream_id}')
+
+
+@dataclass(frozen=True)
+class _AlignedMetricEvent:
+    aligned_at_utc: datetime
+    source_id: str
+    metric_name: str
+    metric_unit: str | None
+    metric_value_string: str | None
+    metric_value_int: int | None
+    metric_value_float: float | None
+    metric_value_bool: int | None
+    dimensions_json: str
+    provenance_json: str | None
+    latest_ingested_at_utc: datetime
+    source_offset_or_equivalent: str
+    event_id: str
 
 
 _FRED_ALIGNED_1S_MATERIALIZATIONS: dict[
     FREDAlignedDataset, FREDAligned1sMaterialization
 ] = {
     'fred_series_metrics': FREDAligned1sMaterialization(
-        table_name='fred_series_metrics_long',
-        datetime_column='observed_at_utc',
-        ingest_column='ingested_at_utc',
-        source_id_column='source_id',
-        metric_name_column='metric_name',
+        stream_id='fred_series_metrics',
     )
 }
 
@@ -87,50 +96,434 @@ def _to_clickhouse_datetime64_literal(value: str) -> str:
     return parsed.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
 
+def _to_utc_datetime(value: Any, *, label: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise RuntimeError(f'{label} must be datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _build_where_clause(
-    *, datetime_column: str, window: QueryWindow
+    *,
+    stream_id: str,
+    window: QueryWindow,
 ) -> str:
+    base_predicates = (
+        f"source_id = '{_CANONICAL_SOURCE_ID}' "
+        f"AND stream_id = '{stream_id}' "
+        f"AND view_id = '{_ALIGNED_VIEW_ID}' "
+        f'AND view_version = {_ALIGNED_VIEW_VERSION}'
+    )
+
     if isinstance(window, MonthWindow):
         month_start = f'{window.year:04d}-{window.month:02d}-01'
         return (
-            f"WHERE {datetime_column} >= toDateTime('{month_start} 00:00:00') "
-            f"AND {datetime_column} < addMonths(toDateTime('{month_start} 00:00:00'), 1)"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{month_start} 00:00:00.000', 3, 'UTC') "
+            f"AND aligned_at_utc < addMonths(toDateTime64('{month_start} 00:00:00.000', 3, 'UTC'), 1)"
         )
     if isinstance(window, TimeRangeWindow):
         start_ch = _to_clickhouse_datetime64_literal(window.start_iso)
         end_ch = _to_clickhouse_datetime64_literal(window.end_iso)
         return (
-            f"WHERE {datetime_column} >= toDateTime64('{start_ch}', 3, 'UTC') "
-            f"AND {datetime_column} < toDateTime64('{end_ch}', 3, 'UTC')"
+            f'WHERE {base_predicates} '
+            f"AND aligned_at_utc >= toDateTime64('{start_ch}', 3, 'UTC') "
+            f"AND aligned_at_utc < toDateTime64('{end_ch}', 3, 'UTC')"
         )
-    return ''
+    return f'WHERE {base_predicates}'
 
 
-def _build_grouped_query(
-    *,
-    database: str,
-    materialization: FREDAligned1sMaterialization,
-    where_clause: str,
-) -> str:
-    datetime_expr = f"toDateTime64({materialization.datetime_column}, 3, 'UTC')"
-    return (
-        'SELECT '
-        f"toUnixTimestamp64Milli(toStartOfSecond({datetime_expr})) AS {_ALIGNED_MS_ALIAS}, "
-        f'{materialization.source_id_column} AS source_id, '
-        f'{materialization.metric_name_column} AS metric_name, '
-        f'argMax(metric_unit, {materialization.ingest_column}) AS metric_unit, '
-        f'argMax(metric_value_string, {materialization.ingest_column}) AS metric_value_string, '
-        f'argMax(metric_value_int, {materialization.ingest_column}) AS metric_value_int, '
-        f'argMax(metric_value_float, {materialization.ingest_column}) AS metric_value_float, '
-        f'argMax(metric_value_bool, {materialization.ingest_column}) AS metric_value_bool, '
-        f'argMax(dimensions_json, {materialization.ingest_column}) AS dimensions_json, '
-        f'argMax(provenance_json, {materialization.ingest_column}) AS provenance_json, '
-        f'max({materialization.ingest_column}) AS latest_ingested_at_utc, '
-        'count() AS records_in_bucket '
-        f'FROM {database}.{materialization.table_name} '
-        f'{where_clause} '
-        f'GROUP BY {_ALIGNED_MS_ALIAS}, source_id, metric_name'
+def _expect_json_object(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError(f'{label} must decode to object')
+    raw_map = cast(dict[Any, Any], value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in raw_map.items():
+        if not isinstance(raw_key, str):
+            raise RuntimeError(f'{label} keys must be strings')
+        normalized[raw_key] = raw_value
+    return normalized
+
+
+def _expect_json_list(value: Any, *, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise RuntimeError(f'{label} must decode to list')
+    return cast(list[Any], value)
+
+
+def _expect_str(payload: dict[str, Any], *, key: str, label: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise RuntimeError(f'{label}.{key} must be string')
+    normalized = value.strip()
+    if normalized == '':
+        raise RuntimeError(f'{label}.{key} must be non-empty string')
+    return normalized
+
+
+def _optional_str(payload: dict[str, Any], *, key: str, label: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f'{label}.{key} must be string or null')
+    normalized = value.strip()
+    if normalized == '':
+        return None
+    return normalized
+
+
+def _canonical_json_or_null(value: Any, *, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError(f'{label} must be object or null')
+    value_map = cast(dict[Any, Any], value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in value_map.items():
+        if not isinstance(raw_key, str):
+            raise RuntimeError(f'{label} object keys must be strings')
+        normalized[raw_key] = raw_value
+    return json.dumps(
+        normalized,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
     )
+
+
+def _decode_metric_value(
+    *,
+    payload: dict[str, Any],
+    label: str,
+) -> tuple[str | None, int | None, float | None, int | None]:
+    metric_value_kind = _expect_str(payload, key='metric_value_kind', label=label)
+    metric_value_text = _optional_str(payload, key='metric_value_text', label=label)
+    metric_value_bool_raw = payload.get('metric_value_bool')
+
+    if metric_value_bool_raw is None:
+        metric_value_bool: int | None = None
+    elif isinstance(metric_value_bool_raw, bool):
+        metric_value_bool = 1 if metric_value_bool_raw else 0
+    else:
+        raise RuntimeError(f'{label}.metric_value_bool must be bool or null')
+
+    if metric_value_kind == 'null':
+        return (None, None, None, None)
+
+    if metric_value_kind == 'bool':
+        if metric_value_bool is None or metric_value_text not in {'true', 'false'}:
+            raise RuntimeError(
+                f'{label} boolean payload requires '
+                'metric_value_bool and metric_value_text=true|false'
+            )
+        return (metric_value_text, None, None, metric_value_bool)
+
+    if metric_value_kind == 'int':
+        if metric_value_text is None:
+            raise RuntimeError(f'{label} integer payload requires metric_value_text')
+        try:
+            metric_value_int = int(metric_value_text)
+        except ValueError as exc:
+            raise RuntimeError(
+                f'{label} integer payload metric_value_text must parse as int'
+            ) from exc
+        return (metric_value_text, metric_value_int, float(metric_value_int), None)
+
+    if metric_value_kind == 'float':
+        if metric_value_text is None:
+            raise RuntimeError(f'{label} float payload requires metric_value_text')
+        try:
+            metric_value_float = float(Decimal(metric_value_text))
+        except InvalidOperation as exc:
+            raise RuntimeError(
+                f'{label} float payload metric_value_text must parse as decimal'
+            ) from exc
+        return (metric_value_text, None, metric_value_float, None)
+
+    if metric_value_kind == 'string':
+        if metric_value_text is None:
+            raise RuntimeError(f'{label} string payload requires metric_value_text')
+        return (metric_value_text, None, None, None)
+
+    raise RuntimeError(f'{label} has unsupported metric_value_kind={metric_value_kind}')
+
+
+def _extract_metric_events_from_bucket(
+    *,
+    aligned_at_utc: Any,
+    payload_rows_json: Any,
+) -> list[_AlignedMetricEvent]:
+    bucket_aligned_at_utc = _to_utc_datetime(aligned_at_utc, label='aligned_at_utc')
+    if not isinstance(payload_rows_json, str):
+        raise RuntimeError('payload_rows_json must be string')
+
+    try:
+        payload_raw = json.loads(payload_rows_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('aligned payload_rows_json must be valid JSON') from exc
+
+    payload_object = _expect_json_object(payload_raw, label='aligned payload_rows_json')
+    rows_raw = _expect_json_list(
+        payload_object.get('rows'),
+        label='aligned payload_rows_json.rows',
+    )
+    if rows_raw == []:
+        raise RuntimeError('aligned payload_rows_json.rows must be non-empty list')
+
+    events: list[_AlignedMetricEvent] = []
+    for index, row_any in enumerate(rows_raw):
+        row = _expect_json_object(
+            row_any,
+            label=f'aligned payload row[{index}]',
+        )
+        payload_json_raw = row.get('payload_json')
+        if not isinstance(payload_json_raw, str):
+            raise RuntimeError(
+                f'aligned payload row[{index}].payload_json must be string'
+            )
+        try:
+            payload_obj = json.loads(payload_json_raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f'aligned payload row[{index}] payload_json must be valid JSON'
+            ) from exc
+        payload = _expect_json_object(
+            payload_obj,
+            label=f'aligned payload row[{index}] payload_json',
+        )
+
+        source_id = _expect_str(
+            payload,
+            key='record_source_id',
+            label=f'aligned payload row[{index}] payload_json',
+        )
+        metric_name = _expect_str(
+            payload,
+            key='metric_name',
+            label=f'aligned payload row[{index}] payload_json',
+        )
+        metric_unit = _optional_str(
+            payload,
+            key='metric_unit',
+            label=f'aligned payload row[{index}] payload_json',
+        )
+        (
+            metric_value_string,
+            metric_value_int,
+            metric_value_float,
+            metric_value_bool,
+        ) = _decode_metric_value(
+            payload=payload,
+            label=f'aligned payload row[{index}] payload_json',
+        )
+        dimensions_json = _canonical_json_or_null(
+            payload.get('dimensions'),
+            label=f'aligned payload row[{index}] payload_json.dimensions',
+        )
+        if dimensions_json is None:
+            raise RuntimeError(
+                f'aligned payload row[{index}] payload_json.dimensions must be object'
+            )
+        provenance_json = _canonical_json_or_null(
+            payload.get('provenance'),
+            label=f'aligned payload row[{index}] payload_json.provenance',
+        )
+
+        ingested_at_raw = _expect_str(
+            row,
+            key='ingested_at_utc',
+            label=f'aligned payload row[{index}]',
+        )
+        ingested_at_utc = _parse_iso_datetime(ingested_at_raw)
+        source_offset_or_equivalent = _expect_str(
+            row,
+            key='source_offset_or_equivalent',
+            label=f'aligned payload row[{index}]',
+        )
+        event_id = _expect_str(
+            row,
+            key='event_id',
+            label=f'aligned payload row[{index}]',
+        )
+
+        events.append(
+            _AlignedMetricEvent(
+                aligned_at_utc=bucket_aligned_at_utc,
+                source_id=source_id,
+                metric_name=metric_name,
+                metric_unit=metric_unit,
+                metric_value_string=metric_value_string,
+                metric_value_int=metric_value_int,
+                metric_value_float=metric_value_float,
+                metric_value_bool=metric_value_bool,
+                dimensions_json=dimensions_json,
+                provenance_json=provenance_json,
+                latest_ingested_at_utc=ingested_at_utc,
+                source_offset_or_equivalent=source_offset_or_equivalent,
+                event_id=event_id,
+            )
+        )
+
+    return events
+
+
+def _events_to_observation_frame(
+    *,
+    events: list[_AlignedMetricEvent],
+) -> pl.DataFrame:
+    if events == []:
+        return pl.DataFrame(
+            schema={
+                'aligned_at_utc': pl.Datetime('ms', time_zone='UTC'),
+                'source_id': pl.Utf8,
+                'metric_name': pl.Utf8,
+                'metric_unit': pl.Utf8,
+                'metric_value_string': pl.Utf8,
+                'metric_value_int': pl.Int64,
+                'metric_value_float': pl.Float64,
+                'metric_value_bool': pl.UInt8,
+                'dimensions_json': pl.Utf8,
+                'provenance_json': pl.Utf8,
+                'latest_ingested_at_utc': pl.Datetime('ms', time_zone='UTC'),
+                'records_in_bucket': pl.UInt64,
+            }
+        )
+
+    grouped: dict[tuple[datetime, str, str], list[_AlignedMetricEvent]] = {}
+    for event in events:
+        key = (event.aligned_at_utc, event.source_id, event.metric_name)
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = [event]
+        else:
+            existing.append(event)
+
+    output_rows: list[dict[str, Any]] = []
+    for key in sorted(grouped):
+        aligned_at_utc, source_id, metric_name = key
+        group = sorted(
+            grouped[key],
+            key=lambda item: (
+                item.latest_ingested_at_utc,
+                item.source_offset_or_equivalent,
+                item.event_id,
+            ),
+        )
+        latest = group[-1]
+        output_rows.append(
+            {
+                'aligned_at_utc': aligned_at_utc,
+                'source_id': source_id,
+                'metric_name': metric_name,
+                'metric_unit': latest.metric_unit,
+                'metric_value_string': latest.metric_value_string,
+                'metric_value_int': latest.metric_value_int,
+                'metric_value_float': latest.metric_value_float,
+                'metric_value_bool': latest.metric_value_bool,
+                'dimensions_json': latest.dimensions_json,
+                'provenance_json': latest.provenance_json,
+                'latest_ingested_at_utc': latest.latest_ingested_at_utc,
+                'records_in_bucket': len(group),
+            }
+        )
+
+    return pl.DataFrame(output_rows).sort(['aligned_at_utc', 'source_id', 'metric_name'])
+
+
+def _row_random_hash(row: dict[str, Any]) -> int:
+    aligned_at_utc = row.get('aligned_at_utc')
+    latest_ingested_at_utc = row.get('latest_ingested_at_utc')
+    if not isinstance(aligned_at_utc, datetime):
+        raise RuntimeError('aligned_at_utc must be datetime for random-row hash')
+    if not isinstance(latest_ingested_at_utc, datetime):
+        raise RuntimeError('latest_ingested_at_utc must be datetime for random-row hash')
+    payload = (
+        f"{aligned_at_utc.astimezone(UTC).isoformat()}|"
+        f"{row.get('source_id')}|"
+        f"{row.get('metric_name')}|"
+        f"{latest_ingested_at_utc.astimezone(UTC).isoformat()}|"
+        f"{row.get('records_in_bucket')}"
+    )
+    digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _apply_window(
+    *,
+    frame: pl.DataFrame,
+    window: QueryWindow,
+) -> pl.DataFrame:
+    sorted_frame = frame.sort(['aligned_at_utc', 'source_id', 'metric_name'])
+    if isinstance(window, LatestRowsWindow):
+        return sorted_frame.tail(window.rows)
+
+    if isinstance(window, RandomRowsWindow):
+        if window.rows >= sorted_frame.height:
+            return sorted_frame
+        row_dicts = sorted_frame.to_dicts()
+        ranked = sorted(
+            ((_row_random_hash(row), row) for row in row_dicts),
+            key=lambda item: item[0],
+        )
+        selected = [item[1] for item in ranked[: window.rows]]
+        return pl.DataFrame(selected, schema=sorted_frame.schema)
+
+    return sorted_frame
+
+
+def _query_bucket_rows(
+    *,
+    dataset: FREDAlignedDataset,
+    window: QueryWindow,
+    auth_token: str | None,
+) -> list[tuple[Any, ...]]:
+    settings = resolve_clickhouse_http_settings(auth_token=auth_token)
+    sql = build_fred_aligned_1s_sql(
+        dataset=dataset,
+        window=window,
+        database=settings.database,
+    )
+
+    client = get_client(
+        host=settings.host,
+        port=settings.port,
+        username=settings.username,
+        password=settings.password,
+        compression=True,
+    )
+    try:
+        assert_canonical_aligned_1s_storage_contract(
+            client=client,
+            database=settings.database,
+        )
+        return client.query(sql).result_rows
+    finally:
+        try:
+            client.close()
+        except Exception as exc:
+            logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
+
+
+def _parse_bucket_rows(
+    *,
+    rows: list[tuple[Any, ...]],
+) -> list[_AlignedMetricEvent]:
+    events: list[_AlignedMetricEvent] = []
+    for row in rows:
+        if len(row) != 2:
+            raise RuntimeError(
+                'FRED aligned query expected exactly two columns '
+                '(aligned_at_utc, payload_rows_json)'
+            )
+        events.extend(
+            _extract_metric_events_from_bucket(
+                aligned_at_utc=row[0],
+                payload_rows_json=row[1],
+            )
+        )
+    return events
 
 
 def build_fred_aligned_1s_sql(
@@ -144,53 +537,23 @@ def build_fred_aligned_1s_sql(
 
     materialization = _FRED_ALIGNED_1S_MATERIALIZATIONS[dataset]
     where_clause = _build_where_clause(
-        datetime_column=materialization.datetime_column,
+        stream_id=materialization.stream_id,
         window=window,
     )
-    grouped_query = _build_grouped_query(
-        database=database,
-        materialization=materialization,
-        where_clause=where_clause,
-    )
-
-    if isinstance(window, LatestRowsWindow):
-        return (
-            'SELECT * FROM ('
-            f'SELECT * FROM ({grouped_query}) '
-            f'ORDER BY {_ALIGNED_MS_ALIAS} DESC, source_id ASC, metric_name ASC LIMIT {window.rows}'
-            f') ORDER BY {_ALIGNED_MS_ALIAS} ASC, source_id ASC, metric_name ASC'
-        )
-
-    if isinstance(window, RandomRowsWindow):
-        return (
-            'SELECT * FROM ('
-            f'{grouped_query}'
-            f') ORDER BY sipHash64(tuple({_ALIGNED_MS_ALIAS}, source_id, metric_name)) '
-            f'LIMIT {window.rows}'
-        )
-
     return (
-        'SELECT * FROM ('
-        f'{grouped_query}'
-        f') ORDER BY {_ALIGNED_MS_ALIAS} ASC, source_id ASC, metric_name ASC'
+        'SELECT '
+        'aligned_at_utc, '
+        'payload_rows_json '
+        f'FROM {database}.{_CANONICAL_ALIGNED_TABLE} '
+        f'{where_clause} '
+        'ORDER BY aligned_at_utc ASC'
     )
 
 
 def _shape_aligned_frame(
     *, frame: pl.DataFrame, datetime_iso_output: bool
 ) -> pl.DataFrame:
-    if _ALIGNED_MS_ALIAS not in frame.columns:
-        raise RuntimeError(
-            f'Aligned query result is missing expected column: {_ALIGNED_MS_ALIAS}'
-        )
-
-    shaped = frame.with_columns(
-        pl.col(_ALIGNED_MS_ALIAS)
-        .cast(pl.Int64)
-        .cast(pl.Datetime('ms', time_zone='UTC'))
-        .alias('aligned_at_utc')
-    ).drop(_ALIGNED_MS_ALIAS)
-    shaped = shaped.sort(['aligned_at_utc', 'source_id', 'metric_name'])
+    shaped = frame.sort(['aligned_at_utc', 'source_id', 'metric_name'])
 
     if datetime_iso_output:
         shaped = shaped.with_columns(
@@ -217,29 +580,17 @@ def _query_fred_aligned_prior_state(
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
     materialization = _FRED_ALIGNED_1S_MATERIALIZATIONS[dataset]
     start_ch = _to_clickhouse_datetime64_literal(start_iso)
-    observation_rank = (
-        "tuple(toDateTime64("
-        f"{materialization.datetime_column}, 3, 'UTC'"
-        f"), {materialization.ingest_column})"
-    )
     sql = (
         'SELECT '
-        f'max(toUnixTimestamp64Milli(toStartOfSecond(toDateTime64({materialization.datetime_column}, 3, \'UTC\')))) AS {_ALIGNED_MS_ALIAS}, '
-        f'{materialization.source_id_column} AS source_id, '
-        f'{materialization.metric_name_column} AS metric_name, '
-        f'argMax(metric_unit, {observation_rank}) AS metric_unit, '
-        f'argMax(metric_value_string, {observation_rank}) AS metric_value_string, '
-        f'argMax(metric_value_int, {observation_rank}) AS metric_value_int, '
-        f'argMax(metric_value_float, {observation_rank}) AS metric_value_float, '
-        f'argMax(metric_value_bool, {observation_rank}) AS metric_value_bool, '
-        f'argMax(dimensions_json, {observation_rank}) AS dimensions_json, '
-        f'argMax(provenance_json, {observation_rank}) AS provenance_json, '
-        f'max({materialization.ingest_column}) AS latest_ingested_at_utc, '
-        'count() AS records_in_bucket '
-        f'FROM {settings.database}.{materialization.table_name} '
-        f"WHERE {materialization.datetime_column} < toDateTime64('{start_ch}', 3, 'UTC') "
-        'GROUP BY source_id, metric_name '
-        f'ORDER BY source_id ASC, metric_name ASC'
+        'aligned_at_utc, '
+        'payload_rows_json '
+        f'FROM {settings.database}.{_CANONICAL_ALIGNED_TABLE} '
+        f"WHERE source_id = '{_CANONICAL_SOURCE_ID}' "
+        f"AND stream_id = '{materialization.stream_id}' "
+        f"AND view_id = '{_ALIGNED_VIEW_ID}' "
+        f'AND view_version = {_ALIGNED_VIEW_VERSION} '
+        f"AND aligned_at_utc < toDateTime64('{start_ch}', 3, 'UTC') "
+        'ORDER BY aligned_at_utc ASC'
     )
 
     client = get_client(
@@ -250,19 +601,29 @@ def _query_fred_aligned_prior_state(
         compression=True,
     )
     try:
-        arrow_table = client.query_arrow(sql)
+        assert_canonical_aligned_1s_storage_contract(
+            client=client,
+            database=settings.database,
+        )
+        rows = client.query(sql).result_rows
     finally:
         try:
             client.close()
         except Exception as exc:
             logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
 
-    raw_frame = pl.DataFrame(arrow_table)
-    if isinstance(raw_frame, pl.Series):
-        raise RuntimeError(
-            'Expected DataFrame from FRED aligned prior-state query, got Series'
-        )
-    return _shape_aligned_frame(frame=raw_frame, datetime_iso_output=False)
+    observations = _events_to_observation_frame(events=_parse_bucket_rows(rows=rows))
+    if observations.height == 0:
+        return observations
+
+    latest = observations.sort(
+        ['source_id', 'metric_name', 'aligned_at_utc', 'latest_ingested_at_utc']
+    ).unique(
+        subset=['source_id', 'metric_name'],
+        keep='last',
+        maintain_order=True,
+    )
+    return _shape_aligned_frame(frame=latest, datetime_iso_output=False)
 
 
 def _build_fred_forward_fill_intervals(
@@ -370,36 +731,18 @@ def query_fred_aligned_1s_data(
     show_summary: bool = False,
     datetime_iso_output: bool = False,
 ) -> pl.DataFrame:
-    settings = resolve_clickhouse_http_settings(auth_token=auth_token)
-    sql = build_fred_aligned_1s_sql(
+    started_at = time.time()
+    bucket_rows = _query_bucket_rows(
         dataset=dataset,
         window=window,
-        database=settings.database,
+        auth_token=auth_token,
     )
-
-    client = get_client(
-        host=settings.host,
-        port=settings.port,
-        username=settings.username,
-        password=settings.password,
-        compression=True,
+    observations = _events_to_observation_frame(
+        events=_parse_bucket_rows(rows=bucket_rows)
     )
-
-    started_at = time.time()
-    try:
-        arrow_table = client.query_arrow(sql)
-    finally:
-        try:
-            client.close()
-        except Exception as exc:
-            logger.warning('Failed to close ClickHouse client cleanly: %s', exc)
-
-    raw_frame = pl.DataFrame(arrow_table)
-    if isinstance(raw_frame, pl.Series):
-        raise RuntimeError('Expected DataFrame from FRED aligned query, got Series')
-
+    windowed = _apply_window(frame=observations, window=window)
     shaped = _shape_aligned_frame(
-        frame=raw_frame,
+        frame=windowed,
         datetime_iso_output=datetime_iso_output,
     )
 

@@ -27,6 +27,7 @@ def run_s4_g5_shadow_promote_proof() -> dict[str, Any]:
                 'sources': {
                     'etf_official': {
                         'rights_state': 'Hosted Allowed',
+                        'rights_provisional': False,
                         'datasets': ['etf_daily_metrics'],
                         'legal_signoff_artifact': str(legal_artifact_path),
                     }

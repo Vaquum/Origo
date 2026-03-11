@@ -1,0 +1,18 @@
+{
+  "derived_formula_guardrail": {
+    "error": "Bitcoin integrity formula check failed for bitcoin_block_subsidy_schedule: row=1, expected_subsidy_sats=312500000, got=312500001",
+    "rows_checked": 2
+  },
+  "guardrail_verified": true,
+  "linkage_guardrail": {
+    "error": "Bitcoin integrity linkage check failed for bitcoin_block_headers: row=2, expected_height=840001, got=840002",
+    "projected_rows_after_failure": 0,
+    "write_summary": {
+      "rows_duplicate": 0,
+      "rows_inserted": 2,
+      "rows_processed": 2
+    }
+  },
+  "proof_database": "origo_s20_g1_proof",
+  "proof_scope": "Slice 20 S20-G1 stream-linkage and derived-formula integrity suite enforcement in Bitcoin event/projection paths"
+}

@@ -1,6 +1,123 @@
 # Changelog
 
 ## 2026-03-10
+- Completed Slice 20 Bitcoin event-sourcing port capability/proof/guardrails:
+  - ported all seven onboarded Bitcoin datasets to canonical event-driven serving (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`)
+  - executed proof artifacts `S20-P1..S20-P6` for acceptance, parity, determinism, exactly-once ingest, no-miss/quarantine, and raw-fidelity/precision
+  - executed live-node gate `S20-P7` against non-IBD server Bitcoin node runtime (`chain=main`, `ibd=false`) and stored `proof-s20-p7-live-node-gate.json`
+  - executed guardrail artifacts `S20-G1..S20-G5` for integrity linkage/formula enforcement, freshness strict behavior, reconciliation quarantine behavior, precision enforcement, and rights metadata fail-closed behavior
+  - fixed a proof-contract mismatch in S20 no-miss fixture generation (`height` vs `block_height` in headers stream) and hardened Bitcoin native projection ordering before integrity enforcement
+- Added Slice 20 documentation and taxonomy updates:
+  - `docs/Developer/s20-bitcoin-event-port.md`
+  - `docs/Developer/s20-bitcoin-guardrails-runbook.md`
+  - updates to `docs/bitcoin-core-reference.md`, `docs/raw-query-reference.md`, `docs/aligned-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 20 closeout artifacts:
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-20-bitcoin-event-sourcing-port/baseline-fixture-2024-04-20_2024-04-20.json`
+- Updated versions to `Origo API v0.1.14` and `control-plane v1.2.63`.
+
+- Completed Slice 19 Bybit event-sourcing port capability/proof/guardrails:
+  - migrated `bybit_spot_trades` ingest to canonical event writes with preserved raw-payload fidelity
+  - migrated Bybit native/aligned serving to event-driven projections and enforced canonical aligned storage contract in Bybit aligned query path
+  - executed proof suite artifacts `S19-P1..S19-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
+  - executed API and runtime guardrail artifacts `S19-G1..S19-G4` for exchange integrity enforcement, rights metadata behavior, reconciliation quarantine enforcement, and precision guardrails
+- Added Slice 19 documentation and taxonomy updates:
+  - `docs/Developer/s19-bybit-event-port.md`
+  - `docs/Developer/s19-bybit-guardrails-runbook.md`
+  - updates to `docs/bybit-reference.md`, `docs/raw-query-reference.md`, `docs/aligned-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 19 closeout artifacts:
+  - `spec/slices/slice-19-bybit-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-19-bybit-event-sourcing-port/baseline-fixture-2024-01-04_2024-01-04.json`
+- Updated versions to `Origo API v0.1.13` and `control-plane v1.2.62`.
+
+- Completed Slice 18 OKX event-sourcing port capability/proof/guardrails:
+  - migrated `okx_spot_trades` ingest to canonical event writes with preserved raw-payload fidelity
+  - migrated OKX native/aligned serving to event-driven projections and enforced canonical aligned storage contract in OKX aligned query path
+  - executed proof suite artifacts `S18-P1..S18-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
+  - executed API and runtime guardrail artifacts `S18-G1..S18-G4` for exchange integrity enforcement, rights metadata behavior, reconciliation quarantine enforcement, and precision guardrails
+- Added Slice 18 documentation and taxonomy updates:
+  - `docs/Developer/s18-okx-event-port.md`
+  - `docs/Developer/s18-okx-guardrails-runbook.md`
+  - updates to `docs/okx-reference.md`, `docs/raw-query-reference.md`, `docs/aligned-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 18 closeout artifacts:
+  - `spec/slices/slice-18-okx-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-18-okx-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-18-okx-event-sourcing-port/baseline-fixture-2024-01-04_2024-01-04.json`
+- Updated versions to `Origo API v0.1.12` and `control-plane v1.2.61`.
+
+- Completed Slice 17 FRED event-sourcing port capability/proof/guardrails:
+  - migrated `fred_series_metrics` ingest to canonical event writes with preserved raw-payload fidelity
+  - migrated FRED native/aligned serving to event-driven projections and enforced canonical aligned storage contract in FRED aligned query path
+  - executed proof suite artifacts `S17-P1..S17-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
+  - executed API and runtime guardrail artifacts `S17-G1..S17-G4` for publish-freshness warning behavior, rights metadata behavior, reconciliation quarantine enforcement, and precision guardrails
+- Added Slice 17 documentation and taxonomy updates:
+  - `docs/Developer/s17-fred-event-port.md`
+  - `docs/Developer/s17-fred-guardrails-runbook.md`
+  - updates to `docs/fred-reference.md`, `docs/raw-query-reference.md`, `docs/aligned-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 17 closeout artifacts:
+  - `spec/slices/slice-17-fred-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-17-fred-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-17-fred-event-sourcing-port/baseline-fixture-2026-03-08_2026-03-10.json`
+- Updated versions to `Origo API v0.1.11` and `control-plane v1.2.60`.
+
+- Completed Slice 16 ETF event-sourcing port capability/proof/guardrails:
+  - migrated `etf_daily_metrics` ingest to canonical event writes with preserved raw-payload fidelity
+  - migrated ETF native/aligned serving to event-driven projections and enforced canonical aligned storage contract in ETF aligned query path
+  - executed proof suite artifacts `S16-P1..S16-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
+  - executed API and runtime guardrail artifacts `S16-G1..S16-G4` for rights/quality warning behavior, reconciliation quarantine enforcement, and precision guardrails
+- Added Slice 16 documentation and taxonomy updates:
+  - `docs/Developer/s16-etf-event-port.md`
+  - `docs/Developer/s16-etf-guardrails-runbook.md`
+  - updates to `docs/etf-reference.md`, `docs/raw-query-reference.md`, `docs/aligned-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 16 closeout artifacts:
+  - `spec/slices/slice-16-etf-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-16-etf-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-16-etf-event-sourcing-port/baseline-fixture-2026-03-08_2026-03-09.json`
+- Updated versions to `Origo API v0.1.10` and `control-plane v1.2.59`.
+
+- Completed Slice 21 canonical aligned aggregate contract enforcement and Binance retrofit:
+  - added runtime fail-loud storage-contract checks for `canonical_aligned_1s_aggregates` (missing table, missing required columns, and required type drift)
+  - refactored S15 API guardrail proof to migration-backed aligned storage provisioning (removed ad-hoc table DDL path)
+  - added contract-gate coverage for aligned storage contract violation modes in `tests/contract/test_binance_event_projection_query_contract.py`
+  - executed proof runs for migration-backed guardrail behavior and deterministic replay preservation
+- Added Slice 21 documentation and taxonomy updates:
+  - `docs/Developer/s21-canonical-aligned-storage-contract.md`
+  - updates to `docs/aligned-reference.md`, `docs/raw-query-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 21 closeout artifacts:
+  - `spec/slices/slice-21-canonical-aligned-contract/manifest.md`
+  - `spec/slices/slice-21-canonical-aligned-contract/run-notes.md`
+  - `spec/slices/slice-21-canonical-aligned-contract/baseline-fixture-2024-01-04_2024-01-04.json`
+- Updated version to `Origo API v0.1.9` (`origo-control-plane` unchanged at `v1.2.58`).
+
+- Completed Slice 15 Binance event-sourcing port capability/proof/guardrails:
+  - migrated Binance `spot_trades`, `spot_agg_trades`, and `futures_trades` serving to canonical projection tables (`canonical_binance_*_native_v1` + `canonical_aligned_1s_aggregates`)
+  - executed proof suite artifacts `S15-P1..S15-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
+  - enforced exchange integrity guardrail in native projection path and added explicit guardrail proof artifacts for integrity, freshness strict escalation, and rights metadata behavior
+- Added Slice 15 documentation and taxonomy updates:
+  - `docs/Developer/s15-binance-event-port.md`
+  - `docs/Developer/s15-binance-guardrails-runbook.md`
+  - `docs/binance-reference.md`
+  - updates to `docs/aligned-reference.md`, `docs/raw-query-reference.md`, `docs/raw-export-reference.md`, `docs/event-serving-reference.md`, and `docs/data-taxonomy.md`
+- Added Slice 15 closeout artifacts:
+  - `spec/slices/slice-15-binance-event-sourcing-port/manifest.md`
+  - `spec/slices/slice-15-binance-event-sourcing-port/run-notes.md`
+  - `spec/slices/slice-15-binance-event-sourcing-port/baseline-fixture-2024-01-04_2024-01-04.json`
+- Updated versions to `Origo API v0.1.8` and `control-plane v1.2.58`.
+
+- Completed Slice 14 Event-Sourcing Core capability/proof/guardrails:
+  - added canonical event contracts and migrations (`canonical_event_log`, ingest cursor/ledger, completeness checkpoints, projector checkpoints/watermarks, aligned policy/aggregate tables)
+  - added deterministic canonical writer, projector runtime, aligned projector, precision registry, runtime audit sink, and fail-loud stream quarantine integration
+  - added Slice-14 capability/proof/guardrail artifacts under `spec/slices/slice-14-event-sourcing-core/`
+  - upgraded Raw API contracts with `view_id`/`view_version` plus `rights_state`/`rights_provisional` response metadata and guard tests
+- Added Slice 14 documentation and taxonomy updates:
+  - `docs/Developer/s14-canonical-event-runtime.md`
+  - `docs/Developer/s14-event-guardrails-runbook.md`
+  - `docs/event-serving-reference.md`
+  - updates to `docs/raw-query-reference.md`, `docs/raw-export-reference.md`, and `docs/data-taxonomy.md`
+- Updated versions to `Origo API v0.1.7` and `control-plane v1.2.57`.
+
 - Closed Slice 0 guardrail `S0-G3` (immutable audit-log sink with 1-year retention policy):
   - introduced shared immutable audit sink used by export, FRED alert, and scraper audit writers
   - enforced append-only hash chain with state sidecar continuity checks (`<log>.state.json`) to fail loudly on tamper/truncation

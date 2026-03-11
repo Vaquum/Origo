@@ -2,70 +2,75 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice/version reference: S4, S5 (API v0.1.0)
+- Last updated: 2026-03-10
+- Slice/version reference: S4, S5, S16 (API v0.1.10)
 
 ## Purpose and scope
-- User-facing reference for ETF data in Origo query surfaces.
-- Scope covers source coverage, field taxonomy, freshness/warnings, and serving constraints.
+- User-facing reference for ETF data in Origo query/export surfaces.
+- Scope covers source coverage, field taxonomy, event-driven serving semantics, and quality warning behavior.
 
 ## Inputs and outputs with contract shape
 - Query endpoint: `POST /v1/raw/query`
 - Source key: `etf_daily_metrics`
-- Request shape (current public contract):
+- Request shape:
   - `mode`: `native | aligned_1s`
-  - `sources`: must include `["etf_daily_metrics"]` for ETF queries
+  - `sources`: must include `["etf_daily_metrics"]`
   - one window selector: `time_range | n_rows | n_random`
   - optional `fields`, `filters`, `strict`
 - Response shape:
-  - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
+  - `mode`, `source`, `sources`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
+  - `rights_state`, `rights_provisional`
 
 ## Data definitions (fields, types, units, timezone, nullability)
-- Core identity fields (non-null):
-  - `source_id` (string)
-  - `metric_name` (string)
-  - `metric_unit` (string)
-- Value channel fields (nullable depending on metric type):
-  - `metric_value_float` (float)
-  - `metric_value_int` (int)
-  - `metric_value_string` (string)
-  - `metric_value_bool` (bool)
+- Core identity fields:
+  - `metric_id` (string, non-null)
+  - `source_id` (string, non-null)
+  - `metric_name` (string, non-null)
+  - `metric_unit` (string, nullable)
+- Value channels:
+  - `metric_value_string` (string, nullable)
+  - `metric_value_int` (int, nullable)
+  - `metric_value_float` (float, nullable)
+  - `metric_value_bool` (int 0/1, nullable)
 - Time/provenance fields:
-  - `observed_at_utc` (UTC timestamp, non-null)
-  - `dimensions_json` (JSON string)
-  - `provenance_json` (JSON string, non-null)
-  - `ingested_at_utc` (UTC timestamp, non-null)
-- Units:
-  - `BTC`, `USD`, `PCT`, `COUNT`
+  - `observed_at_utc` (UTC timestamp, non-null, native mode)
+  - `aligned_at_utc` (UTC second, non-null, aligned mode)
+  - `valid_from_utc` / `valid_to_utc_exclusive` (UTC interval bounds, aligned forward-fill)
+  - `dimensions_json` (JSON string, non-null)
+  - `provenance_json` (JSON string, nullable)
+  - `ingested_at_utc` / `latest_ingested_at_utc` (UTC timestamp)
+  - `records_in_bucket` (uint, aligned mode)
 
 ## Source/provenance and freshness semantics
 - Canonical source hierarchy is issuer official pages/files.
 - Coverage:
-  - `IBIT`, `BTCO`, `BITB`, `ARKB`, `HODL`, `EZBC`, `GBTC`, `FBTC`, `BRRR`, `DEFI`
-- Cadence is daily; normalized time semantics are UTC.
-- Freshness and quality checks are evaluated from canonical ETF daily records.
+  - `IBIT`, `FBTC`, `GBTC`, `ARKB`, `BITB`, `HODL`, `BTCO`, `EZBC`, `BRRR`, `DEFI`
+- ETF writes are eventized (`source_id='etf'`, `stream_id='etf_daily_metrics`) and served from projections:
+  - native: `canonical_etf_daily_metrics_native_v1`
+  - aligned: `canonical_aligned_1s_aggregates`
+- Freshness/quality warnings are projection-driven and evaluated on requested windows.
 
 ## Failure modes, warnings, and error codes
 - Warning codes:
   - `ETF_DAILY_STALE_RECORDS`
   - `ETF_DAILY_MISSING_RECORDS`
   - `ETF_DAILY_INCOMPLETE_RECORDS`
-- `strict=true` turns warnings into `409` failure.
+- `strict=true` escalates warnings to `409` (`STRICT_MODE_WARNING_FAILURE`).
 - Common errors:
   - `404` no data for window
-  - `409` rights/contract/strict conflict
-  - `503` runtime/backend/warning-evaluation failures
+  - `409` rights/contract/strict conflicts
+  - `503` backend/runtime failures
 
 ## Determinism/replay notes
-- ETF ingestion and query proofs are stored in:
-  - `spec/slices/slice-4-etf-use-case/`
-  - `spec/slices/slice-5-raw-query-aligned-1s/`
-- Fixed replay windows are expected to produce deterministic fingerprints.
+- ETF event-sourcing proof artifacts are maintained in:
+  - `spec/slices/slice-16-etf-event-sourcing-port/`
+- Baseline fixture includes deterministic native/aligned fingerprints:
+  - `baseline-fixture-2026-03-08_2026-03-09.json`
 
 ## Environment variables and required config
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
-- `ORIGO_ETF_QUERY_SERVING_STATE`
 - `ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS`
+- `ORIGO_INTERNAL_API_KEY`
 - `CLICKHOUSE_HOST`
 - `CLICKHOUSE_HTTP_PORT`
 - `CLICKHOUSE_USER`
@@ -74,6 +79,6 @@
 
 ## Minimal examples
 - Native ETF query:
-  - `{ "mode":"native", "sources":["etf_daily_metrics"], "time_range":["2026-03-01T00:00:00Z","2026-03-07T00:00:00Z"], "fields":["source_id","metric_name","metric_value_float","observed_at_utc"], "strict":false }`
+  - `{ "mode":"native", "sources":["etf_daily_metrics"], "time_range":["2026-03-08T00:00:00Z","2026-03-10T00:00:00Z"], "fields":["metric_id","source_id","metric_name","metric_value_float","observed_at_utc"], "strict":false }`
 - Aligned ETF query:
-  - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "n_rows":100, "fields":["aligned_at_utc","source_id","metric_name","metric_value_float"], "strict":false }`
+  - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "time_range":["2026-03-08T00:00:00Z","2026-03-10T00:00:00Z"], "fields":["aligned_at_utc","source_id","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "strict":false }`

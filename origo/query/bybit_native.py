@@ -21,7 +21,7 @@ class _BybitSourceSpec:
 
 _BYBIT_SOURCE_SPECS: dict[BybitDataset, _BybitSourceSpec] = {
     'bybit_spot_trades': _BybitSourceSpec(
-        table_name='bybit_spot_trades',
+        table_name='canonical_bybit_spot_trades_native_v1',
         id_column='trade_id',
         allowed_columns=(
             'symbol',

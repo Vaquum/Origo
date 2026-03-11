@@ -4,35 +4,17 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any, cast
 
-from clickhouse_connect import get_client as _raw_get_client
+from clickhouse_driver import Client as ClickHouseClient
 
 from origo.query.native_core import resolve_clickhouse_http_settings
 from origo.scraper.contracts import PersistedRawArtifact, RawArtifact, ScrapeRunContext
 from origo.scraper.object_store import persist_raw_artifact
 
+from .canonical_event_ingest import write_fred_long_metrics_to_canonical
 from .client import FREDClient
 from .contracts import FREDSeriesRegistryEntry
 from .normalize import FREDLongMetricRow
-
-get_client = cast(Any, _raw_get_client)
-
-_FRED_METRICS_TABLE = 'fred_series_metrics_long'
-_INSERT_COLUMN_NAMES = [
-    'metric_id',
-    'source_id',
-    'metric_name',
-    'metric_unit',
-    'metric_value_string',
-    'metric_value_int',
-    'metric_value_float',
-    'metric_value_bool',
-    'observed_at_utc',
-    'dimensions_json',
-    'provenance_json',
-    'ingested_at_utc',
-]
 
 
 @dataclass(frozen=True)
@@ -94,56 +76,29 @@ def persist_fred_long_metrics_to_clickhouse(
     *,
     rows: list[FREDLongMetricRow],
     auth_token: str | None = None,
+    run_id: str | None = None,
 ) -> int:
     if len(rows) == 0:
         raise ValueError('rows must be non-empty')
 
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
-    client = get_client(
+    client = ClickHouseClient(
         host=settings.host,
         port=settings.port,
-        username=settings.username,
+        user=settings.username,
         password=settings.password,
-        database=settings.database,
-        compression=True,
     )
-    ingested_at_utc = datetime.now(UTC)
-    insert_rows: list[list[Any]] = []
-    for row in rows:
-        insert_rows.append(
-            [
-                row.metric_id,
-                row.source_id,
-                row.metric_name,
-                row.metric_unit,
-                row.metric_value_string,
-                row.metric_value_int,
-                row.metric_value_float,
-                row.metric_value_bool,
-                row.observed_at_utc,
-                row.dimensions_json,
-                row.provenance_json,
-                ingested_at_utc,
-            ]
-        )
-
     try:
-        try:
-            client.command(f'DESCRIBE TABLE {settings.database}.{_FRED_METRICS_TABLE}')
-        except Exception as exc:
-            raise RuntimeError(
-                f'ClickHouse table is missing: {settings.database}.{_FRED_METRICS_TABLE}. '
-                'Apply SQL migrations before running FRED persistence.'
-            ) from exc
-
-        client.insert(
-            table=f'{settings.database}.{_FRED_METRICS_TABLE}',
-            data=insert_rows,
-            column_names=_INSERT_COLUMN_NAMES,
+        summary = write_fred_long_metrics_to_canonical(
+            client=client,
+            database=settings.database,
+            rows=rows,
+            run_id=run_id,
+            ingested_at_utc=datetime.now(UTC),
         )
-        return len(insert_rows)
+        return summary.rows_inserted
     finally:
-        client.close()
+        client.disconnect()
 
 
 def build_fred_raw_bundles(

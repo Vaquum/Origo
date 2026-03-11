@@ -16,7 +16,7 @@ from .schemas import RawQueryWarning
 logger = logging.getLogger(__name__)
 get_client = cast(Any, _raw_get_client)
 
-_FRED_TABLE = 'fred_series_metrics_long'
+_FRED_TABLE = 'canonical_fred_series_metrics_native_v1'
 
 
 @dataclass(frozen=True)

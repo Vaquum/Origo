@@ -1,0 +1,22 @@
+{
+  "generated_at_utc": "2026-03-10T17:16:23.555428+00:00",
+  "guardrail_verified": true,
+  "non_strict_query": {
+    "freshness": {
+      "as_of_utc": "2017-08-17T12:00:00.000Z",
+      "lag_seconds": 270191783
+    },
+    "rights_provisional": false,
+    "rights_state": "Hosted Allowed",
+    "status_code": 200,
+    "warning_codes": [
+      "ALIGNED_FRESHNESS_STALE"
+    ]
+  },
+  "proof_database": "origo_s15_g2_g5_proof",
+  "proof_scope": "Slice 15 S15-G2 freshness warning semantics and S15-G5 rights metadata behavior for Binance aligned queries",
+  "strict_query": {
+    "error_code": "STRICT_MODE_WARNING_FAILURE",
+    "status_code": 409
+  }
+}

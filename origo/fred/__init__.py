@@ -1,3 +1,8 @@
+from .canonical_event_ingest import (
+    FREDCanonicalWriteSummary,
+    build_fred_canonical_payload,
+    write_fred_long_metrics_to_canonical,
+)
 from .client import (
     FREDAPIConfig,
     FREDClient,
@@ -36,6 +41,7 @@ __all__ = [
     'FREDAPIConfig',
     'FREDBackfillResult',
     'FREDBackfillSeriesResult',
+    'FREDCanonicalWriteSummary',
     'FREDClient',
     'FREDIncrementalResult',
     'FREDIncrementalSeriesResult',
@@ -45,6 +51,7 @@ __all__ = [
     'FREDSeriesMetadata',
     'FREDSeriesRegistryEntry',
     'FREDSeriesSnapshot',
+    'build_fred_canonical_payload',
     'build_fred_client_from_env',
     'build_fred_raw_bundles',
     'default_fred_series_registry_path',
@@ -57,4 +64,5 @@ __all__ = [
     'persist_fred_raw_bundles_to_object_store',
     'run_fred_historical_backfill',
     'run_fred_incremental_update',
+    'write_fred_long_metrics_to_canonical',
 ]

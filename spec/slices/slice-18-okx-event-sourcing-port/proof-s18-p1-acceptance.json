@@ -1,0 +1,33 @@
+{
+  "acceptance_verified": true,
+  "aligned_fingerprint": {
+    "quantity_sum_total": "0.100",
+    "quote_volume_sum_total": "4250.0230",
+    "row_count": 3,
+    "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+    "trade_count_total": 5
+  },
+  "native_fingerprint": {
+    "first_trade_id": 3001,
+    "last_trade_id": 3005,
+    "quote_quantity_sum": "4250.0230",
+    "row_count": 5,
+    "rows_hash_sha256": "9fad36b4af10b5037c6da523fcdc9d662a59494c56cde4fe4488f408ff941d57",
+    "size_sum": "0.100"
+  },
+  "proof_scope": "Slice 18 S18-P1 fixed-window acceptance for OKX native and aligned_1s from canonical projection serving paths",
+  "row_counts": {
+    "aligned_1s": 3,
+    "native": 5
+  },
+  "source_checksums": {
+    "2024-01-04": {
+      "csv_sha256": "2f35052e175418f89c99f9506f6fa559444e110fb916e13f4d96c7c7c8dc96dd",
+      "zip_sha256": "2f35052e175418f89c99f9506f6fa559444e110fb916e13f4d96c7c7c8dc96dd"
+    }
+  },
+  "window": {
+    "end_utc": "2024-01-04T00:00:03Z",
+    "start_utc": "2024-01-04T00:00:00Z"
+  }
+}

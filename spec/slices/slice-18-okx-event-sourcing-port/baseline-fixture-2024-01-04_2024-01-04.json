@@ -1,0 +1,63 @@
+{
+  "column_key": {
+    "first_trade_id": "Minimum trade_id in native result rows.",
+    "last_trade_id": "Maximum trade_id in native result rows.",
+    "quantity_sum_total": "Deterministic sum of aligned quantity_sum values.",
+    "quote_quantity_sum": "Deterministic sum of native quote_quantity values.",
+    "quote_volume_sum_total": "Deterministic sum of aligned quote_volume_sum values.",
+    "row_count": "Total rows returned in the fixture window for this run.",
+    "rows_hash_sha256": "SHA256 of canonicalized result rows for this run.",
+    "size_sum": "Deterministic sum of native size values.",
+    "source_checksums": "Fixture source checksums (zip and csv sha256).",
+    "trade_count_total": "Deterministic sum of aligned trade_count across buckets."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "end_utc": "2024-01-04T00:00:03Z",
+    "start_utc": "2024-01-04T00:00:00Z"
+  },
+  "run_1_fingerprints": {
+    "okx_spot_trades": {
+      "aligned_1s": {
+        "quantity_sum_total": "0.100",
+        "quote_volume_sum_total": "4250.0230",
+        "row_count": 3,
+        "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+        "trade_count_total": 5
+      },
+      "native": {
+        "first_trade_id": 3001,
+        "last_trade_id": 3005,
+        "quote_quantity_sum": "4250.0230",
+        "row_count": 5,
+        "rows_hash_sha256": "9fad36b4af10b5037c6da523fcdc9d662a59494c56cde4fe4488f408ff941d57",
+        "size_sum": "0.100"
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "okx_spot_trades": {
+      "aligned_1s": {
+        "quantity_sum_total": "0.100",
+        "quote_volume_sum_total": "4250.0230",
+        "row_count": 3,
+        "rows_hash_sha256": "ae20e219d1298f0678f99ce2e5b688c09a330c988614c5b7e0d7fbb629a5a6ca",
+        "trade_count_total": 5
+      },
+      "native": {
+        "first_trade_id": 3001,
+        "last_trade_id": 3005,
+        "quote_quantity_sum": "4250.0230",
+        "row_count": 5,
+        "rows_hash_sha256": "9fad36b4af10b5037c6da523fcdc9d662a59494c56cde4fe4488f408ff941d57",
+        "size_sum": "0.100"
+      }
+    }
+  },
+  "source_checksums": {
+    "2024-01-04": {
+      "csv_sha256": "2f35052e175418f89c99f9506f6fa559444e110fb916e13f4d96c7c7c8dc96dd",
+      "zip_sha256": "2f35052e175418f89c99f9506f6fa559444e110fb916e13f4d96c7c7c8dc96dd"
+    }
+  }
+}

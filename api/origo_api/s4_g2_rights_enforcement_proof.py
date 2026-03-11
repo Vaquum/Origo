@@ -35,11 +35,13 @@ def _build_matrix(
         'sources': {
             'binance': {
                 'rights_state': binance_rights_state,
+                'rights_provisional': False,
                 'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
                 'legal_signoff_artifact': legal_signoff_artifact,
             },
             'ishares': {
                 'rights_state': 'Ingest Only',
+                'rights_provisional': False,
                 'datasets': ishares_datasets,
                 'source_ids': ishares_source_ids,
             },

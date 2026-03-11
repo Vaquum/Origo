@@ -1,0 +1,86 @@
+{
+  "column_key": {
+    "first_offset": "Lexicographically smallest deterministic identity in result rows.",
+    "hash_per_day": "Per-day SHA256 of canonicalized rows in that day bucket.",
+    "last_offset": "Lexicographically largest deterministic identity in result rows.",
+    "metric_value_float_sum": "Deterministic sum of non-null metric_value_float values in the result window.",
+    "row_count": "Total rows returned in the fixture window for this run.",
+    "rows_hash_sha256": "SHA256 of canonicalized full result rows for this run.",
+    "source_checksums": "Daily canonical source payload checksums. zip_sha256/csv_sha256 fields are populated for uniform fixture schema even though FRED source format is JSON."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "end_utc": "2026-03-11T00:00:00Z",
+    "start_utc": "2026-03-08T00:00:00Z"
+  },
+  "run_1_fingerprints": {
+    "fred_series_metrics": {
+      "aligned_1s": {
+        "first_offset": "fred_dgs10:treasury_yield_10y:2026-03-08T00:00:00+00:00",
+        "hash_per_day": {
+          "2026-03-08": "468088d111f5c68986bdf74afbc95c1b35801640abd0ea6d1cf60faeeaf70760",
+          "2026-03-09": "8cbc9d487a25524231bb5536c4832a459c13e30f271031ca0e92e0f173a0dbe4",
+          "2026-03-10": "56c9e1e0fa693016d20650a3c4f7dec3341e01b2ac8c5c785dfc5b8e7182a551"
+        },
+        "last_offset": "fred_fedfunds:effective_federal_funds_rate:2026-03-09T00:00:00+00:00",
+        "metric_value_float_sum": "12.78",
+        "row_count": 4,
+        "rows_hash_sha256": "4507ca0fd3086d6e296a8518a3835e9d55a2a55c79c906095dcd0dc9240f1e57"
+      },
+      "native": {
+        "first_offset": "fred_dgs10:2026-03-08:treasury_yield_10y",
+        "hash_per_day": {
+          "2026-03-08": "ab3852800f9ae71f1f691bc5cde04cf9384355d09345af80b4d62ac236d503dc",
+          "2026-03-09": "811157fec48c4bec7d5153f1a08811921fdea39465e6c71280f38005fca69d38",
+          "2026-03-10": "a517cc1b52b461e053e76b4875b80b3341ce784015708a9db0272efe5af1906b"
+        },
+        "last_offset": "fred_fedfunds:2026-03-09:effective_federal_funds_rate",
+        "metric_value_float_sum": "12.78",
+        "row_count": 4,
+        "rows_hash_sha256": "314d71540571f7ffa4780537309cd2153c76840a1f18fbfd18ee4fd383169f4b"
+      }
+    }
+  },
+  "run_2_fingerprints": {
+    "fred_series_metrics": {
+      "aligned_1s": {
+        "first_offset": "fred_dgs10:treasury_yield_10y:2026-03-08T00:00:00+00:00",
+        "hash_per_day": {
+          "2026-03-08": "468088d111f5c68986bdf74afbc95c1b35801640abd0ea6d1cf60faeeaf70760",
+          "2026-03-09": "8cbc9d487a25524231bb5536c4832a459c13e30f271031ca0e92e0f173a0dbe4",
+          "2026-03-10": "56c9e1e0fa693016d20650a3c4f7dec3341e01b2ac8c5c785dfc5b8e7182a551"
+        },
+        "last_offset": "fred_fedfunds:effective_federal_funds_rate:2026-03-09T00:00:00+00:00",
+        "metric_value_float_sum": "12.78",
+        "row_count": 4,
+        "rows_hash_sha256": "4507ca0fd3086d6e296a8518a3835e9d55a2a55c79c906095dcd0dc9240f1e57"
+      },
+      "native": {
+        "first_offset": "fred_dgs10:2026-03-08:treasury_yield_10y",
+        "hash_per_day": {
+          "2026-03-08": "ab3852800f9ae71f1f691bc5cde04cf9384355d09345af80b4d62ac236d503dc",
+          "2026-03-09": "811157fec48c4bec7d5153f1a08811921fdea39465e6c71280f38005fca69d38",
+          "2026-03-10": "a517cc1b52b461e053e76b4875b80b3341ce784015708a9db0272efe5af1906b"
+        },
+        "last_offset": "fred_fedfunds:2026-03-09:effective_federal_funds_rate",
+        "metric_value_float_sum": "12.78",
+        "row_count": 4,
+        "rows_hash_sha256": "314d71540571f7ffa4780537309cd2153c76840a1f18fbfd18ee4fd383169f4b"
+      }
+    }
+  },
+  "source_checksums": {
+    "2026-03-08": {
+      "csv_sha256": "dd52f8c063cf43dc974c0e82cdf61e7f340ed3279d0b63333fad4f47ac8fa0bf",
+      "zip_sha256": "dd52f8c063cf43dc974c0e82cdf61e7f340ed3279d0b63333fad4f47ac8fa0bf"
+    },
+    "2026-03-09": {
+      "csv_sha256": "65019b8fe7d97600b82bda0f8c115e77667f8b7ebfcdb2f02e2a9c3ed4bfcc8f",
+      "zip_sha256": "65019b8fe7d97600b82bda0f8c115e77667f8b7ebfcdb2f02e2a9c3ed4bfcc8f"
+    },
+    "2026-03-10": {
+      "csv_sha256": "1ecad1ee256c11343d48a35371ca49fb11e8d0862f8f04da5c58d6c24959b038",
+      "zip_sha256": "1ecad1ee256c11343d48a35371ca49fb11e8d0862f8f04da5c58d6c24959b038"
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "aligned_projection_runs": {
+    "run_1": {
+      "backfill": {
+        "batches_processed": 1,
+        "events_processed": 5,
+        "last_checkpoint_status": "checkpointed",
+        "rows_written": 3
+      },
+      "policy_revision": 1,
+      "policy_status": "recorded"
+    },
+    "run_2_replay": {
+      "backfill": {
+        "batches_processed": 0,
+        "events_processed": 0,
+        "last_checkpoint_status": null,
+        "rows_written": 0
+      },
+      "policy_revision": 1,
+      "policy_status": "duplicate"
+    }
+  },
+  "ingest_runs": [
+    {
+      "duplicate": 0,
+      "inserted": 5,
+      "rows_selected": 5,
+      "run_label": "ingest_run_1",
+      "statuses": [
+        "inserted",
+        "inserted",
+        "inserted",
+        "inserted",
+        "inserted"
+      ]
+    },
+    {
+      "duplicate": 5,
+      "inserted": 0,
+      "rows_selected": 5,
+      "run_label": "ingest_run_2_replay",
+      "statuses": [
+        "duplicate",
+        "duplicate",
+        "duplicate",
+        "duplicate",
+        "duplicate"
+      ]
+    }
+  ],
+  "legacy_seed_rows": 5,
+  "native_projection_runs": {
+    "run_1": {
+      "batches_processed": 1,
+      "events_processed": 5,
+      "last_checkpoint_status": "checkpointed",
+      "rows_written": 5
+    },
+    "run_2_replay": {
+      "batches_processed": 0,
+      "events_processed": 0,
+      "last_checkpoint_status": null,
+      "rows_written": 0
+    }
+  },
+  "parity": {
+    "aligned_1s": {
+      "baseline_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+      "pilot_hash_sha256": "ce2fcd9c4a81acc1b500322629381cb94cb6e008c1db5b170aeac0ba93a737a0",
+      "row_count": 3
+    },
+    "native": {
+      "baseline_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+      "pilot_hash_sha256": "ad1864b9114062a8a39707b9f8d7a3d65ee07a0043d2248c51bd73e17be9d0a6",
+      "row_count": 5
+    }
+  },
+  "pilot_view": {
+    "view_id": "spot_trades_event_pilot",
+    "view_version": 1
+  },
+  "proof_database": "origo_s14_c9_proof",
+  "proof_scope": "Slice 14 S14-C9 pilot cutover for spot_trades through canonical events into native and aligned serving projections"
+}

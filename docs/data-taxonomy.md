@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-10
-- Slice/version reference: S1-S8, S10, S11, S13 (platform v0.1.5)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21 (platform v0.1.14)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -15,7 +15,7 @@
   - `POST /v1/raw/query`
   - `POST /v1/raw/export`
   - `GET /v1/raw/export/{export_id}`
-- Query contract currently uses `sources` (single item today), `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
+- Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Query source keys:
@@ -40,6 +40,18 @@
   - `aligned_at_utc`: UTC aligned 1-second timestamp
   - `valid_from_utc`: UTC interval start (inclusive)
   - `valid_to_utc_exclusive`: UTC interval end (exclusive)
+  - `view_id`: logical projection/view identifier
+  - `view_version`: immutable view version integer
+  - `rights_state`: rights classification used for serving/export
+  - `rights_provisional`: boolean flag for temporary hosted-rights transition
+- Canonical aligned serving storage contract:
+  - mandatory table: `canonical_aligned_1s_aggregates`
+  - mandatory in-scope source paths:
+    - Binance aligned serving (`spot_trades`, `spot_agg_trades`, `futures_trades`)
+    - OKX aligned serving (`okx_spot_trades`)
+    - Bybit aligned serving (`bybit_spot_trades`)
+    - ETF aligned serving (`etf_daily_metrics`)
+    - FRED aligned serving (`fred_series_metrics`)
 - ETF source taxonomy:
   - `etf_ishares_ibit_daily`
   - `etf_invesco_btco_daily`
@@ -65,8 +77,8 @@
   - `quote_quantity`: quote-asset quantity (`price * size`)
 - Bybit native trade fields:
   - `symbol`: symbol (`BTCUSDT`)
-  - `trade_id`: deterministic per-file sequence identifier
-  - `trd_match_id`: source match identifier
+  - `trade_id`: integer offset parsed from `trd_match_id` suffix (`m-<digits>`)
+  - `trd_match_id`: source match identifier (`m-<digits>`)
   - `side`: `buy|sell`
   - `price`: execution price
   - `size`: base-asset quantity
@@ -89,12 +101,17 @@
   - `bitcoin_circulating_supply`: `circulating_supply_sats`, `circulating_supply_btc`
 
 ## Source/provenance and freshness semantics
-- Binance canonical historical truth source is exchange-hosted daily/monthly files.
+- Binance canonical historical truth source is exchange-hosted daily/monthly files, persisted first to canonical events and served via projection tables.
 - OKX canonical historical truth source is exchange-hosted daily files resolved from OKX first-party API.
+- OKX native/aligned serving is event-driven from canonical OKX projections as of Slice 18.
 - Bybit canonical historical truth source is exchange-hosted daily csv.gz files.
+- Bybit native/aligned serving is event-driven from canonical Bybit projections as of Slice 19.
 - ETF canonical source hierarchy is issuer official sources.
+- ETF native/aligned serving is event-driven from canonical ETF projections as of Slice 16.
 - FRED canonical source is direct API calls to FRED.
+- FRED native/aligned serving is event-driven from canonical FRED projections as of Slice 17.
 - Bitcoin canonical source is direct Bitcoin Core RPC from one unpruned self-hosted node.
+- Bitcoin native and derived aligned serving are event-driven from canonical Bitcoin projections as of Slice 20.
 - Provenance fields (`provenance_json`, checksums, source keys) are replay-critical.
 
 ## Failure modes, warnings, and error codes
@@ -109,6 +126,10 @@
   - `FRED_SOURCE_PUBLISH_STALE`
 - Query status taxonomy:
   - `200`, `404`, `409`, `503`
+- Aligned storage contract failure taxonomy (runtime fail-loud):
+  - missing aligned aggregate table
+  - missing required aligned columns
+  - required aligned column type drift
 - Export submit status taxonomy:
   - `202`
 - Export lifecycle taxonomy:
@@ -117,11 +138,19 @@
   - `Hosted Allowed`
   - `BYOK Required`
   - `Ingest Only`
+- Rights provisional taxonomy:
+  - `false`: normal rights state
+  - `true`: temporary hosted path during legal transition
 
 ## Determinism/replay notes
 - Deterministic replay artifacts are maintained under `spec/slices/`.
 - Baseline fixtures record source checksums and repeated-run fingerprints.
 - Query and export determinism is validated slice-by-slice before guardrail closeout.
+- Binance event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-15-binance-event-sourcing-port/`.
+- FRED event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-17-fred-event-sourcing-port/`.
+- OKX event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-18-okx-event-sourcing-port/`.
+- Bybit event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-19-bybit-event-sourcing-port/`.
+- Bitcoin event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-20-bitcoin-event-sourcing-port/`.
 
 ## Environment variables and required config
 - API/runtime:
@@ -138,6 +167,9 @@
 - Storage:
   - `CLICKHOUSE_*`
   - `ORIGO_OBJECT_STORE_*`
+- Event-runtime guardrail config:
+  - `ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH`
+  - `ORIGO_STREAM_QUARANTINE_STATE_PATH`
 
 ## Minimal examples
 - Query source list example:

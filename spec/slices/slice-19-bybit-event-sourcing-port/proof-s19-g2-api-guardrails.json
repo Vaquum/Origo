@@ -1,0 +1,13 @@
+{
+  "aligned_rights_provisional": true,
+  "aligned_rights_state": "Hosted Allowed",
+  "aligned_status": 200,
+  "guardrails_verified": true,
+  "missing_rights_error_code": "QUERY_RIGHTS_MISSING_STATE",
+  "missing_rights_status": 409,
+  "native_status": 200,
+  "proof_database": "origo_s19_g2_proof",
+  "proof_scope": "Slice 19 S19-G2 Bybit rights/legal/provisional metadata semantics with fail-closed rights behavior",
+  "rights_provisional": true,
+  "rights_state": "Hosted Allowed"
+}

@@ -1,10 +1,10 @@
 # `origo.data`
 
-> Fetch, normalise, and prepare historical Binance market data for use in experiments.
+> Fetch, normalise, and prepare historical spot market data for use in experiments.
 
 ## Responsibilities
 
-Owns all data ingestion (klines, trades, agg-trades — spot and futures), bar formation from raw tick/trade data, train/val/test splitting, and the helper utilities that glue raw data to the prep pipeline.
+Owns historical spot trades/klines data access for Binance, OKX, and Bybit, bar formation from raw tick/trade data, train/val/test splitting, and the helper utilities that glue raw data to the prep pipeline.
 Does **not** own feature engineering, indicators, or model training.
 
 ## Key concepts
@@ -18,7 +18,7 @@ Does **not** own feature engineering, indicators, or model training.
 
 | What | Where | When you'd call it |
 |------|-------|--------------------|
-| `HistoricalData` | `historical_data.py` | Instantiate with optional `auth_token`; call `get_spot_klines()` etc. to populate `.data` |
+| `HistoricalData` | `historical_data.py` | Instantiate with optional `auth_token`; call `get_binance_spot_trades()` / `get_okx_spot_klines()` etc. to populate `.data` |
 | `compute_data_bars()` | `utils/compute_data_bars.py` | Called by `Manifest.set_bar_formation()` to convert raw data into OHLCV bars |
 | `split_sequential()` | `utils/splits.py` | Used internally by `Manifest.prepare_data()` to partition data |
 | `split_data_to_prep_output()` | `utils/splits.py` | Converts a list of split DataFrames into the `data_dict` used by model functions |
@@ -31,7 +31,7 @@ Does **not** own feature engineering, indicators, or model training.
 ## Quick orientation
 ```text
 data/
-├── historical_data.py     # HistoricalData class (klines, trades, agg-trades)
+├── historical_data.py     # HistoricalData class (spot trades + klines for Binance/OKX/Bybit)
 ├── _internal/
 │   ├── binance_file_to_polars.py   # Download & parse Binance CSV/ZIP files
 │   └── generic_endpoints.py        # DB/API query helpers
@@ -47,6 +47,8 @@ data/
 
 - `HistoricalData._get_data_for_test()` reads from `<repo>/datasets/klines_2h_2020_2025.csv`; this file must exist in the repository root.
 - `get_binance_file()` normalises millisecond timestamps to seconds automatically if the value exceeds `10^13`.
+- Historical spot interfaces use strict window selection: exactly one of `date-window(start_date/end_date)`, `n_latest_rows`, or `n_random_rows`.
+- Date-window inputs are strict UTC day strings (`YYYY-MM-DD`) and apply start inclusive + end-day inclusive (implemented as next-day exclusive).
 - The `auth_token` parameter is forwarded to `generic_endpoints` for authenticated database queries; leave `None` for public Binance file access.
 - `generic_endpoints` is fail-loud for env config: set `CLICKHOUSE_HOST`, `CLICKHOUSE_HTTP_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, and `CLICKHOUSE_DATABASE` before calling DB query helpers.
 - `split_data_to_prep_output` expects all splits to share the same column schema.

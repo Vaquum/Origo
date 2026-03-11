@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-03-11
+- Completed S22-S24 historical spot operationalization:
+  - added six explicit historical Python methods in `origo.data.HistoricalData`:
+    - `get_binance_spot_trades`, `get_okx_spot_trades`, `get_bybit_spot_trades`
+    - `get_binance_spot_klines`, `get_okx_spot_klines`, `get_bybit_spot_klines`
+  - removed dropped historical methods with no fallback aliases:
+    - `get_spot_trades`, `get_spot_klines`, `get_spot_agg_trades`, `get_futures_trades`, `get_futures_klines`
+  - implemented strict historical window contract:
+    - exactly one mode: date-window (`start_date`/`end_date`) or `n_latest_rows` or `n_random_rows`
+    - strict UTC date format `YYYY-MM-DD`
+    - open date bounds resolved from source-table min/max day
+  - added six HTTP routes:
+    - `/v1/historical/binance/spot/trades`
+    - `/v1/historical/binance/spot/klines`
+    - `/v1/historical/okx/spot/trades`
+    - `/v1/historical/okx/spot/klines`
+    - `/v1/historical/bybit/spot/trades`
+    - `/v1/historical/bybit/spot/klines`
+  - applied historical endpoint guardrails:
+    - internal API auth (`X-API-Key`)
+    - source rights gate + rights metadata in responses
+    - fail-loud status/error taxonomy (`200/404/409/503`)
+    - strict-warning failure behavior for mutable/sample windows
+  - normalized OKX/Bybit spot-trades schema to shared contract and enforced maker-side mapping:
+    - `buy -> 0`, `sell -> 1`
+- Added S22-S24 contract tests:
+  - `tests/contract/test_historical_spot_api_contract.py`
+  - route registration, request validation, strict/no-data failures, and method-signature cohesion checks
+- Added S22-S24 docs and artifacts:
+  - `docs/Developer/s22-s24-historical-spot-api-contract.md`
+  - `docs/Developer/s24-historical-cutover-runbook.md`
+  - `docs/historical-spot-reference.md`
+  - `spec/slices/slice-22-historical-binance-lock-in/*`
+  - `spec/slices/slice-23-historical-okx-parallelization/*`
+  - `spec/slices/slice-24-historical-bybit-cutover/*`
+- Updated version to `Origo API v0.1.15`.
+
 ## 2026-03-10
 - Completed Slice 20 Bitcoin event-sourcing port capability/proof/guardrails:
   - ported all seven onboarded Bitcoin datasets to canonical event-driven serving (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`)

@@ -4,14 +4,14 @@ import polars as pl
 
 from origo.data._internal.binance_file_to_polars import binance_file_to_polars
 from origo.data._internal.generic_endpoints import (
-    query_binance_native,
-    query_klines_data,
+    query_spot_klines_data,
+    query_spot_trades_data,
 )
 
 
 class HistoricalData:
     def __init__(self, auth_token: str | None = None) -> None:
-        """Set of endpoints to get historical Binance data."""
+        """Stateful interface for exchange historical spot trades and klines."""
 
         self.auth_token = auth_token
         self.data: pl.DataFrame = pl.DataFrame()
@@ -54,184 +54,124 @@ class HistoricalData:
 
         self.data_columns = self.data.columns
 
-    def get_spot_klines(
+    def get_binance_spot_trades(
         self,
-        n_rows: int | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        include_datetime_col: bool = True,
+    ) -> None:
+        self.data = query_spot_trades_data(
+            source='binance',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            include_datetime_col=include_datetime_col,
+            auth_token=self.auth_token,
+            show_summary=False,
+        )
+        self.data_columns = self.data.columns
+
+    def get_okx_spot_trades(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        include_datetime_col: bool = True,
+    ) -> None:
+        self.data = query_spot_trades_data(
+            source='okx',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            include_datetime_col=include_datetime_col,
+            auth_token=self.auth_token,
+            show_summary=False,
+        )
+        self.data_columns = self.data.columns
+
+    def get_bybit_spot_trades(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        include_datetime_col: bool = True,
+    ) -> None:
+        self.data = query_spot_trades_data(
+            source='bybit',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            include_datetime_col=include_datetime_col,
+            auth_token=self.auth_token,
+            show_summary=False,
+        )
+        self.data_columns = self.data.columns
+
+    def get_binance_spot_klines(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
         kline_size: int = 1,
-        start_date_limit: str | None = None,
     ) -> None:
-        """Get historical klines data for Binance spot.
-
-        Args:
-            n_rows (int): Number of rows to be pulled
-            kline_size (int): Size of the kline in seconds
-            start_date_limit (str): The start date of the klines data
-
-        Returns:
-            self.data (pl.DataFrame)
-
-        """
-
-        self.data = query_klines_data(
-            n_rows=n_rows,
+        self.data = query_spot_klines_data(
+            source='binance',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
             kline_size=kline_size,
-            start_date_limit=start_date_limit,
-            futures=False,
             auth_token=self.auth_token,
+            show_summary=False,
         )
-
         self.data_columns = self.data.columns
 
-    def get_futures_klines(
+    def get_okx_spot_klines(
         self,
-        n_rows: int | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
         kline_size: int = 1,
-        start_date_limit: str | None = None,
     ) -> None:
-        """Get historical klines data for Binance futures.
-
-        Args:
-            n_rows (int): Number of rows to be pulled
-            kline_size (int): Size of the kline in seconds
-            start_date_limit (str): The start date of the klines data
-
-        Returns:
-            self.data (pl.DataFrame)
-
-        """
-
-        self.data = query_klines_data(
-            n_rows=n_rows,
+        self.data = query_spot_klines_data(
+            source='okx',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
             kline_size=kline_size,
-            start_date_limit=start_date_limit,
-            futures=True,
             auth_token=self.auth_token,
+            show_summary=False,
         )
-
         self.data_columns = self.data.columns
 
-    def get_spot_trades(
+    def get_bybit_spot_klines(
         self,
-        month_year: tuple[int, int] | None = None,
-        n_rows: int | None = None,
-        n_random: int | None = None,
-        include_datetime_col: bool = True,
-        show_summary: bool = False,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        kline_size: int = 1,
     ) -> None:
-        """Get historical trades data for Binance spot.
-
-        Args:
-            month_year (Tuple): The month of data to be pulled e.g. (3, 2025)
-            n_rows (int): Number of latest rows to be pulled
-            n_random (int): Number of random rows to be pulled
-            include_datetime_col (bool): If datetime column is to be included
-            show_summary (bool): Print query execution summary
-
-        Returns:
-            self.data (pl.DataFrame)
-
-        """
-
-        self.data = query_binance_native(
-            dataset='spot_trades',
-            select_cols=[
-                'trade_id',
-                'timestamp',
-                'price',
-                'quantity',
-                'is_buyer_maker',
-            ],
-            month_year=month_year,
-            n_rows=n_rows,
-            n_random=n_random,
-            include_datetime_col=include_datetime_col,
-            show_summary=show_summary,
+        self.data = query_spot_klines_data(
+            source='bybit',
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            kline_size=kline_size,
             auth_token=self.auth_token,
+            show_summary=False,
         )
-
-        self.data_columns = self.data.columns
-
-    def get_spot_agg_trades(
-        self,
-        month_year: tuple[int, int] | None = None,
-        n_rows: int | None = None,
-        n_random: int | None = None,
-        include_datetime_col: bool = True,
-        show_summary: bool = False,
-    ) -> None:
-        """Get historical aggTrades data for Binance spot.
-
-        Args:
-            month_year (Tuple): The month of data to be pulled e.g. (3, 2025)
-            n_rows (int): Number of latest rows to be pulled
-            n_random (int): Number of random rows to be pulled
-            include_datetime_col (bool): If datetime column is to be included
-            show_summary (bool): Print query execution summary
-
-        Returns:
-            self.data (pl.DataFrame)
-
-        """
-
-        self.data = query_binance_native(
-            dataset='spot_agg_trades',
-            select_cols=[
-                'agg_trade_id',
-                'timestamp',
-                'price',
-                'quantity',
-                'is_buyer_maker',
-                'first_trade_id',
-                'last_trade_id',
-            ],
-            month_year=month_year,
-            n_rows=n_rows,
-            n_random=n_random,
-            include_datetime_col=include_datetime_col,
-            show_summary=show_summary,
-            auth_token=self.auth_token,
-        )
-
-        self.data_columns = self.data.columns
-
-    def get_futures_trades(
-        self,
-        month_year: tuple[int, int] | None = None,
-        n_rows: int | None = None,
-        n_random: int | None = None,
-        include_datetime_col: bool = True,
-        show_summary: bool = False,
-    ) -> None:
-        """Get historical trades data for Binance futures.
-
-        Args:
-            month_year (tuple[int,int] | None): (month, year) to fetch, e.g. (3, 2025).
-            n_rows (int | None): if set, fetch this many latest rows instead.
-            n_random (int | None): if set, fetch this many random rows instead.
-            include_datetime_col (bool): whether to include `datetime` in the result.
-            show_summary (bool): if a summary for data is printed out
-
-        Returns:
-            pl.DataFrame: the requested trades.
-        """
-
-        self.data = query_binance_native(
-            dataset='futures_trades',
-            select_cols=[
-                'futures_trade_id',
-                'timestamp',
-                'price',
-                'quantity',
-                'is_buyer_maker',
-            ],
-            month_year=month_year,
-            n_rows=n_rows,
-            n_random=n_random,
-            include_datetime_col=include_datetime_col,
-            show_summary=show_summary,
-            auth_token=self.auth_token,
-        )
-
         self.data_columns = self.data.columns
 
     def _get_data_for_test(self, n_rows: int | None = 5000) -> None:

@@ -1452,3 +1452,127 @@ Constraints: documentation only; no feature changes.
 Action: User docs closeout for Slice 21.
 Done looks like: `docs/` explicitly states aligned storage contract requirements and related failure semantics.
 Constraints: documentation only; no feature changes.
+
+## Slice 22: Historical Binance Lock-In (Operational HTTP Surface)
+
+### Capability
+- [x] `S22-C1` Refactor `HistoricalData` Binance methods to explicit contracts: `get_binance_spot_trades`, `get_binance_spot_klines`.
+- [x] `S22-C2` Replace historical window contract with strict `start_date`/`end_date` and row windows (`n_latest_rows`, `n_random_rows`), no aliases.
+- [x] `S22-C3` Remove dropped historical methods (`get_spot_trades`, `get_spot_klines`, `get_spot_agg_trades`, `get_futures_trades`, `get_futures_klines`).
+- [x] `S22-C4` Add Binance historical HTTP endpoints: `/v1/historical/binance/spot/trades` and `/v1/historical/binance/spot/klines`.
+
+### Proof
+- [x] `S22-P1` Add contract tests for six-method Python interface baseline and dropped-method absence.
+- [x] `S22-P2` Add HTTP contract tests for route registration, envelope shape, strict validation, and fail-loud status mapping.
+- [x] `S22-P3` Add deterministic replay test coverage for historical request validation and stable route behavior in repeated runs.
+
+### Guardrails
+- [x] `S22-G1` Apply auth + rights + strict warning guardrails to Binance historical endpoints.
+- [x] `S22-G2` Enforce error taxonomy (`200/404/409/503`) for new historical endpoint surface.
+- [x] `S22-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S22-G4` User docs closeout for slice (`docs/`, full historical endpoint reference + taxonomy updates).
+
+## Slice 23: Historical OKX Parallelization
+
+### Capability
+- [x] `S23-C1` Add OKX historical Python methods with signatures identical to Binance contracts.
+- [x] `S23-C2` Add OKX historical HTTP endpoints: `/v1/historical/okx/spot/trades` and `/v1/historical/okx/spot/klines`.
+- [x] `S23-C3` Normalize OKX spot-trades output to shared schema (`trade_id`, `timestamp`, `price`, `quantity`, `is_buyer_maker`, `datetime`).
+- [x] `S23-C4` Implement OKX maker-side mapping guardrail (`buy -> 0`, `sell -> 1`) in trades and kline paths.
+
+### Proof
+- [x] `S23-P1` Add fixed-contract validation proofs for strict date-window rules and mutually-exclusive window mode selection.
+- [x] `S23-P2` Add endpoint cohesion proofs showing OKX route payload shape parity with Binance historical routes.
+- [x] `S23-P3` Add replay determinism proofs for repeated OKX historical route calls under identical mocked fixtures.
+
+### Guardrails
+- [x] `S23-G1` Apply auth + rights + strict warning guardrails to OKX historical endpoints.
+- [x] `S23-G2` Enforce no old-parameter/method aliases in runtime and contract tests.
+- [x] `S23-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S23-G4` User docs closeout for slice (`docs/`, full historical endpoint reference + taxonomy updates).
+
+## Slice 24: Historical Bybit Parallelization + Cutover
+
+### Capability
+- [x] `S24-C1` Add Bybit historical Python methods with signatures identical to Binance/OKX contracts.
+- [x] `S24-C2` Add Bybit historical HTTP endpoints: `/v1/historical/bybit/spot/trades` and `/v1/historical/bybit/spot/klines`.
+- [x] `S24-C3` Normalize Bybit spot-trades output to shared schema (`trade_id`, `timestamp`, `price`, `quantity`, `is_buyer_maker`, `datetime`).
+- [x] `S24-C4` Implement Bybit maker-side mapping guardrail (`buy -> 0`, `sell -> 1`) in trades and kline paths.
+- [x] `S24-C5` Publish old-system-to-new historical endpoint migration mapping runbook.
+
+### Proof
+- [x] `S24-P1` Add six-route HTTP contract proof coverage for request/response cohesion and strict status/error behavior.
+- [x] `S24-P2` Add six-method Python cohesion proof coverage for signature identity and schema parity by family (trades/klines).
+- [x] `S24-P3` Add replay determinism proofs for all historical routes under repeated fixtures.
+
+### Guardrails
+- [x] `S24-G1` Apply auth + rights + strict warning guardrails to Bybit historical endpoints.
+- [x] `S24-G2` Verify cutover guardrails (migration mapping complete; no fallback aliases retained).
+- [x] `S24-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S24-G4` User docs closeout for slice (`docs/`, full historical endpoint reference + taxonomy updates).
+
+## Slice 22 Sub-Slices
+1. `S22-01`
+Action: Refactor Binance historical Python methods to explicit `get_binance_spot_trades` and `get_binance_spot_klines`.
+Done looks like: only explicit Binance spot methods exist; old generic/futures methods are removed.
+Constraints: no method aliases.
+2. `S22-02`
+Action: Implement strict window/date contract in historical query helpers.
+Done looks like: exactly one window mode enforced with strict UTC `YYYY-MM-DD` date-window semantics and fail-loud validation.
+Constraints: no fallback parameter aliases.
+3. `S22-03`
+Action: Add Binance historical HTTP routes with raw-envelope parity response shape.
+Done looks like: Binance trades/klines routes return `mode`, `source`, `sources`, `row_count`, `schema`, `warnings`, `rows`, and rights metadata.
+Constraints: endpoint scope only.
+4. `S22-04`
+Action: Add contract tests for route registration, validation failures, strict warning behavior, and no-data behavior.
+Done looks like: tests cover 409 contract error, strict warning 409, and 404 no-data behavior.
+Constraints: contract tests only.
+5. `S22-05`
+Action: Apply guardrails and docs closeout.
+Done looks like: auth/rights/error-taxonomy guardrails are active and docs are updated.
+Constraints: guardrails + docs only.
+
+## Slice 23 Sub-Slices
+1. `S23-01`
+Action: Add OKX historical Python methods with the same signature family as Binance.
+Done looks like: `get_okx_spot_trades` and `get_okx_spot_klines` match Binance method signatures.
+Constraints: no signature divergence.
+2. `S23-02`
+Action: Add OKX historical HTTP routes.
+Done looks like: `/v1/historical/okx/spot/trades` and `/v1/historical/okx/spot/klines` are active and protected by internal API key.
+Constraints: endpoint scope only.
+3. `S23-03`
+Action: Normalize OKX spot-trades schema and maker-side mapping.
+Done looks like: output schema matches shared trades contract and side mapping enforces `buy -> 0`, `sell -> 1` fail-loud.
+Constraints: no schema fallback.
+4. `S23-04`
+Action: Prove OKX-to-Binance cohesion through contract tests.
+Done looks like: route and method cohesion tests pass under repeated runs.
+Constraints: contract/replay tests only.
+5. `S23-05`
+Action: Apply guardrails and docs closeout.
+Done looks like: rights, strict-warning, and error-taxonomy guardrails are active and docs are updated.
+Constraints: guardrails + docs only.
+
+## Slice 24 Sub-Slices
+1. `S24-01`
+Action: Add Bybit historical Python methods with signature parity.
+Done looks like: `get_bybit_spot_trades` and `get_bybit_spot_klines` match Binance/OKX method signatures.
+Constraints: no signature divergence.
+2. `S24-02`
+Action: Add Bybit historical HTTP routes.
+Done looks like: `/v1/historical/bybit/spot/trades` and `/v1/historical/bybit/spot/klines` are active and guarded.
+Constraints: endpoint scope only.
+3. `S24-03`
+Action: Normalize Bybit spot-trades schema and maker-side mapping.
+Done looks like: output schema matches shared trades contract and mapping enforces `buy -> 0`, `sell -> 1` fail-loud.
+Constraints: no schema fallback.
+4. `S24-04`
+Action: Prove six-endpoint and six-method cohesion.
+Done looks like: historical contract test suite confirms route presence, request validation, and method signature parity.
+Constraints: contract/replay tests only.
+5. `S24-05`
+Action: Publish cutover runbook and close slice guardrails/docs.
+Done looks like: old endpoint retirement mapping is documented and developer/user docs are updated.
+Constraints: docs + migration mapping only.

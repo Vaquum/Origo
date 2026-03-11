@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import importlib
+import inspect
+import json
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+import polars as pl
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from api.origo_api.schemas import (
+    HistoricalSpotKlinesRequest,
+    HistoricalSpotTradesRequest,
+)
+from origo.data.historical_data import HistoricalData
+
+
+def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
+    matrix_path = tmp_path / 'rights-matrix.json'
+    binance_legal = tmp_path / 'binance-legal.md'
+    okx_legal = tmp_path / 'okx-legal.md'
+    bybit_legal = tmp_path / 'bybit-legal.md'
+    binance_legal.write_text('# legal', encoding='utf-8')
+    okx_legal.write_text('# legal', encoding='utf-8')
+    bybit_legal.write_text('# legal', encoding='utf-8')
+
+    matrix_payload = {
+        'version': 'historical-contract-test',
+        'sources': {
+            'binance': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': ['spot_trades'],
+                'legal_signoff_artifact': str(binance_legal),
+            },
+            'okx': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': ['okx_spot_trades'],
+                'legal_signoff_artifact': str(okx_legal),
+            },
+            'bybit': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': ['bybit_spot_trades'],
+                'legal_signoff_artifact': str(bybit_legal),
+            },
+        },
+    }
+    matrix_path.write_text(json.dumps(matrix_payload), encoding='utf-8')
+
+    monkeypatch.setenv('ORIGO_INTERNAL_API_KEY', 'test-internal-key')
+    monkeypatch.setenv('ORIGO_QUERY_MAX_CONCURRENCY', '2')
+    monkeypatch.setenv('ORIGO_QUERY_MAX_QUEUE', '8')
+    monkeypatch.setenv('ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY', '2')
+    monkeypatch.setenv('ORIGO_ALIGNED_QUERY_MAX_QUEUE', '8')
+    monkeypatch.setenv('ORIGO_EXPORT_MAX_CONCURRENCY', '2')
+    monkeypatch.setenv('ORIGO_EXPORT_MAX_QUEUE', '8')
+    monkeypatch.setenv('ORIGO_SOURCE_RIGHTS_MATRIX_PATH', str(matrix_path))
+    monkeypatch.setenv('ORIGO_EXPORT_AUDIT_LOG_PATH', str(tmp_path / 'export-audit.jsonl'))
+    monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
+    monkeypatch.setenv('ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS', '2')
+    monkeypatch.setenv('ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS', '2')
+    monkeypatch.setenv('ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS', '3600')
+
+    module_name = 'api.origo_api.main'
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    return importlib.import_module(module_name)
+
+
+def test_historical_data_method_contract_and_dropped_methods() -> None:
+    trades_signature = inspect.signature(HistoricalData.get_binance_spot_trades)
+    assert inspect.signature(HistoricalData.get_okx_spot_trades) == trades_signature
+    assert inspect.signature(HistoricalData.get_bybit_spot_trades) == trades_signature
+
+    klines_signature = inspect.signature(HistoricalData.get_binance_spot_klines)
+    assert inspect.signature(HistoricalData.get_okx_spot_klines) == klines_signature
+    assert inspect.signature(HistoricalData.get_bybit_spot_klines) == klines_signature
+
+    dropped_methods = {
+        'get_spot_trades',
+        'get_spot_klines',
+        'get_spot_agg_trades',
+        'get_futures_trades',
+        'get_futures_klines',
+    }
+    for method_name in dropped_methods:
+        assert not hasattr(HistoricalData, method_name)
+
+
+def test_historical_request_requires_exactly_one_window_mode() -> None:
+    with pytest.raises(ValidationError, match='Exactly one window mode must be provided'):
+        HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
+
+
+def test_historical_request_rejects_invalid_date() -> None:
+    with pytest.raises(ValidationError, match='valid strict YYYY-MM-DD'):
+        HistoricalSpotTradesRequest(start_date='2022-02-30', end_date='2022-03-01')
+
+
+def test_historical_klines_request_accepts_random_rows_mode() -> None:
+    request = HistoricalSpotKlinesRequest(n_random_rows=100, kline_size=60)
+    assert request.n_random_rows == 100
+    assert request.kline_size == 60
+
+
+def test_historical_routes_are_registered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    paths = {route.path for route in main_module.app.routes}
+    assert '/v1/historical/binance/spot/trades' in paths
+    assert '/v1/historical/binance/spot/klines' in paths
+    assert '/v1/historical/okx/spot/trades' in paths
+    assert '/v1/historical/okx/spot/klines' in paths
+    assert '/v1/historical/bybit/spot/trades' in paths
+    assert '/v1/historical/bybit/spot/klines' in paths
+
+
+def test_historical_trades_endpoint_returns_raw_envelope_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_trades_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'trade_id': [1],
+                'timestamp': [1704067200000],
+                'price': [42000.0],
+                'quantity': [0.1],
+                'is_buyer_maker': [0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_trades_data', _fake_trades_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/binance/spot/trades',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'native'
+    assert payload['source'] == 'spot_trades'
+    assert payload['sources'] == ['spot_trades']
+    assert payload['row_count'] == 1
+    assert isinstance(payload['schema'], list)
+    assert isinstance(payload['warnings'], list)
+    assert isinstance(payload['rows'], list)
+
+
+def test_historical_endpoint_invalid_date_is_contract_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/okx/spot/trades',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2022-02-30', 'end_date': '2022-03-01'},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_CONTRACT_ERROR'
+
+
+def test_historical_endpoint_strict_warning_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_trades_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'trade_id': [1],
+                'timestamp': [1704067200000],
+                'price': [42000.0],
+                'quantity': [0.1],
+                'is_buyer_maker': [0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_trades_data', _fake_trades_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/bybit/spot/trades',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'n_latest_rows': 10, 'strict': True},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
+
+
+def test_historical_endpoint_returns_404_for_empty_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _empty_klines_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'datetime': [],
+                'open': [],
+                'high': [],
+                'low': [],
+                'close': [],
+                'mean': [],
+                'std': [],
+                'median': [],
+                'iqr': [],
+                'volume': [],
+                'maker_ratio': [],
+                'no_of_trades': [],
+                'open_liquidity': [],
+                'high_liquidity': [],
+                'low_liquidity': [],
+                'close_liquidity': [],
+                'liquidity_sum': [],
+                'maker_volume': [],
+                'maker_liquidity': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_klines_data', _empty_klines_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/binance/spot/klines',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2024-01-01', 'end_date': '2024-01-01', 'kline_size': 60},
+        )
+
+    assert response.status_code == 404
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_NO_DATA'

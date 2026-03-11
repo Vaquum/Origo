@@ -709,12 +709,13 @@ def query_spot_trades_data(
         aligned_frame = query_aligned_data(
             dataset=cast(AlignedDataset, dataset),
             window=window,
-            selected_columns=fields,
+            selected_columns=None,
             datetime_iso_output=False,
             auth_token=auth_token,
             show_summary=show_summary,
         )
         normalized = _apply_filters(frame=aligned_frame, filters=filters)
+        normalized = _apply_fields(frame=normalized, fields=fields)
     else:
         if source == 'binance':
             raw_frame = query_binance_native_data(

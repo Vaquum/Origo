@@ -121,6 +121,25 @@ def test_historical_spot_trades_replay_is_deterministic_for_native_and_aligned(
         )
 
 
+def test_historical_spot_trades_aligned_filters_apply_before_projection(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_aligned_data',
+        lambda **_: _aligned_frame(),
+    )
+    filtered = historical_endpoints.query_spot_trades_data(
+        source='binance',
+        mode='aligned_1s',
+        n_latest_rows=1,
+        fields=['open_price'],
+        filters=[{'field': 'close_price', 'op': 'gte', 'value': 42000.0}],
+    )
+    assert filtered.columns == ['open_price']
+    assert filtered.height == 1
+
+
 def test_historical_spot_klines_aligned_replay_is_deterministic(
     monkeypatch: Any,
 ) -> None:

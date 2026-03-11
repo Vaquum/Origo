@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from origo.data._internal.generic_endpoints import (
     HISTORICAL_SOURCE_TO_DATASET,
     query_aligned_wide_rows_envelope,
+    query_etf_daily_metrics_data,
     query_native_wide_rows_envelope,
     query_spot_klines_data,
     query_spot_trades_data,
@@ -39,6 +40,7 @@ from .rights import RightsGateError, resolve_export_rights, resolve_query_rights
 from .schemas import (
     ExportFormat,
     ExportStatus,
+    HistoricalETFDailyMetricsRequest,
     HistoricalSpotKlinesRequest,
     HistoricalSpotTradesRequest,
     RawExportArtifact,
@@ -55,7 +57,7 @@ from .schemas import (
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.17')
+app = FastAPI(title='Origo Raw API', version='0.1.18')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',
@@ -360,6 +362,18 @@ def _parse_historical_trades_request(payload: dict[str, Any]) -> HistoricalSpotT
 def _parse_historical_klines_request(payload: dict[str, Any]) -> HistoricalSpotKlinesRequest:
     try:
         return HistoricalSpotKlinesRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+
+
+def _parse_historical_etf_request(
+    payload: dict[str, Any],
+) -> HistoricalETFDailyMetricsRequest:
+    try:
+        return HistoricalETFDailyMetricsRequest.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(
             status_code=409,
@@ -830,6 +844,143 @@ async def _handle_historical_spot_klines(
     return RawQueryResponse.model_validate(envelope)
 
 
+async def _handle_historical_etf_daily_metrics(
+    *,
+    request: HistoricalETFDailyMetricsRequest,
+    x_clickhouse_token: str | None,
+) -> RawQueryResponse:
+    dataset: RawQueryDataset = 'etf_daily_metrics'
+    filters_payload = (
+        [
+            filter_clause.model_dump(mode='json')
+            for filter_clause in request.filters
+        ]
+        if request.filters is not None
+        else None
+    )
+    try:
+        query_rights_decision = resolve_query_rights(
+            dataset=dataset,
+            auth_token=x_clickhouse_token,
+        )
+    except RightsGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': exc.code, 'message': str(exc)},
+        ) from exc
+
+    try:
+        query_rights_state, query_rights_provisional = (
+            query_rights_decision.response_metadata()
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'QUERY_RIGHTS_METADATA_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    try:
+        etf_quality_warnings = await run_in_threadpool(
+            build_etf_daily_quality_warnings,
+            x_clickhouse_token,
+            ETF_DAILY_STALE_MAX_AGE_DAYS,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'HISTORICAL_WARNING_RUNTIME_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+    except DatabaseError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'HISTORICAL_WARNING_BACKEND_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'HISTORICAL_WARNING_UNKNOWN_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+    warnings.extend(etf_quality_warnings)
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
+    try:
+        frame = await _run_native_query_with_limits(
+            query_etf_daily_metrics_data,
+            mode=request.mode,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            n_latest_rows=request.n_latest_rows,
+            n_random_rows=request.n_random_rows,
+            fields=request.fields,
+            filters=filters_payload,
+            auth_token=x_clickhouse_token,
+            show_summary=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_RUNTIME_ERROR', 'message': str(exc)},
+        ) from exc
+    except DatabaseError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_BACKEND_ERROR', 'message': str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
+        ) from exc
+
+    if frame.height == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                'code': 'HISTORICAL_NO_DATA',
+                'message': 'No rows found for query window',
+            },
+        )
+
+    envelope = _build_historical_envelope(
+        frame=frame,
+        mode=request.mode,
+        dataset=dataset,
+        warnings=warnings,
+        rights_state=query_rights_state,
+        rights_provisional=query_rights_provisional,
+    )
+    return RawQueryResponse.model_validate(envelope)
+
+
 @app.post('/v1/historical/binance/spot/trades', response_model=RawQueryResponse)
 async def historical_binance_spot_trades(
     payload: dict[str, Any],
@@ -904,6 +1055,18 @@ async def historical_bybit_spot_klines(
     return await _handle_historical_spot_klines(
         source='bybit',
         request=_parse_historical_klines_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/etf/daily_metrics', response_model=RawQueryResponse)
+async def historical_etf_daily_metrics(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_etf_daily_metrics(
+        request=_parse_historical_etf_request(payload),
         x_clickhouse_token=x_clickhouse_token,
     )
 

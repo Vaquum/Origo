@@ -1,0 +1,64 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum logical offset/value anchor in proof output",
+    "offset_max": "maximum logical offset/value anchor in proof output",
+    "volume_sum": "sum-like numeric anchor for replay comparison (metric_value_float for ETF)",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc_exclusive": "2024-01-02T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "etf_daily_metrics",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured-scraper-source",
+      "csv_sha256": "retrospective-not-captured-scraper-source"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "etf_daily_metrics",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": "m1",
+      "offset_max": "m1",
+      "volume_sum": "10.0",
+      "fingerprint_sha256": "3eb449e4c1b895f69f413355d1752179ea4bc37bd6c2ccab7f381d8169bdb1cd"
+    },
+    {
+      "stream": "etf_daily_metrics",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": "2024-01-01T00:00:00Z",
+      "offset_max": "2024-01-01T00:00:00Z",
+      "volume_sum": "10.0",
+      "fingerprint_sha256": "7a2a74b7efe414ade7bd1647189d69a8e2f67ea31cd31c82770c7b9b840d8c19"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "etf_daily_metrics",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": "m1",
+      "offset_max": "m1",
+      "volume_sum": "10.0",
+      "fingerprint_sha256": "3eb449e4c1b895f69f413355d1752179ea4bc37bd6c2ccab7f381d8169bdb1cd"
+    },
+    {
+      "stream": "etf_daily_metrics",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": "2024-01-01T00:00:00Z",
+      "offset_max": "2024-01-01T00:00:00Z",
+      "volume_sum": "10.0",
+      "fingerprint_sha256": "7a2a74b7efe414ade7bd1647189d69a8e2f67ea31cd31c82770c7b9b840d8c19"
+    }
+  ]
+}

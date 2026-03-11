@@ -1,6 +1,22 @@
 # Changelog
 
 ## 2026-03-11
+- Completed Slice 27 historical ETF operationalization:
+  - added `HistoricalData.get_etf_daily_metrics` with shared historical contract semantics
+  - added historical ETF endpoint `POST /v1/historical/etf/daily_metrics`
+  - implemented ETF historical `mode=native|aligned_1s` serving through shared historical endpoint plumbing
+  - added ETF-specific historical guardrail parity:
+    - rights gate and rights metadata
+    - ETF quality warnings (`ETF_DAILY_STALE_RECORDS`, `ETF_DAILY_MISSING_RECORDS`, `ETF_DAILY_INCOMPLETE_RECORDS`)
+    - strict warning escalation and fail-loud status taxonomy
+  - added ETF historical replay/parity proofs and contract coverage
+- Added Slice 27 docs and artifacts:
+  - `docs/Developer/s27-historical-etf-operationalization.md`
+  - `docs/historical-etf-reference.md`
+  - updates to `docs/historical-contract-reference.md`, `docs/etf-reference.md`, and `docs/data-taxonomy.md`
+  - `spec/slices/slice-27-historical-etf-operationalization/*`
+- Updated version to `Origo API v0.1.18`.
+
 - Completed Slice 26 historical exchange spot parity:
   - enabled historical `mode=aligned_1s` execution for exchange trade datasets:
     - `spot_trades`

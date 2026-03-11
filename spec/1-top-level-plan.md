@@ -590,6 +590,10 @@ Every slice must pass:
 4. Both `native` and `aligned_1s` modes are required.
 5. Aligned behavior must preserve deterministic forward-fill semantics and provenance fields.
 6. Slice closeout requires parity + replay proofs and rights/warning guardrail parity with raw-query behavior.
+7. Execution status as of 2026-03-11:
+   1. `S27-C1..S27-C4` complete.
+   2. `S27-P1..S27-P3` complete.
+   3. `S27-G1..S27-G4` complete.
 
 ## Slice 28 (Historical FRED Operationalization) Locked Details
 1. Scope is `fred_series_metrics` historical serving on Python + HTTP surfaces.

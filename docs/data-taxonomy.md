@@ -3,11 +3,11 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-11
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26 (platform v0.1.17)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27 (platform v0.1.18)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
-- Scope includes query datasets, historical spot endpoint taxonomy, scraper source keys, warning/error taxonomies, and export lifecycle taxonomy.
+- Scope includes query datasets, historical endpoint taxonomy, scraper source keys, warning/error taxonomies, and export lifecycle taxonomy.
 
 ## Inputs and outputs with contract shape
 - This document is a reference artifact; it does not define an endpoint.
@@ -21,9 +21,10 @@
   - `POST /v1/historical/okx/spot/klines`
   - `POST /v1/historical/bybit/spot/trades`
   - `POST /v1/historical/bybit/spot/klines`
+  - `POST /v1/historical/etf/daily_metrics`
 - Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
 - Raw query window rule uses at most one selector (`time_range | n_rows | n_random`), and no selector means full available history.
-- Historical spot contract uses at most one window mode:
+- Historical contract uses at most one window mode:
   - date-window (`start_date` and/or `end_date`, strict `YYYY-MM-DD`)
   - `n_latest_rows`
   - `n_random_rows`
@@ -33,6 +34,8 @@
   - `okx_spot_trades`
   - `bybit_spot_trades`
 - Historical spot-klines routes support both `mode=native` and `mode=aligned_1s`.
+- Historical ETF route supports both `mode=native` and `mode=aligned_1s` for:
+  - `etf_daily_metrics`
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
 
 ## Data definitions (fields, types, units, timezone, nullability)

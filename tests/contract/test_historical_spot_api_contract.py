@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api.origo_api.schemas import (
+    HistoricalETFDailyMetricsRequest,
     HistoricalSpotKlinesRequest,
     HistoricalSpotTradesRequest,
 )
@@ -26,9 +27,11 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
     binance_legal = tmp_path / 'binance-legal.md'
     okx_legal = tmp_path / 'okx-legal.md'
     bybit_legal = tmp_path / 'bybit-legal.md'
+    etf_legal = tmp_path / 'etf-legal.md'
     binance_legal.write_text('# legal', encoding='utf-8')
     okx_legal.write_text('# legal', encoding='utf-8')
     bybit_legal.write_text('# legal', encoding='utf-8')
+    etf_legal.write_text('# legal', encoding='utf-8')
 
     matrix_payload = {
         'version': 'historical-contract-test',
@@ -51,6 +54,12 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
                 'datasets': ['bybit_spot_trades'],
                 'legal_signoff_artifact': str(bybit_legal),
             },
+            'etf': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': ['etf_daily_metrics'],
+                'legal_signoff_artifact': str(etf_legal),
+            },
         },
     }
     matrix_path.write_text(json.dumps(matrix_payload), encoding='utf-8')
@@ -68,6 +77,8 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
     monkeypatch.setenv('ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS', '2')
     monkeypatch.setenv('ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS', '2')
     monkeypatch.setenv('ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS', '3600')
+    monkeypatch.setenv('ORIGO_ETF_QUERY_SERVING_STATE', 'promoted')
+    monkeypatch.setenv('ORIGO_FRED_QUERY_SERVING_STATE', 'promoted')
 
     module_name = 'api.origo_api.main'
     if module_name in sys.modules:
@@ -106,6 +117,19 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
         'filters',
         'strict',
         'kline_size',
+    ]
+
+    etf_signature = inspect.signature(HistoricalData.get_etf_daily_metrics)
+    assert list(etf_signature.parameters) == [
+        'self',
+        'mode',
+        'start_date',
+        'end_date',
+        'n_latest_rows',
+        'n_random_rows',
+        'fields',
+        'filters',
+        'strict',
     ]
 
     dropped_methods = {
@@ -189,6 +213,38 @@ def test_historical_data_kline_methods_accept_aligned_mode(
     assert historical.data.height == 1
 
 
+def test_historical_data_etf_method_accepts_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.data import historical_data as historical_data_module
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_query_etf_daily_metrics_data(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'source_id': ['etf_ishares_ibit_daily'],
+                'metric_name': ['btc_units'],
+                'metric_value_float': [10.0],
+                'valid_from_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'valid_to_utc_exclusive': [datetime(2024, 1, 2, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(
+        historical_data_module,
+        'query_etf_daily_metrics_data',
+        _fake_query_etf_daily_metrics_data,
+    )
+    historical = HistoricalData()
+    historical.get_etf_daily_metrics(mode='aligned_1s')
+
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert historical.data.height == 1
+
+
 def test_historical_request_rejects_multiple_window_modes() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
@@ -210,6 +266,26 @@ def test_historical_klines_request_accepts_random_rows_mode() -> None:
     request = HistoricalSpotKlinesRequest(n_random_rows=100, kline_size=60)
     assert request.n_random_rows == 100
     assert request.kline_size == 60
+
+
+def test_historical_etf_request_rejects_invalid_date() -> None:
+    with pytest.raises(ValidationError, match='valid strict YYYY-MM-DD'):
+        HistoricalETFDailyMetricsRequest(
+            start_date='2022-02-30',
+            end_date='2022-03-01',
+        )
+
+
+def test_historical_etf_request_supports_shared_contract_fields() -> None:
+    request = HistoricalETFDailyMetricsRequest(
+        mode='aligned_1s',
+        fields=['source_id', 'metric_name'],
+        filters=[{'field': 'metric_name', 'op': 'eq', 'value': 'btc_units'}],
+    )
+    assert request.mode == 'aligned_1s'
+    assert request.fields == ['source_id', 'metric_name']
+    assert request.filters is not None
+    assert request.filters[0].field == 'metric_name'
 
 
 def test_historical_request_supports_shared_contract_fields() -> None:
@@ -235,6 +311,7 @@ def test_historical_routes_are_registered(
     assert '/v1/historical/okx/spot/klines' in paths
     assert '/v1/historical/bybit/spot/trades' in paths
     assert '/v1/historical/bybit/spot/klines' in paths
+    assert '/v1/historical/etf/daily_metrics' in paths
     assert '/v1/historical/binance/spot/agg_trades' not in paths
     assert '/v1/historical/binance/futures/trades' not in paths
 
@@ -281,6 +358,47 @@ def test_historical_trades_endpoint_returns_raw_envelope_shape(
     assert payload['mode'] == 'native'
     assert payload['source'] == dataset_name
     assert payload['sources'] == [dataset_name]
+    assert payload['row_count'] == 1
+    assert isinstance(payload['schema'], list)
+    assert isinstance(payload['warnings'], list)
+    assert isinstance(payload['rows'], list)
+
+
+def test_historical_etf_endpoint_returns_raw_envelope_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_etf_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': ['etf_ishares_ibit_daily'],
+                'metric_name': ['btc_units'],
+                'metric_value_float': [10.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_etf_daily_metrics_data', _fake_etf_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_etf_daily_quality_warnings',
+        lambda *_: [],
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'native'
+    assert payload['source'] == 'etf_daily_metrics'
+    assert payload['sources'] == ['etf_daily_metrics']
     assert payload['row_count'] == 1
     assert isinstance(payload['schema'], list)
     assert isinstance(payload['warnings'], list)
@@ -337,6 +455,47 @@ def test_historical_trades_endpoint_supports_aligned_mode(
     assert captured_kwargs['source'] == source_name
 
 
+def test_historical_etf_endpoint_supports_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_etf_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'source_id': ['etf_ishares_ibit_daily'],
+                'metric_name': ['btc_units'],
+                'metric_value_float': [10.0],
+                'valid_from_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'valid_to_utc_exclusive': [datetime(2024, 1, 2, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_etf_daily_metrics_data', _fake_etf_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_etf_daily_quality_warnings',
+        lambda *_: [],
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'mode': 'aligned_1s'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'aligned_1s'
+    assert payload['source'] == 'etf_daily_metrics'
+    assert captured_kwargs['mode'] == 'aligned_1s'
+
+
 def test_historical_trades_endpoint_passes_fields_and_filters(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -369,6 +528,50 @@ def test_historical_trades_endpoint_passes_fields_and_filters(
     assert captured_kwargs['fields'] == ['trade_id', 'price']
     assert captured_kwargs['filters'] == [
         {'field': 'price', 'op': 'gte', 'value': 41000}
+    ]
+
+
+def test_historical_etf_endpoint_passes_fields_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_etf_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'source_id': ['etf_ishares_ibit_daily'],
+                'metric_name': ['btc_units'],
+                'metric_value_float': [10.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_etf_daily_metrics_data', _fake_etf_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_etf_daily_quality_warnings',
+        lambda *_: [],
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={
+                'fields': ['source_id', 'metric_name'],
+                'filters': [
+                    {'field': 'metric_name', 'op': 'eq', 'value': 'btc_units'},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_kwargs['fields'] == ['source_id', 'metric_name']
+    assert captured_kwargs['filters'] == [
+        {'field': 'metric_name', 'op': 'eq', 'value': 'btc_units'}
     ]
 
 
@@ -413,6 +616,46 @@ def test_historical_endpoint_strict_warning_failure(
             '/v1/historical/bybit/spot/trades',
             headers={'X-API-Key': 'test-internal-key'},
             json={'n_latest_rows': 10, 'strict': True},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
+
+
+def test_historical_etf_endpoint_strict_warning_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_etf_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': ['etf_ishares_ibit_daily'],
+                'metric_name': ['btc_units'],
+                'metric_value_float': [10.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_etf_daily_metrics_data', _fake_etf_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_etf_daily_quality_warnings',
+        lambda *_: [
+            main_module.RawQueryWarning(
+                code='ETF_DAILY_STALE_RECORDS',
+                message='stale',
+            )
+        ],
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'strict': True},
         )
 
     assert response.status_code == 409
@@ -507,6 +750,41 @@ def test_historical_endpoint_returns_404_for_empty_result(
             '/v1/historical/binance/spot/klines',
             headers={'X-API-Key': 'test-internal-key'},
             json={'start_date': '2024-01-01', 'end_date': '2024-01-01', 'kline_size': 60},
+        )
+
+    assert response.status_code == 404
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_NO_DATA'
+
+
+def test_historical_etf_endpoint_returns_404_for_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _empty_etf_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': [],
+                'metric_name': [],
+                'metric_value_float': [],
+                'observed_at_utc': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_etf_daily_metrics_data', _empty_etf_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_etf_daily_quality_warnings',
+        lambda *_: [],
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
         )
 
     assert response.status_code == 404

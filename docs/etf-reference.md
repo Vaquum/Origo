@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S4, S5, S16 (API v0.1.10)
+- Last updated: 2026-03-11
+- Slice/version reference: S4, S5, S16, S27 (API v0.1.18)
 
 ## Purpose and scope
 - User-facing reference for ETF data in Origo query/export surfaces.
@@ -11,11 +11,16 @@
 
 ## Inputs and outputs with contract shape
 - Query endpoint: `POST /v1/raw/query`
+- Historical endpoint: `POST /v1/historical/etf/daily_metrics`
 - Source key: `etf_daily_metrics`
-- Request shape:
+- Raw query request shape:
   - `mode`: `native | aligned_1s`
   - `sources`: must include `["etf_daily_metrics"]`
   - one window selector: `time_range | n_rows | n_random`
+  - optional `fields`, `filters`, `strict`
+- Historical request shape:
+  - `mode`: `native | aligned_1s`
+  - one historical selector mode: `start_date/end_date | n_latest_rows | n_random_rows` (or no selector for full history)
   - optional `fields`, `filters`, `strict`
 - Response shape:
   - `mode`, `source`, `sources`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
@@ -55,6 +60,9 @@
   - `ETF_DAILY_STALE_RECORDS`
   - `ETF_DAILY_MISSING_RECORDS`
   - `ETF_DAILY_INCOMPLETE_RECORDS`
+- Historical window warning codes:
+  - `WINDOW_LATEST_ROWS_MUTABLE`
+  - `WINDOW_RANDOM_SAMPLE`
 - `strict=true` escalates warnings to `409` (`STRICT_MODE_WARNING_FAILURE`).
 - Common errors:
   - `404` no data for window
@@ -82,3 +90,7 @@
   - `{ "mode":"native", "sources":["etf_daily_metrics"], "time_range":["2026-03-08T00:00:00Z","2026-03-10T00:00:00Z"], "fields":["metric_id","source_id","metric_name","metric_value_float","observed_at_utc"], "strict":false }`
 - Aligned ETF query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "time_range":["2026-03-08T00:00:00Z","2026-03-10T00:00:00Z"], "fields":["aligned_at_utc","source_id","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "strict":false }`
+- Native ETF historical query:
+  - `{ "mode":"native", "start_date":"2024-01-01", "end_date":"2024-01-02", "fields":["source_id","metric_name","metric_value_float","observed_at_utc"], "strict":false }`
+- Aligned ETF historical query:
+  - `{ "mode":"aligned_1s", "start_date":"2024-01-01", "end_date":"2024-01-02", "fields":["aligned_at_utc","source_id","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "strict":false }`

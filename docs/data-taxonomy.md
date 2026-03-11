@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-11
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25 (platform v0.1.16)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26 (platform v0.1.17)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -28,6 +28,12 @@
   - `n_latest_rows`
   - `n_random_rows`
   - no selector means full available history
+- Historical spot-trades routes support both `mode=native` and `mode=aligned_1s` for:
+  - `spot_trades`
+  - `okx_spot_trades`
+  - `bybit_spot_trades`
+- Historical spot-klines routes support both `mode=native` and `mode=aligned_1s`.
+- Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Query source keys:

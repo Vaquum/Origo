@@ -1,6 +1,21 @@
 # Changelog
 
 ## 2026-03-11
+- Completed Slice 26 historical exchange spot parity:
+  - enabled historical `mode=aligned_1s` execution for exchange trade datasets:
+    - `spot_trades`
+    - `okx_spot_trades`
+    - `bybit_spot_trades`
+  - enabled historical `mode=aligned_1s` execution for exchange spot-kline routes with deterministic aligned OHLCV aggregation semantics
+  - preserved explicit historical deferral for `spot_agg_trades` and `futures_trades`
+  - added historical contract coverage for exchange trade `aligned_1s` mode across HTTP + Python surfaces
+  - added replay determinism coverage for exchange trade historical paths in both `native` and `aligned_1s`
+- Added Slice 26 docs and artifacts:
+  - `docs/Developer/s26-historical-exchange-trades-parity.md`
+  - updates to `docs/historical-spot-reference.md`, `docs/historical-contract-reference.md`, `docs/data-taxonomy.md`, `docs/Developer/s22-s24-historical-spot-api-contract.md`, and `docs/Developer/s25-historical-contract-normalization.md`
+  - `spec/slices/slice-26-historical-exchange-trades-parity/*`
+- Updated version to `Origo API v0.1.17`.
+
 - Completed Slice 25 historical contract normalization:
   - normalized shared historical contracts across HTTP + Python with `mode`, `start_date`, `end_date`, `n_latest_rows`, `n_random_rows`, `fields`, `filters`, `strict`
   - implemented optional selector semantics for both raw query and historical paths (`no selector -> full available history`)

@@ -367,7 +367,7 @@ Every slice must pass:
 23. Slice 23: Historical OKX spot HTTP operationalization with Binance-cohesive interface/schema.
 24. Slice 24: Historical Bybit spot HTTP operationalization plus old-system endpoint cutover runbook.
 25. Slice 25: Historical contract normalization (`native` uniformity + shared parameter naming + unbounded default-window semantics).
-26. Slice 26: Historical exchange spot-trades completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` parity.
+26. Slice 26: Historical exchange spot route completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` parity.
 27. Slice 27: Historical ETF operationalization (`etf_daily_metrics` in `native` + `aligned_1s` for Python + HTTP).
 28. Slice 28: Historical FRED operationalization (`fred_series_metrics` in `native` + `aligned_1s` for Python + HTTP).
 29. Slice 29: Bitcoin aligned completion for `bitcoin_block_headers`, `bitcoin_block_transactions`, and `bitcoin_mempool_state`.
@@ -560,7 +560,7 @@ Every slice must pass:
 3. Window selection target behavior is optional: no selector means full available history (`earliest -> now`).
 4. Existing six exchange routes are migrated to the same contract semantics with no silent aliases.
 5. Slice closeout requires contract parity proofs between historical Python and HTTP surfaces.
-6. Historical route execution for `mode=aligned_1s` remains fail-loud and is deferred to Slice 26 capability delivery.
+6. Historical route execution for `mode=aligned_1s` was deferred in S25 and is delivered for exchange historical spot routes in Slice 26.
 
 ## Slice 26 (Historical Exchange Dataset Completion) Locked Details
 1. Scope includes exchange trade datasets:
@@ -578,7 +578,7 @@ Every slice must pass:
       2. `/v1/historical/okx/spot/trades`
       3. `/v1/historical/bybit/spot/trades`
 4. Each in-scope dataset must support both `native` and `aligned_1s` in historical interfaces.
-5. Existing spot kline routes remain convenience routes and must keep request-contract cohesion with historical core where applicable.
+5. Existing spot kline routes remain convenience routes and execute both `native` and `aligned_1s` while keeping request-contract cohesion with historical core.
 6. Slice closeout requires acceptance + replay determinism proofs for all three in-scope datasets in both modes.
 
 ## Slice 27 (Historical ETF Operationalization) Locked Details

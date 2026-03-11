@@ -55,7 +55,7 @@ from .schemas import (
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.16')
+app = FastAPI(title='Origo Raw API', version='0.1.17')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',

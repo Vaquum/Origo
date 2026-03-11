@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-11
-- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S25 (API v0.1.16)
+- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S25, S26 (API v0.1.17)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.

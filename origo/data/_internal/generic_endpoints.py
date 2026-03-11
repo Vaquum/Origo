@@ -690,9 +690,9 @@ def query_spot_trades_data(
     auth_token: str | None = None,
 ) -> pl.DataFrame:
     _require_historical_source(source)
-    if mode != 'native':
+    if mode not in {'native', 'aligned_1s'}:
         raise ValueError(
-            f'Unsupported historical mode={mode!r} for source={source}; only native is available in this slice'
+            f'Unsupported historical mode={mode!r} for source={source}; expected native or aligned_1s'
         )
     table_name = _HISTORICAL_SOURCE_TO_TABLE[source]
     dataset = HISTORICAL_SOURCE_TO_DATASET[source]
@@ -705,50 +705,62 @@ def query_spot_trades_data(
         auth_token=auth_token,
     )
 
-    if source == 'binance':
-        raw_frame = query_binance_native_data(
-            dataset='spot_trades',
-            select_columns=(
-                'trade_id',
-                'timestamp',
-                'price',
-                'quantity',
-                'is_buyer_maker',
-            ),
+    if mode == 'aligned_1s':
+        aligned_frame = query_aligned_data(
+            dataset=cast(AlignedDataset, dataset),
             window=window,
-            include_datetime=include_datetime_col,
+            selected_columns=None,
             datetime_iso_output=False,
             auth_token=auth_token,
             show_summary=show_summary,
         )
-    elif source == 'okx':
-        raw_frame = query_okx_native_data(
-            dataset='okx_spot_trades',
-            select_columns=('trade_id', 'timestamp', 'price', 'size', 'side'),
-            window=window,
-            include_datetime=include_datetime_col,
-            datetime_iso_output=False,
-            auth_token=auth_token,
-            show_summary=show_summary,
-        )
+        normalized = _apply_filters(frame=aligned_frame, filters=filters)
+        normalized = _apply_fields(frame=normalized, fields=fields)
     else:
-        raw_frame = query_bybit_native_data(
-            dataset='bybit_spot_trades',
-            select_columns=('trade_id', 'timestamp', 'price', 'size', 'side'),
-            window=window,
-            include_datetime=include_datetime_col,
-            datetime_iso_output=False,
-            auth_token=auth_token,
-            show_summary=show_summary,
-        )
+        if source == 'binance':
+            raw_frame = query_binance_native_data(
+                dataset='spot_trades',
+                select_columns=(
+                    'trade_id',
+                    'timestamp',
+                    'price',
+                    'quantity',
+                    'is_buyer_maker',
+                ),
+                window=window,
+                include_datetime=include_datetime_col,
+                datetime_iso_output=False,
+                auth_token=auth_token,
+                show_summary=show_summary,
+            )
+        elif source == 'okx':
+            raw_frame = query_okx_native_data(
+                dataset='okx_spot_trades',
+                select_columns=('trade_id', 'timestamp', 'price', 'size', 'side'),
+                window=window,
+                include_datetime=include_datetime_col,
+                datetime_iso_output=False,
+                auth_token=auth_token,
+                show_summary=show_summary,
+            )
+        else:
+            raw_frame = query_bybit_native_data(
+                dataset='bybit_spot_trades',
+                select_columns=('trade_id', 'timestamp', 'price', 'size', 'side'),
+                window=window,
+                include_datetime=include_datetime_col,
+                datetime_iso_output=False,
+                auth_token=auth_token,
+                show_summary=show_summary,
+            )
 
-    normalized = _normalize_spot_trades_frame(
-        source=source,
-        frame=raw_frame,
-        include_datetime_col=include_datetime_col,
-    )
-    normalized = _apply_filters(frame=normalized, filters=filters)
-    normalized = _apply_fields(frame=normalized, fields=fields)
+        normalized = _normalize_spot_trades_frame(
+            source=source,
+            frame=raw_frame,
+            include_datetime_col=include_datetime_col,
+        )
+        normalized = _apply_filters(frame=normalized, filters=filters)
+        normalized = _apply_fields(frame=normalized, fields=fields)
     if show_summary:
         logger.info(
             'historical_spot_trades source=%s dataset=%s rows=%d cols=%d',
@@ -825,15 +837,14 @@ def query_spot_klines_data(
     auth_token: str | None = None,
 ) -> pl.DataFrame:
     _require_historical_source(source)
-    if mode != 'native':
+    if mode not in {'native', 'aligned_1s'}:
         raise ValueError(
-            f'Unsupported historical mode={mode!r} for source={source}; only native is available in this slice'
+            f'Unsupported historical mode={mode!r} for source={source}; expected native or aligned_1s'
         )
     if kline_size <= 0:
         raise ValueError(f'kline_size must be > 0, got {kline_size}')
 
     table_name = _HISTORICAL_SOURCE_TO_TABLE[source]
-    id_column = _HISTORICAL_SOURCE_TO_ID_COLUMN[source]
     window = _resolve_historical_window(
         table_name=table_name,
         start_date=start_date,
@@ -843,6 +854,83 @@ def query_spot_klines_data(
         auth_token=auth_token,
     )
 
+    if mode == 'aligned_1s':
+        dataset = HISTORICAL_SOURCE_TO_DATASET[source]
+        aligned_frame = query_aligned_data(
+            dataset=cast(AlignedDataset, dataset),
+            window=window,
+            selected_columns=(
+                'aligned_at_utc',
+                'open_price',
+                'high_price',
+                'low_price',
+                'close_price',
+                'quantity_sum',
+                'quote_volume_sum',
+                'trade_count',
+            ),
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+        if aligned_frame.is_empty():
+            polars_df = pl.DataFrame(
+                schema={
+                    'datetime': pl.Datetime('ms', time_zone='UTC'),
+                    'open': pl.Float64,
+                    'high': pl.Float64,
+                    'low': pl.Float64,
+                    'close': pl.Float64,
+                    'volume': pl.Float64,
+                    'no_of_trades': pl.Int64,
+                    'liquidity_sum': pl.Float64,
+                }
+            )
+        else:
+            aligned_sorted = aligned_frame.sort('aligned_at_utc')
+            polars_df = (
+                aligned_sorted.group_by_dynamic(
+                    index_column='aligned_at_utc',
+                    every=f'{kline_size}s',
+                    period=f'{kline_size}s',
+                    closed='left',
+                    label='left',
+                )
+                .agg(
+                    [
+                        pl.col('open_price').first().alias('open'),
+                        pl.col('high_price').max().alias('high'),
+                        pl.col('low_price').min().alias('low'),
+                        pl.col('close_price').last().alias('close'),
+                        pl.col('quantity_sum').sum().alias('volume'),
+                        pl.col('trade_count').sum().alias('no_of_trades'),
+                        pl.col('quote_volume_sum').sum().alias('liquidity_sum'),
+                    ]
+                )
+                .rename({'aligned_at_utc': 'datetime'})
+                .with_columns(
+                    [
+                        pl.col('datetime').cast(pl.Datetime('ms', time_zone='UTC')),
+                        pl.col('volume').round(9),
+                        pl.col('liquidity_sum').round(1),
+                    ]
+                )
+                .sort('datetime')
+            )
+        polars_df = _apply_filters(frame=polars_df, filters=filters)
+        polars_df = _apply_fields(frame=polars_df, fields=fields)
+        if show_summary:
+            logger.info(
+                'historical_spot_klines source=%s dataset=%s mode=%s rows=%d cols=%d',
+                source,
+                dataset,
+                mode,
+                polars_df.shape[0],
+                polars_df.shape[1],
+            )
+        return polars_df
+
+    id_column = _HISTORICAL_SOURCE_TO_ID_COLUMN[source]
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
     client = get_client(
         host=settings.host,

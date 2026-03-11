@@ -16,11 +16,12 @@ Klines:
 - `POST /v1/historical/bybit/spot/klines`
 
 All endpoints require `X-API-Key`.
+Historical scope in this tranche explicitly excludes `spot_agg_trades` and `futures_trades`.
 
 ## Request contracts
 
 Trades request:
-- `mode: native | aligned_1s` (default `native`; `aligned_1s` is contract-reserved and currently rejected fail-loud on this route family)
+- `mode: native | aligned_1s` (default `native`)
 - `start_date: YYYY-MM-DD | null`
 - `end_date: YYYY-MM-DD | null`
 - `n_latest_rows: int | null`
@@ -31,7 +32,7 @@ Trades request:
 - `strict: bool` (default `false`)
 
 Klines request:
-- `mode: native | aligned_1s` (default `native`; `aligned_1s` is contract-reserved and currently rejected fail-loud on this route family)
+- `mode: native | aligned_1s` (default `native`)
 - `start_date: YYYY-MM-DD | null`
 - `end_date: YYYY-MM-DD | null`
 - `n_latest_rows: int | null`
@@ -69,20 +70,37 @@ Response fields:
 ## Schema taxonomy
 
 Trades rows (all exchanges):
-- `trade_id`
-- `timestamp`
-- `price`
-- `quantity`
-- `is_buyer_maker`
-- `datetime` (optional if `include_datetime_col=false`)
+- `mode=native`:
+  - `trade_id`
+  - `timestamp`
+  - `price`
+  - `quantity`
+  - `is_buyer_maker`
+  - `datetime` (optional if `include_datetime_col=false`)
+- `mode=aligned_1s`:
+  - `aligned_at_utc`
+  - `open_price`
+  - `high_price`
+  - `low_price`
+  - `close_price`
+  - `quantity_sum`
+  - `quote_volume_sum`
+  - `trade_count`
 
 Klines rows (all exchanges):
-- `datetime`
-- `open`, `high`, `low`, `close`
-- `mean`, `std`, `median`, `iqr`
-- `volume`, `maker_ratio`, `no_of_trades`
-- `open_liquidity`, `high_liquidity`, `low_liquidity`, `close_liquidity`
-- `liquidity_sum`, `maker_volume`, `maker_liquidity`
+- `mode=native`:
+  - `datetime`
+  - `open`, `high`, `low`, `close`
+  - `mean`, `std`, `median`, `iqr`
+  - `volume`, `maker_ratio`, `no_of_trades`
+  - `open_liquidity`, `high_liquidity`, `low_liquidity`, `close_liquidity`
+  - `liquidity_sum`, `maker_volume`, `maker_liquidity`
+- `mode=aligned_1s`:
+  - `datetime`
+  - `open`, `high`, `low`, `close`
+  - `volume`
+  - `no_of_trades`
+  - `liquidity_sum`
 
 Mapping for OKX/Bybit:
 - source `side=buy` => `is_buyer_maker=0`
@@ -96,5 +114,9 @@ Mapping for OKX/Bybit:
 - `503`: runtime/backend failure
 
 Current mode status on historical spot routes:
-- `native`: supported
-- `aligned_1s`: rejected with `409` (`HISTORICAL_CONTRACT_ERROR`) until Slice 26 enables aligned historical parity
+- Trades routes:
+  - `native`: supported
+  - `aligned_1s`: supported
+- Klines routes:
+  - `native`: supported
+  - `aligned_1s`: supported

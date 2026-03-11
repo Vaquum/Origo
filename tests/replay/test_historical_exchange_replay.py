@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import polars as pl
+
+from origo.data._internal import generic_endpoints as historical_endpoints
+
+
+def _native_binance_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'trade_id': [1],
+            'timestamp': [1704067200000],
+            'price': [42000.0],
+            'quantity': [0.1],
+            'is_buyer_maker': [0],
+            'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+        }
+    )
+
+
+def _native_side_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'trade_id': [1],
+            'timestamp': [1704067200000],
+            'price': [42000.0],
+            'size': [0.1],
+            'side': ['buy'],
+            'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+        }
+    )
+
+
+def _aligned_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            'open_price': [42000.0],
+            'high_price': [42000.0],
+            'low_price': [42000.0],
+            'close_price': [42000.0],
+            'quantity_sum': [0.1],
+            'quote_volume_sum': [4200.0],
+            'trade_count': [1],
+        }
+    )
+
+
+def _aligned_kline_input_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'aligned_at_utc': [
+                datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
+                datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
+            ],
+            'open_price': [42000.0, 42001.0],
+            'high_price': [42002.0, 42003.0],
+            'low_price': [41999.0, 42000.0],
+            'close_price': [42001.0, 42002.0],
+            'quantity_sum': [0.1, 0.2],
+            'quote_volume_sum': [4200.0, 8400.0],
+            'trade_count': [1, 2],
+        }
+    )
+
+
+def test_historical_spot_trades_replay_is_deterministic_for_native_and_aligned(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_binance_native_data',
+        lambda **_: _native_binance_frame(),
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_okx_native_data',
+        lambda **_: _native_side_frame(),
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_bybit_native_data',
+        lambda **_: _native_side_frame(),
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_aligned_data',
+        lambda **_: _aligned_frame(),
+    )
+
+    for source in ('binance', 'okx', 'bybit'):
+        native_run_1 = historical_endpoints.query_spot_trades_data(
+            source=source,
+            mode='native',
+            n_latest_rows=1,
+        )
+        native_run_2 = historical_endpoints.query_spot_trades_data(
+            source=source,
+            mode='native',
+            n_latest_rows=1,
+        )
+        assert native_run_1.to_dict(as_series=False) == native_run_2.to_dict(
+            as_series=False
+        )
+
+        aligned_run_1 = historical_endpoints.query_spot_trades_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=1,
+        )
+        aligned_run_2 = historical_endpoints.query_spot_trades_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=1,
+        )
+        assert aligned_run_1.to_dict(as_series=False) == aligned_run_2.to_dict(
+            as_series=False
+        )
+
+
+def test_historical_spot_trades_aligned_filters_apply_before_projection(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_aligned_data',
+        lambda **_: _aligned_frame(),
+    )
+    filtered = historical_endpoints.query_spot_trades_data(
+        source='binance',
+        mode='aligned_1s',
+        n_latest_rows=1,
+        fields=['open_price'],
+        filters=[{'field': 'close_price', 'op': 'gte', 'value': 42000.0}],
+    )
+    assert filtered.columns == ['open_price']
+    assert filtered.height == 1
+
+
+def test_historical_spot_klines_aligned_replay_is_deterministic(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_aligned_data',
+        lambda **_: _aligned_kline_input_frame(),
+    )
+
+    for source in ('binance', 'okx', 'bybit'):
+        run_1 = historical_endpoints.query_spot_klines_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=2,
+            kline_size=2,
+        )
+        run_2 = historical_endpoints.query_spot_klines_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=2,
+            kline_size=2,
+        )
+        assert run_1.to_dict(as_series=False) == run_2.to_dict(as_series=False)

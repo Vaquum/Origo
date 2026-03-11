@@ -46,7 +46,7 @@
 - Multiple selectors in one request fail with contract error (`409`).
 - Invalid date formats/values fail with contract error (`409`).
 - Unknown projection/filter fields fail loudly with contract error (`409`).
-- Historical `mode=aligned_1s` requests fail loudly in this slice with contract error (`409`) until S26 execution support lands.
+- Historical `mode=aligned_1s` requests were fail-loud in S25; execution support is added for exchange spot-trades in S26.
 - `strict=true` continues to escalate warning-bearing mutable/sample windows.
 
 ## Determinism/replay notes

@@ -119,6 +119,41 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
         assert not hasattr(HistoricalData, method_name)
 
 
+def test_historical_data_trade_methods_accept_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.data import historical_data as historical_data_module
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_query_spot_trades_data(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'open_price': [42000.0],
+                'high_price': [42000.0],
+                'low_price': [42000.0],
+                'close_price': [42000.0],
+                'quantity_sum': [0.1],
+                'quote_volume_sum': [4200.0],
+                'trade_count': [1],
+            }
+        )
+
+    monkeypatch.setattr(
+        historical_data_module,
+        'query_spot_trades_data',
+        _fake_query_spot_trades_data,
+    )
+    historical = HistoricalData()
+    historical.get_binance_spot_trades(mode='aligned_1s')
+
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['source'] == 'binance'
+    assert historical.data.height == 1
+
+
 def test_historical_request_rejects_multiple_window_modes() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
@@ -165,10 +200,23 @@ def test_historical_routes_are_registered(
     assert '/v1/historical/okx/spot/klines' in paths
     assert '/v1/historical/bybit/spot/trades' in paths
     assert '/v1/historical/bybit/spot/klines' in paths
+    assert '/v1/historical/binance/spot/agg_trades' not in paths
+    assert '/v1/historical/binance/futures/trades' not in paths
 
 
+@pytest.mark.parametrize(
+    ('source_path', 'dataset_name'),
+    [
+        ('/v1/historical/binance/spot/trades', 'spot_trades'),
+        ('/v1/historical/okx/spot/trades', 'okx_spot_trades'),
+        ('/v1/historical/bybit/spot/trades', 'bybit_spot_trades'),
+    ],
+)
 def test_historical_trades_endpoint_returns_raw_envelope_shape(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_path: str,
+    dataset_name: str,
 ) -> None:
     main_module = _load_main_module(monkeypatch, tmp_path)
 
@@ -188,7 +236,7 @@ def test_historical_trades_endpoint_returns_raw_envelope_shape(
 
     with TestClient(main_module.app) as client:
         response = client.post(
-            '/v1/historical/binance/spot/trades',
+            source_path,
             headers={'X-API-Key': 'test-internal-key'},
             json={},
         )
@@ -196,12 +244,62 @@ def test_historical_trades_endpoint_returns_raw_envelope_shape(
     assert response.status_code == 200
     payload = response.json()
     assert payload['mode'] == 'native'
-    assert payload['source'] == 'spot_trades'
-    assert payload['sources'] == ['spot_trades']
+    assert payload['source'] == dataset_name
+    assert payload['sources'] == [dataset_name]
     assert payload['row_count'] == 1
     assert isinstance(payload['schema'], list)
     assert isinstance(payload['warnings'], list)
     assert isinstance(payload['rows'], list)
+
+
+@pytest.mark.parametrize(
+    ('source_path', 'source_name', 'dataset_name'),
+    [
+        ('/v1/historical/binance/spot/trades', 'binance', 'spot_trades'),
+        ('/v1/historical/okx/spot/trades', 'okx', 'okx_spot_trades'),
+        ('/v1/historical/bybit/spot/trades', 'bybit', 'bybit_spot_trades'),
+    ],
+)
+def test_historical_trades_endpoint_supports_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_path: str,
+    source_name: str,
+    dataset_name: str,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_trades_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'open_price': [42000.0],
+                'high_price': [42000.0],
+                'low_price': [42000.0],
+                'close_price': [42000.0],
+                'quantity_sum': [0.1],
+                'quote_volume_sum': [4200.0],
+                'trade_count': [1],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_trades_data', _fake_trades_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            source_path,
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'mode': 'aligned_1s'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'aligned_1s'
+    assert payload['source'] == dataset_name
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['source'] == source_name
 
 
 def test_historical_trades_endpoint_passes_fields_and_filters(
@@ -287,14 +385,14 @@ def test_historical_endpoint_strict_warning_failure(
     assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
 
 
-def test_historical_endpoint_rejects_unsupported_mode(
+def test_historical_klines_endpoint_rejects_unsupported_aligned_mode(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     main_module = _load_main_module(monkeypatch, tmp_path)
 
     with TestClient(main_module.app) as client:
         response = client.post(
-            '/v1/historical/bybit/spot/trades',
+            '/v1/historical/bybit/spot/klines',
             headers={'X-API-Key': 'test-internal-key'},
             json={'mode': 'aligned_1s'},
         )

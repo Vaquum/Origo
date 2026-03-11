@@ -1,0 +1,148 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum source offset/trade id in proof output",
+    "offset_max": "maximum source offset/trade id in proof output",
+    "volume_sum": "sum(quantity) for trades",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc_exclusive": "2024-01-02T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "binance",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured",
+      "csv_sha256": "retrospective-not-captured"
+    },
+    {
+      "source": "okx",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured",
+      "csv_sha256": "retrospective-not-captured"
+    },
+    {
+      "source": "bybit",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured",
+      "csv_sha256": "retrospective-not-captured"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "d12ff68a3bb279eef6a1ecb92dcb491751c11e8cf189017ff61673f4651e9741"
+    },
+    {
+      "stream": "spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "435de630c832857a17f4939f1efd4de3102198dea5cdfc9414cbf2c3037aaffd"
+    },
+    {
+      "stream": "okx_spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "7b64ca001622d655d85c1e8eac76179f8b98c366f7737ba1586dff29105b7924"
+    },
+    {
+      "stream": "okx_spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "555d800657fb43056ad21e2bbcb4cb27a4a3c5c5aadf87e603a92a563992b71d"
+    },
+    {
+      "stream": "bybit_spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "8a3e61a4ed7f860f4427c96cc8e8a3ccca506e6a9a3c95fdde01df0cbd0a2b38"
+    },
+    {
+      "stream": "bybit_spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "ac861eb6c75460d1670e13ffe1f1639863fbbd0a7277ae0cf641f9504d64ad40"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "d12ff68a3bb279eef6a1ecb92dcb491751c11e8cf189017ff61673f4651e9741"
+    },
+    {
+      "stream": "spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "435de630c832857a17f4939f1efd4de3102198dea5cdfc9414cbf2c3037aaffd"
+    },
+    {
+      "stream": "okx_spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "7b64ca001622d655d85c1e8eac76179f8b98c366f7737ba1586dff29105b7924"
+    },
+    {
+      "stream": "okx_spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "555d800657fb43056ad21e2bbcb4cb27a4a3c5c5aadf87e603a92a563992b71d"
+    },
+    {
+      "stream": "bybit_spot_trades",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "8a3e61a4ed7f860f4427c96cc8e8a3ccca506e6a9a3c95fdde01df0cbd0a2b38"
+    },
+    {
+      "stream": "bybit_spot_trades",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "ac861eb6c75460d1670e13ffe1f1639863fbbd0a7277ae0cf641f9504d64ad40"
+    }
+  ]
+}

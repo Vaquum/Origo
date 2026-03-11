@@ -1600,21 +1600,21 @@ Constraints: docs + migration mapping only.
 ## Slice 26: Historical Exchange Spot-Trades Completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
 
 ### Capability
-- [ ] `S26-C1` Explicitly drop `spot_agg_trades` and `futures_trades` from historical Python/HTTP scope for this tranche and lock them as deferred.
-- [ ] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
-- [ ] `S26-C3` Keep exchange method signatures uniform across in-scope exchange trade datasets and both modes.
-- [ ] `S26-C4` Keep existing spot-kline convenience routes operational while aligning shared selector/filter/strict semantics with historical core.
+- [x] `S26-C1` Explicitly drop `spot_agg_trades` and `futures_trades` from historical Python/HTTP scope for this tranche and lock them as deferred.
+- [x] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+- [x] `S26-C3` Keep exchange method signatures uniform across in-scope exchange trade datasets and both modes.
+- [x] `S26-C4` Keep existing spot-kline convenience routes operational while aligning shared selector/filter/strict semantics with historical core.
 
 ### Proof
-- [ ] `S26-P1` Execute fixed-window acceptance runs for all three in-scope exchange trade datasets in `native` and `aligned_1s`.
-- [ ] `S26-P2` Execute replay determinism proofs for all three in-scope exchange trade datasets in both modes.
-- [ ] `S26-P3` Execute schema/behavior cohesion proofs across exchange historical Python and HTTP interfaces.
+- [x] `S26-P1` Execute fixed-window acceptance runs for all three in-scope exchange trade datasets in `native` and `aligned_1s`.
+- [x] `S26-P2` Execute replay determinism proofs for all three in-scope exchange trade datasets in both modes.
+- [x] `S26-P3` Execute schema/behavior cohesion proofs across exchange historical Python and HTTP interfaces.
 
 ### Guardrails
-- [ ] `S26-G1` Apply rights/auth/strict-warning/error-taxonomy guardrails uniformly to all exchange historical trade routes.
-- [ ] `S26-G2` Add guardrail tests for full-history default-window behavior on exchange historical routes.
-- [ ] `S26-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S26-G4` User docs closeout for slice (`docs/`, full exchange historical taxonomy updates for both modes).
+- [x] `S26-G1` Apply rights/auth/strict-warning/error-taxonomy guardrails uniformly to all exchange historical trade routes.
+- [x] `S26-G2` Add guardrail tests for full-history default-window behavior on exchange historical routes.
+- [x] `S26-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S26-G4` User docs closeout for slice (`docs/`, full exchange historical taxonomy updates for both modes).
 
 ## Slice 27: Historical ETF Operationalization (`etf_daily_metrics` in `native` + `aligned_1s`)
 

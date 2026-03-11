@@ -2,7 +2,7 @@
 
 - Owner: Origo API
 - Last updated: 2026-03-11
-- Slice references: S22, S23, S24, S25
+- Slice references: S22, S23, S24, S25, S26
 
 ## Purpose and scope
 Operational historical spot access for Binance, OKX, and Bybit through six explicit Python methods and six explicit HTTP endpoints. S25 normalizes parameter naming and window semantics across this surface.
@@ -58,8 +58,8 @@ Invalid dates fail loudly with contract error.
 
 Mode semantics:
 - request contract accepts `mode=native|aligned_1s`.
-- current historical route execution supports `native` only.
-- `aligned_1s` requests fail loudly with `409` and `HISTORICAL_CONTRACT_ERROR` until S26.
+- trades routes execute both `native` and `aligned_1s` as of S26.
+- klines routes remain `native` only in this tranche and fail loudly for `aligned_1s`.
 
 ## Data schema and mapping
 Trades schema (all exchanges):

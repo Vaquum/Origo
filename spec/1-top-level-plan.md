@@ -560,7 +560,7 @@ Every slice must pass:
 3. Window selection target behavior is optional: no selector means full available history (`earliest -> now`).
 4. Existing six exchange routes are migrated to the same contract semantics with no silent aliases.
 5. Slice closeout requires contract parity proofs between historical Python and HTTP surfaces.
-6. Historical route execution for `mode=aligned_1s` remains fail-loud and is deferred to Slice 26 capability delivery.
+6. Historical route execution for `mode=aligned_1s` was deferred in S25 and is delivered for exchange trade datasets in Slice 26.
 
 ## Slice 26 (Historical Exchange Dataset Completion) Locked Details
 1. Scope includes exchange trade datasets:

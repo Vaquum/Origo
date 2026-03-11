@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-11
-- Slice/version reference: S25 (API v0.1.16)
+- Slice/version reference: S25, S26 (API v0.1.17)
 
 ## Purpose and scope
 - User reference for shared historical request behavior on Origo historical dataset routes.
@@ -51,5 +51,9 @@ Route-specific additions:
 
 ## Current mode availability
 - Historical route contracts accept `mode=native|aligned_1s`.
-- Historical route execution in current slice supports `native` only.
-- `aligned_1s` requests fail loudly with `409` until S26 completes aligned historical parity.
+- Historical trades routes execute both `native` and `aligned_1s` for:
+  - `spot_trades`
+  - `okx_spot_trades`
+  - `bybit_spot_trades`
+- Historical klines routes execute `native` only in current slice.
+- Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.

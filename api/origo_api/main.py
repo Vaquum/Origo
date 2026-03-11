@@ -16,6 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
 from origo.data._internal.generic_endpoints import (
+    HISTORICAL_SOURCE_TO_DATASET,
     query_aligned_wide_rows_envelope,
     query_native_wide_rows_envelope,
     query_spot_klines_data,
@@ -69,11 +70,6 @@ _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     'bitcoin_circulating_supply',
     }
 )
-_HISTORICAL_SOURCE_TO_DATASET: dict[str, RawQueryDataset] = {
-    'binance': 'spot_trades',
-    'okx': 'okx_spot_trades',
-    'bybit': 'bybit_spot_trades',
-}
 
 ORIGO_INTERNAL_API_KEY = os.environ.get('ORIGO_INTERNAL_API_KEY')
 if ORIGO_INTERNAL_API_KEY is None or ORIGO_INTERNAL_API_KEY.strip() == '':
@@ -317,9 +313,9 @@ async def _run_native_query_with_limits(
 
 
 def _historical_dataset_for_source(source: str) -> RawQueryDataset:
-    if source not in _HISTORICAL_SOURCE_TO_DATASET:
+    if source not in HISTORICAL_SOURCE_TO_DATASET:
         raise RuntimeError(f'Unsupported historical source={source}')
-    return _HISTORICAL_SOURCE_TO_DATASET[source]
+    return HISTORICAL_SOURCE_TO_DATASET[source]
 
 
 def _build_historical_envelope(
@@ -645,6 +641,20 @@ async def _handle_historical_spot_trades(
             },
         ) from exc
 
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
     try:
         frame = await _run_native_query_with_limits(
             query_spot_trades_data,
@@ -677,20 +687,6 @@ async def _handle_historical_spot_trades(
             status_code=503,
             detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
         ) from exc
-
-    warnings = _build_historical_warnings(
-        n_latest_rows=request.n_latest_rows,
-        n_random_rows=request.n_random_rows,
-    )
-    if request.strict and warnings:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                'code': 'STRICT_MODE_WARNING_FAILURE',
-                'message': 'Warnings present while strict=true',
-                'warnings': [warning.model_dump() for warning in warnings],
-            },
-        )
 
     if frame.height == 0:
         raise HTTPException(
@@ -742,6 +738,20 @@ async def _handle_historical_spot_klines(
             },
         ) from exc
 
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
     try:
         frame = await _run_native_query_with_limits(
             query_spot_klines_data,
@@ -774,20 +784,6 @@ async def _handle_historical_spot_klines(
             status_code=503,
             detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
         ) from exc
-
-    warnings = _build_historical_warnings(
-        n_latest_rows=request.n_latest_rows,
-        n_random_rows=request.n_random_rows,
-    )
-    if request.strict and warnings:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                'code': 'STRICT_MODE_WARNING_FAILURE',
-                'message': 'Warnings present while strict=true',
-                'warnings': [warning.model_dump() for warning in warnings],
-            },
-        )
 
     if frame.height == 0:
         raise HTTPException(

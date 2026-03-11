@@ -43,7 +43,7 @@ type NativeQueryDataset = (
 )
 type HistoricalSpotSource = str
 
-_HISTORICAL_SOURCE_TO_DATASET: dict[str, NativeQueryDataset] = {
+HISTORICAL_SOURCE_TO_DATASET: dict[str, NativeQueryDataset] = {
     'binance': 'spot_trades',
     'okx': 'okx_spot_trades',
     'bybit': 'bybit_spot_trades',
@@ -93,10 +93,10 @@ def _resolve_window(
 
 
 def _require_historical_source(source: str) -> None:
-    if source not in _HISTORICAL_SOURCE_TO_DATASET:
+    if source not in HISTORICAL_SOURCE_TO_DATASET:
         raise ValueError(
             'source must be one of '
-            f'{sorted(_HISTORICAL_SOURCE_TO_DATASET)}; got source={source!r}'
+            f'{sorted(HISTORICAL_SOURCE_TO_DATASET)}; got source={source!r}'
         )
 
 
@@ -652,7 +652,7 @@ def query_spot_trades_data(
 ) -> pl.DataFrame:
     _require_historical_source(source)
     table_name = _HISTORICAL_SOURCE_TO_TABLE[source]
-    dataset = _HISTORICAL_SOURCE_TO_DATASET[source]
+    dataset = HISTORICAL_SOURCE_TO_DATASET[source]
     window = _resolve_historical_window(
         table_name=table_name,
         start_date=start_date,

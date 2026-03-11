@@ -120,6 +120,11 @@ class RandomRowsWindow:
 
 
 @dataclass(frozen=True)
+class AllRowsWindow:
+    pass
+
+
+@dataclass(frozen=True)
 class TimeRangeWindow:
     start_iso: str
     end_iso: str
@@ -133,7 +138,9 @@ class TimeRangeWindow:
             )
 
 
-type QueryWindow = MonthWindow | LatestRowsWindow | RandomRowsWindow | TimeRangeWindow
+type QueryWindow = (
+    MonthWindow | LatestRowsWindow | RandomRowsWindow | AllRowsWindow | TimeRangeWindow
+)
 
 
 @dataclass(frozen=True)
@@ -181,7 +188,9 @@ def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNati
     if spec.id_column not in projected_columns:
         projected_columns.append(spec.id_column)
 
-    if datetime_requested or isinstance(spec.window, (MonthWindow, LatestRowsWindow)):
+    if datetime_requested or isinstance(
+        spec.window, (MonthWindow, LatestRowsWindow, AllRowsWindow)
+    ):
         if spec.datetime_column not in projected_columns:
             projected_columns.append(spec.datetime_column)
 
@@ -208,6 +217,8 @@ def _compile_native_query(spec: NativeQuerySpec, database: str) -> _CompiledNati
             f'ORDER BY toStartOfDay({spec.datetime_column}) DESC, '
             f'{spec.id_column} DESC LIMIT {spec.window.rows}'
         )
+    elif isinstance(spec.window, AllRowsWindow):
+        tail = f'ORDER BY {spec.datetime_column} ASC, {spec.id_column} ASC'
     else:
         tail = (
             f'ORDER BY sipHash64(tuple({spec.id_column}, {spec.random_seed_column})) '

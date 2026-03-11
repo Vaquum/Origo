@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21 (API v0.1.14)
+- Last updated: 2026-03-11
+- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S25 (API v0.1.16)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.
@@ -25,7 +25,8 @@
   - `filters`: optional list of filter clauses:
     - `{ "field": "<column>", "op": "eq|ne|gt|gte|lt|lte|in|not_in", "value": <any> }`
   - `strict`: boolean (default `false`)
-- Window selection rule: exactly one of `time_range`, `n_rows`, `n_random` must be provided.
+- Window selection rule: at most one of `time_range`, `n_rows`, `n_random` can be provided.
+- If no selector is provided, query window defaults to full available history (`earliest -> now`).
 - Response contract:
   - `mode`, `source`, `sources`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
   - `view_id`, `view_version`
@@ -94,6 +95,7 @@
 
 ## Determinism/replay notes
 - Deterministic ordering is enforced for replayable windows.
+- No-selector native windows are deterministically ordered by source event time and source identity key.
 - Proof artifacts live under:
   - `spec/slices/slice-1-raw-query-native/`
   - `spec/slices/slice-5-raw-query-aligned-1s/`
@@ -131,3 +133,5 @@
   - `{ "mode":"aligned_1s", "sources":["bitcoin_network_hashrate_estimate"], "fields":["aligned_at_utc","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "strict":false }`
 - Aligned latest rows query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "fields":["aligned_at_utc","metric_name","metric_value_float"], "n_rows":100, "strict":false }`
+- Native full-history query (no selector):
+  - `{ "mode":"native", "sources":["spot_trades"], "fields":["trade_id","timestamp","price","quantity"], "strict":false }`

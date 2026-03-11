@@ -2,20 +2,20 @@
 
 - Owner: Origo API
 - Last updated: 2026-03-11
-- Slice references: S22, S23, S24
+- Slice references: S22, S23, S24, S25
 
 ## Purpose and scope
-Operational historical spot access for Binance, OKX, and Bybit through six explicit Python methods and six explicit HTTP endpoints.
+Operational historical spot access for Binance, OKX, and Bybit through six explicit Python methods and six explicit HTTP endpoints. S25 normalizes parameter naming and window semantics across this surface.
 
 ## Python interface contract
 Exactly six methods are supported in `origo/data/historical_data.py`.
 
-- `get_binance_spot_trades(start_date, end_date, n_latest_rows, n_random_rows, include_datetime_col)`
-- `get_okx_spot_trades(start_date, end_date, n_latest_rows, n_random_rows, include_datetime_col)`
-- `get_bybit_spot_trades(start_date, end_date, n_latest_rows, n_random_rows, include_datetime_col)`
-- `get_binance_spot_klines(start_date, end_date, n_latest_rows, n_random_rows, kline_size)`
-- `get_okx_spot_klines(start_date, end_date, n_latest_rows, n_random_rows, kline_size)`
-- `get_bybit_spot_klines(start_date, end_date, n_latest_rows, n_random_rows, kline_size)`
+- `get_binance_spot_trades(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, include_datetime_col)`
+- `get_okx_spot_trades(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, include_datetime_col)`
+- `get_bybit_spot_trades(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, include_datetime_col)`
+- `get_binance_spot_klines(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, kline_size)`
+- `get_okx_spot_klines(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, kline_size)`
+- `get_bybit_spot_klines(mode, start_date, end_date, n_latest_rows, n_random_rows, fields, filters, strict, kline_size)`
 
 Dropped methods are hard-removed:
 - `get_spot_trades`
@@ -42,10 +42,12 @@ Response envelope:
 - rights metadata: `rights_state`, `rights_provisional`
 
 ## Window and date semantics
-Exactly one mode is allowed per request:
+At most one mode is allowed per request:
 - date-window: (`start_date` and/or `end_date`)
 - `n_latest_rows`
 - `n_random_rows`
+
+No selector defaults to full available history (`earliest -> now`).
 
 Date format is strict UTC `YYYY-MM-DD`.
 - start bound = `start_date 00:00:00Z` inclusive
@@ -53,6 +55,11 @@ Date format is strict UTC `YYYY-MM-DD`.
 - open bounds are resolved from source table min/max UTC day
 
 Invalid dates fail loudly with contract error.
+
+Mode semantics:
+- request contract accepts `mode=native|aligned_1s`.
+- current historical route execution supports `native` only.
+- `aligned_1s` requests fail loudly with `409` and `HISTORICAL_CONTRACT_ERROR` until S26.
 
 ## Data schema and mapping
 Trades schema (all exchanges):

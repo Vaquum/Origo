@@ -45,9 +45,9 @@ def _validate_query_window_selection(
             time_range is not None,
         ]
     )
-    if selected != 1:
+    if selected > 1:
         raise ValueError(
-            'Exactly one window mode must be provided: '
+            'At most one window mode can be provided: '
             'time_range | n_rows | n_random'
         )
 
@@ -102,9 +102,9 @@ def _validate_historical_window_selection(
             n_random_rows is not None,
         ]
     )
-    if selected != 1:
+    if selected > 1:
         raise ValueError(
-            'Exactly one window mode must be provided: '
+            'At most one window mode can be provided: '
             'date-window(start_date/end_date) | n_latest_rows | n_random_rows'
         )
 
@@ -202,10 +202,13 @@ class RawQueryResponse(BaseModel):
 
 
 class HistoricalSpotTradesRequest(BaseModel):
+    mode: RawQueryMode = 'native'
     start_date: str | None = None
     end_date: str | None = None
     n_latest_rows: int | None = Field(default=None, gt=0)
     n_random_rows: int | None = Field(default=None, gt=0)
+    fields: list[str] | None = None
+    filters: list[RawQueryFilter] | None = None
     include_datetime_col: bool = True
     strict: bool = False
 
@@ -233,10 +236,13 @@ class HistoricalSpotTradesRequest(BaseModel):
 
 
 class HistoricalSpotKlinesRequest(BaseModel):
+    mode: RawQueryMode = 'native'
     start_date: str | None = None
     end_date: str | None = None
     n_latest_rows: int | None = Field(default=None, gt=0)
     n_random_rows: int | None = Field(default=None, gt=0)
+    fields: list[str] | None = None
+    filters: list[RawQueryFilter] | None = None
     kline_size: int = Field(default=1, gt=0)
     strict: bool = False
 

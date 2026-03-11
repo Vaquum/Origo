@@ -79,10 +79,34 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
     trades_signature = inspect.signature(HistoricalData.get_binance_spot_trades)
     assert inspect.signature(HistoricalData.get_okx_spot_trades) == trades_signature
     assert inspect.signature(HistoricalData.get_bybit_spot_trades) == trades_signature
+    assert list(trades_signature.parameters) == [
+        'self',
+        'mode',
+        'start_date',
+        'end_date',
+        'n_latest_rows',
+        'n_random_rows',
+        'fields',
+        'filters',
+        'strict',
+        'include_datetime_col',
+    ]
 
     klines_signature = inspect.signature(HistoricalData.get_binance_spot_klines)
     assert inspect.signature(HistoricalData.get_okx_spot_klines) == klines_signature
     assert inspect.signature(HistoricalData.get_bybit_spot_klines) == klines_signature
+    assert list(klines_signature.parameters) == [
+        'self',
+        'mode',
+        'start_date',
+        'end_date',
+        'n_latest_rows',
+        'n_random_rows',
+        'fields',
+        'filters',
+        'strict',
+        'kline_size',
+    ]
 
     dropped_methods = {
         'get_spot_trades',
@@ -95,8 +119,8 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
         assert not hasattr(HistoricalData, method_name)
 
 
-def test_historical_request_requires_exactly_one_window_mode() -> None:
-    with pytest.raises(ValidationError, match='Exactly one window mode must be provided'):
+def test_historical_request_rejects_multiple_window_modes() -> None:
+    with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
 
 
@@ -105,10 +129,29 @@ def test_historical_request_rejects_invalid_date() -> None:
         HistoricalSpotTradesRequest(start_date='2022-02-30', end_date='2022-03-01')
 
 
+def test_historical_request_accepts_no_window_mode() -> None:
+    request = HistoricalSpotTradesRequest()
+    assert request.mode == 'native'
+    assert request.start_date is None
+    assert request.end_date is None
+
+
 def test_historical_klines_request_accepts_random_rows_mode() -> None:
     request = HistoricalSpotKlinesRequest(n_random_rows=100, kline_size=60)
     assert request.n_random_rows == 100
     assert request.kline_size == 60
+
+
+def test_historical_request_supports_shared_contract_fields() -> None:
+    request = HistoricalSpotTradesRequest(
+        mode='aligned_1s',
+        fields=['trade_id', 'price'],
+        filters=[{'field': 'price', 'op': 'gte', 'value': 1000}],
+    )
+    assert request.mode == 'aligned_1s'
+    assert request.fields == ['trade_id', 'price']
+    assert request.filters is not None
+    assert request.filters[0].field == 'price'
 
 
 def test_historical_routes_are_registered(
@@ -147,7 +190,7 @@ def test_historical_trades_endpoint_returns_raw_envelope_shape(
         response = client.post(
             '/v1/historical/binance/spot/trades',
             headers={'X-API-Key': 'test-internal-key'},
-            json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
+            json={},
         )
 
     assert response.status_code == 200
@@ -159,6 +202,41 @@ def test_historical_trades_endpoint_returns_raw_envelope_shape(
     assert isinstance(payload['schema'], list)
     assert isinstance(payload['warnings'], list)
     assert isinstance(payload['rows'], list)
+
+
+def test_historical_trades_endpoint_passes_fields_and_filters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_trades_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'trade_id': [1],
+                'price': [42000.0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_trades_data', _fake_trades_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/binance/spot/trades',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={
+                'fields': ['trade_id', 'price'],
+                'filters': [{'field': 'price', 'op': 'gte', 'value': 41000}],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_kwargs['fields'] == ['trade_id', 'price']
+    assert captured_kwargs['filters'] == [
+        {'field': 'price', 'op': 'gte', 'value': 41000}
+    ]
 
 
 def test_historical_endpoint_invalid_date_is_contract_error(
@@ -207,6 +285,23 @@ def test_historical_endpoint_strict_warning_failure(
     assert response.status_code == 409
     detail = response.json()['detail']
     assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
+
+
+def test_historical_endpoint_rejects_unsupported_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/bybit/spot/trades',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'mode': 'aligned_1s'},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_CONTRACT_ERROR'
 
 
 def test_historical_endpoint_returns_404_for_empty_result(

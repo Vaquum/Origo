@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -16,6 +17,28 @@ class HistoricalData:
         self.auth_token = auth_token
         self.data: pl.DataFrame = pl.DataFrame()
         self.data_columns: list[str] = []
+
+    @staticmethod
+    def _strict_window_warning_present(
+        *,
+        n_latest_rows: int | None,
+        n_random_rows: int | None,
+    ) -> bool:
+        return n_latest_rows is not None or n_random_rows is not None
+
+    @classmethod
+    def _enforce_strict_window_rules(
+        cls,
+        *,
+        strict: bool,
+        n_latest_rows: int | None,
+        n_random_rows: int | None,
+    ) -> None:
+        if strict and cls._strict_window_warning_present(
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        ):
+            raise ValueError('Warnings present while strict=true')
 
     def get_binance_file(
         self, file_url: str, has_header: bool = False, columns: list[str] | None = None
@@ -56,18 +79,30 @@ class HistoricalData:
 
     def get_binance_spot_trades(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         include_datetime_col: bool = True,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_trades_data(
             source='binance',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             include_datetime_col=include_datetime_col,
             auth_token=self.auth_token,
             show_summary=False,
@@ -76,18 +111,30 @@ class HistoricalData:
 
     def get_okx_spot_trades(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         include_datetime_col: bool = True,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_trades_data(
             source='okx',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             include_datetime_col=include_datetime_col,
             auth_token=self.auth_token,
             show_summary=False,
@@ -96,18 +143,30 @@ class HistoricalData:
 
     def get_bybit_spot_trades(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         include_datetime_col: bool = True,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_trades_data(
             source='bybit',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             include_datetime_col=include_datetime_col,
             auth_token=self.auth_token,
             show_summary=False,
@@ -116,18 +175,30 @@ class HistoricalData:
 
     def get_binance_spot_klines(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         kline_size: int = 1,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_klines_data(
             source='binance',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             kline_size=kline_size,
             auth_token=self.auth_token,
             show_summary=False,
@@ -136,18 +207,30 @@ class HistoricalData:
 
     def get_okx_spot_klines(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         kline_size: int = 1,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_klines_data(
             source='okx',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             kline_size=kline_size,
             auth_token=self.auth_token,
             show_summary=False,
@@ -156,18 +239,30 @@ class HistoricalData:
 
     def get_bybit_spot_klines(
         self,
+        mode: str = 'native',
         start_date: str | None = None,
         end_date: str | None = None,
         n_latest_rows: int | None = None,
         n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
         kline_size: int = 1,
     ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
         self.data = query_spot_klines_data(
             source='bybit',
+            mode=mode,
             start_date=start_date,
             end_date=end_date,
             n_latest_rows=n_latest_rows,
             n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             kline_size=kline_size,
             auth_token=self.auth_token,
             show_summary=False,

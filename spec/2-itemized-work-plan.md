@@ -1518,7 +1518,7 @@ Done looks like: only explicit Binance spot methods exist; old generic/futures m
 Constraints: no method aliases.
 2. `S22-02`
 Action: Implement strict window/date contract in historical query helpers.
-Done looks like: exactly one window mode enforced with strict UTC `YYYY-MM-DD` date-window semantics and fail-loud validation.
+Done looks like: window/date validation is enforced with strict UTC `YYYY-MM-DD` semantics and fail-loud behavior (selector semantics later normalized by S25).
 Constraints: no fallback parameter aliases.
 3. `S22-03`
 Action: Add Binance historical HTTP routes with raw-envelope parity response shape.
@@ -1576,3 +1576,291 @@ Constraints: contract/replay tests only.
 Action: Publish cutover runbook and close slice guardrails/docs.
 Done looks like: old endpoint retirement mapping is documented and developer/user docs are updated.
 Constraints: docs + migration mapping only.
+
+## Slice 25: Historical Contract Normalization (Uniform Native Behavior + Unbounded Default Window)
+
+### Capability
+- [x] `S25-C1` Replace per-route historical request parsing with one shared historical request contract (`mode`, `start_date`, `end_date`, `n_latest_rows`, `n_random_rows`, `fields`, `filters`, `strict`).
+- [x] `S25-C2` Enforce parameter-name uniformity between historical HTTP routes and `HistoricalData` methods (same names, same option semantics where applicable).
+- [x] `S25-C3` Implement optional-window semantics (`no selector -> earliest to now`) for historical queries.
+- [x] `S25-C4` Implement optional-window semantics for `/v1/raw/query` with the same unbounded default behavior.
+- [x] `S25-C5` Remove legacy selector assumptions that require exactly one window mode in historical and raw query validators.
+
+### Proof
+- [x] `S25-P1` Add contract tests proving shared parameter names/options across all existing historical routes and methods.
+- [x] `S25-P2` Add acceptance tests proving unbounded default-window behavior (`no selector`) for `native` and `aligned_1s`.
+- [x] `S25-P3` Add replay determinism tests for bounded and unbounded windows on historical and raw query paths.
+
+### Guardrails
+- [x] `S25-G1` Enforce fail-loud validation and no alias fallback behavior in shared historical and raw-query contracts.
+- [x] `S25-G2` Enforce status/error taxonomy parity (`200/404/409/503`) after contract migration.
+- [x] `S25-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S25-G4` User docs closeout for slice (`docs/`, full historical/native/aligned contract + taxonomy updates).
+
+## Slice 26: Historical Exchange Spot-Trades Completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
+
+### Capability
+- [ ] `S26-C1` Explicitly drop `spot_agg_trades` and `futures_trades` from historical Python/HTTP scope for this tranche and lock them as deferred.
+- [ ] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+- [ ] `S26-C3` Keep exchange method signatures uniform across in-scope exchange trade datasets and both modes.
+- [ ] `S26-C4` Keep existing spot-kline convenience routes operational while aligning shared selector/filter/strict semantics with historical core.
+
+### Proof
+- [ ] `S26-P1` Execute fixed-window acceptance runs for all three in-scope exchange trade datasets in `native` and `aligned_1s`.
+- [ ] `S26-P2` Execute replay determinism proofs for all three in-scope exchange trade datasets in both modes.
+- [ ] `S26-P3` Execute schema/behavior cohesion proofs across exchange historical Python and HTTP interfaces.
+
+### Guardrails
+- [ ] `S26-G1` Apply rights/auth/strict-warning/error-taxonomy guardrails uniformly to all exchange historical trade routes.
+- [ ] `S26-G2` Add guardrail tests for full-history default-window behavior on exchange historical routes.
+- [ ] `S26-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S26-G4` User docs closeout for slice (`docs/`, full exchange historical taxonomy updates for both modes).
+
+## Slice 27: Historical ETF Operationalization (`etf_daily_metrics` in `native` + `aligned_1s`)
+
+### Capability
+- [ ] `S27-C1` Add `HistoricalData` method `get_etf_daily_metrics` with shared historical parameters and `mode`.
+- [ ] `S27-C2` Add HTTP endpoint `/v1/historical/etf/daily_metrics` with shared historical contract.
+- [ ] `S27-C3` Implement `native` and `aligned_1s` ETF historical serving with deterministic forward-fill semantics.
+- [ ] `S27-C4` Add ETF historical field projection and filter support aligned with shared historical contract.
+
+### Proof
+- [ ] `S27-P1` Execute fixed-window ETF acceptance runs for `native` and `aligned_1s` historical paths.
+- [ ] `S27-P2` Execute replay determinism proofs for ETF historical paths in both modes.
+- [ ] `S27-P3` Execute parity checks between historical ETF outputs and existing raw query/output expectations.
+
+### Guardrails
+- [ ] `S27-G1` Apply ETF rights/freshness/warning guardrails to historical ETF endpoint behavior.
+- [ ] `S27-G2` Enforce fail-loud strict-mode behavior parity with raw query for ETF historical paths.
+- [ ] `S27-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S27-G4` User docs closeout for slice (`docs/`, full ETF historical taxonomy updates for both modes).
+
+## Slice 28: Historical FRED Operationalization (`fred_series_metrics` in `native` + `aligned_1s`)
+
+### Capability
+- [ ] `S28-C1` Add `HistoricalData` method `get_fred_series_metrics` with shared historical parameters and `mode`.
+- [ ] `S28-C2` Add HTTP endpoint `/v1/historical/fred/series_metrics` with shared historical contract.
+- [ ] `S28-C3` Implement `native` and `aligned_1s` FRED historical serving with deterministic publish-freshness semantics.
+- [ ] `S28-C4` Add FRED historical field projection and filter support aligned with shared historical contract.
+
+### Proof
+- [ ] `S28-P1` Execute fixed-window FRED acceptance runs for `native` and `aligned_1s` historical paths.
+- [ ] `S28-P2` Execute replay determinism proofs for FRED historical paths in both modes.
+- [ ] `S28-P3` Execute parity checks between historical FRED outputs and existing raw query/output expectations.
+
+### Guardrails
+- [ ] `S28-G1` Apply FRED rights/publish-freshness/warning guardrails to historical FRED endpoint behavior.
+- [ ] `S28-G2` Enforce fail-loud strict-mode behavior parity with raw query for FRED historical paths.
+- [ ] `S28-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S28-G4` User docs closeout for slice (`docs/`, full FRED historical taxonomy updates for both modes).
+
+## Slice 29: Bitcoin Full `aligned_1s` Completion (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`)
+
+### Capability
+- [ ] `S29-C1` Implement deterministic `aligned_1s` projections for `bitcoin_block_headers`.
+- [ ] `S29-C2` Implement deterministic `aligned_1s` projections for `bitcoin_block_transactions`.
+- [ ] `S29-C3` Implement deterministic `aligned_1s` projections for `bitcoin_mempool_state`.
+- [ ] `S29-C4` Integrate all three new Bitcoin aligned datasets into raw query/export paths with canonical-aligned contract enforcement.
+- [ ] `S29-C5` Remove remaining aligned-capability exclusions so every onboarded dataset is aligned-capable.
+
+### Proof
+- [ ] `S29-P1` Execute fixed-window acceptance runs for new Bitcoin aligned datasets.
+- [ ] `S29-P2` Execute replay determinism proofs for new Bitcoin aligned datasets.
+- [ ] `S29-P3` Execute canonical aligned storage contract negative proofs (missing table/column/type drift) for new Bitcoin aligned paths.
+
+### Guardrails
+- [ ] `S29-G1` Apply Bitcoin linkage/integrity/freshness guardrails to new aligned paths.
+- [ ] `S29-G2` Enforce fail-loud API contract behavior for all Bitcoin datasets in `aligned_1s` mode.
+- [ ] `S29-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S29-G4` User docs closeout for slice (`docs/`, full Bitcoin taxonomy updates with full aligned coverage).
+
+## Slice 30: Historical Bitcoin Operationalization (All Seven Bitcoin Datasets in `native` + `aligned_1s`)
+
+### Capability
+- [ ] `S30-C1` Add explicit `HistoricalData` methods for all seven Bitcoin datasets (`get_bitcoin_block_headers`, `get_bitcoin_block_transactions`, `get_bitcoin_mempool_state`, `get_bitcoin_block_fee_totals`, `get_bitcoin_block_subsidy_schedule`, `get_bitcoin_network_hashrate_estimate`, `get_bitcoin_circulating_supply`) using shared historical parameter contract and `mode`.
+- [ ] `S30-C2` Add explicit HTTP endpoints for all seven Bitcoin datasets (`/v1/historical/bitcoin/block_headers`, `/v1/historical/bitcoin/block_transactions`, `/v1/historical/bitcoin/mempool_state`, `/v1/historical/bitcoin/block_fee_totals`, `/v1/historical/bitcoin/block_subsidy_schedule`, `/v1/historical/bitcoin/network_hashrate_estimate`, `/v1/historical/bitcoin/circulating_supply`).
+- [ ] `S30-C3` Wire both `native` and `aligned_1s` historical serving for all seven Bitcoin datasets.
+- [ ] `S30-C4` Add field projection and filter handling for historical Bitcoin endpoints with shared semantics.
+
+### Proof
+- [ ] `S30-P1` Execute fixed-window acceptance runs for all seven Bitcoin historical endpoints in both modes.
+- [ ] `S30-P2` Execute fixed-window acceptance runs for all seven Bitcoin historical Python methods in both modes.
+- [ ] `S30-P3` Execute replay determinism proofs across all seven Bitcoin datasets for both historical surfaces.
+
+### Guardrails
+- [ ] `S30-G1` Apply rights/auth/strict-warning/error-taxonomy guardrails uniformly to Bitcoin historical endpoints.
+- [ ] `S30-G2` Enforce full-history default-window behavior and fail-loud validation for Bitcoin historical paths.
+- [ ] `S30-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S30-G4` User docs closeout for slice (`docs/`, full Bitcoin historical taxonomy and endpoint reference updates).
+
+## Slice 31: Historical Full-Surface Cohesion + Rollout Handoff
+
+### Capability
+- [ ] `S31-C1` Build complete historical endpoint and Python method matrix coverage for every in-scope dataset in `native` and `aligned_1s` (excluding deferred `spot_agg_trades` and `futures_trades`).
+- [ ] `S31-C2` Harmonize any remaining signature, envelope, or semantic drift across dataset families.
+- [ ] `S31-C3` Publish final internal cutover mapping from legacy data endpoints to Origo historical surfaces.
+
+### Proof
+- [ ] `S31-P1` Run full contract suite over all historical HTTP endpoints and `HistoricalData` methods.
+- [ ] `S31-P2` Run full replay suite over all historical HTTP endpoints and `HistoricalData` methods.
+- [ ] `S31-P3` Run full integrity suite over all historical datasets and both modes.
+
+### Guardrails
+- [ ] `S31-G1` Enforce zero-drift guardrail: no undocumented endpoint/method contract exceptions remain.
+- [ ] `S31-G2` Enforce rollout-readiness guardrail with explicit operational runbook and rollback mapping.
+- [ ] `S31-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [ ] `S31-G4` User docs closeout for slice (`docs/`, full canonical reference + taxonomy closure).
+
+## Slice 25 Sub-Slices
+1. `S25-01`
+Action: Implement shared historical request model and parser path.
+Done looks like: all historical routes and `HistoricalData` methods consume one canonical parameter contract.
+Constraints: no alias fallback parameters.
+2. `S25-02`
+Action: Implement unbounded default-window semantics for historical and raw query paths.
+Done looks like: missing window selectors resolve to `earliest -> now` deterministically.
+Constraints: fail-loud on invalid combinations only.
+3. `S25-03`
+Action: Migrate existing six exchange historical routes to unified contract.
+Done looks like: routes preserve behavior while adopting shared selector/filter/strict semantics.
+Constraints: no silent compatibility shims.
+4. `S25-04`
+Action: Add contract/replay proofs for bounded and unbounded windows.
+Done looks like: deterministic behavior is proven with and without selectors across both surfaces.
+Constraints: proof-only changes.
+5. `S25-05`
+Action: Apply guardrails and close docs.
+Done looks like: validation/error semantics are fail-loud and docs fully describe unified contract.
+Constraints: guardrails + docs only.
+
+## Slice 26 Sub-Slices
+1. `S26-01`
+Action: Mark `spot_agg_trades` and `futures_trades` as explicitly deferred from historical Python/HTTP scope.
+Done looks like: these two datasets are absent from S26 historical matrix and documented as deferred for now.
+Constraints: no implicit partial implementation.
+2. `S26-02`
+Action: Add exchange historical aligned-mode parity across all exchange trade datasets.
+Done looks like: three in-scope exchange trade datasets support `native` and `aligned_1s`.
+Constraints: no dataset-mode gaps remain.
+3. `S26-03`
+Action: Harmonize exchange signatures and request/response semantics.
+Done looks like: method/endpoint contracts are source-cohesive and parameter-identical where applicable.
+Constraints: no source-specific naming drift.
+4. `S26-04`
+Action: Run exchange-wide acceptance/replay/cohesion proofs.
+Done looks like: all in-scope exchange trade datasets pass deterministic proofs in both modes.
+Constraints: fixed fixtures only.
+5. `S26-05`
+Action: Apply guardrails and close docs.
+Done looks like: exchange historical routes enforce auth/rights/strict/error contracts and docs are updated.
+Constraints: guardrails + docs only.
+
+## Slice 27 Sub-Slices
+1. `S27-01`
+Action: Add historical ETF Python method + HTTP endpoint.
+Done looks like: `get_etf_daily_metrics` and `/v1/historical/etf/daily_metrics` are available with shared contract semantics.
+Constraints: shared contract only.
+2. `S27-02`
+Action: Implement ETF `native` + `aligned_1s` historical serving.
+Done looks like: both modes return deterministic ETF outputs with forward-fill semantics.
+Constraints: no mode-specific contract drift.
+3. `S27-03`
+Action: Add ETF selector/field/filter support under shared historical contract.
+Done looks like: ETF endpoint honors shared parameter semantics and fail-loud validation.
+Constraints: no ETF-only parameter names.
+4. `S27-04`
+Action: Run ETF acceptance/replay/parity proofs.
+Done looks like: deterministic outputs match baseline expectations in both modes.
+Constraints: fixed fixtures only.
+5. `S27-05`
+Action: Apply guardrails and close docs.
+Done looks like: rights/freshness/strict/error semantics are active and docs are updated.
+Constraints: guardrails + docs only.
+
+## Slice 28 Sub-Slices
+1. `S28-01`
+Action: Add historical FRED Python method + HTTP endpoint.
+Done looks like: `get_fred_series_metrics` and `/v1/historical/fred/series_metrics` are available with shared contract semantics.
+Constraints: shared contract only.
+2. `S28-02`
+Action: Implement FRED `native` + `aligned_1s` historical serving.
+Done looks like: both modes return deterministic FRED outputs with publish-freshness semantics.
+Constraints: no mode-specific contract drift.
+3. `S28-03`
+Action: Add FRED selector/field/filter support under shared historical contract.
+Done looks like: FRED endpoint honors shared parameter semantics and fail-loud validation.
+Constraints: no FRED-only parameter names.
+4. `S28-04`
+Action: Run FRED acceptance/replay/parity proofs.
+Done looks like: deterministic outputs match baseline expectations in both modes.
+Constraints: fixed fixtures only.
+5. `S28-05`
+Action: Apply guardrails and close docs.
+Done looks like: rights/freshness/strict/error semantics are active and docs are updated.
+Constraints: guardrails + docs only.
+
+## Slice 29 Sub-Slices
+1. `S29-01`
+Action: Implement aligned projections for `bitcoin_block_headers`.
+Done looks like: aligned headers are queryable with deterministic timestamp semantics.
+Constraints: canonical-aligned storage contract only.
+2. `S29-02`
+Action: Implement aligned projections for `bitcoin_block_transactions`.
+Done looks like: aligned transaction aggregates are queryable with deterministic semantics.
+Constraints: canonical-aligned storage contract only.
+3. `S29-03`
+Action: Implement aligned projections for `bitcoin_mempool_state`.
+Done looks like: aligned mempool-state aggregates are queryable with deterministic semantics.
+Constraints: canonical-aligned storage contract only.
+4. `S29-04`
+Action: Integrate new aligned Bitcoin datasets into query/export with proofs.
+Done looks like: all Bitcoin datasets support `aligned_1s` and pass acceptance/replay/negative-contract proofs.
+Constraints: no temporary exclusions.
+5. `S29-05`
+Action: Apply guardrails and close docs.
+Done looks like: integrity/freshness/strict/error semantics are active and docs are updated for full Bitcoin aligned coverage.
+Constraints: guardrails + docs only.
+
+## Slice 30 Sub-Slices
+1. `S30-01`
+Action: Add explicit historical Python methods for all seven Bitcoin datasets.
+Done looks like: seven explicit methods exist (`get_bitcoin_block_headers`, `get_bitcoin_block_transactions`, `get_bitcoin_mempool_state`, `get_bitcoin_block_fee_totals`, `get_bitcoin_block_subsidy_schedule`, `get_bitcoin_network_hashrate_estimate`, `get_bitcoin_circulating_supply`) with shared historical parameters and `mode`.
+Constraints: no generic fallback-only public API.
+2. `S30-02`
+Action: Add explicit historical HTTP endpoints for all seven Bitcoin datasets.
+Done looks like: seven endpoints exist (`/v1/historical/bitcoin/block_headers`, `/v1/historical/bitcoin/block_transactions`, `/v1/historical/bitcoin/mempool_state`, `/v1/historical/bitcoin/block_fee_totals`, `/v1/historical/bitcoin/block_subsidy_schedule`, `/v1/historical/bitcoin/network_hashrate_estimate`, `/v1/historical/bitcoin/circulating_supply`) with shared contract behavior.
+Constraints: endpoint naming must be deterministic and taxonomy-aligned.
+3. `S30-03`
+Action: Wire native/aligned serving and filter/projection behavior for all seven Bitcoin endpoints.
+Done looks like: both modes behave identically by contract semantics across all seven datasets.
+Constraints: no dataset-specific contract exceptions.
+4. `S30-04`
+Action: Run full Bitcoin historical acceptance/replay/cohesion proofs.
+Done looks like: method/endpoint outputs are deterministic and cohesive in both modes for all seven datasets.
+Constraints: fixed fixtures only.
+5. `S30-05`
+Action: Apply guardrails and close docs.
+Done looks like: auth/rights/strict/error guardrails are active and docs fully cover Bitcoin historical interfaces.
+Constraints: guardrails + docs only.
+
+## Slice 31 Sub-Slices
+1. `S31-01`
+Action: Build complete historical dataset/mode coverage matrix and enforce it in contract tests.
+Done looks like: every in-scope dataset has historical Python + HTTP coverage in `native` and `aligned_1s`, with deferred dataset exclusions explicit.
+Constraints: zero uncovered dataset-mode pairs.
+2. `S31-02`
+Action: Execute full historical replay/integrity suites across all datasets and both modes.
+Done looks like: full-surface deterministic and integrity gates pass without waivers.
+Constraints: no partial-suite closeout.
+3. `S31-03`
+Action: Publish final migration mapping and operational runbook for internal rollout.
+Done looks like: legacy endpoint-to-Origo mapping and rollback guidance are explicit and tested.
+Constraints: no tribal-knowledge handoff.
+4. `S31-04`
+Action: Reconcile docs taxonomy and endpoint/method references against live truth.
+Done looks like: docs contain canonical endpoint/method matrix and no stale contracts.
+Constraints: documentation-only behavior updates.
+5. `S31-05`
+Action: Final guardrail closeout and readiness sign-off.
+Done looks like: work-plan checkboxes, version/changelog/env contract, manifests, baseline fixtures, and run-notes are complete for rollout gate.
+Constraints: closeout artifacts required before declaring rollout-ready.

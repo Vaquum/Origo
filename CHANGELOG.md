@@ -1,6 +1,20 @@
 # Changelog
 
 ## 2026-03-11
+- Completed Slice 25 historical contract normalization:
+  - normalized shared historical contracts across HTTP + Python with `mode`, `start_date`, `end_date`, `n_latest_rows`, `n_random_rows`, `fields`, `filters`, `strict`
+  - implemented optional selector semantics for both raw query and historical paths (`no selector -> full available history`)
+  - added deterministic all-rows native query window path (`AllRowsWindow`) and explicit ordering
+  - added historical projection/filter plumbing with fail-loud field/filter validation
+  - added strict contract tests for no-selector behavior and multi-selector rejection (`at most one` mode)
+  - preserved fail-loud behavior by rejecting historical `mode=aligned_1s` execution in this slice (scheduled for S26 capability)
+- Added Slice 25 docs and artifacts:
+  - `docs/Developer/s25-historical-contract-normalization.md`
+  - `docs/historical-contract-reference.md`
+  - updates to `docs/raw-query-reference.md`, `docs/historical-spot-reference.md`, `docs/data-taxonomy.md`, `docs/Developer/s22-s24-historical-spot-api-contract.md`, and `docs/Developer/s1-raw-query-api.md`
+  - `spec/slices/slice-25-historical-contract-normalization/*`
+- Updated version to `Origo API v0.1.16`.
+
 - Completed S22-S24 historical spot operationalization:
   - added six explicit historical Python methods in `origo.data.HistoricalData`:
     - `get_binance_spot_trades`, `get_okx_spot_trades`, `get_bybit_spot_trades`

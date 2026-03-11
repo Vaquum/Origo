@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-11
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24 (platform v0.1.15)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25 (platform v0.1.16)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -22,10 +22,12 @@
   - `POST /v1/historical/bybit/spot/trades`
   - `POST /v1/historical/bybit/spot/klines`
 - Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
-- Historical spot contract uses exactly one window mode:
+- Raw query window rule uses at most one selector (`time_range | n_rows | n_random`), and no selector means full available history.
+- Historical spot contract uses at most one window mode:
   - date-window (`start_date` and/or `end_date`, strict `YYYY-MM-DD`)
   - `n_latest_rows`
   - `n_random_rows`
+  - no selector means full available history
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Query source keys:

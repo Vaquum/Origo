@@ -17,7 +17,8 @@
 ## Data definitions
 - `sources`: query source list (current capability requires exactly one):
   - `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`.
-- Window mode: exactly one of `time_range | n_rows | n_random`.
+- Window mode: at most one of `time_range | n_rows | n_random`.
+- No selector defaults to full available history (`earliest -> now`).
 - `filters`: optional projection filter clauses (`eq|ne|gt|gte|lt|lte|in|not_in`).
 - `warnings`: structured warning list with `code`, `message`.
 - `rows`: wide-row payload with schema metadata.
@@ -44,7 +45,7 @@
 - Request:
   - `POST /v1/raw/query`
   - `X-API-Key: <internal key>`
-  - body includes one source + one window mode
+  - body includes one source + zero-or-one window selector
 - Result:
   - `200` with schema + rows
   - or mapped error code/status above

@@ -40,7 +40,7 @@ HTTP migration target:
 ## Cutover checklist
 1. Replace all old Python historical method calls with exchange-explicit methods.
 2. Replace old request payload keys with the new keys.
-3. Verify each call uses exactly one window mode.
+3. Verify each call uses at most one window mode, or intentionally uses no selector for full-history mode.
 4. Validate strict date formatting (`YYYY-MM-DD`) and UTC day assumptions.
 5. Validate rights metadata and status/error behavior in client handling.
 6. Remove references to dropped methods from docs/scripts/tests.

@@ -1,0 +1,46 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum source offset/trade id in proof output",
+    "offset_max": "maximum source offset/trade id in proof output",
+    "volume_sum": "sum(quantity) for trades or sum(volume) for klines",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc_exclusive": "2024-01-02T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "binance",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured",
+      "csv_sha256": "retrospective-not-captured"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "historical_binance_spot_trades",
+      "window_mode": "no-selector",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "b0d845583be907891047ab33cadcaab33d92dfdf2827e00cf10ff803e0ab6e40"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "historical_binance_spot_trades",
+      "window_mode": "no-selector",
+      "row_count": 1,
+      "offset_min": 1,
+      "offset_max": 1,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "b0d845583be907891047ab33cadcaab33d92dfdf2827e00cf10ff803e0ab6e40"
+    }
+  ]
+}

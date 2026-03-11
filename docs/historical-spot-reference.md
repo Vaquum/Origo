@@ -20,30 +20,38 @@ All endpoints require `X-API-Key`.
 ## Request contracts
 
 Trades request:
+- `mode: native | aligned_1s` (default `native`; `aligned_1s` is contract-reserved and currently rejected fail-loud on this route family)
 - `start_date: YYYY-MM-DD | null`
 - `end_date: YYYY-MM-DD | null`
 - `n_latest_rows: int | null`
 - `n_random_rows: int | null`
+- `fields: string[] | null`
+- `filters: object[] | null` (`eq|ne|gt|gte|lt|lte|in|not_in`)
 - `include_datetime_col: bool` (default `true`)
 - `strict: bool` (default `false`)
 
 Klines request:
+- `mode: native | aligned_1s` (default `native`; `aligned_1s` is contract-reserved and currently rejected fail-loud on this route family)
 - `start_date: YYYY-MM-DD | null`
 - `end_date: YYYY-MM-DD | null`
 - `n_latest_rows: int | null`
 - `n_random_rows: int | null`
+- `fields: string[] | null`
+- `filters: object[] | null` (`eq|ne|gt|gte|lt|lte|in|not_in`)
 - `kline_size: int` (seconds, `> 0`)
 - `strict: bool` (default `false`)
 
-Exactly one window mode is allowed:
+At most one window mode is allowed:
 - date-window (`start_date` and/or `end_date`)
 - `n_latest_rows`
 - `n_random_rows`
 
+If no selector is provided, window defaults to full available history (`earliest -> now`).
+
 Date semantics:
 - start is inclusive at `00:00:00Z`
 - end day is inclusive via next-day exclusive query bound
-- open bounds are resolved from available source data range
+- open date bounds are resolved from available source data range
 
 ## Response contract
 
@@ -86,3 +94,7 @@ Mapping for OKX/Bybit:
 - `404`: no data in selected window
 - `409`: contract/auth/strict-warning failures
 - `503`: runtime/backend failure
+
+Current mode status on historical spot routes:
+- `native`: supported
+- `aligned_1s`: rejected with `409` (`HISTORICAL_CONTRACT_ERROR`) until Slice 26 enables aligned historical parity

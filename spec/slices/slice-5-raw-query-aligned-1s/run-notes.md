@@ -1,5 +1,48 @@
 # Slice 5 Raw Query Aligned 1s Run Notes
 
+## Run metadata
+
+- Date (UTC): 2026-03-06
+- Scope: `S5-C1..S5-C7`, `S5-P1..S5-P3`, `S5-G1..S5-G6`
+- Fixture windows:
+  - Binance native/aligned proofs on `2017-08-17` windowed data
+  - ETF aligned/forward-fill proofs on `2026-03-04` .. `2026-03-07` windows
+- Runtime environment:
+  - local ClickHouse (`origo`) with control-plane/API proof harnesses via `uv run`
+  - read-only query execution for proof paths; export proofs used temporary artifact directories
+
+## System changes made as proof side effects
+
+- Implemented and validated aligned query materializations/planner paths for Binance and ETF.
+- Integrated aligned mode into API query and export contracts.
+- Added aligned proofs for capability, determinism, UTC boundary semantics, and guardrails.
+- Added/updated slice artifacts in `spec/slices/slice-5-raw-query-aligned-1s/`, including:
+  - capability proof JSON artifacts (`S5-C1`..`S5-C7`)
+  - proof artifacts (`S5-P1`..`S5-P3`)
+  - guardrail proof artifact (`S5-G1`..`S5-G4`)
+  - baseline fixture artifact (`baseline-fixture-2017-08-17_2026-03-05-2026-03-07.json`)
+
+## Known warnings and disposition
+
+- Interim capability-step warnings (for not-yet-implemented subsequent sub-steps) were expected during staged implementation and are resolved within this slice.
+- No unresolved warnings were accepted at Slice 5 closeout.
+
+## Deferred guardrails
+
+- None for Slice 5. Guardrail checklist `S5-G1..S5-G6` is complete.
+
+## Closeout confirmation
+
+- `spec/2-itemized-work-plan.md` updated with `S5-C1..S5-G6` checked.
+- `control-plane/pyproject.toml` version advanced through the slice and closed at `1.2.36`.
+- `control-plane/CHANGELOG.md` updated with Slice 5 entries through `v1.2.36`.
+- `.env.example` updated/reviewed for aligned guardrail env contracts:
+  - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
+  - `ORIGO_ALIGNED_QUERY_MAX_QUEUE`
+  - `ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS`
+
+## Detailed chronological notes
+
 ## S5-C1 run notes
 
 - Date (UTC): 2026-03-06

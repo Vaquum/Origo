@@ -358,6 +358,7 @@ Every slice must pass:
 4. Sentiment model for Slice 12 is fixed to `ElKulako/cryptobert`.
 5. Model outputs must be stored with model identity metadata and deterministic aggregation contract.
 6. Slice completion follows source completion rule: provide both `native` and `aligned_1s` query/export integration for Slice-12 output datasets.
+7. Execution decision (updated): `S12-C4` and `S12-C5` are crossed over as explicitly dropped from roadmap; they are not planned for implementation.
 
 ## Slice 13 (Bitcoin Core Node V1) Locked Details
 1. Data source must be one unpruned self-hosted Bitcoin Core node (no third-party blockchain APIs).

@@ -1,5 +1,7 @@
 # Slice 3 Generic Scraper Run Notes
 
+## Run metadata
+
 - Date (UTC): 2026-03-05
 - Scope: `S3-C1..S3-C12`, `S3-P1..S3-P3`, `S3-G1..S3-G6`
 - Fixture window:
@@ -12,7 +14,7 @@
     - `/tmp/origo-s3-proof`
     - `/tmp/origo-s3-guardrails-proof`
 
-## System changes made as a side effect of proof run
+## System changes made as proof side effects
 
 - Added proof artifacts:
   - `spec/slices/slice-3-generic-scraper/acceptance-proof.json`
@@ -21,7 +23,7 @@
   - `spec/slices/slice-3-generic-scraper/guardrails-proof.json`
 - Added temporary fixture/audit files in `/tmp` during proof harness execution.
 
-## Known warnings
+## Known warnings and disposition
 
 - Proof harness uses deterministic stubs for object-store and ClickHouse persistence while validating end-to-end pipeline contracts and guardrail behavior.
 - Local loopback HTTP server is used for fixed fixture transport.
@@ -30,7 +32,7 @@
 
 - None for Slice 3. Guardrail checklist `S3-G1..S3-G6` is complete.
 
-## Completion confirmation
+## Closeout confirmation
 
 - `spec/2-itemized-work-plan.md` updated:
   - `S3-C1..S3-C12` checked

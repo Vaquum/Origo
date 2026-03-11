@@ -1,5 +1,7 @@
 # Slice 4 ETF Use Case Run Notes
 
+## Run metadata
+
 - Date (UTC): 2026-03-05
 - Scope: `S4-C1` (issuer adapters 1-3)
 - Issuers implemented:
@@ -11,13 +13,13 @@
 - Proof artifact:
   - `spec/slices/slice-4-etf-use-case/acceptance-proof-s4-01.json`
 
-## System changes made as a side effect of proof run
+## System changes made as proof side effects
 
 - External issuer endpoints were called live over HTTPS.
 - Bitwise adapter dynamically resolved current Next.js `buildId` from homepage before fetching JSON data endpoint.
 - No ClickHouse writes, object-store writes, or Dagster jobs were executed in this capability proof.
 
-## Known warnings
+## Known warnings and disposition
 
 - This run validates capability only for `S4-C1`; full Slice 4 proof targets (`S4-P1..S4-P4`) are not complete yet.
 - iShares CSV includes preamble rows before holdings table; parser now explicitly locates the holdings header and as-of preamble field.
@@ -28,7 +30,7 @@
 - `S4-G1..S4-G9` are deferred to guardrail phase.
 - Legal sign-off gating for ETF external serving/export is not part of this capability step.
 
-## Completion confirmation
+## Closeout confirmation
 
 - `S4-C1` checked in `spec/2-itemized-work-plan.md`.
 - New adapter capability modules added:

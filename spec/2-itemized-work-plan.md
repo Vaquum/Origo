@@ -280,8 +280,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S12-C1` Implement official Reddit API OAuth client and subreddit fetch contract for configured subreddit set. (crossed over: blocked by Reddit access/policy constraints in current phase)
 - [x] `S12-C2` Implement hourly Reddit content ingest path with deterministic raw artifact capture and checksums. (crossed over: blocked by Reddit access/policy constraints in current phase)
 - [x] `S12-C3` Persist normalized Reddit content events to ClickHouse with migration-backed schema. (crossed over: blocked by Reddit access/policy constraints in current phase)
-- [ ] `S12-C4` Integrate `ElKulako/cryptobert` inference path for per-item sentiment scoring.
-- [ ] `S12-C5` Implement hourly sentiment signal aggregation dataset with explicit model/version metadata.
+- [x] `S12-C4` Integrate `ElKulako/cryptobert` inference path for per-item sentiment scoring. (crossed over: explicitly dropped from roadmap; not implemented)
+- [x] `S12-C5` Implement hourly sentiment signal aggregation dataset with explicit model/version metadata. (crossed over: explicitly dropped from roadmap; not implemented)
 - [x] `S12-C6` Integrate Slice-12 datasets into raw query/export paths for both `native` and `aligned_1s`. (crossed over: blocked by Reddit access/policy constraints in current phase)
 
 ### Proof
@@ -987,13 +987,13 @@ Action: Implement normalized Reddit event schema + migration-backed ClickHouse p
 Done looks like: ingested Reddit items persist with deterministic IDs/timestamps and source provenance/checksums.
 Constraints: ingest/storage only.
 4. `S12-04`
-Action: Implement `ElKulako/cryptobert` inference capability for per-item sentiment scoring.
-Done looks like: each normalized Reddit item receives deterministic sentiment output with model metadata.
-Constraints: model is fixed to CryptoBERT in this slice.
+Action: Implement `ElKulako/cryptobert` inference capability for per-item sentiment scoring. (crossed over: explicitly dropped from roadmap; not implemented)
+Done looks like: crossed over as not planned for implementation.
+Constraints: dropped scope.
 5. `S12-05`
-Action: Implement hourly sentiment aggregation dataset and deterministic write contract.
-Done looks like: hourly subreddit-level sentiment signals are materialized with reproducible aggregation semantics.
-Constraints: no API integration yet.
+Action: Implement hourly sentiment aggregation dataset and deterministic write contract. (crossed over: explicitly dropped from roadmap; not implemented)
+Done looks like: crossed over as not planned for implementation.
+Constraints: dropped scope.
 6. `S12-06`
 Action: Integrate Slice-12 datasets into raw query/export (`native` + `aligned_1s`) paths.
 Done looks like: query/export contracts can serve Reddit sentiment datasets in both modes.

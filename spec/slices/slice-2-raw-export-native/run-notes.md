@@ -1,5 +1,7 @@
 # Slice 2 Raw Export Native Run Notes
 
+## Run metadata
+
 - Date (UTC): 2026-03-05
 - Scope: `S2-P1`, `S2-P2`, `S2-P3`, `S2-G1`, `S2-G2`, `S2-G3`, `S2-G4`, `S2-G5`
 - Proof windows:
@@ -11,7 +13,7 @@
   - Guardrail harness export root: `/tmp/origo-s2-guardrails-proof/exports`
   - Guardrail harness audit log: `/tmp/origo-s2-guardrails-proof/audit/export-events.jsonl`
 
-## System changes made as side effects of proof run
+## System changes made as proof side effects
 
 - Added guardrail proof artifact:
   - `spec/slices/slice-2-raw-export-native/guardrails-proof.json`
@@ -25,7 +27,7 @@
   - `audit/export-events.jsonl`
   - `ingest-only-rights.json`
 
-## Known warnings
+## Known warnings and disposition
 
 - Dagster GraphQL calls are stubbed in the guardrail harness while endpoint contracts and lifecycle/audit behavior run end-to-end in-process.
 - Audit log validation is intentionally strict; malformed/tampered lines fail future writes loudly.
@@ -34,7 +36,7 @@
 
 - None for Slice 2. Guardrail checklist `S2-G1` through `S2-G5` is complete.
 
-## Completion confirmation
+## Closeout confirmation
 
 - `spec/2-itemized-work-plan.md` updated with `S2-G1..S2-G5` checked.
 - `.env.example` updated with Slice 2 guardrail env vars:

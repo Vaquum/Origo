@@ -16,14 +16,35 @@ from api.origo_api.schemas import (
 )
 
 
-def test_raw_query_requires_exactly_one_window_selector() -> None:
-    with pytest.raises(ValidationError, match='Exactly one window mode must be provided'):
+def test_raw_query_rejects_multiple_window_selectors() -> None:
+    with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         RawQueryRequest(
             mode='native',
             sources=['spot_trades'],
             n_rows=10,
             n_random=5,
         )
+
+
+def test_raw_query_accepts_no_window_selector() -> None:
+    request = RawQueryRequest(
+        mode='native',
+        sources=['spot_trades'],
+    )
+    assert request.n_rows is None
+    assert request.n_random is None
+    assert request.time_range is None
+
+
+def test_raw_query_accepts_no_window_selector_for_aligned_mode() -> None:
+    request = RawQueryRequest(
+        mode='aligned_1s',
+        sources=['spot_trades'],
+    )
+    assert request.mode == 'aligned_1s'
+    assert request.n_rows is None
+    assert request.n_random is None
+    assert request.time_range is None
 
 
 def test_raw_query_accepts_multi_source_contract_shape() -> None:

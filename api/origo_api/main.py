@@ -48,13 +48,14 @@ from .schemas import (
     RawExportSubmitResponse,
     RawQueryDataset,
     RawQueryFreshness,
+    RawQueryMode,
     RawQueryRequest,
     RawQueryResponse,
     RawQueryWarning,
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.15')
+app = FastAPI(title='Origo Raw API', version='0.1.16')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',
@@ -321,13 +322,14 @@ def _historical_dataset_for_source(source: str) -> RawQueryDataset:
 def _build_historical_envelope(
     *,
     frame: pl.DataFrame,
+    mode: RawQueryMode,
     dataset: RawQueryDataset,
     warnings: list[RawQueryWarning],
     rights_state: RightsState,
     rights_provisional: bool,
 ) -> dict[str, Any]:
     return {
-        'mode': 'native',
+        'mode': mode,
         'source': dataset,
         'sources': [dataset],
         'row_count': frame.height,
@@ -617,6 +619,14 @@ async def _handle_historical_spot_trades(
     x_clickhouse_token: str | None,
 ) -> RawQueryResponse:
     dataset = _historical_dataset_for_source(source)
+    filters_payload = (
+        [
+            filter_clause.model_dump(mode='json')
+            for filter_clause in request.filters
+        ]
+        if request.filters is not None
+        else None
+    )
     try:
         query_rights_decision = resolve_query_rights(
             dataset=dataset,
@@ -659,10 +669,13 @@ async def _handle_historical_spot_trades(
         frame = await _run_native_query_with_limits(
             query_spot_trades_data,
             source=source,
+            mode=request.mode,
             start_date=request.start_date,
             end_date=request.end_date,
             n_latest_rows=request.n_latest_rows,
             n_random_rows=request.n_random_rows,
+            fields=request.fields,
+            filters=filters_payload,
             include_datetime_col=request.include_datetime_col,
             auth_token=x_clickhouse_token,
             show_summary=False,
@@ -699,6 +712,7 @@ async def _handle_historical_spot_trades(
 
     envelope = _build_historical_envelope(
         frame=frame,
+        mode=request.mode,
         dataset=dataset,
         warnings=warnings,
         rights_state=query_rights_state,
@@ -714,6 +728,14 @@ async def _handle_historical_spot_klines(
     x_clickhouse_token: str | None,
 ) -> RawQueryResponse:
     dataset = _historical_dataset_for_source(source)
+    filters_payload = (
+        [
+            filter_clause.model_dump(mode='json')
+            for filter_clause in request.filters
+        ]
+        if request.filters is not None
+        else None
+    )
     try:
         query_rights_decision = resolve_query_rights(
             dataset=dataset,
@@ -756,10 +778,13 @@ async def _handle_historical_spot_klines(
         frame = await _run_native_query_with_limits(
             query_spot_klines_data,
             source=source,
+            mode=request.mode,
             start_date=request.start_date,
             end_date=request.end_date,
             n_latest_rows=request.n_latest_rows,
             n_random_rows=request.n_random_rows,
+            fields=request.fields,
+            filters=filters_payload,
             kline_size=request.kline_size,
             auth_token=x_clickhouse_token,
             show_summary=False,
@@ -796,6 +821,7 @@ async def _handle_historical_spot_klines(
 
     envelope = _build_historical_envelope(
         frame=frame,
+        mode=request.mode,
         dataset=dataset,
         warnings=warnings,
         rights_state=query_rights_state,

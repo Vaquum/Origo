@@ -14,6 +14,7 @@ from origo.query.bybit_native import BybitDataset, query_bybit_native_data
 from origo.query.etf_native import ETFDataset, query_etf_native_data
 from origo.query.fred_native import FREDDataset, query_fred_native_data
 from origo.query.native_core import (
+    AllRowsWindow,
     LatestRowsWindow,
     MonthWindow,
     NativeQuerySpec,
@@ -74,11 +75,14 @@ def _resolve_window(
             time_range is not None,
         ]
     )
-    if param_count != 1:
+    if param_count > 1:
         raise ValueError(
-            'Exactly one of month_year, n_rows, n_random, or time_range must be provided. '
+            'At most one of month_year, n_rows, n_random, or time_range can be provided. '
             f'Got: month_year={month_year}, n_rows={n_rows}, n_random={n_random}, time_range={time_range}'
         )
+
+    if param_count == 0:
+        return AllRowsWindow()
 
     if month_year is not None:
         month, year = month_year
@@ -184,9 +188,9 @@ def _resolve_historical_window(
             n_random_rows is not None,
         ]
     )
-    if selected_modes != 1:
+    if selected_modes > 1:
         raise ValueError(
-            'Exactly one window mode must be provided: '
+            'At most one window mode can be provided: '
             'date-window(start_date/end_date) | n_latest_rows | n_random_rows'
         )
 
@@ -194,6 +198,8 @@ def _resolve_historical_window(
         return LatestRowsWindow(rows=n_latest_rows)
     if n_random_rows is not None:
         return RandomRowsWindow(rows=n_random_rows)
+    if not date_mode_selected:
+        return AllRowsWindow()
 
     start_day = (
         _parse_strict_date(label='start_date', value=start_date)
@@ -229,6 +235,36 @@ def _resolve_historical_window(
     start_iso = f'{start_day.isoformat()}T00:00:00Z'
     end_exclusive_iso = f'{(end_day + timedelta(days=1)).isoformat()}T00:00:00Z'
     return TimeRangeWindow(start_iso=start_iso, end_iso=end_exclusive_iso)
+
+
+def _apply_fields(
+    *,
+    frame: pl.DataFrame,
+    fields: list[str] | tuple[str, ...] | None,
+) -> pl.DataFrame:
+    if fields is None:
+        return frame
+    if len(fields) == 0:
+        raise ValueError('fields must be non-empty when provided')
+
+    selected_columns: list[str] = []
+    seen: set[str] = set()
+    for idx, value in enumerate(fields):
+        if value.strip() == '':
+            raise ValueError(f'fields[{idx}] must be a non-empty string')
+        normalized = value.strip()
+        if normalized not in seen:
+            selected_columns.append(normalized)
+            seen.add(normalized)
+
+    missing = [column for column in selected_columns if column not in frame.columns]
+    if missing:
+        raise ValueError(
+            'fields contains columns that are not available in result: '
+            f'{missing}'
+        )
+
+    return frame.select(selected_columns)
 
 
 def _normalize_filters(filters: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
@@ -642,15 +678,22 @@ def _normalize_spot_trades_frame(
 def query_spot_trades_data(
     *,
     source: str,
+    mode: str = 'native',
     start_date: str | None = None,
     end_date: str | None = None,
     n_latest_rows: int | None = None,
     n_random_rows: int | None = None,
+    fields: list[str] | tuple[str, ...] | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
     include_datetime_col: bool = True,
     show_summary: bool = False,
     auth_token: str | None = None,
 ) -> pl.DataFrame:
     _require_historical_source(source)
+    if mode != 'native':
+        raise ValueError(
+            f'Unsupported historical mode={mode!r} for source={source}; only native is available in this slice'
+        )
     table_name = _HISTORICAL_SOURCE_TO_TABLE[source]
     dataset = HISTORICAL_SOURCE_TO_DATASET[source]
     window = _resolve_historical_window(
@@ -704,6 +747,8 @@ def query_spot_trades_data(
         frame=raw_frame,
         include_datetime_col=include_datetime_col,
     )
+    normalized = _apply_filters(frame=normalized, filters=filters)
+    normalized = _apply_fields(frame=normalized, fields=fields)
     if show_summary:
         logger.info(
             'historical_spot_trades source=%s dataset=%s rows=%d cols=%d',
@@ -768,15 +813,22 @@ def _quantity_expression_for_source(source: str) -> str:
 def query_spot_klines_data(
     *,
     source: str,
+    mode: str = 'native',
     start_date: str | None = None,
     end_date: str | None = None,
     n_latest_rows: int | None = None,
     n_random_rows: int | None = None,
+    fields: list[str] | tuple[str, ...] | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
     kline_size: int = 1,
     show_summary: bool = False,
     auth_token: str | None = None,
 ) -> pl.DataFrame:
     _require_historical_source(source)
+    if mode != 'native':
+        raise ValueError(
+            f'Unsupported historical mode={mode!r} for source={source}; only native is available in this slice'
+        )
     if kline_size <= 0:
         raise ValueError(f'kline_size must be > 0, got {kline_size}')
 
@@ -858,6 +910,8 @@ def query_spot_klines_data(
             pl.col('maker_liquidity').round(1),
         ]
     ).sort('datetime')
+    polars_df = _apply_filters(frame=polars_df, filters=filters)
+    polars_df = _apply_fields(frame=polars_df, fields=fields)
 
     if show_summary:
         elapsed = time.time() - start

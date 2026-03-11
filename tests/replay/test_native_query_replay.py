@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
+from origo.data._internal.generic_endpoints import _resolve_historical_window
 from origo.query.binance_aligned_1s import build_binance_aligned_1s_sql
 from origo.query.bitcoin_derived_aligned_1s import (
     build_bitcoin_derived_aligned_1s_sql,
@@ -10,6 +11,7 @@ from origo.query.bitcoin_native import build_bitcoin_native_query_spec
 from origo.query.bybit_aligned_1s import build_bybit_aligned_1s_sql
 from origo.query.bybit_native import build_bybit_native_query_spec
 from origo.query.native_core import (
+    AllRowsWindow,
     NativeQuerySpec,
     TimeRangeWindow,
     _compile_native_query,
@@ -35,6 +37,43 @@ def test_compile_native_query_is_deterministic() -> None:
 
     assert compiled_run_1 == compiled_run_2
     assert compiled_run_1.sql == compiled_run_2.sql
+
+
+def test_compile_native_query_all_rows_window_is_deterministic() -> None:
+    spec = NativeQuerySpec(
+        table_name='binance_trades',
+        id_column='trade_id',
+        select_columns=('trade_id', 'price'),
+        window=AllRowsWindow(),
+    )
+
+    compiled_run_1 = _compile_native_query(spec, 'origo')
+    compiled_run_2 = _compile_native_query(spec, 'origo')
+
+    assert compiled_run_1 == compiled_run_2
+    assert compiled_run_1.sql == compiled_run_2.sql
+
+
+def test_historical_window_no_selector_is_deterministic() -> None:
+    window_run_1 = _resolve_historical_window(
+        table_name='canonical_binance_spot_trades_native_v1',
+        start_date=None,
+        end_date=None,
+        n_latest_rows=None,
+        n_random_rows=None,
+        auth_token=None,
+    )
+    window_run_2 = _resolve_historical_window(
+        table_name='canonical_binance_spot_trades_native_v1',
+        start_date=None,
+        end_date=None,
+        n_latest_rows=None,
+        n_random_rows=None,
+        auth_token=None,
+    )
+
+    assert window_run_1 == window_run_2
+    assert isinstance(window_run_1, AllRowsWindow)
 
 
 def test_shape_native_frame_is_deterministic() -> None:

@@ -1619,21 +1619,21 @@ Constraints: docs + migration mapping only.
 ## Slice 27: Historical ETF Operationalization (`etf_daily_metrics` in `native` + `aligned_1s`)
 
 ### Capability
-- [ ] `S27-C1` Add `HistoricalData` method `get_etf_daily_metrics` with shared historical parameters and `mode`.
-- [ ] `S27-C2` Add HTTP endpoint `/v1/historical/etf/daily_metrics` with shared historical contract.
-- [ ] `S27-C3` Implement `native` and `aligned_1s` ETF historical serving with deterministic forward-fill semantics.
-- [ ] `S27-C4` Add ETF historical field projection and filter support aligned with shared historical contract.
+- [x] `S27-C1` Add `HistoricalData` method `get_etf_daily_metrics` with shared historical parameters and `mode`.
+- [x] `S27-C2` Add HTTP endpoint `/v1/historical/etf/daily_metrics` with shared historical contract.
+- [x] `S27-C3` Implement `native` and `aligned_1s` ETF historical serving with deterministic forward-fill semantics.
+- [x] `S27-C4` Add ETF historical field projection and filter support aligned with shared historical contract.
 
 ### Proof
-- [ ] `S27-P1` Execute fixed-window ETF acceptance runs for `native` and `aligned_1s` historical paths.
-- [ ] `S27-P2` Execute replay determinism proofs for ETF historical paths in both modes.
-- [ ] `S27-P3` Execute parity checks between historical ETF outputs and existing raw query/output expectations.
+- [x] `S27-P1` Execute fixed-window ETF acceptance runs for `native` and `aligned_1s` historical paths.
+- [x] `S27-P2` Execute replay determinism proofs for ETF historical paths in both modes.
+- [x] `S27-P3` Execute parity checks between historical ETF outputs and existing raw query/output expectations.
 
 ### Guardrails
-- [ ] `S27-G1` Apply ETF rights/freshness/warning guardrails to historical ETF endpoint behavior.
-- [ ] `S27-G2` Enforce fail-loud strict-mode behavior parity with raw query for ETF historical paths.
-- [ ] `S27-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S27-G4` User docs closeout for slice (`docs/`, full ETF historical taxonomy updates for both modes).
+- [x] `S27-G1` Apply ETF rights/freshness/warning guardrails to historical ETF endpoint behavior.
+- [x] `S27-G2` Enforce fail-loud strict-mode behavior parity with raw query for ETF historical paths.
+- [x] `S27-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S27-G4` User docs closeout for slice (`docs/`, full ETF historical taxonomy updates for both modes).
 
 ## Slice 28: Historical FRED Operationalization (`fred_series_metrics` in `native` + `aligned_1s`)
 

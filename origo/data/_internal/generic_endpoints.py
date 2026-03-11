@@ -59,6 +59,22 @@ _HISTORICAL_SOURCE_TO_ID_COLUMN: dict[str, str] = {
     'okx': 'trade_id',
     'bybit': 'trade_id',
 }
+_ETF_HISTORICAL_TABLE = 'canonical_etf_daily_metrics_native_v1'
+_ETF_HISTORICAL_DATETIME_COLUMN = 'observed_at_utc'
+_ETF_HISTORICAL_NATIVE_COLUMNS: tuple[str, ...] = (
+    'metric_id',
+    'source_id',
+    'metric_name',
+    'metric_unit',
+    'metric_value_string',
+    'metric_value_int',
+    'metric_value_float',
+    'metric_value_bool',
+    'observed_at_utc',
+    'dimensions_json',
+    'provenance_json',
+    'ingested_at_utc',
+)
 
 
 def _resolve_window(
@@ -125,7 +141,12 @@ def _to_clickhouse_datetime64_literal(value: str) -> str:
     return parsed.astimezone(UTC).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
 
-def _read_table_day_bounds(*, table_name: str, auth_token: str | None) -> tuple[date | None, date | None]:
+def _read_table_day_bounds(
+    *,
+    table_name: str,
+    datetime_column: str = 'datetime',
+    auth_token: str | None,
+) -> tuple[date | None, date | None]:
     settings = resolve_clickhouse_http_settings(auth_token=auth_token)
     client = get_client(
         host=settings.host,
@@ -135,7 +156,8 @@ def _read_table_day_bounds(*, table_name: str, auth_token: str | None) -> tuple[
         compression=True,
     )
     query = (
-        f'SELECT toDate(min(datetime)) AS min_day, toDate(max(datetime)) AS max_day '
+        f'SELECT toDate(min({datetime_column})) AS min_day, '
+        f'toDate(max({datetime_column})) AS max_day '
         f'FROM {settings.database}.{table_name}'
     )
     try:
@@ -174,6 +196,7 @@ def _read_table_day_bounds(*, table_name: str, auth_token: str | None) -> tuple[
 def _resolve_historical_window(
     *,
     table_name: str,
+    datetime_column: str = 'datetime',
     start_date: str | None,
     end_date: str | None,
     n_latest_rows: int | None,
@@ -215,6 +238,7 @@ def _resolve_historical_window(
     if start_day is None or end_day is None:
         min_day, max_day = _read_table_day_bounds(
             table_name=table_name,
+            datetime_column=datetime_column,
             auth_token=auth_token,
         )
         if min_day is None or max_day is None:
@@ -698,6 +722,7 @@ def query_spot_trades_data(
     dataset = HISTORICAL_SOURCE_TO_DATASET[source]
     window = _resolve_historical_window(
         table_name=table_name,
+        datetime_column='datetime',
         start_date=start_date,
         end_date=end_date,
         n_latest_rows=n_latest_rows,
@@ -770,6 +795,67 @@ def query_spot_trades_data(
             normalized.shape[1],
         )
     return normalized
+
+
+def query_etf_daily_metrics_data(
+    *,
+    mode: str = 'native',
+    start_date: str | None = None,
+    end_date: str | None = None,
+    n_latest_rows: int | None = None,
+    n_random_rows: int | None = None,
+    fields: list[str] | tuple[str, ...] | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    show_summary: bool = False,
+    auth_token: str | None = None,
+) -> pl.DataFrame:
+    if mode not in {'native', 'aligned_1s'}:
+        raise ValueError(
+            f'Unsupported historical mode={mode!r} for source=etf_daily_metrics; '
+            'expected native or aligned_1s'
+        )
+
+    window = _resolve_historical_window(
+        table_name=_ETF_HISTORICAL_TABLE,
+        datetime_column=_ETF_HISTORICAL_DATETIME_COLUMN,
+        start_date=start_date,
+        end_date=end_date,
+        n_latest_rows=n_latest_rows,
+        n_random_rows=n_random_rows,
+        auth_token=auth_token,
+    )
+
+    if mode == 'aligned_1s':
+        frame = query_aligned_data(
+            dataset='etf_daily_metrics',
+            window=window,
+            selected_columns=None,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+    else:
+        frame = query_etf_native_data(
+            dataset='etf_daily_metrics',
+            select_columns=_ETF_HISTORICAL_NATIVE_COLUMNS,
+            window=window,
+            include_datetime=True,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+
+    projected = _apply_filters(frame=frame, filters=filters)
+    projected = _apply_fields(frame=projected, fields=fields)
+    if show_summary:
+        logger.info(
+            'historical_etf_daily_metrics dataset=%s mode=%s rows=%d cols=%d',
+            'etf_daily_metrics',
+            mode,
+            projected.shape[0],
+            projected.shape[1],
+        )
+    return projected
 
 
 def _build_kline_where_clause(window: QueryWindow) -> str:
@@ -847,6 +933,7 @@ def query_spot_klines_data(
     table_name = _HISTORICAL_SOURCE_TO_TABLE[source]
     window = _resolve_historical_window(
         table_name=table_name,
+        datetime_column='datetime',
         start_date=start_date,
         end_date=end_date,
         n_latest_rows=n_latest_rows,

@@ -5,6 +5,7 @@ import polars as pl
 
 from origo.data._internal.binance_file_to_polars import binance_file_to_polars
 from origo.data._internal.generic_endpoints import (
+    query_etf_daily_metrics_data,
     query_spot_klines_data,
     query_spot_trades_data,
 )
@@ -264,6 +265,35 @@ class HistoricalData:
             fields=fields,
             filters=filters,
             kline_size=kline_size,
+            auth_token=self.auth_token,
+            show_summary=False,
+        )
+        self.data_columns = self.data.columns
+
+    def get_etf_daily_metrics(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
+        self.data = query_etf_daily_metrics_data(
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
             auth_token=self.auth_token,
             show_summary=False,
         )

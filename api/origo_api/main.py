@@ -9,13 +9,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import polars as pl
 from clickhouse_connect.driver.exceptions import DatabaseError
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 from origo.data._internal.generic_endpoints import (
     query_aligned_wide_rows_envelope,
     query_native_wide_rows_envelope,
+    query_spot_klines_data,
+    query_spot_trades_data,
 )
 from origo.query.aligned_core import AlignedDataset
 
@@ -34,6 +38,8 @@ from .rights import RightsGateError, resolve_export_rights, resolve_query_rights
 from .schemas import (
     ExportFormat,
     ExportStatus,
+    HistoricalSpotKlinesRequest,
+    HistoricalSpotTradesRequest,
     RawExportArtifact,
     RawExportMode,
     RawExportRequest,
@@ -47,7 +53,7 @@ from .schemas import (
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.14')
+app = FastAPI(title='Origo Raw API', version='0.1.15')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
     'spot_trades',
@@ -63,6 +69,11 @@ _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     'bitcoin_circulating_supply',
     }
 )
+_HISTORICAL_SOURCE_TO_DATASET: dict[str, RawQueryDataset] = {
+    'binance': 'spot_trades',
+    'okx': 'okx_spot_trades',
+    'bybit': 'bybit_spot_trades',
+}
 
 ORIGO_INTERNAL_API_KEY = os.environ.get('ORIGO_INTERNAL_API_KEY')
 if ORIGO_INTERNAL_API_KEY is None or ORIGO_INTERNAL_API_KEY.strip() == '':
@@ -249,6 +260,113 @@ def _build_warnings(request: RawQueryRequest) -> list[RawQueryWarning]:
             )
         )
     return warnings
+
+
+def _build_historical_warnings(
+    *, n_latest_rows: int | None, n_random_rows: int | None
+) -> list[RawQueryWarning]:
+    warnings: list[RawQueryWarning] = []
+    if n_latest_rows is not None:
+        warnings.append(
+            RawQueryWarning(
+                code='WINDOW_LATEST_ROWS_MUTABLE',
+                message='n_latest_rows uses latest rows and can drift as new trades arrive',
+            )
+        )
+    if n_random_rows is not None:
+        warnings.append(
+            RawQueryWarning(
+                code='WINDOW_RANDOM_SAMPLE',
+                message='n_random_rows is sampling-oriented and not intended for canonical replay windows',
+            )
+        )
+    return warnings
+
+
+async def _run_native_query_with_limits(
+    callback: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    global _queued_requests
+
+    request_is_queued = False
+    async with _queue_lock:
+        if _queued_requests >= QUERY_MAX_QUEUE:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    'code': 'QUERY_QUEUE_LIMIT_REACHED',
+                    'message': 'Query queue limit reached',
+                },
+            )
+        _queued_requests += 1
+        request_is_queued = True
+
+    try:
+        async with _query_semaphore:
+            async with _queue_lock:
+                if request_is_queued:
+                    _queued_requests -= 1
+                    request_is_queued = False
+            return await run_in_threadpool(callback, *args, **kwargs)
+    finally:
+        if request_is_queued:
+            async with _queue_lock:
+                _queued_requests -= 1
+
+
+def _historical_dataset_for_source(source: str) -> RawQueryDataset:
+    if source not in _HISTORICAL_SOURCE_TO_DATASET:
+        raise RuntimeError(f'Unsupported historical source={source}')
+    return _HISTORICAL_SOURCE_TO_DATASET[source]
+
+
+def _build_historical_envelope(
+    *,
+    frame: pl.DataFrame,
+    dataset: RawQueryDataset,
+    warnings: list[RawQueryWarning],
+    rights_state: RightsState,
+    rights_provisional: bool,
+) -> dict[str, Any]:
+    return {
+        'mode': 'native',
+        'source': dataset,
+        'sources': [dataset],
+        'row_count': frame.height,
+        'schema': [
+            {'name': name, 'dtype': str(dtype)}
+            for name, dtype in frame.schema.items()
+        ],
+        'warnings': [warning.model_dump() for warning in warnings],
+        'rows': frame.to_dicts(),
+        'rights_state': rights_state,
+        'rights_provisional': rights_provisional,
+        'freshness': None,
+        'view_id': None,
+        'view_version': None,
+    }
+
+
+def _parse_historical_trades_request(payload: dict[str, Any]) -> HistoricalSpotTradesRequest:
+    try:
+        return HistoricalSpotTradesRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+
+
+def _parse_historical_klines_request(payload: dict[str, Any]) -> HistoricalSpotKlinesRequest:
+    try:
+        return HistoricalSpotKlinesRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
 
 
 def _resolve_single_source_or_raise(request: RawQueryRequest) -> RawQueryDataset:
@@ -494,6 +612,278 @@ def _classify_terminal_failure(
 @app.get('/health')
 def health() -> dict[str, str]:
     return {'status': 'ok'}
+
+
+async def _handle_historical_spot_trades(
+    *,
+    source: str,
+    request: HistoricalSpotTradesRequest,
+    x_clickhouse_token: str | None,
+) -> RawQueryResponse:
+    dataset = _historical_dataset_for_source(source)
+    try:
+        query_rights_decision = resolve_query_rights(
+            dataset=dataset,
+            auth_token=x_clickhouse_token,
+        )
+    except RightsGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': exc.code, 'message': str(exc)},
+        ) from exc
+
+    try:
+        query_rights_state, query_rights_provisional = (
+            query_rights_decision.response_metadata()
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'QUERY_RIGHTS_METADATA_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+
+    try:
+        frame = await _run_native_query_with_limits(
+            query_spot_trades_data,
+            source=source,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            n_latest_rows=request.n_latest_rows,
+            n_random_rows=request.n_random_rows,
+            include_datetime_col=request.include_datetime_col,
+            auth_token=x_clickhouse_token,
+            show_summary=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_RUNTIME_ERROR', 'message': str(exc)},
+        ) from exc
+    except DatabaseError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_BACKEND_ERROR', 'message': str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
+        ) from exc
+
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
+    if frame.height == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                'code': 'HISTORICAL_NO_DATA',
+                'message': 'No rows found for query window',
+            },
+        )
+
+    envelope = _build_historical_envelope(
+        frame=frame,
+        dataset=dataset,
+        warnings=warnings,
+        rights_state=query_rights_state,
+        rights_provisional=query_rights_provisional,
+    )
+    return RawQueryResponse.model_validate(envelope)
+
+
+async def _handle_historical_spot_klines(
+    *,
+    source: str,
+    request: HistoricalSpotKlinesRequest,
+    x_clickhouse_token: str | None,
+) -> RawQueryResponse:
+    dataset = _historical_dataset_for_source(source)
+    try:
+        query_rights_decision = resolve_query_rights(
+            dataset=dataset,
+            auth_token=x_clickhouse_token,
+        )
+    except RightsGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': exc.code, 'message': str(exc)},
+        ) from exc
+
+    try:
+        query_rights_state, query_rights_provisional = (
+            query_rights_decision.response_metadata()
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'QUERY_RIGHTS_METADATA_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+
+    try:
+        frame = await _run_native_query_with_limits(
+            query_spot_klines_data,
+            source=source,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            n_latest_rows=request.n_latest_rows,
+            n_random_rows=request.n_random_rows,
+            kline_size=request.kline_size,
+            auth_token=x_clickhouse_token,
+            show_summary=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_RUNTIME_ERROR', 'message': str(exc)},
+        ) from exc
+    except DatabaseError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_BACKEND_ERROR', 'message': str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
+        ) from exc
+
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
+    if frame.height == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                'code': 'HISTORICAL_NO_DATA',
+                'message': 'No rows found for query window',
+            },
+        )
+
+    envelope = _build_historical_envelope(
+        frame=frame,
+        dataset=dataset,
+        warnings=warnings,
+        rights_state=query_rights_state,
+        rights_provisional=query_rights_provisional,
+    )
+    return RawQueryResponse.model_validate(envelope)
+
+
+@app.post('/v1/historical/binance/spot/trades', response_model=RawQueryResponse)
+async def historical_binance_spot_trades(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_trades(
+        source='binance',
+        request=_parse_historical_trades_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/binance/spot/klines', response_model=RawQueryResponse)
+async def historical_binance_spot_klines(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_klines(
+        source='binance',
+        request=_parse_historical_klines_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/okx/spot/trades', response_model=RawQueryResponse)
+async def historical_okx_spot_trades(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_trades(
+        source='okx',
+        request=_parse_historical_trades_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/okx/spot/klines', response_model=RawQueryResponse)
+async def historical_okx_spot_klines(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_klines(
+        source='okx',
+        request=_parse_historical_klines_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bybit/spot/trades', response_model=RawQueryResponse)
+async def historical_bybit_spot_trades(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_trades(
+        source='bybit',
+        request=_parse_historical_trades_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bybit/spot/klines', response_model=RawQueryResponse)
+async def historical_bybit_spot_klines(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_spot_klines(
+        source='bybit',
+        request=_parse_historical_klines_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
 
 
 @app.post('/v1/raw/query', response_model=RawQueryResponse)

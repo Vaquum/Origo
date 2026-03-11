@@ -2,12 +2,12 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21 (platform v0.1.14)
+- Last updated: 2026-03-11
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24 (platform v0.1.15)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
-- Scope includes query datasets, scraper source keys, warning/error taxonomies, and export lifecycle taxonomy.
+- Scope includes query datasets, historical spot endpoint taxonomy, scraper source keys, warning/error taxonomies, and export lifecycle taxonomy.
 
 ## Inputs and outputs with contract shape
 - This document is a reference artifact; it does not define an endpoint.
@@ -15,7 +15,17 @@
   - `POST /v1/raw/query`
   - `POST /v1/raw/export`
   - `GET /v1/raw/export/{export_id}`
+  - `POST /v1/historical/binance/spot/trades`
+  - `POST /v1/historical/binance/spot/klines`
+  - `POST /v1/historical/okx/spot/trades`
+  - `POST /v1/historical/okx/spot/klines`
+  - `POST /v1/historical/bybit/spot/trades`
+  - `POST /v1/historical/bybit/spot/klines`
 - Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
+- Historical spot contract uses exactly one window mode:
+  - date-window (`start_date` and/or `end_date`, strict `YYYY-MM-DD`)
+  - `n_latest_rows`
+  - `n_random_rows`
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Query source keys:
@@ -153,17 +163,33 @@
 - Bitcoin event-sourcing replay/guardrail proofs are maintained in `spec/slices/slice-20-bitcoin-event-sourcing-port/`.
 
 ## Environment variables and required config
-- API/runtime:
+- Core API startup contract (required for both query and export endpoints):
   - `ORIGO_INTERNAL_API_KEY`
   - `ORIGO_QUERY_MAX_CONCURRENCY`
   - `ORIGO_QUERY_MAX_QUEUE`
   - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
   - `ORIGO_ALIGNED_QUERY_MAX_QUEUE`
-- Freshness/rights:
+  - `ORIGO_EXPORT_MAX_CONCURRENCY`
+  - `ORIGO_EXPORT_MAX_QUEUE`
+- Freshness/rights/audit startup contract:
   - `ORIGO_ALIGNED_FRESHNESS_MAX_AGE_SECONDS`
   - `ORIGO_ETF_DAILY_STALE_MAX_AGE_DAYS`
   - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
   - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`
+  - `ORIGO_EXPORT_AUDIT_LOG_PATH`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS`
+- Dataset-specific query gate/alert contract:
+  - `ORIGO_ETF_QUERY_SERVING_STATE` (`shadow|promoted`) for `etf_daily_metrics`
+  - `ORIGO_FRED_QUERY_SERVING_STATE` (`shadow|promoted`) for `fred_series_metrics`
+  - `ORIGO_FRED_ALERT_AUDIT_LOG_PATH` for FRED warning alert audit writes
+  - `ORIGO_FRED_DISCORD_WEBHOOK_URL` for FRED warning alert dispatch
+  - `ORIGO_FRED_DISCORD_TIMEOUT_SECONDS` for FRED warning alert dispatch
+- Export dispatch contract:
+  - `ORIGO_DAGSTER_GRAPHQL_URL`
+  - `ORIGO_DAGSTER_REPOSITORY_NAME`
+  - `ORIGO_DAGSTER_LOCATION_NAME`
+  - `ORIGO_DAGSTER_EXPORT_JOB_NAME`
+  - `ORIGO_EXPORT_ROOT_DIR`
 - Storage:
   - `CLICKHOUSE_*`
   - `ORIGO_OBJECT_STORE_*`

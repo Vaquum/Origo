@@ -34,6 +34,18 @@ Every slice must pass:
 4. A slice cannot close with outstanding lint/type debt.
 5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
 
+## Program Status (As of 2026-03-11)
+1. Slices `0-11` and `13-21` are merged to `main`.
+2. Slice `12` is crossed over for this phase:
+   1. `S12-C1..C3` and `S12-C6` are blocked by Reddit access/policy constraints.
+   2. `S12-C4` and `S12-C5` are explicitly dropped from roadmap scope.
+3. PR gates actively enforced on `main` are:
+   1. `style-gate`
+   2. `type-gate`
+   3. `contract-gate`
+   4. `replay-gate`
+   5. `integrity-gate`
+
 ## Documentation Contract (Definition of a Perfect Entry)
 1. Every slice ends with two mandatory guardrail outputs, in this order:
    1. Developer docs update in `docs/Developer/`.
@@ -124,6 +136,10 @@ Every slice must pass:
    5. `ORIGO_SERVER_KNOWN_HOSTS` (pinned host-key entries for strict SSH host verification)
 3. First deploy must bootstrap missing host dependencies (Docker engine + compose plugin + core OS deps) via install-if-missing checks in CI workflow.
 4. Deployment flow remains single-workflow driven (no manual server bootstrap).
+5. Runtime env contract is fail-loud at API/control-plane startup:
+   1. `/opt/origo/deploy/.env` must contain all required non-empty vars.
+   2. `ORIGO_AUDIT_LOG_RETENTION_DAYS` must be present and `>= 365`.
+   3. Root `.env.example` remains the canonical env contract source.
 
 ## ClickHouse Query and Migration Policy
 1. ClickHouse schema and query logic is SQL-first and versioned.
@@ -168,7 +184,8 @@ Every slice must pass:
 7. Canonical ingest must satisfy exactly-once semantics at source-event identity.
 8. Canonical ingest must satisfy no-miss completeness checks per source stream/partition.
 9. Canonical event log must preserve raw source bytes (or exact raw response body) with cryptographic checksum.
-10. Canonical numeric fields must preserve source precision with integer/decimal types and explicit scale metadata (no float in canonical storage).
+10. Canonical event payload numeric fields must preserve source precision with integer/decimal types and explicit scale metadata (no float in canonical event payload storage).
+11. Current reality note: several `canonical_*_native_v1` projection tables still use `Float64`; this is tracked precision debt until migrated.
 
 ### Rights and Secret Safety
 1. Source rights matrix is mandatory in repo.
@@ -181,14 +198,14 @@ Every slice must pass:
 5. `Hosted Allowed` requires legal sign-off artifact before external serving/export.
 6. Credentials are provided at source init/config stage.
 7. Credentials are not persisted in raw form.
-8. Authenticated links must use TLS.
+8. Authenticated links must use TLS at the external boundary (edge termination acceptable; origin transport can remain private-network HTTP).
 9. Internal API key rotation is manual-only.
 
 ### Runtime and Recovery Safety
 1. Freshness policy is uniform from source publish time.
 2. Runtime overload protection uses concurrency + queue limits.
 3. Rollout pattern is shadow-then-promote.
-4. Minimum PR quality gate is contract + replay + integrity tests.
+4. Required PR quality gates are `style + type + contract + replay + integrity`.
 5. DR targets: `RPO 5m` and `RTO 60m`.
 6. DR drills are quarterly.
 7. Audit logs are immutable with 1-year retention.
@@ -212,9 +229,10 @@ Every slice must pass:
 1. Canonical event log stores raw source payload bytes as first-class truth (`payload_raw`) with `payload_sha256_raw`.
 2. Parsed payload (`payload_json`) is derivative and must be reproducible from `payload_raw`.
 3. Canonical ingest must preserve source field values as delivered; normalization happens in projection layers.
-4. Canonical numeric representation forbids float types; use integer/decimal with explicit scale metadata.
-5. Time fields must preserve highest available source precision; normalized timestamps are derivative fields.
-6. Every source migration must include round-trip fidelity/precision proof artifacts on fixed fixtures.
+4. Canonical event-payload numeric representation forbids float types; use integer/decimal with explicit scale metadata.
+5. Projection tables currently include legacy float fields in several sources; these are explicit migration debt and must not be treated as canonical precision truth.
+6. Time fields must preserve highest available source precision; normalized timestamps are derivative fields.
+7. Every source migration must include round-trip fidelity/precision proof artifacts on fixed fixtures.
 
 ## Event-Sourcing and Continuous Aggregate Contract
 1. Canonical raw truth is a single global append-only event log.
@@ -290,7 +308,7 @@ Every slice must pass:
 9. Slice 8: OKX spot trades daily-file ingest plus `aligned_1s` integration capability.
 10. Slice 10: Image-based merge-to-server deployment with first-run host bootstrap.
 11. Slice 11: Bybit spot trades daily-file ingest plus `aligned_1s` integration capability.
-12. Slice 12: Reddit hourly ingest + CryptoBERT sentiment signal capability.
+12. Slice 12: Reddit hourly ingest + sentiment signal scope (crossed over in current phase; see Slice 12 locked details).
 13. Slice 13: Bitcoin Core node streams and derived network/supply signals capability.
 14. Slice 14: Event-sourcing core (canonical event log + projector/checkpoint framework + persistent aligned core) and pilot cutover.
 15. Slice 15: Binance event-sourcing port (`spot_trades`, `spot_agg_trades`, `futures_trades`) with `native` + `aligned_1s` parity.
@@ -300,6 +318,9 @@ Every slice must pass:
 19. Slice 19: Bybit event-sourcing port (`bybit_spot_trades`) with `native` + `aligned_1s` parity.
 20. Slice 20: Bitcoin event-sourcing port (all current Bitcoin datasets; aligned scope remains derived-only in this tranche).
 21. Slice 21: Canonical `aligned_1s` aggregate contract enforcement and Binance retrofit.
+22. Slice 22: Historical Binance spot HTTP operationalization with strict date-window contract.
+23. Slice 23: Historical OKX spot HTTP operationalization with Binance-cohesive interface/schema.
+24. Slice 24: Historical Bybit spot HTTP operationalization plus old-system endpoint cutover runbook.
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -334,8 +355,9 @@ Every slice must pass:
 4. Bybit onboarding follows source completion rule: `native` + `aligned_1s` before slice closeout.
 
 ## Slice 12 (Reddit Sentiment) Locked Details
-1. Source must be the official Reddit API only (no third-party Reddit APIs or aggregators).
-2. Initial subreddit scope is fixed:
+1. Execution status in this phase: crossed over.
+2. Source contract remains official Reddit API only (no third-party Reddit APIs or aggregators).
+3. Initial subreddit scope target is:
    1. `r/BitcoinMarkets`
    2. `r/Bitcoin`
    3. `r/BitcoinMining`
@@ -354,11 +376,11 @@ Every slice must pass:
    16. `r/wallstreetbets`
    17. `r/SatoshiStreetBets`
    18. `r/Buttcoin`
-3. Cadence is hourly pulls for all listed subreddits.
-4. Sentiment model for Slice 12 is fixed to `ElKulako/cryptobert`.
-5. Model outputs must be stored with model identity metadata and deterministic aggregation contract.
-6. Slice completion follows source completion rule: provide both `native` and `aligned_1s` query/export integration for Slice-12 output datasets.
-7. Execution decision (updated): `S12-C4` and `S12-C5` are crossed over as explicitly dropped from roadmap; they are not planned for implementation.
+4. Cadence target is hourly pulls for all listed subreddits.
+5. Historical model target for sentiment was `ElKulako/cryptobert`.
+6. Execution decision for current phase:
+   1. `S12-C1..C3` and `S12-C6` are crossed over as blocked by Reddit access/policy constraints.
+   2. `S12-C4` and `S12-C5` are crossed over as explicitly dropped from roadmap and not planned for implementation.
 
 ## Slice 13 (Bitcoin Core Node V1) Locked Details
 1. Data source must be one unpruned self-hosted Bitcoin Core node (no third-party blockchain APIs).
@@ -455,6 +477,27 @@ Every slice must pass:
 3. Proof harnesses must provision aligned storage via migration runner only; manual ad-hoc table DDL in proofs is disallowed.
 4. Slice includes Binance retrofit of aligned query/proof paths to this contract before moving to the next source migration slice.
 5. Slice closeout requires deterministic replay parity to remain unchanged after enforcing the canonical aligned contract.
+
+## Slice 22 (Historical Binance Lock-In) Locked Details
+1. Python historical contract is Binance-first rename to explicit `get_binance_spot_trades` and `get_binance_spot_klines`.
+2. HTTP adds two endpoints only for this slice: `/v1/historical/binance/spot/trades` and `/v1/historical/binance/spot/klines`.
+3. Window selection is fail-loud and exclusive: exactly one of `date-window(start_date/end_date)`, `n_latest_rows`, `n_random_rows`.
+4. Date-window semantics are strict `YYYY-MM-DD` with UTC day bounds (start inclusive, end-day inclusive via next-day exclusive).
+5. Legacy `historical_data` methods are hard removed in this slice: no aliases or fallback params.
+
+## Slice 23 (Historical OKX Parallelization) Locked Details
+1. Python and HTTP interfaces must be signature-identical with Slice 22 Binance contracts.
+2. HTTP adds two endpoints: `/v1/historical/okx/spot/trades` and `/v1/historical/okx/spot/klines`.
+3. Spot-trades output schema is normalized to shared contract: `trade_id`, `timestamp`, `price`, `quantity`, `is_buyer_maker`, `datetime`.
+4. OKX maker-side mapping is mandatory and fail-loud: `buy -> 0`, `sell -> 1`.
+5. No fallback aliases for old method names or old request parameters are permitted.
+
+## Slice 24 (Historical Bybit Parallelization + Cutover) Locked Details
+1. Python and HTTP interfaces must be signature-identical with Binance and OKX contracts.
+2. HTTP adds two endpoints: `/v1/historical/bybit/spot/trades` and `/v1/historical/bybit/spot/klines`.
+3. Bybit maker-side mapping is mandatory and fail-loud: `buy -> 0`, `sell -> 1`.
+4. Old-system endpoint retirement mapping/runbook is part of slice guardrails and must be explicit.
+5. Slice closeout requires cohesion proof over all six historical spot endpoints and six Python methods.
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

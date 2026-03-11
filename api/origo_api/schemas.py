@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -70,6 +70,42 @@ def _validate_export_window_selection(
         raise ValueError(
             'Exactly one window mode must be provided: '
             'month_year | time_range | n_rows | n_random'
+        )
+
+
+def _parse_strict_utc_date(*, label: str, raw_value: str) -> date:
+    if len(raw_value) != 10:
+        raise ValueError(f'{label} must be strict YYYY-MM-DD (UTC day)')
+    try:
+        parsed = datetime.strptime(raw_value, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise ValueError(
+            f'{label} must be a valid strict YYYY-MM-DD date (UTC day)'
+        ) from exc
+    if parsed.strftime('%Y-%m-%d') != raw_value:
+        raise ValueError(f'{label} must be strict YYYY-MM-DD (UTC day)')
+    return parsed
+
+
+def _validate_historical_window_selection(
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    n_latest_rows: int | None,
+    n_random_rows: int | None,
+) -> None:
+    date_mode_selected = start_date is not None or end_date is not None
+    selected = sum(
+        [
+            date_mode_selected,
+            n_latest_rows is not None,
+            n_random_rows is not None,
+        ]
+    )
+    if selected != 1:
+        raise ValueError(
+            'Exactly one window mode must be provided: '
+            'date-window(start_date/end_date) | n_latest_rows | n_random_rows'
         )
 
 
@@ -163,6 +199,68 @@ class RawQueryResponse(BaseModel):
     rights_provisional: bool
     warnings: list[RawQueryWarning] = Field(default_factory=_empty_warnings)
     rows: list[dict[str, Any]]
+
+
+class HistoricalSpotTradesRequest(BaseModel):
+    start_date: str | None = None
+    end_date: str | None = None
+    n_latest_rows: int | None = Field(default=None, gt=0)
+    n_random_rows: int | None = Field(default=None, gt=0)
+    include_datetime_col: bool = True
+    strict: bool = False
+
+    @model_validator(mode='after')
+    def validate_contract(self) -> HistoricalSpotTradesRequest:
+        _validate_historical_window_selection(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            n_latest_rows=self.n_latest_rows,
+            n_random_rows=self.n_random_rows,
+        )
+        parsed_start = (
+            _parse_strict_utc_date(label='start_date', raw_value=self.start_date)
+            if self.start_date is not None
+            else None
+        )
+        parsed_end = (
+            _parse_strict_utc_date(label='end_date', raw_value=self.end_date)
+            if self.end_date is not None
+            else None
+        )
+        if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+            raise ValueError('date-window must satisfy start_date <= end_date')
+        return self
+
+
+class HistoricalSpotKlinesRequest(BaseModel):
+    start_date: str | None = None
+    end_date: str | None = None
+    n_latest_rows: int | None = Field(default=None, gt=0)
+    n_random_rows: int | None = Field(default=None, gt=0)
+    kline_size: int = Field(default=1, gt=0)
+    strict: bool = False
+
+    @model_validator(mode='after')
+    def validate_contract(self) -> HistoricalSpotKlinesRequest:
+        _validate_historical_window_selection(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            n_latest_rows=self.n_latest_rows,
+            n_random_rows=self.n_random_rows,
+        )
+        parsed_start = (
+            _parse_strict_utc_date(label='start_date', raw_value=self.start_date)
+            if self.start_date is not None
+            else None
+        )
+        parsed_end = (
+            _parse_strict_utc_date(label='end_date', raw_value=self.end_date)
+            if self.end_date is not None
+            else None
+        )
+        if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+            raise ValueError('date-window must satisfy start_date <= end_date')
+        return self
 
 
 class RawExportRequest(BaseModel):

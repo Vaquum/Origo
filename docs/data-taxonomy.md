@@ -32,7 +32,7 @@
   - `spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
-- Historical spot-klines routes currently support `mode=native` only.
+- Historical spot-klines routes support both `mode=native` and `mode=aligned_1s`.
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
 
 ## Data definitions (fields, types, units, timezone, nullability)

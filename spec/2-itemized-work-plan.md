@@ -1597,13 +1597,13 @@ Constraints: docs + migration mapping only.
 - [x] `S25-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S25-G4` User docs closeout for slice (`docs/`, full historical/native/aligned contract + taxonomy updates).
 
-## Slice 26: Historical Exchange Spot-Trades Completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
+## Slice 26: Historical Exchange Spot Route Completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
 
 ### Capability
 - [x] `S26-C1` Explicitly drop `spot_agg_trades` and `futures_trades` from historical Python/HTTP scope for this tranche and lock them as deferred.
 - [x] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S26-C3` Keep exchange method signatures uniform across in-scope exchange trade datasets and both modes.
-- [x] `S26-C4` Keep existing spot-kline convenience routes operational while aligning shared selector/filter/strict semantics with historical core.
+- [x] `S26-C4` Keep existing spot-kline convenience routes operational, add `aligned_1s` execution support, and align shared selector/filter/strict semantics with historical core.
 
 ### Proof
 - [x] `S26-P1` Execute fixed-window acceptance runs for all three in-scope exchange trade datasets in `native` and `aligned_1s`.

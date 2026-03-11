@@ -1,12 +1,12 @@
 # Changelog
 
 ## 2026-03-11
-- Completed Slice 26 historical exchange spot-trades parity:
+- Completed Slice 26 historical exchange spot parity:
   - enabled historical `mode=aligned_1s` execution for exchange trade datasets:
     - `spot_trades`
     - `okx_spot_trades`
     - `bybit_spot_trades`
-  - kept historical spot-kline routes operational with shared contract semantics while enforcing fail-loud `aligned_1s` rejection for klines in this tranche
+  - enabled historical `mode=aligned_1s` execution for exchange spot-kline routes with deterministic aligned OHLCV aggregation semantics
   - preserved explicit historical deferral for `spot_agg_trades` and `futures_trades`
   - added historical contract coverage for exchange trade `aligned_1s` mode across HTTP + Python surfaces
   - added replay determinism coverage for exchange trade historical paths in both `native` and `aligned_1s`

@@ -154,6 +154,41 @@ def test_historical_data_trade_methods_accept_aligned_mode(
     assert historical.data.height == 1
 
 
+def test_historical_data_kline_methods_accept_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.data import historical_data as historical_data_module
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_query_spot_klines_data(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'open': [42000.0],
+                'high': [42000.0],
+                'low': [42000.0],
+                'close': [42000.0],
+                'volume': [0.1],
+                'no_of_trades': [1],
+                'liquidity_sum': [4200.0],
+            }
+        )
+
+    monkeypatch.setattr(
+        historical_data_module,
+        'query_spot_klines_data',
+        _fake_query_spot_klines_data,
+    )
+    historical = HistoricalData()
+    historical.get_binance_spot_klines(mode='aligned_1s')
+
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['source'] == 'binance'
+    assert historical.data.height == 1
+
+
 def test_historical_request_rejects_multiple_window_modes() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
@@ -385,21 +420,54 @@ def test_historical_endpoint_strict_warning_failure(
     assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
 
 
-def test_historical_klines_endpoint_rejects_unsupported_aligned_mode(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ('source_path', 'source_name', 'dataset_name'),
+    [
+        ('/v1/historical/binance/spot/klines', 'binance', 'spot_trades'),
+        ('/v1/historical/okx/spot/klines', 'okx', 'okx_spot_trades'),
+        ('/v1/historical/bybit/spot/klines', 'bybit', 'bybit_spot_trades'),
+    ],
+)
+def test_historical_klines_endpoint_supports_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_path: str,
+    source_name: str,
+    dataset_name: str,
 ) -> None:
     main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_klines_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'open': [42000.0],
+                'high': [42000.0],
+                'low': [42000.0],
+                'close': [42000.0],
+                'volume': [0.1],
+                'no_of_trades': [1],
+                'liquidity_sum': [4200.0],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_spot_klines_data', _fake_klines_query)
 
     with TestClient(main_module.app) as client:
         response = client.post(
-            '/v1/historical/bybit/spot/klines',
+            source_path,
             headers={'X-API-Key': 'test-internal-key'},
             json={'mode': 'aligned_1s'},
         )
 
-    assert response.status_code == 409
-    detail = response.json()['detail']
-    assert detail['code'] == 'HISTORICAL_CONTRACT_ERROR'
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'aligned_1s'
+    assert payload['source'] == dataset_name
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['source'] == source_name
 
 
 def test_historical_endpoint_returns_404_for_empty_result(

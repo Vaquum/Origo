@@ -59,7 +59,7 @@ Invalid dates fail loudly with contract error.
 Mode semantics:
 - request contract accepts `mode=native|aligned_1s`.
 - trades routes execute both `native` and `aligned_1s` as of S26.
-- klines routes remain `native` only in this tranche and fail loudly for `aligned_1s`.
+- klines routes execute both `native` and `aligned_1s` as of the S26 parity extension.
 
 ## Data schema and mapping
 Trades schema (all exchanges):
@@ -71,7 +71,8 @@ Maker mapping for OKX/Bybit:
 - any other value is fail-loud contract/runtime error
 
 Klines schema:
-- unchanged from existing kline contract (`datetime`, OHLC, summary stats, volume/liquidity fields)
+- `mode=native`: existing kline contract (`datetime`, OHLC, summary stats, volume/liquidity fields).
+- `mode=aligned_1s`: deterministic aligned projection (`datetime`, `open`, `high`, `low`, `close`, `volume`, `no_of_trades`, `liquidity_sum`).
 
 ## Error taxonomy
 Historical routes follow:

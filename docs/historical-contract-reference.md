@@ -55,5 +55,5 @@ Route-specific additions:
   - `spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
-- Historical klines routes execute `native` only in current slice.
+- Historical klines routes execute both `native` and `aligned_1s`.
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.

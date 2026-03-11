@@ -32,7 +32,7 @@ Trades request:
 - `strict: bool` (default `false`)
 
 Klines request:
-- `mode: native | aligned_1s` (default `native`; `aligned_1s` is currently unsupported for klines and fails loudly)
+- `mode: native | aligned_1s` (default `native`)
 - `start_date: YYYY-MM-DD | null`
 - `end_date: YYYY-MM-DD | null`
 - `n_latest_rows: int | null`
@@ -88,12 +88,19 @@ Trades rows (all exchanges):
   - `trade_count`
 
 Klines rows (all exchanges):
-- `datetime`
-- `open`, `high`, `low`, `close`
-- `mean`, `std`, `median`, `iqr`
-- `volume`, `maker_ratio`, `no_of_trades`
-- `open_liquidity`, `high_liquidity`, `low_liquidity`, `close_liquidity`
-- `liquidity_sum`, `maker_volume`, `maker_liquidity`
+- `mode=native`:
+  - `datetime`
+  - `open`, `high`, `low`, `close`
+  - `mean`, `std`, `median`, `iqr`
+  - `volume`, `maker_ratio`, `no_of_trades`
+  - `open_liquidity`, `high_liquidity`, `low_liquidity`, `close_liquidity`
+  - `liquidity_sum`, `maker_volume`, `maker_liquidity`
+- `mode=aligned_1s`:
+  - `datetime`
+  - `open`, `high`, `low`, `close`
+  - `volume`
+  - `no_of_trades`
+  - `liquidity_sum`
 
 Mapping for OKX/Bybit:
 - source `side=buy` => `is_buyer_maker=0`
@@ -112,4 +119,4 @@ Current mode status on historical spot routes:
   - `aligned_1s`: supported
 - Klines routes:
   - `native`: supported
-  - `aligned_1s`: rejected with `409` (`HISTORICAL_CONTRACT_ERROR`) in this slice
+  - `aligned_1s`: supported

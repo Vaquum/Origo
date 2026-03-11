@@ -5,7 +5,7 @@
     "row_count": "number of rows returned",
     "offset_min": "minimum source offset/trade id in proof output",
     "offset_max": "maximum source offset/trade id in proof output",
-    "volume_sum": "sum(quantity) for trades",
+    "volume_sum": "sum(quantity) for trades or sum(volume) for klines",
     "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
   },
   "deterministic_match": true,
@@ -87,6 +87,60 @@
       "offset_max": 0,
       "volume_sum": "0.1",
       "fingerprint_sha256": "ac861eb6c75460d1670e13ffe1f1639863fbbd0a7277ae0cf641f9504d64ad40"
+    },
+    {
+      "stream": "spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "ccece25ba765e2076d8780c3f202356e42661c1d09acc1df0689f4b57aebdd97"
+    },
+    {
+      "stream": "spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "75ca91257c2ff9b599903195372bdc789b2f9379068630435adf77db69a0dc8b"
+    },
+    {
+      "stream": "okx_spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "40bd579244b28c28c214b58cdee9945bbc5f1c931b16ff1cd7a186f64fd5a761"
+    },
+    {
+      "stream": "okx_spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "1eaf68d2f5cc72cd00ff1886684bb5421e3fe18e823846f74fd882138083006f"
+    },
+    {
+      "stream": "bybit_spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "31b38b1de7d64da9d1c01f48507c96b3c62abc8f00b6901f7ac1feb0acb019f5"
+    },
+    {
+      "stream": "bybit_spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "9efbce6b7b2118b3257366c3d7419b0199356702ae17c78ab2797390d9aa02d3"
     }
   ],
   "run_2_fingerprints": [
@@ -143,6 +197,60 @@
       "offset_max": 0,
       "volume_sum": "0.1",
       "fingerprint_sha256": "ac861eb6c75460d1670e13ffe1f1639863fbbd0a7277ae0cf641f9504d64ad40"
+    },
+    {
+      "stream": "spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "ccece25ba765e2076d8780c3f202356e42661c1d09acc1df0689f4b57aebdd97"
+    },
+    {
+      "stream": "spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "75ca91257c2ff9b599903195372bdc789b2f9379068630435adf77db69a0dc8b"
+    },
+    {
+      "stream": "okx_spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "40bd579244b28c28c214b58cdee9945bbc5f1c931b16ff1cd7a186f64fd5a761"
+    },
+    {
+      "stream": "okx_spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "1eaf68d2f5cc72cd00ff1886684bb5421e3fe18e823846f74fd882138083006f"
+    },
+    {
+      "stream": "bybit_spot_klines",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.1",
+      "fingerprint_sha256": "31b38b1de7d64da9d1c01f48507c96b3c62abc8f00b6901f7ac1feb0acb019f5"
+    },
+    {
+      "stream": "bybit_spot_klines",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": 0,
+      "offset_max": 0,
+      "volume_sum": "0.3",
+      "fingerprint_sha256": "9efbce6b7b2118b3257366c3d7419b0199356702ae17c78ab2797390d9aa02d3"
     }
   ]
 }

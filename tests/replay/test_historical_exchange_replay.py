@@ -49,6 +49,24 @@ def _aligned_frame() -> pl.DataFrame:
     )
 
 
+def _aligned_kline_input_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'aligned_at_utc': [
+                datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
+                datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
+            ],
+            'open_price': [42000.0, 42001.0],
+            'high_price': [42002.0, 42003.0],
+            'low_price': [41999.0, 42000.0],
+            'close_price': [42001.0, 42002.0],
+            'quantity_sum': [0.1, 0.2],
+            'quote_volume_sum': [4200.0, 8400.0],
+            'trade_count': [1, 2],
+        }
+    )
+
+
 def test_historical_spot_trades_replay_is_deterministic_for_native_and_aligned(
     monkeypatch: Any,
 ) -> None:
@@ -101,3 +119,28 @@ def test_historical_spot_trades_replay_is_deterministic_for_native_and_aligned(
         assert aligned_run_1.to_dict(as_series=False) == aligned_run_2.to_dict(
             as_series=False
         )
+
+
+def test_historical_spot_klines_aligned_replay_is_deterministic(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'query_aligned_data',
+        lambda **_: _aligned_kline_input_frame(),
+    )
+
+    for source in ('binance', 'okx', 'bybit'):
+        run_1 = historical_endpoints.query_spot_klines_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=2,
+            kline_size=2,
+        )
+        run_2 = historical_endpoints.query_spot_klines_data(
+            source=source,
+            mode='aligned_1s',
+            n_latest_rows=2,
+            kline_size=2,
+        )
+        assert run_1.to_dict(as_series=False) == run_2.to_dict(as_series=False)

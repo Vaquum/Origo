@@ -100,6 +100,30 @@ def test_historical_etf_window_no_selector_is_deterministic() -> None:
     assert isinstance(window_run_1, AllRowsWindow)
 
 
+def test_historical_fred_window_no_selector_is_deterministic() -> None:
+    window_run_1 = _resolve_historical_window(
+        table_name='canonical_fred_series_metrics_native_v1',
+        datetime_column='observed_at_utc',
+        start_date=None,
+        end_date=None,
+        n_latest_rows=None,
+        n_random_rows=None,
+        auth_token=None,
+    )
+    window_run_2 = _resolve_historical_window(
+        table_name='canonical_fred_series_metrics_native_v1',
+        datetime_column='observed_at_utc',
+        start_date=None,
+        end_date=None,
+        n_latest_rows=None,
+        n_random_rows=None,
+        auth_token=None,
+    )
+
+    assert window_run_1 == window_run_2
+    assert isinstance(window_run_1, AllRowsWindow)
+
+
 def test_shape_native_frame_is_deterministic() -> None:
     spec = NativeQuerySpec(
         table_name='binance_trades',

@@ -1,0 +1,64 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum logical offset/value anchor in proof output",
+    "offset_max": "maximum logical offset/value anchor in proof output",
+    "volume_sum": "sum-like numeric anchor for replay comparison (metric_value_float for FRED)",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc_exclusive": "2024-01-02T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "fred_series_metrics",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-not-captured-fred-source",
+      "csv_sha256": "retrospective-not-captured-fred-source"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "fred_series_metrics",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": "f1",
+      "offset_max": "f1",
+      "volume_sum": "100.0",
+      "fingerprint_sha256": "609c68367ad41de5fa796b11e6b3ec046decd154cfa5e47139b3a9ba8f696b54"
+    },
+    {
+      "stream": "fred_series_metrics",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": "2024-01-01T00:00:00Z",
+      "offset_max": "2024-01-01T00:00:00Z",
+      "volume_sum": "100.0",
+      "fingerprint_sha256": "bb2fb20dec13946d11d0c7ea6318f7dd7c0863b30d490c1d5d3e76487a1bb9de"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "fred_series_metrics",
+      "window_mode": "date-window-native",
+      "row_count": 1,
+      "offset_min": "f1",
+      "offset_max": "f1",
+      "volume_sum": "100.0",
+      "fingerprint_sha256": "609c68367ad41de5fa796b11e6b3ec046decd154cfa5e47139b3a9ba8f696b54"
+    },
+    {
+      "stream": "fred_series_metrics",
+      "window_mode": "date-window-aligned_1s",
+      "row_count": 1,
+      "offset_min": "2024-01-01T00:00:00Z",
+      "offset_max": "2024-01-01T00:00:00Z",
+      "volume_sum": "100.0",
+      "fingerprint_sha256": "bb2fb20dec13946d11d0c7ea6318f7dd7c0863b30d490c1d5d3e76487a1bb9de"
+    }
+  ]
+}

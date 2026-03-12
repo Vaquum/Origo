@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S6, S17 (API v0.1.11)
+- Last updated: 2026-03-12
+- Slice/version reference: S6, S17, S28 (API v0.1.19)
 
 ## Purpose and scope
 - User-facing reference for FRED data in Origo.
@@ -12,12 +12,16 @@
 ## Inputs and outputs with contract shape
 - Query endpoint: `POST /v1/raw/query`
 - Export endpoint: `POST /v1/raw/export` (`dataset="fred_series_metrics"` supported)
+- Historical endpoint: `POST /v1/historical/fred/series_metrics`
 - Source key: `fred_series_metrics`
 - Request shape:
   - `mode`: `native | aligned_1s`
   - `sources`: must include `["fred_series_metrics"]`
   - one window selector: `time_range | n_rows | n_random`
   - optional `fields`, `filters`, `strict`
+- Historical request shape:
+  - shared historical contract fields (see `docs/historical-fred-reference.md`)
+  - one historical selector mode: `start_date/end_date | n_latest_rows | n_random_rows`
 - Response shape:
   - `mode`, `source`, `row_count`, `schema`, `freshness`, `warnings`, `rows`
 
@@ -85,3 +89,7 @@
   - `{ "mode":"native", "sources":["fred_series_metrics"], "time_range":["2024-01-01T00:00:00Z","2024-04-01T00:00:00Z"], "fields":["source_id","metric_name","observed_at_utc","metric_value_float"], "strict":false }`
 - Aligned query:
   - `{ "mode":"aligned_1s", "sources":["fred_series_metrics"], "n_rows":1000, "fields":["aligned_at_utc","source_id","metric_name","metric_value_float"], "strict":false }`
+- Native historical query:
+  - `{ "mode":"native", "start_date":"2024-01-01", "end_date":"2024-01-31", "fields":["source_id","metric_name","observed_at_utc","metric_value_float"], "strict":false }`
+- Aligned historical query:
+  - `{ "mode":"aligned_1s", "start_date":"2024-01-01", "end_date":"2024-01-31", "fields":["aligned_at_utc","source_id","metric_name","metric_value_float"], "strict":false }`

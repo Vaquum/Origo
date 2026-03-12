@@ -75,6 +75,22 @@ _ETF_HISTORICAL_NATIVE_COLUMNS: tuple[str, ...] = (
     'provenance_json',
     'ingested_at_utc',
 )
+_FRED_HISTORICAL_TABLE = 'canonical_fred_series_metrics_native_v1'
+_FRED_HISTORICAL_DATETIME_COLUMN = 'observed_at_utc'
+_FRED_HISTORICAL_NATIVE_COLUMNS: tuple[str, ...] = (
+    'metric_id',
+    'source_id',
+    'metric_name',
+    'metric_unit',
+    'metric_value_string',
+    'metric_value_int',
+    'metric_value_float',
+    'metric_value_bool',
+    'observed_at_utc',
+    'dimensions_json',
+    'provenance_json',
+    'ingested_at_utc',
+)
 
 
 def _resolve_window(
@@ -851,6 +867,67 @@ def query_etf_daily_metrics_data(
         logger.info(
             'historical_etf_daily_metrics dataset=%s mode=%s rows=%d cols=%d',
             'etf_daily_metrics',
+            mode,
+            projected.shape[0],
+            projected.shape[1],
+        )
+    return projected
+
+
+def query_fred_series_metrics_data(
+    *,
+    mode: str = 'native',
+    start_date: str | None = None,
+    end_date: str | None = None,
+    n_latest_rows: int | None = None,
+    n_random_rows: int | None = None,
+    fields: list[str] | tuple[str, ...] | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    show_summary: bool = False,
+    auth_token: str | None = None,
+) -> pl.DataFrame:
+    if mode not in {'native', 'aligned_1s'}:
+        raise ValueError(
+            f'Unsupported historical mode={mode!r} for source=fred_series_metrics; '
+            'expected native or aligned_1s'
+        )
+
+    window = _resolve_historical_window(
+        table_name=_FRED_HISTORICAL_TABLE,
+        datetime_column=_FRED_HISTORICAL_DATETIME_COLUMN,
+        start_date=start_date,
+        end_date=end_date,
+        n_latest_rows=n_latest_rows,
+        n_random_rows=n_random_rows,
+        auth_token=auth_token,
+    )
+
+    if mode == 'aligned_1s':
+        frame = query_aligned_data(
+            dataset='fred_series_metrics',
+            window=window,
+            selected_columns=None,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+    else:
+        frame = query_fred_native_data(
+            dataset='fred_series_metrics',
+            select_columns=_FRED_HISTORICAL_NATIVE_COLUMNS,
+            window=window,
+            include_datetime=True,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+
+    projected = _apply_filters(frame=frame, filters=filters)
+    projected = _apply_fields(frame=projected, fields=fields)
+    if show_summary:
+        logger.info(
+            'historical_fred_series_metrics dataset=%s mode=%s rows=%d cols=%d',
+            'fred_series_metrics',
             mode,
             projected.shape[0],
             projected.shape[1],

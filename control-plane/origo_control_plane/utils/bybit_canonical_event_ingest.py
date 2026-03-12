@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from clickhouse_driver import Client as ClickhouseClient
 
-from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
+from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
+from origo.events.ingest_state import CanonicalStreamKey
+from origo.events.runtime_audit import get_canonical_runtime_audit_log
+from origo.events.writer import (
+    CanonicalEventWriteInput,
+    CanonicalEventWriter,
+    canonical_event_id_from_key,
+    canonical_event_idempotency_key,
+)
 
 _SOURCE_ID = 'bybit'
 _STREAM_ID = 'bybit_spot_trades'
@@ -16,6 +26,10 @@ _SYMBOL = 'BTCUSDT'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
 _WRITE_EVENTS_BATCH_SIZE = 10_000
+_FAST_INSERT_MODE_ENV = 'ORIGO_CANONICAL_FAST_INSERT_MODE'
+_FAST_INSERT_MODE_DEFAULT = 'writer'
+_FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
+_INSERT_CHUNK_SIZE = 100_000
 _EXPECTED_CSV_HEADER = (
     'timestamp',
     'symbol',
@@ -259,6 +273,184 @@ def write_bybit_spot_trades_to_canonical(
     run_id: str | None,
     ingested_at_utc: datetime,
 ) -> dict[str, int]:
+    canonical_events: list[dict[str, object]] = []
+    for event in events:
+        canonical_events.append(
+            {
+                'partition_id': event.partition_id,
+                'source_offset_or_equivalent': str(event.trade_id),
+                'source_event_time_utc': event.event_time_utc,
+                'payload': event.to_payload(),
+            }
+        )
+    return _write_events_to_canonical(
+        client=client,
+        database=database,
+        events=canonical_events,
+        run_id=run_id,
+        ingested_at_utc=ingested_at_utc,
+    )
+
+
+def _write_events_to_canonical(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    events: list[dict[str, object]],
+    run_id: str | None,
+    ingested_at_utc: datetime,
+) -> dict[str, int]:
+    fast_insert_mode = os.environ.get(
+        _FAST_INSERT_MODE_ENV,
+        _FAST_INSERT_MODE_DEFAULT,
+    ).strip().lower()
+    if fast_insert_mode not in {
+        _FAST_INSERT_MODE_DEFAULT,
+        _FAST_INSERT_MODE_ASSUME_NEW_PARTITION,
+    }:
+        raise RuntimeError(
+            f'{_FAST_INSERT_MODE_ENV} must be one of '
+            f'[{_FAST_INSERT_MODE_DEFAULT}, {_FAST_INSERT_MODE_ASSUME_NEW_PARTITION}], '
+            f'got={fast_insert_mode!r}'
+        )
+
+    if (
+        fast_insert_mode == _FAST_INSERT_MODE_ASSUME_NEW_PARTITION
+        and events != []
+    ):
+        partition_ids = {str(event['partition_id']) for event in events}
+        if len(partition_ids) != 1:
+            raise RuntimeError(
+                'Bybit fast canonical insert requires exactly one partition_id '
+                f'per batch, got={sorted(partition_ids)}'
+            )
+        partition_id = next(iter(partition_ids))
+        existing_rows = client.execute(
+            f'''
+            SELECT 1
+            FROM {database}.canonical_event_log
+            WHERE source_id = %(source_id)s
+              AND stream_id = %(stream_id)s
+              AND partition_id = %(partition_id)s
+            LIMIT 1
+            ''',
+            {
+                'source_id': _SOURCE_ID,
+                'stream_id': _STREAM_ID,
+                'partition_id': partition_id,
+            },
+        )
+        if existing_rows != []:
+            raise RuntimeError(
+                'Bybit fast canonical insert requires empty target partition; '
+                f'partition already has data source={_SOURCE_ID} stream={_STREAM_ID} '
+                f'partition_id={partition_id}'
+            )
+
+        insert_rows: list[tuple[object, ...]] = []
+        first_offset: str | None = None
+        last_offset: str | None = None
+        first_event_id: str | None = None
+        last_event_id: str | None = None
+        for event in events:
+            source_offset = str(event['source_offset_or_equivalent'])
+            source_event_time_utc = event['source_event_time_utc']
+            if not isinstance(source_event_time_utc, datetime):
+                raise RuntimeError('source_event_time_utc must be datetime')
+            payload = event['payload']
+            if not isinstance(payload, dict):
+                raise RuntimeError('payload must be dict')
+            payload_json = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(',', ':'),
+                ensure_ascii=True,
+            )
+            payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
+            payload_sha256_raw = hashlib.sha256(payload_raw).hexdigest()
+            event_id = canonical_event_id_from_key(
+                canonical_event_idempotency_key(
+                    source_id=_SOURCE_ID,
+                    stream_id=_STREAM_ID,
+                    partition_id=partition_id,
+                    source_offset_or_equivalent=source_offset,
+                )
+            )
+            if first_offset is None:
+                first_offset = source_offset
+                first_event_id = str(event_id)
+            last_offset = source_offset
+            last_event_id = str(event_id)
+            insert_rows.append(
+                (
+                    CANONICAL_EVENT_ENVELOPE_VERSION,
+                    event_id,
+                    _SOURCE_ID,
+                    _STREAM_ID,
+                    partition_id,
+                    source_offset,
+                    source_event_time_utc.astimezone(UTC),
+                    ingested_at_utc.astimezone(UTC),
+                    _PAYLOAD_CONTENT_TYPE,
+                    _PAYLOAD_ENCODING,
+                    payload_raw,
+                    payload_sha256_raw,
+                    payload_json,
+                )
+            )
+
+        for start in range(0, len(insert_rows), _INSERT_CHUNK_SIZE):
+            chunk = insert_rows[start : start + _INSERT_CHUNK_SIZE]
+            client.execute(
+                f'''
+                INSERT INTO {database}.canonical_event_log
+                (
+                    envelope_version,
+                    event_id,
+                    source_id,
+                    stream_id,
+                    partition_id,
+                    source_offset_or_equivalent,
+                    source_event_time_utc,
+                    ingested_at_utc,
+                    payload_content_type,
+                    payload_encoding,
+                    payload_raw,
+                    payload_sha256_raw,
+                    payload_json
+                )
+                VALUES
+                ''',
+                chunk,
+            )
+
+        if first_offset is None or last_offset is None:
+            raise RuntimeError('Bybit fast canonical insert produced no rows')
+        if first_event_id is None or last_event_id is None:
+            raise RuntimeError('Bybit fast canonical insert missing event IDs')
+
+        get_canonical_runtime_audit_log().append_ingest_batch_event(
+            stream_key=CanonicalStreamKey(
+                source_id=_SOURCE_ID,
+                stream_id=_STREAM_ID,
+                partition_id=partition_id,
+            ),
+            event_type='canonical_ingest_batch',
+            run_id=run_id,
+            batch_event_count=len(insert_rows),
+            inserted_count=len(insert_rows),
+            duplicate_count=0,
+            first_source_offset_or_equivalent=first_offset,
+            last_source_offset_or_equivalent=last_offset,
+            first_event_id=first_event_id,
+            last_event_id=last_event_id,
+        )
+        return {
+            'rows_processed': len(events),
+            'rows_inserted': len(insert_rows),
+            'rows_duplicate': 0,
+        }
+
     writer = CanonicalEventWriter(client=client, database=database)
 
     inserted = 0

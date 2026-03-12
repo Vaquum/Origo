@@ -1979,7 +1979,7 @@ Done looks like: one canonical ordered dataset list and per-dataset earliest-sou
 Constraints: planning/contract only; no ingestion execution yet.
 2. `S34-02`
 Action: Prepare backfill orchestration controls (partition planner, cursor ledger, resume policy, fail-loud gap checks).
-Done looks like: backfill runs are resumable by cursor and stop loudly on detected gaps or checksum mismatches.
+Done looks like: backfill runs are resumable by cursor and stop loudly on detected gaps or checksum mismatches, and exchange canonical ingest runs with throughput env contract (`ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`, `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`, `ORIGO_BACKFILL_PROJECTION_MODE=deferred`) synchronized by deploy CI.
 Constraints: no source data mutation.
 3. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.

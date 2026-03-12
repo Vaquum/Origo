@@ -108,3 +108,41 @@ def test_canonical_runtime_audit_log_writes_batched_ingest_events(
     assert events[1]['sequence'] == 2
     assert events[0]['event_type'] == 'canonical_ingest_inserted'
     assert events[1]['event_type'] == 'canonical_ingest_duplicate'
+
+
+def test_canonical_runtime_audit_log_writes_ingest_batch_summary_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    audit_log_path = tmp_path / 'audit' / 'canonical-runtime-summary.jsonl'
+    monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
+    monkeypatch.setenv('ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH', str(audit_log_path))
+
+    module = importlib.import_module('origo.events.runtime_audit')
+    setattr(module, '_runtime_audit_singleton', None)
+
+    stream_key = CanonicalStreamKey(
+        source_id='okx',
+        stream_id='okx_spot_trades',
+        partition_id='2021-05-19',
+    )
+    audit_log = module.get_canonical_runtime_audit_log()
+    audit_log.append_ingest_batch_event(
+        stream_key=stream_key,
+        event_type='canonical_ingest_batch',
+        run_id='run-summary',
+        batch_event_count=3,
+        inserted_count=2,
+        duplicate_count=1,
+        first_source_offset_or_equivalent='10',
+        last_source_offset_or_equivalent='12',
+        first_event_id='00000000-0000-0000-0000-000000000010',
+        last_event_id='00000000-0000-0000-0000-000000000012',
+    )
+
+    events = _read_jsonl(audit_log_path)
+    assert len(events) == 1
+    assert events[0]['event_type'] == 'canonical_ingest_batch'
+    payload = events[0]['payload']
+    assert payload['batch_event_count'] == 3
+    assert payload['inserted_count'] == 2
+    assert payload['duplicate_count'] == 1

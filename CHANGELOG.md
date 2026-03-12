@@ -1,6 +1,14 @@
 # Changelog
 
 ## 2026-03-12
+- Fixed exchange backfill canonical ingest throughput bottlenecks and deployment env drift:
+  - added fast canonical insert mode (`ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`) for Binance/OKX/Bybit daily ingest paths with fail-loud non-empty-partition guard
+  - added canonical runtime batch audit event API and summary-mode writer audit path (`ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`) to eliminate per-event audit log bottlenecks during large ingest batches
+  - updated deploy workflow to sync and enforce `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`, `ORIGO_CANONICAL_FAST_INSERT_MODE`, and `ORIGO_BACKFILL_PROJECTION_MODE` from root `.env.example` into `/opt/origo/deploy/.env`
+  - set root `.env.example` defaults to high-throughput canonical ingest mode (`summary` + `assume_new_partition`)
+  - added contract coverage for runtime batch audit and summary-mode writer audit behavior
+- Updated versions to `Origo API v0.1.28` and `origo-control-plane v1.2.68`.
+
 - Fixed large-partition canonical ingest failure caused by ClickHouse `max_query_size` on identity lookup:
   - reduced canonical identity lookup chunk size in `CanonicalEventWriter` to keep tuple-`IN` select queries under default ClickHouse parser limits
   - added contract coverage for writer query chunking (`tests/contract/test_canonical_event_writer_query_chunking_contract.py`)

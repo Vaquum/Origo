@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-12
+- Fixed deploy/runtime env contract regression after Slice 31:
+  - enforced `ORIGO_AUDIT_LOG_RETENTION_DAYS` propagation in `deploy-on-merge` from root `.env.example` to `/opt/origo/deploy/.env`
+  - added fail-loud validation in deploy workflow for integer and minimum retention bound (`>=365`)
+  - added explicit compose-time requirement for API service (`deploy/docker-compose.server.yml`) so missing retention policy fails before runtime boot
+  - updated deploy contract and troubleshooting docs for the new enforcement behavior
+- Updated version to `Origo API v0.1.23`.
+
 - Completed Slice 31 historical full-surface cohesion and rollout handoff:
   - enforced complete historical dataset/mode matrix closure across HTTP and Python surfaces for all in-scope datasets
   - kept `spot_agg_trades` and `futures_trades` explicitly deferred from historical Python/HTTP scope

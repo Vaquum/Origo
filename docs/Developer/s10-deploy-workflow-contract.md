@@ -2,9 +2,9 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
+- Last updated: 2026-03-12
 - Slice reference: S10 (`S10-C1`, `S10-C2`, `S10-C3`, `S10-C4`, `S10-G1`, `S10-G2`, `S10-G3`)
-- Version reference: API `v0.1.5`, control-plane `v1.2.55`
+- Version reference: API `v0.1.23`, control-plane `v1.2.55`
 
 ## Purpose and scope
 - Defines the CI deployment contract for image-based server apply on merge to `main`.
@@ -26,6 +26,7 @@
 - `ORIGO_API_IMAGE`: string image reference (`ghcr.io/...:<sha>`).
 - `ORIGO_CONTROL_PLANE_IMAGE`: string image reference (`ghcr.io/...:<sha>`).
 - `ORIGO_DEPLOY_API_PORT`: integer string (`1..65535`).
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS`: integer string (`>=365`) sourced from root `.env.example` and written to server runtime env on deploy.
 - `ORIGO_SERVER_ENV_B64`: base64-encoded env file content string (required when server env file is missing).
 - Verified service image tuple: `service` (string) + `image` (string).
 
@@ -33,6 +34,7 @@
 - Build provenance is tied to GitHub run metadata and commit SHA tags.
 - Deploy apply path always uses prebuilt registry images (no server-side docker build).
 - Server runtime env is treated as durable contract in `/opt/origo/deploy/.env`.
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` is enforced from root `.env.example` during deploy to keep runtime policy contract in sync.
 
 ## Failure modes, warnings, and error codes
 - Missing required secrets or env values fails workflow immediately.
@@ -56,6 +58,7 @@
   - `ORIGO_API_IMAGE`
   - `ORIGO_CONTROL_PLANE_IMAGE`
   - `ORIGO_DOCKER_API_PORT`
+  - `ORIGO_AUDIT_LOG_RETENTION_DAYS` (`>=365`)
   - `ORIGO_BITCOIN_CORE_*`
   - existing query/export/runtime env contract keys
 

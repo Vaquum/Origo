@@ -1,0 +1,91 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "HTTP status code returned by endpoint",
+    "detail_code": "error/detail code when present",
+    "row_count": "response row_count when present",
+    "body_sha256": "SHA256 hash of full response payload body"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "deploy-env-contract-live-smoke",
+    "captured_at_utc": "2026-03-12T09:50:00Z",
+    "notes": "Two consecutive runs of identical smoke calls against live deploy"
+  },
+  "source_checksums": [
+    {
+      "name": "deploy-workflow",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "ea8306efa3a5bf8c8c2ed9733d8938e2f5b9dceb28be7de397084a057434bc10",
+      "path": ".github/workflows/deploy-on-merge.yml"
+    },
+    {
+      "name": "server-compose",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "bc87356b6494b0b8e1113d9fad04bce20dec079b39bc5d84244e176a96aa6a1b",
+      "path": "deploy/docker-compose.server.yml"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "health_http",
+      "status_code": 200,
+      "detail_code": null,
+      "row_count": null,
+      "body_sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288"
+    },
+    {
+      "name": "health_https",
+      "status_code": 200,
+      "detail_code": null,
+      "row_count": null,
+      "body_sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288"
+    },
+    {
+      "name": "raw_query_native_spot_trades_n_latest_rows",
+      "status_code": 404,
+      "detail_code": "QUERY_NO_DATA",
+      "row_count": null,
+      "body_sha256": "675f782415d61cc50e86febca7a0990fccb3c8b1c9aef37fb2560f66af00533d"
+    },
+    {
+      "name": "historical_binance_spot_trades_native_n_latest_rows",
+      "status_code": 404,
+      "detail_code": "HISTORICAL_NO_DATA",
+      "row_count": null,
+      "body_sha256": "02b471c0c716fda0ea130c919abe5b34374c699f023769e6c3e6d252fd05e584"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "health_http",
+      "status_code": 200,
+      "detail_code": null,
+      "row_count": null,
+      "body_sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288"
+    },
+    {
+      "name": "health_https",
+      "status_code": 200,
+      "detail_code": null,
+      "row_count": null,
+      "body_sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288"
+    },
+    {
+      "name": "raw_query_native_spot_trades_n_latest_rows",
+      "status_code": 404,
+      "detail_code": "QUERY_NO_DATA",
+      "row_count": null,
+      "body_sha256": "675f782415d61cc50e86febca7a0990fccb3c8b1c9aef37fb2560f66af00533d"
+    },
+    {
+      "name": "historical_binance_spot_trades_native_n_latest_rows",
+      "status_code": 404,
+      "detail_code": "HISTORICAL_NO_DATA",
+      "row_count": null,
+      "body_sha256": "02b471c0c716fda0ea130c919abe5b34374c699f023769e6c3e6d252fd05e584"
+    }
+  ]
+}

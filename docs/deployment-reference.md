@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S10 (platform deploy contract)
+- Last updated: 2026-03-12
+- Slice/version reference: S10 + S32 (platform deploy contract + env-drift fix)
 
 ## Purpose and scope
 - User-facing reference for how Origo server deployments are applied after code merges.
@@ -31,6 +31,7 @@
 
 ## Failure modes, warnings, and error semantics
 - Missing deploy secrets/env contracts fail deployment immediately.
+- Missing/invalid `ORIGO_AUDIT_LOG_RETENTION_DAYS` fails deployment before compose service startup.
 - Migration failure fails deploy and prevents partial silent rollout.
 - Service image mismatch after apply fails deployment.
 
@@ -41,6 +42,7 @@
 
 ## Environment variables and required config
 - Deploy is controlled by repository secrets and server env contract.
+- `ORIGO_AUDIT_LOG_RETENTION_DAYS` is sourced from root `.env.example` and synchronized into `/opt/origo/deploy/.env` on deploy.
 - No deployment-specific runtime values are hard-coded in code paths.
 
 ## Minimal examples

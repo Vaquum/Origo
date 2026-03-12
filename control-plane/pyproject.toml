@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo_control_plane"
-version = "1.2.63"
+version = "1.2.64"
 description = "Origo Control Plane"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S5, S6, S8, S11, S13, S15, S16, S17, S18, S19, S20, S21 (API v0.1.14)
+- Last updated: 2026-03-12
+- Slice/version reference: S5, S6, S8, S11, S13, S15, S16, S17, S18, S19, S20, S21, S29 (API v0.1.20)
 
 ## Purpose and scope
 - User-facing reference for `mode=aligned_1s` query and export behavior.
@@ -20,6 +20,9 @@
     - `bybit_spot_trades`
     - `etf_daily_metrics`
     - `fred_series_metrics`
+    - `bitcoin_block_headers`
+    - `bitcoin_block_transactions`
+    - `bitcoin_mempool_state`
     - `bitcoin_block_fee_totals`
     - `bitcoin_block_subsidy_schedule`
     - `bitcoin_network_hashrate_estimate`
@@ -43,6 +46,11 @@
   - `source_id`, `metric_name`, `metric_unit`
   - value channels (`metric_value_*`)
   - `provenance_json`, `records_in_bucket`, `latest_ingested_at_utc`
+- Bitcoin stream aligned fields:
+  - `records_in_bucket`
+  - `first_source_offset_or_equivalent`, `last_source_offset_or_equivalent`
+  - `bucket_sha256`
+  - stream-specific latest/aggregate fields documented in `docs/bitcoin-core-reference.md`
 - Forward-fill interval fields:
   - `valid_from_utc` (inclusive UTC timestamp)
   - `valid_to_utc_exclusive` (exclusive UTC timestamp)
@@ -54,8 +62,8 @@
 - ETF aligned data is also served from canonical aligned aggregate projections built directly from canonical ETF event rows.
 - FRED aligned data is also served from canonical aligned aggregate projections built directly from canonical FRED event rows.
 - Bitcoin derived aligned data is served from canonical aligned aggregate projections built directly from canonical Bitcoin event rows (S20 cutover).
+- Bitcoin stream aligned data is served from canonical aligned aggregate projections built directly from canonical Bitcoin event rows (S29 completion).
 - Canonical aligned storage contract is fixed to `canonical_aligned_1s_aggregates`; no alternate aligned storage path is supported.
-- Other aligned datasets remain projection-driven from their canonical serving paths in current slices.
 - Freshness payload:
   - `as_of_utc`
   - `lag_seconds`
@@ -91,6 +99,7 @@
   - `spec/slices/slice-8-okx-spot-trades-aligned/`
   - `spec/slices/slice-11-bybit-spot-trades-aligned/`
   - `spec/slices/slice-13-bitcoin-core-signals/`
+  - `spec/slices/slice-29-bitcoin-stream-aligned-completion/`
 
 ## Environment variables and required config
 - `ORIGO_ALIGNED_QUERY_MAX_CONCURRENCY`
@@ -112,3 +121,5 @@
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "n_rows":100, "fields":["aligned_at_utc","source_id","metric_name","metric_value_float"], "strict":false }`
 - Bitcoin derived aligned query:
   - `{ "mode":"aligned_1s", "sources":["bitcoin_circulating_supply"], "time_range":["2024-04-20T00:00:00Z","2024-04-22T00:00:00Z"], "fields":["aligned_at_utc","metric_name","metric_value_float","valid_from_utc","valid_to_utc_exclusive"], "strict":false }`
+- Bitcoin stream aligned query:
+  - `{ "mode":"aligned_1s", "sources":["bitcoin_mempool_state"], "time_range":["2024-04-20T00:00:00Z","2024-04-20T00:10:00Z"], "fields":["aligned_at_utc","tx_count","fee_rate_sat_vb_avg","rbf_true_count"], "strict":false }`

@@ -59,20 +59,23 @@ from .schemas import (
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.19')
+app = FastAPI(title='Origo Raw API', version='0.1.20')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
-    'spot_trades',
-    'spot_agg_trades',
-    'futures_trades',
-    'okx_spot_trades',
-    'bybit_spot_trades',
-    'etf_daily_metrics',
-    'fred_series_metrics',
-    'bitcoin_block_fee_totals',
-    'bitcoin_block_subsidy_schedule',
-    'bitcoin_network_hashrate_estimate',
-    'bitcoin_circulating_supply',
+        'spot_trades',
+        'spot_agg_trades',
+        'futures_trades',
+        'okx_spot_trades',
+        'bybit_spot_trades',
+        'etf_daily_metrics',
+        'fred_series_metrics',
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+        'bitcoin_block_fee_totals',
+        'bitcoin_block_subsidy_schedule',
+        'bitcoin_network_hashrate_estimate',
+        'bitcoin_circulating_supply',
     }
 )
 

@@ -1,6 +1,24 @@
 # Changelog
 
 ## 2026-03-12
+- Completed Slice 29 Bitcoin stream aligned completion:
+  - added deterministic aligned query path for:
+    - `bitcoin_block_headers`
+    - `bitcoin_block_transactions`
+    - `bitcoin_mempool_state`
+  - integrated aligned planner/query/export/API allowlists for all three Bitcoin stream datasets
+  - wired Bitcoin stream control-plane assets to run aligned projections into `canonical_aligned_1s_aggregates` alongside native projection writes
+  - added stream-specific aligned proof coverage:
+    - shape/aggregation contract tests
+    - planner/selected-field contract tests
+    - canonical aligned storage negative-contract tests on stream-aligned query path (`missing table`, `missing columns`, `column type mismatch`)
+    - replay SQL determinism coverage
+- Added Slice 29 docs and artifacts:
+  - `docs/Developer/s29-bitcoin-stream-aligned-completion.md`
+  - updates to `docs/bitcoin-core-reference.md`, `docs/aligned-reference.md`, `docs/raw-query-reference.md`, `docs/raw-export-reference.md`, and `docs/data-taxonomy.md`
+  - `spec/slices/slice-29-bitcoin-stream-aligned-completion/*`
+- Updated versions to `Origo API v0.1.20` and `control-plane v1.2.64`.
+
 - Completed Slice 28 historical FRED operationalization:
   - added `HistoricalData.get_fred_series_metrics` with shared historical contract semantics
   - added historical FRED endpoint `POST /v1/historical/fred/series_metrics`

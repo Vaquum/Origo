@@ -34,12 +34,13 @@ Every slice must pass:
 4. A slice cannot close with outstanding lint/type debt.
 5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
 
-## Program Status (As of 2026-03-11)
-1. Slices `0-11` and `13-24` are merged to `main`.
-2. Slice `12` is crossed over for this phase:
+## Program Status (As of 2026-03-12)
+1. Slices `0-11` and `13-28` are merged to `main`.
+2. Slice `29` is implemented and in PR-closeout state.
+3. Slice `12` is crossed over for this phase:
    1. `S12-C1..C3` and `S12-C6` are blocked by Reddit access/policy constraints.
    2. `S12-C4` and `S12-C5` are explicitly dropped from roadmap scope.
-3. PR gates actively enforced on `main` are:
+4. PR gates actively enforced on `main` are:
    1. `style-gate`
    2. `type-gate`
    3. `contract-gate`

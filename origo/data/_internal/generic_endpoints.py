@@ -748,7 +748,7 @@ def query_spot_trades_data(
 
     if mode == 'aligned_1s':
         aligned_frame = query_aligned_data(
-            dataset=cast(AlignedDataset, dataset),
+            dataset=dataset,
             window=window,
             selected_columns=None,
             datetime_iso_output=False,
@@ -1021,7 +1021,7 @@ def query_spot_klines_data(
     if mode == 'aligned_1s':
         dataset = HISTORICAL_SOURCE_TO_DATASET[source]
         aligned_frame = query_aligned_data(
-            dataset=cast(AlignedDataset, dataset),
+            dataset=dataset,
             window=window,
             selected_columns=(
                 'aligned_at_utc',

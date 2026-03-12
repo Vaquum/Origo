@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-03-12
+- Completed Slice 28 historical FRED operationalization:
+  - added `HistoricalData.get_fred_series_metrics` with shared historical contract semantics
+  - added historical FRED endpoint `POST /v1/historical/fred/series_metrics`
+  - implemented FRED historical `mode=native|aligned_1s` serving through shared historical endpoint plumbing
+  - added FRED-specific historical guardrail parity:
+    - rights gate and rights metadata
+    - FRED publish-freshness warnings (`FRED_SOURCE_PUBLISH_MISSING`, `FRED_SOURCE_PUBLISH_STALE`)
+    - strict warning escalation and fail-loud status taxonomy
+    - historical-path warning alert/audit emission parity (`emit_fred_warning_alerts_and_audit`)
+  - added FRED historical replay/parity proofs and contract coverage
+- Added Slice 28 docs and artifacts:
+  - `docs/Developer/s28-historical-fred-operationalization.md`
+  - `docs/historical-fred-reference.md`
+  - updates to `docs/historical-contract-reference.md`, `docs/fred-reference.md`, and `docs/data-taxonomy.md`
+  - `spec/slices/slice-28-historical-fred-operationalization/*`
+- Updated version to `Origo API v0.1.19`.
+
 ## 2026-03-11
 - Completed Slice 27 historical ETF operationalization:
   - added `HistoricalData.get_etf_daily_metrics` with shared historical contract semantics

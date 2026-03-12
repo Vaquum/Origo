@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-11
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27 (platform v0.1.18)
+- Last updated: 2026-03-12
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28 (platform v0.1.19)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -22,6 +22,7 @@
   - `POST /v1/historical/bybit/spot/trades`
   - `POST /v1/historical/bybit/spot/klines`
   - `POST /v1/historical/etf/daily_metrics`
+  - `POST /v1/historical/fred/series_metrics`
 - Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
 - Raw query window rule uses at most one selector (`time_range | n_rows | n_random`), and no selector means full available history.
 - Historical contract uses at most one window mode:
@@ -36,6 +37,8 @@
 - Historical spot-klines routes support both `mode=native` and `mode=aligned_1s`.
 - Historical ETF route supports both `mode=native` and `mode=aligned_1s` for:
   - `etf_daily_metrics`
+- Historical FRED route supports both `mode=native` and `mode=aligned_1s` for:
+  - `fred_series_metrics`
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
 
 ## Data definitions (fields, types, units, timezone, nullability)

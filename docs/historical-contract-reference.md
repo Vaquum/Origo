@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-11
-- Slice/version reference: S25, S26, S27 (API v0.1.18)
+- Last updated: 2026-03-12
+- Slice/version reference: S25, S26, S27, S28 (API v0.1.19)
 
 ## Purpose and scope
 - User reference for shared historical request behavior on Origo historical dataset routes.
@@ -31,6 +31,7 @@ Historical dataset routes in scope:
 - `POST /v1/historical/bybit/spot/trades`
 - `POST /v1/historical/bybit/spot/klines`
 - `POST /v1/historical/etf/daily_metrics`
+- `POST /v1/historical/fred/series_metrics`
 
 ## Window behavior
 - At most one window selector can be supplied.
@@ -67,4 +68,6 @@ Historical dataset routes in scope:
 - Historical klines routes execute both `native` and `aligned_1s`.
 - Historical ETF route executes both `native` and `aligned_1s` for:
   - `etf_daily_metrics`
+- Historical FRED route executes both `native` and `aligned_1s` for:
+  - `fred_series_metrics`
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.

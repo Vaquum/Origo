@@ -604,6 +604,10 @@ Every slice must pass:
 4. Both `native` and `aligned_1s` modes are required.
 5. FRED publish-freshness warning semantics must remain deterministic and fail-loud with `strict=true`.
 6. Slice closeout requires parity + replay proofs and rights/warning guardrail parity with raw-query behavior.
+7. Execution status as of 2026-03-12:
+   1. `S28-C1..S28-C4` complete.
+   2. `S28-P1..S28-P3` complete.
+   3. `S28-G1..S28-G4` complete.
 
 ## Slice 29 (Bitcoin Full Aligned Completion) Locked Details
 1. Scope is aligned enablement for:

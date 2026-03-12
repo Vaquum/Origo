@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from api.origo_api.schemas import (
     HistoricalETFDailyMetricsRequest,
+    HistoricalFREDSeriesMetricsRequest,
     HistoricalSpotKlinesRequest,
     HistoricalSpotTradesRequest,
 )
@@ -28,10 +29,12 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
     okx_legal = tmp_path / 'okx-legal.md'
     bybit_legal = tmp_path / 'bybit-legal.md'
     etf_legal = tmp_path / 'etf-legal.md'
+    fred_legal = tmp_path / 'fred-legal.md'
     binance_legal.write_text('# legal', encoding='utf-8')
     okx_legal.write_text('# legal', encoding='utf-8')
     bybit_legal.write_text('# legal', encoding='utf-8')
     etf_legal.write_text('# legal', encoding='utf-8')
+    fred_legal.write_text('# legal', encoding='utf-8')
 
     matrix_payload = {
         'version': 'historical-contract-test',
@@ -59,6 +62,12 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
                 'rights_provisional': False,
                 'datasets': ['etf_daily_metrics'],
                 'legal_signoff_artifact': str(etf_legal),
+            },
+            'fred': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': ['fred_series_metrics'],
+                'legal_signoff_artifact': str(fred_legal),
             },
         },
     }
@@ -121,6 +130,19 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
 
     etf_signature = inspect.signature(HistoricalData.get_etf_daily_metrics)
     assert list(etf_signature.parameters) == [
+        'self',
+        'mode',
+        'start_date',
+        'end_date',
+        'n_latest_rows',
+        'n_random_rows',
+        'fields',
+        'filters',
+        'strict',
+    ]
+
+    fred_signature = inspect.signature(HistoricalData.get_fred_series_metrics)
+    assert list(fred_signature.parameters) == [
         'self',
         'mode',
         'start_date',
@@ -245,6 +267,38 @@ def test_historical_data_etf_method_accepts_aligned_mode(
     assert historical.data.height == 1
 
 
+def test_historical_data_fred_method_accepts_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.data import historical_data as historical_data_module
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_query_fred_series_metrics_data(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'source_id': ['fred_walcl'],
+                'metric_name': ['WALCL'],
+                'metric_value_float': [100.0],
+                'valid_from_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'valid_to_utc_exclusive': [datetime(2024, 1, 2, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(
+        historical_data_module,
+        'query_fred_series_metrics_data',
+        _fake_query_fred_series_metrics_data,
+    )
+    historical = HistoricalData()
+    historical.get_fred_series_metrics(mode='aligned_1s')
+
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert historical.data.height == 1
+
+
 def test_historical_request_rejects_multiple_window_modes() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
@@ -288,6 +342,26 @@ def test_historical_etf_request_supports_shared_contract_fields() -> None:
     assert request.filters[0].field == 'metric_name'
 
 
+def test_historical_fred_request_rejects_invalid_date() -> None:
+    with pytest.raises(ValidationError, match='valid strict YYYY-MM-DD'):
+        HistoricalFREDSeriesMetricsRequest(
+            start_date='2022-02-30',
+            end_date='2022-03-01',
+        )
+
+
+def test_historical_fred_request_supports_shared_contract_fields() -> None:
+    request = HistoricalFREDSeriesMetricsRequest(
+        mode='aligned_1s',
+        fields=['source_id', 'metric_name'],
+        filters=[{'field': 'metric_name', 'op': 'eq', 'value': 'WALCL'}],
+    )
+    assert request.mode == 'aligned_1s'
+    assert request.fields == ['source_id', 'metric_name']
+    assert request.filters is not None
+    assert request.filters[0].field == 'metric_name'
+
+
 def test_historical_request_supports_shared_contract_fields() -> None:
     request = HistoricalSpotTradesRequest(
         mode='aligned_1s',
@@ -312,6 +386,7 @@ def test_historical_routes_are_registered(
     assert '/v1/historical/bybit/spot/trades' in paths
     assert '/v1/historical/bybit/spot/klines' in paths
     assert '/v1/historical/etf/daily_metrics' in paths
+    assert '/v1/historical/fred/series_metrics' in paths
     assert '/v1/historical/binance/spot/agg_trades' not in paths
     assert '/v1/historical/binance/futures/trades' not in paths
 
@@ -399,6 +474,52 @@ def test_historical_etf_endpoint_returns_raw_envelope_shape(
     assert payload['mode'] == 'native'
     assert payload['source'] == 'etf_daily_metrics'
     assert payload['sources'] == ['etf_daily_metrics']
+    assert payload['row_count'] == 1
+    assert isinstance(payload['schema'], list)
+    assert isinstance(payload['warnings'], list)
+    assert isinstance(payload['rows'], list)
+
+
+def test_historical_fred_endpoint_returns_raw_envelope_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_fred_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': ['fred_walcl'],
+                'metric_name': ['WALCL'],
+                'metric_value_float': [100.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_fred_series_metrics_data', _fake_fred_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_fred_publish_freshness_warnings',
+        lambda *_: [],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'emit_fred_warning_alerts_and_audit',
+        lambda **_: None,
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/fred/series_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'native'
+    assert payload['source'] == 'fred_series_metrics'
+    assert payload['sources'] == ['fred_series_metrics']
     assert payload['row_count'] == 1
     assert isinstance(payload['schema'], list)
     assert isinstance(payload['warnings'], list)
@@ -496,6 +617,52 @@ def test_historical_etf_endpoint_supports_aligned_mode(
     assert captured_kwargs['mode'] == 'aligned_1s'
 
 
+def test_historical_fred_endpoint_supports_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_fred_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'source_id': ['fred_walcl'],
+                'metric_name': ['WALCL'],
+                'metric_value_float': [100.0],
+                'valid_from_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'valid_to_utc_exclusive': [datetime(2024, 1, 2, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_fred_series_metrics_data', _fake_fred_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_fred_publish_freshness_warnings',
+        lambda *_: [],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'emit_fred_warning_alerts_and_audit',
+        lambda **_: None,
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/fred/series_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'mode': 'aligned_1s'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'aligned_1s'
+    assert payload['source'] == 'fred_series_metrics'
+    assert captured_kwargs['mode'] == 'aligned_1s'
+
+
 def test_historical_trades_endpoint_passes_fields_and_filters(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -572,6 +739,55 @@ def test_historical_etf_endpoint_passes_fields_and_filters(
     assert captured_kwargs['fields'] == ['source_id', 'metric_name']
     assert captured_kwargs['filters'] == [
         {'field': 'metric_name', 'op': 'eq', 'value': 'btc_units'}
+    ]
+
+
+def test_historical_fred_endpoint_passes_fields_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_fred_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'source_id': ['fred_walcl'],
+                'metric_name': ['WALCL'],
+                'metric_value_float': [100.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_fred_series_metrics_data', _fake_fred_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_fred_publish_freshness_warnings',
+        lambda *_: [],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'emit_fred_warning_alerts_and_audit',
+        lambda **_: None,
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/fred/series_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={
+                'fields': ['source_id', 'metric_name'],
+                'filters': [
+                    {'field': 'metric_name', 'op': 'eq', 'value': 'WALCL'},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_kwargs['fields'] == ['source_id', 'metric_name']
+    assert captured_kwargs['filters'] == [
+        {'field': 'metric_name', 'op': 'eq', 'value': 'WALCL'}
     ]
 
 
@@ -654,6 +870,51 @@ def test_historical_etf_endpoint_strict_warning_failure(
     with TestClient(main_module.app) as client:
         response = client.post(
             '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'strict': True},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
+
+
+def test_historical_fred_endpoint_strict_warning_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_fred_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': ['fred_walcl'],
+                'metric_name': ['WALCL'],
+                'metric_value_float': [100.0],
+                'observed_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_fred_series_metrics_data', _fake_fred_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_fred_publish_freshness_warnings',
+        lambda *_: [
+            main_module.RawQueryWarning(
+                code='FRED_SOURCE_PUBLISH_STALE',
+                message='stale',
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'emit_fred_warning_alerts_and_audit',
+        lambda **_: None,
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/fred/series_metrics',
             headers={'X-API-Key': 'test-internal-key'},
             json={'strict': True},
         )
@@ -783,6 +1044,46 @@ def test_historical_etf_endpoint_returns_404_for_empty_result(
     with TestClient(main_module.app) as client:
         response = client.post(
             '/v1/historical/etf/daily_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
+        )
+
+    assert response.status_code == 404
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_NO_DATA'
+
+
+def test_historical_fred_endpoint_returns_404_for_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _empty_fred_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'source_id': [],
+                'metric_name': [],
+                'metric_value_float': [],
+                'observed_at_utc': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_fred_series_metrics_data', _empty_fred_query)
+    monkeypatch.setattr(
+        main_module,
+        'build_fred_publish_freshness_warnings',
+        lambda *_: [],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'emit_fred_warning_alerts_and_audit',
+        lambda **_: None,
+    )
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/fred/series_metrics',
             headers={'X-API-Key': 'test-internal-key'},
             json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
         )

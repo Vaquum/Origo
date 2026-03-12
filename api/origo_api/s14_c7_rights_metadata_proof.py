@@ -29,7 +29,7 @@ def run_s14_c7_proof() -> dict[str, Any]:
                     'binance': {
                         'rights_state': 'Hosted Allowed',
                         'rights_provisional': True,
-                        'datasets': ['spot_trades'],
+                        'datasets': ['binance_spot_trades'],
                         'legal_signoff_artifact': str(legal_signoff_path),
                     }
                 },
@@ -39,8 +39,8 @@ def run_s14_c7_proof() -> dict[str, Any]:
         original_matrix = os.environ.get('ORIGO_SOURCE_RIGHTS_MATRIX_PATH')
         os.environ['ORIGO_SOURCE_RIGHTS_MATRIX_PATH'] = str(rights_matrix_path)
         try:
-            query_rights = resolve_query_rights(dataset='spot_trades', auth_token=None)
-            export_rights = resolve_export_rights(dataset='spot_trades', auth_token=None)
+            query_rights = resolve_query_rights(dataset='binance_spot_trades', auth_token=None)
+            export_rights = resolve_export_rights(dataset='binance_spot_trades', auth_token=None)
         finally:
             if original_matrix is None:
                 os.environ.pop('ORIGO_SOURCE_RIGHTS_MATRIX_PATH', None)
@@ -58,8 +58,8 @@ def run_s14_c7_proof() -> dict[str, Any]:
     query_response = RawQueryResponse.model_validate(
         {
             'mode': 'native',
-            'source': 'spot_trades',
-            'sources': ['spot_trades'],
+            'source': 'binance_spot_trades',
+            'sources': ['binance_spot_trades'],
             'row_count': 1,
             'schema': [{'name': 'trade_id', 'dtype': 'UInt64'}],
             'rights_state': query_rights_state,
@@ -74,7 +74,7 @@ def run_s14_c7_proof() -> dict[str, Any]:
             'status': 'queued',
             'mode': 'native',
             'format': 'parquet',
-            'dataset': 'spot_trades',
+            'dataset': 'binance_spot_trades',
             'source': export_rights.source,
             'rights_state': export_rights.rights_state,
             'rights_provisional': export_rights.rights_provisional,

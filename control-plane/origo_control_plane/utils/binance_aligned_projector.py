@@ -19,6 +19,8 @@ _ALIGNED_BUCKET_SECONDS = 1
 _ALIGNED_TIER_POLICY = 'hot_1s_warm_1m'
 _ALIGNED_RETENTION_HOT_DAYS = 7
 _ALIGNED_RETENTION_WARM_DAYS = 90
+_STREAM_ID = 'binance_spot_trades'
+_PROJECTOR_ID = 'binance_spot_trades_aligned_1s_v1'
 
 
 def _require_non_empty(value: str, *, label: str) -> str:
@@ -72,7 +74,6 @@ def _project_partition(
     client: ClickhouseClient,
     database: str,
     stream_key: CanonicalStreamKey,
-    projector_id: str,
     run_id: str,
     projected_at_utc: datetime,
     batch_size: int,
@@ -95,7 +96,7 @@ def _project_partition(
     runtime = CanonicalProjectorRuntime(
         client=client,
         database=database,
-        projector_id=projector_id,
+        projector_id=_PROJECTOR_ID,
         stream_key=stream_key,
         batch_size=batch_size,
     )
@@ -107,7 +108,7 @@ def _project_partition(
             runtime=runtime,
             policy=policy_result.policy_state,
             run_id=run_id,
-            projector_id=projector_id,
+            projector_id=_PROJECTOR_ID,
             projected_at_utc=projected_at_utc,
         )
     finally:
@@ -123,20 +124,17 @@ def _project_partition(
     )
 
 
-def _project_stream_aligned(
+def project_binance_spot_trades_aligned(
     *,
     client: ClickhouseClient,
     database: str,
-    stream_id: str,
-    projector_id: str,
     partition_ids: list[str] | set[str],
     run_id: str,
     projected_at_utc: datetime,
-    batch_size: int,
+    batch_size: int = 10_000,
 ) -> AlignedProjectorSummary:
     normalized_database = _require_non_empty(database, label='database')
     normalized_run_id = _require_non_empty(run_id, label='run_id')
-    normalized_projector_id = _require_non_empty(projector_id, label='projector_id')
     normalized_projected_at_utc = _require_utc(
         projected_at_utc,
         label='projected_at_utc',
@@ -156,10 +154,9 @@ def _project_stream_aligned(
                 database=normalized_database,
                 stream_key=CanonicalStreamKey(
                     source_id='binance',
-                    stream_id=stream_id,
+                    stream_id=_STREAM_ID,
                     partition_id=partition_id,
                 ),
-                projector_id=normalized_projector_id,
                 run_id=normalized_run_id,
                 projected_at_utc=normalized_projected_at_utc,
                 batch_size=batch_size,
@@ -167,66 +164,3 @@ def _project_stream_aligned(
         )
 
     return _aggregate_summaries(summaries)
-
-
-def project_binance_spot_trades_aligned(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    partition_ids: list[str] | set[str],
-    run_id: str,
-    projected_at_utc: datetime,
-    batch_size: int = 10_000,
-) -> AlignedProjectorSummary:
-    return _project_stream_aligned(
-        client=client,
-        database=database,
-        stream_id='spot_trades',
-        projector_id='binance_spot_trades_aligned_1s_v1',
-        partition_ids=partition_ids,
-        run_id=run_id,
-        projected_at_utc=projected_at_utc,
-        batch_size=batch_size,
-    )
-
-
-def project_binance_spot_agg_trades_aligned(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    partition_ids: list[str] | set[str],
-    run_id: str,
-    projected_at_utc: datetime,
-    batch_size: int = 10_000,
-) -> AlignedProjectorSummary:
-    return _project_stream_aligned(
-        client=client,
-        database=database,
-        stream_id='spot_agg_trades',
-        projector_id='binance_spot_agg_trades_aligned_1s_v1',
-        partition_ids=partition_ids,
-        run_id=run_id,
-        projected_at_utc=projected_at_utc,
-        batch_size=batch_size,
-    )
-
-
-def project_binance_futures_trades_aligned(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    partition_ids: list[str] | set[str],
-    run_id: str,
-    projected_at_utc: datetime,
-    batch_size: int = 10_000,
-) -> AlignedProjectorSummary:
-    return _project_stream_aligned(
-        client=client,
-        database=database,
-        stream_id='futures_trades',
-        projector_id='binance_futures_trades_aligned_1s_v1',
-        partition_ids=partition_ids,
-        run_id=run_id,
-        projected_at_utc=projected_at_utc,
-        batch_size=batch_size,
-    )

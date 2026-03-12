@@ -1,6 +1,16 @@
 # Changelog
 
 ## 2026-03-12
+- Completed Slice 33 Binance dataset contract cleanup:
+  - enforced `binance_spot_trades` as the only Binance dataset key across API, query, export, historical, and control-plane contracts
+  - removed legacy non-spot Binance dataset paths from runtime contracts, tests, docs, and plan artifacts (hard remove; no aliases)
+  - updated rights matrix, legal artifact references, and canonical precision registry to the cleaned Binance scope
+  - verified full quality suite pass:
+    - `ruff`, `pyright`, `tests/contract`, `tests/replay`, `tests/integrity`
+  - added Slice 33 closeout artifacts:
+    - `spec/slices/slice-33-binance-dataset-contract-cleanup/*`
+- Updated versions to `Origo API v0.1.24` and `origo-control-plane v1.2.65`.
+
 - Fixed deploy/runtime env contract regression after Slice 31:
   - enforced `ORIGO_AUDIT_LOG_RETENTION_DAYS` propagation in `deploy-on-merge` from root `.env.example` to `/opt/origo/deploy/.env`
   - added fail-loud validation in deploy workflow for integer and minimum retention bound (`>=365`)
@@ -10,7 +20,7 @@
 
 - Completed Slice 31 historical full-surface cohesion and rollout handoff:
   - enforced complete historical dataset/mode matrix closure across HTTP and Python surfaces for all in-scope datasets
-  - kept `spot_agg_trades` and `futures_trades` explicitly deferred from historical Python/HTTP scope
+  - preserved explicit historical scope boundaries before later cleanup of legacy Binance non-spot keys
   - added matrix/zero-drift contract guardrail coverage:
     - `tests/contract/test_historical_surface_cohesion_contract.py`
   - added final rollout handoff documentation and rollback mapping:
@@ -107,11 +117,11 @@
 
 - Completed Slice 26 historical exchange spot parity:
   - enabled historical `mode=aligned_1s` execution for exchange trade datasets:
-    - `spot_trades`
+    - `binance_spot_trades`
     - `okx_spot_trades`
     - `bybit_spot_trades`
   - enabled historical `mode=aligned_1s` execution for exchange spot-kline routes with deterministic aligned OHLCV aggregation semantics
-  - preserved explicit historical deferral for `spot_agg_trades` and `futures_trades`
+  - at that slice boundary, historical scope still excluded legacy Binance non-spot dataset keys
   - added historical contract coverage for exchange trade `aligned_1s` mode across HTTP + Python surfaces
   - added replay determinism coverage for exchange trade historical paths in both `native` and `aligned_1s`
 - Added Slice 26 docs and artifacts:
@@ -262,7 +272,7 @@
 - Updated version to `Origo API v0.1.9` (`origo-control-plane` unchanged at `v1.2.58`).
 
 - Completed Slice 15 Binance event-sourcing port capability/proof/guardrails:
-  - migrated Binance `spot_trades`, `spot_agg_trades`, and `futures_trades` serving to canonical projection tables (`canonical_binance_*_native_v1` + `canonical_aligned_1s_aggregates`)
+  - migrated Binance `binance_spot_trades` serving to canonical projection tables (`canonical_binance_*_native_v1` + `canonical_aligned_1s_aggregates`)
   - executed proof suite artifacts `S15-P1..S15-P6` for acceptance, parity, determinism, exactly-once, no-miss/quarantine, and raw-fidelity/precision
   - enforced exchange integrity guardrail in native projection path and added explicit guardrail proof artifacts for integrity, freshness strict escalation, and rights metadata behavior
 - Added Slice 15 documentation and taxonomy updates:

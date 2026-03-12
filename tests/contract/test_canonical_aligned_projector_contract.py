@@ -102,7 +102,7 @@ def test_aligned_projection_policy_id_is_deterministic() -> None:
         view_id='aligned_1s_raw',
         view_version=1,
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         bucket_size_seconds=1,
         tier_policy='hot_1s_warm_1m',
@@ -113,7 +113,7 @@ def test_aligned_projection_policy_id_is_deterministic() -> None:
         view_id='aligned_1s_raw',
         view_version=1,
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         bucket_size_seconds=1,
         tier_policy='hot_1s_warm_1m',
@@ -126,7 +126,7 @@ def test_aligned_projection_policy_id_is_deterministic() -> None:
 def test_project_batch_is_deterministic() -> None:
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     policy_state = AlignedProjectionPolicyState(

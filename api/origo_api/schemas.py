@@ -5,11 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-BinanceDataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
+BinanceDataset = Literal['binance_spot_trades']
 RawQuerySource = Literal[
-    'spot_trades',
-    'spot_agg_trades',
-    'futures_trades',
+    'binance_spot_trades',
     'okx_spot_trades',
     'bybit_spot_trades',
     'etf_daily_metrics',

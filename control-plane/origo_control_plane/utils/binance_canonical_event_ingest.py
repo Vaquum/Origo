@@ -12,6 +12,7 @@ from clickhouse_driver import Client as ClickhouseClient
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 
 _SOURCE_ID = 'binance'
+_STREAM_ID = 'binance_spot_trades'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
 
@@ -96,79 +97,6 @@ class BinanceSpotTradeEvent:
         )
 
 
-@dataclass(frozen=True)
-class BinanceSpotAggTradeEvent:
-    agg_trade_id: int
-    price_text: str
-    quantity_text: str
-    first_trade_id: int
-    last_trade_id: int
-    timestamp: int
-    event_time_utc: datetime
-    is_buyer_maker: bool
-
-    @property
-    def partition_id(self) -> str:
-        return self.event_time_utc.strftime('%Y-%m-%d')
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            'agg_trade_id': self.agg_trade_id,
-            'price': self.price_text,
-            'qty': self.quantity_text,
-            'first_trade_id': self.first_trade_id,
-            'last_trade_id': self.last_trade_id,
-            'is_buyer_maker': self.is_buyer_maker,
-        }
-
-    def to_integrity_tuple(self) -> tuple[int, float, float, int, int, int, bool, datetime]:
-        return (
-            self.agg_trade_id,
-            float(Decimal(self.price_text)),
-            float(Decimal(self.quantity_text)),
-            self.first_trade_id,
-            self.last_trade_id,
-            self.timestamp,
-            self.is_buyer_maker,
-            self.event_time_utc,
-        )
-
-
-@dataclass(frozen=True)
-class BinanceFuturesTradeEvent:
-    trade_id: int
-    price_text: str
-    quantity_text: str
-    quote_quantity_text: str
-    timestamp: int
-    event_time_utc: datetime
-    is_buyer_maker: bool
-
-    @property
-    def partition_id(self) -> str:
-        return self.event_time_utc.strftime('%Y-%m-%d')
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            'trade_id': self.trade_id,
-            'price': self.price_text,
-            'qty': self.quantity_text,
-            'quote_qty': self.quote_quantity_text,
-            'is_buyer_maker': self.is_buyer_maker,
-        }
-
-    def to_integrity_tuple(self) -> tuple[int, float, float, float, int, bool, datetime]:
-        return (
-            self.trade_id,
-            float(Decimal(self.price_text)),
-            float(Decimal(self.quantity_text)),
-            float(Decimal(self.quote_quantity_text)),
-            self.timestamp,
-            self.is_buyer_maker,
-            self.event_time_utc,
-        )
-
-
 def _iter_csv_rows(csv_content: bytes) -> list[list[str]]:
     csv_text = csv_content.decode('utf-8')
     reader = csv.reader(csv_text.splitlines())
@@ -225,90 +153,10 @@ def parse_binance_spot_trade_csv(csv_content: bytes) -> list[BinanceSpotTradeEve
     return events
 
 
-def parse_binance_spot_agg_trade_csv(csv_content: bytes) -> list[BinanceSpotAggTradeEvent]:
-    rows = _iter_csv_rows(csv_content)
-    events: list[BinanceSpotAggTradeEvent] = []
-    for row_number, row in enumerate(rows, start=1):
-        if len(row) < 7:
-            raise RuntimeError(
-                f'CSV row {row_number} must contain at least 7 columns, got {len(row)}'
-            )
-        timestamp, event_time_utc = _parse_timestamp_to_utc(
-            row[5],
-            label=f'CSV row {row_number} timestamp',
-        )
-        events.append(
-            BinanceSpotAggTradeEvent(
-                agg_trade_id=_parse_int(
-                    row[0], label=f'CSV row {row_number} agg_trade_id'
-                ),
-                price_text=_parse_decimal_text(
-                    row[1], label=f'CSV row {row_number} price'
-                ),
-                quantity_text=_parse_decimal_text(
-                    row[2], label=f'CSV row {row_number} quantity'
-                ),
-                first_trade_id=_parse_int(
-                    row[3], label=f'CSV row {row_number} first_trade_id'
-                ),
-                last_trade_id=_parse_int(
-                    row[4], label=f'CSV row {row_number} last_trade_id'
-                ),
-                timestamp=timestamp,
-                event_time_utc=event_time_utc,
-                is_buyer_maker=_parse_bool(
-                    row[6],
-                    label=f'CSV row {row_number} is_buyer_maker',
-                ),
-            )
-        )
-    if events == []:
-        raise RuntimeError('CSV payload produced zero spot aggregate trade events')
-    return events
-
-
-def parse_binance_futures_trade_csv(csv_content: bytes) -> list[BinanceFuturesTradeEvent]:
-    rows = _iter_csv_rows(csv_content)
-    events: list[BinanceFuturesTradeEvent] = []
-    for row_number, row in enumerate(rows, start=1):
-        if len(row) < 6:
-            raise RuntimeError(
-                f'CSV row {row_number} must contain at least 6 columns, got {len(row)}'
-            )
-        timestamp, event_time_utc = _parse_timestamp_to_utc(
-            row[4],
-            label=f'CSV row {row_number} timestamp',
-        )
-        events.append(
-            BinanceFuturesTradeEvent(
-                trade_id=_parse_int(row[0], label=f'CSV row {row_number} trade_id'),
-                price_text=_parse_decimal_text(
-                    row[1], label=f'CSV row {row_number} price'
-                ),
-                quantity_text=_parse_decimal_text(
-                    row[2], label=f'CSV row {row_number} quantity'
-                ),
-                quote_quantity_text=_parse_decimal_text(
-                    row[3], label=f'CSV row {row_number} quote_quantity'
-                ),
-                timestamp=timestamp,
-                event_time_utc=event_time_utc,
-                is_buyer_maker=_parse_bool(
-                    row[5],
-                    label=f'CSV row {row_number} is_buyer_maker',
-                ),
-            )
-        )
-    if events == []:
-        raise RuntimeError('CSV payload produced zero futures trade events')
-    return events
-
-
 def _write_events_to_canonical(
     *,
     client: ClickhouseClient,
     database: str,
-    stream_id: str,
     events: list[dict[str, object]],
     run_id: str | None,
     ingested_at_utc: datetime,
@@ -335,7 +183,7 @@ def _write_events_to_canonical(
         result = writer.write_event(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
-                stream_id=stream_id,
+                stream_id=_STREAM_ID,
                 partition_id=partition_id,
                 source_offset_or_equivalent=source_offset,
                 source_event_time_utc=source_event_time_utc,
@@ -379,63 +227,6 @@ def write_binance_spot_trades_to_canonical(
     return _write_events_to_canonical(
         client=client,
         database=database,
-        stream_id='spot_trades',
-        events=canonical_events,
-        run_id=run_id,
-        ingested_at_utc=ingested_at_utc,
-    )
-
-
-def write_binance_spot_agg_trades_to_canonical(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    events: list[BinanceSpotAggTradeEvent],
-    run_id: str | None,
-    ingested_at_utc: datetime,
-) -> dict[str, int]:
-    canonical_events: list[dict[str, object]] = []
-    for event in events:
-        canonical_events.append(
-            {
-                'partition_id': event.partition_id,
-                'source_offset_or_equivalent': str(event.agg_trade_id),
-                'source_event_time_utc': event.event_time_utc,
-                'payload': event.to_payload(),
-            }
-        )
-    return _write_events_to_canonical(
-        client=client,
-        database=database,
-        stream_id='spot_agg_trades',
-        events=canonical_events,
-        run_id=run_id,
-        ingested_at_utc=ingested_at_utc,
-    )
-
-
-def write_binance_futures_trades_to_canonical(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    events: list[BinanceFuturesTradeEvent],
-    run_id: str | None,
-    ingested_at_utc: datetime,
-) -> dict[str, int]:
-    canonical_events: list[dict[str, object]] = []
-    for event in events:
-        canonical_events.append(
-            {
-                'partition_id': event.partition_id,
-                'source_offset_or_equivalent': str(event.trade_id),
-                'source_event_time_utc': event.event_time_utc,
-                'payload': event.to_payload(),
-            }
-        )
-    return _write_events_to_canonical(
-        client=client,
-        database=database,
-        stream_id='futures_trades',
         events=canonical_events,
         run_id=run_id,
         ingested_at_utc=ingested_at_utc,

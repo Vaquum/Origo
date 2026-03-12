@@ -33,7 +33,7 @@ def test_canonical_runtime_audit_log_writes_ingest_and_projector_events(
 
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     audit_log = module.get_canonical_runtime_audit_log()

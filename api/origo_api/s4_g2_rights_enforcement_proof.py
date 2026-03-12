@@ -36,7 +36,7 @@ def _build_matrix(
             'binance': {
                 'rights_state': binance_rights_state,
                 'rights_provisional': False,
-                'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
+                'datasets': ['binance_spot_trades'],
                 'legal_signoff_artifact': legal_signoff_artifact,
             },
             'ishares': {
@@ -99,13 +99,13 @@ def run_s4_g2_rights_enforcement_proof() -> dict[str, Any]:
 
             query_hosted_allowed_ok = True
             try:
-                resolve_query_rights(dataset='spot_trades', auth_token=None)
+                resolve_query_rights(dataset='binance_spot_trades', auth_token=None)
             except RightsGateError:
                 query_hosted_allowed_ok = False
 
             export_hosted_allowed_ok = True
             try:
-                resolve_export_rights(dataset='spot_trades', auth_token=None)
+                resolve_export_rights(dataset='binance_spot_trades', auth_token=None)
             except RightsGateError:
                 export_hosted_allowed_ok = False
 
@@ -170,12 +170,12 @@ def run_s4_g2_rights_enforcement_proof() -> dict[str, Any]:
             _write_json(matrix_path, byok_matrix)
 
             try:
-                resolve_query_rights(dataset='spot_trades', auth_token=None)
+                resolve_query_rights(dataset='binance_spot_trades', auth_token=None)
             except RightsGateError as exc:
                 query_byok_required_code = exc.code
 
             try:
-                resolve_export_rights(dataset='spot_trades', auth_token=None)
+                resolve_export_rights(dataset='binance_spot_trades', auth_token=None)
             except RightsGateError as exc:
                 export_byok_required_code = exc.code
 

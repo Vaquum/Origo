@@ -359,12 +359,12 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S14-G6` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S14-G7` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
 
-## Slice 15: Binance Event-Sourcing Port (`spot_trades`, `spot_agg_trades`, `futures_trades`)
+## Slice 15: Binance Event-Sourcing Port (`binance_spot_trades`)
 
 ### Capability
 - [x] `S15-C1` Port Binance spot trades ingest writes to canonical events.
-- [x] `S15-C2` Port Binance agg trades ingest writes to canonical events.
-- [x] `S15-C3` Port Binance futures trades ingest writes to canonical events.
+- [x] `S15-C2` Consolidate Binance ingest scope to `binance_spot_trades` only.
+- [x] `S15-C3` Remove legacy non-spot Binance ingest paths from active serving contracts.
 - [x] `S15-C4` Implement Binance native serving projections from canonical events.
 - [x] `S15-C5` Implement Binance persistent aligned serving projections from canonical events.
 - [x] `S15-C6` Cut query/export serving to Binance event projections and remove legacy direct-serving path.
@@ -373,9 +373,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S15-P1` Execute fixed-window acceptance for Binance `native` + `aligned_1s`.
 - [x] `S15-P2` Execute parity checks versus current Binance fixture baselines.
 - [x] `S15-P3` Execute replay determinism for both Binance modes after cutover.
-- [x] `S15-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for all three Binance datasets.
-- [x] `S15-P5` Execute no-miss completeness proof (reconciliation + gap injection) for all three Binance datasets.
-- [x] `S15-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for all three Binance datasets.
+- [x] `S15-P4` Execute exactly-once ingest proof (duplicate replay + crash/restart) for `binance_spot_trades`.
+- [x] `S15-P5` Execute no-miss completeness proof (reconciliation + gap injection) for `binance_spot_trades`.
+- [x] `S15-P6` Execute raw-fidelity/precision proof (raw payload hash + numeric scale checks) for `binance_spot_trades`.
 
 ### Guardrails
 - [x] `S15-G1` Apply exchange integrity suite in event-ingest and projection paths.
@@ -607,11 +607,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S25-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S25-G4` User docs closeout for slice (`docs/`, full historical/native/aligned contract + taxonomy updates).
 
-## Slice 26: Historical Exchange Spot Route Completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
+## Slice 26: Historical Exchange Spot Route Completion (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` Parity
 
 ### Capability
-- [x] `S26-C1` Explicitly drop `spot_agg_trades` and `futures_trades` from historical Python/HTTP scope for this tranche and lock them as deferred.
-- [x] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+- [x] `S26-C1` Explicitly drop legacy Binance non-spot dataset keys from historical Python/HTTP scope for this tranche and lock removal as hard contract.
+- [x] `S26-C2` Add historical `mode=native|aligned_1s` support for in-scope exchange trade datasets (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S26-C3` Keep exchange method signatures uniform across in-scope exchange trade datasets and both modes.
 - [x] `S26-C4` Keep existing spot-kline convenience routes operational, add `aligned_1s` execution support, and align shared selector/filter/strict semantics with historical core.
 
@@ -706,7 +706,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 31: Historical Full-Surface Cohesion + Rollout Handoff
 
 ### Capability
-- [x] `S31-C1` Build complete historical endpoint and Python method matrix coverage for every in-scope dataset in `native` and `aligned_1s` (excluding deferred `spot_agg_trades` and `futures_trades`).
+- [x] `S31-C1` Build complete historical endpoint and Python method matrix coverage for every active dataset in `native` and `aligned_1s`.
 - [x] `S31-C2` Harmonize any remaining signature, envelope, or semantic drift across dataset families.
 - [x] `S31-C3` Publish final internal cutover mapping from legacy data endpoints to Origo historical surfaces.
 
@@ -734,6 +734,50 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ### Guardrails
 - [x] `S32-G1` Update deployment contract and troubleshooting docs to reflect retention-key enforcement and fail signatures.
 - [x] `S32-G2` Add Slice 32 closeout artifacts (`manifest`, `run-notes`, `baseline fixture`) with explicit deploy evidence and caveats.
+
+## Slice 33: Binance Dataset Contract Cleanup (drop legacy non-spot keys, enforce `binance_spot_trades`)
+
+### Capability
+- [x] `S33-C1` Enforce Binance dataset contract identifier as `binance_spot_trades` across raw query/export, aligned query, historical surfaces, and internal dataset registries.
+- [x] `S33-C2` Remove legacy non-spot Binance dataset keys from active API contracts, control-plane orchestration, and projection/ingest runtimes (hard remove, no alias).
+- [x] `S33-C3` Remove/de-register Binance agg/futures Dagster assets/jobs and keep only Binance spot ingest/project path.
+- [x] `S33-C4` Update rights matrix, precision registry, and legal/source contracts to the cleaned Binance dataset scope.
+
+### Proof
+- [x] `S33-P1` Run contract-gate coverage proving `binance_spot_trades` is the only Binance raw dataset key and legacy non-spot keys are rejected fail-loud.
+- [x] `S33-P2` Run replay/integrity proofs on fixed Binance spot windows to confirm deterministic behavior after rename and scope drop.
+- [x] `S33-P3` Run cross-surface acceptance checks (`/v1/raw/query`, `/v1/raw/export`, historical HTTP, historical Python) for `binance_spot_trades` in `native` and `aligned_1s`.
+- [x] `S33-P4` Run full quality gates (`style`, `type`, `contract`, `replay`, `integrity`) with no waivers.
+
+### Guardrails
+- [x] `S33-G1` Enforce fail-loud unsupported-dataset error contract for removed Binance datasets on all query/export paths.
+- [x] `S33-G2` Ensure no fallback aliases remain for removed legacy Binance dataset keys.
+- [x] `S33-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete cleaned dataset contracts/operations notes).
+- [x] `S33-G4` User docs closeout for slice (`docs/`, full taxonomy/reference updated to `binance_spot_trades` and removed datasets).
+
+## Slice 34: Full Canonical Backfill (All Onboarded Datasets)
+
+### Capability
+- [ ] `S34-C1` Freeze canonical backfill inventory and execution order for every onboarded dataset.
+- [ ] `S34-C2` Implement/verify backfill orchestration contract (partition planner, cursor ledger, resumable run controls, fail-loud gap checks).
+- [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
+- [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
+- [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
+- [ ] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
+- [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
+- [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
+
+### Proof
+- [ ] `S34-P1` Run completeness proofs per dataset/partition (source coverage, row counts, checksums, and fail-loud gap validation).
+- [ ] `S34-P2` Run fixed-window replay determinism proofs across every dataset family after backfill and projection rebuild.
+- [ ] `S34-P3` Run cross-surface acceptance matrix on backfilled windows (`/v1/raw/query`, `/v1/raw/export`, historical HTTP, historical Python) for `native` and `aligned_1s` where applicable.
+- [ ] `S34-P4` Run live deploy validation against server environment and confirm backfilled windows are queryable end-to-end.
+
+### Guardrails
+- [ ] `S34-G1` Enforce immutable backfill audit trail and per-partition manifest evidence (source checksums, cursor windows, fingerprints).
+- [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip).
+- [ ] `S34-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete backfill contracts/operations notes).
+- [ ] `S34-G4` User docs closeout for slice (`docs/`, full dataset-history coverage/taxonomy and backfill status reference).
 
 
 ## Slice Detail Sub-Slices
@@ -802,7 +846,7 @@ Action: Build internal native query kernel (`SQL compiler -> Arrow execute -> Po
 Done looks like: a typed internal query call returns deterministic Polars frames from ClickHouse.
 Constraints: native mode only; production system is comparison oracle, not code source.
 2. `S1-02`
-Action: Implement Binance native planner for all three core tables (`trades`, `agg_trades`, `futures_trades`) in one pass.
+Action: Implement Binance native planner for all three core tables (`trades`, `agg_trades`, `binance_spot_trades`) in one pass.
 Done looks like: fixed-window native queries work for all three datasets through one planner contract.
 Constraints: no auth/hardening yet.
 3. `S1-03`
@@ -1314,9 +1358,9 @@ Action: Add source precision mapping registry and canonical numeric typing rules
 Done looks like: numeric fields have explicit integer/decimal+scale mappings and canonical float usage is prohibited.
 Constraints: canonical typing only.
 9. `S14-09`
-Action: Run pilot cutover on Binance `spot_trades` through canonical events into native and aligned serving.
+Action: Run pilot cutover on Binance `binance_spot_trades` through canonical events into native and aligned serving.
 Done looks like: pilot window serves via projection path with deterministic parity against baseline.
-Constraints: pilot source limited to `spot_trades`.
+Constraints: pilot source limited to `binance_spot_trades`.
 10. `S14-10`
 Action: Execute exactly-once/no-miss/fidelity proof suite (duplicate replay, crash/restart, injected gaps, raw/precision round-trip).
 Done looks like: proofs demonstrate idempotent writes, fail-loud gap detection, and precision-preserving round-trip behavior.
@@ -1336,15 +1380,15 @@ Constraints: documentation only; no feature changes.
 
 ## Slice 15 Sub-Slices
 1. `S15-01`
-Action: Port Binance `spot_trades` ingest writes to canonical event log.
+Action: Port Binance `binance_spot_trades` ingest writes to canonical event log.
 Done looks like: spot-trade source writes only canonical events with source provenance and deterministic IDs.
 Constraints: no legacy write fallback.
 2. `S15-02`
-Action: Port Binance `spot_agg_trades` ingest writes to canonical event log.
+Action: Port Binance `binance_spot_trades` ingest writes to canonical event log.
 Done looks like: agg-trade source emits canonical events with deterministic envelope fields.
 Constraints: no legacy write fallback.
 3. `S15-03`
-Action: Port Binance `futures_trades` ingest writes to canonical event log.
+Action: Port Binance `binance_spot_trades` ingest writes to canonical event log.
 Done looks like: futures-trade source emits canonical events with deterministic envelope fields.
 Constraints: no legacy write fallback.
 4. `S15-04`
@@ -1750,8 +1794,8 @@ Constraints: guardrails + docs only.
 
 ## Slice 26 Sub-Slices
 1. `S26-01`
-Action: Mark `spot_agg_trades` and `futures_trades` as explicitly deferred from historical Python/HTTP scope.
-Done looks like: these two datasets are absent from S26 historical matrix and documented as deferred for now.
+Action: Mark legacy Binance non-spot dataset keys as explicitly removed from historical Python/HTTP scope.
+Done looks like: no legacy Binance non-spot dataset appears in S26 historical matrix or runtime contracts.
 Constraints: no implicit partial implementation.
 2. `S26-02`
 Action: Add exchange historical aligned-mode parity across all exchange trade datasets.
@@ -1901,3 +1945,75 @@ Constraints: proof runs against deployed `main` commit image set.
 Action: Close docs/artifacts/version/changelog/env contract for Slice 32.
 Done looks like: docs are current, version/changelog/env are updated, and Slice 32 artifacts are present for handoff.
 Constraints: closeout artifacts required before slice can be marked done.
+
+## Slice 33 Sub-Slices
+1. `S33-01`
+Action: Freeze the Binance dataset cleanup contract for runtime, tests, docs, and specs.
+Done looks like: scope is explicit and locked (hard remove legacy Binance non-spot keys; enforce `binance_spot_trades` identifier).
+Constraints: contract only; no hidden compatibility scope.
+2. `S33-02`
+Action: Apply runtime contract cleanup in query/export schemas and planners.
+Done looks like: all active code paths accept `binance_spot_trades` and reject removed datasets fail-loud.
+Constraints: no alias/fallback behavior.
+3. `S33-03`
+Action: Apply control-plane cleanup for Binance ingestion/projectors/assets/jobs.
+Done looks like: only Binance spot ingest remains and writes/reads under `binance_spot_trades` stream contract.
+Constraints: no agg/futures execution path retained.
+4. `S33-04`
+Action: Update rights/legal/precision registries and contract artifacts.
+Done looks like: contracts reference only active Binance dataset scope and stream IDs.
+Constraints: fail-closed rights behavior preserved.
+5. `S33-05`
+Action: Execute contract/replay/integrity proofs and full quality gates.
+Done looks like: all gates pass with renamed dataset and removed dataset hard-fail behavior.
+Constraints: no waivers.
+6. `S33-06`
+Action: Close docs/artifacts/version/changelog/env contract for Slice 33.
+Done looks like: docs/spec/artifacts fully match cleaned contract and provide no stale dataset references in active surfaces.
+Constraints: closeout only; no new capability expansion.
+
+## Slice 34 Sub-Slices
+1. `S34-01`
+Action: Freeze full backfill contract and ordered inventory for all onboarded datasets.
+Done looks like: one canonical ordered dataset list and per-dataset earliest-source boundary are documented and locked for execution.
+Constraints: planning/contract only; no ingestion execution yet.
+2. `S34-02`
+Action: Prepare backfill orchestration controls (partition planner, cursor ledger, resume policy, fail-loud gap checks).
+Done looks like: backfill runs are resumable by cursor and stop loudly on detected gaps or checksum mismatches.
+Constraints: no source data mutation.
+3. `S34-03`
+Action: Run Binance full-history backfill for `binance_spot_trades`.
+Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.
+Constraints: first-party Binance source artifacts only.
+4. `S34-04`
+Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
+Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
+Constraints: first-party exchange source artifacts only.
+5. `S34-05`
+Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
+Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
+Constraints: issuer official-source hierarchy only.
+6. `S34-06`
+Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
+Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
+Constraints: official FRED source only.
+7. `S34-07`
+Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
+Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
+Constraints: self-hosted Bitcoin Core node source only.
+8. `S34-08`
+Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
+Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
+Constraints: deterministic formulas only.
+9. `S34-09`
+Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
+Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
+Constraints: projection rebuild only; no alternate serving tables.
+10. `S34-10`
+Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism) across raw and historical surfaces.
+Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable.
+Constraints: fixed proof windows and deterministic fixtures.
+11. `S34-11`
+Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
+Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
+Constraints: closeout only; no new capability expansion.

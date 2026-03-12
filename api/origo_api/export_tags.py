@@ -34,9 +34,7 @@ def read_export_tags(
     if export_format not in {'parquet', 'csv'}:
         raise RuntimeError(f'Unsupported or missing export format tag: {export_format}')
     if dataset not in {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',

@@ -56,9 +56,7 @@ type AlignedExecutionPath = Literal[
     'fred_aligned_forward_fill',
 ]
 
-_BINANCE_DATASETS: frozenset[str] = frozenset(
-    {'spot_trades', 'spot_agg_trades', 'futures_trades'}
-)
+_BINANCE_DATASETS: frozenset[str] = frozenset({'binance_spot_trades'})
 _OKX_DATASETS: frozenset[str] = frozenset({'okx_spot_trades'})
 _BYBIT_DATASETS: frozenset[str] = frozenset({'bybit_spot_trades'})
 _BITCOIN_STREAM_DATASETS: frozenset[str] = frozenset(

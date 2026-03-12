@@ -96,7 +96,7 @@ def _ingest_fixture(
             write_result = writer.write_event(
                 CanonicalEventWriteInput(
                     source_id='binance',
-                    stream_id='spot_trades',
+                    stream_id='binance_spot_trades',
                     partition_id='btcusdt',
                     source_offset_or_equivalent=event.source_offset_or_equivalent,
                     source_event_time_utc=event.source_event_time_utc,
@@ -128,7 +128,7 @@ def _ingest_fixture(
             ''',
             {
                 'source_id': 'binance',
-                'stream_id': 'spot_trades',
+                'stream_id': 'binance_spot_trades',
                 'partition_id': 'btcusdt',
             },
         )

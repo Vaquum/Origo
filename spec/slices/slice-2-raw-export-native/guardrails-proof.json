@@ -36,7 +36,7 @@
       "body": {
         "detail": {
           "code": "EXPORT_RIGHTS_INGEST_ONLY",
-          "message": "Export is blocked for source=binance dataset=spot_trades: rights state is Ingest Only"
+          "message": "Export is blocked for source=binance dataset=binance_spot_trades: rights state is Ingest Only"
         }
       },
       "status_code": 409
@@ -44,7 +44,7 @@
     "status_failed": {
       "body": {
         "artifact": null,
-        "dataset": "spot_trades",
+        "dataset": "binance_spot_trades",
         "error_code": "EXPORT_STRICT_MUTABLE_WINDOW",
         "error_message": "strict=true export rejects mutable windows",
         "export_id": "77777777-7777-4777-8777-777777777777",
@@ -59,7 +59,7 @@
     "status_running": {
       "body": {
         "artifact": null,
-        "dataset": "spot_trades",
+        "dataset": "binance_spot_trades",
         "error_code": null,
         "error_message": null,
         "export_id": "66666666-6666-4666-8666-666666666666",
@@ -79,7 +79,7 @@
           "row_count": 2,
           "uri": "/private/tmp/origo-s2-guardrails-proof/exports/66666666-6666-4666-8666-666666666666/raw_export.parquet"
         },
-        "dataset": "spot_trades",
+        "dataset": "binance_spot_trades",
         "error_code": null,
         "error_message": null,
         "export_id": "66666666-6666-4666-8666-666666666666",

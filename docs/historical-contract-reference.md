@@ -70,7 +70,7 @@ Historical dataset routes in scope:
 ## Current mode availability
 - Historical route contracts accept `mode=native|aligned_1s`.
 - Historical trades routes execute both `native` and `aligned_1s` for:
-  - `spot_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
 - Historical klines routes execute both `native` and `aligned_1s`.
@@ -86,4 +86,4 @@ Historical dataset routes in scope:
   - `bitcoin_block_subsidy_schedule`
   - `bitcoin_network_hashrate_estimate`
   - `bitcoin_circulating_supply`
-- Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
+- Historical scope includes all active dataset contracts in this tranche.

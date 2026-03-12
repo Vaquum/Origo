@@ -13,7 +13,7 @@ from origo.events.precision import canonicalize_payload_json_with_precision
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 from origo_control_plane.migrations import MigrationRunner, MigrationSettings
 
-Dataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
+Dataset = Literal['binance_spot_trades']
 
 _PROOF_DB_SUFFIX = '_s15_p6_proof'
 _SLICE_DIR = Path('spec/slices/slice-15-binance-event-sourcing-port')
@@ -47,8 +47,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
     partition_id = '2024-01-06'
     return (
         StreamFixture(
-            dataset='spot_trades',
-            stream_id='spot_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -77,8 +77,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
             ),
         ),
         StreamFixture(
-            dataset='spot_agg_trades',
-            stream_id='spot_agg_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -102,8 +102,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
             ),
         ),
         StreamFixture(
-            dataset='futures_trades',
-            stream_id='futures_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -200,7 +200,7 @@ def _verify_payload_precision(
     dataset: Dataset,
     payload_object: dict[str, Any],
 ) -> dict[str, Any]:
-    if dataset == 'spot_trades':
+    if dataset == 'binance_spot_trades':
         trade_id = _require_int(payload_object.get('trade_id'), label='trade_id')
         price = _require_string(payload_object.get('price'), label='price')
         qty = _require_string(payload_object.get('qty'), label='qty')
@@ -215,7 +215,7 @@ def _verify_payload_precision(
             'quote_qty': quote_qty,
         }
 
-    if dataset == 'spot_agg_trades':
+    if dataset == 'binance_spot_trades':
         agg_trade_id = _require_int(payload_object.get('agg_trade_id'), label='agg_trade_id')
         first_trade_id = _require_int(payload_object.get('first_trade_id'), label='first_trade_id')
         last_trade_id = _require_int(payload_object.get('last_trade_id'), label='last_trade_id')
@@ -374,7 +374,7 @@ def run_s15_p6_proof() -> dict[str, Any]:
         return {
             'proof_scope': (
                 'Slice 15 S15-P6 raw-fidelity and numeric-precision proof for '
-                'Binance spot_trades, spot_agg_trades, futures_trades'
+                'Binance binance_spot_trades'
             ),
             'proof_database': proof_database,
             'datasets': results,

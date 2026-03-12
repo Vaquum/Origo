@@ -26,9 +26,7 @@ def _build_rights_matrix(*, legal_signoff_artifact: str) -> dict[str, Any]:
                 'rights_state': 'Hosted Allowed',
                 'rights_provisional': False,
                 'datasets': [
-                    'spot_trades',
-                    'spot_agg_trades',
-                    'futures_trades',
+                    'binance_spot_trades',
                 ],
                 'legal_signoff_artifact': legal_signoff_artifact,
             },
@@ -114,7 +112,7 @@ def run_s5_g1_g4_proof() -> dict[str, Any]:
             headers=headers,
             payload={
                 'mode': 'aligned_1s',
-                'dataset': 'spot_trades',
+                'dataset': 'binance_spot_trades',
                 'fields': ['aligned_at_utc', 'open_price', 'close_price'],
                 'n_rows': 5,
                 'include_datetime': True,
@@ -138,7 +136,7 @@ def run_s5_g1_g4_proof() -> dict[str, Any]:
             headers=headers,
             payload={
                 'mode': 'aligned_1s',
-                'dataset': 'spot_trades',
+                'dataset': 'binance_spot_trades',
                 'fields': ['aligned_at_utc', 'open_price', 'close_price'],
                 'time_range': ['2017-08-17T12:00:00Z', '2017-08-17T13:00:00Z'],
                 'include_datetime': True,
@@ -179,7 +177,7 @@ def run_s5_g1_g4_proof() -> dict[str, Any]:
                 headers=headers,
                 payload={
                     'mode': 'aligned_1s',
-                    'dataset': 'spot_trades',
+                    'dataset': 'binance_spot_trades',
                     'fields': ['aligned_at_utc', 'open_price'],
                     'time_range': ['2017-08-17T12:00:00Z', '2017-08-17T13:00:00Z'],
                     'include_datetime': True,

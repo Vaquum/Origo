@@ -79,7 +79,7 @@ def _write_events(
         result = writer.write_event(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent=event.source_offset_or_equivalent,
                 source_event_time_utc=event.source_event_time_utc,
@@ -167,7 +167,7 @@ def run_s14_p2_proof() -> dict[str, Any]:
             ''',
             {
                 'source_id': 'binance',
-                'stream_id': 'spot_trades',
+                'stream_id': 'binance_spot_trades',
                 'partition_id': 'btcusdt',
             },
         )
@@ -192,7 +192,7 @@ def run_s14_p2_proof() -> dict[str, Any]:
             ''',
             {
                 'source_id': 'binance',
-                'stream_id': 'spot_trades',
+                'stream_id': 'binance_spot_trades',
                 'partition_id': 'btcusdt',
             },
         )

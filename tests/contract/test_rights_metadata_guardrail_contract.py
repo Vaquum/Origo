@@ -11,7 +11,7 @@ def test_read_export_tags_requires_rights_metadata_fields() -> None:
             {
                 'origo.export.mode': 'native',
                 'origo.export.format': 'parquet',
-                'origo.export.dataset': 'spot_trades',
+                'origo.export.dataset': 'binance_spot_trades',
                 'origo.export.source': 'binance',
                 'origo.export.rights_provisional': 'false',
             }
@@ -22,7 +22,7 @@ def test_read_export_tags_requires_rights_metadata_fields() -> None:
             {
                 'origo.export.mode': 'native',
                 'origo.export.format': 'parquet',
-                'origo.export.dataset': 'spot_trades',
+                'origo.export.dataset': 'binance_spot_trades',
                 'origo.export.source': 'binance',
                 'origo.export.rights_state': 'Hosted Allowed',
             }
@@ -43,7 +43,7 @@ def test_read_export_tags_accepts_rights_metadata_fields() -> None:
         {
             'origo.export.mode': 'native',
             'origo.export.format': 'parquet',
-            'origo.export.dataset': 'spot_trades',
+            'origo.export.dataset': 'binance_spot_trades',
             'origo.export.source': 'binance',
             'origo.export.rights_state': 'Hosted Allowed',
             'origo.export.rights_provisional': 'false',
@@ -51,7 +51,7 @@ def test_read_export_tags_accepts_rights_metadata_fields() -> None:
     )
     assert mode == 'native'
     assert export_format == 'parquet'
-    assert dataset == 'spot_trades'
+    assert dataset == 'binance_spot_trades'
     assert source == 'binance'
     assert rights_state == 'Hosted Allowed'
     assert rights_provisional is False

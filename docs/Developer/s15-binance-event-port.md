@@ -6,7 +6,7 @@
 - Slice/version reference: S15 (`Origo API v0.1.8`, `origo-control-plane v1.2.58`)
 
 ## Purpose and scope
-- Developer reference for Slice 15 migration of Binance `spot_trades`, `spot_agg_trades`, and `futures_trades` to canonical event-driven serving.
+- Developer reference for Slice 15 migration of Binance `binance_spot_trades` to canonical event-driven serving.
 - Scope covers ingest writes to `canonical_event_log`, native/aligned projection paths, and query-table cutover.
 
 ## Inputs and outputs with contract shape
@@ -25,7 +25,7 @@
 ## Data definitions (field names, types, units, timezone, nullability)
 - Canonical event fields used by this slice:
   - `source_id` string (`binance`)
-  - `stream_id` enum-like string (`spot_trades|spot_agg_trades|futures_trades`)
+  - `stream_id` enum-like string (`binance_spot_trades`)
   - `partition_id` UTC date (`YYYY-MM-DD`)
   - `source_offset_or_equivalent` string source sequence id
   - `source_event_time_utc` nullable UTC timestamp

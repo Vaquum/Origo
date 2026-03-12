@@ -16,7 +16,7 @@
 
 ## Data definitions
 - `sources`: query source list (current capability requires exactly one):
-  - `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`.
+  - `binance_spot_trades | etf_daily_metrics | fred_series_metrics`.
 - Window mode: at most one of `time_range | n_rows | n_random`.
 - No selector defaults to full available history (`earliest -> now`).
 - `filters`: optional projection filter clauses (`eq|ne|gt|gte|lt|lte|in|not_in`).

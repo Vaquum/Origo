@@ -8,10 +8,7 @@ from typing import Any, Literal
 import polars as pl
 
 type ExchangeDataset = Literal[
-    'spot_trades',
-    'spot_agg_trades',
-    'futures_trades',
-    'futures_agg_trades',
+    'binance_spot_trades',
     'okx_spot_trades',
     'bybit_spot_trades',
 ]
@@ -54,7 +51,7 @@ class ExchangeIntegrityReport:
 
 
 _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
-    'spot_trades': _ExchangeIntegritySpec(
+    'binance_spot_trades': _ExchangeIntegritySpec(
         tuple_size=8,
         id_index=0,
         timestamp_index=4,
@@ -75,73 +72,6 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
             'is_buyer_maker',
             'is_best_match',
             'datetime',
-        ),
-    ),
-    'spot_agg_trades': _ExchangeIntegritySpec(
-        tuple_size=8,
-        id_index=0,
-        timestamp_index=5,
-        price_index=1,
-        quantity_index=2,
-        quote_quantity_index=None,
-        side_index=None,
-        bool_indices=(6,),
-        first_last_trade_indices=(3, 4),
-        datetime_index=7,
-        enforce_monotonic_timestamp=False,
-        frame_columns=(
-            'agg_trade_id',
-            'price',
-            'quantity',
-            'first_trade_id',
-            'last_trade_id',
-            'timestamp',
-            'is_buyer_maker',
-            'datetime',
-        ),
-    ),
-    'futures_trades': _ExchangeIntegritySpec(
-        tuple_size=7,
-        id_index=0,
-        timestamp_index=4,
-        price_index=1,
-        quantity_index=2,
-        quote_quantity_index=3,
-        side_index=None,
-        bool_indices=(5,),
-        first_last_trade_indices=None,
-        datetime_index=6,
-        enforce_monotonic_timestamp=False,
-        frame_columns=(
-            'futures_trade_id',
-            'price',
-            'quantity',
-            'quote_quantity',
-            'timestamp',
-            'is_buyer_maker',
-            'datetime',
-        ),
-    ),
-    'futures_agg_trades': _ExchangeIntegritySpec(
-        tuple_size=7,
-        id_index=0,
-        timestamp_index=5,
-        price_index=1,
-        quantity_index=2,
-        quote_quantity_index=None,
-        side_index=None,
-        bool_indices=(6,),
-        first_last_trade_indices=(3, 4),
-        datetime_index=None,
-        enforce_monotonic_timestamp=False,
-        frame_columns=(
-            'futures_agg_trades_id',
-            'price',
-            'quantity',
-            'first_trade_id',
-            'last_trade_id',
-            'timestamp',
-            'is_buyer_maker',
         ),
     ),
     'okx_spot_trades': _ExchangeIntegritySpec(

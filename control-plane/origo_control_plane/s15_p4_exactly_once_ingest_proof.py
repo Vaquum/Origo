@@ -11,7 +11,7 @@ from clickhouse_driver import Client as ClickHouseClient
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 from origo_control_plane.migrations import MigrationRunner, MigrationSettings
 
-Dataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
+Dataset = Literal['binance_spot_trades']
 
 _PROOF_DB_SUFFIX = '_s15_p4_proof'
 _SLICE_DIR = Path('spec/slices/slice-15-binance-event-sourcing-port')
@@ -45,8 +45,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
     partition_id = '2024-01-04'
     return (
         StreamFixture(
-            dataset='spot_trades',
-            stream_id='spot_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -84,8 +84,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
             ),
         ),
         StreamFixture(
-            dataset='spot_agg_trades',
-            stream_id='spot_agg_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -123,8 +123,8 @@ def _fixtures() -> tuple[StreamFixture, ...]:
             ),
         ),
         StreamFixture(
-            dataset='futures_trades',
-            stream_id='futures_trades',
+            dataset='binance_spot_trades',
+            stream_id='binance_spot_trades',
             partition_id=partition_id,
             events=(
                 FixtureEvent(
@@ -310,7 +310,7 @@ def run_s15_p4_proof() -> dict[str, Any]:
         return {
             'proof_scope': (
                 'Slice 15 S15-P4 exactly-once ingest under duplicate replay and '
-                'crash/restart for Binance spot_trades, spot_agg_trades, futures_trades'
+                'crash/restart for Binance binance_spot_trades'
             ),
             'proof_database': proof_database,
             'datasets': results,

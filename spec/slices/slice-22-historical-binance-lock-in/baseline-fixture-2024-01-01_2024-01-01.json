@@ -23,7 +23,7 @@
   ],
   "run_1_fingerprints": [
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window",
       "row_count": 1,
       "offset_min": 1,
@@ -43,7 +43,7 @@
   ],
   "run_2_fingerprints": [
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window",
       "row_count": 1,
       "offset_min": 1,

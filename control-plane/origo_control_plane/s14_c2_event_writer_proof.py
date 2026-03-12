@@ -47,7 +47,7 @@ def run_s14_c2_proof() -> dict[str, Any]:
 
         event_input = CanonicalEventWriteInput(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             partition_id='btcusdt',
             source_offset_or_equivalent='1700000000000',
             source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),

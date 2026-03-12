@@ -24,7 +24,7 @@ class _PlannerProofCase:
 _CASES: tuple[_PlannerProofCase, ...] = (
     _PlannerProofCase(
         name='binance_spot_time_range',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         window=TimeRangeWindow(
             start_iso='2017-08-17T12:00:00Z',
             end_iso='2017-08-17T13:00:00Z',
@@ -38,7 +38,7 @@ _CASES: tuple[_PlannerProofCase, ...] = (
     ),
     _PlannerProofCase(
         name='binance_futures_latest_rows',
-        dataset='futures_trades',
+        dataset='binance_spot_trades',
         window=LatestRowsWindow(rows=15),
         selected_columns=(
             'aligned_at_utc',

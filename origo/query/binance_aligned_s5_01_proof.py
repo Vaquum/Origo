@@ -12,9 +12,7 @@ from .binance_aligned_1s import BinanceAlignedDataset, query_binance_aligned_1s_
 from .native_core import LatestRowsWindow
 
 _DATASETS: tuple[BinanceAlignedDataset, ...] = (
-    'spot_trades',
-    'spot_agg_trades',
-    'futures_trades',
+    'binance_spot_trades',
 )
 
 

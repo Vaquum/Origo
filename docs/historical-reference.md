@@ -36,7 +36,7 @@ Window rules:
 
 | Dataset | HTTP endpoint | Python method | Modes |
 |---|---|---|---|
-| `spot_trades` | `POST /v1/historical/binance/spot/trades` | `get_binance_spot_trades` | `native`, `aligned_1s` |
+| `binance_spot_trades` | `POST /v1/historical/binance/spot/trades` | `get_binance_spot_trades` | `native`, `aligned_1s` |
 | `okx_spot_trades` | `POST /v1/historical/okx/spot/trades` | `get_okx_spot_trades` | `native`, `aligned_1s` |
 | `bybit_spot_trades` | `POST /v1/historical/bybit/spot/trades` | `get_bybit_spot_trades` | `native`, `aligned_1s` |
 | `etf_daily_metrics` | `POST /v1/historical/etf/daily_metrics` | `get_etf_daily_metrics` | `native`, `aligned_1s` |
@@ -55,8 +55,7 @@ Spot kline convenience routes:
 - `POST /v1/historical/bybit/spot/klines`
 
 ## Deferred datasets
-- `spot_agg_trades` (deferred from historical Python/HTTP surface)
-- `futures_trades` (deferred from historical Python/HTTP surface)
+- none in current active historical scope
 
 ## Response contract
 - `mode`

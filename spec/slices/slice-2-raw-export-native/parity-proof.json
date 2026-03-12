@@ -86,7 +86,7 @@
     "parity.row_count": "True if row counts match expected query output"
   },
   "fixture_window": [
-    "spot_trades:month_year=[8,2017]"
+    "binance_spot_trades:month_year=[8,2017]"
   ],
   "generated_at_utc": "2026-03-05T08:11:08.171247+00:00",
   "parity_match": true,

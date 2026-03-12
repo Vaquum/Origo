@@ -94,7 +94,7 @@ def _process_day(
 
     integrity_rows = [event.to_integrity_tuple() for event in events]
     integrity_report = run_exchange_integrity_suite_rows(
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         rows=integrity_rows,
     )
     context.log.info(

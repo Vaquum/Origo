@@ -1,7 +1,7 @@
 {
   "export_incomplete_view_pair_error": "1 validation error for RawExportRequest\n  Value error, view_id and view_version must both be set or both be omitted [type=value_error, input_value={'mode': 'native', 'forma...w_id': 'aligned_1s_raw'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/value_error",
   "export_request": {
-    "dataset": "spot_trades",
+    "dataset": "binance_spot_trades",
     "fields": null,
     "format": "parquet",
     "include_datetime": true,
@@ -25,8 +25,8 @@
     "n_random": null,
     "n_rows": 10,
     "sources": [
-      "spot_trades",
-      "spot_agg_trades"
+      "binance_spot_trades",
+      "binance_spot_trades"
     ],
     "strict": false,
     "time_range": null,

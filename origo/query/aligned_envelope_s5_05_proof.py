@@ -23,7 +23,7 @@ class _AlignedEnvelopeCase:
 _CASES: tuple[_AlignedEnvelopeCase, ...] = (
     _AlignedEnvelopeCase(
         name='binance_spot_aligned_envelope',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         fields=('aligned_at_utc', 'open_price', 'close_price', 'trade_count'),
         time_range=('2017-08-17T12:00:00Z', '2017-08-17T13:00:00Z'),
     ),

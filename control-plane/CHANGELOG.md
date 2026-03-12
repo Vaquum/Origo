@@ -548,9 +548,7 @@
   - Added Binance aligned-1s materialization module:
     - `origo/query/binance_aligned_1s.py`
   - Added dataset definitions for:
-    - `spot_trades` -> `binance_trades`
-    - `spot_agg_trades` -> `binance_agg_trades`
-    - `futures_trades` -> `binance_futures_trades`
+    - `binance_spot_trades` -> `binance_trades`
   - Added aligned query SQL compiler for all window modes:
     - `month_year`, `time_range`, `n_rows`, `n_random`
   - Added deterministic 1-second aggregate output shape:
@@ -561,7 +559,7 @@
   - Added capability proof harness + artifact:
     - `origo/query/binance_aligned_s5_01_proof.py`
     - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c1-binance-aligned.json`
-    - proof validates all three Binance datasets return non-empty second-aligned rows with expected schema.
+    - proof validates Binance spot dataset returns non-empty second-aligned rows with expected schema.
 - Marked `S5-C1` complete in `spec/2-itemized-work-plan.md`.
 
 ## v1.2.27 on 6th of March, 2026
@@ -972,7 +970,7 @@
 
 ## v1.2.6 on 4th of March, 2026
 - Added Slice 1 native query core in `origo/query/native_core.py` (`ClickHouse SQL -> Arrow -> Polars`) with deterministic window semantics.
-- Added unified Binance native planner in `origo/query/binance_native.py` covering `spot_trades`, `spot_agg_trades`, and `futures_trades` with strict field allowlists.
+- Added unified Binance native planner in `origo/query/binance_native.py` covering `binance_spot_trades` with strict field allowlists.
 - Added UTC millisecond canonicalization and optional ISO datetime output for query results.
 - Added wide-row envelope builder with schema metadata in `origo/query/response.py`.
 - Rewired `origo.data.HistoricalData` native trade methods through the new query planner path.

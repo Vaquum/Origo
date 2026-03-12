@@ -17,7 +17,7 @@
         "close_price",
         "trade_count"
       ],
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "expected_rows_hash_sha256": "dfc229358b43e69a7b48697537df3129fb254c267c1b50b21ae05fa9a5d8a9b7",
       "exported_rows_hash_sha256": "dfc229358b43e69a7b48697537df3129fb254c267c1b50b21ae05fa9a5d8a9b7",
       "format": "parquet",
@@ -42,7 +42,7 @@
         "close_price",
         "trade_count"
       ],
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "expected_rows_hash_sha256": "53b9add73a61e985b85f72f403913b5ef46111357edc5ab156c184d980545c95",
       "exported_rows_hash_sha256": "53b9add73a61e985b85f72f403913b5ef46111357edc5ab156c184d980545c95",
       "format": "csv",

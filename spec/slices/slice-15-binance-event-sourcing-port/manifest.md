@@ -1,5 +1,5 @@
 ## What was done
-- Completed Binance event-sourcing port for `spot_trades`, `spot_agg_trades`, and `futures_trades`.
+- Completed Binance event-sourcing port for `binance_spot_trades`.
 - Migrated serving path to canonical projections:
   - native queries now read `canonical_binance_*_native_v1` tables.
   - aligned queries now read `canonical_aligned_1s_aggregates` (`view_id=aligned_1s_raw`, `view_version=1`).

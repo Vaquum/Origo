@@ -1,6 +1,6 @@
 ## What was done
 - Implemented a new internal native query kernel (`ClickHouse SQL -> Arrow -> Polars`) in `origo/query/native_core.py`.
-- Implemented a unified Binance planner for `spot_trades`, `spot_agg_trades`, and `futures_trades` with strict field allowlists.
+- Implemented a unified Binance planner for `binance_spot_trades` with strict field allowlists.
 - Added UTC millisecond datetime canonicalization and optional ISO datetime output in the query execution path.
 - Added a wide-row envelope builder with schema metadata for API-ready responses.
 - Rewired `origo.data.HistoricalData` native trade endpoints to use the new planner path.

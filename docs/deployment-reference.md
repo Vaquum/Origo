@@ -49,4 +49,4 @@
 - Verify live API endpoint after deploy:
   - `curl -sS http://origo.vaquum.fi/health`
 - Query one dataset after deploy:
-  - `curl -sS -X POST 'http://origo.vaquum.fi/v1/raw/query' -H 'Content-Type: application/json' -H 'X-API-Key: <internal-key>' --data '{"mode":"native","sources":["spot_trades"],"time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"],"strict":false}'`
+  - `curl -sS -X POST 'http://origo.vaquum.fi/v1/raw/query' -H 'Content-Type: application/json' -H 'X-API-Key: <internal-key>' --data '{"mode":"native","sources":["binance_spot_trades"],"time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"],"strict":false}'`

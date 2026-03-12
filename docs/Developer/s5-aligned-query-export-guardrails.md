@@ -15,7 +15,7 @@
 - Query API input (`POST /v1/raw/query`):
   - `mode`: `native | aligned_1s`
   - `sources`: one source key in current capability:
-    - `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`
+    - `binance_spot_trades | etf_daily_metrics | fred_series_metrics`
   - `fields`: optional projection
   - exactly one window selector (`time_range | n_rows | n_random`)
   - `filters`: optional projection filter clauses (`eq|ne|gt|gte|lt|lte|in|not_in`)
@@ -88,7 +88,7 @@
 ## Minimal examples
 - Aligned query (Binance):
   - `POST /v1/raw/query` body:
-    - `{ "mode": "aligned_1s", "sources": ["spot_trades"], "time_range": ["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "fields": ["aligned_at_utc","open_price","close_price","trade_count"], "strict": false }`
+    - `{ "mode": "aligned_1s", "sources": ["binance_spot_trades"], "time_range": ["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "fields": ["aligned_at_utc","open_price","close_price","trade_count"], "strict": false }`
 - Aligned query (ETF forward fill):
   - `{ "mode": "aligned_1s", "sources": ["etf_daily_metrics"], "time_range": ["2026-03-05T12:00:00Z","2026-03-07T12:00:00Z"], "fields": ["source_id","metric_name","valid_from_utc","valid_to_utc_exclusive","metric_value_string"], "strict": false }`
 - Aligned export:

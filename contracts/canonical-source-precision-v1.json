@@ -3,73 +3,7 @@
   "entries": [
     {
       "source_id": "binance",
-      "stream_id": "futures_trades",
-      "numeric_fields": [
-        {
-          "field_path": "trade_id",
-          "numeric_kind": "int",
-          "scale": null,
-          "description": "Futures trade identifier."
-        },
-        {
-          "field_path": "price",
-          "numeric_kind": "decimal",
-          "scale": 8,
-          "description": "Futures trade execution price."
-        },
-        {
-          "field_path": "qty",
-          "numeric_kind": "decimal",
-          "scale": 8,
-          "description": "Futures trade quantity."
-        },
-        {
-          "field_path": "quote_qty",
-          "numeric_kind": "decimal",
-          "scale": 8,
-          "description": "Futures trade quote-asset quantity."
-        }
-      ]
-    },
-    {
-      "source_id": "binance",
-      "stream_id": "spot_agg_trades",
-      "numeric_fields": [
-        {
-          "field_path": "agg_trade_id",
-          "numeric_kind": "int",
-          "scale": null,
-          "description": "Exchange aggregate trade identifier."
-        },
-        {
-          "field_path": "price",
-          "numeric_kind": "decimal",
-          "scale": 8,
-          "description": "Aggregate trade price."
-        },
-        {
-          "field_path": "qty",
-          "numeric_kind": "decimal",
-          "scale": 8,
-          "description": "Aggregate trade quantity."
-        },
-        {
-          "field_path": "first_trade_id",
-          "numeric_kind": "int",
-          "scale": null,
-          "description": "First underlying trade identifier in aggregate trade."
-        },
-        {
-          "field_path": "last_trade_id",
-          "numeric_kind": "int",
-          "scale": null,
-          "description": "Last underlying trade identifier in aggregate trade."
-        }
-      ]
-    },
-    {
-      "source_id": "binance",
-      "stream_id": "spot_trades",
+      "stream_id": "binance_spot_trades",
       "numeric_fields": [
         {
           "field_path": "trade_id",

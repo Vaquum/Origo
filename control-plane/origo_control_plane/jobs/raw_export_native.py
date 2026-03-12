@@ -37,9 +37,7 @@ type ExportDataset = (
 type ExportMode = Literal['native', 'aligned_1s']
 _ALIGNED_EXPORT_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',
@@ -82,9 +80,7 @@ def _expect_list(value: Any, label: str) -> list[Any]:
 
 def _read_dataset(value: Any) -> ExportDataset:
     if value not in {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',
@@ -282,9 +278,9 @@ def origo_raw_export_native_step(context: OpExecutionContext) -> None:
             )
 
         if mode == 'native':
-            if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
+            if dataset == 'binance_spot_trades':
                 frame = query_binance_native_data(
-                    dataset=cast(BinanceDataset, dataset),
+                    dataset=dataset,
                     select_columns=select_columns,
                     window=window,
                     include_datetime=include_datetime,

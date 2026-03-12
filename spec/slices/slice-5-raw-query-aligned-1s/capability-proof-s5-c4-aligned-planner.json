@@ -2,7 +2,7 @@
   "cases": [
     {
       "case": "binance_spot_time_range",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "execution_path": "binance_aligned",
       "first_row": {
         "aligned_at_utc": "2017-08-17T12:01:48+00:00",
@@ -32,7 +32,7 @@
     },
     {
       "case": "binance_futures_latest_rows",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "execution_path": "binance_aligned",
       "first_row": {
         "aligned_at_utc": "2019-09-08T19:53:45+00:00",

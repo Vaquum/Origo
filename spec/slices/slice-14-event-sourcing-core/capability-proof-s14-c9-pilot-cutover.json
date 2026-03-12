@@ -81,5 +81,5 @@
     "view_version": 1
   },
   "proof_database": "origo_s14_c9_proof",
-  "proof_scope": "Slice 14 S14-C9 pilot cutover for spot_trades through canonical events into native and aligned serving projections"
+  "proof_scope": "Slice 14 S14-C9 pilot cutover for binance_spot_trades through canonical events into native and aligned serving projections"
 }

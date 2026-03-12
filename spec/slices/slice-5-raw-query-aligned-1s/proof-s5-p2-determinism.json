@@ -3,7 +3,7 @@
   "cases": [
     {
       "case_id": "spot_trades_fixed_window",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "deterministic_match": true,
       "run_1": {
         "row_count": 75,

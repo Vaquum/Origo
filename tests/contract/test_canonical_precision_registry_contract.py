@@ -23,7 +23,7 @@ def test_precision_registry_contract_json_matches_python_contract() -> None:
 def test_canonicalize_payload_json_preserves_registry_numeric_types() -> None:
     payload_json = canonicalize_payload_json_with_precision(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         payload_raw=(
             b'{"qty":"0.01000000","price":"41000.12345678",'
             b'"quote_qty":"410.00123456","trade_id":"1"}'
@@ -39,7 +39,7 @@ def test_canonicalize_payload_json_preserves_registry_numeric_types() -> None:
     }
     assert_payload_json_has_no_float_values(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         payload_json=payload_json,
     )
 
@@ -48,7 +48,7 @@ def test_assert_payload_json_has_no_float_values_rejects_float() -> None:
     with pytest.raises(RuntimeError, match='Float value found in canonical payload_json'):
         assert_payload_json_has_no_float_values(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             payload_json='{"trade_id":1,"price":41000.12}',
         )
 
@@ -67,7 +67,7 @@ def test_canonicalize_payload_json_rejects_non_finite_numbers() -> None:
     with pytest.raises(RuntimeError, match='Non-finite numeric constant'):
         canonicalize_payload_json_with_precision(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             payload_raw=b'{"trade_id":NaN}',
             payload_encoding='utf-8',
         )

@@ -8,10 +8,10 @@
 ## Purpose and scope
 - Enable historical exchange spot routes and Python methods for both `native` and `aligned_1s`.
 - Keep scope limited to three in-scope datasets:
-  - `spot_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
-- Explicitly defer historical `spot_agg_trades` and `futures_trades`.
+- Legacy Binance non-spot dataset keys are explicitly removed from historical scope.
 
 ## Inputs and outputs with contract shape
 - Historical trades HTTP routes:
@@ -79,4 +79,4 @@
 - Aligned historical klines:
   - `{ "mode": "aligned_1s", "start_date": "2024-01-01", "end_date": "2024-01-01", "kline_size": 60, "strict": false }`
 - Deferred datasets note:
-  - no historical routes/methods are added for `spot_agg_trades` or `futures_trades` in S26
+  - no historical routes/methods are added for legacy Binance non-spot dataset keys in S26

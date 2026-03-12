@@ -16,7 +16,7 @@ from origo.events import (
 def _event_input(*, offset: str = '100') -> CanonicalEventWriteInput:
     return CanonicalEventWriteInput(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         source_offset_or_equivalent=offset,
         source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -55,7 +55,7 @@ def test_build_canonical_row_rejects_naive_ingested_time() -> None:
         build_canonical_event_row(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent='100',
                 source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -73,7 +73,7 @@ def test_build_canonical_row_rejects_non_json_payload_type() -> None:
         build_canonical_event_row(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent='100',
                 source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -90,7 +90,7 @@ def test_build_canonical_row_rejects_unmapped_numeric_field() -> None:
         build_canonical_event_row(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent='100',
                 source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -107,7 +107,7 @@ def test_build_canonical_row_rejects_decimal_scale_overflow() -> None:
         build_canonical_event_row(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent='100',
                 source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -125,11 +125,11 @@ def test_build_canonical_row_rejects_decimal_scale_overflow() -> None:
 def test_idempotency_key_and_event_id_are_deterministic() -> None:
     key = canonical_event_idempotency_key(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         source_offset_or_equivalent='100',
     )
-    assert key == '1|binance|spot_trades|btcusdt|100'
+    assert key == '1|binance|binance_spot_trades|btcusdt|100'
     event_id_1 = canonical_event_id_from_key(key)
     event_id_2 = canonical_event_id_from_key(key)
     assert event_id_1 == event_id_2

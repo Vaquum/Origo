@@ -5,7 +5,7 @@
 - Date (UTC): 2026-03-05
 - Scope: `S2-P1`, `S2-P2`, `S2-P3`, `S2-G1`, `S2-G2`, `S2-G3`, `S2-G4`, `S2-G5`
 - Proof windows:
-  - `spot_trades month_year=[8, 2017]` for export lifecycle/determinism/parity
+  - `binance_spot_trades month_year=[8, 2017]` for export lifecycle/determinism/parity
   - synthetic guardrail harness scenarios for rights gate, queue backpressure, audit chain, and failure classification
 - Runtime environment:
   - API/export guardrail harness: `uv run --with fastapi --with httpx --with clickhouse-connect --with polars --with pyarrow --with dagster`

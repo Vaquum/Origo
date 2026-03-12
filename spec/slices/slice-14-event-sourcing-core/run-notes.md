@@ -5,7 +5,7 @@
 - Scope: Slice 14 (`S14-C1`..`S14-C9`, `S14-P1`..`S14-P6`, `S14-G1`..`S14-G7`)
 - Fixture windows:
   - Canonical hash/exactly-once/no-miss/fidelity proof fixtures under `spec/slices/slice-14-event-sourcing-core/`
-  - Pilot cutover fixture window centered on `2024-01-01T00:00:00Z` (`spot_trades` synthetic deterministic sample)
+  - Pilot cutover fixture window centered on `2024-01-01T00:00:00Z` (`binance_spot_trades` synthetic deterministic sample)
 - Runtime environment:
   - local Docker/ClickHouse development environment
   - API/control-plane Python runtimes with repo env contract

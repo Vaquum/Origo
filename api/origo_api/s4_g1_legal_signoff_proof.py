@@ -21,7 +21,7 @@ def _build_matrix(*, legal_artifact_path: str | None) -> dict[str, Any]:
     source_payload: dict[str, Any] = {
         'rights_state': 'Hosted Allowed',
         'rights_provisional': False,
-        'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
+        'datasets': ['binance_spot_trades'],
     }
     if legal_artifact_path is not None:
         source_payload['legal_signoff_artifact'] = legal_artifact_path
@@ -50,13 +50,13 @@ def run_s4_g1_legal_signoff_proof() -> dict[str, Any]:
 
         query_missing_code = None
         try:
-            resolve_query_rights(dataset='spot_trades', auth_token=None)
+            resolve_query_rights(dataset='binance_spot_trades', auth_token=None)
         except RightsGateError as exc:
             query_missing_code = exc.code
 
         export_missing_code = None
         try:
-            resolve_export_rights(dataset='spot_trades', auth_token=None)
+            resolve_export_rights(dataset='binance_spot_trades', auth_token=None)
         except RightsGateError as exc:
             export_missing_code = exc.code
 
@@ -66,13 +66,13 @@ def run_s4_g1_legal_signoff_proof() -> dict[str, Any]:
 
         query_ok = True
         try:
-            resolve_query_rights(dataset='spot_trades', auth_token=None)
+            resolve_query_rights(dataset='binance_spot_trades', auth_token=None)
         except RightsGateError:
             query_ok = False
 
         export_ok = True
         try:
-            resolve_export_rights(dataset='spot_trades', auth_token=None)
+            resolve_export_rights(dataset='binance_spot_trades', auth_token=None)
         except RightsGateError:
             export_ok = False
 

@@ -93,6 +93,19 @@ Every slice must pass:
    1. Canonical reference format is the Slice 7+ baseline-fixture family.
    2. Historical pre-standard artifacts may be retained for provenance but must carry an explicit warning note and must not be used as structure templates.
 
+## Itemized Work Plan Contract (`spec/2-itemized-work-plan.md`)
+1. No work is executed out-of-slice.
+2. Every implementation/proof/guardrail task must map to an explicit checkbox in the currently active slice before execution starts.
+3. If new work is discovered mid-slice, it must be added to the active slice checklist first (or explicitly deferred to a future slice) before implementation.
+4. `spec/2-itemized-work-plan.md` has exactly two structural parts, in this order:
+   1. Top section: all slice checkbox sections (`## Slice N: ...`) with `Capability`, `Proof`, and `Guardrails`.
+   2. Bottom section: all slice detail sections (`## Slice N Sub-Slices`) with one-day breakdowns.
+5. Every slice must exist in both parts:
+   1. one checkbox section in the top part
+   2. one matching sub-slice section in the bottom part
+6. Slice sections must not be interleaved or mixed across parts.
+7. No duplicate slice sections are allowed.
+
 ## Pinned Stack
 
 ### Repo and Runtime

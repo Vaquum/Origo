@@ -60,7 +60,6 @@ Native rows:
 - `dimensions_json`
 - `provenance_json`
 - `ingested_at_utc`
-- `datetime`
 
 Aligned rows:
 - `aligned_at_utc`

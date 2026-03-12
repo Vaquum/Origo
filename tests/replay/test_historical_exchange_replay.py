@@ -83,7 +83,6 @@ def _etf_native_frame() -> pl.DataFrame:
             'dimensions_json': ['{}'],
             'provenance_json': ['{}'],
             'ingested_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
-            'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
         }
     )
 

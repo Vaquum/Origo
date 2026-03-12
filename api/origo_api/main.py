@@ -665,6 +665,14 @@ async def _handle_historical_spot_trades(
             status_code=409,
             detail={'code': exc.code, 'message': str(exc)},
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'QUERY_RIGHTS_RESOLUTION_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
 
     try:
         query_rights_state, query_rights_provisional = (

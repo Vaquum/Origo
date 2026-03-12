@@ -474,8 +474,16 @@ def _write_events_to_canonical(
                 )
 
     for event in events:
+        partition_id = str(event['partition_id'])
+        source_offset = str(event['source_offset_or_equivalent'])
+        source_event_time_utc = event['source_event_time_utc']
+        if not isinstance(source_event_time_utc, datetime):
+            raise RuntimeError('source_event_time_utc must be datetime')
+        payload = event['payload']
+        if not isinstance(payload, dict):
+            raise RuntimeError('payload must be dict')
         payload_json = json.dumps(
-            event.to_payload(),
+            payload,
             sort_keys=True,
             separators=(',', ':'),
             ensure_ascii=True,
@@ -485,9 +493,9 @@ def _write_events_to_canonical(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
                 stream_id=_STREAM_ID,
-                partition_id=event.partition_id,
-                source_offset_or_equivalent=str(event.trade_id),
-                source_event_time_utc=event.event_time_utc,
+                partition_id=partition_id,
+                source_offset_or_equivalent=source_offset,
+                source_event_time_utc=source_event_time_utc,
                 ingested_at_utc=ingested_at_utc,
                 payload_content_type=_PAYLOAD_CONTENT_TYPE,
                 payload_encoding=_PAYLOAD_ENCODING,

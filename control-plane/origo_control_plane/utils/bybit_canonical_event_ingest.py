@@ -15,6 +15,7 @@ _STREAM_ID = 'bybit_spot_trades'
 _SYMBOL = 'BTCUSDT'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
+_WRITE_EVENTS_BATCH_SIZE = 10_000
 _EXPECTED_CSV_HEADER = (
     'timestamp',
     'symbol',
@@ -262,14 +263,33 @@ def write_bybit_spot_trades_to_canonical(
 
     inserted = 0
     duplicate = 0
+    write_inputs: list[CanonicalEventWriteInput] = []
+
+    def flush_batch() -> None:
+        nonlocal inserted, duplicate
+        if write_inputs == []:
+            return
+        results = writer.write_events(write_inputs)
+        write_inputs.clear()
+        for result in results:
+            if result.status == 'inserted':
+                inserted += 1
+            elif result.status == 'duplicate':
+                duplicate += 1
+            else:
+                raise RuntimeError(
+                    f'Unexpected canonical writer status: {result.status}'
+                )
+
     for event in events:
-        payload_raw = json.dumps(
+        payload_json = json.dumps(
             event.to_payload(),
             sort_keys=True,
             separators=(',', ':'),
             ensure_ascii=True,
-        ).encode(_PAYLOAD_ENCODING)
-        result = writer.write_event(
+        )
+        payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
+        write_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
                 stream_id=_STREAM_ID,
@@ -283,12 +303,10 @@ def write_bybit_spot_trades_to_canonical(
                 run_id=run_id,
             )
         )
-        if result.status == 'inserted':
-            inserted += 1
-        elif result.status == 'duplicate':
-            duplicate += 1
-        else:
-            raise RuntimeError(f'Unexpected canonical writer status: {result.status}')
+        if len(write_inputs) >= _WRITE_EVENTS_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
 
     return {
         'rows_processed': len(events),

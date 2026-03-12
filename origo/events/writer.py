@@ -21,6 +21,7 @@ from .runtime_audit import get_canonical_runtime_audit_log
 _CANONICAL_EVENT_NAMESPACE: Final[UUID] = UUID(
     'f1d1ef17-95ce-4f9f-bd81-f9958cdf8ee5'
 )
+_FETCH_EXISTING_IDENTITY_BATCH_SIZE: Final[int] = 10_000
 _CANONICAL_EVENT_LOG_COLUMNS: Final[tuple[str, ...]] = (
     'envelope_version',
     'event_id',
@@ -199,6 +200,9 @@ class CanonicalEventWriteResult:
     row: CanonicalEventRow
 
 
+CanonicalEventIdentityKey = tuple[str, str, str, str]
+
+
 def build_canonical_event_row(event_input: CanonicalEventWriteInput) -> CanonicalEventRow:
     if event_input.payload_raw == b'':
         raise EventWriterError(
@@ -267,33 +271,157 @@ class CanonicalEventWriter:
         )
 
     def write_event(self, event_input: CanonicalEventWriteInput) -> CanonicalEventWriteResult:
-        row = build_canonical_event_row(event_input)
-        stream_key = CanonicalStreamKey(
-            source_id=row.source_id,
-            stream_id=row.stream_id,
-            partition_id=row.partition_id,
-        )
-        try:
-            self._quarantine_registry.assert_not_quarantined(stream_key=stream_key)
-        except StreamQuarantineError as exc:
-            raise EventWriterError(
-                code=exc.code,
-                message=exc.message,
-                context=exc.context,
-            ) from exc
+        return self.write_events([event_input])[0]
 
-        existing = self._fetch_existing(row)
-        if existing is None:
-            self._insert_row(row)
-            result = CanonicalEventWriteResult(status='inserted', row=row)
-            self._append_runtime_audit_event(
-                stream_key=stream_key,
-                result=result,
-                run_id=event_input.run_id,
+    def write_events(
+        self, event_inputs: list[CanonicalEventWriteInput]
+    ) -> list[CanonicalEventWriteResult]:
+        if event_inputs == []:
+            return []
+
+        rows: list[CanonicalEventRow] = []
+        stream_keys: list[CanonicalStreamKey] = []
+        run_ids: list[str | None] = []
+        for event_input in event_inputs:
+            row = build_canonical_event_row(event_input)
+            stream_key = CanonicalStreamKey(
+                source_id=row.source_id,
+                stream_id=row.stream_id,
+                partition_id=row.partition_id,
             )
-            return result
+            try:
+                self._quarantine_registry.assert_not_quarantined(stream_key=stream_key)
+            except StreamQuarantineError as exc:
+                raise EventWriterError(
+                    code=exc.code,
+                    message=exc.message,
+                    context=exc.context,
+                ) from exc
+            rows.append(row)
+            stream_keys.append(stream_key)
+            run_ids.append(self._normalize_run_id(event_input.run_id))
 
-        existing_event_id, existing_payload_sha256_raw = existing
+        existing_by_identity = self._fetch_existing_bulk(rows)
+
+        inserted_by_identity: dict[
+            CanonicalEventIdentityKey, CanonicalEventWriteResult
+        ] = {}
+        results: list[CanonicalEventWriteResult] = []
+        rows_to_insert: list[CanonicalEventRow] = []
+
+        for row in rows:
+            identity = self._identity_key(row)
+            existing = existing_by_identity.get(identity)
+            if existing is not None:
+                existing_event_id, existing_payload_sha256_raw = existing
+                self._assert_existing_identity_matches(
+                    row=row,
+                    existing_event_id=existing_event_id,
+                    existing_payload_sha256_raw=existing_payload_sha256_raw,
+                )
+                results.append(CanonicalEventWriteResult(status='duplicate', row=row))
+                continue
+
+            existing_insert = inserted_by_identity.get(identity)
+            if existing_insert is not None:
+                self._assert_existing_identity_matches(
+                    row=row,
+                    existing_event_id=existing_insert.row.event_id,
+                    existing_payload_sha256_raw=existing_insert.row.payload_sha256_raw,
+                )
+                results.append(CanonicalEventWriteResult(status='duplicate', row=row))
+                continue
+
+            inserted_result = CanonicalEventWriteResult(status='inserted', row=row)
+            inserted_by_identity[identity] = inserted_result
+            results.append(inserted_result)
+            rows_to_insert.append(row)
+
+        if rows_to_insert != []:
+            self._insert_rows(rows_to_insert)
+
+        self._append_runtime_audit_events(
+            stream_keys=stream_keys,
+            results=results,
+            run_ids=run_ids,
+        )
+        return results
+
+    def _identity_key(self, row: CanonicalEventRow) -> CanonicalEventIdentityKey:
+        return (
+            row.source_id,
+            row.stream_id,
+            row.partition_id,
+            row.source_offset_or_equivalent,
+        )
+
+    def _fetch_existing_bulk(
+        self, rows: list[CanonicalEventRow]
+    ) -> dict[CanonicalEventIdentityKey, tuple[UUID, str]]:
+        if rows == []:
+            return {}
+
+        identity_keys = sorted({self._identity_key(row) for row in rows})
+        existing_by_identity: dict[CanonicalEventIdentityKey, tuple[UUID, str]] = {}
+
+        for offset in range(0, len(identity_keys), _FETCH_EXISTING_IDENTITY_BATCH_SIZE):
+            chunk = identity_keys[offset : offset + _FETCH_EXISTING_IDENTITY_BATCH_SIZE]
+            existing_rows = self._client.execute(
+                f'''
+                SELECT
+                    source_id,
+                    stream_id,
+                    partition_id,
+                    source_offset_or_equivalent,
+                    event_id,
+                    payload_sha256_raw
+                FROM {self._database}.{self._table}
+                WHERE (
+                    source_id,
+                    stream_id,
+                    partition_id,
+                    source_offset_or_equivalent
+                ) IN %(identity_keys)s
+                ORDER BY
+                    source_id ASC,
+                    stream_id ASC,
+                    partition_id ASC,
+                    source_offset_or_equivalent ASC,
+                    ingested_at_utc ASC
+                ''',
+                {'identity_keys': chunk},
+            )
+
+            for (
+                source_id,
+                stream_id,
+                partition_id,
+                source_offset_or_equivalent,
+                event_id,
+                payload_sha256_raw,
+            ) in existing_rows:
+                identity = (
+                    str(source_id),
+                    str(stream_id),
+                    str(partition_id),
+                    str(source_offset_or_equivalent),
+                )
+                if identity in existing_by_identity:
+                    raise EventWriterError(
+                        code='WRITER_IDENTITY_DUPLICATE_ROW_CONFLICT',
+                        message='Canonical identity conflict: multiple canonical rows exist for same source-event identity',
+                    )
+                existing_by_identity[identity] = (event_id, payload_sha256_raw)
+
+        return existing_by_identity
+
+    def _assert_existing_identity_matches(
+        self,
+        *,
+        row: CanonicalEventRow,
+        existing_event_id: UUID,
+        existing_payload_sha256_raw: str,
+    ) -> None:
         if existing_event_id != row.event_id:
             raise EventWriterError(
                 code='WRITER_IDENTITY_EVENT_ID_CONFLICT',
@@ -305,95 +433,74 @@ class CanonicalEventWriter:
                 message='Canonical identity conflict: payload hash mismatch for existing source-event identity',
             )
 
-        result = CanonicalEventWriteResult(status='duplicate', row=row)
-        self._append_runtime_audit_event(
-            stream_key=stream_key,
-            result=result,
-            run_id=event_input.run_id,
-        )
-        return result
-
-    def _fetch_existing(self, row: CanonicalEventRow) -> tuple[UUID, str] | None:
-        rows = self._client.execute(
-            f'''
-            SELECT
-                event_id,
-                payload_sha256_raw
-            FROM {self._database}.{self._table}
-            WHERE source_id = %(source_id)s
-                AND stream_id = %(stream_id)s
-                AND partition_id = %(partition_id)s
-                AND source_offset_or_equivalent = %(source_offset_or_equivalent)s
-            ORDER BY ingested_at_utc ASC
-            LIMIT 2
-            ''',
-            {
-                'source_id': row.source_id,
-                'stream_id': row.stream_id,
-                'partition_id': row.partition_id,
-                'source_offset_or_equivalent': row.source_offset_or_equivalent,
-            },
-        )
-        if rows == []:
-            return None
-        if len(rows) > 1:
-            raise EventWriterError(
-                code='WRITER_IDENTITY_DUPLICATE_ROW_CONFLICT',
-                message='Canonical identity conflict: multiple canonical rows exist for same source-event identity',
-            )
-        event_id, payload_sha256_raw = rows[0]
-        return event_id, payload_sha256_raw
-
-    def _insert_row(self, row: CanonicalEventRow) -> None:
+    def _insert_rows(self, rows: list[CanonicalEventRow]) -> None:
         self._client.execute(
             f'''
             INSERT INTO {self._database}.{self._table}
             ({', '.join(_CANONICAL_EVENT_LOG_COLUMNS)})
             VALUES
             ''',
-            [row.to_insert_tuple()],
+            [row.to_insert_tuple() for row in rows],
         )
 
-    def _append_runtime_audit_event(
+    def _normalize_run_id(self, run_id: str | None) -> str | None:
+        if run_id is None:
+            return None
+        normalized = run_id.strip()
+        if normalized == '':
+            raise EventWriterError(
+                code='WRITER_INVALID_RUN_ID',
+                message='run_id must be non-empty when set',
+            )
+        return normalized
+
+    def _append_runtime_audit_events(
         self,
         *,
-        stream_key: CanonicalStreamKey,
-        result: CanonicalEventWriteResult,
-        run_id: str | None,
+        stream_keys: list[CanonicalStreamKey],
+        results: list[CanonicalEventWriteResult],
+        run_ids: list[str | None],
     ) -> None:
-        normalized_run_id = None
-        if run_id is not None:
-            normalized = run_id.strip()
-            if normalized == '':
-                raise EventWriterError(
-                    code='WRITER_INVALID_RUN_ID',
-                    message='run_id must be non-empty when set',
-                )
-            normalized_run_id = normalized
-        event_type = (
-            'canonical_ingest_inserted'
-            if result.status == 'inserted'
-            else 'canonical_ingest_duplicate'
-        )
-        try:
-            get_canonical_runtime_audit_log().append_ingest_event(
-                event_type=event_type,
-                stream_key=stream_key,
-                source_offset_or_equivalent=result.row.source_offset_or_equivalent,
-                event_id=str(result.row.event_id),
-                payload_sha256_raw=result.row.payload_sha256_raw,
-                status=result.status,
-                run_id=normalized_run_id,
-            )
-        except RuntimeError as exc:
+        if len(stream_keys) != len(results) or len(results) != len(run_ids):
             raise EventWriterError(
-                code='WRITER_AUDIT_WRITE_FAILED',
-                message='Failed to write canonical ingest runtime audit event',
-                context={
+                code='WRITER_AUDIT_BATCH_SIZE_MISMATCH',
+                message='Audit append requires equal-length stream_keys, results, and run_ids',
+            )
+        ingest_events: list[dict[str, object]] = []
+        for stream_key, result, run_id in zip(stream_keys, results, run_ids, strict=True):
+            ingest_events.append(
+                {
+                    'event_type': (
+                        'canonical_ingest_inserted'
+                        if result.status == 'inserted'
+                        else 'canonical_ingest_duplicate'
+                    ),
                     'source_id': stream_key.source_id,
                     'stream_id': stream_key.stream_id,
                     'partition_id': stream_key.partition_id,
+                    'source_offset_or_equivalent': result.row.source_offset_or_equivalent,
                     'event_id': str(result.row.event_id),
+                    'payload_sha256_raw': result.row.payload_sha256_raw,
                     'status': result.status,
-                },
+                    'run_id': run_id,
+                }
+            )
+        try:
+            get_canonical_runtime_audit_log().append_ingest_events(events=ingest_events)
+        except RuntimeError as exc:
+            context: dict[str, object] = {}
+            if results != []:
+                first_result = results[0]
+                first_stream_key = stream_keys[0]
+                context = {
+                    'source_id': first_stream_key.source_id,
+                    'stream_id': first_stream_key.stream_id,
+                    'partition_id': first_stream_key.partition_id,
+                    'event_id': str(first_result.row.event_id),
+                    'status': first_result.status,
+                }
+            raise EventWriterError(
+                code='WRITER_AUDIT_WRITE_FAILED',
+                message='Failed to write canonical ingest runtime audit event',
+                context=context,
             ) from exc

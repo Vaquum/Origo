@@ -9,7 +9,7 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
-from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.config import require_env, resolve_clickhouse_native_settings
 from origo_control_plane.utils.binance_aligned_projector import (
     project_binance_spot_trades_aligned,
 )
@@ -32,6 +32,18 @@ CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
 
 daily_partitions = DailyPartitionsDefinition(start_date='2017-08-17')
+_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
+
+
+def _load_backfill_projection_mode_or_raise() -> str:
+    raw_mode = require_env(_BACKFILL_PROJECTION_MODE_ENV)
+    normalized = raw_mode.strip().lower()
+    if normalized not in {'inline', 'deferred'}:
+        raise RuntimeError(
+            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
+            f'got={raw_mode!r}'
+        )
+    return normalized
 
 
 @asset(
@@ -55,6 +67,7 @@ def _process_day(
     day_file_name: str,
     partition_date_str: str,
 ) -> dict[str, Any]:
+    projection_mode = _load_backfill_projection_mode_or_raise()
     base_url = 'https://data.binance.vision/data/spot/daily/trades/BTCUSDT/'
     file_url = base_url + day_file_name
     checksum_url = file_url + '.CHECKSUM'
@@ -143,32 +156,49 @@ def _process_day(
         projected_at_utc = datetime.now(UTC)
         partition_ids = {event.partition_id for event in events}
 
-        native_projection_summary = project_binance_spot_trades_native(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
-        aligned_projection_summary = project_binance_spot_trades_aligned(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
+        if projection_mode == 'inline':
+            native_projection_summary_dict = project_binance_spot_trades_native(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+            aligned_projection_summary_dict = project_binance_spot_trades_aligned(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+        else:
+            native_projection_summary_dict = {
+                'partitions_processed': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
+            aligned_projection_summary_dict = {
+                'partitions_processed': 0,
+                'policies_recorded': 0,
+                'policies_duplicate': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
 
         result_data: dict[str, Any] = {
             'date': day_file_name,
             'partition_date': partition_date_str,
+            'projection_mode': projection_mode,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
             'zip_checksum': actual_checksum,
             'csv_checksum': csv_checksum,
             'integrity_report': integrity_report.to_dict(),
-            'native_projection_summary': native_projection_summary.to_dict(),
-            'aligned_projection_summary': aligned_projection_summary.to_dict(),
+            'native_projection_summary': native_projection_summary_dict,
+            'aligned_projection_summary': aligned_projection_summary_dict,
         }
 
         context.log.info(f'Successfully processed {day_file_name}')

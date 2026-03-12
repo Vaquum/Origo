@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.67 on 12th of March, 2026
+- Improved canonical exchange ingest throughput for backfill workloads:
+  - switched Binance/OKX/Bybit canonical ingest writers from per-event writes to batched canonical writes
+  - enforced explicit `ORIGO_BACKFILL_PROJECTION_MODE` env contract in Binance daily ingest asset (no fallback)
+  - defaulted `.env.example` backfill projection mode to `deferred` to keep ingest capability fast during full-history backfill
+- Added regression coverage for batched immutable audit and batched canonical runtime ingest audit paths.
+
 ## v1.2.64 on 12th of March, 2026
 - Completed Slice 29 Bitcoin stream aligned completion control-plane work:
   - Added stream-aligned projector utility:

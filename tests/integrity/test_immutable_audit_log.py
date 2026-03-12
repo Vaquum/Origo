@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 from origo.audit.immutable_log import (
+    ImmutableAuditAppendInput,
     ImmutableAuditLog,
     load_audit_log_retention_days,
 )
@@ -75,6 +76,36 @@ def test_immutable_audit_log_rejects_retention_below_one_year(tmp_path: Path) ->
     log_path = tmp_path / 'audit' / 'events.jsonl'
     with pytest.raises(RuntimeError, match='retention_days must be >= 365'):
         ImmutableAuditLog(path=log_path, sink_name='test_sink', retention_days=364)
+
+
+def test_immutable_audit_log_append_events_writes_consistent_chain(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / 'audit' / 'events-batch.jsonl'
+    sink = ImmutableAuditLog(path=log_path, sink_name='test_sink', retention_days=365)
+
+    hashes = sink.append_events(
+        events=[
+            ImmutableAuditAppendInput(
+                event_type='event_one',
+                payload={'value': 1},
+                attributes={'run_id': 'run-1'},
+            ),
+            ImmutableAuditAppendInput(
+                event_type='event_two',
+                payload={'value': 2},
+                attributes={'run_id': 'run-1'},
+            ),
+        ]
+    )
+
+    events = _read_jsonl(log_path)
+    assert len(hashes) == 2
+    assert len(events) == 2
+    assert events[0]['sequence'] == 1
+    assert events[1]['sequence'] == 2
+    assert events[1]['previous_event_hash'] == hashes[0]
+    assert events[1]['event_hash'] == hashes[1]
 
 
 def test_immutable_audit_log_detects_state_backed_tamper(tmp_path: Path) -> None:

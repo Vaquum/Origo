@@ -21,7 +21,8 @@ from .runtime_audit import get_canonical_runtime_audit_log
 _CANONICAL_EVENT_NAMESPACE: Final[UUID] = UUID(
     'f1d1ef17-95ce-4f9f-bd81-f9958cdf8ee5'
 )
-_FETCH_EXISTING_IDENTITY_BATCH_SIZE: Final[int] = 10_000
+# Keep tuple-IN identity lookup well below ClickHouse default max_query_size.
+_FETCH_EXISTING_IDENTITY_BATCH_SIZE: Final[int] = 1_500
 _CANONICAL_EVENT_LOG_COLUMNS: Final[tuple[str, ...]] = (
     'envelope_version',
     'event_id',

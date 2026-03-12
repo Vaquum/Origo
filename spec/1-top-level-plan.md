@@ -35,8 +35,8 @@ Every slice must pass:
 5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
 
 ## Program Status (As of 2026-03-12)
-1. Slices `0-11` and `13-30` are merged to `main`.
-2. Slice `31` is implemented and in PR-closeout state.
+1. Slices `0-11` and `13-31` are merged to `main`.
+2. Post-slice deployment/env-contract hotfix is in progress.
 3. Slice `12` is crossed over for this phase:
    1. `S12-C1..C3` and `S12-C6` are blocked by Reddit access/policy constraints.
    2. `S12-C4` and `S12-C5` are explicitly dropped from roadmap scope.
@@ -387,6 +387,7 @@ Every slice must pass:
 29. Slice 29: Bitcoin aligned completion for `bitcoin_block_headers`, `bitcoin_block_transactions`, and `bitcoin_mempool_state`.
 30. Slice 30: Historical Bitcoin operationalization (all seven Bitcoin datasets in `native` + `aligned_1s` for Python + HTTP).
 31. Slice 31: Full historical-surface cohesion and rollout handoff (all datasets).
+32. Slice 32: Deployment env-contract drift fix (`ORIGO_AUDIT_LOG_RETENTION_DAYS`) and live deploy validation closure.
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -664,6 +665,13 @@ Every slice must pass:
 4. Rollout artifacts must include endpoint taxonomy, migration/cutover mapping, and operational runbook updates.
 5. Legacy route/method drift is not allowed; any retained legacy path must be explicit, tested, and documented as compatibility-only.
 6. Slice closeout is the rollout gate for internal user migration off legacy systems.
+
+## Slice 32 (Deploy Env-Contract Drift Fix) Locked Details
+1. Scope is deployment/runtime env-contract consistency, not data capability expansion.
+2. `ORIGO_AUDIT_LOG_RETENTION_DAYS` must be fail-loud validated in deploy path before compose service startup.
+3. Deploy workflow must source `ORIGO_AUDIT_LOG_RETENTION_DAYS` from root `.env.example` and synchronize it into `/opt/origo/deploy/.env`.
+4. Deploy compose contract must explicitly require `ORIGO_AUDIT_LOG_RETENTION_DAYS` for API runtime.
+5. Slice closeout requires successful merge-triggered deploy and live API health verification.
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

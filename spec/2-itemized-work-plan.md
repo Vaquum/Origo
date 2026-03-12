@@ -721,6 +721,20 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S31-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S31-G4` User docs closeout for slice (`docs/`, full canonical reference + taxonomy closure).
 
+## Slice 32: Deploy Env-Contract Drift Fix (`ORIGO_AUDIT_LOG_RETENTION_DAYS`) + Live Validation Closure
+
+### Capability
+- [x] `S32-C1` Enforce deploy-time sync of `ORIGO_AUDIT_LOG_RETENTION_DAYS` from root `.env.example` into `/opt/origo/deploy/.env`.
+- [x] `S32-C2` Enforce compose-time API requirement for `ORIGO_AUDIT_LOG_RETENTION_DAYS` in server compose contract.
+
+### Proof
+- [x] `S32-P1` Run full quality gates (`style`, `type`, `contract`, `replay`, `integrity`) on the deploy-contract fix branch.
+- [ ] `S32-P2` Verify merge-triggered deploy succeeds and live server health checks pass over domain endpoint.
+
+### Guardrails
+- [x] `S32-G1` Update deployment contract and troubleshooting docs to reflect retention-key enforcement and fail signatures.
+- [ ] `S32-G2` Add Slice 32 closeout artifacts (`manifest`, `run-notes`, `baseline fixture`) with explicit deploy evidence and caveats.
+
 
 ## Slice Detail Sub-Slices
 
@@ -1865,3 +1879,25 @@ Constraints: documentation-only behavior updates.
 Action: Final guardrail closeout and readiness sign-off.
 Done looks like: work-plan checkboxes, version/changelog/env contract, manifests, baseline fixtures, and run-notes are complete for rollout gate.
 Constraints: closeout artifacts required before declaring rollout-ready.
+
+## Slice 32 Sub-Slices
+1. `S32-01`
+Action: Patch deploy workflow to source `ORIGO_AUDIT_LOG_RETENTION_DAYS` from root `.env.example`, validate numeric policy bounds, and persist value into `/opt/origo/deploy/.env`.
+Done looks like: deploy workflow fails before compose on invalid policy value and always writes a validated retention key into runtime env file.
+Constraints: no fallback defaults outside root `.env.example`.
+2. `S32-02`
+Action: Patch server compose contract to require `ORIGO_AUDIT_LOG_RETENTION_DAYS` in API environment wiring.
+Done looks like: compose expansion fails loudly if key is absent at runtime.
+Constraints: compose contract only; no API behavior changes.
+3. `S32-03`
+Action: Execute full local quality gates for fix branch (`ruff`, `pyright`, `tests/contract`, `tests/replay`, `tests/integrity`).
+Done looks like: all gates pass with no waivers.
+Constraints: fixed test suites only.
+4. `S32-04`
+Action: Execute merge-triggered deploy proof and live-domain health/API smoke checks.
+Done looks like: deploy workflow succeeds and remote API passes health plus representative endpoint checks.
+Constraints: proof runs against deployed `main` commit image set.
+5. `S32-05`
+Action: Close docs/artifacts/version/changelog/env contract for Slice 32.
+Done looks like: docs are current, version/changelog/env are updated, and Slice 32 artifacts are present for handoff.
+Constraints: closeout artifacts required before slice can be marked done.

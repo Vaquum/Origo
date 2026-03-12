@@ -729,11 +729,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Proof
 - [x] `S32-P1` Run full quality gates (`style`, `type`, `contract`, `replay`, `integrity`) on the deploy-contract fix branch.
-- [ ] `S32-P2` Verify merge-triggered deploy succeeds and live server health checks pass over domain endpoint.
+- [x] `S32-P2` Verify merge-triggered deploy succeeds and live server health checks pass over domain endpoint.
 
 ### Guardrails
 - [x] `S32-G1` Update deployment contract and troubleshooting docs to reflect retention-key enforcement and fail signatures.
-- [ ] `S32-G2` Add Slice 32 closeout artifacts (`manifest`, `run-notes`, `baseline fixture`) with explicit deploy evidence and caveats.
+- [x] `S32-G2` Add Slice 32 closeout artifacts (`manifest`, `run-notes`, `baseline fixture`) with explicit deploy evidence and caveats.
 
 
 ## Slice Detail Sub-Slices

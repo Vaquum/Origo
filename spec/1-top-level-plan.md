@@ -36,7 +36,7 @@ Every slice must pass:
 
 ## Program Status (As of 2026-03-12)
 1. Slices `0-11` and `13-31` are merged to `main`.
-2. Post-slice deployment/env-contract hotfix is in progress.
+2. Slice `32` is implemented and in PR-closeout state.
 3. Slice `12` is crossed over for this phase:
    1. `S12-C1..C3` and `S12-C6` are blocked by Reddit access/policy constraints.
    2. `S12-C4` and `S12-C5` are explicitly dropped from roadmap scope.

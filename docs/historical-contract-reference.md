@@ -3,11 +3,12 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S25, S26, S27, S28, S30 (API v0.1.21)
+- Slice/version reference: S25, S26, S27, S28, S30, S31 (API v0.1.22)
 
 ## Purpose and scope
 - User reference for shared historical request behavior on Origo historical dataset routes.
 - Covers normalized parameter naming and selector semantics.
+- Full dataset/method/endpoint matrix is maintained in `docs/historical-reference.md`.
 
 ## Shared request contract
 - `mode`

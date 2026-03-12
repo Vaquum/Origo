@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S13, S20, S29, S30 (API v0.1.21)
+- Slice/version reference: S13, S20, S29, S30, S31 (API v0.1.22)
 
 ## Purpose and scope
 - User-facing reference for Bitcoin Core datasets available through raw query/export and historical Bitcoin routes.

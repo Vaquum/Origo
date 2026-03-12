@@ -1,0 +1,112 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum logical offset/value anchor in proof output",
+    "offset_max": "maximum logical offset/value anchor in proof output",
+    "volume_sum": "sum-like numeric anchor for replay comparison",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc_exclusive": "2024-01-02T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "spot_trades",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-partial-proof-window",
+      "csv_sha256": "retrospective-partial-proof-window"
+    },
+    {
+      "source": "okx_spot_trades",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-partial-proof-window",
+      "csv_sha256": "retrospective-partial-proof-window"
+    },
+    {
+      "source": "bybit_spot_trades",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-partial-proof-window",
+      "csv_sha256": "retrospective-partial-proof-window"
+    },
+    {
+      "source": "etf_daily_metrics",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-partial-proof-window",
+      "csv_sha256": "retrospective-partial-proof-window"
+    },
+    {
+      "source": "fred_series_metrics",
+      "day": "2024-01-01",
+      "zip_sha256": "retrospective-partial-proof-window",
+      "csv_sha256": "retrospective-partial-proof-window"
+    },
+    {
+      "source": "bitcoin_block_headers",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_block_transactions",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_mempool_state",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_block_fee_totals",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_block_subsidy_schedule",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_network_hashrate_estimate",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_circulating_supply",
+      "day": "2024-01-01",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "historical-surface-matrix",
+      "window_mode": "full-surface-native-and-aligned",
+      "row_count": 12,
+      "offset_min": "dataset:bitcoin_block_fee_totals",
+      "offset_max": "dataset:spot_trades",
+      "volume_sum": "24",
+      "fingerprint_sha256": "4ef12e515677df0aa6d9a0a6d663d4a066f5f9b53336d4056b45b8303534a248"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "historical-surface-matrix",
+      "window_mode": "full-surface-native-and-aligned",
+      "row_count": 12,
+      "offset_min": "dataset:bitcoin_block_fee_totals",
+      "offset_max": "dataset:spot_trades",
+      "volume_sum": "24",
+      "fingerprint_sha256": "4ef12e515677df0aa6d9a0a6d663d4a066f5f9b53336d4056b45b8303534a248"
+    }
+  ]
+}

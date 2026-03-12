@@ -34,12 +34,13 @@ Every slice must pass:
 4. A slice cannot close with outstanding lint/type debt.
 5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
 
-## Program Status (As of 2026-03-11)
-1. Slices `0-11` and `13-24` are merged to `main`.
+## Program Status (As of 2026-03-12)
+1. Slices `0-11` and `13-27` are merged to `main`.
 2. Slice `12` is crossed over for this phase:
    1. `S12-C1..C3` and `S12-C6` are blocked by Reddit access/policy constraints.
    2. `S12-C4` and `S12-C5` are explicitly dropped from roadmap scope.
-3. PR gates actively enforced on `main` are:
+3. Slice `28` is implemented on active branch and pending merge review.
+4. PR gates actively enforced on `main` are:
    1. `style-gate`
    2. `type-gate`
    3. `contract-gate`
@@ -295,8 +296,15 @@ Every slice must pass:
 4. Event-sourcing migration target returns rights metadata (`rights_state`, `rights_provisional`) in export status responses.
 
 ### Historical API and Python Interface
-1. Historical surface is explicit endpoint + explicit method coverage per onboarded dataset (no partial dataset coverage).
-2. Historical endpoints and `HistoricalData` methods use the shared historical parameter contract:
+1. Historical surface contract is explicit endpoint + explicit method coverage per onboarded dataset.
+2. Current realized historical coverage as of 2026-03-12 is:
+   1. `spot_trades`
+   2. `okx_spot_trades`
+   3. `bybit_spot_trades`
+   4. `etf_daily_metrics`
+   5. `fred_series_metrics`
+3. Remaining historical endpoint/method coverage is explicitly tracked in S30/S31.
+4. Historical endpoints and `HistoricalData` methods use the shared historical parameter contract:
    1. `mode`
    2. `start_date`
    3. `end_date`
@@ -305,10 +313,10 @@ Every slice must pass:
    6. `fields`
    7. `filters`
    8. `strict`
-3. Historical window behavior target:
+5. Historical window behavior target:
    1. no selector -> full available history (`earliest -> now`)
    2. provided selectors -> deterministic bounded window semantics
-4. Historical response shape follows query-envelope parity (`mode`, `source`, `sources`, `row_count`, `schema`, `warnings`, `rows`, rights metadata).
+6. Historical response shape follows query-envelope parity (`mode`, `source`, `sources`, `row_count`, `schema`, `warnings`, `rows`, rights metadata).
 
 ## Source Onboarding Completion Rule
 1. Every new source slice must deliver both `native` and `aligned_1s` integration before slice closeout.
@@ -529,6 +537,10 @@ Every slice must pass:
 3. Proof harnesses must provision aligned storage via migration runner only; manual ad-hoc table DDL in proofs is disallowed.
 4. Slice includes Binance retrofit of aligned query/proof paths to this contract before moving to the next source migration slice.
 5. Slice closeout requires deterministic replay parity to remain unchanged after enforcing the canonical aligned contract.
+6. Execution status as of 2026-03-11:
+   1. `S21-C1..S21-C3` complete.
+   2. `S21-P1..S21-P3` complete.
+   3. `S21-G1..S21-G4` complete.
 
 ## Slice 22 (Historical Binance Lock-In) Locked Details
 1. Python historical contract is Binance-first rename to explicit `get_binance_spot_trades` and `get_binance_spot_klines`.
@@ -537,6 +549,10 @@ Every slice must pass:
 4. Date-window semantics are strict `YYYY-MM-DD` with UTC day bounds (start inclusive, end-day inclusive via next-day exclusive).
 5. Legacy `historical_data` methods are hard removed in this slice: no aliases or fallback params.
 6. This contract is historical provenance; Slice 25 supersedes selector semantics with shared optional-window behavior.
+7. Execution status as of 2026-03-11:
+   1. `S22-C1..S22-C4` complete.
+   2. `S22-P1..S22-P3` complete.
+   3. `S22-G1..S22-G4` complete.
 
 ## Slice 23 (Historical OKX Parallelization) Locked Details
 1. Python and HTTP interfaces must be signature-identical with Slice 22 Binance contracts.
@@ -545,6 +561,10 @@ Every slice must pass:
 4. OKX maker-side mapping is mandatory and fail-loud: `buy -> 0`, `sell -> 1`.
 5. No fallback aliases for old method names or old request parameters are permitted.
 6. This contract is historical provenance; Slice 25 supersedes selector semantics with shared optional-window behavior.
+7. Execution status as of 2026-03-11:
+   1. `S23-C1..S23-C4` complete.
+   2. `S23-P1..S23-P3` complete.
+   3. `S23-G1..S23-G4` complete.
 
 ## Slice 24 (Historical Bybit Parallelization + Cutover) Locked Details
 1. Python and HTTP interfaces must be signature-identical with Binance and OKX contracts.
@@ -553,6 +573,10 @@ Every slice must pass:
 4. Old-system endpoint retirement mapping/runbook is part of slice guardrails and must be explicit.
 5. Slice closeout requires cohesion proof over all six historical spot endpoints and six Python methods.
 6. This contract is historical provenance; Slice 25 supersedes selector semantics with shared optional-window behavior.
+7. Execution status as of 2026-03-11:
+   1. `S24-C1..S24-C5` complete.
+   2. `S24-P1..S24-P3` complete.
+   3. `S24-G1..S24-G4` complete.
 
 ## Slice 25 (Historical Contract Normalization) Locked Details
 1. Historical contract becomes uniform across datasets and interfaces (`HistoricalData` + HTTP).
@@ -561,6 +585,10 @@ Every slice must pass:
 4. Existing six exchange routes are migrated to the same contract semantics with no silent aliases.
 5. Slice closeout requires contract parity proofs between historical Python and HTTP surfaces.
 6. Historical route execution for `mode=aligned_1s` was deferred in S25 and is delivered for exchange historical spot routes in Slice 26.
+7. Execution status as of 2026-03-11:
+   1. `S25-C1..S25-C5` complete.
+   2. `S25-P1..S25-P3` complete.
+   3. `S25-G1..S25-G4` complete.
 
 ## Slice 26 (Historical Exchange Dataset Completion) Locked Details
 1. Scope includes exchange trade datasets:
@@ -580,6 +608,10 @@ Every slice must pass:
 4. Each in-scope dataset must support both `native` and `aligned_1s` in historical interfaces.
 5. Existing spot kline routes remain convenience routes and execute both `native` and `aligned_1s` while keeping request-contract cohesion with historical core.
 6. Slice closeout requires acceptance + replay determinism proofs for all three in-scope datasets in both modes.
+7. Execution status as of 2026-03-11:
+   1. `S26-C1..S26-C4` complete.
+   2. `S26-P1..S26-P3` complete.
+   3. `S26-G1..S26-G4` complete.
 
 ## Slice 27 (Historical ETF Operationalization) Locked Details
 1. Scope is `etf_daily_metrics` historical serving on Python + HTTP surfaces.
@@ -590,7 +622,7 @@ Every slice must pass:
 4. Both `native` and `aligned_1s` modes are required.
 5. Aligned behavior must preserve deterministic forward-fill semantics and provenance fields.
 6. Slice closeout requires parity + replay proofs and rights/warning guardrail parity with raw-query behavior.
-7. Execution status as of 2026-03-11:
+7. Execution status as of 2026-03-12:
    1. `S27-C1..S27-C4` complete.
    2. `S27-P1..S27-P3` complete.
    3. `S27-G1..S27-G4` complete.

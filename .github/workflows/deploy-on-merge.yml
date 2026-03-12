@@ -624,84 +624,90 @@ jobs:
             local dos_usable_end_gib
             local dos_cap_end_gib='2000'
             local excluded_disk_path=''
+            local scan_mode
 
             if [[ -n "${bitcoin_core_data_disk_by_id}" && -L "${bitcoin_core_data_disk_by_id}" ]]; then
               excluded_disk_path="$(readlink -f "${bitcoin_core_data_disk_by_id}")"
             fi
 
-            while IFS= read -r link_name; do
-              [[ "${link_name}" == *-part* ]] && continue
-              link_path="/dev/disk/by-id/${link_name}"
-              [[ -L "${link_path}" ]] || continue
-              disk_path="$(readlink -f "${link_path}")"
-              [[ -b "${disk_path}" ]] || continue
-              if [[ -n "${excluded_disk_path}" && "${disk_path}" == "${excluded_disk_path}" ]]; then
-                continue
-              fi
-              read -r disk_type disk_size < <(run_privileged lsblk -dnbo TYPE,SIZE "${disk_path}")
-              [[ "${disk_type}" == "disk" ]] || continue
-              [[ "${disk_size}" -ge 3000000000000 ]] || continue
-              disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
-              partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
-              child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
-              partition_device="$(run_privileged lsblk -nrpo NAME,TYPE,LABEL "${disk_path}" | awk '$2 == "part" && $3 == "origo-clickhouse" { print $1; exit }')"
-              if [[ -n "${partition_device}" ]]; then
-                printf '%s' "${link_path}"
-                return 0
-              fi
-              partition_device="$(run_privileged lsblk -bnrpo NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT "${disk_path}" | awk '$2 == "part" && $3 >= 536870912000 && $4 == "" && $5 == "" { print $1; exit }')"
-              if [[ -n "${partition_device}" ]]; then
-                printf '%s' "${link_path}"
-                return 0
-              fi
-              if [[ "${partition_count}" == "0" && "${child_device_count}" != "0" ]]; then
-                continue
-              fi
-              if [[ "${partition_count}" != "0" && "${disk_table_type}" != "gpt" && "${disk_table_type}" != "dos" && "${disk_table_type}" != "msdos" ]]; then
-                continue
-              fi
-              if [[ "${partition_count}" == "0" ]]; then
-                max_free_gib="$((disk_size / 1024 / 1024 / 1024))"
-              else
-                read -r free_start_gib free_end_gib max_free_gib < <(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
-                  $5 ~ /^free/ {
-                    gsub("GiB", "", $2)
-                    gsub("GiB", "", $3)
-                    gsub("GiB", "", $4)
-                    if (($4 + 0) > max) {
-                      max = $4 + 0
-                      start = $2 + 0
-                      end = $3 + 0
-                    }
-                  }
-                  END {
-                    if (max == "") {
-                      max = 0
-                      start = 0
-                      end = 0
-                    }
-                    printf "%.0f %.0f %.0f\n", start, end, max
-                  }
-                ')
-                if [[ "${disk_table_type}" == "dos" || "${disk_table_type}" == "msdos" ]]; then
-                  dos_usable_end_gib="${free_end_gib}"
-                  if [[ "${dos_usable_end_gib}" -gt "${dos_cap_end_gib}" ]]; then
-                    dos_usable_end_gib="${dos_cap_end_gib}"
-                  fi
-                  if [[ "${dos_usable_end_gib}" -le "${free_start_gib}" ]]; then
-                    max_free_gib='0'
-                  else
-                    max_free_gib="$((dos_usable_end_gib - free_start_gib))"
-                  fi
-                elif [[ "${disk_table_type}" != "gpt" ]]; then
+            for scan_mode in 'exclude-bitcoin-disk' 'allow-bitcoin-disk'; do
+              while IFS= read -r link_name; do
+                [[ "${link_name}" == *-part* ]] && continue
+                link_path="/dev/disk/by-id/${link_name}"
+                [[ -L "${link_path}" ]] || continue
+                disk_path="$(readlink -f "${link_path}")"
+                [[ -b "${disk_path}" ]] || continue
+                if [[ -n "${excluded_disk_path}" && "${disk_path}" == "${excluded_disk_path}" && "${scan_mode}" == 'exclude-bitcoin-disk' ]]; then
                   continue
                 fi
+                read -r disk_type disk_size < <(run_privileged lsblk -dnbo TYPE,SIZE "${disk_path}")
+                [[ "${disk_type}" == "disk" ]] || continue
+                [[ "${disk_size}" -ge 3000000000000 ]] || continue
+                disk_table_type="$(run_privileged lsblk -dnro PTTYPE "${disk_path}" | head -n 1 | tr -d ' ')"
+                partition_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 == "part" { c++ } END { print c + 0 }')"
+                child_device_count="$(run_privileged lsblk -nrpo NAME,TYPE "${disk_path}" | awk '$2 != "disk" { c++ } END { print c + 0 }')"
+                partition_device="$(run_privileged lsblk -nrpo NAME,TYPE,LABEL "${disk_path}" | awk '$2 == "part" && $3 == "origo-clickhouse" { print $1; exit }')"
+                if [[ -n "${partition_device}" ]]; then
+                  printf '%s' "${link_path}"
+                  return 0
+                fi
+                partition_device="$(run_privileged lsblk -bnrpo NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT "${disk_path}" | awk '$2 == "part" && $3 >= 536870912000 && $4 == "" && $5 == "" { print $1; exit }')"
+                if [[ -n "${partition_device}" ]]; then
+                  printf '%s' "${link_path}"
+                  return 0
+                fi
+                if [[ "${partition_count}" == "0" && "${child_device_count}" != "0" ]]; then
+                  continue
+                fi
+                if [[ "${partition_count}" != "0" && "${disk_table_type}" != "gpt" && "${disk_table_type}" != "dos" && "${disk_table_type}" != "msdos" ]]; then
+                  continue
+                fi
+                if [[ "${partition_count}" == "0" ]]; then
+                  max_free_gib="$((disk_size / 1024 / 1024 / 1024))"
+                else
+                  read -r free_start_gib free_end_gib max_free_gib < <(run_privileged parted -m "${disk_path}" unit GiB print free | awk -F: '
+                    $5 ~ /^free/ {
+                      gsub("GiB", "", $2)
+                      gsub("GiB", "", $3)
+                      gsub("GiB", "", $4)
+                      if (($4 + 0) > max) {
+                        max = $4 + 0
+                        start = $2 + 0
+                        end = $3 + 0
+                      }
+                    }
+                    END {
+                      if (max == "") {
+                        max = 0
+                        start = 0
+                        end = 0
+                      }
+                      printf "%.0f %.0f %.0f\n", start, end, max
+                    }
+                  ')
+                  if [[ "${disk_table_type}" == "dos" || "${disk_table_type}" == "msdos" ]]; then
+                    dos_usable_end_gib="${free_end_gib}"
+                    if [[ "${dos_usable_end_gib}" -gt "${dos_cap_end_gib}" ]]; then
+                      dos_usable_end_gib="${dos_cap_end_gib}"
+                    fi
+                    if [[ "${dos_usable_end_gib}" -le "${free_start_gib}" ]]; then
+                      max_free_gib='0'
+                    else
+                      max_free_gib="$((dos_usable_end_gib - free_start_gib))"
+                    fi
+                  elif [[ "${disk_table_type}" != "gpt" ]]; then
+                    continue
+                  fi
+                fi
+                if [[ "${max_free_gib}" -ge 500 ]]; then
+                  printf '%s' "${link_path}"
+                  return 0
+                fi
+              done < <(ls -1 /dev/disk/by-id | sort)
+              if [[ -z "${excluded_disk_path}" ]]; then
+                break
               fi
-              if [[ "${max_free_gib}" -ge 500 ]]; then
-                printf '%s' "${link_path}"
-                return 0
-              fi
-            done < <(ls -1 /dev/disk/by-id | sort)
+            done
             return 1
           }
 
@@ -745,6 +751,11 @@ jobs:
               mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
               if [[ -n "${mounted_source}" && -b "${mounted_source}" ]]; then
                 local parent_kname
+                local resolved_mounted_source
+                resolved_mounted_source="$(readlink -f "${mounted_source}" || true)"
+                if [[ -n "${resolved_mounted_source}" && "${resolved_mounted_source}" == "${disk_path}" ]]; then
+                  partition_device="${mounted_source}"
+                fi
                 parent_kname="$(run_privileged lsblk -nro PKNAME "${mounted_source}" | head -n 1 || true)"
                 if [[ -n "${parent_kname}" && "/dev/${parent_kname}" == "${disk_path}" ]]; then
                   partition_device="${mounted_source}"

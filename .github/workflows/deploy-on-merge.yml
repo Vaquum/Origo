@@ -157,11 +157,44 @@ jobs:
             echo "ERROR: ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH must be present and non-empty in .env.example." >&2
             exit 1
           fi
+          origo_canonical_runtime_audit_mode="$(
+            read_root_env_example_value ORIGO_CANONICAL_RUNTIME_AUDIT_MODE
+          )"
+          if [[ -z "${origo_canonical_runtime_audit_mode}" ]]; then
+            echo "ERROR: ORIGO_CANONICAL_RUNTIME_AUDIT_MODE must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ "${origo_canonical_runtime_audit_mode}" != 'event' && "${origo_canonical_runtime_audit_mode}" != 'summary' ]]; then
+            echo "ERROR: ORIGO_CANONICAL_RUNTIME_AUDIT_MODE in .env.example must be event|summary." >&2
+            exit 1
+          fi
+          origo_canonical_fast_insert_mode="$(
+            read_root_env_example_value ORIGO_CANONICAL_FAST_INSERT_MODE
+          )"
+          if [[ -z "${origo_canonical_fast_insert_mode}" ]]; then
+            echo "ERROR: ORIGO_CANONICAL_FAST_INSERT_MODE must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ "${origo_canonical_fast_insert_mode}" != 'writer' && "${origo_canonical_fast_insert_mode}" != 'assume_new_partition' ]]; then
+            echo "ERROR: ORIGO_CANONICAL_FAST_INSERT_MODE in .env.example must be writer|assume_new_partition." >&2
+            exit 1
+          fi
           origo_stream_quarantine_state_path="$(
             read_root_env_example_value ORIGO_STREAM_QUARANTINE_STATE_PATH
           )"
           if [[ -z "${origo_stream_quarantine_state_path}" ]]; then
             echo "ERROR: ORIGO_STREAM_QUARANTINE_STATE_PATH must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          origo_backfill_projection_mode="$(
+            read_root_env_example_value ORIGO_BACKFILL_PROJECTION_MODE
+          )"
+          if [[ -z "${origo_backfill_projection_mode}" ]]; then
+            echo "ERROR: ORIGO_BACKFILL_PROJECTION_MODE must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ "${origo_backfill_projection_mode}" != 'inline' && "${origo_backfill_projection_mode}" != 'deferred' ]]; then
+            echo "ERROR: ORIGO_BACKFILL_PROJECTION_MODE in .env.example must be inline|deferred." >&2
             exit 1
           fi
           origo_backfill_run_state_path="$(
@@ -181,8 +214,17 @@ jobs:
           origo_canonical_runtime_audit_log_path_b64="$(
             printf '%s' "${origo_canonical_runtime_audit_log_path}" | base64 -w0
           )"
+          origo_canonical_runtime_audit_mode_b64="$(
+            printf '%s' "${origo_canonical_runtime_audit_mode}" | base64 -w0
+          )"
+          origo_canonical_fast_insert_mode_b64="$(
+            printf '%s' "${origo_canonical_fast_insert_mode}" | base64 -w0
+          )"
           origo_stream_quarantine_state_path_b64="$(
             printf '%s' "${origo_stream_quarantine_state_path}" | base64 -w0
+          )"
+          origo_backfill_projection_mode_b64="$(
+            printf '%s' "${origo_backfill_projection_mode}" | base64 -w0
           )"
           origo_backfill_run_state_path_b64="$(
             printf '%s' "${origo_backfill_run_state_path}" | base64 -w0
@@ -203,7 +245,10 @@ jobs:
              ORIGO_DEPLOY_API_PORT_B64='${origo_deploy_api_port_b64}' \
              ORIGO_AUDIT_LOG_RETENTION_DAYS_B64='${origo_audit_log_retention_days_b64}' \
              ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH_B64='${origo_canonical_runtime_audit_log_path_b64}' \
+             ORIGO_CANONICAL_RUNTIME_AUDIT_MODE_B64='${origo_canonical_runtime_audit_mode_b64}' \
+             ORIGO_CANONICAL_FAST_INSERT_MODE_B64='${origo_canonical_fast_insert_mode_b64}' \
              ORIGO_STREAM_QUARANTINE_STATE_PATH_B64='${origo_stream_quarantine_state_path_b64}' \
+             ORIGO_BACKFILL_PROJECTION_MODE_B64='${origo_backfill_projection_mode_b64}' \
              ORIGO_BACKFILL_RUN_STATE_PATH_B64='${origo_backfill_run_state_path_b64}' \
              ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64='${origo_backfill_manifest_log_path_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
@@ -232,7 +277,10 @@ jobs:
           decode_env_b64_required ORIGO_DEPLOY_API_PORT_B64 ORIGO_DEPLOY_API_PORT
           decode_env_b64_required ORIGO_AUDIT_LOG_RETENTION_DAYS_B64 ORIGO_AUDIT_LOG_RETENTION_DAYS
           decode_env_b64_required ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH_B64 ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH
+          decode_env_b64_required ORIGO_CANONICAL_RUNTIME_AUDIT_MODE_B64 ORIGO_CANONICAL_RUNTIME_AUDIT_MODE
+          decode_env_b64_required ORIGO_CANONICAL_FAST_INSERT_MODE_B64 ORIGO_CANONICAL_FAST_INSERT_MODE
           decode_env_b64_required ORIGO_STREAM_QUARANTINE_STATE_PATH_B64 ORIGO_STREAM_QUARANTINE_STATE_PATH
+          decode_env_b64_required ORIGO_BACKFILL_PROJECTION_MODE_B64 ORIGO_BACKFILL_PROJECTION_MODE
           decode_env_b64_required ORIGO_BACKFILL_RUN_STATE_PATH_B64 ORIGO_BACKFILL_RUN_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64 ORIGO_BACKFILL_MANIFEST_LOG_PATH
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
@@ -259,7 +307,10 @@ jobs:
           require_env ORIGO_DEPLOY_API_PORT
           require_env ORIGO_AUDIT_LOG_RETENTION_DAYS
           require_env ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH
+          require_env ORIGO_CANONICAL_RUNTIME_AUDIT_MODE
+          require_env ORIGO_CANONICAL_FAST_INSERT_MODE
           require_env ORIGO_STREAM_QUARANTINE_STATE_PATH
+          require_env ORIGO_BACKFILL_PROJECTION_MODE
           require_env ORIGO_BACKFILL_RUN_STATE_PATH
           require_env ORIGO_BACKFILL_MANIFEST_LOG_PATH
           require_env ORIGO_API_IMAGE
@@ -283,6 +334,18 @@ jobs:
           fi
           if [[ "${ORIGO_AUDIT_LOG_RETENTION_DAYS}" -lt 365 ]]; then
             echo "ERROR: ORIGO_AUDIT_LOG_RETENTION_DAYS must be >= 365." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_CANONICAL_RUNTIME_AUDIT_MODE}" != 'event' && "${ORIGO_CANONICAL_RUNTIME_AUDIT_MODE}" != 'summary' ]]; then
+            echo "ERROR: ORIGO_CANONICAL_RUNTIME_AUDIT_MODE must be event|summary." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_CANONICAL_FAST_INSERT_MODE}" != 'writer' && "${ORIGO_CANONICAL_FAST_INSERT_MODE}" != 'assume_new_partition' ]]; then
+            echo "ERROR: ORIGO_CANONICAL_FAST_INSERT_MODE must be writer|assume_new_partition." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_BACKFILL_PROJECTION_MODE}" != 'inline' && "${ORIGO_BACKFILL_PROJECTION_MODE}" != 'deferred' ]]; then
+            echo "ERROR: ORIGO_BACKFILL_PROJECTION_MODE must be inline|deferred." >&2
             exit 1
           fi
 
@@ -458,7 +521,10 @@ jobs:
             $0 !~ /^ORIGO_DOCKER_API_PORT=/ &&
             $0 !~ /^ORIGO_AUDIT_LOG_RETENTION_DAYS=/ &&
             $0 !~ /^ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH=/ &&
+            $0 !~ /^ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=/ &&
+            $0 !~ /^ORIGO_CANONICAL_FAST_INSERT_MODE=/ &&
             $0 !~ /^ORIGO_STREAM_QUARANTINE_STATE_PATH=/ &&
+            $0 !~ /^ORIGO_BACKFILL_PROJECTION_MODE=/ &&
             $0 !~ /^ORIGO_BACKFILL_RUN_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_MANIFEST_LOG_PATH=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_URL=/ &&
@@ -480,7 +546,10 @@ jobs:
             echo "ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
             echo "ORIGO_AUDIT_LOG_RETENTION_DAYS=${ORIGO_AUDIT_LOG_RETENTION_DAYS}"
             echo "ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH=${ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH}"
+            echo "ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=${ORIGO_CANONICAL_RUNTIME_AUDIT_MODE}"
+            echo "ORIGO_CANONICAL_FAST_INSERT_MODE=${ORIGO_CANONICAL_FAST_INSERT_MODE}"
             echo "ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
+            echo "ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
             echo "ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
             echo "ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
             echo "ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
@@ -505,7 +574,10 @@ jobs:
           echo "  ORIGO_DOCKER_API_PORT=${ORIGO_DEPLOY_API_PORT}"
           echo "  ORIGO_AUDIT_LOG_RETENTION_DAYS=${ORIGO_AUDIT_LOG_RETENTION_DAYS}"
           echo "  ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH=${ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH}"
+          echo "  ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=${ORIGO_CANONICAL_RUNTIME_AUDIT_MODE}"
+          echo "  ORIGO_CANONICAL_FAST_INSERT_MODE=${ORIGO_CANONICAL_FAST_INSERT_MODE}"
           echo "  ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
+          echo "  ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
           echo "  ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
           echo "  ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
           echo "  ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"

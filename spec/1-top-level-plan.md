@@ -717,16 +717,24 @@ Every slice must pass:
    6. Bitcoin derived datasets (`fees`, `subsidy`, `hashrate`, `supply`)
 3. All backfill reads must come from original first-party sources already contracted in the repo; no third-party data APIs are allowed.
 4. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
-5. Every backfill partition must emit deterministic provenance:
+5. Exchange backfill canonical ingest must run in high-throughput canonical mode:
+   1. `ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`
+   2. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`
+   3. partition must fail-loud if target canonical partition already contains rows
+6. Deploy contract must synchronize backfill-critical env keys from root `.env.example` into deploy runtime env on every deploy:
+   1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
+   2. `ORIGO_CANONICAL_FAST_INSERT_MODE`
+   3. `ORIGO_BACKFILL_PROJECTION_MODE`
+7. Every backfill partition must emit deterministic provenance:
    1. source artifact identity/checksum
    2. ingest cursor/offset window
    3. row-count and hash fingerprint
-6. Backfill must be resumable from cursor state with no destructive rewrites of canonical raw events.
-7. Gap/no-miss checks are fail-loud during backfill and trigger quarantine behavior for affected streams/partitions.
-8. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+8. Backfill must be resumable from cursor state with no destructive rewrites of canonical raw events.
+9. Gap/no-miss checks are fail-loud during backfill and trigger quarantine behavior for affected streams/partitions.
+10. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
    1. `native` everywhere
    2. `aligned_1s` everywhere currently aligned-capable by contract
-9. Slice closeout requires cross-surface validation:
+11. Slice closeout requires cross-surface validation:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods

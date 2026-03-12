@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -88,3 +89,37 @@ def test_canonical_event_writer_chunks_identity_lookup_query_size(
     assert client.select_identity_batch_sizes != []
     assert max(client.select_identity_batch_sizes) <= 1_500
     assert sum(client.select_identity_batch_sizes) == total_events
+
+
+def test_canonical_event_writer_summary_audit_mode_writes_batch_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    audit_log_path = tmp_path / 'canonical-runtime-audit-summary.jsonl'
+    monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
+    monkeypatch.setenv('ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH', str(audit_log_path))
+    monkeypatch.setenv('ORIGO_CANONICAL_RUNTIME_AUDIT_MODE', 'summary')
+    # Ensure test-local singleton wiring after env mutation.
+    import origo.events.runtime_audit as runtime_audit
+
+    runtime_audit._runtime_audit_singleton = None
+
+    client = _RecordingClickHouseClient()
+    writer = CanonicalEventWriter(
+        client=client,  # type: ignore[arg-type]
+        database='origo',
+        quarantine_registry=StreamQuarantineRegistry(
+            path=tmp_path / 'stream-quarantine-state.json'
+        ),
+    )
+
+    event_inputs = [_event_input(offset=i) for i in range(1, 11)]
+    results = writer.write_events(event_inputs)
+
+    assert len(results) == 10
+    lines = [line for line in audit_log_path.read_text(encoding='utf-8').splitlines() if line != '']
+    assert len(lines) == 1
+    parsed = json.loads(lines[0])
+    assert parsed['event_type'] == 'canonical_ingest_batch'
+    assert parsed['payload']['batch_event_count'] == 10
+    assert parsed['payload']['inserted_count'] == 10
+    assert parsed['payload']['duplicate_count'] == 0

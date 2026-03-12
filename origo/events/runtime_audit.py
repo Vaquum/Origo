@@ -110,6 +110,58 @@ class CanonicalRuntimeAuditLog:
 
         return self._sink.append_events(events=audit_events)
 
+    def append_ingest_batch_event(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        event_type: str,
+        run_id: str | None,
+        batch_event_count: int,
+        inserted_count: int,
+        duplicate_count: int,
+        first_source_offset_or_equivalent: str,
+        last_source_offset_or_equivalent: str,
+        first_event_id: str,
+        last_event_id: str,
+    ) -> str:
+        if batch_event_count <= 0:
+            raise RuntimeError('batch_event_count must be positive')
+        if inserted_count < 0:
+            raise RuntimeError('inserted_count must be non-negative')
+        if duplicate_count < 0:
+            raise RuntimeError('duplicate_count must be non-negative')
+        if inserted_count + duplicate_count != batch_event_count:
+            raise RuntimeError(
+                'inserted_count + duplicate_count must equal batch_event_count'
+            )
+        if first_source_offset_or_equivalent.strip() == '':
+            raise RuntimeError('first_source_offset_or_equivalent must be non-empty')
+        if last_source_offset_or_equivalent.strip() == '':
+            raise RuntimeError('last_source_offset_or_equivalent must be non-empty')
+        if first_event_id.strip() == '':
+            raise RuntimeError('first_event_id must be non-empty')
+        if last_event_id.strip() == '':
+            raise RuntimeError('last_event_id must be non-empty')
+
+        return self._sink.append_event(
+            event_type=event_type,
+            attributes={
+                'source_id': stream_key.source_id,
+                'stream_id': stream_key.stream_id,
+                'partition_id': stream_key.partition_id,
+                'run_id': run_id,
+            },
+            payload={
+                'batch_event_count': batch_event_count,
+                'inserted_count': inserted_count,
+                'duplicate_count': duplicate_count,
+                'first_source_offset_or_equivalent': first_source_offset_or_equivalent,
+                'last_source_offset_or_equivalent': last_source_offset_or_equivalent,
+                'first_event_id': first_event_id,
+                'last_event_id': last_event_id,
+            },
+        )
+
     def append_projector_checkpoint_event(
         self,
         *,

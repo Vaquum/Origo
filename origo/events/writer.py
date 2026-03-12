@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Literal
@@ -38,6 +39,9 @@ _CANONICAL_EVENT_LOG_COLUMNS: Final[tuple[str, ...]] = (
     'payload_sha256_raw',
     'payload_json',
 )
+_RUNTIME_AUDIT_MODE_ENV: Final[str] = 'ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'
+_RUNTIME_AUDIT_MODE_EVENT: Final[str] = 'event'
+_RUNTIME_AUDIT_MODE_SUMMARY: Final[str] = 'summary'
 
 
 def _canonicalize_content_type(content_type: str) -> str:
@@ -467,6 +471,93 @@ class CanonicalEventWriter:
                 code='WRITER_AUDIT_BATCH_SIZE_MISMATCH',
                 message='Audit append requires equal-length stream_keys, results, and run_ids',
             )
+        runtime_audit_mode = os.environ.get(
+            _RUNTIME_AUDIT_MODE_ENV,
+            _RUNTIME_AUDIT_MODE_EVENT,
+        ).strip().lower()
+        if runtime_audit_mode not in {
+            _RUNTIME_AUDIT_MODE_EVENT,
+            _RUNTIME_AUDIT_MODE_SUMMARY,
+        }:
+            raise EventWriterError(
+                code='WRITER_INVALID_RUNTIME_AUDIT_MODE',
+                message=(
+                    f'{_RUNTIME_AUDIT_MODE_ENV} must be one of '
+                    f'[{_RUNTIME_AUDIT_MODE_EVENT}, {_RUNTIME_AUDIT_MODE_SUMMARY}]'
+                ),
+            )
+
+        if runtime_audit_mode == _RUNTIME_AUDIT_MODE_SUMMARY:
+            if results == []:
+                return
+            grouped_indexes: dict[tuple[str, str, str], list[int]] = {}
+            for index, stream_key in enumerate(stream_keys):
+                key = (
+                    stream_key.source_id,
+                    stream_key.stream_id,
+                    stream_key.partition_id,
+                )
+                existing = grouped_indexes.get(key)
+                if existing is None:
+                    grouped_indexes[key] = [index]
+                else:
+                    existing.append(index)
+            try:
+                audit_log = get_canonical_runtime_audit_log()
+                for grouped in grouped_indexes.values():
+                    first_index = grouped[0]
+                    last_index = grouped[-1]
+                    first_stream_key = stream_keys[first_index]
+                    first_result = results[first_index]
+                    last_result = results[last_index]
+                    inserted_count = 0
+                    duplicate_count = 0
+                    for index in grouped:
+                        result = results[index]
+                        if result.status == 'inserted':
+                            inserted_count += 1
+                        elif result.status == 'duplicate':
+                            duplicate_count += 1
+                        else:
+                            raise EventWriterError(
+                                code='WRITER_UNKNOWN_RESULT_STATUS',
+                                message=f'Unknown write result status: {result.status}',
+                            )
+                    audit_log.append_ingest_batch_event(
+                        stream_key=first_stream_key,
+                        event_type='canonical_ingest_batch',
+                        run_id=run_ids[first_index],
+                        batch_event_count=len(grouped),
+                        inserted_count=inserted_count,
+                        duplicate_count=duplicate_count,
+                        first_source_offset_or_equivalent=(
+                            first_result.row.source_offset_or_equivalent
+                        ),
+                        last_source_offset_or_equivalent=(
+                            last_result.row.source_offset_or_equivalent
+                        ),
+                        first_event_id=str(first_result.row.event_id),
+                        last_event_id=str(last_result.row.event_id),
+                    )
+                return
+            except EventWriterError:
+                raise
+            except RuntimeError as exc:
+                first_stream_key = stream_keys[0]
+                first_result = results[0]
+                raise EventWriterError(
+                    code='WRITER_AUDIT_WRITE_FAILED',
+                    message='Failed to write canonical ingest runtime audit event',
+                    context={
+                        'source_id': first_stream_key.source_id,
+                        'stream_id': first_stream_key.stream_id,
+                        'partition_id': first_stream_key.partition_id,
+                        'event_id': str(first_result.row.event_id),
+                        'status': first_result.status,
+                        'batch_size': len(results),
+                    },
+                ) from exc
+
         ingest_events: list[dict[str, object]] = []
         for stream_key, result, run_id in zip(stream_keys, results, run_ids, strict=True):
             ingest_events.append(

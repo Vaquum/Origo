@@ -370,7 +370,8 @@ def _write_events_to_canonical(
             stream_ids.append(_STREAM_ID)
             partition_ids.append(resolved_partition_id)
             source_offsets.append(source_offset)
-            source_event_times.append(event.timestamp_ms)
+            # `source_event_time_utc` is DateTime64(9): provide nanosecond ticks.
+            source_event_times.append(event.timestamp_ms * 1_000_000)
             ingested_times.append(ingested_at_utc_ms)
             payload_content_types.append(_PAYLOAD_CONTENT_TYPE)
             payload_encodings.append(_PAYLOAD_ENCODING)

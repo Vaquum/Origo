@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
-- Slice/version reference: S2, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20 (API v0.1.14)
+- Last updated: 2026-03-12
+- Slice/version reference: S2, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S29 (API v0.1.20)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -52,7 +52,7 @@
 - Export freshness follows the latest successful ingestion for requested sources.
 - OKX native/aligned exports are served from canonical OKX projection paths as of Slice 18.
 - Bybit native/aligned exports are served from canonical Bybit projection paths as of Slice 19.
-- Bitcoin native/aligned exports are served from canonical Bitcoin projection paths as of Slice 20 (aligned scope is derived-only datasets).
+- Bitcoin native/aligned exports are served from canonical Bitcoin projection paths as of Slice 20 with stream aligned completion in Slice 29.
 - `mode=aligned_1s` supports only aligned-capable datasets:
   - `spot_trades`
   - `spot_agg_trades`
@@ -61,6 +61,9 @@
   - `bybit_spot_trades`
   - `etf_daily_metrics`
   - `fred_series_metrics`
+  - `bitcoin_block_headers`
+  - `bitcoin_block_transactions`
+  - `bitcoin_mempool_state`
   - `bitcoin_block_fee_totals`
   - `bitcoin_block_subsidy_schedule`
   - `bitcoin_network_hashrate_estimate`

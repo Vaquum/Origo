@@ -8,6 +8,9 @@ from origo.query.bitcoin_derived_aligned_1s import (
     build_bitcoin_derived_aligned_1s_sql,
 )
 from origo.query.bitcoin_native import build_bitcoin_native_query_spec
+from origo.query.bitcoin_stream_aligned_1s import (
+    build_bitcoin_stream_aligned_1s_sql,
+)
 from origo.query.bybit_aligned_1s import build_bybit_aligned_1s_sql
 from origo.query.bybit_native import build_bybit_native_query_spec
 from origo.query.native_core import (
@@ -272,6 +275,26 @@ def test_compile_bitcoin_derived_aligned_sql_is_deterministic() -> None:
     )
     sql_run_2 = build_bitcoin_derived_aligned_1s_sql(
         dataset='bitcoin_block_fee_totals',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    assert sql_run_1 == sql_run_2
+
+
+def test_compile_bitcoin_stream_aligned_sql_is_deterministic() -> None:
+    sql_run_1 = build_bitcoin_stream_aligned_1s_sql(
+        dataset='bitcoin_block_headers',
+        window=TimeRangeWindow(
+            start_iso='2024-01-01T00:00:00Z',
+            end_iso='2024-01-01T01:00:00Z',
+        ),
+        database='origo',
+    )
+    sql_run_2 = build_bitcoin_stream_aligned_1s_sql(
+        dataset='bitcoin_block_headers',
         window=TimeRangeWindow(
             start_iso='2024-01-01T00:00:00Z',
             end_iso='2024-01-01T01:00:00Z',

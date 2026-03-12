@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28 (platform v0.1.19)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28, S29 (platform v0.1.20)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -76,6 +76,7 @@
     - Bybit aligned serving (`bybit_spot_trades`)
     - ETF aligned serving (`etf_daily_metrics`)
     - FRED aligned serving (`fred_series_metrics`)
+    - Bitcoin stream aligned serving (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`)
 - ETF source taxonomy:
   - `etf_ishares_ibit_daily`
   - `etf_invesco_btco_daily`
@@ -135,7 +136,7 @@
 - FRED canonical source is direct API calls to FRED.
 - FRED native/aligned serving is event-driven from canonical FRED projections as of Slice 17.
 - Bitcoin canonical source is direct Bitcoin Core RPC from one unpruned self-hosted node.
-- Bitcoin native and derived aligned serving are event-driven from canonical Bitcoin projections as of Slice 20.
+- Bitcoin native and aligned serving (stream + derived) are event-driven from canonical Bitcoin projections as of S20/S29.
 - Provenance fields (`provenance_json`, checksums, source keys) are replay-critical.
 
 ## Failure modes, warnings, and error codes

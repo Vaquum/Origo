@@ -28,6 +28,9 @@ from origo_control_plane.utils.bitcoin_integrity import (
 from origo_control_plane.utils.bitcoin_native_projector import (
     project_bitcoin_block_headers_native,
 )
+from origo_control_plane.utils.bitcoin_stream_aligned_projector import (
+    project_bitcoin_block_headers_aligned,
+)
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
 CLICKHOUSE_HOST = _CLICKHOUSE.host
@@ -307,6 +310,13 @@ def insert_bitcoin_block_headers_to_origo(
             run_id=context.run_id,
             projected_at_utc=datetime.now(UTC),
         )
+        aligned_projection_summary = project_bitcoin_block_headers_aligned(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            partition_ids={event.partition_id for event in canonical_events},
+            run_id=context.run_id,
+            projected_at_utc=datetime.now(UTC),
+        )
 
         result_data: dict[str, Any] = {
             'range_start_height': settings.headers_start_height,
@@ -317,6 +327,7 @@ def insert_bitcoin_block_headers_to_origo(
             'headers_sha256': headers_sha256,
             'integrity_report': integrity_report.to_dict(),
             'native_projection_summary': native_projection_summary.to_dict(),
+            'aligned_projection_summary': aligned_projection_summary.to_dict(),
             'source_chain': node_contract.chain,
             'node_best_block_height': node_contract.best_block_height,
             'node_best_block_hash': node_contract.best_block_hash,

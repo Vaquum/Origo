@@ -28,6 +28,10 @@ from origo_control_plane.utils.bitcoin_native_projector import (
     ProjectorSummary,
     project_bitcoin_mempool_state_native,
 )
+from origo_control_plane.utils.bitcoin_stream_aligned_projector import (
+    AlignedProjectorSummary,
+    project_bitcoin_mempool_state_aligned,
+)
 
 _HASH_HEX_64_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 
@@ -287,6 +291,7 @@ def insert_bitcoin_mempool_state_to_origo(
             )
 
         native_projection_summary: ProjectorSummary
+        aligned_projection_summary: AlignedProjectorSummary
         if canonical_events == []:
             native_projection_summary = ProjectorSummary(
                 partitions_processed=0,
@@ -294,8 +299,23 @@ def insert_bitcoin_mempool_state_to_origo(
                 events_processed=0,
                 rows_written=0,
             )
+            aligned_projection_summary = AlignedProjectorSummary(
+                partitions_processed=0,
+                policies_recorded=0,
+                policies_duplicate=0,
+                batches_processed=0,
+                events_processed=0,
+                rows_written=0,
+            )
         else:
             native_projection_summary = project_bitcoin_mempool_state_native(
+                client=client,
+                database=clickhouse_target.database,
+                partition_ids={event.partition_id for event in canonical_events},
+                run_id=context.run_id,
+                projected_at_utc=datetime.now(UTC),
+            )
+            aligned_projection_summary = project_bitcoin_mempool_state_aligned(
                 client=client,
                 database=clickhouse_target.database,
                 partition_ids={event.partition_id for event in canonical_events},
@@ -312,6 +332,7 @@ def insert_bitcoin_mempool_state_to_origo(
             'rows_sha256': rows_sha256,
             'integrity_report': integrity_report.to_dict(),
             'native_projection_summary': native_projection_summary.to_dict(),
+            'aligned_projection_summary': aligned_projection_summary.to_dict(),
             'source_chain': node_contract.chain,
             'node_best_block_height': node_contract.best_block_height,
             'node_best_block_hash': node_contract.best_block_hash,

@@ -667,22 +667,22 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 29: Bitcoin Full `aligned_1s` Completion (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`)
 
 ### Capability
-- [ ] `S29-C1` Implement deterministic `aligned_1s` projections for `bitcoin_block_headers`.
-- [ ] `S29-C2` Implement deterministic `aligned_1s` projections for `bitcoin_block_transactions`.
-- [ ] `S29-C3` Implement deterministic `aligned_1s` projections for `bitcoin_mempool_state`.
-- [ ] `S29-C4` Integrate all three new Bitcoin aligned datasets into raw query/export paths with canonical-aligned contract enforcement.
-- [ ] `S29-C5` Remove remaining aligned-capability exclusions so every onboarded dataset is aligned-capable.
+- [x] `S29-C1` Implement deterministic `aligned_1s` projections for `bitcoin_block_headers`.
+- [x] `S29-C2` Implement deterministic `aligned_1s` projections for `bitcoin_block_transactions`.
+- [x] `S29-C3` Implement deterministic `aligned_1s` projections for `bitcoin_mempool_state`.
+- [x] `S29-C4` Integrate all three new Bitcoin aligned datasets into raw query/export paths with canonical-aligned contract enforcement.
+- [x] `S29-C5` Remove remaining aligned-capability exclusions so every onboarded dataset is aligned-capable.
 
 ### Proof
-- [ ] `S29-P1` Execute fixed-window acceptance runs for new Bitcoin aligned datasets.
-- [ ] `S29-P2` Execute replay determinism proofs for new Bitcoin aligned datasets.
-- [ ] `S29-P3` Execute canonical aligned storage contract negative proofs (missing table/column/type drift) for new Bitcoin aligned paths.
+- [x] `S29-P1` Execute fixed-window acceptance runs for new Bitcoin aligned datasets.
+- [x] `S29-P2` Execute replay determinism proofs for new Bitcoin aligned datasets.
+- [x] `S29-P3` Execute canonical aligned storage contract negative proofs (missing table/column/type drift) for new Bitcoin aligned paths.
 
 ### Guardrails
-- [ ] `S29-G1` Apply Bitcoin linkage/integrity/freshness guardrails to new aligned paths.
-- [ ] `S29-G2` Enforce fail-loud API contract behavior for all Bitcoin datasets in `aligned_1s` mode.
-- [ ] `S29-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S29-G4` User docs closeout for slice (`docs/`, full Bitcoin taxonomy updates with full aligned coverage).
+- [x] `S29-G1` Apply Bitcoin linkage/integrity/freshness guardrails to new aligned paths.
+- [x] `S29-G2` Enforce fail-loud API contract behavior for all Bitcoin datasets in `aligned_1s` mode.
+- [x] `S29-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S29-G4` User docs closeout for slice (`docs/`, full Bitcoin taxonomy updates with full aligned coverage).
 
 ## Slice 30: Historical Bitcoin Operationalization (All Seven Bitcoin Datasets in `native` + `aligned_1s`)
 
@@ -1850,22 +1850,22 @@ Constraints: docs + migration mapping only.
 ## Slice 29: Bitcoin Full `aligned_1s` Completion (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`)
 
 ### Capability
-- [ ] `S29-C1` Implement deterministic `aligned_1s` projections for `bitcoin_block_headers`.
-- [ ] `S29-C2` Implement deterministic `aligned_1s` projections for `bitcoin_block_transactions`.
-- [ ] `S29-C3` Implement deterministic `aligned_1s` projections for `bitcoin_mempool_state`.
-- [ ] `S29-C4` Integrate all three new Bitcoin aligned datasets into raw query/export paths with canonical-aligned contract enforcement.
-- [ ] `S29-C5` Remove remaining aligned-capability exclusions so every onboarded dataset is aligned-capable.
+- [x] `S29-C1` Implement deterministic `aligned_1s` projections for `bitcoin_block_headers`.
+- [x] `S29-C2` Implement deterministic `aligned_1s` projections for `bitcoin_block_transactions`.
+- [x] `S29-C3` Implement deterministic `aligned_1s` projections for `bitcoin_mempool_state`.
+- [x] `S29-C4` Integrate all three new Bitcoin aligned datasets into raw query/export paths with canonical-aligned contract enforcement.
+- [x] `S29-C5` Remove remaining aligned-capability exclusions so every onboarded dataset is aligned-capable.
 
 ### Proof
-- [ ] `S29-P1` Execute fixed-window acceptance runs for new Bitcoin aligned datasets.
-- [ ] `S29-P2` Execute replay determinism proofs for new Bitcoin aligned datasets.
-- [ ] `S29-P3` Execute canonical aligned storage contract negative proofs (missing table/column/type drift) for new Bitcoin aligned paths.
+- [x] `S29-P1` Execute fixed-window acceptance runs for new Bitcoin aligned datasets.
+- [x] `S29-P2` Execute replay determinism proofs for new Bitcoin aligned datasets.
+- [x] `S29-P3` Execute canonical aligned storage contract negative proofs (missing table/column/type drift) for new Bitcoin aligned paths.
 
 ### Guardrails
-- [ ] `S29-G1` Apply Bitcoin linkage/integrity/freshness guardrails to new aligned paths.
-- [ ] `S29-G2` Enforce fail-loud API contract behavior for all Bitcoin datasets in `aligned_1s` mode.
-- [ ] `S29-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S29-G4` User docs closeout for slice (`docs/`, full Bitcoin taxonomy updates with full aligned coverage).
+- [x] `S29-G1` Apply Bitcoin linkage/integrity/freshness guardrails to new aligned paths.
+- [x] `S29-G2` Enforce fail-loud API contract behavior for all Bitcoin datasets in `aligned_1s` mode.
+- [x] `S29-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S29-G4` User docs closeout for slice (`docs/`, full Bitcoin taxonomy updates with full aligned coverage).
 
 ## Slice 30: Historical Bitcoin Operationalization (All Seven Bitcoin Datasets in `native` + `aligned_1s`)
 

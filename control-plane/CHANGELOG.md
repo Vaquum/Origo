@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.64 on 12th of March, 2026
+- Completed Slice 29 Bitcoin stream aligned completion control-plane work:
+  - Added stream-aligned projector utility:
+    - `control-plane/origo_control_plane/utils/bitcoin_stream_aligned_projector.py`
+  - Wired Bitcoin stream assets to execute aligned projections after canonical ingest/native projection:
+    - `insert_bitcoin_block_headers_to_origo`
+    - `insert_bitcoin_block_transactions_to_origo`
+    - `insert_bitcoin_mempool_state_to_origo`
+  - Extended aligned export allowlist for stream datasets:
+    - `bitcoin_block_headers`
+    - `bitcoin_block_transactions`
+    - `bitcoin_mempool_state`
+  - Added slice artifacts:
+    - `spec/slices/slice-29-bitcoin-stream-aligned-completion/*`
+
 ## v1.2.55 on 8th of March, 2026
 - Completed Slice 13 Bitcoin Core node streams and derived signal onboarding (`Capability -> Proof -> Guardrails`):
   - Added migration-backed Bitcoin tables:

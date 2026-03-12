@@ -12,6 +12,10 @@ from .bitcoin_derived_aligned_1s import (
     query_bitcoin_derived_aligned_1s_data,
     query_bitcoin_derived_forward_fill_intervals,
 )
+from .bitcoin_stream_aligned_1s import (
+    BitcoinStreamAlignedDataset,
+    query_bitcoin_stream_aligned_1s_data,
+)
 from .bybit_aligned_1s import BybitAlignedDataset, query_bybit_aligned_1s_data
 from .etf_aligned_1s import (
     ETFAlignedDataset,
@@ -32,6 +36,7 @@ from .okx_aligned_1s import OKXAlignedDataset, query_okx_aligned_1s_data
 
 type AlignedDataset = (
     BinanceAlignedDataset
+    | BitcoinStreamAlignedDataset
     | BitcoinDerivedAlignedDataset
     | BybitAlignedDataset
     | ETFAlignedDataset
@@ -42,6 +47,7 @@ type AlignedExecutionPath = Literal[
     'binance_aligned',
     'bybit_aligned',
     'okx_aligned',
+    'bitcoin_stream_aligned_observation',
     'bitcoin_derived_aligned_observation',
     'bitcoin_derived_aligned_forward_fill',
     'etf_aligned_observation',
@@ -55,6 +61,13 @@ _BINANCE_DATASETS: frozenset[str] = frozenset(
 )
 _OKX_DATASETS: frozenset[str] = frozenset({'okx_spot_trades'})
 _BYBIT_DATASETS: frozenset[str] = frozenset({'bybit_spot_trades'})
+_BITCOIN_STREAM_DATASETS: frozenset[str] = frozenset(
+    {
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+    }
+)
 _BITCOIN_DERIVED_DATASETS: frozenset[str] = frozenset(
     {
         'bitcoin_block_fee_totals',
@@ -97,6 +110,65 @@ _BYBIT_ALIGNED_COLUMNS: frozenset[str] = frozenset(
         'quantity_sum',
         'quote_volume_sum',
         'trade_count',
+    }
+)
+_BITCOIN_STREAM_HEADER_ALIGNED_COLUMNS: frozenset[str] = frozenset(
+    {
+        'aligned_at_utc',
+        'records_in_bucket',
+        'latest_height',
+        'latest_block_hash',
+        'latest_prev_hash',
+        'latest_merkle_root',
+        'latest_version',
+        'latest_nonce',
+        'latest_difficulty',
+        'latest_timestamp_ms',
+        'latest_source_chain',
+        'latest_ingested_at_utc',
+        'first_source_offset_or_equivalent',
+        'last_source_offset_or_equivalent',
+        'bucket_sha256',
+    }
+)
+_BITCOIN_STREAM_TRANSACTION_ALIGNED_COLUMNS: frozenset[str] = frozenset(
+    {
+        'aligned_at_utc',
+        'records_in_bucket',
+        'tx_count',
+        'coinbase_tx_count',
+        'total_input_value_btc',
+        'total_output_value_btc',
+        'first_block_height',
+        'last_block_height',
+        'latest_block_timestamp_ms',
+        'latest_txid',
+        'latest_source_chain',
+        'latest_ingested_at_utc',
+        'first_source_offset_or_equivalent',
+        'last_source_offset_or_equivalent',
+        'bucket_sha256',
+    }
+)
+_BITCOIN_STREAM_MEMPOOL_ALIGNED_COLUMNS: frozenset[str] = frozenset(
+    {
+        'aligned_at_utc',
+        'records_in_bucket',
+        'tx_count',
+        'fee_rate_sat_vb_min',
+        'fee_rate_sat_vb_max',
+        'fee_rate_sat_vb_avg',
+        'total_vsize',
+        'first_seen_timestamp_min',
+        'first_seen_timestamp_max',
+        'rbf_true_count',
+        'latest_snapshot_at_unix_ms',
+        'latest_txid',
+        'latest_source_chain',
+        'latest_ingested_at_utc',
+        'first_source_offset_or_equivalent',
+        'last_source_offset_or_equivalent',
+        'bucket_sha256',
     }
 )
 _BITCOIN_DERIVED_ALIGNED_COLUMNS: frozenset[str] = frozenset(
@@ -204,6 +276,12 @@ def build_aligned_query_plan(*, dataset: AlignedDataset, window: QueryWindow) ->
             execution_path='bybit_aligned',
             window=window,
         )
+    if dataset in _BITCOIN_STREAM_DATASETS:
+        return AlignedQueryPlan(
+            dataset=dataset,
+            execution_path='bitcoin_stream_aligned_observation',
+            window=window,
+        )
 
     if dataset in _BITCOIN_DERIVED_DATASETS:
         if isinstance(window, MonthWindow):
@@ -278,6 +356,12 @@ def _validate_selected_columns(
         allowed_columns = _OKX_ALIGNED_COLUMNS
     elif dataset in _BYBIT_DATASETS:
         allowed_columns = _BYBIT_ALIGNED_COLUMNS
+    elif dataset == 'bitcoin_block_headers':
+        allowed_columns = _BITCOIN_STREAM_HEADER_ALIGNED_COLUMNS
+    elif dataset == 'bitcoin_block_transactions':
+        allowed_columns = _BITCOIN_STREAM_TRANSACTION_ALIGNED_COLUMNS
+    elif dataset == 'bitcoin_mempool_state':
+        allowed_columns = _BITCOIN_STREAM_MEMPOOL_ALIGNED_COLUMNS
     elif dataset in _BITCOIN_DERIVED_DATASETS:
         allowed_columns = _BITCOIN_DERIVED_ALIGNED_COLUMNS
     elif dataset == 'etf_daily_metrics':
@@ -346,6 +430,14 @@ def query_aligned_data(
     elif plan.execution_path == 'bybit_aligned':
         frame = query_bybit_aligned_1s_data(
             dataset=cast(BybitAlignedDataset, plan.dataset),
+            window=plan.window,
+            auth_token=auth_token,
+            show_summary=show_summary,
+            datetime_iso_output=datetime_iso_output,
+        )
+    elif plan.execution_path == 'bitcoin_stream_aligned_observation':
+        frame = query_bitcoin_stream_aligned_1s_data(
+            dataset=cast(BitcoinStreamAlignedDataset, plan.dataset),
             window=plan.window,
             auth_token=auth_token,
             show_summary=show_summary,

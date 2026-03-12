@@ -4,6 +4,9 @@ from typing import Literal
 
 from origo.query.bitcoin_derived_aligned_1s import build_bitcoin_derived_aligned_1s_sql
 from origo.query.bitcoin_native import build_bitcoin_native_query_spec
+from origo.query.bitcoin_stream_aligned_1s import (
+    build_bitcoin_stream_aligned_1s_sql,
+)
 from origo.query.native_core import LatestRowsWindow
 
 BitcoinDataset = Literal[
@@ -58,3 +61,23 @@ def test_bitcoin_derived_aligned_query_targets_canonical_aligned_table() -> None
         assert 'FROM origo.bitcoin_block_subsidy_schedule' not in sql
         assert 'FROM origo.bitcoin_network_hashrate_estimate' not in sql
         assert 'FROM origo.bitcoin_circulating_supply' not in sql
+
+
+def test_bitcoin_stream_aligned_query_targets_canonical_aligned_table() -> None:
+    window = LatestRowsWindow(rows=5)
+    for dataset in (
+        'bitcoin_block_headers',
+        'bitcoin_block_transactions',
+        'bitcoin_mempool_state',
+    ):
+        sql = build_bitcoin_stream_aligned_1s_sql(
+            dataset=dataset,
+            window=window,
+            database='origo',
+        )
+        assert 'FROM origo.canonical_aligned_1s_aggregates' in sql
+        assert "source_id = 'bitcoin_core'" in sql
+        assert f"stream_id = '{dataset}'" in sql
+        assert 'FROM origo.canonical_bitcoin_block_headers_native_v1' not in sql
+        assert 'FROM origo.canonical_bitcoin_block_transactions_native_v1' not in sql
+        assert 'FROM origo.canonical_bitcoin_mempool_state_native_v1' not in sql

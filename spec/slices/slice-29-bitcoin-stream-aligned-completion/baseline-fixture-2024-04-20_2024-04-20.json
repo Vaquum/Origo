@@ -1,0 +1,94 @@
+{
+  "column_key": {
+    "stream": "logical dataset stream for proof row",
+    "window_mode": "window mode used in proof run",
+    "row_count": "number of rows returned",
+    "offset_min": "minimum logical offset/value anchor in proof output",
+    "offset_max": "maximum logical offset/value anchor in proof output",
+    "volume_sum": "sum-like numeric anchor for replay comparison",
+    "fingerprint_sha256": "sha256 hash of canonicalized proof row payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-04-20T00:00:00Z",
+    "end_utc_exclusive": "2024-04-21T00:00:00Z"
+  },
+  "source_checksums": [
+    {
+      "source": "bitcoin_block_headers",
+      "day": "2024-04-20",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_block_transactions",
+      "day": "2024-04-20",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    },
+    {
+      "source": "bitcoin_mempool_state",
+      "day": "2024-04-20",
+      "zip_sha256": "not-applicable-self-hosted-bitcoin-core-rpc",
+      "csv_sha256": "not-applicable-self-hosted-bitcoin-core-rpc"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "stream": "bitcoin_block_headers",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "100",
+      "offset_max": "101",
+      "volume_sum": "101",
+      "fingerprint_sha256": "3a9fb0d1d6f3d3b9d6f719cbdf09b6ce5ee9f1d8f7e1035732a22d93576a2bd7"
+    },
+    {
+      "stream": "bitcoin_block_transactions",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "840000:0:tx0",
+      "offset_max": "840000:1:tx1",
+      "volume_sum": "9.15",
+      "fingerprint_sha256": "024f3372a14fa7be44f4f05e92258d42df28cfd2cc9e763655becae51c05d77e"
+    },
+    {
+      "stream": "bitcoin_mempool_state",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "1704067201000:tx0",
+      "offset_max": "1704067201000:tx1",
+      "volume_sum": "30.0",
+      "fingerprint_sha256": "2200a190d14070e374cc6178c9a518623e90cea66545844de17c8b6bb8e7c3bd"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "stream": "bitcoin_block_headers",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "100",
+      "offset_max": "101",
+      "volume_sum": "101",
+      "fingerprint_sha256": "3a9fb0d1d6f3d3b9d6f719cbdf09b6ce5ee9f1d8f7e1035732a22d93576a2bd7"
+    },
+    {
+      "stream": "bitcoin_block_transactions",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "840000:0:tx0",
+      "offset_max": "840000:1:tx1",
+      "volume_sum": "9.15",
+      "fingerprint_sha256": "024f3372a14fa7be44f4f05e92258d42df28cfd2cc9e763655becae51c05d77e"
+    },
+    {
+      "stream": "bitcoin_mempool_state",
+      "window_mode": "latest-rows-aligned_1s",
+      "row_count": 1,
+      "offset_min": "1704067201000:tx0",
+      "offset_max": "1704067201000:tx1",
+      "volume_sum": "30.0",
+      "fingerprint_sha256": "2200a190d14070e374cc6178c9a518623e90cea66545844de17c8b6bb8e7c3bd"
+    }
+  ]
+}

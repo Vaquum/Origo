@@ -2,7 +2,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server@sha256:0b2d7824347397b2ba6fcb216f0ae772568105f1f47e19f0d3247e24c79bc10a
     volumes:
-      - origo-clickhouse-data:/var/lib/clickhouse
+      - ${ORIGO_CLICKHOUSE_DATA_DIR:?ORIGO_CLICKHOUSE_DATA_DIR must be set}:/var/lib/clickhouse
       - /opt/origo/config/clickhouse-config.xml:/etc/clickhouse-server/config.d/clickhouse-config.xml:ro
     environment:
       CLICKHOUSE_USER: ${ORIGO_DOCKER_CLICKHOUSE_USER:?ORIGO_DOCKER_CLICKHOUSE_USER must be set}
@@ -185,6 +185,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  origo-clickhouse-data:
   origo-dagster-instance:
   origo-storage:

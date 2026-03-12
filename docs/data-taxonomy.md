@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28, S29, S30 (platform v0.1.21)
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28, S29, S30, S31 (platform v0.1.22)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -30,6 +30,7 @@
   - `POST /v1/historical/bitcoin/block_subsidy_schedule`
   - `POST /v1/historical/bitcoin/network_hashrate_estimate`
   - `POST /v1/historical/bitcoin/circulating_supply`
+- Full historical endpoint/method matrix is maintained in `docs/historical-reference.md`.
 - Query contract currently uses `sources` (single item today), `view_id`, `view_version`, `fields`, `time_range|n_rows|n_random`, `filters`, `strict`.
 - Raw query window rule uses at most one selector (`time_range | n_rows | n_random`), and no selector means full available history.
 - Historical contract uses at most one window mode:

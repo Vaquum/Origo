@@ -1,6 +1,21 @@
 # Changelog
 
 ## 2026-03-12
+- Completed Slice 31 historical full-surface cohesion and rollout handoff:
+  - enforced complete historical dataset/mode matrix closure across HTTP and Python surfaces for all in-scope datasets
+  - kept `spot_agg_trades` and `futures_trades` explicitly deferred from historical Python/HTTP scope
+  - added matrix/zero-drift contract guardrail coverage:
+    - `tests/contract/test_historical_surface_cohesion_contract.py`
+  - added final rollout handoff documentation and rollback mapping:
+    - `docs/Developer/s31-historical-rollout-handoff.md`
+    - `docs/historical-reference.md`
+  - reconciled canonical user/developer docs references for historical surface taxonomy closure
+  - executed full quality suites for closure proof:
+    - `ruff`, `pyright`, `tests/contract`, `tests/replay`, `tests/integrity`
+- Added Slice 31 artifacts:
+  - `spec/slices/slice-31-historical-full-surface-cohesion/*`
+- Updated version to `Origo API v0.1.22`.
+
 - Completed Slice 30 historical Bitcoin operationalization:
   - added seven explicit `HistoricalData` methods:
     - `get_bitcoin_block_headers`

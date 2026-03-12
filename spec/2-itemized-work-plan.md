@@ -706,20 +706,20 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 31: Historical Full-Surface Cohesion + Rollout Handoff
 
 ### Capability
-- [ ] `S31-C1` Build complete historical endpoint and Python method matrix coverage for every in-scope dataset in `native` and `aligned_1s` (excluding deferred `spot_agg_trades` and `futures_trades`).
-- [ ] `S31-C2` Harmonize any remaining signature, envelope, or semantic drift across dataset families.
-- [ ] `S31-C3` Publish final internal cutover mapping from legacy data endpoints to Origo historical surfaces.
+- [x] `S31-C1` Build complete historical endpoint and Python method matrix coverage for every in-scope dataset in `native` and `aligned_1s` (excluding deferred `spot_agg_trades` and `futures_trades`).
+- [x] `S31-C2` Harmonize any remaining signature, envelope, or semantic drift across dataset families.
+- [x] `S31-C3` Publish final internal cutover mapping from legacy data endpoints to Origo historical surfaces.
 
 ### Proof
-- [ ] `S31-P1` Run full contract suite over all historical HTTP endpoints and `HistoricalData` methods.
-- [ ] `S31-P2` Run full replay suite over all historical HTTP endpoints and `HistoricalData` methods.
-- [ ] `S31-P3` Run full integrity suite over all historical datasets and both modes.
+- [x] `S31-P1` Run full contract suite over all historical HTTP endpoints and `HistoricalData` methods.
+- [x] `S31-P2` Run full replay suite over all historical HTTP endpoints and `HistoricalData` methods.
+- [x] `S31-P3` Run full integrity suite over all historical datasets and both modes.
 
 ### Guardrails
-- [ ] `S31-G1` Enforce zero-drift guardrail: no undocumented endpoint/method contract exceptions remain.
-- [ ] `S31-G2` Enforce rollout-readiness guardrail with explicit operational runbook and rollback mapping.
-- [ ] `S31-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
-- [ ] `S31-G4` User docs closeout for slice (`docs/`, full canonical reference + taxonomy closure).
+- [x] `S31-G1` Enforce zero-drift guardrail: no undocumented endpoint/method contract exceptions remain.
+- [x] `S31-G2` Enforce rollout-readiness guardrail with explicit operational runbook and rollback mapping.
+- [x] `S31-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
+- [x] `S31-G4` User docs closeout for slice (`docs/`, full canonical reference + taxonomy closure).
 
 
 ## Slice Detail Sub-Slices

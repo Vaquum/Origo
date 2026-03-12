@@ -3,11 +3,11 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S13, S20, S29 (API v0.1.20)
+- Slice/version reference: S13, S20, S29, S30 (API v0.1.21)
 
 ## Purpose and scope
-- User-facing reference for Bitcoin Core datasets available through raw query/export.
-- Scope includes stream datasets, derived datasets, aligned support, contracts, and guardrail behavior.
+- User-facing reference for Bitcoin Core datasets available through raw query/export and historical Bitcoin routes.
+- Scope includes stream datasets, derived datasets, aligned support, historical route coverage, contracts, and guardrail behavior.
 
 ## Inputs and outputs with contract shape
 - Query:
@@ -19,6 +19,24 @@
   - `dataset`: one dataset key
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
+- Historical:
+  - endpoints:
+    - `POST /v1/historical/bitcoin/block_headers`
+    - `POST /v1/historical/bitcoin/block_transactions`
+    - `POST /v1/historical/bitcoin/mempool_state`
+    - `POST /v1/historical/bitcoin/block_fee_totals`
+    - `POST /v1/historical/bitcoin/block_subsidy_schedule`
+    - `POST /v1/historical/bitcoin/network_hashrate_estimate`
+    - `POST /v1/historical/bitcoin/circulating_supply`
+  - request contract: `mode`, `start_date`, `end_date`, `n_latest_rows`, `n_random_rows`, `fields`, `filters`, `strict`
+- Historical Python methods:
+  - `HistoricalData.get_bitcoin_block_headers`
+  - `HistoricalData.get_bitcoin_block_transactions`
+  - `HistoricalData.get_bitcoin_mempool_state`
+  - `HistoricalData.get_bitcoin_block_fee_totals`
+  - `HistoricalData.get_bitcoin_block_subsidy_schedule`
+  - `HistoricalData.get_bitcoin_network_hashrate_estimate`
+  - `HistoricalData.get_bitcoin_circulating_supply`
 - Bitcoin source keys:
   - `bitcoin_block_headers` (native + aligned_1s)
   - `bitcoin_block_transactions` (native + aligned_1s)

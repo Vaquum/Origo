@@ -91,6 +91,24 @@ _FRED_HISTORICAL_NATIVE_COLUMNS: tuple[str, ...] = (
     'provenance_json',
     'ingested_at_utc',
 )
+_BITCOIN_HISTORICAL_TABLE: dict[BitcoinDataset, str] = {
+    'bitcoin_block_headers': 'canonical_bitcoin_block_headers_native_v1',
+    'bitcoin_block_transactions': 'canonical_bitcoin_block_transactions_native_v1',
+    'bitcoin_mempool_state': 'canonical_bitcoin_mempool_state_native_v1',
+    'bitcoin_block_fee_totals': 'canonical_bitcoin_block_fee_totals_native_v1',
+    'bitcoin_block_subsidy_schedule': 'canonical_bitcoin_block_subsidy_schedule_native_v1',
+    'bitcoin_network_hashrate_estimate': 'canonical_bitcoin_network_hashrate_estimate_native_v1',
+    'bitcoin_circulating_supply': 'canonical_bitcoin_circulating_supply_native_v1',
+}
+_BITCOIN_HISTORICAL_DATETIME_COLUMN: dict[BitcoinDataset, str] = {
+    'bitcoin_block_headers': 'datetime',
+    'bitcoin_block_transactions': 'datetime',
+    'bitcoin_mempool_state': 'snapshot_at',
+    'bitcoin_block_fee_totals': 'datetime',
+    'bitcoin_block_subsidy_schedule': 'datetime',
+    'bitcoin_network_hashrate_estimate': 'datetime',
+    'bitcoin_circulating_supply': 'datetime',
+}
 
 
 def _resolve_window(
@@ -928,6 +946,70 @@ def query_fred_series_metrics_data(
         logger.info(
             'historical_fred_series_metrics dataset=%s mode=%s rows=%d cols=%d',
             'fred_series_metrics',
+            mode,
+            projected.shape[0],
+            projected.shape[1],
+        )
+    return projected
+
+
+def query_bitcoin_dataset_data(
+    *,
+    dataset: BitcoinDataset,
+    mode: str = 'native',
+    start_date: str | None = None,
+    end_date: str | None = None,
+    n_latest_rows: int | None = None,
+    n_random_rows: int | None = None,
+    fields: list[str] | tuple[str, ...] | None = None,
+    filters: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    show_summary: bool = False,
+    auth_token: str | None = None,
+) -> pl.DataFrame:
+    if mode not in {'native', 'aligned_1s'}:
+        raise ValueError(
+            f'Unsupported historical mode={mode!r} for source={dataset}; '
+            'expected native or aligned_1s'
+        )
+
+    table_name = _BITCOIN_HISTORICAL_TABLE[dataset]
+    datetime_column = _BITCOIN_HISTORICAL_DATETIME_COLUMN[dataset]
+    window = _resolve_historical_window(
+        table_name=table_name,
+        datetime_column=datetime_column,
+        start_date=start_date,
+        end_date=end_date,
+        n_latest_rows=n_latest_rows,
+        n_random_rows=n_random_rows,
+        auth_token=auth_token,
+    )
+
+    if mode == 'aligned_1s':
+        frame = query_aligned_data(
+            dataset=dataset,
+            window=window,
+            selected_columns=None,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+    else:
+        frame = query_bitcoin_native_data(
+            dataset=dataset,
+            select_columns=None,
+            window=window,
+            include_datetime=True,
+            datetime_iso_output=False,
+            auth_token=auth_token,
+            show_summary=show_summary,
+        )
+
+    projected = _apply_filters(frame=frame, filters=filters)
+    projected = _apply_fields(frame=projected, fields=fields)
+    if show_summary:
+        logger.info(
+            'historical_bitcoin_dataset dataset=%s mode=%s rows=%d cols=%d',
+            dataset,
             mode,
             projected.shape[0],
             projected.shape[1],

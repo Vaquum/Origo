@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api.origo_api.schemas import (
+    HistoricalBitcoinDatasetRequest,
     HistoricalETFDailyMetricsRequest,
     HistoricalFREDSeriesMetricsRequest,
     HistoricalSpotKlinesRequest,
@@ -30,11 +31,13 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
     bybit_legal = tmp_path / 'bybit-legal.md'
     etf_legal = tmp_path / 'etf-legal.md'
     fred_legal = tmp_path / 'fred-legal.md'
+    bitcoin_legal = tmp_path / 'bitcoin-legal.md'
     binance_legal.write_text('# legal', encoding='utf-8')
     okx_legal.write_text('# legal', encoding='utf-8')
     bybit_legal.write_text('# legal', encoding='utf-8')
     etf_legal.write_text('# legal', encoding='utf-8')
     fred_legal.write_text('# legal', encoding='utf-8')
+    bitcoin_legal.write_text('# legal', encoding='utf-8')
 
     matrix_payload = {
         'version': 'historical-contract-test',
@@ -68,6 +71,20 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
                 'rights_provisional': False,
                 'datasets': ['fred_series_metrics'],
                 'legal_signoff_artifact': str(fred_legal),
+            },
+            'bitcoin_core': {
+                'rights_state': 'Hosted Allowed',
+                'rights_provisional': False,
+                'datasets': [
+                    'bitcoin_block_headers',
+                    'bitcoin_block_transactions',
+                    'bitcoin_mempool_state',
+                    'bitcoin_block_fee_totals',
+                    'bitcoin_block_subsidy_schedule',
+                    'bitcoin_network_hashrate_estimate',
+                    'bitcoin_circulating_supply',
+                ],
+                'legal_signoff_artifact': str(bitcoin_legal),
             },
         },
     }
@@ -143,6 +160,31 @@ def test_historical_data_method_contract_and_dropped_methods() -> None:
 
     fred_signature = inspect.signature(HistoricalData.get_fred_series_metrics)
     assert list(fred_signature.parameters) == [
+        'self',
+        'mode',
+        'start_date',
+        'end_date',
+        'n_latest_rows',
+        'n_random_rows',
+        'fields',
+        'filters',
+        'strict',
+    ]
+
+    bitcoin_signature = inspect.signature(HistoricalData.get_bitcoin_block_headers)
+    assert inspect.signature(HistoricalData.get_bitcoin_block_transactions) == bitcoin_signature
+    assert inspect.signature(HistoricalData.get_bitcoin_mempool_state) == bitcoin_signature
+    assert inspect.signature(HistoricalData.get_bitcoin_block_fee_totals) == bitcoin_signature
+    assert (
+        inspect.signature(HistoricalData.get_bitcoin_block_subsidy_schedule)
+        == bitcoin_signature
+    )
+    assert (
+        inspect.signature(HistoricalData.get_bitcoin_network_hashrate_estimate)
+        == bitcoin_signature
+    )
+    assert inspect.signature(HistoricalData.get_bitcoin_circulating_supply) == bitcoin_signature
+    assert list(bitcoin_signature.parameters) == [
         'self',
         'mode',
         'start_date',
@@ -299,6 +341,50 @@ def test_historical_data_fred_method_accepts_aligned_mode(
     assert historical.data.height == 1
 
 
+@pytest.mark.parametrize(
+    'method_name,dataset',
+    [
+        ('get_bitcoin_block_headers', 'bitcoin_block_headers'),
+        ('get_bitcoin_block_transactions', 'bitcoin_block_transactions'),
+        ('get_bitcoin_mempool_state', 'bitcoin_mempool_state'),
+        ('get_bitcoin_block_fee_totals', 'bitcoin_block_fee_totals'),
+        ('get_bitcoin_block_subsidy_schedule', 'bitcoin_block_subsidy_schedule'),
+        ('get_bitcoin_network_hashrate_estimate', 'bitcoin_network_hashrate_estimate'),
+        ('get_bitcoin_circulating_supply', 'bitcoin_circulating_supply'),
+    ],
+)
+def test_historical_data_bitcoin_methods_accept_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    dataset: str,
+) -> None:
+    from origo.data import historical_data as historical_data_module
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_query_bitcoin_dataset_data(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'records_in_bucket': [1],
+            }
+        )
+
+    monkeypatch.setattr(
+        historical_data_module,
+        'query_bitcoin_dataset_data',
+        _fake_query_bitcoin_dataset_data,
+    )
+    historical = HistoricalData()
+    method = getattr(historical, method_name)
+    method(mode='aligned_1s')
+
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['dataset'] == dataset
+    assert historical.data.height == 1
+
+
 def test_historical_request_rejects_multiple_window_modes() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         HistoricalSpotTradesRequest(start_date='2024-01-01', n_latest_rows=10)
@@ -362,6 +448,26 @@ def test_historical_fred_request_supports_shared_contract_fields() -> None:
     assert request.filters[0].field == 'metric_name'
 
 
+def test_historical_bitcoin_request_rejects_invalid_date() -> None:
+    with pytest.raises(ValidationError, match='valid strict YYYY-MM-DD'):
+        HistoricalBitcoinDatasetRequest(
+            start_date='2022-02-30',
+            end_date='2022-03-01',
+        )
+
+
+def test_historical_bitcoin_request_supports_shared_contract_fields() -> None:
+    request = HistoricalBitcoinDatasetRequest(
+        mode='aligned_1s',
+        fields=['height', 'difficulty'],
+        filters=[{'field': 'height', 'op': 'gte', 'value': 1000}],
+    )
+    assert request.mode == 'aligned_1s'
+    assert request.fields == ['height', 'difficulty']
+    assert request.filters is not None
+    assert request.filters[0].field == 'height'
+
+
 def test_historical_request_supports_shared_contract_fields() -> None:
     request = HistoricalSpotTradesRequest(
         mode='aligned_1s',
@@ -387,6 +493,13 @@ def test_historical_routes_are_registered(
     assert '/v1/historical/bybit/spot/klines' in paths
     assert '/v1/historical/etf/daily_metrics' in paths
     assert '/v1/historical/fred/series_metrics' in paths
+    assert '/v1/historical/bitcoin/block_headers' in paths
+    assert '/v1/historical/bitcoin/block_transactions' in paths
+    assert '/v1/historical/bitcoin/mempool_state' in paths
+    assert '/v1/historical/bitcoin/block_fee_totals' in paths
+    assert '/v1/historical/bitcoin/block_subsidy_schedule' in paths
+    assert '/v1/historical/bitcoin/network_hashrate_estimate' in paths
+    assert '/v1/historical/bitcoin/circulating_supply' in paths
     assert '/v1/historical/binance/spot/agg_trades' not in paths
     assert '/v1/historical/binance/futures/trades' not in paths
 
@@ -520,6 +633,61 @@ def test_historical_fred_endpoint_returns_raw_envelope_shape(
     assert payload['mode'] == 'native'
     assert payload['source'] == 'fred_series_metrics'
     assert payload['sources'] == ['fred_series_metrics']
+    assert payload['row_count'] == 1
+    assert isinstance(payload['schema'], list)
+    assert isinstance(payload['warnings'], list)
+    assert isinstance(payload['rows'], list)
+
+
+@pytest.mark.parametrize(
+    ('source_path', 'dataset_name'),
+    [
+        ('/v1/historical/bitcoin/block_headers', 'bitcoin_block_headers'),
+        ('/v1/historical/bitcoin/block_transactions', 'bitcoin_block_transactions'),
+        ('/v1/historical/bitcoin/mempool_state', 'bitcoin_mempool_state'),
+        ('/v1/historical/bitcoin/block_fee_totals', 'bitcoin_block_fee_totals'),
+        (
+            '/v1/historical/bitcoin/block_subsidy_schedule',
+            'bitcoin_block_subsidy_schedule',
+        ),
+        (
+            '/v1/historical/bitcoin/network_hashrate_estimate',
+            'bitcoin_network_hashrate_estimate',
+        ),
+        ('/v1/historical/bitcoin/circulating_supply', 'bitcoin_circulating_supply'),
+    ],
+)
+def test_historical_bitcoin_endpoint_returns_raw_envelope_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_path: str,
+    dataset_name: str,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_bitcoin_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'height': [1],
+                'difficulty': [2.0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_bitcoin_dataset_data', _fake_bitcoin_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            source_path,
+            headers={'X-API-Key': 'test-internal-key'},
+            json={},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'native'
+    assert payload['source'] == dataset_name
+    assert payload['sources'] == [dataset_name]
     assert payload['row_count'] == 1
     assert isinstance(payload['schema'], list)
     assert isinstance(payload['warnings'], list)
@@ -663,6 +831,59 @@ def test_historical_fred_endpoint_supports_aligned_mode(
     assert captured_kwargs['mode'] == 'aligned_1s'
 
 
+@pytest.mark.parametrize(
+    ('source_path', 'dataset_name'),
+    [
+        ('/v1/historical/bitcoin/block_headers', 'bitcoin_block_headers'),
+        ('/v1/historical/bitcoin/block_transactions', 'bitcoin_block_transactions'),
+        ('/v1/historical/bitcoin/mempool_state', 'bitcoin_mempool_state'),
+        ('/v1/historical/bitcoin/block_fee_totals', 'bitcoin_block_fee_totals'),
+        (
+            '/v1/historical/bitcoin/block_subsidy_schedule',
+            'bitcoin_block_subsidy_schedule',
+        ),
+        (
+            '/v1/historical/bitcoin/network_hashrate_estimate',
+            'bitcoin_network_hashrate_estimate',
+        ),
+        ('/v1/historical/bitcoin/circulating_supply', 'bitcoin_circulating_supply'),
+    ],
+)
+def test_historical_bitcoin_endpoint_supports_aligned_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_path: str,
+    dataset_name: str,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_bitcoin_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'aligned_at_utc': [datetime(2024, 1, 1, tzinfo=UTC)],
+                'records_in_bucket': [1],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_bitcoin_dataset_data', _fake_bitcoin_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            source_path,
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'mode': 'aligned_1s'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['mode'] == 'aligned_1s'
+    assert payload['source'] == dataset_name
+    assert captured_kwargs['mode'] == 'aligned_1s'
+    assert captured_kwargs['dataset'] == dataset_name
+
+
 def test_historical_trades_endpoint_passes_fields_and_filters(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -788,6 +1009,43 @@ def test_historical_fred_endpoint_passes_fields_and_filters(
     assert captured_kwargs['fields'] == ['source_id', 'metric_name']
     assert captured_kwargs['filters'] == [
         {'field': 'metric_name', 'op': 'eq', 'value': 'WALCL'}
+    ]
+
+
+def test_historical_bitcoin_endpoint_passes_fields_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_bitcoin_query(**kwargs: Any) -> pl.DataFrame:
+        captured_kwargs.update(kwargs)
+        return pl.DataFrame(
+            {
+                'height': [100],
+                'difficulty': [2.0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_bitcoin_dataset_data', _fake_bitcoin_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/bitcoin/block_headers',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={
+                'fields': ['height', 'difficulty'],
+                'filters': [{'field': 'height', 'op': 'gte', 'value': 99}],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_kwargs['dataset'] == 'bitcoin_block_headers'
+    assert captured_kwargs['fields'] == ['height', 'difficulty']
+    assert captured_kwargs['filters'] == [
+        {'field': 'height', 'op': 'gte', 'value': 99}
     ]
 
 
@@ -917,6 +1175,35 @@ def test_historical_fred_endpoint_strict_warning_failure(
             '/v1/historical/fred/series_metrics',
             headers={'X-API-Key': 'test-internal-key'},
             json={'strict': True},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()['detail']
+    assert detail['code'] == 'STRICT_MODE_WARNING_FAILURE'
+
+
+def test_historical_bitcoin_endpoint_strict_warning_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _fake_bitcoin_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'height': [1],
+                'difficulty': [2.0],
+                'datetime': [datetime(2024, 1, 1, tzinfo=UTC)],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_bitcoin_dataset_data', _fake_bitcoin_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/bitcoin/block_headers',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'n_latest_rows': 10, 'strict': True},
         )
 
     assert response.status_code == 409
@@ -1084,6 +1371,35 @@ def test_historical_fred_endpoint_returns_404_for_empty_result(
     with TestClient(main_module.app) as client:
         response = client.post(
             '/v1/historical/fred/series_metrics',
+            headers={'X-API-Key': 'test-internal-key'},
+            json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
+        )
+
+    assert response.status_code == 404
+    detail = response.json()['detail']
+    assert detail['code'] == 'HISTORICAL_NO_DATA'
+
+
+def test_historical_bitcoin_endpoint_returns_404_for_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    main_module = _load_main_module(monkeypatch, tmp_path)
+
+    def _empty_bitcoin_query(**_: Any) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                'height': [],
+                'difficulty': [],
+                'datetime': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'query_bitcoin_dataset_data', _empty_bitcoin_query)
+
+    with TestClient(main_module.app) as client:
+        response = client.post(
+            '/v1/historical/bitcoin/block_headers',
             headers={'X-API-Key': 'test-internal-key'},
             json={'start_date': '2024-01-01', 'end_date': '2024-01-01'},
         )

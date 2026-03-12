@@ -5,16 +5,18 @@ import polars as pl
 
 from origo.data._internal.binance_file_to_polars import binance_file_to_polars
 from origo.data._internal.generic_endpoints import (
+    query_bitcoin_dataset_data,
     query_etf_daily_metrics_data,
     query_fred_series_metrics_data,
     query_spot_klines_data,
     query_spot_trades_data,
 )
+from origo.query.bitcoin_native import BitcoinDataset
 
 
 class HistoricalData:
     def __init__(self, auth_token: str | None = None) -> None:
-        """Stateful interface for exchange historical spot trades and klines."""
+        """Stateful interface for historical dataset queries."""
 
         self.auth_token = auth_token
         self.data: pl.DataFrame = pl.DataFrame()
@@ -328,6 +330,199 @@ class HistoricalData:
             show_summary=False,
         )
         self.data_columns = self.data.columns
+
+    def _get_bitcoin_dataset(
+        self,
+        *,
+        dataset: BitcoinDataset,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._enforce_strict_window_rules(
+            strict=strict,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+        )
+        self.data = query_bitcoin_dataset_data(
+            dataset=dataset,
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            auth_token=self.auth_token,
+            show_summary=False,
+        )
+        self.data_columns = self.data.columns
+
+    def get_bitcoin_block_headers(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_block_headers',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_block_transactions(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_block_transactions',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_mempool_state(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_mempool_state',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_block_fee_totals(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_block_fee_totals',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_block_subsidy_schedule(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_block_subsidy_schedule',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_network_hashrate_estimate(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_network_hashrate_estimate',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
+
+    def get_bitcoin_circulating_supply(
+        self,
+        mode: str = 'native',
+        start_date: str | None = None,
+        end_date: str | None = None,
+        n_latest_rows: int | None = None,
+        n_random_rows: int | None = None,
+        fields: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._get_bitcoin_dataset(
+            dataset='bitcoin_circulating_supply',
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+            n_latest_rows=n_latest_rows,
+            n_random_rows=n_random_rows,
+            fields=fields,
+            filters=filters,
+            strict=strict,
+        )
 
     def _get_data_for_test(self, n_rows: int | None = 5000) -> None:
         """

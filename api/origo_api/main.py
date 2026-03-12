@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from origo.data._internal.generic_endpoints import (
     HISTORICAL_SOURCE_TO_DATASET,
     query_aligned_wide_rows_envelope,
+    query_bitcoin_dataset_data,
     query_etf_daily_metrics_data,
     query_fred_series_metrics_data,
     query_native_wide_rows_envelope,
@@ -41,6 +42,7 @@ from .rights import RightsGateError, resolve_export_rights, resolve_query_rights
 from .schemas import (
     ExportFormat,
     ExportStatus,
+    HistoricalBitcoinDatasetRequest,
     HistoricalETFDailyMetricsRequest,
     HistoricalFREDSeriesMetricsRequest,
     HistoricalSpotKlinesRequest,
@@ -59,7 +61,7 @@ from .schemas import (
     RightsState,
 )
 
-app = FastAPI(title='Origo Raw API', version='0.1.20')
+app = FastAPI(title='Origo Raw API', version='0.1.21')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
         'spot_trades',
@@ -391,6 +393,18 @@ def _parse_historical_fred_request(
 ) -> HistoricalFREDSeriesMetricsRequest:
     try:
         return HistoricalFREDSeriesMetricsRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+
+
+def _parse_historical_bitcoin_request(
+    payload: dict[str, Any],
+) -> HistoricalBitcoinDatasetRequest:
+    try:
+        return HistoricalBitcoinDatasetRequest.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(
             status_code=409,
@@ -1169,6 +1183,113 @@ async def _handle_historical_fred_series_metrics(
     return RawQueryResponse.model_validate(envelope)
 
 
+async def _handle_historical_bitcoin_dataset(
+    *,
+    dataset: RawQueryDataset,
+    request: HistoricalBitcoinDatasetRequest,
+    x_clickhouse_token: str | None,
+) -> RawQueryResponse:
+    filters_payload = (
+        [
+            filter_clause.model_dump(mode='json')
+            for filter_clause in request.filters
+        ]
+        if request.filters is not None
+        else None
+    )
+    try:
+        query_rights_decision = resolve_query_rights(
+            dataset=dataset,
+            auth_token=x_clickhouse_token,
+        )
+    except RightsGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': exc.code, 'message': str(exc)},
+        ) from exc
+
+    try:
+        query_rights_state, query_rights_provisional = (
+            query_rights_decision.response_metadata()
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'QUERY_RIGHTS_METADATA_ERROR',
+                'message': str(exc),
+            },
+        ) from exc
+
+    warnings = _build_historical_warnings(
+        n_latest_rows=request.n_latest_rows,
+        n_random_rows=request.n_random_rows,
+    )
+    if request.strict and warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'STRICT_MODE_WARNING_FAILURE',
+                'message': 'Warnings present while strict=true',
+                'warnings': [warning.model_dump() for warning in warnings],
+            },
+        )
+
+    try:
+        frame = await _run_native_query_with_limits(
+            query_bitcoin_dataset_data,
+            dataset=dataset,
+            mode=request.mode,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            n_latest_rows=request.n_latest_rows,
+            n_random_rows=request.n_random_rows,
+            fields=request.fields,
+            filters=filters_payload,
+            auth_token=x_clickhouse_token,
+            show_summary=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={'code': 'HISTORICAL_CONTRACT_ERROR', 'message': str(exc)},
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_RUNTIME_ERROR', 'message': str(exc)},
+        ) from exc
+    except DatabaseError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_BACKEND_ERROR', 'message': str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'HISTORICAL_UNKNOWN_ERROR', 'message': str(exc)},
+        ) from exc
+
+    if frame.height == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                'code': 'HISTORICAL_NO_DATA',
+                'message': 'No rows found for query window',
+            },
+        )
+
+    envelope = _build_historical_envelope(
+        frame=frame,
+        mode=request.mode,
+        dataset=dataset,
+        warnings=warnings,
+        rights_state=query_rights_state,
+        rights_provisional=query_rights_provisional,
+    )
+    return RawQueryResponse.model_validate(envelope)
+
+
 @app.post('/v1/historical/binance/spot/trades', response_model=RawQueryResponse)
 async def historical_binance_spot_trades(
     payload: dict[str, Any],
@@ -1267,6 +1388,103 @@ async def historical_fred_series_metrics(
 ) -> RawQueryResponse:
     return await _handle_historical_fred_series_metrics(
         request=_parse_historical_fred_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bitcoin/block_headers', response_model=RawQueryResponse)
+async def historical_bitcoin_block_headers(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_block_headers',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bitcoin/block_transactions', response_model=RawQueryResponse)
+async def historical_bitcoin_block_transactions(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_block_transactions',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bitcoin/mempool_state', response_model=RawQueryResponse)
+async def historical_bitcoin_mempool_state(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_mempool_state',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bitcoin/block_fee_totals', response_model=RawQueryResponse)
+async def historical_bitcoin_block_fee_totals(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_block_fee_totals',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post(
+    '/v1/historical/bitcoin/block_subsidy_schedule',
+    response_model=RawQueryResponse,
+)
+async def historical_bitcoin_block_subsidy_schedule(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_block_subsidy_schedule',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post(
+    '/v1/historical/bitcoin/network_hashrate_estimate',
+    response_model=RawQueryResponse,
+)
+async def historical_bitcoin_network_hashrate_estimate(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_network_hashrate_estimate',
+        request=_parse_historical_bitcoin_request(payload),
+        x_clickhouse_token=x_clickhouse_token,
+    )
+
+
+@app.post('/v1/historical/bitcoin/circulating_supply', response_model=RawQueryResponse)
+async def historical_bitcoin_circulating_supply(
+    payload: dict[str, Any],
+    x_clickhouse_token: str | None = Header(default=None, alias='X-ClickHouse-Token'),
+    _: None = Depends(_require_internal_api_key),
+) -> RawQueryResponse:
+    return await _handle_historical_bitcoin_dataset(
+        dataset='bitcoin_circulating_supply',
+        request=_parse_historical_bitcoin_request(payload),
         x_clickhouse_token=x_clickhouse_token,
     )
 

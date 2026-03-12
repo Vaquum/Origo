@@ -1,6 +1,36 @@
 # Changelog
 
 ## 2026-03-12
+- Completed Slice 30 historical Bitcoin operationalization:
+  - added seven explicit `HistoricalData` methods:
+    - `get_bitcoin_block_headers`
+    - `get_bitcoin_block_transactions`
+    - `get_bitcoin_mempool_state`
+    - `get_bitcoin_block_fee_totals`
+    - `get_bitcoin_block_subsidy_schedule`
+    - `get_bitcoin_network_hashrate_estimate`
+    - `get_bitcoin_circulating_supply`
+  - added seven historical HTTP routes:
+    - `/v1/historical/bitcoin/block_headers`
+    - `/v1/historical/bitcoin/block_transactions`
+    - `/v1/historical/bitcoin/mempool_state`
+    - `/v1/historical/bitcoin/block_fee_totals`
+    - `/v1/historical/bitcoin/block_subsidy_schedule`
+    - `/v1/historical/bitcoin/network_hashrate_estimate`
+    - `/v1/historical/bitcoin/circulating_supply`
+  - implemented shared historical Bitcoin query helper with full contract parity:
+    - `mode=native|aligned_1s`
+    - strict date-window and optional unbounded default-window semantics
+    - field projection and filter support
+    - rights/auth/strict/error taxonomy parity (`200/404/409/503`)
+  - added S30 contract and replay proof coverage for all seven datasets across Python and HTTP surfaces
+- Added Slice 30 docs and artifacts:
+  - `docs/Developer/s30-historical-bitcoin-operationalization.md`
+  - `docs/historical-bitcoin-reference.md`
+  - updates to `docs/historical-contract-reference.md`, `docs/bitcoin-core-reference.md`, and `docs/data-taxonomy.md`
+  - `spec/slices/slice-30-historical-bitcoin-operationalization/*`
+- Updated version to `Origo API v0.1.21`.
+
 - Completed Slice 29 Bitcoin stream aligned completion:
   - added deterministic aligned query path for:
     - `bitcoin_block_headers`

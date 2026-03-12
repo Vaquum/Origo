@@ -9,6 +9,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Final, cast
 
+from origo.pathing import resolve_repo_relative_path
+
 _JSON_SEPARATORS: Final[tuple[str, str]] = (',', ':')
 _MIN_RETENTION_DAYS: Final[int] = 365
 _STATE_SCHEMA_VERSION: Final[int] = 1
@@ -33,10 +35,7 @@ def require_non_empty_env(name: str) -> str:
 
 def resolve_required_path_env(name: str) -> Path:
     raw_path = require_non_empty_env(name)
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path
+    return resolve_repo_relative_path(raw_path)
 
 
 def load_audit_log_retention_days() -> int:

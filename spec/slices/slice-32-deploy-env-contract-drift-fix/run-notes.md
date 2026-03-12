@@ -3,7 +3,7 @@
 - Scope: Slice 32 deploy env-contract drift fix (`ORIGO_AUDIT_LOG_RETENTION_DAYS`) + live validation closure.
 - Fixture window: deploy contract proof + live API smoke (no source-time fixture window; latest-row/no-data smoke only).
 - Runtime environment:
-  - Local: macOS workspace, branch `codex/s31-deploy-env-contract-fix`
+  - Local: macOS workspace, branch `codex/s31-deploy-env-contract-fix` (Slice 32 hotfix branch retained prior naming prefix)
   - CI proof: GitHub Actions `deploy-on-merge`, run `22995788913`, job `66767544363`
   - Remote target: `origo.vaquum.fi`
 

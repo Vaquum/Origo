@@ -62,3 +62,49 @@ def test_canonical_runtime_audit_log_writes_ingest_and_projector_events(
     assert len(events) == 2
     assert events[0]['event_type'] == 'canonical_ingest_inserted'
     assert events[1]['event_type'] == 'projector_checkpointed'
+
+
+def test_canonical_runtime_audit_log_writes_batched_ingest_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    audit_log_path = tmp_path / 'audit' / 'canonical-runtime-batch.jsonl'
+    monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
+    monkeypatch.setenv('ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH', str(audit_log_path))
+
+    module = importlib.import_module('origo.events.runtime_audit')
+    setattr(module, '_runtime_audit_singleton', None)
+
+    audit_log = module.get_canonical_runtime_audit_log()
+    audit_log.append_ingest_events(
+        events=[
+            {
+                'event_type': 'canonical_ingest_inserted',
+                'source_id': 'binance',
+                'stream_id': 'binance_spot_trades',
+                'partition_id': '2020-01-01',
+                'source_offset_or_equivalent': '1',
+                'event_id': '00000000-0000-0000-0000-000000000001',
+                'payload_sha256_raw': 'a' * 64,
+                'status': 'inserted',
+                'run_id': 'run-1',
+            },
+            {
+                'event_type': 'canonical_ingest_duplicate',
+                'source_id': 'binance',
+                'stream_id': 'binance_spot_trades',
+                'partition_id': '2020-01-01',
+                'source_offset_or_equivalent': '2',
+                'event_id': '00000000-0000-0000-0000-000000000002',
+                'payload_sha256_raw': 'b' * 64,
+                'status': 'duplicate',
+                'run_id': 'run-1',
+            },
+        ]
+    )
+
+    events = _read_jsonl(audit_log_path)
+    assert len(events) == 2
+    assert events[0]['sequence'] == 1
+    assert events[1]['sequence'] == 2
+    assert events[0]['event_type'] == 'canonical_ingest_inserted'
+    assert events[1]['event_type'] == 'canonical_ingest_duplicate'

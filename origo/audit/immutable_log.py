@@ -136,6 +136,13 @@ def _normalize_attributes(attributes: dict[str, Any] | None) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class ImmutableAuditAppendInput:
+    event_type: str
+    payload: dict[str, Any]
+    attributes: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class _ChainState:
     first_event_occurred_at: datetime | None
     last_sequence: int
@@ -185,10 +192,34 @@ class ImmutableAuditLog:
         payload: dict[str, Any],
         attributes: dict[str, Any] | None = None,
     ) -> str:
-        if event_type.strip() == '':
-            raise RuntimeError('event_type must be non-empty')
-        normalized_payload = _expect_dict(payload, 'Immutable audit payload')
-        normalized_attributes = _normalize_attributes(attributes)
+        hashes = self.append_events(
+            events=[
+                ImmutableAuditAppendInput(
+                    event_type=event_type,
+                    payload=payload,
+                    attributes=attributes,
+                )
+            ]
+        )
+        return hashes[0]
+
+    def append_events(self, *, events: list[ImmutableAuditAppendInput]) -> list[str]:
+        if events == []:
+            return []
+
+        normalized_events: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        for index, event in enumerate(events, start=1):
+            if event.event_type.strip() == '':
+                raise RuntimeError(
+                    f'events[{index}].event_type must be non-empty'
+                )
+            normalized_payload = _expect_dict(
+                event.payload, f'events[{index}].payload'
+            )
+            normalized_attributes = _normalize_attributes(event.attributes)
+            normalized_events.append(
+                (event.event_type, normalized_payload, normalized_attributes)
+            )
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -203,44 +234,57 @@ class ImmutableAuditLog:
                 chain_state=chain_state,
             )
 
-            sequence = chain_state.last_sequence + 1
-            event_payload: dict[str, Any] = {
-                'sequence': sequence,
-                'occurred_at': _utc_now_iso(),
-                'event_type': event_type,
-                **normalized_attributes,
-                'previous_event_hash': chain_state.last_event_hash,
-                'payload': normalized_payload,
-            }
-            event_hash = _compute_event_hash(event_payload)
-            event_payload['event_hash'] = event_hash
-            self._append_event_payload(event_payload)
-
-            event_occurred_at = _parse_utc_timestamp(
-                event_payload['occurred_at'],
-                'Immutable audit append occurred_at',
-            )
+            sequence = chain_state.last_sequence
+            previous_event_hash = chain_state.last_event_hash
             first_event_at = chain_state.first_event_occurred_at
+            event_payloads: list[dict[str, Any]] = []
+            event_hashes: list[str] = []
+
+            for event_type, normalized_payload, normalized_attributes in normalized_events:
+                sequence += 1
+                event_payload: dict[str, Any] = {
+                    'sequence': sequence,
+                    'occurred_at': _utc_now_iso(),
+                    'event_type': event_type,
+                    **normalized_attributes,
+                    'previous_event_hash': previous_event_hash,
+                    'payload': normalized_payload,
+                }
+                event_hash = _compute_event_hash(event_payload)
+                event_payload['event_hash'] = event_hash
+                event_payloads.append(event_payload)
+                event_hashes.append(event_hash)
+
+                event_occurred_at = _parse_utc_timestamp(
+                    event_payload['occurred_at'],
+                    'Immutable audit append occurred_at',
+                )
+                if first_event_at is None:
+                    first_event_at = event_occurred_at
+                previous_event_hash = event_hash
+
             if first_event_at is None:
-                first_event_at = event_occurred_at
+                raise RuntimeError('append_events produced no occurred_at timestamp')
+            self._append_event_payloads(event_payloads)
             self._write_state(
                 first_event_occurred_at=first_event_at,
                 max_sequence=sequence,
-                max_event_hash=event_hash,
+                max_event_hash=event_hashes[-1],
             )
-            return event_hash
+            return event_hashes
 
-    def _append_event_payload(self, payload: dict[str, Any]) -> None:
+    def _append_event_payloads(self, payloads: list[dict[str, Any]]) -> None:
         with self._path.open('a', encoding='utf-8') as handle:
-            handle.write(
-                json.dumps(
-                    payload,
-                    sort_keys=True,
-                    separators=_JSON_SEPARATORS,
-                    ensure_ascii=True,
+            for payload in payloads:
+                handle.write(
+                    json.dumps(
+                        payload,
+                        sort_keys=True,
+                        separators=_JSON_SEPARATORS,
+                        ensure_ascii=True,
+                    )
                 )
-            )
-            handle.write('\n')
+                handle.write('\n')
             handle.flush()
             os.fsync(handle.fileno())
 

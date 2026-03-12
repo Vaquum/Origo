@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from origo.audit import (
+    ImmutableAuditAppendInput,
     ImmutableAuditLog,
     load_audit_log_retention_days,
     resolve_required_path_env,
@@ -48,6 +49,64 @@ class CanonicalRuntimeAuditLog:
                 'status': status,
             },
         )
+
+    def append_ingest_events(self, *, events: list[dict[str, object]]) -> list[str]:
+        if events == []:
+            return []
+
+        audit_events: list[ImmutableAuditAppendInput] = []
+        for index, event in enumerate(events, start=1):
+            event_type = event.get('event_type')
+            source_id = event.get('source_id')
+            stream_id = event.get('stream_id')
+            partition_id = event.get('partition_id')
+            source_offset_or_equivalent = event.get('source_offset_or_equivalent')
+            event_id = event.get('event_id')
+            payload_sha256_raw = event.get('payload_sha256_raw')
+            status = event.get('status')
+            run_id = event.get('run_id')
+            if not isinstance(event_type, str):
+                raise RuntimeError(f'events[{index}].event_type must be string')
+            if not isinstance(source_id, str):
+                raise RuntimeError(f'events[{index}].source_id must be string')
+            if not isinstance(stream_id, str):
+                raise RuntimeError(f'events[{index}].stream_id must be string')
+            if not isinstance(partition_id, str):
+                raise RuntimeError(f'events[{index}].partition_id must be string')
+            if not isinstance(source_offset_or_equivalent, str):
+                raise RuntimeError(
+                    f'events[{index}].source_offset_or_equivalent must be string'
+                )
+            if not isinstance(event_id, str):
+                raise RuntimeError(f'events[{index}].event_id must be string')
+            if not isinstance(payload_sha256_raw, str):
+                raise RuntimeError(
+                    f'events[{index}].payload_sha256_raw must be string'
+                )
+            if not isinstance(status, str):
+                raise RuntimeError(f'events[{index}].status must be string')
+            if run_id is not None and not isinstance(run_id, str):
+                raise RuntimeError(f'events[{index}].run_id must be string when set')
+
+            audit_events.append(
+                ImmutableAuditAppendInput(
+                    event_type=event_type,
+                    attributes={
+                        'source_id': source_id,
+                        'stream_id': stream_id,
+                        'partition_id': partition_id,
+                        'run_id': run_id,
+                    },
+                    payload={
+                        'source_offset_or_equivalent': source_offset_or_equivalent,
+                        'event_id': event_id,
+                        'payload_sha256_raw': payload_sha256_raw,
+                        'status': status,
+                    },
+                )
+            )
+
+        return self._sink.append_events(events=audit_events)
 
     def append_projector_checkpoint_event(
         self,

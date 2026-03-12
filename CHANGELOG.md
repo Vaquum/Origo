@@ -1,6 +1,14 @@
 # Changelog
 
 ## 2026-03-12
+- Fixed canonical backfill ingest throughput bottlenecks for exchange daily files:
+  - added batched canonical event writes in `CanonicalEventWriter.write_events` (bulk identity lookup + bulk insert path)
+  - added batched runtime audit append path (`ImmutableAuditLog.append_events` + `CanonicalRuntimeAuditLog.append_ingest_events`) to avoid per-event full-chain revalidation/fsync loops
+  - migrated Binance/OKX/Bybit canonical ingest writers to use batched canonical writes
+  - added contract/integrity test coverage for batched immutable-audit and batched runtime-audit ingest paths
+  - enforced explicit `ORIGO_BACKFILL_PROJECTION_MODE` env contract (no fallback) and set `.env.example` default to `deferred` for backfill-first throughput
+- Updated versions to `Origo API v0.1.26` and `origo-control-plane v1.2.67`.
+
 - Fixed monorepo path resolution for runtime audit/quarantine/rights and Dagster anomaly-log paths:
   - relative env paths now resolve from monorepo root instead of process working directory
   - this fixes backfill failures in Dagster workers when `ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH` and related paths are configured as `./storage/...`

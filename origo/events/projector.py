@@ -13,6 +13,7 @@ from .ingest_state import CanonicalStreamKey
 from .runtime_audit import get_canonical_runtime_audit_log
 
 ProjectorCommitStatus = Literal['checkpointed', 'duplicate']
+ProjectorFetchOrder = Literal['ingested_event_id', 'source_offset_numeric']
 
 
 def _require_non_empty(value: str, *, field_name: str) -> str:
@@ -133,11 +134,20 @@ class CanonicalProjectorRuntime:
         projector_id: str,
         stream_key: CanonicalStreamKey,
         batch_size: int,
+        fetch_order: ProjectorFetchOrder = 'ingested_event_id',
     ) -> None:
         if batch_size <= 0:
             raise ProjectorRuntimeError(
                 code='PROJECTOR_INVALID_BATCH_SIZE',
                 message='batch_size must be > 0',
+            )
+        if fetch_order not in {'ingested_event_id', 'source_offset_numeric'}:
+            raise ProjectorRuntimeError(
+                code='PROJECTOR_INVALID_FETCH_ORDER',
+                message=(
+                    'fetch_order must be one of '
+                    '[ingested_event_id, source_offset_numeric]'
+                ),
             )
         self._client = client
         self._database = _require_non_empty(database, field_name='database')
@@ -154,6 +164,7 @@ class CanonicalProjectorRuntime:
             ),
         )
         self._batch_size = batch_size
+        self._fetch_order = fetch_order
         self._started = False
         self._cursor: ProjectorCheckpointState | None = None
 
@@ -188,6 +199,19 @@ class CanonicalProjectorRuntime:
                     ),
                 )
         self._cursor = checkpoint
+        if self._fetch_order == 'source_offset_numeric':
+            self._assert_numeric_source_offsets_or_raise()
+            if self._cursor is not None:
+                try:
+                    int(self._cursor.last_source_offset_or_equivalent)
+                except ValueError as exc:
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_INVALID_CURSOR_OFFSET',
+                        message=(
+                            'source_offset_numeric fetch order requires numeric cursor offset, '
+                            f'got={self._cursor.last_source_offset_or_equivalent!r}'
+                        ),
+                    ) from exc
         self._started = True
         return ProjectorStartState(
             projector_id=self._projector_id,
@@ -214,7 +238,9 @@ class CanonicalProjectorRuntime:
                 code='PROJECTOR_NOT_STARTED',
                 message='Projector runtime is not started',
             )
-        if self._cursor is None:
+        if self._fetch_order == 'source_offset_numeric':
+            rows = self._fetch_next_batch_source_offset_numeric()
+        elif self._cursor is None:
             rows = self._client.execute(
                 f'''
                 SELECT
@@ -286,6 +312,112 @@ class CanonicalProjectorRuntime:
             for row in rows
         ]
 
+    def _fetch_next_batch_source_offset_numeric(self) -> list[tuple[Any, ...]]:
+        if self._cursor is None:
+            return self._client.execute(
+                f'''
+                SELECT
+                    event_id,
+                    source_offset_or_equivalent,
+                    source_event_time_utc,
+                    ingested_at_utc,
+                    payload_json,
+                    payload_sha256_raw
+                FROM {self._database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                    AND stream_id = %(stream_id)s
+                    AND partition_id = %(partition_id)s
+                    AND toInt256OrNull(source_offset_or_equivalent) IS NOT NULL
+                ORDER BY toInt256OrNull(source_offset_or_equivalent) ASC, event_id ASC
+                LIMIT %(limit)s
+                ''',
+                {
+                    'source_id': self._stream_key.source_id,
+                    'stream_id': self._stream_key.stream_id,
+                    'partition_id': self._stream_key.partition_id,
+                    'limit': self._batch_size,
+                },
+            )
+
+        try:
+            last_offset_numeric = int(self._cursor.last_source_offset_or_equivalent)
+        except ValueError as exc:
+            raise ProjectorRuntimeError(
+                code='PROJECTOR_INVALID_CURSOR_OFFSET',
+                message=(
+                    'source_offset_numeric fetch order requires numeric cursor offset, '
+                    f'got={self._cursor.last_source_offset_or_equivalent!r}'
+                ),
+            ) from exc
+        return self._client.execute(
+            f'''
+            SELECT
+                event_id,
+                source_offset_or_equivalent,
+                source_event_time_utc,
+                ingested_at_utc,
+                payload_json,
+                payload_sha256_raw
+            FROM {self._database}.canonical_event_log
+            WHERE source_id = %(source_id)s
+                AND stream_id = %(stream_id)s
+                AND partition_id = %(partition_id)s
+                AND toInt256OrNull(source_offset_or_equivalent) IS NOT NULL
+                AND (
+                    toInt256OrNull(source_offset_or_equivalent) > %(last_source_offset_numeric)s
+                    OR (
+                        toInt256OrNull(source_offset_or_equivalent) = %(last_source_offset_numeric)s
+                        AND event_id > %(last_event_id)s
+                    )
+                )
+            ORDER BY toInt256OrNull(source_offset_or_equivalent) ASC, event_id ASC
+            LIMIT %(limit)s
+            ''',
+            {
+                'source_id': self._stream_key.source_id,
+                'stream_id': self._stream_key.stream_id,
+                'partition_id': self._stream_key.partition_id,
+                'last_source_offset_numeric': last_offset_numeric,
+                'last_event_id': self._cursor.last_event_id,
+                'limit': self._batch_size,
+            },
+        )
+
+    def _assert_numeric_source_offsets_or_raise(self) -> None:
+        rows = self._client.execute(
+            f'''
+            SELECT
+                count() AS non_numeric_count,
+                any(source_offset_or_equivalent) AS sample_offset
+            FROM {self._database}.canonical_event_log
+            WHERE source_id = %(source_id)s
+                AND stream_id = %(stream_id)s
+                AND partition_id = %(partition_id)s
+                AND toInt256OrNull(source_offset_or_equivalent) IS NULL
+            ''',
+            {
+                'source_id': self._stream_key.source_id,
+                'stream_id': self._stream_key.stream_id,
+                'partition_id': self._stream_key.partition_id,
+            },
+        )
+        if rows == []:
+            raise ProjectorRuntimeError(
+                code='PROJECTOR_NUMERIC_OFFSET_VALIDATION_FAILED',
+                message='Numeric offset validation returned no rows',
+            )
+        non_numeric_count = int(rows[0][0])
+        sample_offset = str(rows[0][1]) if rows[0][1] is not None else ''
+        if non_numeric_count > 0:
+            raise ProjectorRuntimeError(
+                code='PROJECTOR_NON_NUMERIC_SOURCE_OFFSET',
+                message=(
+                    'source_offset_numeric fetch order requires numeric '
+                    'source_offset_or_equivalent values, '
+                    f'found={non_numeric_count} sample={sample_offset!r}'
+                ),
+            )
+
     def commit_checkpoint(
         self,
         *,
@@ -331,19 +463,59 @@ class CanonicalProjectorRuntime:
                     state=state or {},
                 )
                 return duplicate_result
-            if last_event.ingested_at_utc < latest_checkpoint.last_ingested_at_utc:
-                raise ProjectorRuntimeError(
-                    code='PROJECTOR_NON_MONOTONIC_INGESTED_AT',
-                    message='Projector checkpoint conflict: non-monotonic ingested_at_utc',
-                )
-            if (
-                last_event.ingested_at_utc == latest_checkpoint.last_ingested_at_utc
-                and last_event.event_id <= latest_checkpoint.last_event_id
-            ):
-                raise ProjectorRuntimeError(
-                    code='PROJECTOR_EVENT_ORDER_NOT_ADVANCED',
-                    message='Projector checkpoint conflict: event order did not advance',
-                )
+            if self._fetch_order == 'source_offset_numeric':
+                try:
+                    latest_offset = int(
+                        latest_checkpoint.last_source_offset_or_equivalent
+                    )
+                except ValueError as exc:
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_INVALID_CURSOR_OFFSET',
+                        message=(
+                            'source_offset_numeric checkpoint order requires numeric '
+                            'latest checkpoint offset, '
+                            f'got={latest_checkpoint.last_source_offset_or_equivalent!r}'
+                        ),
+                    ) from exc
+                try:
+                    next_offset = int(last_event.source_offset_or_equivalent)
+                except ValueError as exc:
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_INVALID_CURSOR_OFFSET',
+                        message=(
+                            'source_offset_numeric checkpoint order requires numeric '
+                            'event offset, '
+                            f'got={last_event.source_offset_or_equivalent!r}'
+                        ),
+                    ) from exc
+                if next_offset < latest_offset:
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_NON_MONOTONIC_SOURCE_OFFSET',
+                        message='Projector checkpoint conflict: non-monotonic source offset',
+                    )
+                if (
+                    next_offset == latest_offset
+                    and last_event.event_id <= latest_checkpoint.last_event_id
+                ):
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_EVENT_ORDER_NOT_ADVANCED',
+                        message='Projector checkpoint conflict: event order did not advance',
+                    )
+            else:
+                if last_event.ingested_at_utc < latest_checkpoint.last_ingested_at_utc:
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_NON_MONOTONIC_INGESTED_AT',
+                        message='Projector checkpoint conflict: non-monotonic ingested_at_utc',
+                    )
+                if (
+                    last_event.ingested_at_utc
+                    == latest_checkpoint.last_ingested_at_utc
+                    and last_event.event_id <= latest_checkpoint.last_event_id
+                ):
+                    raise ProjectorRuntimeError(
+                        code='PROJECTOR_EVENT_ORDER_NOT_ADVANCED',
+                        message='Projector checkpoint conflict: event order did not advance',
+                    )
             next_revision = latest_checkpoint.checkpoint_revision + 1
 
         state_json = _canonical_json(state or {})

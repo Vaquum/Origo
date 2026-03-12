@@ -18,6 +18,8 @@ import dagster as dg
 import requests
 from dagster import Definitions
 
+from origo.pathing import resolve_repo_relative_path
+
 from .assets.bitcoin_block_fee_totals_to_origo import (
     insert_bitcoin_block_fee_totals_to_origo,
 )
@@ -203,10 +205,7 @@ def _to_utc(value: datetime) -> datetime:
 
 
 def _resolve_path(path_value: str) -> Path:
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path
+    return resolve_repo_relative_path(path_value)
 
 
 def _append_etf_anomaly_log(*, event_payload: Mapping[str, Any]) -> None:

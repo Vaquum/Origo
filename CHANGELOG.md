@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-12
+- Fixed monorepo path resolution for runtime audit/quarantine/rights and Dagster anomaly-log paths:
+  - relative env paths now resolve from monorepo root instead of process working directory
+  - this fixes backfill failures in Dagster workers when `ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH` and related paths are configured as `./storage/...`
+  - added contract coverage for repo-root relative path resolution:
+    - `tests/contract/test_repo_relative_path_resolution_contract.py`
+- Updated versions to `Origo API v0.1.25` and `origo-control-plane v1.2.66`.
+
 - Completed Slice 33 Binance dataset contract cleanup:
   - enforced `binance_spot_trades` as the only Binance dataset key across API, query, export, historical, and control-plane contracts
   - removed legacy non-spot Binance dataset paths from runtime contracts, tests, docs, and plan artifacts (hard remove; no aliases)

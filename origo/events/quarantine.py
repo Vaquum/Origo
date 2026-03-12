@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from origo.pathing import resolve_repo_relative_path
+
 from .errors import StreamQuarantineError
 
 if TYPE_CHECKING:
@@ -22,10 +24,7 @@ def load_stream_quarantine_state_path() -> Path:
             code='QUARANTINE_PATH_ENV_MISSING',
             message=f'{_QUARANTINE_PATH_ENV} must be set and non-empty',
         )
-    path = Path(raw_value)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path
+    return resolve_repo_relative_path(raw_value)
 
 
 @dataclass(frozen=True)

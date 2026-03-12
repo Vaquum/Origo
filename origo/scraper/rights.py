@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from origo.pathing import resolve_repo_relative_path
+
 from .errors import as_scraper_error
 
 RightsState = Literal['Hosted Allowed', 'BYOK Required', 'Ingest Only']
@@ -54,9 +56,7 @@ class ScraperRightsDecision:
 
 def _resolve_matrix_path() -> Path:
     path_value = _require_env('ORIGO_SOURCE_RIGHTS_MATRIX_PATH')
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = Path.cwd() / path
+    path = resolve_repo_relative_path(path_value)
     if not path.exists():
         raise RuntimeError(f'Rights matrix file missing: {path}')
     return path

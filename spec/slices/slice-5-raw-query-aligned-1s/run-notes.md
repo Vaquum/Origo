@@ -50,10 +50,8 @@
 - Capability changes:
   - Added Binance aligned-1s materialization module:
     - `origo/query/binance_aligned_1s.py`
-  - Added materialization definitions for all three Binance datasets:
+  - Added materialization definitions for Binance spot trades dataset:
     - `binance_spot_trades` -> `binance_trades`
-    - `binance_spot_trades` -> `binance_agg_trades`
-    - `binance_spot_trades` -> `binance_futures_trades`
   - Added deterministic aligned aggregation outputs per second:
     - `aligned_at_utc`
     - `open_price`
@@ -77,8 +75,6 @@
 - Validation artifact:
   - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c1-binance-aligned.json`
 - Validation results:
-  - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
-  - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
   - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
 - System changes made as a side effect of proof run:
   - Read-only queries against local ClickHouse Binance raw tables.

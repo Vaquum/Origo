@@ -13,8 +13,6 @@ from .native_core import LatestRowsWindow
 
 _DATASETS: tuple[BinanceAlignedDataset, ...] = (
     'binance_spot_trades',
-    'binance_spot_trades',
-    'binance_spot_trades',
 )
 
 

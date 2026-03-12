@@ -51,8 +51,7 @@
   - Python: `HistoricalData.get_bitcoin_circulating_supply`
 
 Deferred from historical surface in this tranche:
-- `binance_spot_trades`
-- `binance_spot_trades`
+- none
 
 ## Contract and guardrail closure
 - Historical mode support is complete for every in-scope dataset:

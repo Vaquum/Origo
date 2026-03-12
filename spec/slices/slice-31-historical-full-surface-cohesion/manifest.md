@@ -23,8 +23,7 @@
   - `native`
   - `aligned_1s`
 - Deferred historical datasets are explicit and unchanged:
-  - `binance_spot_trades`
-  - `binance_spot_trades`
+  - none
 - Zero-drift guardrail is now test-enforced for historical matrix and docs-route consistency.
 - Historical rollout/cutover mapping is documented with explicit rollback guidance.
 

@@ -36,50 +36,6 @@
           "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
         }
       }
-    },
-    "binance_spot_trades": {
-      "aligned_1s": {
-        "2024-01-04": {
-          "offset_first": "8001",
-          "offset_last": "8004",
-          "quantity_sum": "0.45",
-          "quote_volume_sum": "18900.0765",
-          "row_count": 3,
-          "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
-        }
-      },
-      "native": {
-        "2024-01-04": {
-          "offset_first": "8001",
-          "offset_last": "8004",
-          "quantity_sum": "0.45",
-          "quote_volume_sum": "18900.0765",
-          "row_count": 4,
-          "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
-        }
-      }
-    },
-    "binance_spot_trades": {
-      "aligned_1s": {
-        "2024-01-04": {
-          "offset_first": "7001",
-          "offset_last": "7005",
-          "quantity_sum": "0.15",
-          "quote_volume_sum": "6300.033",
-          "row_count": 3,
-          "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
-        }
-      },
-      "native": {
-        "2024-01-04": {
-          "offset_first": "7001",
-          "offset_last": "7005",
-          "quantity_sum": "0.15",
-          "quote_volume_sum": "6300.033",
-          "row_count": 5,
-          "rows_hash_sha256": "9324c9b8b4a364330569ac7d47e70af5b3faf69b32b0ffec3b2c658e816dfb4d"
-        }
-      }
     }
   },
   "run_2_fingerprints": {
@@ -104,65 +60,9 @@
           "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
         }
       }
-    },
-    "binance_spot_trades": {
-      "aligned_1s": {
-        "2024-01-04": {
-          "offset_first": "8001",
-          "offset_last": "8004",
-          "quantity_sum": "0.45",
-          "quote_volume_sum": "18900.0765",
-          "row_count": 3,
-          "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
-        }
-      },
-      "native": {
-        "2024-01-04": {
-          "offset_first": "8001",
-          "offset_last": "8004",
-          "quantity_sum": "0.45",
-          "quote_volume_sum": "18900.0765",
-          "row_count": 4,
-          "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
-        }
-      }
-    },
-    "binance_spot_trades": {
-      "aligned_1s": {
-        "2024-01-04": {
-          "offset_first": "7001",
-          "offset_last": "7005",
-          "quantity_sum": "0.15",
-          "quote_volume_sum": "6300.033",
-          "row_count": 3,
-          "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
-        }
-      },
-      "native": {
-        "2024-01-04": {
-          "offset_first": "7001",
-          "offset_last": "7005",
-          "quantity_sum": "0.15",
-          "quote_volume_sum": "6300.033",
-          "row_count": 5,
-          "rows_hash_sha256": "9324c9b8b4a364330569ac7d47e70af5b3faf69b32b0ffec3b2c658e816dfb4d"
-        }
-      }
     }
   },
   "source_checksums": {
-    "binance_spot_trades": {
-      "2024-01-04": {
-        "csv_sha256": null,
-        "zip_sha256": null
-      }
-    },
-    "binance_spot_trades": {
-      "2024-01-04": {
-        "csv_sha256": null,
-        "zip_sha256": null
-      }
-    },
     "binance_spot_trades": {
       "2024-01-04": {
         "csv_sha256": null,

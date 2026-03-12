@@ -14,8 +14,6 @@
   - `mode` must be `aligned_1s`
   - `sources` currently must contain exactly one key from:
     - `binance_spot_trades`
-    - `binance_spot_trades`
-    - `binance_spot_trades`
     - `okx_spot_trades`
     - `bybit_spot_trades`
     - `etf_daily_metrics`

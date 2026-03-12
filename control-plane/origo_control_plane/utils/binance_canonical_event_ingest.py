@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from itertools import chain
 
 from clickhouse_driver import Client as ClickhouseClient
 
@@ -107,7 +108,7 @@ def _iter_csv_rows(csv_content: bytes) -> list[list[str]]:
     if first_cell in {'id', 'trade_id'}:
         rows = reader
     else:
-        rows = [first_row, *list(reader)]
+        rows = chain([first_row], reader)
     return [row for row in rows if row != []]
 
 

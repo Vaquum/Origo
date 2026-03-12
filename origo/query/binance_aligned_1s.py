@@ -48,7 +48,7 @@ CANONICAL_ALIGNED_1S_REQUIRED_SCHEMA: dict[str, str] = {
     'projected_at_utc': "DateTime64(3, 'UTC')",
 }
 
-BinanceAlignedDataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
+BinanceAlignedDataset = Literal['binance_spot_trades']
 
 
 @dataclass(frozen=True)
@@ -71,9 +71,9 @@ class _AlignedTradeEvent:
 _BINANCE_ALIGNED_1S_MATERIALIZATIONS: dict[
     BinanceAlignedDataset, BinanceAligned1sMaterialization
 ] = {
-    'spot_trades': BinanceAligned1sMaterialization(stream_id='spot_trades'),
-    'spot_agg_trades': BinanceAligned1sMaterialization(stream_id='spot_agg_trades'),
-    'futures_trades': BinanceAligned1sMaterialization(stream_id='futures_trades'),
+    'binance_spot_trades': BinanceAligned1sMaterialization(
+        stream_id='binance_spot_trades'
+    ),
 }
 
 

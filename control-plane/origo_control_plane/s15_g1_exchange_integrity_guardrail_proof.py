@@ -87,7 +87,7 @@ def _run_ingest_integrity_guardrail_proof() -> dict[str, Any]:
     ingest_error: str | None = None
     try:
         run_exchange_integrity_suite_rows(
-            dataset='spot_trades',
+            dataset='binance_spot_trades',
             rows=[event.to_integrity_tuple() for event in events],
         )
     except ValueError as exc:
@@ -169,7 +169,7 @@ def _run_projection_integrity_guardrail_proof(
         WHERE source_id = %(source_id)s
             AND stream_id = %(stream_id)s
         ''',
-        {'source_id': 'binance', 'stream_id': 'spot_trades'},
+        {'source_id': 'binance', 'stream_id': 'binance_spot_trades'},
     )
     canonical_rows = _require_int(canonical_rows_raw[0][0], label='canonical_rows')
     if canonical_rows != len(events):

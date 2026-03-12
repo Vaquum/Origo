@@ -352,7 +352,7 @@ def run_s14_p5_proof() -> dict[str, Any]:
     single_database = f'{base_settings.database}{_PROOF_DB_SUFFIX_SINGLE}'
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     fixture_events = _fixture_events()

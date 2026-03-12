@@ -15,7 +15,7 @@
     "start_utc": "2024-01-04T00:00:00Z"
   },
   "run_1_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "9001",
@@ -37,7 +37,7 @@
         }
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "8001",
@@ -59,7 +59,7 @@
         }
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "7001",
@@ -83,7 +83,7 @@
     }
   },
   "run_2_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "9001",
@@ -105,7 +105,7 @@
         }
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "8001",
@@ -127,7 +127,7 @@
         }
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "2024-01-04": {
           "offset_first": "7001",
@@ -151,19 +151,19 @@
     }
   },
   "source_checksums": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "2024-01-04": {
         "csv_sha256": null,
         "zip_sha256": null
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "2024-01-04": {
         "csv_sha256": null,
         "zip_sha256": null
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "2024-01-04": {
         "csv_sha256": null,
         "zip_sha256": null

@@ -16,8 +16,8 @@ def run_s14_g5_proof() -> dict[str, Any]:
         RawQueryResponse.model_validate(
             {
                 'mode': 'native',
-                'source': 'spot_trades',
-                'sources': ['spot_trades'],
+                'source': 'binance_spot_trades',
+                'sources': ['binance_spot_trades'],
                 'row_count': 1,
                 'schema': [{'name': 'datetime', 'dtype': 'DateTime64(3)'}],
                 'rows': [{'datetime': '2024-01-01T00:00:00.000Z'}],
@@ -36,7 +36,7 @@ def run_s14_g5_proof() -> dict[str, Any]:
             {
                 'origo.export.mode': 'native',
                 'origo.export.format': 'parquet',
-                'origo.export.dataset': 'spot_trades',
+                'origo.export.dataset': 'binance_spot_trades',
                 'origo.export.source': 'binance',
                 'origo.export.rights_state': 'Hosted Allowed',
             }
@@ -61,7 +61,7 @@ def run_s14_g5_proof() -> dict[str, Any]:
         {
             'origo.export.mode': 'native',
             'origo.export.format': 'parquet',
-            'origo.export.dataset': 'spot_trades',
+            'origo.export.dataset': 'binance_spot_trades',
             'origo.export.source': 'binance',
             'origo.export.rights_state': 'Hosted Allowed',
             'origo.export.rights_provisional': 'false',
@@ -70,7 +70,7 @@ def run_s14_g5_proof() -> dict[str, Any]:
     if (
         mode != 'native'
         or export_format != 'parquet'
-        or dataset != 'spot_trades'
+        or dataset != 'binance_spot_trades'
         or source != 'binance'
         or rights_state != 'Hosted Allowed'
         or rights_provisional is not False

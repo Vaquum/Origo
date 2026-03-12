@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from clickhouse_driver import Client as ClickhouseClient
 
@@ -14,8 +14,6 @@ from origo.events.projector import CanonicalProjectorRuntime, ProjectorEvent
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
 )
-
-BinanceNativeDataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
 
 
 def _require_non_empty(value: str, *, label: str) -> str:
@@ -109,10 +107,7 @@ def _project_partition(
     *,
     client: ClickhouseClient,
     database: str,
-    dataset: BinanceNativeDataset,
     stream_key: CanonicalStreamKey,
-    projector_id: str,
-    target_table: str,
     run_id: str,
     projected_at_utc: datetime,
     batch_size: int,
@@ -122,7 +117,7 @@ def _project_partition(
     runtime = CanonicalProjectorRuntime(
         client=client,
         database=database,
-        projector_id=projector_id,
+        projector_id='binance_spot_trades_native_v1',
         stream_key=stream_key,
         batch_size=batch_size,
     )
@@ -140,13 +135,13 @@ def _project_partition(
             projection_rows = [build_insert_row(event) for event in batch]
             integrity_rows = [row.integrity_row for row in projection_rows]
             run_exchange_integrity_suite_rows(
-                dataset=dataset,
+                dataset='binance_spot_trades',
                 rows=integrity_rows,
             )
             insert_rows = [row.insert_row for row in projection_rows]
             client.execute(
                 f'''
-                INSERT INTO {database}.{target_table}
+                INSERT INTO {database}.canonical_binance_spot_trades_native_v1
                 ({insert_columns})
                 VALUES
                 ''',
@@ -158,7 +153,7 @@ def _project_partition(
                 run_id=run_id,
                 checkpointed_at_utc=projected_at_utc,
                 state={
-                    'projection': target_table,
+                    'projection': 'canonical_binance_spot_trades_native_v1',
                     'rows_written': len(insert_rows),
                 },
             )
@@ -191,9 +186,7 @@ def project_binance_spot_trades_native(
     projected_at_utc: datetime,
     batch_size: int = 10_000,
 ) -> ProjectorSummary:
-    stream_id = 'spot_trades'
-    projector_id = 'binance_spot_trades_native_v1'
-    target_table = 'canonical_binance_spot_trades_native_v1'
+    stream_id = 'binance_spot_trades'
     insert_columns = (
         'trade_id, timestamp, price, quantity, quote_quantity, '
         'is_buyer_maker, is_best_match, datetime, event_id, '
@@ -243,169 +236,11 @@ def project_binance_spot_trades_native(
             _project_partition(
                 client=client,
                 database=database,
-                dataset=stream_id,
                 stream_key=CanonicalStreamKey(
                     source_id='binance',
                     stream_id=stream_id,
                     partition_id=partition_id,
                 ),
-                projector_id=projector_id,
-                target_table=target_table,
-                run_id=run_id,
-                projected_at_utc=projected_at_utc,
-                batch_size=batch_size,
-                build_insert_row=_build_insert_row,
-                insert_columns=insert_columns,
-            )
-        )
-    return _aggregate_summaries(summaries)
-
-
-def project_binance_spot_agg_trades_native(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    partition_ids: list[str] | set[str],
-    run_id: str,
-    projected_at_utc: datetime,
-    batch_size: int = 10_000,
-) -> ProjectorSummary:
-    stream_id = 'spot_agg_trades'
-    projector_id = 'binance_spot_agg_trades_native_v1'
-    target_table = 'canonical_binance_spot_agg_trades_native_v1'
-    insert_columns = (
-        'agg_trade_id, timestamp, price, quantity, first_trade_id, '
-        'last_trade_id, is_buyer_maker, datetime, event_id, '
-        'source_offset_or_equivalent, source_event_time_utc, ingested_at_utc'
-    )
-
-    def _build_insert_row(event: ProjectorEvent) -> ProjectionInsert:
-        payload = _require_payload(event.payload_json)
-        source_event_time_utc = _require_source_event_time(event)
-        agg_trade_id = _require_int_payload(payload, 'agg_trade_id')
-        timestamp = int(source_event_time_utc.timestamp() * 1000)
-        price = _require_decimal_float_payload(payload, 'price')
-        quantity = _require_decimal_float_payload(payload, 'qty')
-        first_trade_id = _require_int_payload(payload, 'first_trade_id')
-        last_trade_id = _require_int_payload(payload, 'last_trade_id')
-        is_buyer_maker = 1 if _require_bool_payload(payload, 'is_buyer_maker') else 0
-        return ProjectionInsert(
-            integrity_row=(
-                agg_trade_id,
-                price,
-                quantity,
-                first_trade_id,
-                last_trade_id,
-                timestamp,
-                is_buyer_maker,
-                source_event_time_utc,
-            ),
-            insert_row=(
-                agg_trade_id,
-                timestamp,
-                price,
-                quantity,
-                first_trade_id,
-                last_trade_id,
-                is_buyer_maker,
-                source_event_time_utc,
-                event.event_id,
-                event.source_offset_or_equivalent,
-                source_event_time_utc,
-                event.ingested_at_utc.astimezone(UTC),
-            ),
-        )
-
-    summaries: list[ProjectorSummary] = []
-    for partition_id in sorted({_require_non_empty(p, label='partition_id') for p in partition_ids}):
-        summaries.append(
-            _project_partition(
-                client=client,
-                database=database,
-                dataset=stream_id,
-                stream_key=CanonicalStreamKey(
-                    source_id='binance',
-                    stream_id=stream_id,
-                    partition_id=partition_id,
-                ),
-                projector_id=projector_id,
-                target_table=target_table,
-                run_id=run_id,
-                projected_at_utc=projected_at_utc,
-                batch_size=batch_size,
-                build_insert_row=_build_insert_row,
-                insert_columns=insert_columns,
-            )
-        )
-    return _aggregate_summaries(summaries)
-
-
-def project_binance_futures_trades_native(
-    *,
-    client: ClickhouseClient,
-    database: str,
-    partition_ids: list[str] | set[str],
-    run_id: str,
-    projected_at_utc: datetime,
-    batch_size: int = 10_000,
-) -> ProjectorSummary:
-    stream_id = 'futures_trades'
-    projector_id = 'binance_futures_trades_native_v1'
-    target_table = 'canonical_binance_futures_trades_native_v1'
-    insert_columns = (
-        'futures_trade_id, timestamp, price, quantity, quote_quantity, '
-        'is_buyer_maker, datetime, event_id, source_offset_or_equivalent, '
-        'source_event_time_utc, ingested_at_utc'
-    )
-
-    def _build_insert_row(event: ProjectorEvent) -> ProjectionInsert:
-        payload = _require_payload(event.payload_json)
-        source_event_time_utc = _require_source_event_time(event)
-        trade_id = _require_int_payload(payload, 'trade_id')
-        timestamp = int(source_event_time_utc.timestamp() * 1000)
-        price = _require_decimal_float_payload(payload, 'price')
-        quantity = _require_decimal_float_payload(payload, 'qty')
-        quote_quantity = _require_decimal_float_payload(payload, 'quote_qty')
-        is_buyer_maker = 1 if _require_bool_payload(payload, 'is_buyer_maker') else 0
-        return ProjectionInsert(
-            integrity_row=(
-                trade_id,
-                price,
-                quantity,
-                quote_quantity,
-                timestamp,
-                is_buyer_maker,
-                source_event_time_utc,
-            ),
-            insert_row=(
-                trade_id,
-                timestamp,
-                price,
-                quantity,
-                quote_quantity,
-                is_buyer_maker,
-                source_event_time_utc,
-                event.event_id,
-                event.source_offset_or_equivalent,
-                source_event_time_utc,
-                event.ingested_at_utc.astimezone(UTC),
-            ),
-        )
-
-    summaries: list[ProjectorSummary] = []
-    for partition_id in sorted({_require_non_empty(p, label='partition_id') for p in partition_ids}):
-        summaries.append(
-            _project_partition(
-                client=client,
-                database=database,
-                dataset=stream_id,
-                stream_key=CanonicalStreamKey(
-                    source_id='binance',
-                    stream_id=stream_id,
-                    partition_id=partition_id,
-                ),
-                projector_id=projector_id,
-                target_table=target_table,
                 run_id=run_id,
                 projected_at_utc=projected_at_utc,
                 batch_size=batch_size,

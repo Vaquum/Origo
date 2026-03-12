@@ -88,7 +88,7 @@ def run_s14_g2_proof() -> dict[str, Any]:
     )
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     fixture = _fixture_event()

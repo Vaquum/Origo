@@ -51,9 +51,9 @@
   - Added Binance aligned-1s materialization module:
     - `origo/query/binance_aligned_1s.py`
   - Added materialization definitions for all three Binance datasets:
-    - `spot_trades` -> `binance_trades`
-    - `spot_agg_trades` -> `binance_agg_trades`
-    - `futures_trades` -> `binance_futures_trades`
+    - `binance_spot_trades` -> `binance_trades`
+    - `binance_spot_trades` -> `binance_agg_trades`
+    - `binance_spot_trades` -> `binance_futures_trades`
   - Added deterministic aligned aggregation outputs per second:
     - `aligned_at_utc`
     - `open_price`
@@ -77,9 +77,9 @@
 - Validation artifact:
   - `spec/slices/slice-5-raw-query-aligned-1s/capability-proof-s5-c1-binance-aligned.json`
 - Validation results:
-  - `spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
-  - `spot_agg_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
-  - `futures_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+  - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+  - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
+  - `binance_spot_trades`: `25` aligned rows, schema and second-aligned timestamp checks passed.
 - System changes made as a side effect of proof run:
   - Read-only queries against local ClickHouse Binance raw tables.
   - No schema migrations or writes were performed.
@@ -326,7 +326,7 @@
     - `parity_match_by_format.parquet = true`
     - `parity_match_by_format.csv = true`
   - validated case matrix:
-    - `spot_trades` aligned time-range export (`parquet` and `csv`) with row parity (`75`)
+    - `binance_spot_trades` aligned time-range export (`parquet` and `csv`) with row parity (`75`)
     - `etf_daily_metrics` aligned time-range export (`parquet` and `csv`) with row parity (`125`)
   - metadata contract checks passed (`mode`, `format`, `checksum_sha256`, artifact path existence).
 - System changes made as a side effect of proof run:

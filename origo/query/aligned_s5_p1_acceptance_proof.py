@@ -27,7 +27,7 @@ class _AcceptanceCase:
 _CASES: tuple[_AcceptanceCase, ...] = (
     _AcceptanceCase(
         case_id='binance_spot_time_range',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         fields=('aligned_at_utc', 'open_price', 'close_price', 'trade_count'),
         window=TimeRangeWindow(
             start_iso='2017-08-17T12:00:00Z',
@@ -36,7 +36,7 @@ _CASES: tuple[_AcceptanceCase, ...] = (
     ),
     _AcceptanceCase(
         case_id='binance_futures_latest_rows',
-        dataset='futures_trades',
+        dataset='binance_spot_trades',
         fields=('aligned_at_utc', 'high_price', 'low_price', 'quote_volume_sum'),
         window=LatestRowsWindow(rows=25),
     ),

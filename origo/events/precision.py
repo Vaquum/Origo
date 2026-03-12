@@ -41,7 +41,7 @@ _CANONICAL_SOURCE_PRECISION_RULES: Final[
 ] = {
     (
         'binance',
-        'spot_trades',
+        'binance_spot_trades',
     ): (
         CanonicalNumericFieldRule(
             field_path='trade_id',
@@ -66,70 +66,6 @@ _CANONICAL_SOURCE_PRECISION_RULES: Final[
             numeric_kind='decimal',
             scale=8,
             description='Quote-asset trade quantity.',
-        ),
-    ),
-    (
-        'binance',
-        'spot_agg_trades',
-    ): (
-        CanonicalNumericFieldRule(
-            field_path='agg_trade_id',
-            numeric_kind='int',
-            scale=None,
-            description='Exchange aggregate trade identifier.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='price',
-            numeric_kind='decimal',
-            scale=8,
-            description='Aggregate trade price.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='qty',
-            numeric_kind='decimal',
-            scale=8,
-            description='Aggregate trade quantity.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='first_trade_id',
-            numeric_kind='int',
-            scale=None,
-            description='First underlying trade identifier in aggregate trade.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='last_trade_id',
-            numeric_kind='int',
-            scale=None,
-            description='Last underlying trade identifier in aggregate trade.',
-        ),
-    ),
-    (
-        'binance',
-        'futures_trades',
-    ): (
-        CanonicalNumericFieldRule(
-            field_path='trade_id',
-            numeric_kind='int',
-            scale=None,
-            description='Futures trade identifier.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='price',
-            numeric_kind='decimal',
-            scale=8,
-            description='Futures trade execution price.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='qty',
-            numeric_kind='decimal',
-            scale=8,
-            description='Futures trade quantity.',
-        ),
-        CanonicalNumericFieldRule(
-            field_path='quote_qty',
-            numeric_kind='decimal',
-            scale=8,
-            description='Futures trade quote-asset quantity.',
         ),
     ),
     (

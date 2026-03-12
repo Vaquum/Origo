@@ -35,7 +35,7 @@
   ],
   "run_1_fingerprints": [
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window-native",
       "row_count": 1,
       "offset_min": 1,
@@ -44,7 +44,7 @@
       "fingerprint_sha256": "d12ff68a3bb279eef6a1ecb92dcb491751c11e8cf189017ff61673f4651e9741"
     },
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window-aligned_1s",
       "row_count": 1,
       "offset_min": 0,
@@ -145,7 +145,7 @@
   ],
   "run_2_fingerprints": [
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window-native",
       "row_count": 1,
       "offset_min": 1,
@@ -154,7 +154,7 @@
       "fingerprint_sha256": "d12ff68a3bb279eef6a1ecb92dcb491751c11e8cf189017ff61673f4651e9741"
     },
     {
-      "stream": "spot_trades",
+      "stream": "binance_spot_trades",
       "window_mode": "date-window-aligned_1s",
       "row_count": 1,
       "offset_min": 0,

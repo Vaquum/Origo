@@ -8,7 +8,7 @@ import polars as pl
 
 from .native_core import NativeQuerySpec, QueryWindow, execute_native_query
 
-BinanceDataset = Literal['spot_trades', 'spot_agg_trades', 'futures_trades']
+BinanceDataset = Literal['binance_spot_trades']
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class _BinanceSourceSpec:
 
 
 _BINANCE_SOURCE_SPECS: dict[BinanceDataset, _BinanceSourceSpec] = {
-    'spot_trades': _BinanceSourceSpec(
+    'binance_spot_trades': _BinanceSourceSpec(
         table_name='canonical_binance_spot_trades_native_v1',
         id_column='trade_id',
         allowed_columns=(
@@ -35,49 +35,6 @@ _BINANCE_SOURCE_SPECS: dict[BinanceDataset, _BinanceSourceSpec] = {
         ),
         default_columns=(
             'trade_id',
-            'timestamp',
-            'price',
-            'quantity',
-            'is_buyer_maker',
-        ),
-    ),
-    'spot_agg_trades': _BinanceSourceSpec(
-        table_name='canonical_binance_spot_agg_trades_native_v1',
-        id_column='agg_trade_id',
-        allowed_columns=(
-            'agg_trade_id',
-            'timestamp',
-            'price',
-            'quantity',
-            'first_trade_id',
-            'last_trade_id',
-            'is_buyer_maker',
-            'datetime',
-        ),
-        default_columns=(
-            'agg_trade_id',
-            'timestamp',
-            'price',
-            'quantity',
-            'is_buyer_maker',
-            'first_trade_id',
-            'last_trade_id',
-        ),
-    ),
-    'futures_trades': _BinanceSourceSpec(
-        table_name='canonical_binance_futures_trades_native_v1',
-        id_column='futures_trade_id',
-        allowed_columns=(
-            'futures_trade_id',
-            'timestamp',
-            'price',
-            'quantity',
-            'quote_quantity',
-            'is_buyer_maker',
-            'datetime',
-        ),
-        default_columns=(
-            'futures_trade_id',
             'timestamp',
             'price',
             'quantity',

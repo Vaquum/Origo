@@ -17,7 +17,7 @@
 - Submit request contract:
   - `mode`: `native | aligned_1s`
   - `format`: `parquet | csv`
-  - `dataset`: `spot_trades | spot_agg_trades | futures_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics | bitcoin_block_headers | bitcoin_block_transactions | bitcoin_mempool_state | bitcoin_block_fee_totals | bitcoin_block_subsidy_schedule | bitcoin_network_hashrate_estimate | bitcoin_circulating_supply`
+  - `dataset`: `binance_spot_trades | okx_spot_trades | bybit_spot_trades | etf_daily_metrics | fred_series_metrics | bitcoin_block_headers | bitcoin_block_transactions | bitcoin_mempool_state | bitcoin_block_fee_totals | bitcoin_block_subsidy_schedule | bitcoin_network_hashrate_estimate | bitcoin_circulating_supply`
   - `view_id`: optional view identifier (must be paired with `view_version`)
   - `view_version`: optional positive integer (must be paired with `view_id`)
   - `fields`: optional field projection
@@ -54,9 +54,7 @@
 - Bybit native/aligned exports are served from canonical Bybit projection paths as of Slice 19.
 - Bitcoin native/aligned exports are served from canonical Bitcoin projection paths as of Slice 20 with stream aligned completion in Slice 29.
 - `mode=aligned_1s` supports only aligned-capable datasets:
-  - `spot_trades`
-  - `spot_agg_trades`
-  - `futures_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
   - `etf_daily_metrics`
@@ -111,7 +109,7 @@
 
 ## Minimal examples
 - Submit native export:
-  - `{ "mode":"native", "format":"parquet", "dataset":"spot_trades", "month_year":[8,2017], "strict":false }`
+  - `{ "mode":"native", "format":"parquet", "dataset":"binance_spot_trades", "month_year":[8,2017], "strict":false }`
 - Submit OKX native export:
   - `{ "mode":"native", "format":"csv", "dataset":"okx_spot_trades", "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
 - Submit Bybit native export:

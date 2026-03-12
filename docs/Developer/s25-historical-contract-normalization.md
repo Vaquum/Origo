@@ -62,7 +62,7 @@
 
 ## Minimal examples
 - Raw query full history:
-  - `{ "mode": "native", "sources": ["spot_trades"], "strict": false }`
+  - `{ "mode": "native", "sources": ["binance_spot_trades"], "strict": false }`
 - Historical trades full history:
   - `{ "mode": "native", "fields": ["trade_id", "price"], "strict": false }`
 - Historical date-window query:

@@ -17,8 +17,8 @@ _WINDOW = TimeRangeWindow(
     end_iso='2024-01-01T01:00:00Z',
 )
 _BINANCE_DATASETS: tuple[
-    Literal['spot_trades', 'spot_agg_trades', 'futures_trades'], ...
-] = ('spot_trades', 'spot_agg_trades', 'futures_trades')
+    Literal['binance_spot_trades'], ...
+] = ('binance_spot_trades',)
 
 
 class _FakeQueryResult:
@@ -46,12 +46,10 @@ def _schema_rows(
 
 def test_binance_native_specs_use_canonical_projection_tables() -> None:
     expected: dict[
-        Literal['spot_trades', 'spot_agg_trades', 'futures_trades'],
+        Literal['binance_spot_trades'],
         str,
     ] = {
-        'spot_trades': 'canonical_binance_spot_trades_native_v1',
-        'spot_agg_trades': 'canonical_binance_spot_agg_trades_native_v1',
-        'futures_trades': 'canonical_binance_futures_trades_native_v1',
+        'binance_spot_trades': 'canonical_binance_spot_trades_native_v1',
     }
 
     for dataset in _BINANCE_DATASETS:

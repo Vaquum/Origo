@@ -26,11 +26,11 @@
   ],
   "proof_database": "origo_s14_p3_proof",
   "proof_scope": "Slice 14 S14-P3 no-miss detection with injected gaps and reconciliation checks",
-  "quarantine_error": "No-miss reconciliation failed: source=binance stream=spot_trades partition=btcusdt missing_offsets=['1003']",
+  "quarantine_error": "No-miss reconciliation failed: source=binance stream=binance_spot_trades partition=btcusdt missing_offsets=['1003']",
   "quarantine_triggered": true,
   "stream_key": {
     "partition_id": "btcusdt",
     "source_id": "binance",
-    "stream_id": "spot_trades"
+    "stream_id": "binance_spot_trades"
   }
 }

@@ -1,0 +1,70 @@
+{
+  "column_key": {
+    "surface": "Validation surface name used for deterministic replay checks.",
+    "row_count": "Number of rows/records asserted by the surface proof run.",
+    "offset_max": "Highest deterministic source offset observed for the fixture scope, or n/a for non-ingest contract checks.",
+    "volume_sum": "Deterministic aggregate volume for the fixture scope, or n/a for non-volume contract checks.",
+    "hash_per_day": "Deterministic fingerprint token for fixture-day output equivalence."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2024-01-01T00:00:00Z",
+    "end_utc": "2024-01-01T01:00:00Z",
+    "note": "Slice 33 proof focused on contract/runtime cleanup and gate determinism."
+  },
+  "source_checksums": [
+    {
+      "source": "binance",
+      "stream": "binance_spot_trades",
+      "day": "2024-01-01",
+      "zip_sha256": "not_collected_s33_contract_cleanup",
+      "csv_sha256": "not_collected_s33_contract_cleanup"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "surface": "contract-gate",
+      "row_count": 193,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "contract-gate-193-pass"
+    },
+    {
+      "surface": "replay-gate",
+      "row_count": 44,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "replay-gate-44-pass"
+    },
+    {
+      "surface": "integrity-gate",
+      "row_count": 20,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "integrity-gate-20-pass"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "surface": "contract-gate",
+      "row_count": 193,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "contract-gate-193-pass"
+    },
+    {
+      "surface": "replay-gate",
+      "row_count": 44,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "replay-gate-44-pass"
+    },
+    {
+      "surface": "integrity-gate",
+      "row_count": 20,
+      "offset_max": "n/a",
+      "volume_sum": "n/a",
+      "hash_per_day": "integrity-gate-20-pass"
+    }
+  ]
+}

@@ -15,7 +15,7 @@
   },
   "source_checksums": [
     {
-      "source": "spot_trades",
+      "source": "binance_spot_trades",
       "day": "2024-01-01",
       "zip_sha256": "retrospective-partial-proof-window",
       "csv_sha256": "retrospective-partial-proof-window"
@@ -93,7 +93,7 @@
       "window_mode": "full-surface-native-and-aligned",
       "row_count": 12,
       "offset_min": "dataset:bitcoin_block_fee_totals",
-      "offset_max": "dataset:spot_trades",
+      "offset_max": "dataset:binance_spot_trades",
       "volume_sum": "24",
       "fingerprint_sha256": "4ef12e515677df0aa6d9a0a6d663d4a066f5f9b53336d4056b45b8303534a248"
     }
@@ -104,7 +104,7 @@
       "window_mode": "full-surface-native-and-aligned",
       "row_count": 12,
       "offset_min": "dataset:bitcoin_block_fee_totals",
-      "offset_max": "dataset:spot_trades",
+      "offset_max": "dataset:binance_spot_trades",
       "volume_sum": "24",
       "fingerprint_sha256": "4ef12e515677df0aa6d9a0a6d663d4a066f5f9b53336d4056b45b8303534a248"
     }

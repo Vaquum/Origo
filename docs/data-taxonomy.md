@@ -39,7 +39,7 @@
   - `n_random_rows`
   - no selector means full available history
 - Historical spot-trades routes support both `mode=native` and `mode=aligned_1s` for:
-  - `spot_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
 - Historical spot-klines routes support both `mode=native` and `mode=aligned_1s`.
@@ -55,13 +55,11 @@
   - `bitcoin_block_subsidy_schedule`
   - `bitcoin_network_hashrate_estimate`
   - `bitcoin_circulating_supply`
-- Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.
+- Historical scope includes only active dataset contracts in this tranche.
 
 ## Data definitions (fields, types, units, timezone, nullability)
 - Query source keys:
-  - `spot_trades`
-  - `spot_agg_trades`
-  - `futures_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
   - `etf_daily_metrics`
@@ -87,7 +85,7 @@
 - Canonical aligned serving storage contract:
   - mandatory table: `canonical_aligned_1s_aggregates`
   - mandatory in-scope source paths:
-    - Binance aligned serving (`spot_trades`, `spot_agg_trades`, `futures_trades`)
+    - Binance aligned serving (`binance_spot_trades`)
     - OKX aligned serving (`okx_spot_trades`)
     - Bybit aligned serving (`bybit_spot_trades`)
     - ETF aligned serving (`etf_daily_metrics`)
@@ -230,7 +228,7 @@
 
 ## Minimal examples
 - Query source list example:
-  - `sources=["spot_trades"]`
+  - `sources=["binance_spot_trades"]`
 - OKX source list example:
   - `sources=["okx_spot_trades"]`
 - Bybit source list example:

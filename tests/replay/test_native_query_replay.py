@@ -192,7 +192,7 @@ def test_compile_okx_aligned_sql_is_deterministic() -> None:
 
 def test_compile_binance_aligned_sql_is_deterministic() -> None:
     sql_run_1 = build_binance_aligned_1s_sql(
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         window=TimeRangeWindow(
             start_iso='2024-01-01T00:00:00Z',
             end_iso='2024-01-01T01:00:00Z',
@@ -200,7 +200,7 @@ def test_compile_binance_aligned_sql_is_deterministic() -> None:
         database='origo',
     )
     sql_run_2 = build_binance_aligned_1s_sql(
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         window=TimeRangeWindow(
             start_iso='2024-01-01T00:00:00Z',
             end_iso='2024-01-01T01:00:00Z',

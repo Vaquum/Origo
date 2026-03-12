@@ -6,7 +6,7 @@
   "cases": [
     {
       "case_id": "spot_trades_month_2017_08",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "trade_id",
         "timestamp",
@@ -47,7 +47,7 @@
     },
     {
       "case_id": "spot_agg_trades_month_2019_01",
-      "dataset": "spot_agg_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "agg_trade_id",
         "timestamp",
@@ -88,7 +88,7 @@
     },
     {
       "case_id": "futures_trades_month_2019_09",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "futures_trade_id",
         "timestamp",
@@ -129,7 +129,7 @@
     },
     {
       "case_id": "spot_trades_n_rows_50",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "trade_id",
         "timestamp",
@@ -167,7 +167,7 @@
     },
     {
       "case_id": "spot_agg_trades_n_rows_50",
-      "dataset": "spot_agg_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "agg_trade_id",
         "timestamp",
@@ -205,7 +205,7 @@
     },
     {
       "case_id": "futures_trades_n_rows_50",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "futures_trade_id",
         "timestamp",
@@ -243,7 +243,7 @@
     },
     {
       "case_id": "spot_trades_time_range_1h",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "trade_id",
         "timestamp",
@@ -284,7 +284,7 @@
     },
     {
       "case_id": "spot_agg_trades_time_range_5m",
-      "dataset": "spot_agg_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "agg_trade_id",
         "timestamp",
@@ -325,7 +325,7 @@
     },
     {
       "case_id": "futures_trades_time_range_3h",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "fields": [
         "futures_trade_id",
         "timestamp",

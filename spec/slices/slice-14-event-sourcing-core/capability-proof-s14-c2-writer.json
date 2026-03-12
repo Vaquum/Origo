@@ -2,7 +2,7 @@
   "conflicting_payload_error": "Canonical identity conflict: payload hash mismatch for existing source-event identity",
   "event_id": "df244032-3a27-5f9d-90cd-d90234d85c83",
   "first_write_status": "inserted",
-  "idempotency_key": "1|binance|spot_trades|btcusdt|1700000000000",
+  "idempotency_key": "1|binance|binance_spot_trades|btcusdt|1700000000000",
   "payload_json": "{\"price\":\"30000.0\",\"qty\":\"0.5\",\"trade_id\":\"1\"}",
   "payload_sha256_raw": "56c3de76904b7695050f897535c415e283a966e60c14fcdd9079193c2d443f8b",
   "persisted_row_count_after_repeat": 1,

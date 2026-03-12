@@ -9,7 +9,7 @@
     "start_utc": "2024-01-04T00:00:00Z"
   },
   "run_1_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
       },
@@ -17,7 +17,7 @@
         "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
       },
@@ -25,7 +25,7 @@
         "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
       },
@@ -35,7 +35,7 @@
     }
   },
   "run_2_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
       },
@@ -43,7 +43,7 @@
         "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
       },
@@ -51,7 +51,7 @@
         "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
       },
@@ -61,19 +61,19 @@
     }
   },
   "source_checksums": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "9001": "a01f42f60a8b2ea8b603eeb369444f2f4a1802861d1398a8f6838b2ce92705c3",
       "9002": "48634cdcf25b86a3a561a94e6a0e2202d16ded05fa542c0e08448614984bcbe5",
       "9003": "48a9c03b52ebcd79c0155d410f79a8025e088269eba282c12c10d7c5d8403c47",
       "9004": "6ff988e6101577dad9255e4d83d81c9c1af0ad124c417b20adcbb98960eb01ed"
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "8001": "68a808d0d4e10d57b9df6767d77707388bac158662f457b95c45989c004e26d3",
       "8002": "93298bebeaa8974c5d34e8bb3849facbab7dc2d48c85253d20216bfc24d92c14",
       "8003": "55ce0b25e7bdd97bc340d57b962bd02b935bbc92d23c347b081eacf3148ffdf1",
       "8004": "92709c7bad9b6fce8fc9952b6f6ee0cabbea9af3d71e61068318ad67c76c86f6"
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "7001": "bd28ef94a90dd52236ff7628d02e25e970b3f2ff157a0322996690986fdd5388",
       "7002": "05aedf263534d65f4cfc90c7483d22e8e87317276fdc34ff34cc09b80b010f73",
       "7003": "4e8b9b4ec1fc9cd71c2a471839c73c2d0c3395331d360db0fc792cde3c52a9ac",

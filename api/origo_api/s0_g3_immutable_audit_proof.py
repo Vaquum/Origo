@@ -115,7 +115,7 @@ def run_s0_g3_immutable_audit_proof() -> dict[str, Any]:
                 event_type='export_submit_accepted',
                 export_id='proof-export-1',
                 payload={
-                    'dataset': 'spot_trades',
+                    'dataset': 'binance_spot_trades',
                     'format': 'parquet',
                 },
             )

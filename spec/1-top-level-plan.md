@@ -369,7 +369,7 @@ Every slice must pass:
 12. Slice 12: Reddit hourly ingest + sentiment signal scope (crossed over in current phase; see Slice 12 locked details).
 13. Slice 13: Bitcoin Core node streams and derived network/supply signals capability.
 14. Slice 14: Event-sourcing core (canonical event log + projector/checkpoint framework + persistent aligned core) and pilot cutover.
-15. Slice 15: Binance event-sourcing port (`spot_trades`, `spot_agg_trades`, `futures_trades`) with `native` + `aligned_1s` parity.
+15. Slice 15: Binance event-sourcing port (`binance_spot_trades`) with `native` + `aligned_1s` parity.
 16. Slice 16: ETF event-sourcing port (`etf_daily_metrics`) with `native` + `aligned_1s` parity.
 17. Slice 17: FRED event-sourcing port (`fred_series_metrics`) with `native` + `aligned_1s` parity.
 18. Slice 18: OKX event-sourcing port (`okx_spot_trades`) with `native` + `aligned_1s` parity.
@@ -380,13 +380,15 @@ Every slice must pass:
 23. Slice 23: Historical OKX spot HTTP operationalization with Binance-cohesive interface/schema.
 24. Slice 24: Historical Bybit spot HTTP operationalization plus old-system endpoint cutover runbook.
 25. Slice 25: Historical contract normalization (`native` uniformity + shared parameter naming + unbounded default-window semantics).
-26. Slice 26: Historical exchange spot route completion (`spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` parity.
+26. Slice 26: Historical exchange spot route completion (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`) with `native`/`aligned_1s` parity.
 27. Slice 27: Historical ETF operationalization (`etf_daily_metrics` in `native` + `aligned_1s` for Python + HTTP).
 28. Slice 28: Historical FRED operationalization (`fred_series_metrics` in `native` + `aligned_1s` for Python + HTTP).
 29. Slice 29: Bitcoin aligned completion for `bitcoin_block_headers`, `bitcoin_block_transactions`, and `bitcoin_mempool_state`.
 30. Slice 30: Historical Bitcoin operationalization (all seven Bitcoin datasets in `native` + `aligned_1s` for Python + HTTP).
 31. Slice 31: Full historical-surface cohesion and rollout handoff (all datasets).
 32. Slice 32: Deployment env-contract drift fix (`ORIGO_AUDIT_LOG_RETENTION_DAYS`) and live deploy validation closure.
+33. Slice 33: Binance dataset contract cleanup (drop legacy non-spot Binance dataset keys and enforce `binance_spot_trades` naming everywhere).
+34. Slice 34: Full canonical backfill (all onboarded datasets) with projection rebuild and end-to-end serving validation.
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -481,11 +483,11 @@ Every slice must pass:
 9. Slice includes minimal pilot cutover on Binance spot trades before full Binance source port slice.
 
 ## Slice 15 (Binance Event-Sourcing Port) Locked Details
-1. Scope includes `spot_trades`, `spot_agg_trades`, and `futures_trades`.
+1. Scope includes `binance_spot_trades`.
 2. Writes move to canonical events; serving reads move to projection tables.
-3. Slice closeout requires `native` + `aligned_1s` parity for all three Binance datasets.
+3. Slice closeout requires `native` + `aligned_1s` parity for Binance spot dataset serving paths.
 4. Legacy direct-serving path is removed after parity/determinism proof passes.
-5. Slice closeout requires exactly-once/no-miss ingest proof and raw-fidelity/precision proof for all three datasets.
+5. Slice closeout requires exactly-once/no-miss ingest proof and raw-fidelity/precision proof for `binance_spot_trades`.
 
 ## Slice 16 (ETF Event-Sourcing Port) Locked Details
 1. Scope includes `etf_daily_metrics`.
@@ -578,10 +580,10 @@ Every slice must pass:
 
 ## Slice 26 (Historical Exchange Dataset Completion) Locked Details
 1. Scope includes exchange trade datasets:
-   1. `spot_trades`
+   1. `binance_spot_trades`
    2. `okx_spot_trades`
    3. `bybit_spot_trades`
-2. `spot_agg_trades` and `futures_trades` are explicitly deferred from historical Python/HTTP scope in this tranche (remain available on existing raw query/export surfaces).
+2. Legacy Binance non-spot dataset keys were deferred in this tranche and are now removed from active contracts.
 3. Historical Python and HTTP coverage must exist for all three in-scope datasets using explicit names:
    1. Python methods:
       1. `get_binance_spot_trades`
@@ -659,7 +661,7 @@ Every slice must pass:
 
 ## Slice 31 (Historical Full-Surface Cohesion + Rollout Handoff) Locked Details
 1. Scope is end-to-end cohesion across every historical dataset/mode in Python + HTTP.
-2. Historical scope in this tranche explicitly excludes `spot_agg_trades` and `futures_trades`.
+2. Historical scope in this tranche includes only active datasets (no legacy Binance non-spot dataset keys).
 3. Contract, replay, and integrity suites must run across all in-scope historical datasets and both modes.
 4. Rollout artifacts must include endpoint taxonomy, migration/cutover mapping, and operational runbook updates.
 5. Legacy route/method drift is not allowed; any retained legacy path must be explicit, tested, and documented as compatibility-only.
@@ -671,6 +673,63 @@ Every slice must pass:
 3. Deploy workflow must source `ORIGO_AUDIT_LOG_RETENTION_DAYS` from root `.env.example` and synchronize it into `/opt/origo/deploy/.env`.
 4. Deploy compose contract must explicitly require `ORIGO_AUDIT_LOG_RETENTION_DAYS` for API runtime.
 5. Slice closeout requires successful merge-triggered deploy and live API health verification.
+
+## Slice 33 (Binance Dataset Contract Cleanup) Locked Details
+1. Scope is contract cleanup across runtime, control-plane, tests, docs, and specs:
+   1. remove legacy Binance non-spot dataset keys from all active contracts and code paths
+   2. remove/de-register legacy Binance non-spot ingest and projection paths
+   3. enforce Binance dataset key as `binance_spot_trades` everywhere (no aliases)
+2. Cleanup is hard remove only:
+   1. no aliases
+   2. no fallback parameters
+   3. no compatibility shims
+3. Cleanup includes Dagster/control-plane ingestion and projector wiring:
+   1. remove/de-register Binance agg/futures assets and jobs
+   2. keep Binance spot ingestion only under `binance_spot_trades`
+4. Cleanup includes canonical event contracts:
+   1. Binance stream id must be `binance_spot_trades`
+   2. precision registry and rights matrix must be updated to the same identifier
+5. Cleanup includes query/export contracts:
+   1. `native` and `aligned_1s` must support `binance_spot_trades`
+   2. legacy Binance non-spot dataset keys must fail-loud as unsupported
+6. Slice closeout requires repo-wide gate pass (`style`, `type`, `contract`, `replay`, `integrity`) with no waiver.
+
+## Slice 34 (Full Canonical Backfill) Locked Details
+1. Scope is full-history backfill for every currently onboarded dataset:
+   1. `binance_spot_trades`
+   2. `okx_spot_trades`
+   3. `bybit_spot_trades`
+   4. `etf_daily_metrics`
+   5. `fred_series_metrics`
+   6. `bitcoin_block_headers`
+   7. `bitcoin_block_transactions`
+   8. `bitcoin_mempool_state`
+   9. `bitcoin_block_fee_totals`
+   10. `bitcoin_block_subsidy_schedule`
+   11. `bitcoin_network_hashrate_estimate`
+   12. `bitcoin_circulating_supply`
+2. Backfill order is fixed and must be executed step-by-step:
+   1. Binance market dataset (`binance_spot_trades`)
+   2. OKX and Bybit market datasets
+   3. ETF dataset
+   4. FRED dataset
+   5. Bitcoin base streams (`headers`, `transactions`, `mempool`)
+   6. Bitcoin derived datasets (`fees`, `subsidy`, `hashrate`, `supply`)
+3. All backfill reads must come from original first-party sources already contracted in the repo; no third-party data APIs are allowed.
+4. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
+5. Every backfill partition must emit deterministic provenance:
+   1. source artifact identity/checksum
+   2. ingest cursor/offset window
+   3. row-count and hash fingerprint
+6. Backfill must be resumable from cursor state with no destructive rewrites of canonical raw events.
+7. Gap/no-miss checks are fail-loud during backfill and trigger quarantine behavior for affected streams/partitions.
+8. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+   1. `native` everywhere
+   2. `aligned_1s` everywhere currently aligned-capable by contract
+9. Slice closeout requires cross-surface validation:
+   1. raw query and raw export
+   2. historical HTTP endpoints
+   3. historical Python methods
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

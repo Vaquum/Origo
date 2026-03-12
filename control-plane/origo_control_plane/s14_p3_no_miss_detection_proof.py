@@ -127,7 +127,7 @@ def run_s14_p3_proof() -> dict[str, Any]:
     fixture_events = _fixture_events()
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
 

@@ -22,7 +22,7 @@
 - Query and export responses follow existing contracts in:
   - `docs/raw-query-reference.md`
   - `docs/raw-export-reference.md`
-- Seed dataset: `spot_trades` (Binance daily files).
+- Seed dataset: `binance_spot_trades` (Binance daily files).
 
 ## Source/provenance and freshness semantics
 - Local proof reads exchange data from canonical Binance daily archives.

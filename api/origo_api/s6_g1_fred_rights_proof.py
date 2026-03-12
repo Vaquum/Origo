@@ -18,7 +18,7 @@ def _build_matrix(*, legal_artifact_path: str | None, include_fred: bool) -> dic
         'binance': {
             'rights_state': 'Hosted Allowed',
             'rights_provisional': False,
-            'datasets': ['spot_trades', 'spot_agg_trades', 'futures_trades'],
+            'datasets': ['binance_spot_trades'],
             'legal_signoff_artifact': 'contracts/legal/binance-hosted-allowed.md',
         }
     }

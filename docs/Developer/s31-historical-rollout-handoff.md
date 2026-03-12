@@ -13,7 +13,7 @@
 - Publish final internal rollout and rollback mapping for legacy migration.
 
 ## Historical surface matrix (in scope)
-- `spot_trades`
+- `binance_spot_trades`
   - HTTP: `POST /v1/historical/binance/spot/trades`
   - Python: `HistoricalData.get_binance_spot_trades`
 - `okx_spot_trades`
@@ -51,8 +51,8 @@
   - Python: `HistoricalData.get_bitcoin_circulating_supply`
 
 Deferred from historical surface in this tranche:
-- `spot_agg_trades`
-- `futures_trades`
+- `binance_spot_trades`
+- `binance_spot_trades`
 
 ## Contract and guardrail closure
 - Historical mode support is complete for every in-scope dataset:

@@ -36,9 +36,7 @@
 - Timestamp fields are UTC and returned as ISO-8601 strings.
 - `schema` response entries are `{name, dtype}`.
 - Dataset/source keys:
-  - `spot_trades`
-  - `spot_agg_trades`
-  - `futures_trades`
+  - `binance_spot_trades`
   - `okx_spot_trades`
   - `bybit_spot_trades`
   - `etf_daily_metrics`
@@ -123,7 +121,7 @@
 
 ## Minimal examples
 - Native time-range query:
-  - `{ "mode":"native", "sources":["spot_trades"], "fields":["trade_id","price","timestamp"], "time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "filters":[{"field":"price","op":"gt","value":1000}], "strict":false }`
+  - `{ "mode":"native", "sources":["binance_spot_trades"], "fields":["trade_id","price","timestamp"], "time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "filters":[{"field":"price","op":"gt","value":1000}], "strict":false }`
 - Native OKX query:
   - `{ "mode":"native", "sources":["okx_spot_trades"], "fields":["trade_id","timestamp","price","size","side"], "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "strict":false }`
 - Native Bybit query:
@@ -135,4 +133,4 @@
 - Aligned latest rows query:
   - `{ "mode":"aligned_1s", "sources":["etf_daily_metrics"], "fields":["aligned_at_utc","metric_name","metric_value_float"], "n_rows":100, "strict":false }`
 - Native full-history query (no selector):
-  - `{ "mode":"native", "sources":["spot_trades"], "fields":["trade_id","timestamp","price","quantity"], "strict":false }`
+  - `{ "mode":"native", "sources":["binance_spot_trades"], "fields":["trade_id","timestamp","price","quantity"], "strict":false }`

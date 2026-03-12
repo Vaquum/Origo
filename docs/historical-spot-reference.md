@@ -16,7 +16,7 @@ Klines:
 - `POST /v1/historical/bybit/spot/klines`
 
 All endpoints require `X-API-Key`.
-Historical scope in this tranche explicitly excludes `spot_agg_trades` and `futures_trades`.
+Historical scope in this tranche includes active spot dataset contracts only.
 
 ## Request contracts
 

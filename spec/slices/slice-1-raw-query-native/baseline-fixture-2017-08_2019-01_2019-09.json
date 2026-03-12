@@ -1,9 +1,9 @@
 {
   "structure_warning": "Historical artifact retained for provenance. Do not use this file as the fixture structure template; use the canonical baseline fixture contract in spec/1-top-level-plan.md (reference slices 7+).",
   "fixture_window": [
-    "spot_trades:2017-08",
-    "spot_agg_trades:2019-01",
-    "futures_trades:2019-09"
+    "binance_spot_trades:2017-08",
+    "binance_spot_trades:2019-01",
+    "binance_spot_trades:2019-09"
   ],
   "source_checksums": {
     "spot_daily_2017-08-17": {
@@ -30,7 +30,7 @@
   "run_1_fingerprint": [
     {
       "window_id": "spot_trades_month_2017-08",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 10813,
       "offset_min_id": 0,
       "offset_max_id": 10812,
@@ -40,7 +40,7 @@
     },
     {
       "window_id": "spot_agg_trades_month_2019-01",
-      "dataset": "spot_agg_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 500,
       "offset_min_id": 82541550,
       "offset_max_id": 82542049,
@@ -50,7 +50,7 @@
     },
     {
       "window_id": "futures_trades_month_2019-09",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 500,
       "offset_min_id": 1,
       "offset_max_id": 500,
@@ -62,7 +62,7 @@
   "run_2_fingerprint": [
     {
       "window_id": "spot_trades_month_2017-08",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 10813,
       "offset_min_id": 0,
       "offset_max_id": 10812,
@@ -72,7 +72,7 @@
     },
     {
       "window_id": "spot_agg_trades_month_2019-01",
-      "dataset": "spot_agg_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 500,
       "offset_min_id": 82541550,
       "offset_max_id": 82542049,
@@ -82,7 +82,7 @@
     },
     {
       "window_id": "futures_trades_month_2019-09",
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "row_count": 500,
       "offset_min_id": 1,
       "offset_max_id": 500,

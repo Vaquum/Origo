@@ -13,9 +13,9 @@
 - Query endpoint: `POST /v1/raw/query`
   - `mode` must be `aligned_1s`
   - `sources` currently must contain exactly one key from:
-    - `spot_trades`
-    - `spot_agg_trades`
-    - `futures_trades`
+    - `binance_spot_trades`
+    - `binance_spot_trades`
+    - `binance_spot_trades`
     - `okx_spot_trades`
     - `bybit_spot_trades`
     - `etf_daily_metrics`
@@ -112,7 +112,7 @@
 
 ## Minimal examples
 - Binance aligned query:
-  - `{ "mode":"aligned_1s", "sources":["spot_trades"], "time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "fields":["aligned_at_utc","open_price","close_price","trade_count"], "strict":false }`
+  - `{ "mode":"aligned_1s", "sources":["binance_spot_trades"], "time_range":["2017-08-17T12:00:00Z","2017-08-17T13:00:00Z"], "fields":["aligned_at_utc","open_price","close_price","trade_count"], "strict":false }`
 - OKX aligned query:
   - `{ "mode":"aligned_1s", "sources":["okx_spot_trades"], "time_range":["2024-01-01T16:00:00Z","2024-01-02T16:00:00Z"], "fields":["aligned_at_utc","open_price","close_price","trade_count"], "strict":false }`
 - Bybit aligned query:

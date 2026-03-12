@@ -16,11 +16,9 @@ from fastapi.testclient import TestClient
 from api.origo_api.schemas import RawQuerySource
 from origo.data.historical_data import HistoricalData
 
-_DEFERRED_HISTORICAL_DATASETS: frozenset[str] = frozenset(
-    {'spot_agg_trades', 'futures_trades'}
-)
+_DEFERRED_HISTORICAL_DATASETS: frozenset[str] = frozenset()
 _HISTORICAL_DATASET_TO_HTTP_ROUTE: dict[str, str] = {
-    'spot_trades': '/v1/historical/binance/spot/trades',
+    'binance_spot_trades': '/v1/historical/binance/spot/trades',
     'okx_spot_trades': '/v1/historical/okx/spot/trades',
     'bybit_spot_trades': '/v1/historical/bybit/spot/trades',
     'etf_daily_metrics': '/v1/historical/etf/daily_metrics',
@@ -34,7 +32,7 @@ _HISTORICAL_DATASET_TO_HTTP_ROUTE: dict[str, str] = {
     'bitcoin_circulating_supply': '/v1/historical/bitcoin/circulating_supply',
 }
 _HISTORICAL_DATASET_TO_PYTHON_METHOD: dict[str, str] = {
-    'spot_trades': 'get_binance_spot_trades',
+    'binance_spot_trades': 'get_binance_spot_trades',
     'okx_spot_trades': 'get_okx_spot_trades',
     'bybit_spot_trades': 'get_bybit_spot_trades',
     'etf_daily_metrics': 'get_etf_daily_metrics',
@@ -75,7 +73,7 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
             'binance': {
                 'rights_state': 'Hosted Allowed',
                 'rights_provisional': False,
-                'datasets': ['spot_trades'],
+                'datasets': ['binance_spot_trades'],
                 'legal_signoff_artifact': str(binance_legal),
             },
             'okx': {
@@ -208,10 +206,7 @@ def test_historical_surface_dataset_matrix_is_complete() -> None:
 
     assert set(_HISTORICAL_DATASET_TO_HTTP_ROUTE) == in_scope
     assert set(_HISTORICAL_DATASET_TO_PYTHON_METHOD) == in_scope
-    assert query_datasets.intersection(_DEFERRED_HISTORICAL_DATASETS) == {
-        'spot_agg_trades',
-        'futures_trades',
-    }
+    assert query_datasets.intersection(_DEFERRED_HISTORICAL_DATASETS) == set()
 
 
 def test_historical_surface_routes_and_methods_are_registered(
@@ -277,9 +272,7 @@ def test_historical_surface_docs_cover_routes_and_datasets() -> None:
     for dataset in _HISTORICAL_DATASET_TO_HTTP_ROUTE:
         assert dataset in taxonomy_doc
 
-    assert 'spot_agg_trades' in taxonomy_doc
-    assert 'futures_trades' in taxonomy_doc
-    assert 'explicitly excludes `spot_agg_trades` and `futures_trades`' in taxonomy_doc
+    assert 'binance_spot_trades' in taxonomy_doc
     assert '/v1/historical/bitcoin/block_headers' in historical_reference_doc
 
 

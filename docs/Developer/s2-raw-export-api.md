@@ -18,7 +18,7 @@
 ## Data definitions
 - `mode`: `native | aligned_1s`.
 - `format`: `parquet | csv`.
-- `dataset`: `spot_trades | spot_agg_trades | futures_trades | etf_daily_metrics | fred_series_metrics`.
+- `dataset`: `binance_spot_trades | etf_daily_metrics | fred_series_metrics`.
 - Window selector: exactly one of `month_year | n_rows | n_random | time_range`.
 - Status lifecycle: `queued | running | succeeded | failed`.
 - Artifact metadata: `uri`, `row_count`, `checksum_sha256`.
@@ -59,7 +59,7 @@
 - Submit:
   - `POST /v1/raw/export`
   - `X-API-Key: <internal key>`
-  - body: `{ \"mode\": \"native\", \"format\": \"parquet\", \"dataset\": \"spot_trades\", \"month_year\": [8, 2017], \"strict\": false }`
+  - body: `{ \"mode\": \"native\", \"format\": \"parquet\", \"dataset\": \"binance_spot_trades\", \"month_year\": [8, 2017], \"strict\": false }`
 - Poll:
   - `GET /v1/raw/export/<export_id>`
   - returns lifecycle status and artifact metadata when available.

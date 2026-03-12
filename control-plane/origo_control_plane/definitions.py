@@ -46,15 +46,6 @@ from .assets.daily_okx_spot_trades_to_origo import (
     insert_daily_okx_spot_trades_to_origo,
 )
 from .assets.daily_trades_to_origo import insert_daily_binance_trades_to_origo
-from .assets.monthly_agg_trades_to_origo import (
-    insert_monthly_binance_agg_trades_to_origo,
-)
-from .assets.monthly_futures_agg_trades_to_origo import (
-    insert_monthly_binance_futures_agg_trades_to_origo,
-)
-from .assets.monthly_futures_trades_to_origo import (
-    insert_monthly_binance_futures_trades_to_origo,
-)
 from .assets.monthly_trades_to_origo import insert_monthly_binance_trades_to_origo
 from .jobs.etf_daily_ingest import origo_etf_daily_ingest_job
 from .jobs.raw_export_native import origo_raw_export_native_job
@@ -121,21 +112,6 @@ insert_bitcoin_block_transactions_job = define_asset_job(
 insert_bitcoin_mempool_state_job = define_asset_job(
     name='insert_bitcoin_mempool_state_to_origo_job',
     selection=['insert_bitcoin_mempool_state_to_origo'],
-)
-
-insert_monthly_binance_agg_trades_job = define_asset_job(
-    name='insert_monthly_agg_trades_to_origo_job',
-    selection=['insert_monthly_binance_agg_trades_to_origo'],
-)
-
-insert_monthly_binance_futures_trades_job = define_asset_job(
-    name='insert_monthly_futures_trades_to_origo_job',
-    selection=['insert_monthly_binance_futures_trades_to_origo'],
-)
-
-insert_monthly_binance_futures_agg_trades_job = define_asset_job(
-    name='insert_monthly_futures_agg_trades_to_origo_job',
-    selection=['insert_monthly_binance_futures_agg_trades_to_origo'],
 )
 
 
@@ -397,9 +373,6 @@ defs = Definitions(
         insert_bitcoin_circulating_supply_to_origo,
         insert_bitcoin_block_transactions_to_origo,
         insert_bitcoin_mempool_state_to_origo,
-        insert_monthly_binance_agg_trades_to_origo,
-        insert_monthly_binance_futures_trades_to_origo,
-        insert_monthly_binance_futures_agg_trades_to_origo,
     ],
     schedules=[daily_pipeline_schedule, origo_etf_daily_ingest_schedule],
     sensors=[origo_etf_daily_retry_sensor, origo_etf_ingest_anomaly_alert_sensor],
@@ -415,9 +388,6 @@ defs = Definitions(
         insert_bitcoin_circulating_supply_job,
         insert_bitcoin_block_transactions_job,
         insert_bitcoin_mempool_state_job,
-        insert_monthly_binance_agg_trades_job,
-        insert_monthly_binance_futures_trades_job,
-        insert_monthly_binance_futures_agg_trades_job,
         origo_etf_daily_ingest_job,
         origo_raw_export_native_job,
     ],

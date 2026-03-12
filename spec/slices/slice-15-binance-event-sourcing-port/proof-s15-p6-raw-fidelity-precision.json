@@ -1,6 +1,6 @@
 {
   "datasets": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "fidelity_rows": [
         {
           "event_id": "54cabb44-9285-52b4-a971-fc6cf3ef520a",
@@ -35,7 +35,7 @@
         "inserted"
       ]
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "fidelity_rows": [
         {
           "event_id": "8d59a648-c091-5647-932a-77c5dd6e247f",
@@ -72,7 +72,7 @@
         "inserted"
       ]
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "fidelity_rows": [
         {
           "event_id": "36898a20-fc69-5f71-ac10-5f2a8643775d",
@@ -110,6 +110,6 @@
   },
   "precision_round_trip_verified": true,
   "proof_database": "origo_s15_p6_proof",
-  "proof_scope": "Slice 15 S15-P6 raw-fidelity and numeric-precision proof for Binance spot_trades, spot_agg_trades, futures_trades",
+  "proof_scope": "Slice 15 S15-P6 raw-fidelity and numeric-precision proof for Binance binance_spot_trades",
   "raw_fidelity_verified": true
 }

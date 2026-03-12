@@ -45,7 +45,7 @@ def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Module
             'binance': {
                 'rights_state': 'Hosted Allowed',
                 'rights_provisional': False,
-                'datasets': ['spot_trades'],
+                'datasets': ['binance_spot_trades'],
                 'legal_signoff_artifact': str(binance_legal),
             },
             'okx': {
@@ -507,7 +507,7 @@ def test_historical_routes_are_registered(
 @pytest.mark.parametrize(
     ('source_path', 'dataset_name'),
     [
-        ('/v1/historical/binance/spot/trades', 'spot_trades'),
+        ('/v1/historical/binance/spot/trades', 'binance_spot_trades'),
         ('/v1/historical/okx/spot/trades', 'okx_spot_trades'),
         ('/v1/historical/bybit/spot/trades', 'bybit_spot_trades'),
     ],
@@ -697,7 +697,7 @@ def test_historical_bitcoin_endpoint_returns_raw_envelope_shape(
 @pytest.mark.parametrize(
     ('source_path', 'source_name', 'dataset_name'),
     [
-        ('/v1/historical/binance/spot/trades', 'binance', 'spot_trades'),
+        ('/v1/historical/binance/spot/trades', 'binance', 'binance_spot_trades'),
         ('/v1/historical/okx/spot/trades', 'okx', 'okx_spot_trades'),
         ('/v1/historical/bybit/spot/trades', 'bybit', 'bybit_spot_trades'),
     ],
@@ -1214,7 +1214,7 @@ def test_historical_bitcoin_endpoint_strict_warning_failure(
 @pytest.mark.parametrize(
     ('source_path', 'source_name', 'dataset_name'),
     [
-        ('/v1/historical/binance/spot/klines', 'binance', 'spot_trades'),
+        ('/v1/historical/binance/spot/klines', 'binance', 'binance_spot_trades'),
         ('/v1/historical/okx/spot/klines', 'okx', 'okx_spot_trades'),
         ('/v1/historical/bybit/spot/klines', 'bybit', 'bybit_spot_trades'),
     ],

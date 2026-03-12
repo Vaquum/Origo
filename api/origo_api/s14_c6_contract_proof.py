@@ -12,7 +12,7 @@ from api.origo_api.schemas import RawExportRequest, RawQueryRequest
 def run_s14_c6_proof() -> dict[str, Any]:
     query_request = RawQueryRequest(
         mode='native',
-        sources=['spot_trades', 'spot_agg_trades'],
+        sources=['binance_spot_trades', 'okx_spot_trades'],
         n_rows=10,
         view_id='aligned_1s_raw',
         view_version=1,
@@ -20,7 +20,7 @@ def run_s14_c6_proof() -> dict[str, Any]:
     export_request = RawExportRequest(
         mode='native',
         format='parquet',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         n_rows=10,
         view_id='aligned_1s_raw',
         view_version=1,
@@ -30,7 +30,7 @@ def run_s14_c6_proof() -> dict[str, Any]:
     try:
         RawQueryRequest(
             mode='native',
-            sources=['spot_trades'],
+            sources=['binance_spot_trades'],
             n_rows=10,
             view_id='aligned_1s_raw',
         )
@@ -42,7 +42,7 @@ def run_s14_c6_proof() -> dict[str, Any]:
         RawExportRequest(
             mode='native',
             format='parquet',
-            dataset='spot_trades',
+            dataset='binance_spot_trades',
             n_rows=10,
             view_id='aligned_1s_raw',
         )

@@ -64,9 +64,7 @@ from .schemas import (
 app = FastAPI(title='Origo Raw API', version='0.1.23')
 _ALIGNED_QUERY_DATASETS: frozenset[AlignedDataset] = frozenset(
     {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',

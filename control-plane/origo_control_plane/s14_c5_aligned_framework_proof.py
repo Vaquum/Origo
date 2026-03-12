@@ -48,7 +48,7 @@ def run_s14_c5_proof() -> dict[str, Any]:
 
         stream_key = CanonicalStreamKey(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             partition_id='btcusdt',
         )
         writer = CanonicalEventWriter(client=admin_client, database=proof_database)

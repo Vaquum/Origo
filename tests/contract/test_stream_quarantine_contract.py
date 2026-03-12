@@ -24,7 +24,7 @@ def test_load_stream_quarantine_state_path_requires_env(
 def test_stream_quarantine_registry_persists_and_blocks(tmp_path: Path) -> None:
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     registry = StreamQuarantineRegistry(path=tmp_path / 'stream-quarantine-state.json')

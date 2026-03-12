@@ -199,7 +199,7 @@ def _run_native_query(day: str) -> dict:
         '/v1/raw/query',
         {
             'mode': 'native',
-            'sources': ['spot_trades'],
+            'sources': ['binance_spot_trades'],
             'fields': ['trade_id', 'timestamp', 'quantity', 'quote_quantity'],
             'time_range': [day_start, day_end],
             'strict': False,
@@ -216,7 +216,7 @@ def _run_aligned_query(day: str) -> dict:
         '/v1/raw/query',
         {
             'mode': 'aligned_1s',
-            'sources': ['spot_trades'],
+            'sources': ['binance_spot_trades'],
             'fields': ['aligned_at_utc', 'open_price', 'close_price', 'trade_count'],
             'time_range': [day_start, day_end],
             'strict': False,
@@ -228,7 +228,7 @@ def _submit_export(mode: str, export_format: str, start: str, end: str) -> dict:
     payload = {
         'mode': mode,
         'format': export_format,
-        'dataset': 'spot_trades',
+        'dataset': 'binance_spot_trades',
         'time_range': [start, end],
         'strict': False,
     }
@@ -461,7 +461,7 @@ for day in ('2017-08-17', '2017-08-18'):
     payload = _request_json(
         {
             'mode': 'native',
-            'sources': ['spot_trades'],
+            'sources': ['binance_spot_trades'],
             'fields': ['trade_id', 'timestamp', 'quantity', 'quote_quantity'],
             'time_range': [start_iso, end_iso],
             'strict': False,

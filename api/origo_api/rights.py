@@ -19,9 +19,7 @@ _ALLOWED_SHADOW_PROMOTION_STATES: frozenset[ShadowPromotionState] = frozenset(
 )
 _ALLOWED_EXPORT_DATASETS: frozenset[RawQueryDataset] = frozenset(
     {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',
@@ -37,9 +35,7 @@ _ALLOWED_EXPORT_DATASETS: frozenset[RawQueryDataset] = frozenset(
 )
 _ALLOWED_QUERY_DATASETS: frozenset[RawQueryDataset] = frozenset(
     {
-        'spot_trades',
-        'spot_agg_trades',
-        'futures_trades',
+        'binance_spot_trades',
         'okx_spot_trades',
         'bybit_spot_trades',
         'etf_daily_metrics',

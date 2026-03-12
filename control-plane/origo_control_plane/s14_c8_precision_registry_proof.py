@@ -27,7 +27,7 @@ def run_s14_c8_proof() -> dict[str, Any]:
     contract = canonical_source_precision_registry_contract()
     payload_json = canonicalize_payload_json_with_precision(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         payload_raw=(
             b'{"qty":"0.01000000","price":"41000.12345678",'
             b'"quote_qty":"410.00123456","trade_id":"1"}'
@@ -41,7 +41,7 @@ def run_s14_c8_proof() -> dict[str, Any]:
     try:
         canonicalize_payload_json_with_precision(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             payload_raw=b'{"trade_id":"1","unexpected_numeric":2}',
             payload_encoding='utf-8',
         )

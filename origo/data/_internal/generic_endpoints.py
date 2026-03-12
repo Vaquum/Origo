@@ -45,7 +45,7 @@ type NativeQueryDataset = (
 type HistoricalSpotSource = str
 
 HISTORICAL_SOURCE_TO_DATASET: dict[str, NativeQueryDataset] = {
-    'binance': 'spot_trades',
+    'binance': 'binance_spot_trades',
     'okx': 'okx_spot_trades',
     'bybit': 'bybit_spot_trades',
 }
@@ -452,9 +452,9 @@ def query_native(
         month_year=month_year, n_rows=n_rows, n_random=n_random, time_range=time_range
     )
 
-    if dataset in {'spot_trades', 'spot_agg_trades', 'futures_trades'}:
+    if dataset == 'binance_spot_trades':
         frame = query_binance_native_data(
-            dataset=cast(BinanceDataset, dataset),
+            dataset=dataset,
             select_columns=select_cols,
             window=window,
             include_datetime=include_datetime_col,
@@ -522,7 +522,7 @@ def query_native(
         'bitcoin_circulating_supply',
     }:
         frame = query_bitcoin_native_data(
-            dataset=cast(BitcoinDataset, dataset),
+            dataset=dataset,
             select_columns=select_cols,
             window=window,
             include_datetime=include_datetime_col,
@@ -778,7 +778,7 @@ def query_spot_trades_data(
     else:
         if source == 'binance':
             raw_frame = query_binance_native_data(
-                dataset='spot_trades',
+                dataset='binance_spot_trades',
                 select_columns=(
                     'trade_id',
                     'timestamp',

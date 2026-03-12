@@ -3,7 +3,7 @@
   "generated_at_utc": "2026-03-10T17:16:50.845868+00:00",
   "proof_scope": "Slice 15 S15-P3 replay determinism for native + aligned_1s",
   "run_1_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
       },
@@ -11,7 +11,7 @@
         "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
       },
@@ -19,7 +19,7 @@
         "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
       },
@@ -29,7 +29,7 @@
     }
   },
   "run_2_fingerprints": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "b08b66c88b153dab3abb076dee42df0dfca07c8e58f3c4686be622124353f304"
       },
@@ -37,7 +37,7 @@
         "rows_hash_sha256": "3e5fb93eb48599a2f452cd7a2b03e4aa71f83a7024e423ce88e9ead6afbd3215"
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "00120dcd0974f0a400c686c96db3fc7c7fc4f106c346ed825d6c74db6cc0d9f3"
       },
@@ -45,7 +45,7 @@
         "rows_hash_sha256": "24110434318a5fd89e7ad22833f870efb1d0f6b09eb4162e1d0e683f07a37c39"
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "rows_hash_sha256": "0166d3b79674350da7483dc03c88d9e8d70de1859205ec63f35affedb8cd5598"
       },

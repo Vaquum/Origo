@@ -292,7 +292,7 @@ def _project_native_from_canonical_events(
                 source_event_time_utc = event.source_event_time_utc
                 if source_event_time_utc is None:
                     raise RuntimeError(
-                        'Native projection requires source_event_time_utc for spot_trades events'
+                        'Native projection requires source_event_time_utc for binance_spot_trades events'
                     )
                 source_event_time_utc = source_event_time_utc.astimezone(UTC)
                 timestamp_ms = int(source_event_time_utc.timestamp() * 1000)
@@ -693,7 +693,7 @@ def run_s14_c9_proof() -> dict[str, Any]:
     runner = MigrationRunner(settings=proof_settings)
     stream_key = CanonicalStreamKey(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
     )
     start_utc = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
@@ -802,7 +802,7 @@ def run_s14_c9_proof() -> dict[str, Any]:
 
         return {
             'proof_scope': (
-                'Slice 14 S14-C9 pilot cutover for spot_trades through canonical '
+                'Slice 14 S14-C9 pilot cutover for binance_spot_trades through canonical '
                 'events into native and aligned serving projections'
             ),
             'proof_database': proof_database,

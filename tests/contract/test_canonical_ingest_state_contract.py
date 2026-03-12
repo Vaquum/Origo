@@ -111,7 +111,7 @@ def test_canonical_completeness_checkpoint_sql_columns_match_contract() -> None:
 def test_completeness_checkpoint_id_is_deterministic() -> None:
     checkpoint_id_1 = completeness_checkpoint_id(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         last_checked_source_offset_or_equivalent='1700000000010',
         expected_event_count=100,
@@ -122,7 +122,7 @@ def test_completeness_checkpoint_id_is_deterministic() -> None:
     )
     checkpoint_id_2 = completeness_checkpoint_id(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         partition_id='btcusdt',
         last_checked_source_offset_or_equivalent='1700000000010',
         expected_event_count=100,
@@ -164,7 +164,7 @@ def test_canonical_ingest_state_store_requires_non_empty_database() -> None:
 
 def test_cursor_advance_input_contract_smoke() -> None:
     stream_key = CanonicalStreamKey(
-        source_id='binance', stream_id='spot_trades', partition_id='btcusdt'
+        source_id='binance', stream_id='binance_spot_trades', partition_id='btcusdt'
     )
     cursor_input = CursorAdvanceInput(
         stream_key=stream_key,

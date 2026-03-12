@@ -2,7 +2,7 @@
   "cases": [
     {
       "case": "binance_spot_aligned_envelope",
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "first_row": {
         "aligned_at_utc": "2017-08-17T12:01:48.000Z",
         "close_price": 4436.06,

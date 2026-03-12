@@ -110,6 +110,6 @@
   "stream_key": {
     "partition_id": "btcusdt",
     "source_id": "binance",
-    "stream_id": "spot_trades"
+    "stream_id": "binance_spot_trades"
   }
 }

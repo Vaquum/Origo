@@ -44,7 +44,7 @@
         "zip_sha256": null
       }
     ],
-    "spot_trades": [
+    "binance_spot_trades": [
       {
         "csv_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
         "date": "2017-08-17",
@@ -65,7 +65,7 @@
       "start_offset": "2026-03-05T12:00:00+00:00",
       "volume_sum": null
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "end_offset": "2017-08-17T12:54:47+00:00",
       "row_count": 75,
       "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",
@@ -81,7 +81,7 @@
       "start_offset": "2026-03-05T12:00:00+00:00",
       "volume_sum": null
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "end_offset": "2017-08-17T12:54:47+00:00",
       "row_count": 75,
       "rows_hash_sha256": "48a58e7a99519c86fec1a38019ae6ee6b21e170f511aa0ae8eb3fac9f21903c4",

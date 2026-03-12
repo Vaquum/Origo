@@ -228,7 +228,7 @@ def _build_rights_matrix_missing_okx() -> dict[str, Any]:
             'binance': {
                 'rights_state': 'Hosted Allowed',
                 'rights_provisional': False,
-                'datasets': ['spot_trades'],
+                'datasets': ['binance_spot_trades'],
                 'legal_signoff_artifact': 'contracts/legal/binance-hosted-allowed.md',
             }
         },

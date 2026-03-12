@@ -22,7 +22,7 @@ class _DeterminismCase:
 _CASES: tuple[_DeterminismCase, ...] = (
     _DeterminismCase(
         case_id='spot_trades_fixed_window',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         fields=('aligned_at_utc', 'open_price', 'close_price', 'trade_count'),
         window=TimeRangeWindow(
             start_iso='2017-08-17T12:00:00Z',

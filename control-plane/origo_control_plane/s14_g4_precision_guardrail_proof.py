@@ -32,7 +32,7 @@ def run_s14_g4_proof() -> dict[str, Any]:
 
     payload_json = canonicalize_payload_json_with_precision(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         payload_raw=(
             b'{"qty":"0.01000000","price":"43500.12345678",'
             b'"quote_qty":"435.00123457","trade_id":"6001"}'
@@ -41,7 +41,7 @@ def run_s14_g4_proof() -> dict[str, Any]:
     )
     assert_payload_json_has_no_float_values(
         source_id='binance',
-        stream_id='spot_trades',
+        stream_id='binance_spot_trades',
         payload_json=payload_json,
     )
     parsed = json.loads(payload_json)
@@ -66,7 +66,7 @@ def run_s14_g4_proof() -> dict[str, Any]:
     try:
         assert_payload_json_has_no_float_values(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             payload_json='{"trade_id":1,"price":43500.1}',
         )
     except RuntimeError as exc:

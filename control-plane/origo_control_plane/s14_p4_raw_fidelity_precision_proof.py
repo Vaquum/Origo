@@ -137,7 +137,7 @@ def run_s14_p4_proof() -> dict[str, Any]:
             result = writer.write_event(
                 CanonicalEventWriteInput(
                     source_id='binance',
-                    stream_id='spot_trades',
+                    stream_id='binance_spot_trades',
                     partition_id='btcusdt',
                     source_offset_or_equivalent=event.source_offset_or_equivalent,
                     source_event_time_utc=event.source_event_time_utc,
@@ -170,7 +170,7 @@ def run_s14_p4_proof() -> dict[str, Any]:
             ''',
             {
                 'source_id': 'binance',
-                'stream_id': 'spot_trades',
+                'stream_id': 'binance_spot_trades',
                 'partition_id': 'btcusdt',
             },
         )
@@ -204,7 +204,7 @@ def run_s14_p4_proof() -> dict[str, Any]:
 
             canonicalized_from_raw = canonicalize_payload_json_with_precision(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 payload_raw=fixture_event.payload_raw,
                 payload_encoding='utf-8',
             )

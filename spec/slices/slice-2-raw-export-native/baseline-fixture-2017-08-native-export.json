@@ -101,7 +101,7 @@
     "parquet": true
   },
   "fixture_window": [
-    "spot_trades:month_year=[8,2017]"
+    "binance_spot_trades:month_year=[8,2017]"
   ],
   "generated_at_utc": "2026-03-05T08:08:09.008409+00:00",
   "proof_scope": "Slice 2 P2 deterministic export artifacts on fixed window",

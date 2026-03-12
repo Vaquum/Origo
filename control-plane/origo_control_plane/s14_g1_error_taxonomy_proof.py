@@ -35,7 +35,7 @@ def run_s14_g1_proof() -> dict[str, Any]:
         build_canonical_event_row(
             CanonicalEventWriteInput(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
                 source_offset_or_equivalent='100',
                 source_event_time_utc=datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
@@ -55,7 +55,7 @@ def run_s14_g1_proof() -> dict[str, Any]:
             projector_id='projector',
             stream_key=CanonicalStreamKey(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
             ),
             batch_size=0,
@@ -69,7 +69,7 @@ def run_s14_g1_proof() -> dict[str, Any]:
         projector_id='projector',
         stream_key=CanonicalStreamKey(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             partition_id='btcusdt',
         ),
         batch_size=1,
@@ -86,7 +86,7 @@ def run_s14_g1_proof() -> dict[str, Any]:
                 view_version=0,
                 stream_key=CanonicalStreamKey(
                     source_id='binance',
-                    stream_id='spot_trades',
+                    stream_id='binance_spot_trades',
                     partition_id='btcusdt',
                 ),
                 bucket_size_seconds=1,

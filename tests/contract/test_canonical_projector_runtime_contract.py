@@ -87,7 +87,7 @@ def test_projector_runtime_requires_positive_batch_size() -> None:
             projector_id='projector',
             stream_key=CanonicalStreamKey(
                 source_id='binance',
-                stream_id='spot_trades',
+                stream_id='binance_spot_trades',
                 partition_id='btcusdt',
             ),
             batch_size=0,
@@ -102,7 +102,7 @@ def test_projector_runtime_start_stop_cycle_with_empty_source() -> None:
         projector_id='projector',
         stream_key=CanonicalStreamKey(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             partition_id='btcusdt',
         ),
         batch_size=10,
@@ -120,7 +120,7 @@ def test_projector_runtime_stop_before_start_fails() -> None:
         projector_id='projector',
         stream_key=CanonicalStreamKey(
             source_id='binance',
-            stream_id='spot_trades',
+            stream_id='binance_spot_trades',
             partition_id='btcusdt',
         ),
         batch_size=10,

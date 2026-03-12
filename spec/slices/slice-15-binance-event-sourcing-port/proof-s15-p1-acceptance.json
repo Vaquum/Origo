@@ -1,6 +1,6 @@
 {
   "acceptance": {
-    "futures_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "row_count": 3,
         "rows_hash_sha256": "7528e551989bad907e743e474a14448372916e947de0c519b5e44b95d7961d34",
@@ -70,7 +70,7 @@
         ]
       }
     },
-    "spot_agg_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "row_count": 3,
         "rows_hash_sha256": "e67d967b093fd70f5fc50e879052f175f3b6ec19fa179553528f8914a759f47e",
@@ -148,7 +148,7 @@
         ]
       }
     },
-    "spot_trades": {
+    "binance_spot_trades": {
       "aligned_1s": {
         "row_count": 3,
         "rows_hash_sha256": "e73c39c76bf546134fd05dd235f9267d7f218deef39b606acb42d4eea954d05d",

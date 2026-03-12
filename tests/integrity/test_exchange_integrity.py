@@ -15,7 +15,7 @@ def test_spot_trades_integrity_passes_for_valid_rows() -> None:
         (100, 50000.0, 0.1, 5000.0, 1704067200000, True, True, datetime(2024, 1, 1, tzinfo=UTC)),
         (101, 50001.0, 0.2, 10000.2, 1704067201000, False, True, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC)),
     ]
-    report = run_exchange_integrity_suite_rows(dataset='spot_trades', rows=rows)
+    report = run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
     assert report.rows_checked == 2
     assert report.sequence_gap_count == 0
     assert report.min_id == 100
@@ -28,7 +28,7 @@ def test_spot_trades_integrity_fails_on_sequence_gap() -> None:
         (102, 50001.0, 0.2, 10000.2, 1704067201000, False, True, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC)),
     ]
     with pytest.raises(ValueError, match='sequence-gap'):
-        run_exchange_integrity_suite_rows(dataset='spot_trades', rows=rows)
+        run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
 
 
 def test_spot_trades_integrity_allows_zero_starting_trade_id() -> None:
@@ -36,35 +36,48 @@ def test_spot_trades_integrity_allows_zero_starting_trade_id() -> None:
         (0, 50000.0, 0.1, 5000.0, 1502928000000, True, True, datetime(2017, 8, 17, tzinfo=UTC)),
         (1, 50001.0, 0.2, 10000.2, 1502928001000, False, True, datetime(2017, 8, 17, 0, 0, 1, tzinfo=UTC)),
     ]
-    report = run_exchange_integrity_suite_rows(dataset='spot_trades', rows=rows)
+    report = run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
     assert report.rows_checked == 2
     assert report.sequence_gap_count == 0
     assert report.min_id == 0
     assert report.max_id == 1
 
 
-def test_futures_trades_integrity_fails_on_anomaly() -> None:
+def test_binance_spot_trades_integrity_fails_on_anomaly() -> None:
     rows = [
-        (200, -1.0, 0.1, 10.0, 1704067200000, True, datetime(2024, 1, 1, tzinfo=UTC)),
+        (
+            200,
+            -1.0,
+            0.1,
+            10.0,
+            1704067200000,
+            True,
+            True,
+            datetime(2024, 1, 1, tzinfo=UTC),
+        ),
     ]
     with pytest.raises(ValueError, match='anomaly check failed'):
-        run_exchange_integrity_suite_rows(dataset='futures_trades', rows=rows)
+        run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
 
 
-def test_futures_agg_frame_integrity_passes() -> None:
+def test_binance_spot_trades_frame_integrity_passes() -> None:
     frame = pl.DataFrame(
         {
-            'futures_agg_trades_id': [1, 2],
+            'trade_id': [1, 2],
             'price': [100.0, 101.0],
             'quantity': [0.5, 0.6],
-            'first_trade_id': [10, 11],
-            'last_trade_id': [10, 11],
+            'quote_quantity': [50.0, 60.6],
             'timestamp': [1704067200000, 1704067201000],
             'is_buyer_maker': [True, False],
+            'is_best_match': [True, True],
+            'datetime': [
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC),
+            ],
         }
     )
     report = run_exchange_integrity_suite_frame(
-        dataset='futures_agg_trades',
+        dataset='binance_spot_trades',
         frame=frame,
     )
     assert report.rows_checked == 2

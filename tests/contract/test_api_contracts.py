@@ -20,7 +20,7 @@ def test_raw_query_rejects_multiple_window_selectors() -> None:
     with pytest.raises(ValidationError, match='At most one window mode can be provided'):
         RawQueryRequest(
             mode='native',
-            sources=['spot_trades'],
+            sources=['binance_spot_trades'],
             n_rows=10,
             n_random=5,
         )
@@ -29,7 +29,7 @@ def test_raw_query_rejects_multiple_window_selectors() -> None:
 def test_raw_query_accepts_no_window_selector() -> None:
     request = RawQueryRequest(
         mode='native',
-        sources=['spot_trades'],
+        sources=['binance_spot_trades'],
     )
     assert request.n_rows is None
     assert request.n_random is None
@@ -39,7 +39,7 @@ def test_raw_query_accepts_no_window_selector() -> None:
 def test_raw_query_accepts_no_window_selector_for_aligned_mode() -> None:
     request = RawQueryRequest(
         mode='aligned_1s',
-        sources=['spot_trades'],
+        sources=['binance_spot_trades'],
     )
     assert request.mode == 'aligned_1s'
     assert request.n_rows is None
@@ -50,10 +50,10 @@ def test_raw_query_accepts_no_window_selector_for_aligned_mode() -> None:
 def test_raw_query_accepts_multi_source_contract_shape() -> None:
     request = RawQueryRequest(
         mode='native',
-        sources=['spot_trades', 'spot_agg_trades'],
+        sources=['binance_spot_trades', 'okx_spot_trades'],
         n_rows=10,
     )
-    assert request.sources == ['spot_trades', 'spot_agg_trades']
+    assert request.sources == ['binance_spot_trades', 'okx_spot_trades']
 
 
 def test_raw_query_request_accepts_okx_source() -> None:
@@ -90,7 +90,7 @@ def test_raw_query_view_fields_must_be_set_together() -> None:
     ):
         RawQueryRequest(
             mode='native',
-            sources=['spot_trades'],
+            sources=['binance_spot_trades'],
             n_rows=10,
             view_id='aligned_1s_raw',
         )
@@ -99,7 +99,7 @@ def test_raw_query_view_fields_must_be_set_together() -> None:
 def test_raw_query_view_fields_accept_target_shape() -> None:
     request = RawQueryRequest(
         mode='native',
-        sources=['spot_trades', 'spot_agg_trades'],
+        sources=['binance_spot_trades', 'okx_spot_trades'],
         n_rows=10,
         view_id='aligned_1s_raw',
         view_version=1,
@@ -156,7 +156,7 @@ def test_raw_export_view_fields_must_be_set_together() -> None:
         RawExportRequest(
             mode='native',
             format='parquet',
-            dataset='spot_trades',
+            dataset='binance_spot_trades',
             n_rows=10,
             view_id='aligned_1s_raw',
         )
@@ -166,7 +166,7 @@ def test_raw_export_view_fields_accept_target_shape() -> None:
     request = RawExportRequest(
         mode='native',
         format='parquet',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         n_rows=10,
         view_id='aligned_1s_raw',
         view_version=1,
@@ -179,8 +179,8 @@ def test_raw_query_response_requires_rights_metadata() -> None:
     response = RawQueryResponse.model_validate(
         {
             'mode': 'native',
-            'source': 'spot_trades',
-            'sources': ['spot_trades'],
+            'source': 'binance_spot_trades',
+            'sources': ['binance_spot_trades'],
             'row_count': 1,
             'schema': [{'name': 'event_time', 'dtype': 'DateTime64(3)'}],
             'rights_state': 'Hosted Allowed',
@@ -200,7 +200,7 @@ def test_raw_export_status_requires_rights_metadata() -> None:
             'status': 'queued',
             'mode': 'native',
             'format': 'parquet',
-            'dataset': 'spot_trades',
+            'dataset': 'binance_spot_trades',
             'source': 'binance',
             'rights_state': 'Hosted Allowed',
             'rights_provisional': False,

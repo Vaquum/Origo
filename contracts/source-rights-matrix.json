@@ -1,13 +1,11 @@
 {
-  "version": "2026-03-08-s13-c7",
+  "version": "2026-03-12-s33-cleanup",
   "sources": {
     "binance": {
       "rights_state": "Hosted Allowed",
       "rights_provisional": false,
       "datasets": [
-        "spot_trades",
-        "spot_agg_trades",
-        "futures_trades"
+        "binance_spot_trades"
       ],
       "legal_signoff_artifact": "contracts/legal/binance-hosted-allowed.md"
     },

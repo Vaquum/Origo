@@ -27,7 +27,7 @@ class _AlignedExportCase:
 _CASE_DEFS: tuple[_AlignedExportCase, ...] = (
     _AlignedExportCase(
         case_id='spot_trades_time_range',
-        dataset='spot_trades',
+        dataset='binance_spot_trades',
         fields=('aligned_at_utc', 'open_price', 'close_price', 'trade_count'),
         time_range=('2017-08-17T12:00:00Z', '2017-08-17T13:00:00Z'),
     ),

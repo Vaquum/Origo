@@ -71,6 +71,6 @@
 
 ## Minimal examples
 - Query with view metadata:
-  - `{ "mode":"native", "sources":["spot_trades"], "view_id":"aligned_1s_raw", "view_version":1, "n_rows":100, "strict":false }`
+  - `{ "mode":"native", "sources":["binance_spot_trades"], "view_id":"aligned_1s_raw", "view_version":1, "n_rows":100, "strict":false }`
 - Export status rights metadata shape:
   - `{ "rights_state":"Hosted Allowed", "rights_provisional":false, "source":"binance" }`

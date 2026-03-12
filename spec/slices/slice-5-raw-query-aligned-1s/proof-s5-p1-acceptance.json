@@ -9,7 +9,7 @@
         "close_price",
         "trade_count"
       ],
-      "dataset": "spot_trades",
+      "dataset": "binance_spot_trades",
       "execution_path": "binance_aligned",
       "first_row": {
         "aligned_at_utc": "2017-08-17T12:01:48+00:00",
@@ -39,7 +39,7 @@
         "low_price",
         "quote_volume_sum"
       ],
-      "dataset": "futures_trades",
+      "dataset": "binance_spot_trades",
       "execution_path": "binance_aligned",
       "first_row": {
         "aligned_at_utc": "2019-09-08T19:52:45+00:00",

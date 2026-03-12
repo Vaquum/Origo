@@ -1080,7 +1080,7 @@ jobs:
             if ! run_privileged mountpoint -q "${target_dir}"; then
               run_privileged mount "${target_dir}"
             fi
-            run_privileged chown 101:101 "${target_dir}" || true
+            run_privileged chown 101:101 "${target_dir}"
 
             mounted_source="$(run_privileged findmnt -n -o SOURCE --target "${target_dir}")"
             echo "ClickHouse data mount ready: target=${target_dir} source=${mounted_source} disk=${disk_by_id}"
@@ -1122,9 +1122,9 @@ jobs:
             fi
 
             echo "Migrating legacy ClickHouse data volume (${legacy_volume}) to ${target_dir}."
-            compose_cmd stop clickhouse || true
+            compose_cmd stop clickhouse
             run_privileged cp -a "${legacy_mountpoint}/." "${target_dir}/"
-            run_privileged chown -R 101:101 "${target_dir}" || true
+            run_privileged chown -R 101:101 "${target_dir}"
             echo "Legacy ClickHouse data migration completed."
           }
 

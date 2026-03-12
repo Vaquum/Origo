@@ -419,7 +419,6 @@ def _write_events_to_canonical(
         source_event_time_utc = datetime.fromtimestamp(event.timestamp_ms / 1000.0, tz=UTC)
         payload_json = _payload_json_for_event(event)
         payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
-        payload_sha256_raw = hashlib.sha256(payload_raw).hexdigest()
         write_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
@@ -431,8 +430,6 @@ def _write_events_to_canonical(
                 payload_content_type=_PAYLOAD_CONTENT_TYPE,
                 payload_encoding=_PAYLOAD_ENCODING,
                 payload_raw=payload_raw,
-                payload_json_precanonical=payload_json,
-                payload_sha256_raw_precomputed=payload_sha256_raw,
                 run_id=run_id,
             )
         )

@@ -43,12 +43,12 @@ class _RecordingClickHouseClient:
 
 def _binance_event(at_utc: datetime, trade_id: int) -> BinanceSpotTradeEvent:
     return BinanceSpotTradeEvent(
+        partition_id=at_utc.strftime('%Y-%m-%d'),
         trade_id=trade_id,
         price_text='41000.10000000',
         quantity_text='0.01000000',
         quote_quantity_text='410.00100000',
-        timestamp=int(at_utc.timestamp() * 1000),
-        event_time_utc=at_utc,
+        timestamp_ms=int(at_utc.timestamp() * 1000),
         is_buyer_maker=False,
         is_best_match=True,
     )

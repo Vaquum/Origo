@@ -1,4 +1,5 @@
 import hashlib
+import os
 import sys
 import zipfile
 from datetime import UTC, datetime
@@ -9,7 +10,7 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
-from origo_control_plane.config import require_env, resolve_clickhouse_native_settings
+from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.binance_aligned_projector import (
     project_binance_spot_trades_aligned,
 )
@@ -36,7 +37,7 @@ _BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
 
 
 def _load_backfill_projection_mode_or_raise() -> str:
-    raw_mode = require_env(_BACKFILL_PROJECTION_MODE_ENV)
+    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
     normalized = raw_mode.strip().lower()
     if normalized not in {'inline', 'deferred'}:
         raise RuntimeError(
@@ -102,10 +103,13 @@ def _process_day(
     csv_checksum = hashlib.sha256(csv_content).hexdigest()
     context.log.info(f'CSV checksum: {csv_checksum}')
 
-    events = parse_binance_spot_trade_csv(csv_content)
+    events = parse_binance_spot_trade_csv(
+        csv_content,
+        partition_id=partition_date_str,
+    )
     context.log.info(f'Parsed {len(events)} rows from CSV')
 
-    integrity_rows = [event.to_integrity_tuple() for event in events]
+    integrity_rows = (event.to_integrity_tuple() for event in events)
     integrity_report = run_exchange_integrity_suite_rows(
         dataset='binance_spot_trades',
         rows=integrity_rows,
@@ -132,6 +136,7 @@ def _process_day(
         write_summary = write_binance_spot_trades_to_canonical(
             client=client,
             database=CLICKHOUSE_DATABASE,
+            partition_id=partition_date_str,
             events=events,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
@@ -154,8 +159,7 @@ def _process_day(
             )
 
         projected_at_utc = datetime.now(UTC)
-        partition_ids = {event.partition_id for event in events}
-
+        partition_ids = {partition_date_str}
         if projection_mode == 'inline':
             native_projection_summary_dict = project_binance_spot_trades_native(
                 client=client,

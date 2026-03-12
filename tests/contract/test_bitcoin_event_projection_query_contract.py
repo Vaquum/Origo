@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
+
+import pytest
 
 from origo.query.bitcoin_derived_aligned_1s import build_bitcoin_derived_aligned_1s_sql
 from origo.query.bitcoin_native import build_bitcoin_native_query_spec
@@ -81,3 +83,19 @@ def test_bitcoin_stream_aligned_query_targets_canonical_aligned_table() -> None:
         assert 'FROM origo.canonical_bitcoin_block_headers_native_v1' not in sql
         assert 'FROM origo.canonical_bitcoin_block_transactions_native_v1' not in sql
         assert 'FROM origo.canonical_bitcoin_mempool_state_native_v1' not in sql
+
+
+def test_bitcoin_stream_aligned_query_rejects_invalid_dataset_identifier() -> None:
+    with pytest.raises(ValueError, match='Invalid dataset identifier'):
+        build_bitcoin_stream_aligned_1s_sql(
+            dataset=cast(
+                Literal[
+                    'bitcoin_block_headers',
+                    'bitcoin_block_transactions',
+                    'bitcoin_mempool_state',
+                ],
+                "bitcoin_block_headers'; DROP TABLE x; --",
+            ),
+            window=LatestRowsWindow(rows=1),
+            database='origo',
+        )

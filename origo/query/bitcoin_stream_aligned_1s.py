@@ -276,8 +276,6 @@ def _extract_events(
 
         events.append(_AlignedEvent(order_key=order_key, payload=payload))
 
-    if events == []:
-        raise RuntimeError('aligned payload rows did not contain events')
     return sorted(events, key=lambda event: event.order_key)
 
 
@@ -317,6 +315,8 @@ def build_bitcoin_stream_aligned_1s_sql(
 ) -> str:
     if not _IDENTIFIER_PATTERN.match(database):
         raise ValueError(f'Invalid database identifier: {database}')
+    if not _IDENTIFIER_PATTERN.match(dataset):
+        raise ValueError(f'Invalid dataset identifier: {dataset}')
 
     where_clause = _build_where_clause(stream_id=dataset, window=window)
     base_query = (

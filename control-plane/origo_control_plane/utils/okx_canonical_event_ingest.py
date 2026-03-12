@@ -15,6 +15,7 @@ _STREAM_ID = 'okx_spot_trades'
 _INSTRUMENT_ID = 'BTC-USDT'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
+_WRITE_EVENTS_BATCH_SIZE = 10_000
 _EXPECTED_CSV_HEADER = (
     'instrument_name',
     'trade_id',
@@ -167,7 +168,26 @@ def write_okx_spot_trades_to_canonical(
 ) -> dict[str, int]:
     writer = CanonicalEventWriter(client=client, database=database)
 
+    inserted = 0
+    duplicate = 0
     write_inputs: list[CanonicalEventWriteInput] = []
+
+    def flush_batch() -> None:
+        nonlocal inserted, duplicate
+        if write_inputs == []:
+            return
+        results = writer.write_events(write_inputs)
+        write_inputs.clear()
+        for result in results:
+            if result.status == 'inserted':
+                inserted += 1
+            elif result.status == 'duplicate':
+                duplicate += 1
+            else:
+                raise RuntimeError(
+                    f'Unexpected canonical writer status: {result.status}'
+                )
+
     for event in events:
         payload_json = json.dumps(
             event.to_payload(),
@@ -190,17 +210,10 @@ def write_okx_spot_trades_to_canonical(
                 run_id=run_id,
             )
         )
+        if len(write_inputs) >= _WRITE_EVENTS_BATCH_SIZE:
+            flush_batch()
 
-    inserted = 0
-    duplicate = 0
-    results = writer.write_events(write_inputs)
-    for result in results:
-        if result.status == 'inserted':
-            inserted += 1
-        elif result.status == 'duplicate':
-            duplicate += 1
-        else:
-            raise RuntimeError(f'Unexpected canonical writer status: {result.status}')
+    flush_batch()
 
     return {
         'rows_processed': len(events),

@@ -55,7 +55,7 @@ class CanonicalRuntimeAuditLog:
             return []
 
         audit_events: list[ImmutableAuditAppendInput] = []
-        for index, event in enumerate(events, start=1):
+        for event_number, event in enumerate(events, start=1):
             event_type = event.get('event_type')
             source_id = event.get('source_id')
             stream_id = event.get('stream_id')
@@ -66,27 +66,29 @@ class CanonicalRuntimeAuditLog:
             status = event.get('status')
             run_id = event.get('run_id')
             if not isinstance(event_type, str):
-                raise RuntimeError(f'events[{index}].event_type must be string')
+                raise RuntimeError(f'event #{event_number} event_type must be string')
             if not isinstance(source_id, str):
-                raise RuntimeError(f'events[{index}].source_id must be string')
+                raise RuntimeError(f'event #{event_number} source_id must be string')
             if not isinstance(stream_id, str):
-                raise RuntimeError(f'events[{index}].stream_id must be string')
+                raise RuntimeError(f'event #{event_number} stream_id must be string')
             if not isinstance(partition_id, str):
-                raise RuntimeError(f'events[{index}].partition_id must be string')
+                raise RuntimeError(f'event #{event_number} partition_id must be string')
             if not isinstance(source_offset_or_equivalent, str):
                 raise RuntimeError(
-                    f'events[{index}].source_offset_or_equivalent must be string'
+                    f'event #{event_number} source_offset_or_equivalent must be string'
                 )
             if not isinstance(event_id, str):
-                raise RuntimeError(f'events[{index}].event_id must be string')
+                raise RuntimeError(f'event #{event_number} event_id must be string')
             if not isinstance(payload_sha256_raw, str):
                 raise RuntimeError(
-                    f'events[{index}].payload_sha256_raw must be string'
+                    f'event #{event_number} payload_sha256_raw must be string'
                 )
             if not isinstance(status, str):
-                raise RuntimeError(f'events[{index}].status must be string')
+                raise RuntimeError(f'event #{event_number} status must be string')
             if run_id is not None and not isinstance(run_id, str):
-                raise RuntimeError(f'events[{index}].run_id must be string when set')
+                raise RuntimeError(
+                    f'event #{event_number} run_id must be string when set'
+                )
 
             audit_events.append(
                 ImmutableAuditAppendInput(

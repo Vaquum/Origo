@@ -208,13 +208,13 @@ class ImmutableAuditLog:
             return []
 
         normalized_events: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
-        for index, event in enumerate(events, start=1):
+        for event_number, event in enumerate(events, start=1):
             if event.event_type.strip() == '':
                 raise RuntimeError(
-                    f'events[{index}].event_type must be non-empty'
+                    f'event #{event_number} event_type must be non-empty'
                 )
             normalized_payload = _expect_dict(
-                event.payload, f'events[{index}].payload'
+                event.payload, f'event #{event_number} payload'
             )
             normalized_attributes = _normalize_attributes(event.attributes)
             normalized_events.append(

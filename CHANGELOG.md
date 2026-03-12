@@ -1,6 +1,11 @@
 # Changelog
 
 ## 2026-03-12
+- Fixed large-partition canonical ingest failure caused by ClickHouse `max_query_size` on identity lookup:
+  - reduced canonical identity lookup chunk size in `CanonicalEventWriter` to keep tuple-`IN` select queries under default ClickHouse parser limits
+  - added contract coverage for writer query chunking (`tests/contract/test_canonical_event_writer_query_chunking_contract.py`)
+- Updated version to `Origo API v0.1.27`.
+
 - Fixed canonical backfill ingest throughput bottlenecks for exchange daily files:
   - added batched canonical event writes in `CanonicalEventWriter.write_events` (bulk identity lookup + bulk insert path)
   - added batched runtime audit append path (`ImmutableAuditLog.append_events` + `CanonicalRuntimeAuditLog.append_ingest_events`) to avoid per-event full-chain revalidation/fsync loops

@@ -121,7 +121,7 @@
     - `okx_spot_trades`
     - `bybit_spot_trades`
   - enabled historical `mode=aligned_1s` execution for exchange spot-kline routes with deterministic aligned OHLCV aggregation semantics
-  - preserved explicit historical deferral for `binance_spot_trades` and `binance_spot_trades`
+  - at that slice boundary, historical scope still excluded legacy Binance non-spot dataset keys
   - added historical contract coverage for exchange trade `aligned_1s` mode across HTTP + Python surfaces
   - added replay determinism coverage for exchange trade historical paths in both `native` and `aligned_1s`
 - Added Slice 26 docs and artifacts:

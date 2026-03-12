@@ -27,8 +27,6 @@ def _build_rights_matrix(*, legal_signoff_artifact: str) -> dict[str, Any]:
                 'rights_provisional': False,
                 'datasets': [
                     'binance_spot_trades',
-                    'binance_spot_trades',
-                    'binance_spot_trades',
                 ],
                 'legal_signoff_artifact': legal_signoff_artifact,
             },

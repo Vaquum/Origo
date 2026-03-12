@@ -52,7 +52,7 @@ class ExchangeIntegrityReport:
 
 _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
     'binance_spot_trades': _ExchangeIntegritySpec(
-        tuple_size=8,
+        tuple_size=7,
         id_index=0,
         timestamp_index=4,
         price_index=1,
@@ -61,7 +61,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         side_index=None,
         bool_indices=(5, 6),
         first_last_trade_indices=None,
-        datetime_index=7,
+        datetime_index=None,
         enforce_monotonic_timestamp=False,
         frame_columns=(
             'trade_id',
@@ -71,7 +71,6 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
             'timestamp',
             'is_buyer_maker',
             'is_best_match',
-            'datetime',
         ),
     ),
     'okx_spot_trades': _ExchangeIntegritySpec(
@@ -143,9 +142,24 @@ def _expect_int(*, value: Any, label: str) -> int:
 
 
 def _expect_positive_number(*, value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool):
         raise ValueError(f'Exchange integrity schema/type check failed for {label}')
-    numeric_value = float(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized == '':
+            raise ValueError(
+                f'Exchange integrity schema/type check failed for {label}'
+            )
+        try:
+            numeric_value = float(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                f'Exchange integrity schema/type check failed for {label}'
+            ) from exc
+    elif isinstance(value, (int, float)):
+        numeric_value = float(value)
+    else:
+        raise ValueError(f'Exchange integrity schema/type check failed for {label}')
     if numeric_value <= 0:
         raise ValueError(
             f'Exchange integrity anomaly check failed for {label}: '

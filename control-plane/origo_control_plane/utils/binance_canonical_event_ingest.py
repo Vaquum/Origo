@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from datetime import UTC, datetime, timedelta
 from itertools import chain
 
 from clickhouse_driver import Client as ClickhouseClient
@@ -18,18 +17,16 @@ from origo.events.writer import (
     CanonicalEventWriteInput,
     CanonicalEventWriter,
     canonical_event_id_from_key,
-    canonical_event_idempotency_key,
 )
 
 _SOURCE_ID = 'binance'
 _STREAM_ID = 'binance_spot_trades'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
-_WRITE_EVENTS_BATCH_SIZE = 10_000
 _FAST_INSERT_MODE_ENV = 'ORIGO_CANONICAL_FAST_INSERT_MODE'
 _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
-_INSERT_CHUNK_SIZE = 100_000
+_INSERT_CHUNK_SIZE = 100000
 
 
 def _parse_bool(value: str, *, label: str) -> bool:
@@ -45,10 +42,10 @@ def _parse_decimal_text(value: str, *, label: str) -> str:
     candidate = value.strip()
     if candidate == '':
         raise RuntimeError(f'{label} must be non-empty decimal text')
-    try:
-        Decimal(candidate)
-    except InvalidOperation as exc:
-        raise RuntimeError(f'{label} must be valid decimal text, got {value!r}') from exc
+    if not any(character.isdigit() for character in candidate):
+        raise RuntimeError(f'{label} must contain digits, got {value!r}')
+    if any(character not in '+-.eE0123456789' for character in candidate):
+        raise RuntimeError(f'{label} contains invalid decimal characters, got {value!r}')
     return candidate
 
 
@@ -60,34 +57,28 @@ def _parse_int(value: str, *, label: str) -> int:
         raise RuntimeError(f'{label} must be integer, got {value!r}') from exc
 
 
-def _parse_timestamp_to_utc(value: str, *, label: str) -> tuple[int, datetime]:
+def _parse_timestamp_to_epoch_ms(value: str, *, label: str) -> int:
     timestamp = _parse_int(value, label=label)
     timestamp_length = len(value.strip())
     if timestamp_length == 13:
-        event_time_utc = datetime.fromtimestamp(timestamp / 1000.0, tz=UTC)
-    elif timestamp_length == 16:
-        event_time_utc = datetime.fromtimestamp(timestamp / 1000000.0, tz=UTC)
-    else:
-        raise RuntimeError(
-            f'{label} must be epoch milliseconds or microseconds, got {timestamp}'
-        )
-    return timestamp, event_time_utc
+        return timestamp
+    if timestamp_length == 16:
+        return timestamp // 1000
+    raise RuntimeError(
+        f'{label} must be epoch milliseconds or microseconds, got {timestamp}'
+    )
 
 
 @dataclass(frozen=True)
 class BinanceSpotTradeEvent:
+    partition_id: str
     trade_id: int
     price_text: str
     quantity_text: str
     quote_quantity_text: str
-    timestamp: int
-    event_time_utc: datetime
+    timestamp_ms: int
     is_buyer_maker: bool
     is_best_match: bool
-
-    @property
-    def partition_id(self) -> str:
-        return self.event_time_utc.strftime('%Y-%m-%d')
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -99,20 +90,19 @@ class BinanceSpotTradeEvent:
             'is_best_match': self.is_best_match,
         }
 
-    def to_integrity_tuple(self) -> tuple[int, float, float, float, int, bool, bool, datetime]:
+    def to_integrity_tuple(self) -> tuple[int, str, str, str, int, bool, bool]:
         return (
             self.trade_id,
-            float(Decimal(self.price_text)),
-            float(Decimal(self.quantity_text)),
-            float(Decimal(self.quote_quantity_text)),
-            self.timestamp,
+            self.price_text,
+            self.quantity_text,
+            self.quote_quantity_text,
+            self.timestamp_ms,
             self.is_buyer_maker,
             self.is_best_match,
-            self.event_time_utc,
         )
 
 
-def _iter_csv_rows(csv_content: bytes) -> list[list[str]]:
+def _iter_csv_rows(csv_content: bytes) -> Iterator[list[str]]:
     csv_text = csv_content.decode('utf-8')
     reader = csv.reader(csv_text.splitlines())
     first_row = next(reader, None)
@@ -121,13 +111,55 @@ def _iter_csv_rows(csv_content: bytes) -> list[list[str]]:
 
     first_cell = first_row[0].strip().lower() if first_row else ''
     if first_cell in {'id', 'trade_id'}:
-        rows = reader
+        rows: Iterator[list[str]] = reader
     else:
         rows = chain([first_row], reader)
-    return [row for row in rows if row != []]
+    for row in rows:
+        if row != []:
+            yield row
 
 
-def parse_binance_spot_trade_csv(csv_content: bytes) -> list[BinanceSpotTradeEvent]:
+def _partition_bounds_epoch_ms(*, partition_id: str) -> tuple[int, int]:
+    try:
+        day_start_utc = datetime.fromisoformat(partition_id).replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'partition_id must be ISO date (YYYY-MM-DD), got {partition_id!r}'
+        ) from exc
+    day_end_utc = day_start_utc + timedelta(days=1)
+    return int(day_start_utc.timestamp() * 1000), int(day_end_utc.timestamp() * 1000)
+
+
+def _payload_json_for_event(event: BinanceSpotTradeEvent) -> str:
+    is_best_match = 'true' if event.is_best_match else 'false'
+    is_buyer_maker = 'true' if event.is_buyer_maker else 'false'
+    # Keys are intentionally sorted to match canonical JSON ordering.
+    return (
+        '{"is_best_match":'
+        + is_best_match
+        + ',"is_buyer_maker":'
+        + is_buyer_maker
+        + ',"price":"'
+        + event.price_text
+        + '","qty":"'
+        + event.quantity_text
+        + '","quote_qty":"'
+        + event.quote_quantity_text
+        + '","trade_id":'
+        + str(event.trade_id)
+        + '}'
+    )
+
+
+def parse_binance_spot_trade_csv(
+    csv_content: bytes, *, partition_id: str | None = None
+) -> list[BinanceSpotTradeEvent]:
+    day_start_epoch_ms: int | None = None
+    day_end_epoch_ms: int | None = None
+    if partition_id is not None:
+        day_start_epoch_ms, day_end_epoch_ms = _partition_bounds_epoch_ms(
+            partition_id=partition_id
+        )
     rows = _iter_csv_rows(csv_content)
     events: list[BinanceSpotTradeEvent] = []
     for row_number, row in enumerate(rows, start=1):
@@ -135,12 +167,27 @@ def parse_binance_spot_trade_csv(csv_content: bytes) -> list[BinanceSpotTradeEve
             raise RuntimeError(
                 f'CSV row {row_number} must contain at least 7 columns, got {len(row)}'
             )
-        timestamp, event_time_utc = _parse_timestamp_to_utc(
+        timestamp_ms = _parse_timestamp_to_epoch_ms(
             row[4],
             label=f'CSV row {row_number} timestamp',
         )
+        event_partition_id = partition_id
+        if day_start_epoch_ms is not None and day_end_epoch_ms is not None:
+            if timestamp_ms < day_start_epoch_ms or timestamp_ms >= day_end_epoch_ms:
+                raise RuntimeError(
+                    'CSV row timestamp must fall inside partition UTC day window, '
+                    f'row={row_number}, partition_id={partition_id}, '
+                    f'timestamp_ms={timestamp_ms}'
+                )
+        else:
+            event_partition_id = datetime.fromtimestamp(
+                timestamp_ms / 1000.0, tz=UTC
+            ).strftime('%Y-%m-%d')
+        if event_partition_id is None:
+            raise RuntimeError('Parsed Binance row must resolve partition_id')
         events.append(
             BinanceSpotTradeEvent(
+                partition_id=event_partition_id,
                 trade_id=_parse_int(row[0], label=f'CSV row {row_number} trade_id'),
                 price_text=_parse_decimal_text(
                     row[1], label=f'CSV row {row_number} price'
@@ -151,8 +198,7 @@ def parse_binance_spot_trade_csv(csv_content: bytes) -> list[BinanceSpotTradeEve
                 quote_quantity_text=_parse_decimal_text(
                     row[3], label=f'CSV row {row_number} quote_quantity'
                 ),
-                timestamp=timestamp,
-                event_time_utc=event_time_utc,
+                timestamp_ms=timestamp_ms,
                 is_buyer_maker=_parse_bool(
                     row[5],
                     label=f'CSV row {row_number} is_buyer_maker',
@@ -172,7 +218,8 @@ def _write_events_to_canonical(
     *,
     client: ClickhouseClient,
     database: str,
-    events: list[dict[str, object]],
+    partition_id: str | None,
+    events: list[BinanceSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
 ) -> dict[str, int]:
@@ -190,17 +237,18 @@ def _write_events_to_canonical(
             f'got={fast_insert_mode!r}'
         )
 
-    if (
-        fast_insert_mode == _FAST_INSERT_MODE_ASSUME_NEW_PARTITION
-        and events != []
-    ):
-        partition_ids = {str(event['partition_id']) for event in events}
-        if len(partition_ids) != 1:
-            raise RuntimeError(
-                'Binance fast canonical insert requires exactly one partition_id '
-                f'per batch, got={sorted(partition_ids)}'
-            )
-        partition_id = next(iter(partition_ids))
+    if fast_insert_mode == _FAST_INSERT_MODE_ASSUME_NEW_PARTITION and events != []:
+        resolved_partition_id = partition_id
+        if resolved_partition_id is None:
+            event_partition_ids = {event.partition_id for event in events}
+            if len(event_partition_ids) != 1:
+                raise RuntimeError(
+                    'Binance fast canonical insert requires exactly one partition_id '
+                    f'per batch, got={sorted(event_partition_ids)}'
+                )
+            resolved_partition_id = next(iter(event_partition_ids))
+        if resolved_partition_id.strip() == '':
+            raise RuntimeError('partition_id must be non-empty')
         existing_rows = client.execute(
             f'''
             SELECT 1
@@ -213,70 +261,44 @@ def _write_events_to_canonical(
             {
                 'source_id': _SOURCE_ID,
                 'stream_id': _STREAM_ID,
-                'partition_id': partition_id,
+                'partition_id': resolved_partition_id,
             },
         )
         if existing_rows != []:
             raise RuntimeError(
                 'Binance fast canonical insert requires empty target partition; '
                 f'partition already has data source={_SOURCE_ID} stream={_STREAM_ID} '
-                f'partition_id={partition_id}'
+                f'partition_id={resolved_partition_id}'
             )
 
-        insert_rows: list[tuple[object, ...]] = []
+        ingested_at_utc_ms = int(ingested_at_utc.astimezone(UTC).timestamp() * 1000)
+        idempotency_key_prefix = (
+            f'{CANONICAL_EVENT_ENVELOPE_VERSION}|{_SOURCE_ID}|{_STREAM_ID}|'
+            f'{resolved_partition_id}|'
+        )
+        envelope_versions: list[int] = []
+        event_ids: list[object] = []
+        source_ids: list[str] = []
+        stream_ids: list[str] = []
+        partition_ids: list[str] = []
+        source_offsets: list[str] = []
+        source_event_times: list[int] = []
+        ingested_times: list[int] = []
+        payload_content_types: list[str] = []
+        payload_encodings: list[str] = []
+        payload_raws: list[bytes] = []
+        payload_sha256_raws: list[str] = []
+        payload_jsons: list[str] = []
+        inserted_count = 0
         first_offset: str | None = None
         last_offset: str | None = None
         first_event_id: str | None = None
         last_event_id: str | None = None
-        for event in events:
-            source_offset = str(event['source_offset_or_equivalent'])
-            source_event_time_utc = event['source_event_time_utc']
-            if not isinstance(source_event_time_utc, datetime):
-                raise RuntimeError('source_event_time_utc must be datetime')
-            payload = event['payload']
-            if not isinstance(payload, dict):
-                raise RuntimeError('payload must be dict')
-            payload_json = json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(',', ':'),
-                ensure_ascii=True,
-            )
-            payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
-            payload_sha256_raw = hashlib.sha256(payload_raw).hexdigest()
-            event_id = canonical_event_id_from_key(
-                canonical_event_idempotency_key(
-                    source_id=_SOURCE_ID,
-                    stream_id=_STREAM_ID,
-                    partition_id=partition_id,
-                    source_offset_or_equivalent=source_offset,
-                )
-            )
-            if first_offset is None:
-                first_offset = source_offset
-                first_event_id = str(event_id)
-            last_offset = source_offset
-            last_event_id = str(event_id)
-            insert_rows.append(
-                (
-                    CANONICAL_EVENT_ENVELOPE_VERSION,
-                    event_id,
-                    _SOURCE_ID,
-                    _STREAM_ID,
-                    partition_id,
-                    source_offset,
-                    source_event_time_utc.astimezone(UTC),
-                    ingested_at_utc.astimezone(UTC),
-                    _PAYLOAD_CONTENT_TYPE,
-                    _PAYLOAD_ENCODING,
-                    payload_raw,
-                    payload_sha256_raw,
-                    payload_json,
-                )
-            )
 
-        for start in range(0, len(insert_rows), _INSERT_CHUNK_SIZE):
-            chunk = insert_rows[start : start + _INSERT_CHUNK_SIZE]
+        def _flush_chunk() -> None:
+            nonlocal inserted_count
+            if event_ids == []:
+                return
             client.execute(
                 f'''
                 INSERT INTO {database}.canonical_event_log
@@ -297,8 +319,68 @@ def _write_events_to_canonical(
                 )
                 VALUES
                 ''',
-                chunk,
+                [
+                    envelope_versions,
+                    event_ids,
+                    source_ids,
+                    stream_ids,
+                    partition_ids,
+                    source_offsets,
+                    source_event_times,
+                    ingested_times,
+                    payload_content_types,
+                    payload_encodings,
+                    payload_raws,
+                    payload_sha256_raws,
+                    payload_jsons,
+                ],
+                columnar=True,
             )
+            inserted_count += len(event_ids)
+            envelope_versions.clear()
+            event_ids.clear()
+            source_ids.clear()
+            stream_ids.clear()
+            partition_ids.clear()
+            source_offsets.clear()
+            source_event_times.clear()
+            ingested_times.clear()
+            payload_content_types.clear()
+            payload_encodings.clear()
+            payload_raws.clear()
+            payload_sha256_raws.clear()
+            payload_jsons.clear()
+
+        for event in events:
+            source_offset = str(event.trade_id)
+            payload_json = _payload_json_for_event(event)
+            payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
+            payload_sha256_raw = hashlib.sha256(payload_raw).hexdigest()
+            event_id = canonical_event_id_from_key(
+                idempotency_key_prefix + source_offset
+            )
+            if first_offset is None:
+                first_offset = source_offset
+                first_event_id = str(event_id)
+            last_offset = source_offset
+            last_event_id = str(event_id)
+            envelope_versions.append(CANONICAL_EVENT_ENVELOPE_VERSION)
+            event_ids.append(event_id)
+            source_ids.append(_SOURCE_ID)
+            stream_ids.append(_STREAM_ID)
+            partition_ids.append(resolved_partition_id)
+            source_offsets.append(source_offset)
+            # `source_event_time_utc` is DateTime64(9): provide nanosecond ticks.
+            source_event_times.append(event.timestamp_ms * 1_000_000)
+            ingested_times.append(ingested_at_utc_ms)
+            payload_content_types.append(_PAYLOAD_CONTENT_TYPE)
+            payload_encodings.append(_PAYLOAD_ENCODING)
+            payload_raws.append(payload_raw)
+            payload_sha256_raws.append(payload_sha256_raw)
+            payload_jsons.append(payload_json)
+            if len(event_ids) >= _INSERT_CHUNK_SIZE:
+                _flush_chunk()
+        _flush_chunk()
 
         if first_offset is None or last_offset is None:
             raise RuntimeError('Binance fast canonical insert produced no rows')
@@ -309,67 +391,40 @@ def _write_events_to_canonical(
             stream_key=CanonicalStreamKey(
                 source_id=_SOURCE_ID,
                 stream_id=_STREAM_ID,
-                partition_id=partition_id,
+                partition_id=resolved_partition_id,
             ),
             event_type='canonical_ingest_batch',
             run_id=run_id,
-            batch_event_count=len(insert_rows),
-            inserted_count=len(insert_rows),
+            batch_event_count=len(events),
+            inserted_count=inserted_count,
             duplicate_count=0,
             first_source_offset_or_equivalent=first_offset,
             last_source_offset_or_equivalent=last_offset,
             first_event_id=first_event_id,
             last_event_id=last_event_id,
         )
+
         return {
             'rows_processed': len(events),
-            'rows_inserted': len(insert_rows),
+            'rows_inserted': inserted_count,
             'rows_duplicate': 0,
         }
 
     writer = CanonicalEventWriter(client=client, database=database)
-
-    inserted = 0
-    duplicate = 0
     write_inputs: list[CanonicalEventWriteInput] = []
-
-    def flush_batch() -> None:
-        nonlocal inserted, duplicate
-        if write_inputs == []:
-            return
-        results = writer.write_events(write_inputs)
-        write_inputs.clear()
-        for result in results:
-            if result.status == 'inserted':
-                inserted += 1
-            elif result.status == 'duplicate':
-                duplicate += 1
-            else:
-                raise RuntimeError(
-                    f'Unexpected canonical writer status: {result.status}'
-                )
-
     for event in events:
-        partition_id = str(event['partition_id'])
-        source_offset = str(event['source_offset_or_equivalent'])
-        source_event_time_utc = event['source_event_time_utc']
-        if not isinstance(source_event_time_utc, datetime):
-            raise RuntimeError('source_event_time_utc must be datetime')
-        payload = event['payload']
-        if not isinstance(payload, dict):
-            raise RuntimeError('payload must be dict')
-        payload_json = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(',', ':'),
-            ensure_ascii=True,
-        )
+        resolved_partition_id = partition_id if partition_id is not None else event.partition_id
+        if resolved_partition_id.strip() == '':
+            raise RuntimeError('partition_id must be non-empty')
+        source_offset = str(event.trade_id)
+        source_event_time_utc = datetime.fromtimestamp(event.timestamp_ms / 1000.0, tz=UTC)
+        payload_json = _payload_json_for_event(event)
         payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
         write_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
                 stream_id=_STREAM_ID,
-                partition_id=partition_id,
+                partition_id=resolved_partition_id,
                 source_offset_or_equivalent=source_offset,
                 source_event_time_utc=source_event_time_utc,
                 ingested_at_utc=ingested_at_utc,
@@ -379,10 +434,17 @@ def _write_events_to_canonical(
                 run_id=run_id,
             )
         )
-        if len(write_inputs) >= _WRITE_EVENTS_BATCH_SIZE:
-            flush_batch()
+    results = writer.write_events(write_inputs)
 
-    flush_batch()
+    inserted = 0
+    duplicate = 0
+    for result in results:
+        if result.status == 'inserted':
+            inserted += 1
+        elif result.status == 'duplicate':
+            duplicate += 1
+        else:
+            raise RuntimeError(f'Unexpected canonical writer status: {result.status}')
 
     return {
         'rows_processed': len(events),
@@ -395,24 +457,16 @@ def write_binance_spot_trades_to_canonical(
     *,
     client: ClickhouseClient,
     database: str,
+    partition_id: str | None = None,
     events: list[BinanceSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
 ) -> dict[str, int]:
-    canonical_events: list[dict[str, object]] = []
-    for event in events:
-        canonical_events.append(
-            {
-                'partition_id': event.partition_id,
-                'source_offset_or_equivalent': str(event.trade_id),
-                'source_event_time_utc': event.event_time_utc,
-                'payload': event.to_payload(),
-            }
-        )
     return _write_events_to_canonical(
         client=client,
         database=database,
-        events=canonical_events,
+        partition_id=partition_id,
+        events=events,
         run_id=run_id,
         ingested_at_utc=ingested_at_utc,
     )

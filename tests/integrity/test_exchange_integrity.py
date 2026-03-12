@@ -12,8 +12,8 @@ from origo_control_plane.utils.exchange_integrity import (
 
 def test_spot_trades_integrity_passes_for_valid_rows() -> None:
     rows = [
-        (100, 50000.0, 0.1, 5000.0, 1704067200000, True, True, datetime(2024, 1, 1, tzinfo=UTC)),
-        (101, 50001.0, 0.2, 10000.2, 1704067201000, False, True, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC)),
+        (100, 50000.0, 0.1, 5000.0, 1704067200000, True, True),
+        (101, 50001.0, 0.2, 10000.2, 1704067201000, False, True),
     ]
     report = run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
     assert report.rows_checked == 2
@@ -24,8 +24,8 @@ def test_spot_trades_integrity_passes_for_valid_rows() -> None:
 
 def test_spot_trades_integrity_fails_on_sequence_gap() -> None:
     rows = [
-        (100, 50000.0, 0.1, 5000.0, 1704067200000, True, True, datetime(2024, 1, 1, tzinfo=UTC)),
-        (102, 50001.0, 0.2, 10000.2, 1704067201000, False, True, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC)),
+        (100, 50000.0, 0.1, 5000.0, 1704067200000, True, True),
+        (102, 50001.0, 0.2, 10000.2, 1704067201000, False, True),
     ]
     with pytest.raises(ValueError, match='sequence-gap'):
         run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
@@ -33,8 +33,8 @@ def test_spot_trades_integrity_fails_on_sequence_gap() -> None:
 
 def test_spot_trades_integrity_allows_zero_starting_trade_id() -> None:
     rows = [
-        (0, 50000.0, 0.1, 5000.0, 1502928000000, True, True, datetime(2017, 8, 17, tzinfo=UTC)),
-        (1, 50001.0, 0.2, 10000.2, 1502928001000, False, True, datetime(2017, 8, 17, 0, 0, 1, tzinfo=UTC)),
+        (0, 50000.0, 0.1, 5000.0, 1502928000000, True, True),
+        (1, 50001.0, 0.2, 10000.2, 1502928001000, False, True),
     ]
     report = run_exchange_integrity_suite_rows(dataset='binance_spot_trades', rows=rows)
     assert report.rows_checked == 2
@@ -53,7 +53,6 @@ def test_binance_spot_trades_integrity_fails_on_anomaly() -> None:
             1704067200000,
             True,
             True,
-            datetime(2024, 1, 1, tzinfo=UTC),
         ),
     ]
     with pytest.raises(ValueError, match='anomaly check failed'):

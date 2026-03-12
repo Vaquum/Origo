@@ -540,6 +540,8 @@ class CanonicalEventWriter:
                         last_event_id=str(last_result.row.event_id),
                     )
                 return
+            except EventWriterError:
+                raise
             except RuntimeError as exc:
                 first_stream_key = stream_keys[0]
                 first_result = results[0]

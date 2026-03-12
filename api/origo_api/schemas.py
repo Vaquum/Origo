@@ -335,6 +335,39 @@ class HistoricalFREDSeriesMetricsRequest(BaseModel):
         return self
 
 
+class HistoricalBitcoinDatasetRequest(BaseModel):
+    mode: RawQueryMode = 'native'
+    start_date: str | None = None
+    end_date: str | None = None
+    n_latest_rows: int | None = Field(default=None, gt=0)
+    n_random_rows: int | None = Field(default=None, gt=0)
+    fields: list[str] | None = None
+    filters: list[RawQueryFilter] | None = None
+    strict: bool = False
+
+    @model_validator(mode='after')
+    def validate_contract(self) -> HistoricalBitcoinDatasetRequest:
+        _validate_historical_window_selection(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            n_latest_rows=self.n_latest_rows,
+            n_random_rows=self.n_random_rows,
+        )
+        parsed_start = (
+            _parse_strict_utc_date(label='start_date', raw_value=self.start_date)
+            if self.start_date is not None
+            else None
+        )
+        parsed_end = (
+            _parse_strict_utc_date(label='end_date', raw_value=self.end_date)
+            if self.end_date is not None
+            else None
+        )
+        if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+            raise ValueError('date-window must satisfy start_date <= end_date')
+        return self
+
+
 class RawExportRequest(BaseModel):
     mode: RawExportMode = 'native'
     format: ExportFormat

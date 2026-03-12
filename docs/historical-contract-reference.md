@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-12
-- Slice/version reference: S25, S26, S27, S28 (API v0.1.19)
+- Slice/version reference: S25, S26, S27, S28, S30 (API v0.1.21)
 
 ## Purpose and scope
 - User reference for shared historical request behavior on Origo historical dataset routes.
@@ -32,6 +32,13 @@ Historical dataset routes in scope:
 - `POST /v1/historical/bybit/spot/klines`
 - `POST /v1/historical/etf/daily_metrics`
 - `POST /v1/historical/fred/series_metrics`
+- `POST /v1/historical/bitcoin/block_headers`
+- `POST /v1/historical/bitcoin/block_transactions`
+- `POST /v1/historical/bitcoin/mempool_state`
+- `POST /v1/historical/bitcoin/block_fee_totals`
+- `POST /v1/historical/bitcoin/block_subsidy_schedule`
+- `POST /v1/historical/bitcoin/network_hashrate_estimate`
+- `POST /v1/historical/bitcoin/circulating_supply`
 
 ## Window behavior
 - At most one window selector can be supplied.
@@ -70,4 +77,12 @@ Historical dataset routes in scope:
   - `etf_daily_metrics`
 - Historical FRED route executes both `native` and `aligned_1s` for:
   - `fred_series_metrics`
+- Historical Bitcoin routes execute both `native` and `aligned_1s` for:
+  - `bitcoin_block_headers`
+  - `bitcoin_block_transactions`
+  - `bitcoin_mempool_state`
+  - `bitcoin_block_fee_totals`
+  - `bitcoin_block_subsidy_schedule`
+  - `bitcoin_network_hashrate_estimate`
+  - `bitcoin_circulating_supply`
 - Historical scope explicitly excludes `spot_agg_trades` and `futures_trades` in this tranche.

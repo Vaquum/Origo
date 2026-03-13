@@ -317,3 +317,8 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Took a timed live ETF throughput sample over 60 seconds against `origo.canonical_event_log` while five iShares shard workers remained active on server.
 - I found: ETF canonical rows increased `405 -> 413` in one minute (`+8 rows/min`), confirming continued forward movement but materially below target operational speed.
 - Progress/Next: Keep current workers running until deploy change is merged, then restart ETF backfill on the patched runtime to remove conflict drag and re-measure throughput.
+
+### Entry 062
+- I tried: Applied PR-review fixes from `zero-bang` and `copilot` by (1) adding missing canonical-cursor helper tests (happy path + earliest-boundary rejection), (2) updating dry-run CLI semantics/help to state live ClickHouse dependency, and (3) removing stale “Run-state” wording from partition-planner error text.
+- I found: Updated contract tests pass (`12/12`) and style checks on touched files remain clean.
+- Progress/Next: Push review-fix commit, re-request review, and proceed through merge cycle once approval is granted.

@@ -231,7 +231,7 @@ def remaining_daily_partitions_or_raise(
     )
     if last_day < contract.earliest_partition_date:
         raise RuntimeError(
-            'Run-state last_completed_partition is before contract earliest_partition_date '
+            'last_completed_partition is before contract earliest_partition_date '
             f'for dataset={contract.dataset}: '
             f'last={last_day.isoformat()} '
             f'earliest={contract.earliest_partition_date.isoformat()}'

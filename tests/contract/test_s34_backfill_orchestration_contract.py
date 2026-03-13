@@ -127,3 +127,36 @@ def test_load_last_completed_daily_partition_from_canonical_rejects_empty() -> N
             database='origo',
             contract=contract,
         )
+
+
+def test_load_last_completed_daily_partition_from_canonical_returns_value() -> None:
+    class _FakeClient:
+        def execute(self, *_: object, **__: object) -> list[tuple[str]]:
+            return [('2017-08-18',)]
+
+    contract = get_s34_dataset_contract('binance_spot_trades')
+    assert (
+        load_last_completed_daily_partition_from_canonical_or_raise(
+            client=cast(Any, _FakeClient()),
+            database='origo',
+            contract=contract,
+        )
+        == '2017-08-18'
+    )
+
+
+def test_load_last_completed_daily_partition_from_canonical_rejects_before_earliest() -> None:
+    class _FakeClient:
+        def execute(self, *_: object, **__: object) -> list[tuple[str]]:
+            return [('2017-08-16',)]
+
+    contract = get_s34_dataset_contract('binance_spot_trades')
+    with pytest.raises(
+        RuntimeError,
+        match='before dataset earliest partition date',
+    ):
+        load_last_completed_daily_partition_from_canonical_or_raise(
+            client=cast(Any, _FakeClient()),
+            database='origo',
+            contract=contract,
+        )

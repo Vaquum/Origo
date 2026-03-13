@@ -374,7 +374,10 @@ def run_exchange_backfill(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='Run S34 exchange dataset backfill partitions with resume controls.',
+        description=(
+            'Run S34 exchange dataset backfill partitions with canonical-cursor '
+            'resume controls (live ClickHouse connection required, including dry-run).'
+        ),
     )
     parser.add_argument(
         '--dataset',
@@ -405,7 +408,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Only print planned partitions without executing asset ingestion.',
+        help=(
+            'Only print planned partitions without executing asset ingestion; '
+            'still requires a live ClickHouse connection to read canonical cursor state.'
+        ),
     )
     parser.add_argument(
         '--projection-mode',

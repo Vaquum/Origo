@@ -47,7 +47,7 @@ def test_immutable_audit_log_appends_hash_chain_and_state(tmp_path: Path) -> Non
     sink = ImmutableAuditLog(path=log_path, sink_name='test_sink', retention_days=365)
 
     hash_1, hash_2 = sink.append_events(
-        [
+        events=[
             ImmutableAuditAppendInput(
                 event_type='event_one',
                 payload={'value': 1},

@@ -9,6 +9,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Final, cast
 
+from origo.pathing import resolve_repo_relative_path
+
 _JSON_SEPARATORS: Final[tuple[str, str]] = (',', ':')
 _MIN_RETENTION_DAYS: Final[int] = 365
 _STATE_SCHEMA_VERSION: Final[int] = 1
@@ -33,10 +35,7 @@ def require_non_empty_env(name: str) -> str:
 
 def resolve_required_path_env(name: str) -> Path:
     raw_path = require_non_empty_env(name)
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path
+    return resolve_repo_relative_path(raw_path)
 
 
 def load_audit_log_retention_days() -> int:
@@ -137,6 +136,13 @@ def _normalize_attributes(attributes: dict[str, Any] | None) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class ImmutableAuditAppendInput:
+    event_type: str
+    payload: dict[str, Any]
+    attributes: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class _ChainState:
     first_event_occurred_at: datetime | None
     last_sequence: int
@@ -152,13 +158,6 @@ class _AuditState:
     first_event_occurred_at: datetime
     max_sequence: int
     max_event_hash: str
-
-
-@dataclass(frozen=True)
-class ImmutableAuditAppendInput:
-    event_type: str
-    payload: dict[str, Any]
-    attributes: dict[str, Any] | None = None
 
 
 class ImmutableAuditLog:
@@ -181,7 +180,6 @@ class ImmutableAuditLog:
         self._retention_days = retention_days
         self._state_path = Path(f'{path}.state.json')
         self._lock = Lock()
-        self._chain_state_cache: _ChainState | None = None
 
     @property
     def state_path(self) -> Path:
@@ -194,55 +192,54 @@ class ImmutableAuditLog:
         payload: dict[str, Any],
         attributes: dict[str, Any] | None = None,
     ) -> str:
-        return self.append_events(
-            [
+        hashes = self.append_events(
+            events=[
                 ImmutableAuditAppendInput(
                     event_type=event_type,
                     payload=payload,
                     attributes=attributes,
                 )
             ]
-        )[0]
+        )
+        return hashes[0]
 
-    def append_events(
-        self,
-        events: list[ImmutableAuditAppendInput],
-    ) -> list[str]:
+    def append_events(self, *, events: list[ImmutableAuditAppendInput]) -> list[str]:
         if events == []:
-            raise RuntimeError('events must contain at least one entry')
+            return []
 
         normalized_events: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
-        for event in events:
-            event_type = event.event_type.strip()
-            if event_type == '':
-                raise RuntimeError('event_type must be non-empty')
-            normalized_payload = _expect_dict(event.payload, 'Immutable audit payload')
+        for event_number, event in enumerate(events, start=1):
+            if event.event_type.strip() == '':
+                raise RuntimeError(
+                    f'event #{event_number} event_type must be non-empty'
+                )
+            normalized_payload = _expect_dict(
+                event.payload, f'event #{event_number} payload'
+            )
             normalized_attributes = _normalize_attributes(event.attributes)
             normalized_events.append(
-                (event_type, normalized_payload, normalized_attributes)
+                (event.event_type, normalized_payload, normalized_attributes)
             )
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
-            if self._chain_state_cache is None:
-                state = self._load_state()
-                capture_sequence = None if state is None else state.max_sequence
-                chain_state = self._validate_existing_chain(
-                    capture_sequence=capture_sequence
-                )
-                self._validate_state_against_chain(
-                    state=state,
-                    chain_state=chain_state,
-                )
-            else:
-                chain_state = self._chain_state_cache
+            state = self._load_state()
+            capture_sequence = None if state is None else state.max_sequence
+            chain_state = self._validate_existing_chain(
+                capture_sequence=capture_sequence
+            )
+            self._validate_state_against_chain(
+                state=state,
+                chain_state=chain_state,
+            )
 
             sequence = chain_state.last_sequence
-            previous_hash = chain_state.last_event_hash
+            previous_event_hash = chain_state.last_event_hash
             first_event_at = chain_state.first_event_occurred_at
-            payloads_to_append: list[dict[str, Any]] = []
+            event_payloads: list[dict[str, Any]] = []
             event_hashes: list[str] = []
+
             for event_type, normalized_payload, normalized_attributes in normalized_events:
                 sequence += 1
                 event_payload: dict[str, Any] = {
@@ -250,14 +247,13 @@ class ImmutableAuditLog:
                     'occurred_at': _utc_now_iso(),
                     'event_type': event_type,
                     **normalized_attributes,
-                    'previous_event_hash': previous_hash,
+                    'previous_event_hash': previous_event_hash,
                     'payload': normalized_payload,
                 }
                 event_hash = _compute_event_hash(event_payload)
                 event_payload['event_hash'] = event_hash
-                payloads_to_append.append(event_payload)
+                event_payloads.append(event_payload)
                 event_hashes.append(event_hash)
-                previous_hash = event_hash
 
                 event_occurred_at = _parse_utc_timestamp(
                     event_payload['occurred_at'],
@@ -265,32 +261,19 @@ class ImmutableAuditLog:
                 )
                 if first_event_at is None:
                     first_event_at = event_occurred_at
+                previous_event_hash = event_hash
 
-            self._append_event_payloads(payloads_to_append)
             if first_event_at is None:
-                raise RuntimeError('first_event_occurred_at missing after append')
-            if previous_hash is None:
-                raise RuntimeError('max_event_hash missing after append')
-
+                raise RuntimeError('append_events produced no occurred_at timestamp')
+            self._append_event_payloads(event_payloads)
             self._write_state(
                 first_event_occurred_at=first_event_at,
                 max_sequence=sequence,
-                max_event_hash=previous_hash,
-            )
-            self._chain_state_cache = _ChainState(
-                first_event_occurred_at=first_event_at,
-                last_sequence=sequence,
-                last_event_hash=previous_hash,
-                captured_sequence_hash=previous_hash,
+                max_event_hash=event_hashes[-1],
             )
             return event_hashes
 
-    def _append_event_payload(self, payload: dict[str, Any]) -> None:
-        self._append_event_payloads([payload])
-
     def _append_event_payloads(self, payloads: list[dict[str, Any]]) -> None:
-        if payloads == []:
-            raise RuntimeError('payloads must contain at least one entry')
         with self._path.open('a', encoding='utf-8') as handle:
             for payload in payloads:
                 handle.write(

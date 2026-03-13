@@ -238,6 +238,7 @@ def insert_daily_okx_spot_trades_to_origo(
             events=events,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
+            canonical_partition_id=partition_date_str,
         )
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
@@ -255,7 +256,8 @@ def insert_daily_okx_spot_trades_to_origo(
             )
 
         projected_at_utc = datetime.now(UTC)
-        partition_ids = {event.partition_id for event in events}
+        source_partition_ids = {event.partition_id for event in events}
+        partition_ids = {partition_date_str}
         if projection_mode == 'inline':
             native_projection_summary_dict = project_okx_spot_trades_native(
                 client=client,
@@ -296,8 +298,8 @@ def insert_daily_okx_spot_trades_to_origo(
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
             'source_partition_span': {
-                'first_day': min(partition_ids),
-                'last_day': max(partition_ids),
+                'first_day': min(source_partition_ids),
+                'last_day': max(source_partition_ids),
             },
             'zip_sha256': zip_sha256,
             'csv_sha256': csv_sha256,

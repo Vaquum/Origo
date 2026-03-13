@@ -327,3 +327,8 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Started post-deploy OKX S34 run with canonical-cursor resume and observed immediate fail-loud stop (`canonical_ingest_cursor_state max(partition_id) must not be empty`).
 - I found: Root cause is query semantics, not corrupted data: ClickHouse `max(String)` on empty result set returns `''` (empty string), which tripped the non-empty cursor guard for fresh datasets.
 - Progress/Next: Patch cursor lookup to `maxOrNull(partition_id)`, add regression test for query contract, deploy, and re-run OKX backfill.
+
+### Entry 064
+- I tried: Re-ran OKX S34 start after deploying the `maxOrNull` cursor fix.
+- I found: Backfill progressed past cursor load and failed at canonical fast insert guard because one OKX daily file produced two UTC event-day partitions (`2021-08-31`, `2021-09-01`) while fast mode requires one canonical partition per batch.
+- Progress/Next: Make OKX daily-file canonical partition deterministic by pinning canonical partition id to the selected source day (`partition_date_str`) during write and projection dispatch; keep event timestamps untouched.

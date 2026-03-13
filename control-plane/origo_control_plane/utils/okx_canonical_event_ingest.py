@@ -179,12 +179,20 @@ def write_okx_spot_trades_to_canonical(
     events: list[OKXSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
+    canonical_partition_id: str | None = None,
 ) -> dict[str, int]:
+    resolved_partition_id: str | None = None
+    if canonical_partition_id is not None:
+        normalized_partition_id = canonical_partition_id.strip()
+        if normalized_partition_id == '':
+            raise RuntimeError('canonical_partition_id must be non-empty when provided')
+        resolved_partition_id = normalized_partition_id
+
     canonical_events: list[dict[str, object]] = []
     for event in events:
         canonical_events.append(
             {
-                'partition_id': event.partition_id,
+                'partition_id': resolved_partition_id or event.partition_id,
                 'source_offset_or_equivalent': str(event.trade_id),
                 'source_event_time_utc': event.event_time_utc,
                 'payload': event.to_payload(),

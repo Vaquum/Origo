@@ -196,7 +196,7 @@ def _project_partition(
             partition_id=partition_id,
         ),
         batch_size=batch_size,
-        fetch_order='source_offset_numeric',
+        fetch_order='ingested_event_id',
     )
 
     runtime.start()

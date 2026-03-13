@@ -114,13 +114,7 @@ def _parse_trade_id_from_match_id(*, trd_match_id: str, row_index: int) -> int:
             'Bybit CSV trdMatchID UUID must use canonical hyphenated form '
             f'at line={row_index}, got={trd_match_id!r}'
         )
-    trade_id = row_index - 1
-    if trade_id <= 0:
-        raise RuntimeError(
-            'Bybit CSV synthetic trade_id must be positive for UUID rows '
-            f'at line={row_index}, got={trade_id}'
-        )
-    return trade_id
+    return row_index - 1
 
 
 @dataclass(frozen=True)
@@ -295,7 +289,7 @@ def write_bybit_spot_trades_to_canonical(
         canonical_events.append(
             {
                 'partition_id': event.partition_id,
-                'source_offset_or_equivalent': str(event.trade_id),
+                'source_offset_or_equivalent': event.trd_match_id,
                 'source_event_time_utc': event.event_time_utc,
                 'payload': event.to_payload(),
             }

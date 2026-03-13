@@ -342,3 +342,8 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Implemented Bybit parser compatibility patch and executed targeted local contract verification (`ruff`, new Bybit parser contract tests, Bybit historical API contract subset, and fast-insert guardrail contract tests).
 - I found: Verification passed (`ruff clean`, parser contract `3/3`, fast-insert contract `7/7`, historical Bybit contract subset `3/3`); parser now handles UUID `trdMatchID` deterministically instead of failing on valid source rows.
 - Progress/Next: Ship patch through PR/deploy pipeline, then re-run live Bybit S34 smoke and continue full exchange backfill progression.
+
+### Entry 067
+- I tried: Processed review feedback on PR #59 and traced the reported correctness risk through canonical idempotency-key construction.
+- I found: Reviewer concern is valid: deriving canonical source offset from `trade_id` can collide between UUID and `m-<digits>` rows when `trade_id` overlaps, which can corrupt exactly-once semantics.
+- Progress/Next: Fix canonical identity by using raw `trd_match_id` as `source_offset_or_equivalent`, switch Bybit native projector fetch order to `ingested_event_id`, add a contract test proving mixed-ID rows generate distinct canonical identities, and re-run gates.

@@ -322,3 +322,8 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Applied PR-review fixes from `zero-bang` and `copilot` by (1) adding missing canonical-cursor helper tests (happy path + earliest-boundary rejection), (2) updating dry-run CLI semantics/help to state live ClickHouse dependency, and (3) removing stale “Run-state” wording from partition-planner error text.
 - I found: Updated contract tests pass (`12/12`) and style checks on touched files remain clean.
 - Progress/Next: Push review-fix commit, re-request review, and proceed through merge cycle once approval is granted.
+
+### Entry 063
+- I tried: Started post-deploy OKX S34 run with canonical-cursor resume and observed immediate fail-loud stop (`canonical_ingest_cursor_state max(partition_id) must not be empty`).
+- I found: Root cause is query semantics, not corrupted data: ClickHouse `max(String)` on empty result set returns `''` (empty string), which tripped the non-empty cursor guard for fresh datasets.
+- Progress/Next: Patch cursor lookup to `maxOrNull(partition_id)`, add regression test for query contract, deploy, and re-run OKX backfill.

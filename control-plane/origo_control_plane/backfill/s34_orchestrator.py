@@ -257,7 +257,7 @@ def load_last_completed_daily_partition_from_canonical_or_raise(
         )
     rows = client.execute(
         f'''
-        SELECT max(partition_id)
+        SELECT maxOrNull(partition_id)
         FROM {database}.canonical_ingest_cursor_state
         WHERE source_id = %(source_id)s
           AND stream_id = %(stream_id)s

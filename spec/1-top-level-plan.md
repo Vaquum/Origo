@@ -246,6 +246,7 @@ Every slice must pass:
 5. Projection tables currently include legacy float fields in several sources; these are explicit migration debt and must not be treated as canonical precision truth.
 6. Time fields must preserve highest available source precision; normalized timestamps are derivative fields.
 7. Every source migration must include round-trip fidelity/precision proof artifacts on fixed fixtures.
+8. Canonical payload fields that are run-volatile processing metadata (for example parse/normalize runtime timestamps) must not participate in canonical payload identity semantics; replay of unchanged source events must keep payload hash stable.
 
 ## Event-Sourcing and Continuous Aggregate Contract
 1. Canonical raw truth is a single global append-only event log.
@@ -389,6 +390,7 @@ Every slice must pass:
 32. Slice 32: Deployment env-contract drift fix (`ORIGO_AUDIT_LOG_RETENTION_DAYS`) and live deploy validation closure.
 33. Slice 33: Binance dataset contract cleanup (drop legacy non-spot Binance dataset keys and enforce `binance_spot_trades` naming everywhere).
 34. Slice 34: Full canonical backfill (all onboarded datasets) with projection rebuild and end-to-end serving validation.
+35. Slice 35: Automated daily backfill scheduling (time-configured orchestration for all daily datasets with canonical-cursor resume).
 
 ## Slice 10 (Deployment) Locked Details
 1. Trigger: merge to `main` (implemented as push to `main`).
@@ -738,6 +740,30 @@ Every slice must pass:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods
+
+## Slice 35 (Automated Daily Backfill Scheduling) Locked Details
+1. Objective is to make daily backfill fully automatic at configured daily run time, without manual triggering in normal operation.
+2. Scope is all currently onboarded daily-partition datasets:
+   1. `binance_spot_trades`
+   2. `okx_spot_trades`
+   3. `bybit_spot_trades`
+   4. `etf_daily_metrics`
+   5. `fred_series_metrics`
+3. Daily schedule time is env-configured and must be fail-loud validated:
+   1. `ORIGO_BACKFILL_DAILY_SCHEDULE_CRON`
+   2. `ORIGO_BACKFILL_DAILY_SCHEDULE_TIMEZONE`
+4. Daily boundary is env-configured and must be fail-loud validated:
+   1. `ORIGO_BACKFILL_DAILY_LAG_DAYS`
+   2. `target_end_date = utc_today - lag_days`
+   3. `lag_days` must be integer `>= 1`.
+5. Resume state for scheduled runs must come from ClickHouse canonical cursor state (`canonical_ingest_cursor_state`), not file-based run-state.
+6. Scheduled orchestration must enforce non-overlap per dataset (one active run per dataset; overlap attempt fails loudly).
+7. Missing source artifacts at or before the computed target boundary are hard failures (no silent skip/no fallback).
+8. Every scheduled run must emit deterministic operations evidence:
+   1. run id + dataset + target boundary
+   2. per-partition manifest entries
+   3. post-run watermark summary per dataset
+9. Slice closeout requires end-to-end server proof that scheduled runs advance partitions automatically day over day.
 
 ## Defaults and Assumptions
 1. Phase scope is Raw API only (MK API excluded).

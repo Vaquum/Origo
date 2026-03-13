@@ -197,13 +197,6 @@ jobs:
             echo "ERROR: ORIGO_BACKFILL_PROJECTION_MODE in .env.example must be inline|deferred." >&2
             exit 1
           fi
-          origo_backfill_run_state_path="$(
-            read_root_env_example_value ORIGO_BACKFILL_RUN_STATE_PATH
-          )"
-          if [[ -z "${origo_backfill_run_state_path}" ]]; then
-            echo "ERROR: ORIGO_BACKFILL_RUN_STATE_PATH must be present and non-empty in .env.example." >&2
-            exit 1
-          fi
           origo_backfill_manifest_log_path="$(
             read_root_env_example_value ORIGO_BACKFILL_MANIFEST_LOG_PATH
           )"
@@ -241,9 +234,6 @@ jobs:
           origo_backfill_projection_mode_b64="$(
             printf '%s' "${origo_backfill_projection_mode}" | base64 -w0
           )"
-          origo_backfill_run_state_path_b64="$(
-            printf '%s' "${origo_backfill_run_state_path}" | base64 -w0
-          )"
           origo_backfill_manifest_log_path_b64="$(
             printf '%s' "${origo_backfill_manifest_log_path}" | base64 -w0
           )"
@@ -267,7 +257,6 @@ jobs:
              ORIGO_CANONICAL_FAST_INSERT_MODE_B64='${origo_canonical_fast_insert_mode_b64}' \
              ORIGO_STREAM_QUARANTINE_STATE_PATH_B64='${origo_stream_quarantine_state_path_b64}' \
              ORIGO_BACKFILL_PROJECTION_MODE_B64='${origo_backfill_projection_mode_b64}' \
-             ORIGO_BACKFILL_RUN_STATE_PATH_B64='${origo_backfill_run_state_path_b64}' \
              ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64='${origo_backfill_manifest_log_path_b64}' \
              ORIGO_S34_BACKFILL_CONCURRENCY_B64='${origo_s34_backfill_concurrency_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
@@ -300,7 +289,6 @@ jobs:
           decode_env_b64_required ORIGO_CANONICAL_FAST_INSERT_MODE_B64 ORIGO_CANONICAL_FAST_INSERT_MODE
           decode_env_b64_required ORIGO_STREAM_QUARANTINE_STATE_PATH_B64 ORIGO_STREAM_QUARANTINE_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_PROJECTION_MODE_B64 ORIGO_BACKFILL_PROJECTION_MODE
-          decode_env_b64_required ORIGO_BACKFILL_RUN_STATE_PATH_B64 ORIGO_BACKFILL_RUN_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64 ORIGO_BACKFILL_MANIFEST_LOG_PATH
           decode_env_b64_required ORIGO_S34_BACKFILL_CONCURRENCY_B64 ORIGO_S34_BACKFILL_CONCURRENCY
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
@@ -331,7 +319,6 @@ jobs:
           require_env ORIGO_CANONICAL_FAST_INSERT_MODE
           require_env ORIGO_STREAM_QUARANTINE_STATE_PATH
           require_env ORIGO_BACKFILL_PROJECTION_MODE
-          require_env ORIGO_BACKFILL_RUN_STATE_PATH
           require_env ORIGO_BACKFILL_MANIFEST_LOG_PATH
           require_env ORIGO_S34_BACKFILL_CONCURRENCY
           require_env ORIGO_API_IMAGE
@@ -554,7 +541,6 @@ jobs:
             $0 !~ /^ORIGO_CANONICAL_FAST_INSERT_MODE=/ &&
             $0 !~ /^ORIGO_STREAM_QUARANTINE_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_PROJECTION_MODE=/ &&
-            $0 !~ /^ORIGO_BACKFILL_RUN_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_MANIFEST_LOG_PATH=/ &&
             $0 !~ /^ORIGO_S34_BACKFILL_CONCURRENCY=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_URL=/ &&
@@ -580,7 +566,6 @@ jobs:
             echo "ORIGO_CANONICAL_FAST_INSERT_MODE=${ORIGO_CANONICAL_FAST_INSERT_MODE}"
             echo "ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
             echo "ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
-            echo "ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
             echo "ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
             echo "ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
             echo "ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
@@ -609,7 +594,6 @@ jobs:
           echo "  ORIGO_CANONICAL_FAST_INSERT_MODE=${ORIGO_CANONICAL_FAST_INSERT_MODE}"
           echo "  ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
           echo "  ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
-          echo "  ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
           echo "  ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
           echo "  ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
           echo "  ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"

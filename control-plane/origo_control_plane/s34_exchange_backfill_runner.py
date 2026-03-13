@@ -15,12 +15,11 @@ from dagster import build_asset_context
 
 from origo.events import StreamQuarantineRegistry, load_stream_quarantine_state_path
 from origo_control_plane.backfill import (
-    BackfillRunStateStore,
     S34BackfillDataset,
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
     load_backfill_manifest_log_path,
-    load_backfill_run_state_path,
+    load_last_completed_daily_partition_from_canonical_or_raise,
     record_partition_cursor_and_checkpoint_or_raise,
     remaining_daily_partitions_or_raise,
     write_backfill_manifest_event,
@@ -43,8 +42,7 @@ _DAILY_ASSET_RUNNER_IMPORTS: dict[S34BackfillDataset, tuple[str, str]] = {
 }
 ProjectionMode = Literal['inline', 'deferred']
 RuntimeAuditMode = Literal['event', 'summary']
-_PATH_ENV_NAMES: tuple[str, str, str] = (
-    'ORIGO_BACKFILL_RUN_STATE_PATH',
+_PATH_ENV_NAMES: tuple[str, str] = (
     'ORIGO_BACKFILL_MANIFEST_LOG_PATH',
     'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
 )
@@ -206,27 +204,6 @@ def run_exchange_backfill(
     if normalized_run_id == '':
         raise RuntimeError('run_id must be non-empty')
 
-    run_state = BackfillRunStateStore(path=load_backfill_run_state_path())
-    remaining_partitions = list(
-        remaining_daily_partitions_or_raise(
-            contract=contract,
-            plan_end_date=end_date,
-            run_state=run_state,
-        )
-    )
-    if max_partitions is not None:
-        remaining_partitions = remaining_partitions[:max_partitions]
-
-    if dry_run:
-        return {
-            'dataset': dataset,
-            'run_id': normalized_run_id,
-            'dry_run': True,
-            'planned_partitions': remaining_partitions,
-            'planned_partition_count': len(remaining_partitions),
-            'end_date': end_date.isoformat(),
-        }
-
     settings = resolve_clickhouse_native_settings()
     manifest_path = load_backfill_manifest_log_path()
     quarantine_registry = StreamQuarantineRegistry(
@@ -268,6 +245,35 @@ def run_exchange_backfill(
             compression=True,
             send_receive_timeout=900,
         )
+        last_completed_partition = (
+            load_last_completed_daily_partition_from_canonical_or_raise(
+                client=client,
+                database=settings.database,
+                contract=contract,
+            )
+        )
+        remaining_partitions = list(
+            remaining_daily_partitions_or_raise(
+                contract=contract,
+                plan_end_date=end_date,
+                last_completed_partition=last_completed_partition,
+            )
+        )
+        if max_partitions is not None:
+            remaining_partitions = remaining_partitions[:max_partitions]
+
+        if dry_run:
+            return {
+                'dataset': dataset,
+                'run_id': normalized_run_id,
+                'dry_run': True,
+                'planned_partitions': remaining_partitions,
+                'planned_partition_count': len(remaining_partitions),
+                'last_completed_partition': last_completed_partition,
+                'resume_state_source': 'canonical_ingest_cursor_state',
+                'end_date': end_date.isoformat(),
+            }
+
         partition_results: dict[str, dict[str, Any]] = {}
         partition_start_times: dict[str, datetime] = {}
         worker_payloads = [
@@ -305,12 +311,6 @@ def run_exchange_backfill(
                 run_id=normalized_run_id,
                 checked_at_utc=datetime.now(UTC),
                 quarantine_registry=quarantine_registry,
-            )
-            run_state.mark_completed(
-                dataset=dataset,
-                partition_id=partition_id,
-                run_id=normalized_run_id,
-                completed_at_utc=datetime.now(UTC),
             )
             partition_event = {
                 'event_type': 's34_backfill_partition_completed',

@@ -57,7 +57,9 @@ def run_s34_c1_c2_backfill_contract_proof() -> dict[str, Any]:
         initial_remaining = remaining_daily_partitions_or_raise(
             contract=binance_contract,
             plan_end_date=date(2017, 8, 19),
-            run_state=run_state_store,
+            last_completed_partition=run_state_store.last_completed_partition(
+                dataset=binance_contract.dataset
+            ),
         )
         run_state_store.mark_completed(
             dataset=binance_contract.dataset,
@@ -68,7 +70,9 @@ def run_s34_c1_c2_backfill_contract_proof() -> dict[str, Any]:
         resumed_remaining = remaining_daily_partitions_or_raise(
             contract=binance_contract,
             plan_end_date=date(2017, 8, 19),
-            run_state=run_state_store,
+            last_completed_partition=run_state_store.last_completed_partition(
+                dataset=binance_contract.dataset
+            ),
         )
         run_state_payload = run_state_store.read()
 

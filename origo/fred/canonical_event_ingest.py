@@ -126,8 +126,7 @@ def write_fred_long_metrics_to_canonical(
         label='ingested_at_utc',
     )
 
-    rows_inserted = 0
-    rows_duplicate = 0
+    event_inputs: list[CanonicalEventWriteInput] = []
     for row in rows:
         observed_at_utc = _require_utc(
             row.observed_at_utc,
@@ -139,7 +138,7 @@ def write_fred_long_metrics_to_canonical(
             sort_keys=True,
             separators=(',', ':'),
         ).encode(_PAYLOAD_ENCODING)
-        write_result = writer.write_event(
+        event_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_CANONICAL_SOURCE_ID,
                 stream_id=_CANONICAL_STREAM_ID,
@@ -153,6 +152,10 @@ def write_fred_long_metrics_to_canonical(
                 run_id=run_id,
             )
         )
+
+    rows_inserted = 0
+    rows_duplicate = 0
+    for write_result in writer.write_events(event_inputs):
         if write_result.status == 'inserted':
             rows_inserted += 1
         elif write_result.status == 'duplicate':

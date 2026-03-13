@@ -237,3 +237,78 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Interpreted ClickHouse `system.events.InsertedRows` during fast-path benchmarks as direct canonical row throughput.
 - I found: `InsertedRows` includes both temporary stage-table inserts and canonical table inserts in the SQL-transform path, so event counter deltas are roughly `~2x` the canonical rows written.
 - Progress/Next: Use manifest duration + canonical table row counts for throughput truth; use `InsertedRows` only as relative load indicator.
+
+### Entry 046
+- I tried: Shifted S34 execution focus to non-exchange datasets and launched live ETF (`python -m origo.scraper.etf_s4_07_backfill --ishares-start-date 2024-01-11 --end-date 2026-03-12`) plus FRED (`python /tmp/fred_backfill_live.py`) backfills in `deploy-dagster-webserver-1`.
+- I found: Both processes are actively running and canonical partitions are advancing (`etf/etf_daily_metrics` and `fred/fred_series_metrics`), but these runs are ad-hoc and currently do not update `canonical_ingest_cursor_state` for resume control.
+- Progress/Next: Keep monitoring live partition advancement, then move ETF/FRED into a contract-compliant S34 runner path so resume state and manifests are uniformly canonical.
+
+### Entry 047
+- I tried: Took timed live snapshots of canonical progression for ETF/FRED while the two non-exchange backfill processes were running.
+- I found: Over ~70 seconds, ETF advanced `18 -> 20` canonical rows (max partition still `2024-01-12`) and FRED advanced `14 -> 16` rows (max partition `1948-02-01 -> 1948-04-01`), confirming ongoing ingestion but at slow visible partition progression.
+- Progress/Next: Keep these runs active for now, continue short-interval monitoring, and prioritize moving ETF/FRED execution onto a canonical-cursor runner path for deterministic resume/progress accounting.
+
+### Entry 048
+- I tried: Replaced the previous slow FRED live process with a batch canonical-writer run (`/tmp/fred_backfill_batch_live.py`) that accumulates event inputs and commits through one `writer.write_events(...)` call.
+- I found: The new batch FRED process is running in `deploy-dagster-webserver-1` while ETF backfill continues unchanged; FRED canonical counts are expected to stay flat until the batch commit point.
+- Progress/Next: Wait for batch completion signal in `/workspace/storage/audit/fred-backfill-batch-live.log`, then verify step-change in canonical FRED coverage and resume with ETF monitoring.
+
+### Entry 049
+- I tried: Monitored post-switch canonical coverage while batch FRED and ETF runs were active.
+- I found: FRED coverage jumped to `19,495` canonical rows with max partition `2026-03-11` (from low double-digit row counts previously), confirming the batch-writer path materially changed ingestion throughput; ETF continued forward progression (`max partition` advanced into `2024-01-17`).
+- Progress/Next: Keep both runs active, wait for FRED process exit/final summary emission, and continue ETF progression monitoring before deciding whether ETF also needs an explicit batch-writer override path.
+
+### Entry 050
+- I tried: Validated FRED completion state directly from canonical events by grouping on `dimensions.series_id`, then terminated the lingering batch process once all four registry series showed full historical coverage.
+- I found: FRED now has complete per-series ranges in canonical (`CPIAUCSL`, `DGS10`, `FEDFUNDS`, `UNRATE`) through expected latest partitions, and only ETF backfill remains actively running.
+- Progress/Next: Treat FRED backfill as complete for S34-C6 data coverage, keep ETF running/monitored, and revisit whether ETF needs the same explicit batch-writer acceleration path.
+
+### Entry 051
+- I tried: Parallelized ETF backfill with five date-range shards using the existing `etf_s4_07_backfill` flow.
+- I found: Shards failed with `WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT` because ETF payload provenance fields are run-volatile, while ETF persistence currently writes canonical events directly (and existing-day checks rely on `etf_daily_metrics_long`, which is not authoritative in deferred projection mode).
+- Progress/Next: Avoid broad rerun collisions by switching to an iShares-only shard runner with canonical metric-id prechecks per partition.
+
+### Entry 052
+- I tried: Built and launched an iShares-only shard runner (`/tmp/etf_ishares_shard_backfill.py`) with canonical precheck logic and five non-overlapping date shards.
+- I found: ETF canonical coverage resumed forward movement without immediate fail-loud identity conflicts; snapshot moved from `81 rows / 9 distinct days / max 2026-01-02` to `101 rows / 13 distinct days / max 2026-01-05` over roughly two minutes while shards were active.
+- Progress/Next: Keep shard runners active, monitor distinct partition growth and shard completion artifacts, and then reconcile remaining ETF-day gaps.
+
+### Entry 053
+- I tried: Kept five iShares shard runners active and sampled ETF canonical coverage deltas during runtime.
+- I found: ETF continued to advance under shard mode (`111 -> 131` rows, `13 -> 14` distinct partitions over ~2 minutes), with all five shard workers still active.
+- Progress/Next: Continue runtime monitoring until shards finish and proof artifacts are emitted, then compute exact missing partition set for any final reconciliation pass.
+
+### Entry 054
+- I tried: Implemented a permanent ETF canonical idempotency fix by removing run-volatile provenance timestamps (`fetched_at_utc`, `parsed_at_utc`, `normalized_at_utc`) from ETF canonical payload construction in `origo/scraper/etf_canonical_event_ingest.py`.
+- I found: This makes canonical payload hash stable for identical source-event identity across replay runs, aligning ETF behavior with strict exactly-once identity semantics.
+- Progress/Next: Validate with targeted contract tests and then move this fix through PR/deploy so server backfills no longer need runtime precheck workarounds.
+
+### Entry 055
+- I tried: Added/ran ETF contract proof for timestamp-insensitive payload determinism (`tests/contract/test_etf_canonical_event_ingest_contract.py`) using uv-run isolated deps.
+- I found: Targeted contract suite passed (`3 passed`), including new assertion that payload remains identical when provenance runtime timestamps differ.
+- Progress/Next: Prepare PR for permanent ETF canonical idempotency fix and then deploy; keep live ETF shards running meanwhile.
+
+### Entry 056
+- I tried: Validated permanent ETF idempotency fix locally with style/type and targeted contract checks (`ruff`, `pyright`, and ETF canonical ingest contract tests).
+- I found: Checks passed cleanly (`ruff: all checks passed`, `pyright: 0 errors`, `pytest: 3 passed`), confirming the canonical payload contract update and replay-stability assertion are consistent.
+- Progress/Next: Keep ETF live shard backfill running until completion while preparing the permanent fix for PR/deploy, so future runs do not require runtime precheck workarounds.
+
+### Entry 057
+- I tried: Re-checked live deployment state and active ETF shard workers (`docker compose ps`, process scan in `deploy-dagster-webserver-1`, canonical counts from `origo.canonical_event_log`).
+- I found: Runtime stack is healthy; five ETF shard workers are still active; ETF canonical coverage is still moving (`etf` rows advanced to `334`, partitions `33`, max partition `2026-01-09`), while FRED remains complete at `19,495` rows through `2026-03-11`.
+- Progress/Next: Keep ETF progress under watch while shipping the permanent idempotency fix/deploy so reruns stop hitting payload-hash conflicts.
+
+### Entry 058
+- I tried: Inspected shard runner logs and process telemetry to verify whether shard failures were transient or ongoing.
+- I found: Each shard log contains `WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT`; logs are not actively appending, but worker CPU time is still high and canonical ETF rows keep increasing slowly, indicating expensive conflict-prone execution under old image code.
+- Progress/Next: Prioritize deploy of the permanent ETF payload stabilization change and stop relying on ad-hoc shard precheck behavior for correctness/performance.
+
+### Entry 059
+- I tried: Completed code-level migration away from file-based backfill resume state in active runner path by switching S34 resume source to `canonical_ingest_cursor_state` and removing deploy/env wiring for `ORIGO_BACKFILL_RUN_STATE_PATH`.
+- I found: Active runner contract now reads last completed partition from canonical cursor state, reports `resume_state_source=canonical_ingest_cursor_state` in dry-run output, and no longer mutates JSON run-state in runtime flow.
+- Progress/Next: Keep legacy run-state helper only for historical contract-proof scaffolding until full cleanup slice, then enforce canonical-cursor-only resume everywhere.
+
+### Entry 060
+- I tried: Ran full local validation for changed files after resume-source + ETF/FRED canonical-writer updates (`ruff`, `pyright`, and targeted contract suites for ETF canonical ingest and S34 runner/orchestrator contracts).
+- I found: Gates passed (`ruff clean`, `pyright 0 errors`, `13/13 contract tests passed`), including new proofs for canonical resume lookup and ETF payload determinism under runtime provenance timestamp drift.
+- Progress/Next: Package these changes into PR/deploy so server execution uses canonical-cursor resume and stable ETF canonical payload semantics.

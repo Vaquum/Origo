@@ -77,3 +77,57 @@ def test_etf_payload_is_valid_under_canonical_precision_contract() -> None:
     payload_json = json.loads(row.payload_json)
     assert payload_json['metric_value_kind'] == 'string'
     assert payload_json['metric_value_text'] == '2026-03-10'
+
+
+def test_etf_canonical_payload_ignores_runtime_provenance_timestamps() -> None:
+    base_record = NormalizedMetricRecord(
+        metric_id='metric-3',
+        source_id='etf_ishares_ibit_daily',
+        metric_name='shares_outstanding',
+        metric_value=1000000,
+        metric_unit='shares',
+        observed_at_utc=datetime(2026, 3, 10, 0, 0, 0, tzinfo=UTC),
+        dimensions={'issuer': 'ishares', 'ticker': 'IBIT'},
+        provenance=ProvenanceMetadata(
+            source_id='etf_ishares_ibit_daily',
+            source_uri='https://example.com/ibit.csv',
+            artifact_id='artifact-1',
+            artifact_sha256='sha-a',
+            fetch_method='http',
+            parser_name='csv',
+            parser_version='1.0.0',
+            fetched_at_utc=datetime(2026, 3, 10, 12, 0, 0, tzinfo=UTC),
+            parsed_at_utc=datetime(2026, 3, 10, 12, 0, 1, tzinfo=UTC),
+            normalized_at_utc=datetime(2026, 3, 10, 12, 0, 2, tzinfo=UTC),
+        ),
+    )
+    replay_record = NormalizedMetricRecord(
+        metric_id='metric-3',
+        source_id='etf_ishares_ibit_daily',
+        metric_name='shares_outstanding',
+        metric_value=1000000,
+        metric_unit='shares',
+        observed_at_utc=datetime(2026, 3, 10, 0, 0, 0, tzinfo=UTC),
+        dimensions={'issuer': 'ishares', 'ticker': 'IBIT'},
+        provenance=ProvenanceMetadata(
+            source_id='etf_ishares_ibit_daily',
+            source_uri='https://example.com/ibit.csv',
+            artifact_id='artifact-1',
+            artifact_sha256='sha-a',
+            fetch_method='http',
+            parser_name='csv',
+            parser_version='1.0.0',
+            fetched_at_utc=datetime(2026, 3, 10, 13, 0, 0, tzinfo=UTC),
+            parsed_at_utc=datetime(2026, 3, 10, 13, 0, 1, tzinfo=UTC),
+            normalized_at_utc=datetime(2026, 3, 10, 13, 0, 2, tzinfo=UTC),
+        ),
+    )
+
+    payload_1 = build_etf_canonical_payload(record=base_record)
+    payload_2 = build_etf_canonical_payload(record=replay_record)
+    assert payload_1 == payload_2
+    provenance = payload_1['provenance']
+    assert provenance is not None
+    assert 'fetched_at_utc' not in provenance
+    assert 'parsed_at_utc' not in provenance
+    assert 'normalized_at_utc' not in provenance

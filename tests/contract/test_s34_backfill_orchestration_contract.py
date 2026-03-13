@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from origo_control_plane.backfill.s34_contract import get_s34_dataset_contract
@@ -9,6 +10,7 @@ from origo_control_plane.backfill.s34_orchestrator import (
     BackfillRunStateStore,
     build_daily_partitions,
     evaluate_numeric_offset_gaps_or_raise,
+    load_last_completed_daily_partition_from_canonical_or_raise,
     remaining_daily_partitions_or_raise,
 )
 
@@ -55,7 +57,9 @@ def test_remaining_daily_partitions_uses_resume_state(tmp_path: Path) -> None:
     initial = remaining_daily_partitions_or_raise(
         contract=contract,
         plan_end_date=date(2017, 8, 19),
-        run_state=run_state,
+        last_completed_partition=run_state.last_completed_partition(
+            dataset=contract.dataset
+        ),
     )
     assert initial == ('2017-08-17', '2017-08-18', '2017-08-19')
 
@@ -68,7 +72,9 @@ def test_remaining_daily_partitions_uses_resume_state(tmp_path: Path) -> None:
     resumed = remaining_daily_partitions_or_raise(
         contract=contract,
         plan_end_date=date(2017, 8, 19),
-        run_state=run_state,
+        last_completed_partition=run_state.last_completed_partition(
+            dataset=contract.dataset
+        ),
     )
     assert resumed == ('2017-08-19',)
 
@@ -88,3 +94,36 @@ def test_evaluate_numeric_offset_gaps_detects_gap_and_duplicates() -> None:
 def test_evaluate_numeric_offset_gaps_rejects_non_numeric_offset() -> None:
     with pytest.raises(RuntimeError, match='offset must be integer text'):
         evaluate_numeric_offset_gaps_or_raise(offsets=['100', 'abc'])
+
+
+def test_load_last_completed_daily_partition_from_canonical_returns_none() -> None:
+    class _FakeClient:
+        def execute(self, *_: object, **__: object) -> list[tuple[None]]:
+            return [(None,)]
+
+    contract = get_s34_dataset_contract('binance_spot_trades')
+    assert (
+        load_last_completed_daily_partition_from_canonical_or_raise(
+            client=cast(Any, _FakeClient()),
+            database='origo',
+            contract=contract,
+        )
+        is None
+    )
+
+
+def test_load_last_completed_daily_partition_from_canonical_rejects_empty() -> None:
+    class _FakeClient:
+        def execute(self, *_: object, **__: object) -> list[tuple[str]]:
+            return [('   ',)]
+
+    contract = get_s34_dataset_contract('binance_spot_trades')
+    with pytest.raises(
+        RuntimeError,
+        match='must not be empty',
+    ):
+        load_last_completed_daily_partition_from_canonical_or_raise(
+            client=cast(Any, _FakeClient()),
+            database='origo',
+            contract=contract,
+        )

@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -42,6 +43,18 @@ _OKX_SOURCE_DAY_UTC_OFFSET_HOURS = 8
 _REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
+_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
+
+
+def _load_backfill_projection_mode_or_raise() -> str:
+    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
+    normalized = raw_mode.strip().lower()
+    if normalized not in {'inline', 'deferred'}:
+        raise RuntimeError(
+            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
+            f'got={raw_mode!r}'
+        )
+    return normalized
 
 
 def _expect_dict(value: Any, label: str) -> dict[str, Any]:
@@ -161,6 +174,7 @@ def _verify_source_content_md5_or_raise(*, payload: bytes, content_md5_b64: str)
 def insert_daily_okx_spot_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
+    projection_mode = _load_backfill_projection_mode_or_raise()
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
     filename, file_url = _resolve_okx_daily_file_url(date_str=date_str)
@@ -242,25 +256,42 @@ def insert_daily_okx_spot_trades_to_origo(
 
         projected_at_utc = datetime.now(UTC)
         partition_ids = {event.partition_id for event in events}
-        native_projection_summary = project_okx_spot_trades_native(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
-        aligned_projection_summary = project_okx_spot_trades_aligned(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
+        if projection_mode == 'inline':
+            native_projection_summary_dict = project_okx_spot_trades_native(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+            aligned_projection_summary_dict = project_okx_spot_trades_aligned(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+        else:
+            native_projection_summary_dict = {
+                'partitions_processed': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
+            aligned_projection_summary_dict = {
+                'partitions_processed': 0,
+                'policies_recorded': 0,
+                'policies_duplicate': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
 
         result_data: dict[str, Any] = {
             'date': date_str,
             'source_filename': filename,
             'source_url': file_url,
+            'projection_mode': projection_mode,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
@@ -272,8 +303,8 @@ def insert_daily_okx_spot_trades_to_origo(
             'csv_sha256': csv_sha256,
             'source_content_md5': source_content_md5,
             'integrity_report': integrity_report.to_dict(),
-            'native_projection_summary': native_projection_summary.to_dict(),
-            'aligned_projection_summary': aligned_projection_summary.to_dict(),
+            'native_projection_summary': native_projection_summary_dict,
+            'aligned_projection_summary': aligned_projection_summary_dict,
         }
         context.log.info('Successfully processed OKX daily file: ' + json.dumps(result_data))
         return result_data

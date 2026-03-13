@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,16 @@ from origo.audit import (
 from .ingest_state import CanonicalStreamKey
 
 _RUNTIME_AUDIT_PATH_ENV = 'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH'
+
+
+@dataclass(frozen=True)
+class CanonicalRuntimeIngestEvent:
+    event_type: str
+    source_offset_or_equivalent: str
+    event_id: str
+    payload_sha256_raw: str
+    status: str
+    run_id: str | None
 
 
 class CanonicalRuntimeAuditLog:
@@ -34,6 +45,61 @@ class CanonicalRuntimeAuditLog:
         status: str,
         run_id: str | None,
     ) -> str:
+        return self.append_ingest_events(
+            stream_key=stream_key,
+            events=[
+                CanonicalRuntimeIngestEvent(
+                    event_type=event_type,
+                    source_offset_or_equivalent=source_offset_or_equivalent,
+                    event_id=event_id,
+                    payload_sha256_raw=payload_sha256_raw,
+                    status=status,
+                    run_id=run_id,
+                )
+            ],
+        )[0]
+
+    def append_ingest_events(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        events: list[CanonicalRuntimeIngestEvent],
+    ) -> list[str]:
+        append_inputs: list[ImmutableAuditAppendInput] = []
+        for event in events:
+            append_inputs.append(
+                ImmutableAuditAppendInput(
+                    event_type=event.event_type,
+                    attributes={
+                        'source_id': stream_key.source_id,
+                        'stream_id': stream_key.stream_id,
+                        'partition_id': stream_key.partition_id,
+                        'run_id': event.run_id,
+                    },
+                    payload={
+                        'source_offset_or_equivalent': event.source_offset_or_equivalent,
+                        'event_id': event.event_id,
+                        'payload_sha256_raw': event.payload_sha256_raw,
+                        'status': event.status,
+                    },
+                )
+            )
+        return self._sink.append_events(append_inputs)
+
+    def append_ingest_batch_event(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        event_type: str,
+        run_id: str | None,
+        batch_event_count: int,
+        inserted_count: int,
+        duplicate_count: int,
+        first_source_offset_or_equivalent: str,
+        last_source_offset_or_equivalent: str,
+        first_event_id: str,
+        last_event_id: str,
+    ) -> str:
         return self._sink.append_event(
             event_type=event_type,
             attributes={
@@ -43,10 +109,13 @@ class CanonicalRuntimeAuditLog:
                 'run_id': run_id,
             },
             payload={
-                'source_offset_or_equivalent': source_offset_or_equivalent,
-                'event_id': event_id,
-                'payload_sha256_raw': payload_sha256_raw,
-                'status': status,
+                'batch_event_count': batch_event_count,
+                'inserted_count': inserted_count,
+                'duplicate_count': duplicate_count,
+                'first_source_offset_or_equivalent': first_source_offset_or_equivalent,
+                'last_source_offset_or_equivalent': last_source_offset_or_equivalent,
+                'first_event_id': first_event_id,
+                'last_event_id': last_event_id,
             },
         )
 

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
+import polars as pl
 import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
@@ -15,14 +16,14 @@ from origo_control_plane.utils.binance_aligned_projector import (
     project_binance_spot_trades_aligned,
 )
 from origo_control_plane.utils.binance_canonical_event_ingest import (
-    parse_binance_spot_trade_csv,
-    write_binance_spot_trades_to_canonical,
+    parse_binance_spot_trade_csv_frame,
+    write_binance_spot_trade_frame_to_canonical,
 )
 from origo_control_plane.utils.binance_native_projector import (
     project_binance_spot_trades_native,
 )
 from origo_control_plane.utils.exchange_integrity import (
-    run_exchange_integrity_suite_rows,
+    run_exchange_integrity_suite_frame,
 )
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
@@ -103,16 +104,23 @@ def _process_day(
     csv_checksum = hashlib.sha256(csv_content).hexdigest()
     context.log.info(f'CSV checksum: {csv_checksum}')
 
-    events = parse_binance_spot_trade_csv(
+    events_frame = parse_binance_spot_trade_csv_frame(
         csv_content,
         partition_id=partition_date_str,
     )
-    context.log.info(f'Parsed {len(events)} rows from CSV')
+    context.log.info(f'Parsed {events_frame.height} rows from CSV')
 
-    integrity_rows = (event.to_integrity_tuple() for event in events)
-    integrity_report = run_exchange_integrity_suite_rows(
+    integrity_report = run_exchange_integrity_suite_frame(
         dataset='binance_spot_trades',
-        rows=integrity_rows,
+        frame=events_frame.select(
+            pl.col('trade_id').alias('trade_id'),
+            pl.col('price_text').alias('price'),
+            pl.col('quantity_text').alias('quantity'),
+            pl.col('quote_quantity_text').alias('quote_quantity'),
+            pl.col('timestamp_ms').alias('timestamp'),
+            pl.col('is_buyer_maker').alias('is_buyer_maker'),
+            pl.col('is_best_match').alias('is_best_match'),
+        ),
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
@@ -133,11 +141,11 @@ def _process_day(
             send_receive_timeout=900,
         )
 
-        write_summary = write_binance_spot_trades_to_canonical(
+        write_summary = write_binance_spot_trade_frame_to_canonical(
             client=client,
             database=CLICKHOUSE_DATABASE,
             partition_id=partition_date_str,
-            events=events,
+            frame=events_frame,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
         )
@@ -146,10 +154,10 @@ def _process_day(
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])
-        if rows_processed != len(events):
+        if rows_processed != events_frame.height:
             raise RuntimeError(
                 'Canonical writer summary mismatch: '
-                f'rows_processed={rows_processed} expected={len(events)}'
+                f'rows_processed={rows_processed} expected={events_frame.height}'
             )
         if rows_inserted + rows_duplicate != rows_processed:
             raise RuntimeError(

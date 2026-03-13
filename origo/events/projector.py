@@ -493,10 +493,7 @@ class CanonicalProjectorRuntime:
                         code='PROJECTOR_NON_MONOTONIC_SOURCE_OFFSET',
                         message='Projector checkpoint conflict: non-monotonic source offset',
                     )
-                if (
-                    next_offset == latest_offset
-                    and last_event.event_id <= latest_checkpoint.last_event_id
-                ):
+                if next_offset == latest_offset:
                     raise ProjectorRuntimeError(
                         code='PROJECTOR_EVENT_ORDER_NOT_ADVANCED',
                         message='Projector checkpoint conflict: event order did not advance',
@@ -506,15 +503,6 @@ class CanonicalProjectorRuntime:
                     raise ProjectorRuntimeError(
                         code='PROJECTOR_NON_MONOTONIC_INGESTED_AT',
                         message='Projector checkpoint conflict: non-monotonic ingested_at_utc',
-                    )
-                if (
-                    last_event.ingested_at_utc
-                    == latest_checkpoint.last_ingested_at_utc
-                    and last_event.event_id <= latest_checkpoint.last_event_id
-                ):
-                    raise ProjectorRuntimeError(
-                        code='PROJECTOR_EVENT_ORDER_NOT_ADVANCED',
-                        message='Projector checkpoint conflict: event order did not advance',
                     )
             next_revision = latest_checkpoint.checkpoint_revision + 1
 

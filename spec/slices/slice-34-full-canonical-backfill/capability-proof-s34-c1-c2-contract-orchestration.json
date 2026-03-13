@@ -1,0 +1,192 @@
+{
+  "binance_sample_plan": {
+    "daily_partitions": [
+      "2017-08-17",
+      "2017-08-18",
+      "2017-08-19"
+    ],
+    "initial_remaining": [
+      "2017-08-17",
+      "2017-08-18",
+      "2017-08-19"
+    ],
+    "resumed_remaining_after_2017-08-17": [
+      "2017-08-18",
+      "2017-08-19"
+    ],
+    "run_state_payload": {
+      "binance_spot_trades": {
+        "last_completed_partition": "2017-08-17",
+        "updated_at_utc": "2026-03-12T12:10:46.630986+00:00",
+        "updated_by_run_id": "s34-proof-run-1"
+      }
+    }
+  },
+  "dataset_contracts": [
+    {
+      "aligned_capable": true,
+      "dataset": "binance_spot_trades",
+      "earliest_height": null,
+      "earliest_partition_date": "2017-08-17",
+      "execution_rank": 1,
+      "offset_ordering": "numeric",
+      "partition_scheme": "daily",
+      "phase": "exchange_primary",
+      "source_id": "binance",
+      "stream_id": "binance_spot_trades"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "okx_spot_trades",
+      "earliest_height": null,
+      "earliest_partition_date": "2021-09-01",
+      "execution_rank": 2,
+      "offset_ordering": "numeric",
+      "partition_scheme": "daily",
+      "phase": "exchange_parallel",
+      "source_id": "okx",
+      "stream_id": "okx_spot_trades"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bybit_spot_trades",
+      "earliest_height": null,
+      "earliest_partition_date": "2020-03-25",
+      "execution_rank": 3,
+      "offset_ordering": "numeric",
+      "partition_scheme": "daily",
+      "phase": "exchange_parallel",
+      "source_id": "bybit",
+      "stream_id": "bybit_spot_trades"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "etf_daily_metrics",
+      "earliest_height": null,
+      "earliest_partition_date": "2024-01-11",
+      "execution_rank": 4,
+      "offset_ordering": "lexicographic",
+      "partition_scheme": "daily",
+      "phase": "etf",
+      "source_id": "etf",
+      "stream_id": "etf_daily_metrics"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "fred_series_metrics",
+      "earliest_height": null,
+      "earliest_partition_date": null,
+      "execution_rank": 5,
+      "offset_ordering": "lexicographic",
+      "partition_scheme": "daily",
+      "phase": "fred",
+      "source_id": "fred",
+      "stream_id": "fred_series_metrics"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_block_headers",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 6,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_base",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_headers"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_block_transactions",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 7,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_base",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_transactions"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_mempool_state",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 8,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_base",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_mempool_state"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_block_fee_totals",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 9,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_derived",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_fee_totals"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_block_subsidy_schedule",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 10,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_derived",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_block_subsidy_schedule"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_network_hashrate_estimate",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 11,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_derived",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_network_hashrate_estimate"
+    },
+    {
+      "aligned_capable": true,
+      "dataset": "bitcoin_circulating_supply",
+      "earliest_height": 0,
+      "earliest_partition_date": null,
+      "execution_rank": 12,
+      "offset_ordering": "numeric",
+      "partition_scheme": "height_range",
+      "phase": "bitcoin_derived",
+      "source_id": "bitcoin_core",
+      "stream_id": "bitcoin_circulating_supply"
+    }
+  ],
+  "gap_checks": {
+    "contiguous": {
+      "duplicate_offset_count": 0,
+      "expected_event_count": 4,
+      "gap_count": 0,
+      "missing_offset_preview": [],
+      "observed_event_count": 4
+    },
+    "gap_injected": {
+      "duplicate_offset_count": 1,
+      "expected_event_count": 6,
+      "gap_count": 2,
+      "missing_offset_preview": [
+        102,
+        104
+      ],
+      "observed_event_count": 4
+    }
+  },
+  "generated_at_utc": "2026-03-12T12:10:46.632054+00:00",
+  "proof_scope": "Slice 34 S34-C1/S34-C2 backfill contract and orchestration controls"
+}

@@ -211,6 +211,21 @@ jobs:
             echo "ERROR: ORIGO_BACKFILL_MANIFEST_LOG_PATH must be present and non-empty in .env.example." >&2
             exit 1
           fi
+          origo_s34_backfill_concurrency="$(
+            read_root_env_example_value ORIGO_S34_BACKFILL_CONCURRENCY
+          )"
+          if [[ -z "${origo_s34_backfill_concurrency}" ]]; then
+            echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ ! "${origo_s34_backfill_concurrency}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY in .env.example must be an integer >= 10." >&2
+            exit 1
+          fi
+          if [[ "${origo_s34_backfill_concurrency}" -lt 10 ]]; then
+            echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY in .env.example must be >= 10." >&2
+            exit 1
+          fi
           origo_canonical_runtime_audit_log_path_b64="$(
             printf '%s' "${origo_canonical_runtime_audit_log_path}" | base64 -w0
           )"
@@ -232,6 +247,9 @@ jobs:
           origo_backfill_manifest_log_path_b64="$(
             printf '%s' "${origo_backfill_manifest_log_path}" | base64 -w0
           )"
+          origo_s34_backfill_concurrency_b64="$(
+            printf '%s' "${origo_s34_backfill_concurrency}" | base64 -w0
+          )"
           origo_api_image_b64="$(printf '%s' "${ORIGO_API_IMAGE}" | base64 -w0)"
           origo_control_plane_image_b64="$(printf '%s' "${ORIGO_CONTROL_PLANE_IMAGE}" | base64 -w0)"
           origo_deploy_compose_b64="$(base64 -w0 deploy/docker-compose.server.yml)"
@@ -251,6 +269,7 @@ jobs:
              ORIGO_BACKFILL_PROJECTION_MODE_B64='${origo_backfill_projection_mode_b64}' \
              ORIGO_BACKFILL_RUN_STATE_PATH_B64='${origo_backfill_run_state_path_b64}' \
              ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64='${origo_backfill_manifest_log_path_b64}' \
+             ORIGO_S34_BACKFILL_CONCURRENCY_B64='${origo_s34_backfill_concurrency_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
              ORIGO_CONTROL_PLANE_IMAGE_B64='${origo_control_plane_image_b64}' \
              ORIGO_DEPLOY_COMPOSE_B64='${origo_deploy_compose_b64}' \
@@ -283,6 +302,7 @@ jobs:
           decode_env_b64_required ORIGO_BACKFILL_PROJECTION_MODE_B64 ORIGO_BACKFILL_PROJECTION_MODE
           decode_env_b64_required ORIGO_BACKFILL_RUN_STATE_PATH_B64 ORIGO_BACKFILL_RUN_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64 ORIGO_BACKFILL_MANIFEST_LOG_PATH
+          decode_env_b64_required ORIGO_S34_BACKFILL_CONCURRENCY_B64 ORIGO_S34_BACKFILL_CONCURRENCY
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
           decode_env_b64_required ORIGO_CONTROL_PLANE_IMAGE_B64 ORIGO_CONTROL_PLANE_IMAGE
           decode_env_b64_required ORIGO_DEPLOY_COMPOSE_B64 ORIGO_DEPLOY_COMPOSE_CONTENT
@@ -313,6 +333,7 @@ jobs:
           require_env ORIGO_BACKFILL_PROJECTION_MODE
           require_env ORIGO_BACKFILL_RUN_STATE_PATH
           require_env ORIGO_BACKFILL_MANIFEST_LOG_PATH
+          require_env ORIGO_S34_BACKFILL_CONCURRENCY
           require_env ORIGO_API_IMAGE
           require_env ORIGO_CONTROL_PLANE_IMAGE
           require_env ORIGO_DEPLOY_COMPOSE_CONTENT
@@ -346,6 +367,14 @@ jobs:
           fi
           if [[ "${ORIGO_BACKFILL_PROJECTION_MODE}" != 'inline' && "${ORIGO_BACKFILL_PROJECTION_MODE}" != 'deferred' ]]; then
             echo "ERROR: ORIGO_BACKFILL_PROJECTION_MODE must be inline|deferred." >&2
+            exit 1
+          fi
+          if [[ ! "${ORIGO_S34_BACKFILL_CONCURRENCY}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY must be an integer >= 10." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_S34_BACKFILL_CONCURRENCY}" -lt 10 ]]; then
+            echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY must be >= 10." >&2
             exit 1
           fi
 
@@ -527,6 +556,7 @@ jobs:
             $0 !~ /^ORIGO_BACKFILL_PROJECTION_MODE=/ &&
             $0 !~ /^ORIGO_BACKFILL_RUN_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_MANIFEST_LOG_PATH=/ &&
+            $0 !~ /^ORIGO_S34_BACKFILL_CONCURRENCY=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_URL=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_USER=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_PASSWORD=/ &&
@@ -552,6 +582,7 @@ jobs:
             echo "ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
             echo "ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
             echo "ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
+            echo "ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
             echo "ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
             echo "ORIGO_BITCOIN_CORE_RPC_USER=${bitcoin_core_rpc_user}"
             echo "ORIGO_BITCOIN_CORE_RPC_PASSWORD=${bitcoin_core_rpc_password}"
@@ -580,6 +611,7 @@ jobs:
           echo "  ORIGO_BACKFILL_PROJECTION_MODE=${ORIGO_BACKFILL_PROJECTION_MODE}"
           echo "  ORIGO_BACKFILL_RUN_STATE_PATH=${ORIGO_BACKFILL_RUN_STATE_PATH}"
           echo "  ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
+          echo "  ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
           echo "  ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
           echo "  ORIGO_BITCOIN_CORE_NETWORK=${bitcoin_core_network}"
           echo "  ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"

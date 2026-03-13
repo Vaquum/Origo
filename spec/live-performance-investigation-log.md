@@ -192,3 +192,48 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Verified UUIDv5 parity strategy in SQL by switching namespace input from `reinterpretAsString(toUUID(...))` to `unhex(namespace_hex)` and applying RFC4122 version/variant bit masking inside ClickHouse.
 - I found: SQL-generated UUIDs now match Python deterministic UUIDv5 output for canonical idempotency keys.
 - Progress/Next: Keep this implementation as the canonical SQL event-id path for fast Binance backfill mode.
+
+### Entry 038
+- I tried: Connected directly to the live host using available SSH access and validated active deployment paths/services.
+- I found: Live stack is running at `/opt/origo/deploy` (not legacy tdw path), with healthy `api`, `clickhouse`, `dagster-webserver`, and `dagster-daemon`; deploy env currently pins `ORIGO_BACKFILL_PROJECTION_MODE=deferred`, `ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`, `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`.
+- Progress/Next: Run concurrency sweeps against this live stack only; no local dry-run assumptions.
+
+### Entry 039
+- I tried: Executed S34 runner with custom backfill state/manifests from host shell env.
+- I found: `docker compose exec` did not inherit host env overrides automatically; runner ignored intended run-state and restarted at `2017-08-17`, triggering fail-loud partition-nonempty errors.
+- Progress/Next: Pass path envs explicitly with `docker compose exec -e ...` for every benchmark/backfill invocation.
+
+### Entry 040
+- I tried: Seeded benchmark run-state/manifests on host filesystem under `/opt/origo/deploy/storage/...`.
+- I found: Containers read `/workspace/storage` volume, so host-seeded files were invisible inside `dagster-webserver`.
+- Progress/Next: Seed and read benchmark artifacts strictly inside container-visible paths (`/workspace/storage/audit/...`).
+
+### Entry 041
+- I tried: Ran sanity benchmark (`concurrency=10`, partitions `2021-05-26..2021-05-27`) with isolated run-state and clean window.
+- I found: Run completed successfully in `20s` for `4,534,501` rows (~`226,725` rows/s end-to-end), confirming corrected runner path + env wiring.
+- Progress/Next: Move to multi-partition controlled sweeps.
+
+### Entry 042
+- I tried: Swept `concurrency=10,15,20,30` on a 10-partition window (`2021-05-26..2021-06-04`, `19,986,874` rows).
+- I found: Durations were `31.949s (c10)`, `30.516s (c15)`, `30.499s (c20)`, `30.544s (c30)`.
+- Progress/Next: Above `c10`, gains were flat because only `10` partitions were scheduled; run larger partition count to expose real concurrency scaling.
+
+### Entry 043
+- I tried: Re-ran scaling test on 40 partitions (`2021-05-26..2021-07-04`, `73,384,135` rows).
+- I found:
+  - `c10`: `106.713s` (~`687,675` rows/s)
+  - `c15`: `95.379s` (~`769,380` rows/s)
+  - `c20`: `97.014s` (~`756,417` rows/s)
+  - `c30`: `99.472s` (~`737,743` rows/s)
+  Real throughput peak is at `c15`; higher concurrency regressed slightly.
+- Progress/Next: Set operational S34 exchange backfill concurrency default to `15` and keep runner overrideable for controlled experiments.
+
+### Entry 044
+- I tried: Captured live telemetry during sweeps (CPU/RAM/network + ClickHouse counters) at multiple snapshots.
+- I found: Host memory remained safe throughout (typically `<20GB` actively used with `~230GB+` cache/available), network deltas tracked Binance download bursts, and ClickHouse memory tracking stayed well below system limits while insert workloads progressed.
+- Progress/Next: Promote `c15` as default, then continue with full S34 backfill execution using this setting and keep telemetry checks running during long windows.
+
+### Entry 045
+- I tried: Interpreted ClickHouse `system.events.InsertedRows` during fast-path benchmarks as direct canonical row throughput.
+- I found: `InsertedRows` includes both temporary stage-table inserts and canonical table inserts in the SQL-transform path, so event counter deltas are roughly `~2x` the canonical rows written.
+- Progress/Next: Use manifest duration + canonical table row counts for throughput truth; use `InsertedRows` only as relative load indicator.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -90,8 +91,7 @@ def write_bitcoin_events_to_canonical(
         label='ingested_at_utc',
     )
 
-    rows_inserted = 0
-    rows_duplicate = 0
+    write_inputs: list[CanonicalEventWriteInput] = []
     for event in events:
         stream_id = _require_non_empty(event.stream_id, label='stream_id')
         if stream_id not in _ALLOWED_STREAM_IDS:
@@ -109,8 +109,10 @@ def write_bitcoin_events_to_canonical(
                 event.source_event_time_utc,
                 label='source_event_time_utc',
             )
-        payload_raw = canonical_json_string(event.payload).encode(_PAYLOAD_ENCODING)
-        write_result = writer.write_event(
+        payload_json = canonical_json_string(event.payload)
+        payload_raw = payload_json.encode(_PAYLOAD_ENCODING)
+        payload_sha256_raw = hashlib.sha256(payload_raw).hexdigest()
+        write_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_SOURCE_ID,
                 stream_id=stream_id,
@@ -121,9 +123,16 @@ def write_bitcoin_events_to_canonical(
                 payload_content_type=_PAYLOAD_CONTENT_TYPE,
                 payload_encoding=_PAYLOAD_ENCODING,
                 payload_raw=payload_raw,
+                payload_json_precanonical=payload_json,
+                payload_sha256_raw_precomputed=payload_sha256_raw,
                 run_id=run_id,
             )
         )
+    write_results = writer.write_events(write_inputs)
+
+    rows_inserted = 0
+    rows_duplicate = 0
+    for write_result in write_results:
         if write_result.status == 'inserted':
             rows_inserted += 1
         elif write_result.status == 'duplicate':

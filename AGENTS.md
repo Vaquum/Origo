@@ -9,6 +9,7 @@ alwaysApply: true
 - No silent failures. If something goes wrong, surface it.
 - No swallowed exceptions. If it's caught, it's handled or re-raised.
 - Nothing deployment-specific is ever hard-coded. If a value changes between local, CI, and production, it is an environment variable. No exceptions.
+- Never replace real execution. No unplanned dry-runs.
 
 ## Before every slice
 

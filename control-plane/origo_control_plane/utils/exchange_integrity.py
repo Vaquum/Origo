@@ -354,7 +354,142 @@ def run_exchange_integrity_suite_frame(
         )
 
     selected = frame.select(list(spec.frame_columns))
+    if dataset == 'binance_spot_trades':
+        return _run_binance_integrity_suite_frame_fast(selected)
     return run_exchange_integrity_suite_rows(
         dataset=dataset,
         rows=selected.iter_rows(),
+    )
+
+
+def _run_binance_integrity_suite_frame_fast(frame: pl.DataFrame) -> ExchangeIntegrityReport:
+    if frame.height == 0:
+        raise ValueError(
+            'Exchange integrity schema/type check failed for binance_spot_trades: no rows found'
+        )
+    typed = frame.with_row_index(name='_row_number', offset=1).with_columns(
+        pl.col('trade_id').cast(pl.Int64, strict=False).alias('_trade_id_int'),
+        pl.col('timestamp').cast(pl.Int64, strict=False).alias('_timestamp_int'),
+        pl.col('price').cast(pl.Float64, strict=False).alias('_price_float'),
+        pl.col('quantity').cast(pl.Float64, strict=False).alias('_quantity_float'),
+        pl.col('quote_quantity')
+        .cast(pl.Float64, strict=False)
+        .alias('_quote_quantity_float'),
+        pl.col('is_buyer_maker')
+        .cast(pl.Utf8)
+        .str.strip_chars()
+        .str.to_lowercase()
+        .alias('_is_buyer_maker_text'),
+        pl.col('is_best_match')
+        .cast(pl.Utf8)
+        .str.strip_chars()
+        .str.to_lowercase()
+        .alias('_is_best_match_text'),
+    )
+
+    invalid_schema = typed.filter(
+        pl.col('_trade_id_int').is_null()
+        | pl.col('_timestamp_int').is_null()
+        | pl.col('_price_float').is_null()
+        | pl.col('_quantity_float').is_null()
+        | pl.col('_quote_quantity_float').is_null()
+        | ~pl.col('_is_buyer_maker_text').is_in(['true', 'false', '0', '1'])
+        | ~pl.col('_is_best_match_text').is_in(['true', 'false', '0', '1'])
+    )
+    if invalid_schema.height > 0:
+        row_number = int(invalid_schema.get_column('_row_number').item(0))
+        raise ValueError(
+            'Exchange integrity schema/type check failed for '
+            f'binance_spot_trades.row[{row_number}]'
+        )
+
+    invalid_trade_id = typed.filter(pl.col('_trade_id_int') < 0)
+    if invalid_trade_id.height > 0:
+        row_number = int(invalid_trade_id.get_column('_row_number').item(0))
+        value = int(invalid_trade_id.get_column('_trade_id_int').item(0))
+        raise ValueError(
+            'Exchange integrity anomaly check failed for '
+            f'binance_spot_trades.row[{row_number}].id: '
+            f'expected >= 0, got={value}'
+        )
+
+    invalid_timestamp = typed.filter(pl.col('_timestamp_int') <= 0)
+    if invalid_timestamp.height > 0:
+        row_number = int(invalid_timestamp.get_column('_row_number').item(0))
+        value = int(invalid_timestamp.get_column('_timestamp_int').item(0))
+        raise ValueError(
+            'Exchange integrity anomaly check failed for '
+            f'binance_spot_trades.row[{row_number}].timestamp: '
+            f'expected > 0, got={value}'
+        )
+
+    invalid_positive = typed.filter(
+        (pl.col('_price_float') <= 0)
+        | (pl.col('_quantity_float') <= 0)
+        | (pl.col('_quote_quantity_float') <= 0)
+    )
+    if invalid_positive.height > 0:
+        row_number = int(invalid_positive.get_column('_row_number').item(0))
+        raise ValueError(
+            'Exchange integrity anomaly check failed for '
+            f'binance_spot_trades.row[{row_number}]'
+        )
+
+    id_diffs = typed.select(
+        pl.col('_row_number'),
+        (pl.col('_trade_id_int') - pl.col('_trade_id_int').shift(1)).alias('_id_diff'),
+    )
+    invalid_diff = id_diffs.filter(
+        (pl.col('_row_number') > 1) & (pl.col('_id_diff') != 1)
+    )
+    if invalid_diff.height > 0:
+        row_number = int(invalid_diff.get_column('_row_number').item(0))
+        previous_id = int(typed.get_column('_trade_id_int').item(row_number - 2))
+        current_id = int(typed.get_column('_trade_id_int').item(row_number - 1))
+        if current_id <= previous_id:
+            raise ValueError(
+                'Exchange integrity sequence-gap check failed for binance_spot_trades: '
+                f'row={row_number}, previous_id={previous_id}, current_id={current_id}'
+            )
+        raise ValueError(
+            'Exchange integrity sequence-gap check failed for binance_spot_trades: '
+            f'row={row_number}, expected_next_id={previous_id + 1}, got={current_id}'
+        )
+
+    min_id_value = typed.get_column('_trade_id_int').min()
+    max_id_value = typed.get_column('_trade_id_int').max()
+    if min_id_value is None or max_id_value is None:
+        raise RuntimeError(
+            'Exchange integrity internal error for binance_spot_trades: '
+            'id bounds missing after validation'
+        )
+    if isinstance(min_id_value, bool) or not isinstance(min_id_value, int):
+        raise RuntimeError(
+            'Exchange integrity internal error for binance_spot_trades: '
+            f'invalid min_id type={type(min_id_value).__name__}'
+        )
+    if isinstance(max_id_value, bool) or not isinstance(max_id_value, int):
+        raise RuntimeError(
+            'Exchange integrity internal error for binance_spot_trades: '
+            f'invalid max_id type={type(max_id_value).__name__}'
+        )
+    min_id = min_id_value
+    max_id = max_id_value
+    rows_checked = typed.height
+    contiguous_span = max_id - min_id + 1
+    sequence_gap_count = contiguous_span - rows_checked
+    if sequence_gap_count != 0:
+        raise ValueError(
+            'Exchange integrity sequence-gap check failed for binance_spot_trades: '
+            f'min_id={min_id}, max_id={max_id}, rows={rows_checked}, '
+            f'gap_count={sequence_gap_count}'
+        )
+
+    return ExchangeIntegrityReport(
+        dataset='binance_spot_trades',
+        rows_checked=rows_checked,
+        min_id=min_id,
+        max_id=max_id,
+        sequence_gap_count=sequence_gap_count,
+        anomaly_checks_performed=rows_checked * 6,
     )

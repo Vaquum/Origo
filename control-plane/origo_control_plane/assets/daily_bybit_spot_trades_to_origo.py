@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -36,6 +37,18 @@ _BYBIT_SYMBOL = 'BTCUSDT'
 _REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2020-03-25')
+_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
+
+
+def _load_backfill_projection_mode_or_raise() -> str:
+    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
+    normalized = raw_mode.strip().lower()
+    if normalized not in {'inline', 'deferred'}:
+        raise RuntimeError(
+            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
+            f'got={raw_mode!r}'
+        )
+    return normalized
 
 
 def _bybit_day_window_utc_ms(date_str: str) -> tuple[int, int]:
@@ -61,6 +74,7 @@ def _resolve_bybit_daily_file_url(*, date_str: str) -> tuple[str, str]:
 def insert_daily_bybit_spot_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
+    projection_mode = _load_backfill_projection_mode_or_raise()
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
     day_start_ts_utc_ms, day_end_ts_utc_ms = _bybit_day_window_utc_ms(date_str)
@@ -144,25 +158,42 @@ def insert_daily_bybit_spot_trades_to_origo(
 
         projected_at_utc = datetime.now(UTC)
         partition_ids = {event.partition_id for event in events}
-        native_projection_summary = project_bybit_spot_trades_native(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
-        aligned_projection_summary = project_bybit_spot_trades_aligned(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids=partition_ids,
-            run_id=context.run_id,
-            projected_at_utc=projected_at_utc,
-        )
+        if projection_mode == 'inline':
+            native_projection_summary_dict = project_bybit_spot_trades_native(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+            aligned_projection_summary_dict = project_bybit_spot_trades_aligned(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=projected_at_utc,
+            ).to_dict()
+        else:
+            native_projection_summary_dict = {
+                'partitions_processed': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
+            aligned_projection_summary_dict = {
+                'partitions_processed': 0,
+                'policies_recorded': 0,
+                'policies_duplicate': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
 
         result_data: dict[str, Any] = {
             'date': date_str,
             'source_filename': filename,
             'source_url': file_url,
+            'projection_mode': projection_mode,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
@@ -174,8 +205,8 @@ def insert_daily_bybit_spot_trades_to_origo(
             'csv_sha256': csv_sha256,
             'source_etag': source_etag,
             'integrity_report': integrity_report.to_dict(),
-            'native_projection_summary': native_projection_summary.to_dict(),
-            'aligned_projection_summary': aligned_projection_summary.to_dict(),
+            'native_projection_summary': native_projection_summary_dict,
+            'aligned_projection_summary': aligned_projection_summary_dict,
         }
         context.log.info(
             'Successfully processed Bybit daily file: ' + json.dumps(result_data)

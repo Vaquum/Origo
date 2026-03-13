@@ -46,15 +46,19 @@ def test_immutable_audit_log_appends_hash_chain_and_state(tmp_path: Path) -> Non
     log_path = tmp_path / 'audit' / 'events.jsonl'
     sink = ImmutableAuditLog(path=log_path, sink_name='test_sink', retention_days=365)
 
-    hash_1 = sink.append_event(
-        event_type='event_one',
-        payload={'value': 1},
-        attributes={'run_id': 'run-1', 'source_id': None},
-    )
-    hash_2 = sink.append_event(
-        event_type='event_two',
-        payload={'value': 2},
-        attributes={'run_id': 'run-1', 'source_id': 'source-a'},
+    hash_1, hash_2 = sink.append_events(
+        events=[
+            ImmutableAuditAppendInput(
+                event_type='event_one',
+                payload={'value': 1},
+                attributes={'run_id': 'run-1', 'source_id': None},
+            ),
+            ImmutableAuditAppendInput(
+                event_type='event_two',
+                payload={'value': 2},
+                attributes={'run_id': 'run-1', 'source_id': 'source-a'},
+            ),
+        ]
     )
 
     events = _read_jsonl(log_path)

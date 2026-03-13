@@ -37,14 +37,18 @@ def test_canonical_runtime_audit_log_writes_ingest_and_projector_events(
         partition_id='btcusdt',
     )
     audit_log = module.get_canonical_runtime_audit_log()
-    audit_log.append_ingest_event(
-        event_type='canonical_ingest_inserted',
+    audit_log.append_ingest_events(
         stream_key=stream_key,
-        source_offset_or_equivalent='1001',
-        event_id='00000000-0000-0000-0000-000000000001',
-        payload_sha256_raw='a' * 64,
-        status='inserted',
-        run_id='run-1',
+        events=[
+            module.CanonicalRuntimeIngestEvent(
+                event_type='canonical_ingest_inserted',
+                source_offset_or_equivalent='1001',
+                event_id='00000000-0000-0000-0000-000000000001',
+                payload_sha256_raw='a' * 64,
+                status='inserted',
+                run_id='run-1',
+            )
+        ],
     )
     audit_log.append_projector_checkpoint_event(
         event_type='projector_checkpointed',

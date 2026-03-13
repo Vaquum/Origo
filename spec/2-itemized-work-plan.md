@@ -758,8 +758,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ## Slice 34: Full Canonical Backfill (All Onboarded Datasets)
 
 ### Capability
-- [ ] `S34-C1` Freeze canonical backfill inventory and execution order for every onboarded dataset.
-- [ ] `S34-C2` Implement/verify backfill orchestration contract (partition planner, cursor ledger, resumable run controls, fail-loud gap checks).
+- [x] `S34-C1` Freeze canonical backfill inventory and execution order for every onboarded dataset.
+- [x] `S34-C2` Implement/verify backfill orchestration contract (partition planner, cursor ledger, resumable run controls, fail-loud gap checks).
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.

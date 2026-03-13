@@ -153,6 +153,8 @@ class CanonicalEventWriteInput:
     payload_content_type: str
     payload_encoding: str
     payload_raw: bytes
+    payload_json_precanonical: str | None = None
+    payload_sha256_raw_precomputed: str | None = None
     run_id: str | None = None
 
 
@@ -231,14 +233,49 @@ def build_canonical_event_row(event_input: CanonicalEventWriteInput) -> Canonica
         source_offset_or_equivalent=event_input.source_offset_or_equivalent,
     )
     event_id = canonical_event_id_from_key(idempotency_key)
-    payload_sha256_raw = hashlib.sha256(event_input.payload_raw).hexdigest()
-    payload_json = _payload_json_from_raw(
-        source_id=event_input.source_id,
-        stream_id=event_input.stream_id,
-        payload_content_type=payload_content_type,
-        payload_encoding=payload_encoding,
-        payload_raw=event_input.payload_raw,
-    )
+    payload_sha256_raw_precomputed = event_input.payload_sha256_raw_precomputed
+    if payload_sha256_raw_precomputed is None:
+        payload_sha256_raw = hashlib.sha256(event_input.payload_raw).hexdigest()
+    else:
+        payload_sha256_raw = payload_sha256_raw_precomputed.strip().lower()
+        if len(payload_sha256_raw) != 64:
+            raise EventWriterError(
+                code='WRITER_INVALID_PRECOMPUTED_PAYLOAD_SHA256',
+                message='payload_sha256_raw_precomputed must be 64 hex characters',
+            )
+        try:
+            int(payload_sha256_raw, 16)
+        except ValueError as exc:
+            raise EventWriterError(
+                code='WRITER_INVALID_PRECOMPUTED_PAYLOAD_SHA256',
+                message='payload_sha256_raw_precomputed must be lowercase hex',
+            ) from exc
+
+    payload_json_precanonical = event_input.payload_json_precanonical
+    if payload_json_precanonical is None:
+        payload_json = _payload_json_from_raw(
+            source_id=event_input.source_id,
+            stream_id=event_input.stream_id,
+            payload_content_type=payload_content_type,
+            payload_encoding=payload_encoding,
+            payload_raw=event_input.payload_raw,
+        )
+    else:
+        media_type = payload_content_type.split(';')[0].strip()
+        if media_type != 'application/json':
+            raise EventWriterError(
+                code='WRITER_UNSUPPORTED_PAYLOAD_MEDIA_TYPE',
+                message=(
+                    'payload_json_precanonical is only supported for '
+                    'application/json payloads'
+                ),
+            )
+        payload_json = payload_json_precanonical
+        if payload_json.strip() == '':
+            raise EventWriterError(
+                code='WRITER_INVALID_PRECANONICAL_PAYLOAD_JSON',
+                message='payload_json_precanonical must be non-empty JSON text',
+            )
 
     return CanonicalEventRow(
         envelope_version=CANONICAL_EVENT_ENVELOPE_VERSION,

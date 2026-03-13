@@ -21,3 +21,18 @@ schedule_storage:
   class: SqliteScheduleStorage
   config:
     base_dir: /opt/dagster-instance
+
+run_queue:
+  max_concurrent_runs: 20
+
+run_monitoring:
+  enabled: true
+  start_timeout_seconds: 300
+  max_runtime_seconds: 3600
+  max_resume_run_attempts: 0
+  poll_interval_seconds: 30
+  cancellation_thread_poll_interval_seconds: 30
+
+code_servers:
+  local_startup_timeout: 180
+  reload_timeout: 180

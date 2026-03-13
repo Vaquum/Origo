@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,16 @@ from origo.audit import (
 from .ingest_state import CanonicalStreamKey
 
 _RUNTIME_AUDIT_PATH_ENV = 'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH'
+
+
+@dataclass(frozen=True)
+class CanonicalRuntimeIngestEvent:
+    event_type: str
+    source_offset_or_equivalent: str
+    event_id: str
+    payload_sha256_raw: str
+    status: str
+    run_id: str | None
 
 
 class CanonicalRuntimeAuditLog:
@@ -34,28 +45,67 @@ class CanonicalRuntimeAuditLog:
         status: str,
         run_id: str | None,
     ) -> str:
-        return self._sink.append_event(
-            event_type=event_type,
-            attributes={
-                'source_id': stream_key.source_id,
-                'stream_id': stream_key.stream_id,
-                'partition_id': stream_key.partition_id,
-                'run_id': run_id,
-            },
-            payload={
-                'source_offset_or_equivalent': source_offset_or_equivalent,
-                'event_id': event_id,
-                'payload_sha256_raw': payload_sha256_raw,
-                'status': status,
-            },
-        )
+        return self.append_ingest_events(
+            stream_key=stream_key,
+            events=[
+                CanonicalRuntimeIngestEvent(
+                    event_type=event_type,
+                    source_offset_or_equivalent=source_offset_or_equivalent,
+                    event_id=event_id,
+                    payload_sha256_raw=payload_sha256_raw,
+                    status=status,
+                    run_id=run_id,
+                )
+            ],
+        )[0]
 
-    def append_ingest_events(self, *, events: list[dict[str, object]]) -> list[str]:
+    def append_ingest_events(
+        self,
+        *,
+        events: list[dict[str, object]] | list[CanonicalRuntimeIngestEvent],
+        stream_key: CanonicalStreamKey | None = None,
+    ) -> list[str]:
         if events == []:
             return []
+        first_event = events[0]
+        if isinstance(first_event, CanonicalRuntimeIngestEvent):
+            if stream_key is None:
+                raise RuntimeError(
+                    'stream_key is required when events are CanonicalRuntimeIngestEvent'
+                )
+            typed_events = [
+                event for event in events if isinstance(event, CanonicalRuntimeIngestEvent)
+            ]
+            if len(typed_events) != len(events):
+                raise RuntimeError(
+                    'all events must be CanonicalRuntimeIngestEvent when stream_key is set'
+                )
+            audit_events: list[ImmutableAuditAppendInput] = []
+            for event in typed_events:
+                audit_events.append(
+                    ImmutableAuditAppendInput(
+                        event_type=event.event_type,
+                        attributes={
+                            'source_id': stream_key.source_id,
+                            'stream_id': stream_key.stream_id,
+                            'partition_id': stream_key.partition_id,
+                            'run_id': event.run_id,
+                        },
+                        payload={
+                            'source_offset_or_equivalent': event.source_offset_or_equivalent,
+                            'event_id': event.event_id,
+                            'payload_sha256_raw': event.payload_sha256_raw,
+                            'status': event.status,
+                        },
+                    )
+                )
+            return self._sink.append_events(events=audit_events)
 
         audit_events: list[ImmutableAuditAppendInput] = []
-        for event_number, event in enumerate(events, start=1):
+        dict_events = [event for event in events if isinstance(event, dict)]
+        if len(dict_events) != len(events):
+            raise RuntimeError('all events must be dict[str, object] in legacy mode')
+        for event_number, event in enumerate(dict_events, start=1):
             event_type = event.get('event_type')
             source_id = event.get('source_id')
             stream_id = event.get('stream_id')

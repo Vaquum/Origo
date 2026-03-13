@@ -332,3 +332,13 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Re-ran OKX S34 start after deploying the `maxOrNull` cursor fix.
 - I found: Backfill progressed past cursor load and failed at canonical fast insert guard because one OKX daily file produced two UTC event-day partitions (`2021-08-31`, `2021-09-01`) while fast mode requires one canonical partition per batch.
 - Progress/Next: Make OKX daily-file canonical partition deterministic by pinning canonical partition id to the selected source day (`partition_date_str`) during write and projection dispatch; keep event timestamps untouched.
+
+### Entry 065
+- I tried: Started Bybit S34 smoke on live runtime after OKX was unblocked and captured the first hard failure payload.
+- I found: Root cause is parser contract drift, not infra: Bybit historical CSV can contain UUID `trdMatchID` values (for example `08ff9568-cb50-55d6-b497-13727eec09dc`), while ingest parser accepted only `m-<digits>`.
+- Progress/Next: Patch Bybit parser to accept both first-party source formats (`m-<digits>` and canonical UUID), keep fail-loud behavior for anything else, and add contract tests before redeploying and re-running Bybit smoke.
+
+### Entry 066
+- I tried: Implemented Bybit parser compatibility patch and executed targeted local contract verification (`ruff`, new Bybit parser contract tests, Bybit historical API contract subset, and fast-insert guardrail contract tests).
+- I found: Verification passed (`ruff clean`, parser contract `3/3`, fast-insert contract `7/7`, historical Bybit contract subset `3/3`); parser now handles UUID `trdMatchID` deterministically instead of failing on valid source rows.
+- Progress/Next: Ship patch through PR/deploy pipeline, then re-run live Bybit S34 smoke and continue full exchange backfill progression.

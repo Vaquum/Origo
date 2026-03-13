@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from uuid import UUID
 
 from clickhouse_driver import Client as ClickhouseClient
 
@@ -87,21 +88,37 @@ def _normalize_side(raw_value: str, *, row_index: int) -> str:
 
 
 def _parse_trade_id_from_match_id(*, trd_match_id: str, row_index: int) -> int:
-    if not trd_match_id.startswith('m-'):
+    if trd_match_id.startswith('m-'):
+        raw_trade_id = trd_match_id[2:]
+        if raw_trade_id == '' or not raw_trade_id.isdigit():
+            raise RuntimeError(
+                'Bybit CSV trdMatchID suffix must be numeric '
+                f'at line={row_index}, got={trd_match_id!r}'
+            )
+        trade_id = int(raw_trade_id)
+        if trade_id <= 0:
+            raise RuntimeError(
+                f'Bybit CSV trade_id must be positive at line={row_index}, got={trade_id}'
+            )
+        return trade_id
+
+    try:
+        parsed_uuid = UUID(trd_match_id)
+    except ValueError as exc:
         raise RuntimeError(
-            'Bybit CSV trdMatchID must use m-<digits> format '
+            'Bybit CSV trdMatchID must be m-<digits> or canonical UUID '
+            f'at line={row_index}, got={trd_match_id!r}'
+        ) from exc
+    if str(parsed_uuid) != trd_match_id.lower():
+        raise RuntimeError(
+            'Bybit CSV trdMatchID UUID must use canonical hyphenated form '
             f'at line={row_index}, got={trd_match_id!r}'
         )
-    raw_trade_id = trd_match_id[2:]
-    if raw_trade_id == '' or not raw_trade_id.isdigit():
-        raise RuntimeError(
-            'Bybit CSV trdMatchID suffix must be numeric '
-            f'at line={row_index}, got={trd_match_id!r}'
-        )
-    trade_id = int(raw_trade_id)
+    trade_id = row_index - 1
     if trade_id <= 0:
         raise RuntimeError(
-            f'Bybit CSV trade_id must be positive at line={row_index}, got={trade_id}'
+            'Bybit CSV synthetic trade_id must be positive for UUID rows '
+            f'at line={row_index}, got={trade_id}'
         )
     return trade_id
 

@@ -160,3 +160,25 @@ def test_load_last_completed_daily_partition_from_canonical_rejects_before_earli
             database='origo',
             contract=contract,
         )
+
+
+def test_load_last_completed_daily_partition_from_canonical_uses_max_or_null() -> None:
+    captured_query: str | None = None
+
+    class _FakeClient:
+        def execute(self, query: str, *_: object, **__: object) -> list[tuple[None]]:
+            nonlocal captured_query
+            captured_query = query
+            return [(None,)]
+
+    contract = get_s34_dataset_contract('okx_spot_trades')
+    assert (
+        load_last_completed_daily_partition_from_canonical_or_raise(
+            client=cast(Any, _FakeClient()),
+            database='origo',
+            contract=contract,
+        )
+        is None
+    )
+    assert captured_query is not None
+    assert 'maxOrNull(partition_id)' in captured_query

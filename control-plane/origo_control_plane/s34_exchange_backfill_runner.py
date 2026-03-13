@@ -49,6 +49,7 @@ _PATH_ENV_NAMES: tuple[str, str, str] = (
     'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
 )
 _MIN_DAILY_CONCURRENCY: int = 10
+_S34_BACKFILL_CONCURRENCY_ENV = 'ORIGO_S34_BACKFILL_CONCURRENCY'
 
 
 def _repo_root() -> Path:
@@ -142,6 +143,27 @@ def _parse_iso_date(value: str) -> date:
         raise RuntimeError(
             f'Invalid --end-date value={value!r}; expected YYYY-MM-DD'
         ) from exc
+
+
+def _load_env_backfill_concurrency_or_raise() -> int:
+    raw = os.environ.get(_S34_BACKFILL_CONCURRENCY_ENV)
+    if raw is None or raw.strip() == '':
+        raise RuntimeError(
+            '--concurrency was not provided and '
+            f'{_S34_BACKFILL_CONCURRENCY_ENV} is missing/empty'
+        )
+    try:
+        concurrency = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{_S34_BACKFILL_CONCURRENCY_ENV} must be integer, got {raw!r}'
+        ) from exc
+    if concurrency < _MIN_DAILY_CONCURRENCY:
+        raise RuntimeError(
+            f'{_S34_BACKFILL_CONCURRENCY_ENV} must be >= {_MIN_DAILY_CONCURRENCY}, '
+            f'got {concurrency}'
+        )
+    return concurrency
 
 
 def _default_run_id(dataset: str) -> str:
@@ -406,10 +428,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--concurrency',
         type=int,
-        default=_MIN_DAILY_CONCURRENCY,
+        default=None,
         help=(
             'Max number of partition workers to run in parallel. '
-            'Use carefully to avoid memory pressure.'
+            f'Use carefully to avoid memory pressure. '
+            f'If omitted, {_S34_BACKFILL_CONCURRENCY_ENV} is required.'
         ),
     )
     return parser
@@ -418,6 +441,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+    resolved_concurrency = (
+        int(args.concurrency)
+        if args.concurrency is not None
+        else _load_env_backfill_concurrency_or_raise()
+    )
     result = run_exchange_backfill(
         dataset=cast(S34BackfillDataset, args.dataset),
         end_date=_parse_iso_date(args.end_date),
@@ -426,7 +454,7 @@ def main() -> None:
         dry_run=bool(args.dry_run),
         projection_mode=cast(ProjectionMode, args.projection_mode),
         runtime_audit_mode=cast(RuntimeAuditMode, args.runtime_audit_mode),
-        concurrency=int(args.concurrency),
+        concurrency=resolved_concurrency,
     )
     print(json.dumps(result, sort_keys=True, indent=2))
 

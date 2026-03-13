@@ -4,7 +4,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
-from origo_control_plane.s34_exchange_backfill_runner import run_exchange_backfill
+import pytest
+from origo_control_plane.s34_exchange_backfill_runner import (
+    _load_env_backfill_concurrency_or_raise,
+    run_exchange_backfill,
+)
 
 
 def test_s34_exchange_backfill_runner_dry_run_uses_contract_planner(
@@ -38,3 +42,14 @@ def test_s34_exchange_backfill_runner_dry_run_uses_contract_planner(
     planned = cast(list[str], result['planned_partitions'])
     assert result['dry_run'] is True
     assert planned == ['2017-08-17', '2017-08-18', '2017-08-19']
+
+
+def test_s34_exchange_backfill_concurrency_env_requires_integer_ge_10(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('ORIGO_S34_BACKFILL_CONCURRENCY', '9')
+    with pytest.raises(RuntimeError, match='must be >= 10'):
+        _load_env_backfill_concurrency_or_raise()
+
+    monkeypatch.setenv('ORIGO_S34_BACKFILL_CONCURRENCY', '15')
+    assert _load_env_backfill_concurrency_or_raise() == 15

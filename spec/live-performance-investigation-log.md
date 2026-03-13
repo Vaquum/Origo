@@ -312,3 +312,8 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Ran full local validation for changed files after resume-source + ETF/FRED canonical-writer updates (`ruff`, `pyright`, and targeted contract suites for ETF canonical ingest and S34 runner/orchestrator contracts).
 - I found: Gates passed (`ruff clean`, `pyright 0 errors`, `13/13 contract tests passed`), including new proofs for canonical resume lookup and ETF payload determinism under runtime provenance timestamp drift.
 - Progress/Next: Package these changes into PR/deploy so server execution uses canonical-cursor resume and stable ETF canonical payload semantics.
+
+### Entry 061
+- I tried: Took a timed live ETF throughput sample over 60 seconds against `origo.canonical_event_log` while five iShares shard workers remained active on server.
+- I found: ETF canonical rows increased `405 -> 413` in one minute (`+8 rows/min`), confirming continued forward movement but materially below target operational speed.
+- Progress/Next: Keep current workers running until deploy change is merged, then restart ETF backfill on the patched runtime to remove conflict drag and re-measure throughput.

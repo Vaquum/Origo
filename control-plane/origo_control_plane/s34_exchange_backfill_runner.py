@@ -114,7 +114,7 @@ def _run_partition_asset_in_worker(
         str,
         str,
     ],
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], datetime]:
     (
         dataset,
         partition_id,
@@ -130,8 +130,9 @@ def _run_partition_asset_in_worker(
     runtime_audit_module = importlib.import_module('origo.events.runtime_audit')
     setattr(runtime_audit_module, '_runtime_audit_singleton', None)
     asset_runner = _load_daily_asset_runner_or_raise(dataset)
+    partition_started_at_utc = datetime.now(UTC)
     context = build_asset_context(partition_key=partition_id)
-    return partition_id, asset_runner(context)
+    return partition_id, asset_runner(context), partition_started_at_utc
 
 
 def _parse_iso_date(value: str) -> date:
@@ -246,37 +247,33 @@ def run_exchange_backfill(
             send_receive_timeout=900,
         )
         partition_results: dict[str, dict[str, Any]] = {}
-        if concurrency == 1:
-            asset_runner = _load_daily_asset_runner_or_raise(dataset)
-            for partition_id in remaining_partitions:
-                context = build_asset_context(partition_key=partition_id)
-                partition_results[partition_id] = asset_runner(context)
-        else:
-            worker_payloads = [
-                (
-                    dataset,
-                    partition_id,
-                    normalized_projection_mode,
-                    normalized_runtime_audit_mode,
-                    fast_insert_mode,
-                    str(
-                        per_run_runtime_audit_path.with_name(
-                            f'{per_run_runtime_audit_path.stem}-{partition_id}'
-                            f'{per_run_runtime_audit_path.suffix}'
-                        )
-                    ),
-                )
-                for partition_id in remaining_partitions
-            ]
-            with ProcessPoolExecutor(max_workers=concurrency) as executor:
-                for partition_id, asset_result in executor.map(
-                    _run_partition_asset_in_worker,
-                    worker_payloads,
-                ):
-                    partition_results[partition_id] = asset_result
+        partition_start_times: dict[str, datetime] = {}
+        worker_payloads = [
+            (
+                dataset,
+                partition_id,
+                normalized_projection_mode,
+                normalized_runtime_audit_mode,
+                fast_insert_mode,
+                str(
+                    per_run_runtime_audit_path.with_name(
+                        f'{per_run_runtime_audit_path.stem}-{partition_id}'
+                        f'{per_run_runtime_audit_path.suffix}'
+                    )
+                ),
+            )
+            for partition_id in remaining_partitions
+        ]
+        with ProcessPoolExecutor(max_workers=concurrency) as executor:
+            for partition_id, asset_result, partition_started_at_utc in executor.map(
+                _run_partition_asset_in_worker,
+                worker_payloads,
+            ):
+                partition_results[partition_id] = asset_result
+                partition_start_times[partition_id] = partition_started_at_utc
 
         for partition_id in remaining_partitions:
-            partition_started_at_utc = datetime.now(UTC)
+            partition_started_at_utc = partition_start_times[partition_id]
             asset_result = partition_results[partition_id]
             checkpoint = record_partition_cursor_and_checkpoint_or_raise(
                 client=client,

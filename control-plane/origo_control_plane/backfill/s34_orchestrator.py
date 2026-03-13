@@ -23,6 +23,7 @@ from .s34_contract import S34DatasetBackfillContract
 
 _BACKFILL_RUN_STATE_PATH_ENV = 'ORIGO_BACKFILL_RUN_STATE_PATH'
 _BACKFILL_MANIFEST_LOG_PATH_ENV = 'ORIGO_BACKFILL_MANIFEST_LOG_PATH'
+_NUMERIC_GAP_PREVIEW_LIMIT = 20
 
 
 def _resolve_path_from_env(name: str) -> Path:
@@ -245,7 +246,7 @@ def remaining_daily_partitions_or_raise(
 def evaluate_numeric_offset_gaps_or_raise(
     *,
     offsets: list[str],
-    missing_preview_limit: int = 20,
+    missing_preview_limit: int = _NUMERIC_GAP_PREVIEW_LIMIT,
 ) -> NumericGapSummary:
     if offsets == []:
         raise RuntimeError('offsets must be non-empty')
@@ -363,7 +364,10 @@ def record_partition_cursor_and_checkpoint_or_raise(
     max_offset = offsets[-1]
     gap_details: dict[str, Any]
     if contract.offset_ordering == 'numeric':
-        gap_summary = evaluate_numeric_offset_gaps_or_raise(offsets=offsets)
+        gap_summary = evaluate_numeric_offset_gaps_or_raise(
+            offsets=offsets,
+            missing_preview_limit=_NUMERIC_GAP_PREVIEW_LIMIT,
+        )
         expected_event_count = gap_summary.expected_event_count
         observed_event_count = gap_summary.observed_event_count
         gap_count = gap_summary.gap_count
@@ -373,7 +377,8 @@ def record_partition_cursor_and_checkpoint_or_raise(
             'missing_offset_preview': list(gap_summary.missing_offset_preview),
             'duplicate_offset_count': gap_summary.duplicate_offset_count,
             'missing_offset_preview_truncated': (
-                len(gap_summary.missing_offset_preview) == 20
+                len(gap_summary.missing_offset_preview)
+                == _NUMERIC_GAP_PREVIEW_LIMIT
             ),
         }
     else:

@@ -196,7 +196,7 @@ def remaining_daily_partitions_or_raise(
     *,
     contract: S34DatasetBackfillContract,
     plan_end_date: date,
-    run_state: BackfillRunStateStore,
+    last_completed_partition: str | None,
 ) -> tuple[str, ...]:
     if contract.partition_scheme != 'daily':
         raise RuntimeError(
@@ -222,16 +222,16 @@ def remaining_daily_partitions_or_raise(
             end_date=plan_end_date,
         )
     )
-    last_completed = run_state.last_completed_partition(dataset=contract.dataset)
-    if last_completed is None:
+    if last_completed_partition is None:
         return tuple(planned)
 
     last_day = _parse_partition_date_or_raise(
-        last_completed, label='run_state.last_completed_partition'
+        last_completed_partition,
+        label='last_completed_partition',
     )
     if last_day < contract.earliest_partition_date:
         raise RuntimeError(
-            'Run-state last_completed_partition is before contract earliest_partition_date '
+            'last_completed_partition is before contract earliest_partition_date '
             f'for dataset={contract.dataset}: '
             f'last={last_day.isoformat()} '
             f'earliest={contract.earliest_partition_date.isoformat()}'
@@ -241,6 +241,66 @@ def remaining_daily_partitions_or_raise(
 
     start_index = (last_day - contract.earliest_partition_date).days + 1
     return tuple(planned[start_index:])
+
+
+def load_last_completed_daily_partition_from_canonical_or_raise(
+    *,
+    client: ClickHouseClient,
+    database: str,
+    contract: S34DatasetBackfillContract,
+) -> str | None:
+    if contract.partition_scheme != 'daily':
+        raise RuntimeError(
+            'load_last_completed_daily_partition_from_canonical_or_raise requires '
+            f'daily partition scheme, got={contract.partition_scheme} '
+            f'for dataset={contract.dataset}'
+        )
+    rows = client.execute(
+        f'''
+        SELECT max(partition_id)
+        FROM {database}.canonical_ingest_cursor_state
+        WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+        ''',
+        {
+            'source_id': contract.source_id,
+            'stream_id': contract.stream_id,
+        },
+    )
+    if len(rows) != 1:
+        raise RuntimeError(
+            'Failed to load canonical backfill cursor state: expected one row, '
+            f'got={len(rows)} for dataset={contract.dataset}'
+        )
+    raw_value = rows[0][0]
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str):
+        raise RuntimeError(
+            'canonical_ingest_cursor_state max(partition_id) must be string '
+            f'or null, got type={type(raw_value)!r} for dataset={contract.dataset}'
+        )
+    normalized = raw_value.strip()
+    if normalized == '':
+        raise RuntimeError(
+            'canonical_ingest_cursor_state max(partition_id) must not be empty '
+            f'for dataset={contract.dataset}'
+        )
+    partition_day = _parse_partition_date_or_raise(
+        normalized,
+        label='canonical_ingest_cursor_state.partition_id',
+    )
+    if (
+        contract.earliest_partition_date is not None
+        and partition_day < contract.earliest_partition_date
+    ):
+        raise RuntimeError(
+            'canonical_ingest_cursor_state partition is before dataset earliest '
+            f'partition date for dataset={contract.dataset}: '
+            f'last={partition_day.isoformat()} '
+            f'earliest={contract.earliest_partition_date.isoformat()}'
+        )
+    return normalized
 
 
 def evaluate_numeric_offset_gaps_or_raise(

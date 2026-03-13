@@ -46,18 +46,6 @@ def _provenance_payload(provenance: ProvenanceMetadata | None) -> dict[str, str]
         'fetch_method': provenance.fetch_method,
         'parser_name': provenance.parser_name,
         'parser_version': provenance.parser_version,
-        'fetched_at_utc': _require_utc(
-            provenance.fetched_at_utc,
-            label='provenance.fetched_at_utc',
-        ).isoformat(),
-        'parsed_at_utc': _require_utc(
-            provenance.parsed_at_utc,
-            label='provenance.parsed_at_utc',
-        ).isoformat(),
-        'normalized_at_utc': _require_utc(
-            provenance.normalized_at_utc,
-            label='provenance.normalized_at_utc',
-        ).isoformat(),
     }
 
 
@@ -118,8 +106,7 @@ def write_etf_normalized_records_to_canonical(
         label='ingested_at_utc',
     )
 
-    rows_inserted = 0
-    rows_duplicate = 0
+    event_inputs: list[CanonicalEventWriteInput] = []
     for record in records:
         observed_at_utc = _require_utc(
             record.observed_at_utc,
@@ -132,7 +119,7 @@ def write_etf_normalized_records_to_canonical(
             separators=(',', ':'),
         ).encode(_PAYLOAD_ENCODING)
 
-        write_result = writer.write_event(
+        event_inputs.append(
             CanonicalEventWriteInput(
                 source_id=_CANONICAL_SOURCE_ID,
                 stream_id=_CANONICAL_STREAM_ID,
@@ -146,6 +133,10 @@ def write_etf_normalized_records_to_canonical(
                 run_id=run_id,
             )
         )
+
+    rows_inserted = 0
+    rows_duplicate = 0
+    for write_result in writer.write_events(event_inputs):
         if write_result.status == 'inserted':
             rows_inserted += 1
         elif write_result.status == 'duplicate':

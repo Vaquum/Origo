@@ -760,10 +760,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 ### Capability
 - [x] `S34-C1` Freeze canonical backfill inventory and execution order for every onboarded dataset.
 - [x] `S34-C2` Implement/verify backfill orchestration contract (partition planner, cursor ledger, resumable run controls, fail-loud gap checks).
+- [x] `S34-C2a` Stabilize ETF canonical event payload for replay idempotency (exclude run-volatile provenance timestamps from canonical payload hash contract).
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
-- [ ] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
+- [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
@@ -778,6 +779,26 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip).
 - [ ] `S34-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete backfill contracts/operations notes).
 - [ ] `S34-G4` User docs closeout for slice (`docs/`, full dataset-history coverage/taxonomy and backfill status reference).
+
+## Slice 35: Automated Daily Backfill Scheduling (Configured Daily Runtime)
+
+### Capability
+- [ ] `S35-C1` Add Dagster orchestration to run daily backfill automatically for all daily datasets in fixed contract order (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`, `etf_daily_metrics`, `fred_series_metrics`).
+- [ ] `S35-C2` Add schedule env contract and fail-loud validation for daily runtime configuration (`ORIGO_BACKFILL_DAILY_SCHEDULE_CRON`, `ORIGO_BACKFILL_DAILY_SCHEDULE_TIMEZONE`, `ORIGO_BACKFILL_DAILY_LAG_DAYS`).
+- [ ] `S35-C3` Compute `target_end_date` from UTC date and lag days and pass it consistently to each dataset backfill dispatch.
+- [ ] `S35-C4` Enforce per-dataset non-overlap (single active scheduled run per dataset) and fail loudly on overlap attempts.
+
+### Proof
+- [ ] `S35-P1` Add contract tests for schedule env validation and target-boundary computation (including missing/invalid values).
+- [ ] `S35-P2` Add orchestration proof for deterministic dataset dispatch order and per-dataset run argument shape.
+- [ ] `S35-P3` Execute live scheduled-run proof on server and verify automatic partition advancement for the configured daily boundary.
+- [ ] `S35-P4` Run full quality gates (`style`, `type`, `contract`, `replay`, `integrity`) on slice branch.
+
+### Guardrails
+- [ ] `S35-G1` Add fail-loud alerting hooks for scheduled run failures and stale dataset watermark thresholds.
+- [ ] `S35-G2` Add operational runbook controls for pause/resume/force catch-up of scheduled backfill.
+- [ ] `S35-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete schedule/backfill operations contract).
+- [ ] `S35-G4` User docs closeout for slice (`docs/`, full reference for daily schedule behavior, freshness boundaries, and status interpretation).
 
 
 ## Slice Detail Sub-Slices
@@ -1981,39 +2002,69 @@ Constraints: planning/contract only; no ingestion execution yet.
 Action: Prepare backfill orchestration controls (partition planner, cursor ledger, resume policy, fail-loud gap checks).
 Done looks like: backfill runs are resumable by cursor and stop loudly on detected gaps or checksum mismatches, and exchange canonical ingest runs with throughput env contract (`ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`, `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`, `ORIGO_BACKFILL_PROJECTION_MODE=deferred`) synchronized by deploy CI.
 Constraints: no source data mutation.
-3. `S34-03`
+3. `S34-02a`
+Action: Stabilize ETF canonical payload idempotency by excluding run-volatile provenance timestamps from canonical event payload construction.
+Done looks like: rerun of the same ETF source-event identity does not change canonical payload hash when only runtime provenance timestamps differ.
+Constraints: preserve source/artifact lineage fields and keep fail-loud identity conflict semantics for true payload drift.
+4. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.
 Constraints: first-party Binance source artifacts only.
-4. `S34-04`
+5. `S34-04`
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
-5. `S34-05`
+6. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-6. `S34-06`
+7. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-7. `S34-07`
+8. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-8. `S34-08`
+9. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-9. `S34-09`
+10. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-10. `S34-10`
+11. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable.
 Constraints: fixed proof windows and deterministic fixtures.
-11. `S34-11`
+12. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
+Constraints: closeout only; no new capability expansion.
+
+## Slice 35 Sub-Slices
+1. `S35-01`
+Action: Freeze the automated daily backfill schedule contract (scope, dataset order, boundary semantics).
+Done looks like: contract states exact dataset order, exact schedule env keys, and exact boundary formula (`target_end_date = utc_today - lag_days`).
+Constraints: planning contract only; no runtime wiring yet.
+2. `S35-02`
+Action: Wire schedule configuration env validation and Dagster schedule definition.
+Done looks like: invalid/missing schedule env values fail loudly and the schedule object resolves with explicit cron/timezone from env.
+Constraints: no hidden defaults for required schedule contract fields.
+3. `S35-03`
+Action: Implement scheduled orchestrator dispatch with per-dataset non-overlap guard.
+Done looks like: each scheduled cycle dispatches datasets in contract order and rejects overlapping in-flight dataset runs fail-loud.
+Constraints: no fallback path that silently skips overlap.
+4. `S35-04`
+Action: Build contract/proof tests for boundary math and dispatch order determinism.
+Done looks like: fixed-clock tests prove computed boundaries, dispatch order, and runner-argument shape are deterministic and contract-compliant.
+Constraints: proofs use deterministic fixtures and explicit clock control.
+5. `S35-05`
+Action: Run live server proof cycle for scheduled automation and verify partition advancement.
+Done looks like: scheduled execution produces manifest evidence and cursor/watermark movement for the expected boundary window.
+Constraints: proof must run against deployed server stack with real source calls.
+6. `S35-06`
+Action: Close guardrails/docs/artifacts/version/changelog/env contract for Slice 35.
+Done looks like: docs and slice artifacts are complete and the schedule contract is fully reflected in developer and user references.
 Constraints: closeout only; no new capability expansion.

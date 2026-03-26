@@ -71,6 +71,40 @@ def _sha256_lines(lines: list[str]) -> str:
     return digest.hexdigest()
 
 
+def _ordered_identity_materials_or_raise(
+    *,
+    offset_ordering: OffsetOrdering,
+    materials: list[tuple[str, str, str]],
+) -> list[tuple[str, str, str]]:
+    if offset_ordering == 'numeric':
+        numeric_materials: list[tuple[int, str, str, str]] = []
+        for offset, event_id, payload_sha256_raw in materials:
+            try:
+                numeric_offset = int(offset)
+            except ValueError as exc:
+                raise ReconciliationError(
+                    code='BACKFILL_INVALID_NUMERIC_OFFSET',
+                    message=(
+                        'Numeric offset ordering requires integer offsets, '
+                        f'got {offset!r}'
+                    ),
+                ) from exc
+            numeric_materials.append(
+                (
+                    numeric_offset,
+                    offset,
+                    event_id,
+                    payload_sha256_raw,
+                )
+            )
+        numeric_materials.sort(key=lambda item: (item[0], item[2], item[3]))
+        return [
+            (offset, event_id, payload_sha256_raw)
+            for _, offset, event_id, payload_sha256_raw in numeric_materials
+        ]
+    return sorted(materials)
+
+
 def _source_manifest_id(*, source_proof: PartitionSourceProof) -> UUID:
     return uuid5(
         _MANIFEST_NAMESPACE,
@@ -339,13 +373,16 @@ def build_partition_source_proof(
             allow_empty_partition=True,
         )
 
-    normalized_materials = sorted(
-        (
+    normalized_materials = _ordered_identity_materials_or_raise(
+        offset_ordering=offset_ordering,
+        materials=[
+            (
             _require_non_empty(item.source_offset_or_equivalent, field_name='source_offset_or_equivalent'),
             _require_non_empty(item.event_id, field_name='event_id'),
             _require_non_empty(item.payload_sha256_raw, field_name='payload_sha256_raw'),
         )
-        for item in materials
+            for item in materials
+        ],
     )
     offsets = [item[0] for item in normalized_materials]
     identity_lines = [f'{item[0]}|{item[1]}|{item[2]}' for item in normalized_materials]
@@ -1138,7 +1175,6 @@ class CanonicalBackfillStateStore:
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
               AND partition_id = %(partition_id)s
-            ORDER BY source_offset_or_equivalent ASC, event_id ASC
             ''',
             {
                 'source_id': stream_key.source_id,
@@ -1165,24 +1201,36 @@ class CanonicalBackfillStateStore:
                     f'for {stream_key.source_id}/{stream_key.stream_id}/{stream_key.partition_id}'
                 ),
             )
-        offsets = [str(row[0]) for row in rows]
-        identity_lines = [f'{row[0]}|{row[1]}|{row[2]}' for row in rows]
-        unique_offsets = sorted(set(offsets))
+        ordered_materials = _ordered_identity_materials_or_raise(
+            offset_ordering=source_proof.offset_ordering,
+            materials=[
+                (
+                    _require_non_empty(
+                        str(row[0]),
+                        field_name='source_offset_or_equivalent',
+                    ),
+                    _require_non_empty(str(row[1]), field_name='event_id'),
+                    _require_non_empty(
+                        str(row[2]),
+                        field_name='payload_sha256_raw',
+                    ),
+                )
+                for row in rows
+            ],
+        )
+        offsets = [item[0] for item in ordered_materials]
+        identity_lines = [
+            f'{offset}|{event_id}|{payload_sha256_raw}'
+            for offset, event_id, payload_sha256_raw in ordered_materials
+        ]
+        if source_proof.offset_ordering == 'numeric':
+            unique_offsets = sorted(set(offsets), key=int)
+        else:
+            unique_offsets = sorted(set(offsets))
         duplicate_count = len(offsets) - len(unique_offsets)
         gap_count = 0
         if source_proof.offset_ordering == 'numeric' and unique_offsets != []:
-            parsed_offsets: list[int] = []
-            for offset in unique_offsets:
-                try:
-                    parsed_offsets.append(int(offset))
-                except ValueError as exc:
-                    raise ReconciliationError(
-                        code='BACKFILL_INVALID_NUMERIC_OFFSET',
-                        message=(
-                            'Numeric offset ordering requires integer offsets in canonical rows, '
-                            f'got {offset!r}'
-                        ),
-                    ) from exc
+            parsed_offsets = [int(offset) for offset in unique_offsets]
             if parsed_offsets:
                 expected_count = (parsed_offsets[-1] - parsed_offsets[0]) + 1
                 gap_count = expected_count - len(parsed_offsets)

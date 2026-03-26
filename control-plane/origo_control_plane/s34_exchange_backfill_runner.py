@@ -11,6 +11,10 @@ from typing import Any, Literal, cast
 
 from clickhouse_driver import Client as ClickHouseClient
 from dagster import DagsterInstance
+
+# NOTE: Slice 34 Dagster partition submission currently depends on private
+# dagster._core symbols validated against Dagster 1.12.17. Treat any Dagster
+# upgrade as a breaking change for this module until the private imports are removed.
 from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
 from dagster._core.execution.job_backfill import create_backfill_run
 from dagster._core.remote_representation.code_location import CodeLocation

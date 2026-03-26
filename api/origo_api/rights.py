@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,8 @@ from clickhouse_driver import Client as ClickHouseClient
 from origo.events.backfill_state import CanonicalBackfillStateStore
 
 from .schemas import RawQueryDataset
+
+logger = logging.getLogger(__name__)
 
 RightsState = Literal['Hosted Allowed', 'BYOK Required', 'Ingest Only']
 ShadowPromotionState = Literal['shadow', 'promoted']
@@ -303,6 +306,9 @@ def _assert_promoted_serving_projection_coverage_or_raise(
     if promotion_contract is None:
         return
 
+    # This check is intentionally evaluated on every rights decision while the
+    # dataset is marked promoted. Serving must fail closed immediately if the
+    # promoted projection coverage drifts away from terminal proof coverage.
     client = _build_clickhouse_native_client()
     try:
         state_store = CanonicalBackfillStateStore(
@@ -332,9 +338,10 @@ def _assert_promoted_serving_projection_coverage_or_raise(
         try:
             client.disconnect()
         except Exception as exc:
-            raise RuntimeError(
-                f'Failed to close ClickHouse native client cleanly: {exc}'
-            ) from exc
+            logger.warning(
+                'Failed to close ClickHouse native client cleanly: %s',
+                exc,
+            )
 
 
 def _collect_source_decisions_for_dataset(

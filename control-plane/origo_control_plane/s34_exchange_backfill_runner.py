@@ -88,6 +88,83 @@ class _CompletedRun:
     finished_at_utc: datetime
 
 
+def _load_json_object_or_raise(*, payload: str, label: str) -> dict[str, Any]:
+    try:
+        loaded = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f'{label} must be valid JSON object text') from exc
+    if not isinstance(loaded, dict):
+        raise RuntimeError(f'{label} must decode to JSON object, got {type(loaded).__name__}')
+    return cast(dict[str, Any], loaded)
+
+
+def _build_source_manifest_payload_or_raise(
+    source_manifest: Any,
+) -> dict[str, Any]:
+    return {
+        'manifest_revision': source_manifest.manifest_revision,
+        'manifest_id': str(source_manifest.manifest_id),
+        'offset_ordering': source_manifest.offset_ordering,
+        'source_artifact_identity': _load_json_object_or_raise(
+            payload=source_manifest.source_artifact_identity_json,
+            label='source_artifact_identity_json',
+        ),
+        'source_row_count': source_manifest.source_row_count,
+        'first_offset_or_equivalent': source_manifest.first_offset_or_equivalent,
+        'last_offset_or_equivalent': source_manifest.last_offset_or_equivalent,
+        'source_offset_digest_sha256': source_manifest.source_offset_digest_sha256,
+        'source_identity_digest_sha256': source_manifest.source_identity_digest_sha256,
+        'allow_empty_partition': source_manifest.allow_empty_partition,
+        'manifested_by_run_id': source_manifest.manifested_by_run_id,
+        'manifested_at_utc': source_manifest.manifested_at_utc.isoformat(),
+    }
+
+
+def _build_partition_proof_payload_or_raise(latest_proof: Any) -> dict[str, Any]:
+    return {
+        'proof_revision': latest_proof.proof_revision,
+        'proof_id': str(latest_proof.proof_id),
+        'state': latest_proof.state,
+        'reason': latest_proof.reason,
+        'offset_ordering': latest_proof.offset_ordering,
+        'source_row_count': latest_proof.source_row_count,
+        'canonical_row_count': latest_proof.canonical_row_count,
+        'canonical_unique_offset_count': latest_proof.canonical_unique_offset_count,
+        'first_offset_or_equivalent': latest_proof.first_offset_or_equivalent,
+        'last_offset_or_equivalent': latest_proof.last_offset_or_equivalent,
+        'source_offset_digest_sha256': latest_proof.source_offset_digest_sha256,
+        'source_identity_digest_sha256': latest_proof.source_identity_digest_sha256,
+        'canonical_offset_digest_sha256': latest_proof.canonical_offset_digest_sha256,
+        'canonical_identity_digest_sha256': latest_proof.canonical_identity_digest_sha256,
+        'gap_count': latest_proof.gap_count,
+        'duplicate_count': latest_proof.duplicate_count,
+        'proof_digest_sha256': latest_proof.proof_digest_sha256,
+        'proof_details': _load_json_object_or_raise(
+            payload=latest_proof.proof_details_json,
+            label='proof_details_json',
+        ),
+        'recorded_by_run_id': latest_proof.recorded_by_run_id,
+        'recorded_at_utc': latest_proof.recorded_at_utc.isoformat(),
+    }
+
+
+def _build_range_proof_payload_or_raise(range_proof: Any) -> dict[str, Any]:
+    return {
+        'range_revision': range_proof.range_revision,
+        'range_proof_id': str(range_proof.range_proof_id),
+        'range_start_partition_id': range_proof.range_start_partition_id,
+        'range_end_partition_id': range_proof.range_end_partition_id,
+        'partition_count': range_proof.partition_count,
+        'range_digest_sha256': range_proof.range_digest_sha256,
+        'range_details': _load_json_object_or_raise(
+            payload=range_proof.range_details_json,
+            label='range_details_json',
+        ),
+        'recorded_by_run_id': range_proof.recorded_by_run_id,
+        'recorded_at_utc': range_proof.recorded_at_utc.isoformat(),
+    }
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -575,6 +652,18 @@ def run_exchange_backfill(
                         'Dagster partition run completed but no partition proof exists '
                         f'for dataset={dataset} partition_id={partition_id}'
                     )
+                latest_source_manifest = state_store.fetch_latest_source_manifest(
+                    stream_key=CanonicalStreamKey(
+                        source_id=contract.source_id,
+                        stream_id=contract.stream_id,
+                        partition_id=partition_id,
+                    )
+                )
+                if latest_source_manifest is None:
+                    raise RuntimeError(
+                        'Dagster partition run completed but no source manifest exists '
+                        f'for dataset={dataset} partition_id={partition_id}'
+                    )
                 if latest_proof.state not in {'proved_complete', 'empty_proved'}:
                     raise RuntimeError(
                         'Dagster partition run completed without terminal proof state '
@@ -592,16 +681,12 @@ def run_exchange_backfill(
                     'execution_mode': normalized_execution_mode,
                     'completed_at_utc': completed_run.finished_at_utc.isoformat(),
                     'started_at_utc': completed_run.started_at_utc.isoformat(),
-                    'partition_proof': {
-                        'state': latest_proof.state,
-                        'reason': latest_proof.reason,
-                        'source_row_count': latest_proof.source_row_count,
-                        'canonical_row_count': latest_proof.canonical_row_count,
-                        'canonical_unique_offset_count': latest_proof.canonical_unique_offset_count,
-                        'gap_count': latest_proof.gap_count,
-                        'duplicate_count': latest_proof.duplicate_count,
-                        'proof_digest_sha256': latest_proof.proof_digest_sha256,
-                    },
+                    'source_manifest': _build_source_manifest_payload_or_raise(
+                        latest_source_manifest
+                    ),
+                    'partition_proof': _build_partition_proof_payload_or_raise(
+                        latest_proof
+                    ),
                 }
                 write_backfill_manifest_event(path=manifest_path, payload=partition_event)
                 processed.append(partition_event)
@@ -624,11 +709,7 @@ def run_exchange_backfill(
                     'source_id': contract.source_id,
                     'stream_id': contract.stream_id,
                     'run_id': normalized_run_id,
-                    'range_start_partition_id': range_proof.range_start_partition_id,
-                    'range_end_partition_id': range_proof.range_end_partition_id,
-                    'partition_count': range_proof.partition_count,
-                    'range_digest_sha256': range_proof.range_digest_sha256,
-                    'recorded_at_utc': range_proof.recorded_at_utc.isoformat(),
+                    'range_proof': _build_range_proof_payload_or_raise(range_proof),
                 },
             )
     finally:

@@ -2065,6 +2065,10 @@ Constraints: first-party Binance source artifacts only.
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
+14. `S34-04a`
+Action: Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+Done looks like: one controller can plan immediate next batches from authoritative proof state, choose reconcile vs backfill fail-loud, and chain batches without idle gaps.
+Constraints: daily partition datasets only; no hidden fallback planning rules.
 15. `S34-04b`
 Action: Fix OKX source-duplicate contract for Slice 34 backfill.
 Done looks like: raw-row counts remain truthful, exact duplicate OKX trade rows are accepted as duplicate delivery of the same source event, conflicting duplicate trade payloads still fail loudly, and canonical/source-proof identity stays stable for already-ingested unique partitions.
@@ -2105,6 +2109,10 @@ Constraints: live server only; no local dry-run substitutes.
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.
+25. `S34-11a`
+Action: Build Slice 34 closeout-prep reporting from authoritative backfill proof/manifests.
+Done looks like: one deterministic prep tool can summarize per-dataset proof coverage, manifest evidence, and remaining closeout gaps straight from ClickHouse/live manifest artifacts without hand-editing.
+Constraints: prep/reporting only; do not mark Slice 34 closed and do not create fake final artifacts.
 
 ## Slice 35 Sub-Slices
 1. `S35-01`

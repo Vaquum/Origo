@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-12
-- Slice/version reference: S2, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S29 (API v0.1.20)
+- Last updated: 2026-03-26
+- Slice/version reference: S2, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S29, S34 prep (API v0.1.28 branch state)
 
 ## Purpose and scope
 - This is the user-facing reference for asynchronous raw exports.
@@ -53,6 +53,8 @@
 - OKX native/aligned exports are served from canonical OKX projection paths as of Slice 18.
 - Bybit native/aligned exports are served from canonical Bybit projection paths as of Slice 19.
 - Bitcoin native/aligned exports are served from canonical Bitcoin projection paths as of Slice 20 with stream aligned completion in Slice 29.
+- During Slice 34 full-history backfill, exportable history is bounded by terminal proof coverage; export does not silently include unproved partitions.
+- User-facing backfill-boundary meaning is defined in `docs/backfill-status-reference.md`.
 - `mode=aligned_1s` supports only aligned-capable datasets:
   - `binance_spot_trades`
   - `okx_spot_trades`

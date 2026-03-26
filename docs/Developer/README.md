@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-12
+- Last updated: 2026-03-26
 
 ## Purpose
 - This folder is the engineering reference for Origo implementation slices.
@@ -20,6 +20,8 @@
   - `docs/event-serving-reference.md`
   - `docs/Developer/s14-canonical-event-runtime.md`
   - `docs/Developer/s21-canonical-aligned-storage-contract.md`
+  - `docs/Developer/s34-canonical-backfill-runtime.md`
+  - `docs/Developer/s34-daily-tranche-controller.md`
 
 ## Historical slice docs
 - All `s*.md` files capture what was true at slice closeout time.

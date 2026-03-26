@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-12
-- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S25, S26, S29 (API v0.1.20)
+- Last updated: 2026-03-26
+- Slice/version reference: S1, S4, S5, S6, S8, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S25, S26, S29, S34 prep (API v0.1.28 branch state)
 
 ## Purpose and scope
 - This is the user-facing reference for `POST /v1/raw/query`.
@@ -69,6 +69,8 @@
 - ETF native/aligned serving is event-driven from canonical ETF projections (S16 cutover).
 - FRED native/aligned serving is event-driven from canonical FRED projections (S17 cutover).
 - Bitcoin native/aligned serving is event-driven from canonical Bitcoin projections (S20 cutover, S29 aligned stream completion).
+- During Slice 34 full-history backfill, queryable history is bounded by terminal proof coverage; Origo does not silently serve beyond the proved boundary.
+- User-facing meaning of that boundary is defined in `docs/backfill-status-reference.md`.
 
 ## Failure modes, warnings, and error codes
 - Status map:

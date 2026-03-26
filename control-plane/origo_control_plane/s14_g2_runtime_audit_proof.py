@@ -164,11 +164,15 @@ def run_s14_g2_proof() -> dict[str, Any]:
                         'S14-G2 proof expected checkpoint commit status=checkpointed'
                     )
 
-                if not runtime_audit_log_path.exists():
+                scoped_runtime_audit_log_path = (
+                    runtime_audit_module.get_canonical_runtime_audit_log()
+                    .resolve_stream_log_path(stream_key=stream_key)
+                )
+                if not scoped_runtime_audit_log_path.exists():
                     raise RuntimeError(
                         'S14-G2 proof expected canonical runtime audit log file to exist'
                     )
-                audit_events = _read_jsonl(runtime_audit_log_path)
+                audit_events = _read_jsonl(scoped_runtime_audit_log_path)
                 event_types = [str(event.get('event_type')) for event in audit_events]
                 if event_types != ['canonical_ingest_inserted', 'projector_checkpointed']:
                     raise RuntimeError(
@@ -183,7 +187,7 @@ def run_s14_g2_proof() -> dict[str, Any]:
                         'event ingestion and projector checkpoint transitions'
                     ),
                     'proof_database': proof_database,
-                    'runtime_audit_log_path': str(runtime_audit_log_path),
+                    'runtime_audit_log_path': str(scoped_runtime_audit_log_path),
                     'runtime_audit_event_count': len(audit_events),
                     'runtime_audit_event_types': event_types,
                     'audit_verified': True,

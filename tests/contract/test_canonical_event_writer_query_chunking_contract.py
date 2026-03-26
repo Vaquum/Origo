@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from origo.events.ingest_state import CanonicalStreamKey
 from origo.events.quarantine import StreamQuarantineRegistry
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 
@@ -113,10 +114,22 @@ def test_canonical_event_writer_summary_audit_mode_writes_batch_event(
     )
 
     event_inputs = [_event_input(offset=i) for i in range(1, 11)]
+    stream_key = CanonicalStreamKey(
+        source_id=event_inputs[0].source_id,
+        stream_id=event_inputs[0].stream_id,
+        partition_id=event_inputs[0].partition_id,
+    )
+    scoped_audit_log_path = runtime_audit.get_canonical_runtime_audit_log().resolve_stream_log_path(
+        stream_key=stream_key
+    )
     results = writer.write_events(event_inputs)
 
     assert len(results) == 10
-    lines = [line for line in audit_log_path.read_text(encoding='utf-8').splitlines() if line != '']
+    lines = [
+        line
+        for line in scoped_audit_log_path.read_text(encoding='utf-8').splitlines()
+        if line != ''
+    ]
     assert len(lines) == 1
     parsed = json.loads(lines[0])
     assert parsed['event_type'] == 'canonical_ingest_batch'

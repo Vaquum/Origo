@@ -768,6 +768,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2f` Gate fast insert, resume, projection rebuild, and serving promotion on terminal proof state only.
 - [ ] `S34-C2g` Add reconcile fast path that proves existing canonical partitions directly from source and canonical evidence without duplicate-writer replay.
 - [ ] `S34-C2h` Remove Binance canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution.
+- [ ] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
@@ -780,7 +781,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-P1a` Run partition state-machine proofs (new, completed, ambiguous, quarantined, and reconcile-required transitions).
 - [ ] `S34-P1b` Run exactly-once/no-miss crash-recovery proofs (duplicate replay, crash after canonical write, explicit reconcile recovery).
 - [ ] `S34-P1c` Run deterministic range-proof validation for completed backfill windows.
-- [ ] `S34-P1d` Run formal live/server-side performance proof on Binance backfill phases and capture throughput/phase-timing evidence.
+- [x] `S34-P1d` Run formal live/server-side performance proof on Binance backfill phases and capture throughput/phase-timing evidence.
 - [ ] `S34-P2` Run fixed-window replay determinism proofs across every dataset family after backfill and projection rebuild.
 - [ ] `S34-P3` Run cross-surface acceptance matrix on backfilled windows (`/v1/raw/query`, `/v1/raw/export`, historical HTTP, historical Python) for `native` and `aligned_1s` where applicable.
 - [ ] `S34-P4` Run live deploy validation against server environment and confirm backfilled windows are queryable end-to-end.
@@ -2045,43 +2046,47 @@ Constraints: no blind canonical rewrite and no fallback duplicate path in reconc
 Action: Remove Binance source-proof and fresh-write Python bottlenecks with staged/vectorized execution.
 Done looks like: source proof and fresh canonical write preparation no longer depend on Python per-row loops or giant Python list materialization, and daily partition runtime drops to the seconds range on the live server benchmark path.
 Constraints: preserve canonical identity, payload fidelity, and fail-loud proof behavior.
-11. `S34-03`
+11. `S34-02i`
+Action: Remove immutable runtime-audit append bottleneck from Binance fresh-write path.
+Done looks like: canonical fresh writes no longer spend tens of seconds re-validating the full runtime-audit chain per append, while audit append remains immutable, fail-loud, and cryptographically chained.
+Constraints: no weakened audit integrity contract, no silent skip of audit validation, and no fallback to lossy/no-op audit behavior.
+12. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.
 Constraints: first-party Binance source artifacts only.
-12. `S34-04`
+13. `S34-04`
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
-13. `S34-05`
+14. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-14. `S34-06`
+15. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-15. `S34-07`
+16. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-16. `S34-08`
+17. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-17. `S34-09`
+18. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-18. `S34-10`
+19. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-19. `S34-10a`
+20. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-20. `S34-11`
+21. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.

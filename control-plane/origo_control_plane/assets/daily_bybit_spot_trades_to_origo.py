@@ -199,11 +199,12 @@ def insert_daily_bybit_spot_trades_to_origo(
                     proof_details={'trigger_message': exc.message},
                 )
             raise
-        fast_insert_mode = _resolve_fast_insert_mode_or_raise(
-            state_store=state_store,
-            partition_id=partition_date_str,
-            projection_mode=runtime_contract.projection_mode,
-            execution_mode=runtime_contract.execution_mode,
+        execution_assessment = state_store.assess_partition_execution(
+            stream_key=source_proof.stream_key
+        )
+        prove_existing_canonical_without_write = (
+            runtime_contract.execution_mode == 'reconcile'
+            and execution_assessment.canonical_row_count > 0
         )
         source_manifested_at_utc = datetime.now(UTC)
         state_store.record_source_manifest(
@@ -219,14 +220,35 @@ def insert_daily_bybit_spot_trades_to_origo(
             recorded_at_utc=source_manifested_at_utc,
         )
 
-        write_summary = write_bybit_spot_trades_to_canonical(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            events=events,
-            run_id=context.run_id,
-            ingested_at_utc=datetime.now(UTC),
-            fast_insert_mode=fast_insert_mode,
-        )
+        if prove_existing_canonical_without_write:
+            write_summary = {
+                'rows_processed': source_proof.source_row_count,
+                'rows_inserted': 0,
+                'rows_duplicate': source_proof.source_row_count,
+            }
+            context.log.info(
+                'Reconcile detected existing canonical rows; proving partition '
+                'directly without duplicate-writer replay'
+            )
+            proof_reason = 'reconcile_existing_canonical_rows_detected'
+            write_path = 'reconcile_proof_only'
+        else:
+            fast_insert_mode = _resolve_fast_insert_mode_or_raise(
+                state_store=state_store,
+                partition_id=partition_date_str,
+                projection_mode=runtime_contract.projection_mode,
+                execution_mode=runtime_contract.execution_mode,
+            )
+            write_summary = write_bybit_spot_trades_to_canonical(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                events=events,
+                run_id=context.run_id,
+                ingested_at_utc=datetime.now(UTC),
+                fast_insert_mode=fast_insert_mode,
+            )
+            proof_reason = 'canonical_write_completed'
+            write_path = 'writer'
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])
@@ -245,7 +267,7 @@ def insert_daily_bybit_spot_trades_to_origo(
         state_store.record_partition_state(
             source_proof=source_proof,
             state='canonical_written_unproved',
-            reason='canonical_write_completed',
+            reason=proof_reason,
             run_id=context.run_id,
             recorded_at_utc=proof_recorded_at_utc,
         )
@@ -293,6 +315,7 @@ def insert_daily_bybit_spot_trades_to_origo(
             'source_filename': filename,
             'source_url': file_url,
             'projection_mode': projection_mode,
+            'write_path': write_path,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,

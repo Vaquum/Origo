@@ -28,6 +28,51 @@ class _FakeCanonicalRowsClient:
         _params: dict[str, object] | None = None,
     ) -> list[tuple[object, ...]]:
         if 'canonical_event_log' in query:
+            if 'groupArray' in query:
+                ordered_rows = sorted(
+                    (
+                        int(str(row[0])),
+                        str(row[0]),
+                        str(row[1]),
+                        str(row[2]),
+                    )
+                    for row in self._rows
+                )
+                row_count = len(ordered_rows)
+                if row_count == 0:
+                    return [
+                        (
+                            0,
+                            0,
+                            None,
+                            None,
+                            _sha256_lines([]),
+                            _sha256_lines([]),
+                            0,
+                            0,
+                        )
+                    ]
+                unique_offsets = sorted({row[1] for row in ordered_rows}, key=int)
+                gap_count = (int(unique_offsets[-1]) - int(unique_offsets[0]) + 1) - len(
+                    unique_offsets
+                )
+                return [
+                    (
+                        row_count,
+                        len(unique_offsets),
+                        ordered_rows[0][1],
+                        ordered_rows[-1][1],
+                        _sha256_lines([row[1] for row in ordered_rows]),
+                        _sha256_lines(
+                            [
+                                f'{row[1]}|{row[2]}|{row[3]}'
+                                for row in ordered_rows
+                            ]
+                        ),
+                        gap_count,
+                        row_count - len(unique_offsets),
+                    )
+                ]
             return self._rows
         raise AssertionError(f'unexpected query: {query}')
 

@@ -768,7 +768,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2f` Gate fast insert, resume, projection rebuild, and serving promotion on terminal proof state only.
 - [ ] `S34-C2g` Add reconcile fast path that proves existing canonical partitions directly from source and canonical evidence without duplicate-writer replay.
 - [ ] `S34-C2h` Remove Binance canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution.
-- [ ] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
+- [x] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.

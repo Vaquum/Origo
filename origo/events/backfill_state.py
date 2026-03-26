@@ -343,16 +343,25 @@ class SourceIdentityMaterial:
     payload_sha256_raw: str
 
 
-def build_partition_source_proof(
+def build_partition_source_proof_from_precomputed(
     *,
     stream_key: CanonicalStreamKey,
     offset_ordering: OffsetOrdering,
     source_artifact_identity: dict[str, Any],
-    materials: list[SourceIdentityMaterial],
+    source_row_count: int,
+    first_offset_or_equivalent: str | None,
+    last_offset_or_equivalent: str | None,
+    source_offset_digest_sha256: str,
+    source_identity_digest_sha256: str,
     allow_empty_partition: bool,
 ) -> PartitionSourceProof:
     artifact_identity_json = _canonical_json(source_artifact_identity)
-    if materials == []:
+    if source_row_count < 0:
+        raise ReconciliationError(
+            code='BACKFILL_INVALID_INPUT',
+            message='source_row_count must be >= 0',
+        )
+    if source_row_count == 0:
         if not allow_empty_partition:
             raise ReconciliationError(
                 code='BACKFILL_EMPTY_SOURCE_DISALLOWED',
@@ -372,6 +381,55 @@ def build_partition_source_proof(
             source_identity_digest_sha256=_EMPTY_SHA256,
             allow_empty_partition=True,
         )
+    normalized_first_offset = _require_non_empty(
+        first_offset_or_equivalent or '',
+        field_name='first_offset_or_equivalent',
+    )
+    normalized_last_offset = _require_non_empty(
+        last_offset_or_equivalent or '',
+        field_name='last_offset_or_equivalent',
+    )
+    normalized_source_offset_digest = _require_non_empty(
+        source_offset_digest_sha256,
+        field_name='source_offset_digest_sha256',
+    )
+    normalized_source_identity_digest = _require_non_empty(
+        source_identity_digest_sha256,
+        field_name='source_identity_digest_sha256',
+    )
+    return PartitionSourceProof(
+        stream_key=stream_key,
+        offset_ordering=offset_ordering,
+        source_artifact_identity_json=artifact_identity_json,
+        source_row_count=source_row_count,
+        first_offset_or_equivalent=normalized_first_offset,
+        last_offset_or_equivalent=normalized_last_offset,
+        source_offset_digest_sha256=normalized_source_offset_digest,
+        source_identity_digest_sha256=normalized_source_identity_digest,
+        allow_empty_partition=allow_empty_partition,
+    )
+
+
+def build_partition_source_proof(
+    *,
+    stream_key: CanonicalStreamKey,
+    offset_ordering: OffsetOrdering,
+    source_artifact_identity: dict[str, Any],
+    materials: list[SourceIdentityMaterial],
+    allow_empty_partition: bool,
+) -> PartitionSourceProof:
+    if materials == []:
+        return build_partition_source_proof_from_precomputed(
+            stream_key=stream_key,
+            offset_ordering=offset_ordering,
+            source_artifact_identity=source_artifact_identity,
+            source_row_count=0,
+            first_offset_or_equivalent=None,
+            last_offset_or_equivalent=None,
+            source_offset_digest_sha256=_EMPTY_SHA256,
+            source_identity_digest_sha256=_EMPTY_SHA256,
+            allow_empty_partition=allow_empty_partition,
+        )
 
     normalized_materials = _ordered_identity_materials_or_raise(
         offset_ordering=offset_ordering,
@@ -386,10 +444,10 @@ def build_partition_source_proof(
     )
     offsets = [item[0] for item in normalized_materials]
     identity_lines = [f'{item[0]}|{item[1]}|{item[2]}' for item in normalized_materials]
-    return PartitionSourceProof(
+    return build_partition_source_proof_from_precomputed(
         stream_key=stream_key,
         offset_ordering=offset_ordering,
-        source_artifact_identity_json=artifact_identity_json,
+        source_artifact_identity=source_artifact_identity,
         source_row_count=len(normalized_materials),
         first_offset_or_equivalent=offsets[0],
         last_offset_or_equivalent=offsets[-1],
@@ -1165,24 +1223,169 @@ class CanonicalBackfillStateStore:
         source_proof: PartitionSourceProof,
     ) -> PartitionCanonicalProof:
         stream_key = source_proof.stream_key
-        rows = self._client.execute(
-            f'''
+        if source_proof.offset_ordering == 'numeric':
+            digest_query = f'''
             SELECT
-                source_offset_or_equivalent,
-                event_id,
-                payload_sha256_raw
-            FROM {self._database}.canonical_event_log
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-              AND partition_id = %(partition_id)s
-            ''',
+                row_count,
+                unique_offset_count,
+                if(
+                    row_count = 0,
+                    CAST(NULL AS Nullable(String)),
+                    toString(tupleElement(materials[1], 2))
+                ) AS first_offset_or_equivalent,
+                if(
+                    row_count = 0,
+                    CAST(NULL AS Nullable(String)),
+                    toString(tupleElement(materials[length(materials)], 2))
+                ) AS last_offset_or_equivalent,
+                if(
+                    row_count = 0,
+                    %(empty_sha256)s,
+                    lower(hex(SHA256(concat(
+                        arrayStringConcat(
+                            arrayMap(item -> tupleElement(item, 2), materials),
+                            '\\n'
+                        ),
+                        '\\n'
+                    ))))
+                ) AS canonical_offset_digest_sha256,
+                if(
+                    row_count = 0,
+                    %(empty_sha256)s,
+                    lower(hex(SHA256(concat(
+                        arrayStringConcat(
+                            arrayMap(
+                                item -> concat(
+                                    tupleElement(item, 2),
+                                    '|',
+                                    tupleElement(item, 3),
+                                    '|',
+                                    tupleElement(item, 4)
+                                ),
+                                materials
+                            ),
+                            '\\n'
+                        ),
+                        '\\n'
+                    ))))
+                ) AS canonical_identity_digest_sha256,
+                if(
+                    row_count = 0,
+                    0,
+                    greatest(max_offset_int - min_offset_int + 1 - unique_offset_count, 0)
+                ) AS gap_count,
+                row_count - unique_offset_count AS duplicate_count
+            FROM
+            (
+                SELECT
+                    count() AS row_count,
+                    uniqExact(source_offset_or_equivalent) AS unique_offset_count,
+                    min(toInt64(source_offset_or_equivalent)) AS min_offset_int,
+                    max(toInt64(source_offset_or_equivalent)) AS max_offset_int,
+                    arraySort(
+                        groupArray(
+                            (
+                                toInt64(source_offset_or_equivalent),
+                                source_offset_or_equivalent,
+                                toString(event_id),
+                                payload_sha256_raw
+                            )
+                        )
+                    ) AS materials
+                FROM {self._database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            )
+            '''
+        else:
+            digest_query = f'''
+            SELECT
+                row_count,
+                unique_offset_count,
+                if(
+                    row_count = 0,
+                    CAST(NULL AS Nullable(String)),
+                    toString(tupleElement(materials[1], 1))
+                ) AS first_offset_or_equivalent,
+                if(
+                    row_count = 0,
+                    CAST(NULL AS Nullable(String)),
+                    toString(tupleElement(materials[length(materials)], 1))
+                ) AS last_offset_or_equivalent,
+                if(
+                    row_count = 0,
+                    %(empty_sha256)s,
+                    lower(hex(SHA256(concat(
+                        arrayStringConcat(
+                            arrayMap(item -> tupleElement(item, 1), materials),
+                            '\\n'
+                        ),
+                        '\\n'
+                    ))))
+                ) AS canonical_offset_digest_sha256,
+                if(
+                    row_count = 0,
+                    %(empty_sha256)s,
+                    lower(hex(SHA256(concat(
+                        arrayStringConcat(
+                            arrayMap(
+                                item -> concat(
+                                    tupleElement(item, 1),
+                                    '|',
+                                    tupleElement(item, 2),
+                                    '|',
+                                    tupleElement(item, 3)
+                                ),
+                                materials
+                            ),
+                            '\\n'
+                        ),
+                        '\\n'
+                    ))))
+                ) AS canonical_identity_digest_sha256,
+                0 AS gap_count,
+                row_count - unique_offset_count AS duplicate_count
+            FROM
+            (
+                SELECT
+                    count() AS row_count,
+                    uniqExact(source_offset_or_equivalent) AS unique_offset_count,
+                    arraySort(
+                        groupArray(
+                            (
+                                source_offset_or_equivalent,
+                                toString(event_id),
+                                payload_sha256_raw
+                            )
+                        )
+                    ) AS materials
+                FROM {self._database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            )
+            '''
+        rows = self._client.execute(
+            digest_query,
             {
                 'source_id': stream_key.source_id,
                 'stream_id': stream_key.stream_id,
                 'partition_id': stream_key.partition_id,
+                'empty_sha256': _EMPTY_SHA256,
             },
         )
         if rows == []:
+            raise ReconciliationError(
+                code='BACKFILL_CANONICAL_PROOF_QUERY_EMPTY',
+                message=(
+                    'Canonical proof query returned no rows '
+                    f'for {stream_key.source_id}/{stream_key.stream_id}/{stream_key.partition_id}'
+                ),
+            )
+        row = rows[0]
+        canonical_row_count = int(row[0])
+        if canonical_row_count == 0:
             if source_proof.source_row_count == 0 and source_proof.allow_empty_partition:
                 return PartitionCanonicalProof(
                     canonical_row_count=0,
@@ -1201,48 +1404,15 @@ class CanonicalBackfillStateStore:
                     f'for {stream_key.source_id}/{stream_key.stream_id}/{stream_key.partition_id}'
                 ),
             )
-        ordered_materials = _ordered_identity_materials_or_raise(
-            offset_ordering=source_proof.offset_ordering,
-            materials=[
-                (
-                    _require_non_empty(
-                        str(row[0]),
-                        field_name='source_offset_or_equivalent',
-                    ),
-                    _require_non_empty(str(row[1]), field_name='event_id'),
-                    _require_non_empty(
-                        str(row[2]),
-                        field_name='payload_sha256_raw',
-                    ),
-                )
-                for row in rows
-            ],
-        )
-        offsets = [item[0] for item in ordered_materials]
-        identity_lines = [
-            f'{offset}|{event_id}|{payload_sha256_raw}'
-            for offset, event_id, payload_sha256_raw in ordered_materials
-        ]
-        if source_proof.offset_ordering == 'numeric':
-            unique_offsets = sorted(set(offsets), key=int)
-        else:
-            unique_offsets = sorted(set(offsets))
-        duplicate_count = len(offsets) - len(unique_offsets)
-        gap_count = 0
-        if source_proof.offset_ordering == 'numeric' and unique_offsets != []:
-            parsed_offsets = [int(offset) for offset in unique_offsets]
-            if parsed_offsets:
-                expected_count = (parsed_offsets[-1] - parsed_offsets[0]) + 1
-                gap_count = expected_count - len(parsed_offsets)
         return PartitionCanonicalProof(
-            canonical_row_count=len(rows),
-            canonical_unique_offset_count=len(unique_offsets),
-            first_offset_or_equivalent=offsets[0],
-            last_offset_or_equivalent=offsets[-1],
-            canonical_offset_digest_sha256=_sha256_lines(offsets),
-            canonical_identity_digest_sha256=_sha256_lines(identity_lines),
-            gap_count=gap_count,
-            duplicate_count=duplicate_count,
+            canonical_row_count=canonical_row_count,
+            canonical_unique_offset_count=int(row[1]),
+            first_offset_or_equivalent=(None if row[2] is None else str(row[2])),
+            last_offset_or_equivalent=(None if row[3] is None else str(row[3])),
+            canonical_offset_digest_sha256=str(row[4]),
+            canonical_identity_digest_sha256=str(row[5]),
+            gap_count=int(row[6]),
+            duplicate_count=int(row[7]),
         )
 
     def prove_partition_or_quarantine(

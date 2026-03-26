@@ -4,15 +4,16 @@ import hashlib
 import io
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import polars as pl
+from clickhouse_connect import get_client as get_clickhouse_http_client
 from clickhouse_driver import Client as ClickhouseClient
 
 from origo.events.backfill_state import (
     PartitionSourceProof,
-    SourceIdentityMaterial,
-    build_partition_source_proof,
+    build_partition_source_proof_from_precomputed,
 )
 from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
 from origo.events.ingest_state import CanonicalStreamKey
@@ -22,9 +23,9 @@ from origo.events.writer import (
     CanonicalEventWriteInput,
     CanonicalEventWriter,
     canonical_event_id_from_key,
-    canonical_event_idempotency_key,
 )
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
+from origo_control_plane.config import resolve_clickhouse_http_settings
 
 _SOURCE_ID = 'binance'
 _STREAM_ID = 'binance_spot_trades'
@@ -34,6 +35,18 @@ _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
 _INSERT_CHUNK_SIZE = 100000
 _CANONICAL_EVENT_NAMESPACE_HEX = 'f1d1ef1795ce4f9fbd81f9958cdf8ee5'
+
+
+def _build_clickhouse_http_client_or_raise() -> Any:
+    settings = resolve_clickhouse_http_settings()
+    return get_clickhouse_http_client(
+        host=settings.host,
+        port=settings.port,
+        username=settings.user,
+        password=settings.password,
+        database=settings.database,
+    )
+
 
 @dataclass(frozen=True)
 class BinanceSpotTradeEvent:
@@ -121,7 +134,9 @@ def _payload_json_from_fields(
 
 def build_binance_partition_source_proof(
     *,
-    frame: pl.DataFrame,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
     partition_id: str,
     file_url: str,
     checksum_url: str,
@@ -129,60 +144,79 @@ def build_binance_partition_source_proof(
     csv_sha256: str,
     csv_filename: str,
 ) -> PartitionSourceProof:
-    trade_ids = frame.get_column('trade_id').to_list()
-    price_texts = frame.get_column('price_text').to_list()
-    quantity_texts = frame.get_column('quantity_text').to_list()
-    quote_quantity_texts = frame.get_column('quote_quantity_text').to_list()
-    is_buyer_maker_values = frame.get_column('is_buyer_maker').to_list()
-    is_best_match_values = frame.get_column('is_best_match').to_list()
-    materials: list[SourceIdentityMaterial] = []
-    for (
-        trade_id,
-        price_text,
-        quantity_text,
-        quote_quantity_text,
-        is_buyer_maker,
-        is_best_match,
-    ) in zip(
-        trade_ids,
-        price_texts,
-        quantity_texts,
-        quote_quantity_texts,
-        is_buyer_maker_values,
-        is_best_match_values,
-        strict=True,
-    ):
-        event = BinanceSpotTradeEvent(
-            partition_id=partition_id,
-            trade_id=int(trade_id),
-            price_text=str(price_text),
-            quantity_text=str(quantity_text),
-            quote_quantity_text=str(quote_quantity_text),
-            timestamp_ms=0,
-            is_buyer_maker=bool(is_buyer_maker),
-            is_best_match=bool(is_best_match),
-        )
-        payload_json = _payload_json_for_event(event)
-        source_offset = str(event.trade_id)
-        materials.append(
-            SourceIdentityMaterial(
-                source_offset_or_equivalent=source_offset,
-                event_id=str(
-                    canonical_event_id_from_key(
-                        canonical_event_idempotency_key(
-                            source_id=_SOURCE_ID,
-                            stream_id=_STREAM_ID,
-                            partition_id=partition_id,
-                            source_offset_or_equivalent=source_offset,
+    rows = client.execute(
+        f'''
+        SELECT
+            source_row_count,
+            first_offset_or_equivalent,
+            last_offset_or_equivalent,
+            source_offset_digest_sha256,
+            source_identity_digest_sha256
+        FROM
+        (
+            SELECT
+                row_count AS source_row_count,
+                toString(tupleElement(materials[1], 2)) AS first_offset_or_equivalent,
+                toString(tupleElement(materials[length(materials)], 2)) AS last_offset_or_equivalent,
+                lower(hex(SHA256(concat(
+                    arrayStringConcat(
+                        arrayMap(item -> tupleElement(item, 2), materials),
+                        '\\n'
+                    ),
+                    '\\n'
+                )))) AS source_offset_digest_sha256,
+                lower(hex(SHA256(concat(
+                    arrayStringConcat(
+                        arrayMap(
+                            item -> concat(
+                                tupleElement(item, 2),
+                                '|',
+                                tupleElement(item, 3),
+                                '|',
+                                tupleElement(item, 4)
+                            ),
+                            materials
+                        ),
+                        '\\n'
+                    ),
+                    '\\n'
+                )))) AS source_identity_digest_sha256
+            FROM
+            (
+                SELECT
+                    count() AS row_count,
+                    arraySort(
+                        groupArray(
+                            (
+                                trade_id_int,
+                                source_offset,
+                                event_id_text,
+                                payload_sha256_raw
+                            )
                         )
-                    )
-                ),
-                payload_sha256_raw=hashlib.sha256(
-                    payload_json.encode(_PAYLOAD_ENCODING)
-                ).hexdigest(),
+                    ) AS materials
+                FROM
+                (
+                    {_binance_stage_event_projection_sql(database=database, stage_table=stage_table)}
+                )
             )
         )
-    return build_partition_source_proof(
+        ''',
+        {
+            'canonical_event_namespace_hex': _CANONICAL_EVENT_NAMESPACE_HEX,
+            'idempotency_prefix': (
+                f'{CANONICAL_EVENT_ENVELOPE_VERSION}|'
+                f'{_SOURCE_ID}|{_STREAM_ID}|{partition_id}|'
+            ),
+        },
+    )
+    if rows == []:
+        raise RuntimeError(
+            'Binance staged source proof query returned no rows '
+            f'for partition_id={partition_id}'
+        )
+    row = rows[0]
+    return build_partition_source_proof_from_precomputed(
         stream_key=CanonicalStreamKey(
             source_id=_SOURCE_ID,
             stream_id=_STREAM_ID,
@@ -196,7 +230,11 @@ def build_binance_partition_source_proof(
             'csv_sha256': csv_sha256,
             'csv_filename': csv_filename,
         },
-        materials=materials,
+        source_row_count=int(row[0]),
+        first_offset_or_equivalent=str(row[1]),
+        last_offset_or_equivalent=str(row[2]),
+        source_offset_digest_sha256=str(row[3]),
+        source_identity_digest_sha256=str(row[4]),
         allow_empty_partition=False,
     )
 
@@ -209,6 +247,160 @@ def _first_row_text_or_raise(csv_content: bytes) -> str:
     if first_line_bytes == b'':
         raise RuntimeError('CSV payload is empty')
     return first_line_bytes.decode('utf-8')
+
+
+def _normalized_binance_csv_payload_for_stage_insert_or_raise(
+    csv_content: bytes,
+) -> bytes:
+    first_line = _first_row_text_or_raise(csv_content)
+    first_cell = first_line.split(',', 1)[0].strip().lstrip('\ufeff').lower()
+    has_header = first_cell in {'id', 'trade_id'}
+    if not has_header:
+        return csv_content
+    first_newline = csv_content.find(b'\n')
+    if first_newline == -1:
+        raise RuntimeError('CSV payload contains header row but no data rows')
+    normalized_payload = csv_content[first_newline + 1 :]
+    if normalized_payload == b'':
+        raise RuntimeError('CSV payload contains header row but no data rows')
+    return normalized_payload
+
+
+def create_staged_binance_spot_trade_csv_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    csv_content: bytes,
+) -> str:
+    stage_table = f'__origo_binance_stage_{uuid4().hex}'
+    client.execute(
+        f'''
+        CREATE TABLE {database}.{stage_table}
+        (
+            trade_id String,
+            price_text String,
+            quantity_text String,
+            quote_quantity_text String,
+            timestamp_raw String,
+            is_buyer_maker_raw String,
+            is_best_match_raw String
+        )
+        ENGINE = Memory
+        '''
+    )
+    http_client: Any | None = None
+    try:
+        http_client = _build_clickhouse_http_client_or_raise()
+        if http_client is None:
+            raise RuntimeError('Failed to build ClickHouse HTTP client')
+        http_client.raw_insert(
+            table=f'{database}.{stage_table}',
+            insert_block=_normalized_binance_csv_payload_for_stage_insert_or_raise(
+                csv_content
+            ),
+            fmt='CSV',
+        )
+    except Exception:
+        client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
+        raise
+    finally:
+        if http_client is not None:
+            http_client.close()
+    return stage_table
+
+
+def drop_staged_binance_spot_trade_csv_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+) -> None:
+    client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
+
+
+def _binance_stage_event_projection_sql(*, database: str, stage_table: str) -> str:
+    return f'''
+        SELECT
+            trade_id_int,
+            toString(trade_id_int) AS source_offset,
+            timestamp_ms,
+            payload_json,
+            lower(hex(SHA256(payload_json))) AS payload_sha256_raw,
+            toString(toUUID(concat(
+                substring(event_id_hex, 1, 8), '-',
+                substring(event_id_hex, 9, 4), '-',
+                substring(event_id_hex, 13, 4), '-',
+                substring(event_id_hex, 17, 4), '-',
+                substring(event_id_hex, 21, 12)
+            ))) AS event_id_text,
+            toUUID(concat(
+                substring(event_id_hex, 1, 8), '-',
+                substring(event_id_hex, 9, 4), '-',
+                substring(event_id_hex, 13, 4), '-',
+                substring(event_id_hex, 17, 4), '-',
+                substring(event_id_hex, 21, 12)
+            )) AS event_id_uuid
+        FROM
+        (
+            SELECT
+                trade_id_int,
+                timestamp_ms,
+                concat(
+                    '{{"is_best_match":',
+                    if(is_best_match, 'true', 'false'),
+                    ',"is_buyer_maker":',
+                    if(is_buyer_maker, 'true', 'false'),
+                    ',"price":"', price_text_normalized,
+                    '","qty":"', quantity_text_normalized,
+                    '","quote_qty":"', quote_quantity_text_normalized,
+                    '","trade_id":', toString(trade_id_int),
+                    '}}'
+                ) AS payload_json,
+                lower(hex(uuid_bytes)) AS event_id_hex
+            FROM
+            (
+                SELECT
+                    trade_id_int,
+                    timestamp_ms,
+                    price_text_normalized,
+                    quantity_text_normalized,
+                    quote_quantity_text_normalized,
+                    is_buyer_maker,
+                    is_best_match,
+                    concat(
+                        substring(sha1_digest, 1, 6),
+                        reinterpretAsString(reinterpretAsUInt8(
+                            bitOr(bitAnd(reinterpretAsUInt8(substring(sha1_digest, 7, 1)), 15), 80)
+                        )),
+                        substring(sha1_digest, 8, 1),
+                        reinterpretAsString(reinterpretAsUInt8(
+                            bitOr(bitAnd(reinterpretAsUInt8(substring(sha1_digest, 9, 1)), 63), 128)
+                        )),
+                        substring(sha1_digest, 10, 7)
+                    ) AS uuid_bytes
+                FROM
+                (
+                    SELECT
+                        toInt64(trimBoth(trade_id)) AS trade_id_int,
+                        trimBoth(price_text) AS price_text_normalized,
+                        trimBoth(quantity_text) AS quantity_text_normalized,
+                        trimBoth(quote_quantity_text) AS quote_quantity_text_normalized,
+                        if(
+                            length(trimBoth(timestamp_raw)) = 13,
+                            toInt64(trimBoth(timestamp_raw)),
+                            intDiv(toInt64(trimBoth(timestamp_raw)), 1000)
+                        ) AS timestamp_ms,
+                        lower(trimBoth(is_buyer_maker_raw)) IN ('true', '1') AS is_buyer_maker,
+                        lower(trimBoth(is_best_match_raw)) IN ('true', '1') AS is_best_match,
+                        SHA1(concat(
+                            unhex(%(canonical_event_namespace_hex)s),
+                            concat(%(idempotency_prefix)s, trimBoth(trade_id))
+                        )) AS sha1_digest
+                    FROM {database}.{stage_table}
+                )
+            )
+        )
+    '''
 
 
 def _bool_series_from_text(
@@ -862,6 +1054,139 @@ def _insert_binance_frame_via_clickhouse_transform_or_raise(
         client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
 
     return row_count
+
+
+def write_staged_binance_spot_trade_csv_to_canonical(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+    partition_id: str,
+    row_count: int,
+    run_id: str | None,
+    ingested_at_utc: datetime,
+) -> dict[str, int]:
+    if partition_id.strip() == '':
+        raise RuntimeError('partition_id must be non-empty')
+    if row_count <= 0:
+        raise RuntimeError(
+            'Binance staged canonical insert requires row_count > 0, '
+            f'got={row_count}'
+        )
+    existing_rows = client.execute(
+        f'''
+        SELECT 1
+        FROM {database}.canonical_event_log
+        WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        LIMIT 1
+        ''',
+        {
+            'source_id': _SOURCE_ID,
+            'stream_id': _STREAM_ID,
+            'partition_id': partition_id,
+        },
+    )
+    if existing_rows != []:
+        raise RuntimeError(
+            'Binance staged canonical insert requires empty target partition; '
+            f'partition already has data source={_SOURCE_ID} stream={_STREAM_ID} '
+            f'partition_id={partition_id}'
+        )
+    client.execute(
+        f'''
+        INSERT INTO {database}.canonical_event_log
+        (
+            envelope_version,
+            event_id,
+            source_id,
+            stream_id,
+            partition_id,
+            source_offset_or_equivalent,
+            source_event_time_utc,
+            ingested_at_utc,
+            payload_content_type,
+            payload_encoding,
+            payload_raw,
+            payload_sha256_raw,
+            payload_json
+        )
+        SELECT
+            toUInt16({CANONICAL_EVENT_ENVELOPE_VERSION}) AS envelope_version,
+            event_id_uuid AS event_id,
+            %(source_id)s AS source_id,
+            %(stream_id)s AS stream_id,
+            %(partition_id)s AS partition_id,
+            source_offset,
+            fromUnixTimestamp64Milli(timestamp_ms, 'UTC') AS source_event_time_utc,
+            %(ingested_at_utc)s AS ingested_at_utc,
+            %(payload_content_type)s AS payload_content_type,
+            %(payload_encoding)s AS payload_encoding,
+            payload_json AS payload_raw,
+            payload_sha256_raw,
+            payload_json
+        FROM
+        (
+            {_binance_stage_event_projection_sql(database=database, stage_table=stage_table)}
+        )
+        ''',
+        {
+            'source_id': _SOURCE_ID,
+            'stream_id': _STREAM_ID,
+            'partition_id': partition_id,
+            'ingested_at_utc': ingested_at_utc,
+            'payload_content_type': _PAYLOAD_CONTENT_TYPE,
+            'payload_encoding': _PAYLOAD_ENCODING,
+            'canonical_event_namespace_hex': _CANONICAL_EVENT_NAMESPACE_HEX,
+            'idempotency_prefix': (
+                f'{CANONICAL_EVENT_ENVELOPE_VERSION}|'
+                f'{_SOURCE_ID}|{_STREAM_ID}|{partition_id}|'
+            ),
+        },
+    )
+    first_offset = client.execute(
+        f'''
+        SELECT min(toInt64(trimBoth(trade_id))), max(toInt64(trimBoth(trade_id)))
+        FROM {database}.{stage_table}
+        '''
+    )
+    if first_offset == []:
+        raise RuntimeError(
+            'Binance staged canonical insert could not load stage bounds '
+            f'for partition_id={partition_id}'
+        )
+    min_offset = int(first_offset[0][0])
+    max_offset = int(first_offset[0][1])
+    idempotency_key_prefix = (
+        f'{CANONICAL_EVENT_ENVELOPE_VERSION}|{_SOURCE_ID}|{_STREAM_ID}|'
+        f'{partition_id}|'
+    )
+    get_canonical_runtime_audit_log().append_ingest_batch_event(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=_STREAM_ID,
+            partition_id=partition_id,
+        ),
+        event_type='canonical_ingest_batch',
+        run_id=run_id,
+        batch_event_count=row_count,
+        inserted_count=row_count,
+        duplicate_count=0,
+        first_source_offset_or_equivalent=str(min_offset),
+        last_source_offset_or_equivalent=str(max_offset),
+        first_event_id=str(
+            canonical_event_id_from_key(idempotency_key_prefix + str(min_offset))
+        ),
+        last_event_id=str(
+            canonical_event_id_from_key(idempotency_key_prefix + str(max_offset))
+        ),
+    )
+    return {
+        'rows_processed': row_count,
+        'rows_inserted': row_count,
+        'rows_duplicate': 0,
+    }
 
 
 def write_binance_spot_trade_frame_to_canonical(

@@ -23,8 +23,11 @@ from origo_control_plane.utils.binance_aligned_projector import (
 )
 from origo_control_plane.utils.binance_canonical_event_ingest import (
     build_binance_partition_source_proof,
+    create_staged_binance_spot_trade_csv_or_raise,
+    drop_staged_binance_spot_trade_csv_or_raise,
     parse_binance_spot_trade_csv_frame,
     write_binance_spot_trade_frame_to_canonical,
+    write_staged_binance_spot_trade_csv_to_canonical,
 )
 from origo_control_plane.utils.binance_native_projector import (
     project_binance_spot_trades_native,
@@ -161,6 +164,7 @@ def _process_day(
     )
 
     client: ClickhouseClient | None = None
+    stage_table: str | None = None
     try:
         context.log.info(
             f'Connecting to ClickHouse at {CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}'
@@ -178,8 +182,15 @@ def _process_day(
             client=client,
             database=CLICKHOUSE_DATABASE,
         )
+        stage_table = create_staged_binance_spot_trade_csv_or_raise(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            csv_content=csv_content,
+        )
         source_proof = build_binance_partition_source_proof(
-            frame=events_frame,
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            stage_table=stage_table,
             partition_id=partition_date_str,
             file_url=file_url,
             checksum_url=checksum_url,
@@ -206,11 +217,12 @@ def _process_day(
                     proof_details={'trigger_message': exc.message},
                 )
             raise
-        fast_insert_mode = _resolve_fast_insert_mode_or_raise(
-            state_store=state_store,
-            partition_id=partition_date_str,
-            projection_mode=runtime_contract.projection_mode,
-            execution_mode=runtime_contract.execution_mode,
+        execution_assessment = state_store.assess_partition_execution(
+            stream_key=source_proof.stream_key
+        )
+        prove_existing_canonical_without_write = (
+            runtime_contract.execution_mode == 'reconcile'
+            and execution_assessment.canonical_row_count > 0
         )
         source_manifested_at_utc = datetime.now(UTC)
         state_store.record_source_manifest(
@@ -226,17 +238,49 @@ def _process_day(
             recorded_at_utc=source_manifested_at_utc,
         )
 
-        write_summary = write_binance_spot_trade_frame_to_canonical(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_id=partition_date_str,
-            frame=events_frame,
-            run_id=context.run_id,
-            ingested_at_utc=datetime.now(UTC),
-            fast_insert_mode=fast_insert_mode,
-        )
-        context.log.info(f'Canonical write summary: {write_summary}')
-
+        if prove_existing_canonical_without_write:
+            write_path = 'reconcile_proof_only'
+            write_summary = {
+                'rows_processed': source_proof.source_row_count,
+                'rows_inserted': 0,
+                'rows_duplicate': source_proof.source_row_count,
+            }
+            context.log.info(
+                'Reconcile detected existing canonical rows; proving partition '
+                'directly without duplicate-writer replay'
+            )
+            proof_reason = 'reconcile_existing_canonical_rows_detected'
+        else:
+            fast_insert_mode = _resolve_fast_insert_mode_or_raise(
+                state_store=state_store,
+                partition_id=partition_date_str,
+                projection_mode=runtime_contract.projection_mode,
+                execution_mode=runtime_contract.execution_mode,
+            )
+            if fast_insert_mode == 'assume_new_partition':
+                write_summary = write_staged_binance_spot_trade_csv_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                    partition_id=partition_date_str,
+                    row_count=source_proof.source_row_count,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                )
+                write_path = 'staged_fast_insert'
+            else:
+                write_summary = write_binance_spot_trade_frame_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    partition_id=partition_date_str,
+                    frame=events_frame,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                    fast_insert_mode=fast_insert_mode,
+                )
+                write_path = 'writer'
+            context.log.info(f'Canonical write summary: {write_summary}')
+            proof_reason = 'canonical_write_completed'
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])
@@ -255,7 +299,7 @@ def _process_day(
         state_store.record_partition_state(
             source_proof=source_proof,
             state='canonical_written_unproved',
-            reason='canonical_write_completed',
+            reason=proof_reason,
             run_id=context.run_id,
             recorded_at_utc=proof_recorded_at_utc,
         )
@@ -302,6 +346,7 @@ def _process_day(
             'date': day_file_name,
             'partition_date': partition_date_str,
             'projection_mode': projection_mode,
+            'write_path': write_path,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
@@ -317,6 +362,26 @@ def _process_day(
         context.log.info(f'Successfully processed {day_file_name}')
         return result_data
     finally:
+        if client is not None and stage_table is not None:
+            try:
+                drop_staged_binance_spot_trade_csv_or_raise(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                )
+            except Exception as exc:
+                active_exception = sys.exc_info()[1]
+                if active_exception is not None:
+                    active_exception.add_note(
+                        f'ClickHouse stage cleanup failed during cleanup: {exc}'
+                    )
+                    context.log.warning(
+                        f'Failed to drop Binance stage table cleanly: {exc}'
+                    )
+                else:
+                    raise RuntimeError(
+                        f'Failed to drop Binance stage table cleanly: {exc}'
+                    ) from exc
         if client is not None:
             try:
                 client.disconnect()

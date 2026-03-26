@@ -23,6 +23,7 @@
   - `docs/Developer/s34-canonical-backfill-runtime.md`
   - `docs/Developer/s34-daily-tranche-controller.md`
   - `docs/Developer/s34-exchange-sequence-controller.md`
+  - `docs/Developer/s34-etf-backfill-runner.md`
 
 ## Historical slice docs
 - All `s*.md` files capture what was true at slice closeout time.

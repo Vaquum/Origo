@@ -8,6 +8,7 @@
 ## Purpose and scope
 - Defines the repo-native daily tranche controller for S34 exchange backfills.
 - Scope covers daily dataset batch planning, reconcile-first behavior, and immediate batch chaining without idle gaps.
+- This controller is the execution unit composed by `docs/Developer/s34-exchange-sequence-controller.md` for post-Binance exchange order.
 
 ## Inputs and outputs with contract shape
 - Controller entrypoint:

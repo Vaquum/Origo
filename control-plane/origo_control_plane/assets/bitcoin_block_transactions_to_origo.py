@@ -10,11 +10,14 @@ from typing import Any, cast
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, asset
 
+from origo_control_plane.backfill import (
+    load_backfill_height_window_or_raise,
+)
 from origo_control_plane.bitcoin_core import (
     BitcoinCoreNodeContract,
     BitcoinCoreNodeSettings,
     BitcoinCoreRpcClient,
-    resolve_bitcoin_core_node_settings,
+    resolve_bitcoin_core_node_settings_with_height_range_or_raise,
     validate_bitcoin_core_node_contract_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
@@ -511,7 +514,11 @@ def insert_bitcoin_block_transactions_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
     clickhouse_target = _resolve_clickhouse_target()
-    settings = resolve_bitcoin_core_node_settings()
+    height_window = load_backfill_height_window_or_raise(context)
+    settings = resolve_bitcoin_core_node_settings_with_height_range_or_raise(
+        headers_start_height=height_window.start_height,
+        headers_end_height=height_window.end_height,
+    )
     context.log.info(
         'Fetching Bitcoin block transactions '
         f'for range=[{settings.headers_start_height}, {settings.headers_end_height}]'

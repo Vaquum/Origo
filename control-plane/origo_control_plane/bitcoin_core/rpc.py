@@ -63,26 +63,51 @@ def _validate_rpc_url_or_raise(rpc_url: str) -> None:
         )
 
 
-def resolve_bitcoin_core_node_settings() -> BitcoinCoreNodeSettings:
-    rpc_url = require_env('ORIGO_BITCOIN_CORE_RPC_URL')
-    _validate_rpc_url_or_raise(rpc_url)
-    headers_start_height = _require_non_negative_int_env(
-        'ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT'
-    )
-    headers_end_height = _require_non_negative_int_env(
-        'ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT'
-    )
+def _build_bitcoin_core_node_settings_or_raise(
+    *,
+    headers_start_height: int,
+    headers_end_height: int,
+) -> BitcoinCoreNodeSettings:
+    if headers_start_height < 0:
+        raise RuntimeError('headers_start_height must be >= 0')
+    if headers_end_height < 0:
+        raise RuntimeError('headers_end_height must be >= 0')
     if headers_end_height < headers_start_height:
         raise RuntimeError(
-            'ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT must be >= '
-            'ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT'
+            'headers_end_height must be >= headers_start_height'
         )
+    rpc_url = require_env('ORIGO_BITCOIN_CORE_RPC_URL')
+    _validate_rpc_url_or_raise(rpc_url)
     return BitcoinCoreNodeSettings(
         rpc_url=rpc_url,
         rpc_user=require_env('ORIGO_BITCOIN_CORE_RPC_USER'),
         rpc_password=require_env('ORIGO_BITCOIN_CORE_RPC_PASSWORD'),
         network=_resolve_network(),
         rpc_timeout_seconds=_resolve_rpc_timeout_seconds(),
+        headers_start_height=headers_start_height,
+        headers_end_height=headers_end_height,
+    )
+
+
+def resolve_bitcoin_core_node_settings() -> BitcoinCoreNodeSettings:
+    headers_start_height = _require_non_negative_int_env(
+        'ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT'
+    )
+    headers_end_height = _require_non_negative_int_env(
+        'ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT'
+    )
+    return _build_bitcoin_core_node_settings_or_raise(
+        headers_start_height=headers_start_height,
+        headers_end_height=headers_end_height,
+    )
+
+
+def resolve_bitcoin_core_node_settings_with_height_range_or_raise(
+    *,
+    headers_start_height: int,
+    headers_end_height: int,
+) -> BitcoinCoreNodeSettings:
+    return _build_bitcoin_core_node_settings_or_raise(
         headers_start_height=headers_start_height,
         headers_end_height=headers_end_height,
     )

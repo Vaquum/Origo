@@ -779,6 +779,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
+- [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof
@@ -2099,27 +2100,31 @@ Constraints: official FRED source only.
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-23. `S34-08`
+23. `S34-07a`
+Action: Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
+Done looks like: height-based Bitcoin assets read `start_height` / `end_height` from explicit run tags, reject missing/invalid ranges, and no longer take per-run backfill boundaries from static env.
+Constraints: no fallback to env for asset run-window selection; non-height datasets remain out of scope.
+24. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-24. `S34-09`
+25. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-25. `S34-10`
+26. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-26. `S34-10a`
+27. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-27. `S34-11`
+28. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.
-28. `S34-11a`
+29. `S34-11a`
 Action: Build Slice 34 closeout-prep reporting from authoritative backfill proof/manifests.
 Done looks like: one deterministic prep tool can summarize per-dataset proof coverage, manifest evidence, and remaining closeout gaps straight from ClickHouse/live manifest artifacts without hand-editing.
 Constraints: prep/reporting only; do not mark Slice 34 closed and do not create fake final artifacts.

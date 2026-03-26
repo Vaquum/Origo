@@ -18,6 +18,23 @@
 
 Origo is an event-sourced market data platform that delivers multi-exchange trade data, ETF data, blockchain data, and global liquidity signals through deterministic source-native endpoints or a zero-wrangling 1-second normalized master table. Replayable, auditable, and schema-strict by design, it turns fragmented financial data into a reliable query surface.
 
+# Capabilities
+
+**Source-native access** to multi-exchange trade data, ETF data, blockchain data, and global liquidity signals.
+
+**Two query modes:** deterministic source-native endpoints, or a zero-wrangling 1-second normalized multi-source master table.
+
+**Immutable raw truth:** source events are preserved as the canonical record.
+
+**Replayable outputs:** the same inputs produce the same results.
+
+**Auditable provenance:** every dataset can be traced back to source artifacts, partitions, and ingest runs.
+
+**Schema-strict contracts:** explicit interfaces with fail-loud behavior on missing or invalid data.
+
+**Cross-source alignment:** market, ETF, blockchain, and liquidity data can be queried together without manual joins or timestamp wrangling.
+
+**Deterministic rebuilds:** backfills, replays, and projection rebuilds are first-class platform capabilities.
 # Quick Start
 
 1) Clone the repository and prepare env vars:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -10,20 +9,27 @@ from uuid import uuid4
 import polars as pl
 from clickhouse_driver import Client as ClickhouseClient
 
+from origo.events.backfill_state import (
+    PartitionSourceProof,
+    SourceIdentityMaterial,
+    build_partition_source_proof,
+)
 from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
 from origo.events.ingest_state import CanonicalStreamKey
+from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.runtime_audit import get_canonical_runtime_audit_log
 from origo.events.writer import (
     CanonicalEventWriteInput,
     CanonicalEventWriter,
     canonical_event_id_from_key,
+    canonical_event_idempotency_key,
 )
+from origo_control_plane.backfill.runtime_contract import FastInsertMode
 
 _SOURCE_ID = 'binance'
 _STREAM_ID = 'binance_spot_trades'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
-_FAST_INSERT_MODE_ENV = 'ORIGO_CANONICAL_FAST_INSERT_MODE'
 _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
 _INSERT_CHUNK_SIZE = 100000
@@ -110,6 +116,88 @@ def _payload_json_from_fields(
         + '","trade_id":'
         + str(trade_id)
         + '}'
+    )
+
+
+def build_binance_partition_source_proof(
+    *,
+    frame: pl.DataFrame,
+    partition_id: str,
+    file_url: str,
+    checksum_url: str,
+    zip_sha256: str,
+    csv_sha256: str,
+    csv_filename: str,
+) -> PartitionSourceProof:
+    trade_ids = frame.get_column('trade_id').to_list()
+    price_texts = frame.get_column('price_text').to_list()
+    quantity_texts = frame.get_column('quantity_text').to_list()
+    quote_quantity_texts = frame.get_column('quote_quantity_text').to_list()
+    is_buyer_maker_values = frame.get_column('is_buyer_maker').to_list()
+    is_best_match_values = frame.get_column('is_best_match').to_list()
+    materials: list[SourceIdentityMaterial] = []
+    for (
+        trade_id,
+        price_text,
+        quantity_text,
+        quote_quantity_text,
+        is_buyer_maker,
+        is_best_match,
+    ) in zip(
+        trade_ids,
+        price_texts,
+        quantity_texts,
+        quote_quantity_texts,
+        is_buyer_maker_values,
+        is_best_match_values,
+        strict=True,
+    ):
+        event = BinanceSpotTradeEvent(
+            partition_id=partition_id,
+            trade_id=int(trade_id),
+            price_text=str(price_text),
+            quantity_text=str(quantity_text),
+            quote_quantity_text=str(quote_quantity_text),
+            timestamp_ms=0,
+            is_buyer_maker=bool(is_buyer_maker),
+            is_best_match=bool(is_best_match),
+        )
+        payload_json = _payload_json_for_event(event)
+        source_offset = str(event.trade_id)
+        materials.append(
+            SourceIdentityMaterial(
+                source_offset_or_equivalent=source_offset,
+                event_id=str(
+                    canonical_event_id_from_key(
+                        canonical_event_idempotency_key(
+                            source_id=_SOURCE_ID,
+                            stream_id=_STREAM_ID,
+                            partition_id=partition_id,
+                            source_offset_or_equivalent=source_offset,
+                        )
+                    )
+                ),
+                payload_sha256_raw=hashlib.sha256(
+                    payload_json.encode(_PAYLOAD_ENCODING)
+                ).hexdigest(),
+            )
+        )
+    return build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=_STREAM_ID,
+            partition_id=partition_id,
+        ),
+        offset_ordering='numeric',
+        source_artifact_identity={
+            'file_url': file_url,
+            'checksum_url': checksum_url,
+            'zip_sha256': zip_sha256,
+            'csv_sha256': csv_sha256,
+            'csv_filename': csv_filename,
+        },
+        materials=materials,
+        allow_empty_partition=False,
     )
 
 
@@ -360,17 +448,14 @@ def _write_events_to_canonical(
     events: list[BinanceSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
+    fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
-    fast_insert_mode = os.environ.get(
-        _FAST_INSERT_MODE_ENV,
-        _FAST_INSERT_MODE_DEFAULT,
-    ).strip().lower()
     if fast_insert_mode not in {
         _FAST_INSERT_MODE_DEFAULT,
         _FAST_INSERT_MODE_ASSUME_NEW_PARTITION,
     }:
         raise RuntimeError(
-            f'{_FAST_INSERT_MODE_ENV} must be one of '
+            'fast_insert_mode must be one of '
             f'[{_FAST_INSERT_MODE_DEFAULT}, {_FAST_INSERT_MODE_ASSUME_NEW_PARTITION}], '
             f'got={fast_insert_mode!r}'
         )
@@ -547,7 +632,11 @@ def _write_events_to_canonical(
             'rows_duplicate': 0,
         }
 
-    writer = CanonicalEventWriter(client=client, database=database)
+    writer = CanonicalEventWriter(
+        client=client,
+        database=database,
+        quarantine_registry=NoopStreamQuarantineRegistry(),
+    )
     write_inputs: list[CanonicalEventWriteInput] = []
     for event in events:
         resolved_partition_id = partition_id if partition_id is not None else event.partition_id
@@ -783,6 +872,7 @@ def write_binance_spot_trade_frame_to_canonical(
     frame: pl.DataFrame,
     run_id: str | None,
     ingested_at_utc: datetime,
+    fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
     if frame.height == 0:
         raise RuntimeError('Binance canonical frame writer requires non-empty frame')
@@ -820,16 +910,12 @@ def write_binance_spot_trade_frame_to_canonical(
                 f'column={column_name}: expected={expected_dtype}, got={actual_dtype}'
             )
 
-    fast_insert_mode = os.environ.get(
-        _FAST_INSERT_MODE_ENV,
-        _FAST_INSERT_MODE_DEFAULT,
-    ).strip().lower()
     if fast_insert_mode not in {
         _FAST_INSERT_MODE_DEFAULT,
         _FAST_INSERT_MODE_ASSUME_NEW_PARTITION,
     }:
         raise RuntimeError(
-            f'{_FAST_INSERT_MODE_ENV} must be one of '
+            'fast_insert_mode must be one of '
             f'[{_FAST_INSERT_MODE_DEFAULT}, {_FAST_INSERT_MODE_ASSUME_NEW_PARTITION}], '
             f'got={fast_insert_mode!r}'
         )
@@ -889,6 +975,7 @@ def write_binance_spot_trade_frame_to_canonical(
             events=events,
             run_id=run_id,
             ingested_at_utc=ingested_at_utc,
+            fast_insert_mode=fast_insert_mode,
         )
 
     existing_rows = client.execute(
@@ -966,6 +1053,7 @@ def write_binance_spot_trades_to_canonical(
     events: list[BinanceSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
+    fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
     return _write_events_to_canonical(
         client=client,
@@ -974,4 +1062,5 @@ def write_binance_spot_trades_to_canonical(
         events=events,
         run_id=run_id,
         ingested_at_utc=ingested_at_utc,
+        fast_insert_mode=fast_insert_mode,
     )

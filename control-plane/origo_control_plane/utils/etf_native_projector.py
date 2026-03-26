@@ -217,6 +217,7 @@ def _project_partition(
             partition_id=partition_id,
         ),
         batch_size=batch_size,
+        require_terminal_partition_proof=True,
     )
 
     runtime.start()

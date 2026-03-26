@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -11,8 +10,14 @@ from uuid import UUID
 
 from clickhouse_driver import Client as ClickhouseClient
 
+from origo.events.backfill_state import (
+    PartitionSourceProof,
+    SourceIdentityMaterial,
+    build_partition_source_proof,
+)
 from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
 from origo.events.ingest_state import CanonicalStreamKey
+from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.runtime_audit import get_canonical_runtime_audit_log
 from origo.events.writer import (
     CanonicalEventWriteInput,
@@ -20,6 +25,7 @@ from origo.events.writer import (
     canonical_event_id_from_key,
     canonical_event_idempotency_key,
 )
+from origo_control_plane.backfill.runtime_contract import FastInsertMode
 
 _SOURCE_ID = 'bybit'
 _STREAM_ID = 'bybit_spot_trades'
@@ -27,7 +33,6 @@ _SYMBOL = 'BTCUSDT'
 _PAYLOAD_CONTENT_TYPE = 'application/json'
 _PAYLOAD_ENCODING = 'utf-8'
 _WRITE_EVENTS_BATCH_SIZE = 10_000
-_FAST_INSERT_MODE_ENV = 'ORIGO_CANONICAL_FAST_INSERT_MODE'
 _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
 _INSERT_CHUNK_SIZE = 100_000
@@ -276,6 +281,62 @@ def parse_bybit_spot_trade_csv(
     return events
 
 
+def build_bybit_partition_source_proof(
+    *,
+    partition_id: str,
+    events: list[BybitSpotTradeEvent],
+    source_file_url: str,
+    source_filename: str,
+    gzip_sha256: str,
+    csv_sha256: str,
+    source_etag: str,
+) -> PartitionSourceProof:
+    materials: list[SourceIdentityMaterial] = []
+    for event in events:
+        payload_json = json.dumps(
+            event.to_payload(),
+            sort_keys=True,
+            separators=(',', ':'),
+            ensure_ascii=True,
+        )
+        source_offset = event.trd_match_id
+        materials.append(
+            SourceIdentityMaterial(
+                source_offset_or_equivalent=source_offset,
+                event_id=str(
+                    canonical_event_id_from_key(
+                        canonical_event_idempotency_key(
+                            source_id=_SOURCE_ID,
+                            stream_id=_STREAM_ID,
+                            partition_id=partition_id,
+                            source_offset_or_equivalent=source_offset,
+                        )
+                    )
+                ),
+                payload_sha256_raw=hashlib.sha256(
+                    payload_json.encode(_PAYLOAD_ENCODING)
+                ).hexdigest(),
+            )
+        )
+    return build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=_STREAM_ID,
+            partition_id=partition_id,
+        ),
+        offset_ordering='lexicographic',
+        source_artifact_identity={
+            'source_file_url': source_file_url,
+            'source_filename': source_filename,
+            'gzip_sha256': gzip_sha256,
+            'csv_sha256': csv_sha256,
+            'source_etag': source_etag,
+        },
+        materials=materials,
+        allow_empty_partition=False,
+    )
+
+
 def write_bybit_spot_trades_to_canonical(
     *,
     client: ClickhouseClient,
@@ -283,6 +344,7 @@ def write_bybit_spot_trades_to_canonical(
     events: list[BybitSpotTradeEvent],
     run_id: str | None,
     ingested_at_utc: datetime,
+    fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
     canonical_events: list[dict[str, object]] = []
     for event in events:
@@ -300,6 +362,7 @@ def write_bybit_spot_trades_to_canonical(
         events=canonical_events,
         run_id=run_id,
         ingested_at_utc=ingested_at_utc,
+        fast_insert_mode=fast_insert_mode,
     )
 
 
@@ -310,17 +373,14 @@ def _write_events_to_canonical(
     events: list[dict[str, object]],
     run_id: str | None,
     ingested_at_utc: datetime,
+    fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
-    fast_insert_mode = os.environ.get(
-        _FAST_INSERT_MODE_ENV,
-        _FAST_INSERT_MODE_DEFAULT,
-    ).strip().lower()
     if fast_insert_mode not in {
         _FAST_INSERT_MODE_DEFAULT,
         _FAST_INSERT_MODE_ASSUME_NEW_PARTITION,
     }:
         raise RuntimeError(
-            f'{_FAST_INSERT_MODE_ENV} must be one of '
+            'fast_insert_mode must be one of '
             f'[{_FAST_INSERT_MODE_DEFAULT}, {_FAST_INSERT_MODE_ASSUME_NEW_PARTITION}], '
             f'got={fast_insert_mode!r}'
         )
@@ -462,7 +522,11 @@ def _write_events_to_canonical(
             'rows_duplicate': 0,
         }
 
-    writer = CanonicalEventWriter(client=client, database=database)
+    writer = CanonicalEventWriter(
+        client=client,
+        database=database,
+        quarantine_registry=NoopStreamQuarantineRegistry(),
+    )
 
     inserted = 0
     duplicate = 0

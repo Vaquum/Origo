@@ -761,6 +761,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C1` Freeze canonical backfill inventory and execution order for every onboarded dataset.
 - [x] `S34-C2` Implement/verify backfill orchestration contract (partition planner, cursor ledger, resumable run controls, fail-loud gap checks).
 - [x] `S34-C2a` Stabilize ETF canonical event payload for replay idempotency (exclude run-volatile provenance timestamps from canonical payload hash contract).
+- [x] `S34-C2b` Replace direct asset invocation with Dagster-native partition execution for live backfill dispatch/monitoring.
+- [x] `S34-C2c` Move authoritative backfill progress, proof, and quarantine state fully into ClickHouse and remove file-backed live state paths.
+- [x] `S34-C2d` Implement strict partition state machine and explicit reconcile flow for completed, ambiguous, and quarantined partitions.
+- [x] `S34-C2e` Implement deterministic partition-local source/canonical proof records and range-level proof folding.
+- [x] `S34-C2f` Gate fast insert, resume, projection rebuild, and serving promotion on terminal proof state only.
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
@@ -770,13 +775,16 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Proof
 - [ ] `S34-P1` Run completeness proofs per dataset/partition (source coverage, row counts, checksums, and fail-loud gap validation).
+- [x] `S34-P1a` Run partition state-machine proofs (new, completed, ambiguous, quarantined, and reconcile-required transitions).
+- [ ] `S34-P1b` Run exactly-once/no-miss crash-recovery proofs (duplicate replay, crash after canonical write, explicit reconcile recovery).
+- [ ] `S34-P1c` Run deterministic range-proof validation for completed backfill windows.
 - [ ] `S34-P2` Run fixed-window replay determinism proofs across every dataset family after backfill and projection rebuild.
 - [ ] `S34-P3` Run cross-surface acceptance matrix on backfilled windows (`/v1/raw/query`, `/v1/raw/export`, historical HTTP, historical Python) for `native` and `aligned_1s` where applicable.
 - [ ] `S34-P4` Run live deploy validation against server environment and confirm backfilled windows are queryable end-to-end.
 
 ### Guardrails
-- [ ] `S34-G1` Enforce immutable backfill audit trail and per-partition manifest evidence (source checksums, cursor windows, fingerprints).
-- [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip).
+- [ ] `S34-G1` Enforce immutable backfill audit trail and per-partition manifest evidence (source checksums, cursor windows, fingerprints, proof digests).
+- [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip), with ClickHouse as the only live authority.
 - [ ] `S34-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete backfill contracts/operations notes).
 - [ ] `S34-G4` User docs closeout for slice (`docs/`, full dataset-history coverage/taxonomy and backfill status reference).
 
@@ -2000,45 +2008,65 @@ Done looks like: one canonical ordered dataset list and per-dataset earliest-sou
 Constraints: planning/contract only; no ingestion execution yet.
 2. `S34-02`
 Action: Prepare backfill orchestration controls (partition planner, cursor ledger, resume policy, fail-loud gap checks).
-Done looks like: backfill runs are resumable by cursor and stop loudly on detected gaps or checksum mismatches, and exchange canonical ingest runs with throughput env contract (`ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`, `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`, `ORIGO_BACKFILL_PROJECTION_MODE=deferred`) synchronized by deploy CI.
+Done looks like: backfill runs are resumable from terminal partition proof state, stop loudly on detected gaps or checksum mismatches, and exchange Dagster runs carry explicit projection/execution/audit tags while fast canonical insert is allowed only for brand-new empty partitions in deferred backfill mode.
 Constraints: no source data mutation.
 3. `S34-02a`
 Action: Stabilize ETF canonical payload idempotency by excluding run-volatile provenance timestamps from canonical event payload construction.
 Done looks like: rerun of the same ETF source-event identity does not change canonical payload hash when only runtime provenance timestamps differ.
 Constraints: preserve source/artifact lineage fields and keep fail-loud identity conflict semantics for true payload drift.
-4. `S34-03`
+4. `S34-02b`
+Action: Replace direct asset invocation with Dagster-native partition execution for live backfill dispatch and monitoring.
+Done looks like: backfill submission launches partitioned Dagster runs instead of calling asset functions directly, and monitor tooling only observes or launches Dagster runs.
+Constraints: canonical writer remains the exact-once layer; no alternate execution path.
+5. `S34-02c`
+Action: Move authoritative backfill progress, proof, and quarantine state fully into ClickHouse and remove file-backed live state paths.
+Done looks like: live backfill correctness no longer depends on JSON/file state, and authoritative state is stored in ClickHouse tables for manifests, partition proofs, quarantines, and range proofs.
+Constraints: file artifacts may remain as immutable evidence only.
+6. `S34-02d`
+Action: Implement strict partition state machine and explicit reconcile flow.
+Done looks like: normal backfill fails loudly on completed or ambiguous partitions, and only reconcile can resolve `reconcile_required` or `quarantined` partitions.
+Constraints: no silent cursor advancement and no blind canonical rewrites.
+7. `S34-02e`
+Action: Implement deterministic partition-local proofs and range-level proof folding.
+Done looks like: each partition records source/canonical identity digests, counts, first/last offsets where applicable, gap metrics, and terminal proof status; completed ranges emit machine-checkable range proofs.
+Constraints: proof contract must be source-native and deterministic.
+8. `S34-02f`
+Action: Gate fast insert, resume, projection rebuild, and serving promotion on terminal proof state only.
+Done looks like: only genuinely new partitions may use fast insert, resume truth comes from terminal proofs, and projections serve only up to the proved canonical boundary.
+Constraints: no fallback to bare cursor maxima.
+9. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.
 Constraints: first-party Binance source artifacts only.
-5. `S34-04`
+10. `S34-04`
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
-6. `S34-05`
+11. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-7. `S34-06`
+12. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-8. `S34-07`
+13. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-9. `S34-08`
+14. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-10. `S34-09`
+15. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-11. `S34-10`
-Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism) across raw and historical surfaces.
-Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable.
+16. `S34-10`
+Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
+Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-12. `S34-11`
+17. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.

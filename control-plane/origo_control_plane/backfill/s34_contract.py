@@ -95,7 +95,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         partition_scheme='daily',
         earliest_partition_date=date(2020, 3, 25),
         earliest_height=None,
-        offset_ordering='numeric',
+        offset_ordering='lexicographic',
         aligned_capable=True,
     ),
     S34DatasetBackfillContract(

@@ -214,6 +214,7 @@ def _project_partition(
         projector_id=_PROJECTOR_ID,
         stream_key=stream_key,
         batch_size=batch_size,
+        require_terminal_partition_proof=True,
     )
     aligned_projector = CanonicalAligned1sProjector(client=client, database=database)
 

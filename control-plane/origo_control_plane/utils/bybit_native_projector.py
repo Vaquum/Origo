@@ -197,6 +197,7 @@ def _project_partition(
         ),
         batch_size=batch_size,
         fetch_order='ingested_event_id',
+        require_terminal_partition_proof=True,
     )
 
     runtime.start()

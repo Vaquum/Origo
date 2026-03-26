@@ -179,6 +179,7 @@ def _project_partition(
         ),
         batch_size=batch_size,
         fetch_order='source_offset_numeric',
+        require_terminal_partition_proof=True,
     )
 
     runtime.start()

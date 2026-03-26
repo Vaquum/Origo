@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from clickhouse_driver import Client as ClickHouseClient
 
+from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 
 from .normalize import FREDLongMetricRow
@@ -120,7 +121,11 @@ def write_fred_long_metrics_to_canonical(
             rows_duplicate=0,
         )
 
-    writer = CanonicalEventWriter(client=client, database=database)
+    writer = CanonicalEventWriter(
+        client=client,
+        database=database,
+        quarantine_registry=NoopStreamQuarantineRegistry(),
+    )
     normalized_ingested_at_utc = _require_utc(
         ingested_at_utc,
         label='ingested_at_utc',

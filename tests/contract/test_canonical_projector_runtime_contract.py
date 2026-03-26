@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from origo.events.errors import ProjectorRuntimeError
+from origo.events.errors import ProjectorRuntimeError, ReconciliationError
 from origo.events.ingest_state import CanonicalStreamKey
 from origo.events.projector import (
     CanonicalProjectorRuntime,
@@ -121,6 +121,86 @@ def test_projector_runtime_start_stop_cycle_with_empty_source() -> None:
     start_state = runtime.start()
     assert start_state.resumed is False
     assert runtime.fetch_next_batch() == []
+    runtime.stop()
+
+
+def test_projector_runtime_requires_terminal_partition_proof_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_missing_proof(self: object, *, stream_key: CanonicalStreamKey) -> None:
+        raise ReconciliationError(
+            code='BACKFILL_PARTITION_PROOF_MISSING',
+            message=(
+                'Projection requires terminal partition proof state '
+                f'for {stream_key.source_id}/{stream_key.stream_id}/{stream_key.partition_id}'
+            ),
+        )
+
+    monkeypatch.setattr(
+        'origo.events.projector.CanonicalBackfillStateStore.'
+        'assert_partition_terminally_proved_or_raise',
+        _raise_missing_proof,
+    )
+
+    runtime = CanonicalProjectorRuntime(
+        client=_RaisingClickHouseClient(),
+        database='origo',
+        projector_id='projector',
+        stream_key=CanonicalStreamKey(
+            source_id='binance',
+            stream_id='binance_spot_trades',
+            partition_id='2024-01-01',
+        ),
+        batch_size=10,
+        require_terminal_partition_proof=True,
+    )
+
+    with pytest.raises(
+        ProjectorRuntimeError,
+        match='requires terminal partition proof state',
+    ) as exc_info:
+        runtime.start()
+    assert exc_info.value.code == 'BACKFILL_PARTITION_PROOF_MISSING'
+
+
+def test_projector_runtime_checks_terminal_partition_proof_before_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, CanonicalStreamKey] = {}
+
+    def _record_proof_check(
+        self: object,
+        *,
+        stream_key: CanonicalStreamKey,
+    ) -> None:
+        observed['stream_key'] = stream_key
+
+    monkeypatch.setattr(
+        'origo.events.projector.CanonicalBackfillStateStore.'
+        'assert_partition_terminally_proved_or_raise',
+        _record_proof_check,
+    )
+
+    runtime = CanonicalProjectorRuntime(
+        client=_FakeClickHouseClient(),
+        database='origo',
+        projector_id='projector',
+        stream_key=CanonicalStreamKey(
+            source_id='binance',
+            stream_id='binance_spot_trades',
+            partition_id='2024-01-01',
+        ),
+        batch_size=10,
+        require_terminal_partition_proof=True,
+    )
+
+    start_state = runtime.start()
+    assert start_state.resumed is False
+    assert observed['stream_key'] == CanonicalStreamKey(
+        source_id='binance',
+        stream_id='binance_spot_trades',
+        partition_id='2024-01-01',
+    )
     runtime.stop()
 
 

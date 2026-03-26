@@ -347,3 +347,38 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I tried: Processed review feedback on PR #59 and traced the reported correctness risk through canonical idempotency-key construction.
 - I found: Reviewer concern is valid: deriving canonical source offset from `trade_id` can collide between UUID and `m-<digits>` rows when `trade_id` overlaps, which can corrupt exactly-once semantics.
 - Progress/Next: Fix canonical identity by using raw `trd_match_id` as `source_offset_or_equivalent`, switch Bybit native projector fetch order to `ingested_event_id`, add a contract test proving mixed-ID rows generate distinct canonical identities, and re-run gates.
+
+### Entry 068
+- I tried: Replaced S34 live backfill correctness state with ClickHouse-backed proof/manifests/quarantine tables and removed file-backed run-state from the active runner path.
+- I found: Canonical correctness is now expressed in one place: source manifests plus partition proofs in ClickHouse. Fresh partition execution can fail closed on `proved_complete`, `quarantined`, `canonical_written_unproved`, or raw canonical rows without terminal proof.
+- Progress/Next: Finish moving runner execution off `execute_in_process` and onto Dagster-submitted partition runs so orchestration no longer depends on a custom worker path.
+
+### Entry 069
+- I tried: Audited the new proof path against live exchange source contracts while wiring Dagster-run tags into daily exchange assets.
+- I found: There was a correctness bug in Bybit proofing: source-proof identity used numeric `trade_id` with `offset_ordering='numeric'`, while canonical ingest correctly used raw `trd_match_id`. That would have produced false proof mismatches and invalid no-miss claims.
+- Progress/Next: Keep `trd_match_id` as the canonical Bybit offset, treat Bybit as `lexicographic` ordering for proof purposes, and lock this with a contract test.
+
+### Entry 070
+- I tried: Replaced the S34 runner execution path so it now only submits/polls Dagster partition runs and validates terminal ClickHouse proof state per partition.
+- I found: This preserves explicit active-run concurrency while removing the last direct execution path (`execute_in_process`) from exchange backfill orchestration. Exchange assets now read `projection_mode`, `execution_mode`, and `runtime_audit_mode` from Dagster run tags instead of per-run environment mutation.
+- Progress/Next: Run the broader contract suite around the new state machine and then close out the slice proof/guardrail artifacts once docs and env contracts are aligned.
+
+### Entry 071
+- I tried: Added an explicit reconcile execution path to the S34 Dagster submit/poll runner instead of overloading the normal resume planner.
+- I found: The original runner could label a run as `reconcile` but still only plan from `last_completed_partition`, which meant a drifted partition could not actually be targeted for repair. The runner now requires explicit `--partition-id` selection for reconcile mode and refuses reconcile on clean partitions.
+- Progress/Next: Keep reconcile as a first-class repair mode only, and make exchange assets enforce the same state-machine rules so manual Dagster runs cannot bypass them.
+
+### Entry 072
+- I tried: Moved the proof-state gate into the Binance, OKX, and Bybit daily Dagster assets instead of trusting runner preflight alone.
+- I found: This closes a real bypass risk. A manual Dagster partition run could previously have skipped the runner checks and still attempted to write. The assets now fail-loud on completed partitions, fail-loud on ambiguous partitions, and stamp `reconcile_required` before raising when backfill hits a repair-only state.
+- Progress/Next: Validate the new reconcile/state-machine behavior with contract tests and then align the deploy/spec layer with the now tag-driven execution contract.
+
+### Entry 073
+- I tried: Cleaned the active deploy/spec contract away from the old env-driven fast-insert/projection model and reran the targeted Slice 34 validation suite.
+- I found: Active truth is now coherent: runtime semantics are driven by Dagster run tags, not deploy env switches. Targeted validation passed with `ruff`, `py_compile`, strict-scope `pyright`, and the S34 contract suite (`30 passed`).
+- Progress/Next: The hardening tranche is now materially in place; the remaining Slice 34 work is the actual full-history backfills, projection rebuild, end-to-end serving proofs, and slice closeout artifacts/docs.
+
+### Entry 074
+- I tried: Closed `S34-C2f` by proof-gating projector runtime start on terminal partition proofs and by making promoted ETF/FRED serving verify exact partition-set equality between terminal proof coverage and both native/aligned projector watermark coverage.
+- I found: This removed the last soft spot in the Slice 34 hardening tranche. Projection rebuild can no longer advance on non-terminal partitions, and serving promotion is no longer just an env flip. Validation passed with repo-wide `pyright` (`0 errors`), targeted `ruff`, focused historical/API contract suites (`85 passed`), and the broader Slice 34 regression suite (`46 passed`).
+- Progress/Next: The hardening tranche is now complete through `S34-C2f`. The next active frontier is executing the real full-history backfills in order, starting with `S34-C3` for Binance under the hardened runner.

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from clickhouse_driver import Client as ClickHouseClient
 
+from .backfill_state import CanonicalBackfillStateStore
 from .errors import ProjectorRuntimeError
 from .ingest_state import CanonicalStreamKey
 from .runtime_audit import get_canonical_runtime_audit_log
@@ -135,6 +136,7 @@ class CanonicalProjectorRuntime:
         stream_key: CanonicalStreamKey,
         batch_size: int,
         fetch_order: ProjectorFetchOrder = 'ingested_event_id',
+        require_terminal_partition_proof: bool = False,
     ) -> None:
         if batch_size <= 0:
             raise ProjectorRuntimeError(
@@ -165,6 +167,7 @@ class CanonicalProjectorRuntime:
         )
         self._batch_size = batch_size
         self._fetch_order = fetch_order
+        self._require_terminal_partition_proof = require_terminal_partition_proof
         self._started = False
         self._cursor: ProjectorCheckpointState | None = None
 
@@ -186,6 +189,26 @@ class CanonicalProjectorRuntime:
                 code='PROJECTOR_ALREADY_STARTED',
                 message='Projector runtime already started',
             )
+        if self._require_terminal_partition_proof:
+            try:
+                CanonicalBackfillStateStore(
+                    client=self._client,
+                    database=self._database,
+                ).assert_partition_terminally_proved_or_raise(
+                    stream_key=self._stream_key
+                )
+            except Exception as exc:
+                message = str(exc)
+                code = getattr(exc, 'code', 'PROJECTOR_PARTITION_PROOF_GATE_FAILED')
+                raise ProjectorRuntimeError(
+                    code=code,
+                    message=(
+                        'Projector runtime requires terminal partition proof state '
+                        f'for {self._stream_key.source_id}/'
+                        f'{self._stream_key.stream_id}/'
+                        f'{self._stream_key.partition_id}: {message}'
+                    ),
+                ) from exc
         checkpoint = self.fetch_latest_checkpoint()
         watermark = self.fetch_latest_watermark()
         if checkpoint is not None and watermark is not None:

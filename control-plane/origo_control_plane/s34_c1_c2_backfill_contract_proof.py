@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 from .backfill.s34_contract import (
@@ -12,7 +11,6 @@ from .backfill.s34_contract import (
     list_s34_dataset_contracts,
 )
 from .backfill.s34_orchestrator import (
-    BackfillRunStateStore,
     build_daily_partitions,
     evaluate_numeric_offset_gaps_or_raise,
     remaining_daily_partitions_or_raise,
@@ -50,31 +48,16 @@ def run_s34_c1_c2_backfill_contract_proof() -> dict[str, Any]:
         start_date=binance_contract.earliest_partition_date,
         end_date=date(2017, 8, 19),
     )
-
-    with TemporaryDirectory() as tmpdir:
-        run_state_path = Path(tmpdir) / 's34-proof-run-state.json'
-        run_state_store = BackfillRunStateStore(path=run_state_path)
-        initial_remaining = remaining_daily_partitions_or_raise(
-            contract=binance_contract,
-            plan_end_date=date(2017, 8, 19),
-            last_completed_partition=run_state_store.last_completed_partition(
-                dataset=binance_contract.dataset
-            ),
-        )
-        run_state_store.mark_completed(
-            dataset=binance_contract.dataset,
-            partition_id='2017-08-17',
-            run_id='s34-proof-run-1',
-            completed_at_utc=datetime.now(UTC),
-        )
-        resumed_remaining = remaining_daily_partitions_or_raise(
-            contract=binance_contract,
-            plan_end_date=date(2017, 8, 19),
-            last_completed_partition=run_state_store.last_completed_partition(
-                dataset=binance_contract.dataset
-            ),
-        )
-        run_state_payload = run_state_store.read()
+    initial_remaining = remaining_daily_partitions_or_raise(
+        contract=binance_contract,
+        plan_end_date=date(2017, 8, 19),
+        last_completed_partition=None,
+    )
+    resumed_remaining = remaining_daily_partitions_or_raise(
+        contract=binance_contract,
+        plan_end_date=date(2017, 8, 19),
+        last_completed_partition='2017-08-17',
+    )
 
     contiguous_gap_summary = evaluate_numeric_offset_gaps_or_raise(
         offsets=['100', '101', '102', '103'],
@@ -86,14 +69,17 @@ def run_s34_c1_c2_backfill_contract_proof() -> dict[str, Any]:
         raise RuntimeError('S34-C1/C2 proof expected gap_count > 0 for injected gap')
 
     return {
-        'proof_scope': 'Slice 34 S34-C1/S34-C2 backfill contract and orchestration controls',
+        'proof_scope': (
+            'Slice 34 S34-C1/S34-C2 backfill contract and proof-driven '
+            'resume/orchestration controls'
+        ),
         'generated_at_utc': datetime.now(UTC).isoformat(),
         'dataset_contracts': contract_records,
         'binance_sample_plan': {
             'daily_partitions': list(dry_plan),
             'initial_remaining': list(initial_remaining),
             'resumed_remaining_after_2017-08-17': list(resumed_remaining),
-            'run_state_payload': run_state_payload,
+            'resume_state_source': 'canonical_backfill_partition_proofs',
         },
         'gap_checks': {
             'contiguous': {

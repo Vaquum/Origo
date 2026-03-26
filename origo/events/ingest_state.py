@@ -9,7 +9,7 @@ from uuid import UUID, uuid5
 from clickhouse_driver import Client as ClickHouseClient
 
 from .errors import ReconciliationError, StreamQuarantineError
-from .quarantine import StreamQuarantineRegistry
+from .quarantine import StreamQuarantineRegistryProtocol
 
 OffsetOrdering = Literal['numeric', 'lexicographic', 'opaque']
 CursorWriteStatus = Literal['advanced', 'duplicate']
@@ -190,7 +190,7 @@ class CanonicalIngestStateStore:
         *,
         client: ClickHouseClient,
         database: str,
-        quarantine_registry: StreamQuarantineRegistry | None = None,
+        quarantine_registry: StreamQuarantineRegistryProtocol | None = None,
     ) -> None:
         self._client = client
         self._database = _require_non_empty(database, field_name='database')

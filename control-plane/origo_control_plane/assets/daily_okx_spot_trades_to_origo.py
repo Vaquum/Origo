@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import json
-import os
 import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -12,6 +11,13 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
+from origo.events.errors import ReconciliationError
+from origo_control_plane.backfill import (
+    apply_runtime_audit_mode_or_raise,
+    load_backfill_runtime_contract_or_raise,
+)
+from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
@@ -20,6 +26,7 @@ from origo_control_plane.utils.okx_aligned_projector import (
     project_okx_spot_trades_aligned,
 )
 from origo_control_plane.utils.okx_canonical_event_ingest import (
+    build_okx_partition_source_proof,
     parse_okx_spot_trade_csv,
     write_okx_spot_trades_to_canonical,
 )
@@ -43,18 +50,41 @@ _OKX_SOURCE_DAY_UTC_OFFSET_HOURS = 8
 _REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
-_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
 
 
-def _load_backfill_projection_mode_or_raise() -> str:
-    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
-    normalized = raw_mode.strip().lower()
-    if normalized not in {'inline', 'deferred'}:
-        raise RuntimeError(
-            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
-            f'got={raw_mode!r}'
+def _resolve_fast_insert_mode_or_raise(
+    *,
+    state_store: CanonicalBackfillStateStore,
+    partition_id: str,
+    projection_mode: str,
+    execution_mode: str,
+) -> FastInsertMode:
+    if projection_mode != 'deferred' or execution_mode != 'backfill':
+        return 'writer'
+    assessment = state_store.assess_partition_execution(
+        stream_key=CanonicalStreamKey(
+            source_id='okx',
+            stream_id='okx_spot_trades',
+            partition_id=partition_id,
         )
-    return normalized
+    )
+    if assessment.latest_proof_state is not None:
+        raise RuntimeError(
+            'Fast canonical insert requires partition with no prior proof state, '
+            f'found state={assessment.latest_proof_state} for partition_id={partition_id}'
+        )
+    if assessment.canonical_row_count != 0:
+        raise RuntimeError(
+            'Fast canonical insert requires empty canonical partition, '
+            f'found canonical_row_count={assessment.canonical_row_count} '
+            f'for partition_id={partition_id}'
+        )
+    if assessment.active_quarantine:
+        raise RuntimeError(
+            'Fast canonical insert requires non-quarantined partition, '
+            f'found active quarantine for partition_id={partition_id}'
+        )
+    return 'assume_new_partition'
 
 
 def _expect_dict(value: Any, label: str) -> dict[str, Any]:
@@ -174,7 +204,11 @@ def _verify_source_content_md5_or_raise(*, payload: bytes, content_md5_b64: str)
 def insert_daily_okx_spot_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
-    projection_mode = _load_backfill_projection_mode_or_raise()
+    runtime_contract = load_backfill_runtime_contract_or_raise(context)
+    apply_runtime_audit_mode_or_raise(
+        runtime_audit_mode=runtime_contract.runtime_audit_mode
+    )
+    projection_mode = runtime_contract.projection_mode
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
     filename, file_url = _resolve_okx_daily_file_url(date_str=date_str)
@@ -231,6 +265,57 @@ def insert_daily_okx_spot_trades_to_origo(
             compression=True,
             send_receive_timeout=900,
         )
+        state_store = CanonicalBackfillStateStore(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+        )
+        source_proof = build_okx_partition_source_proof(
+            canonical_partition_id=partition_date_str,
+            events=events,
+            source_file_url=file_url,
+            source_filename=filename,
+            zip_sha256=zip_sha256,
+            csv_sha256=csv_sha256,
+            content_md5_b64=source_content_md5,
+        )
+        try:
+            state_store.assert_partition_can_execute_or_raise(
+                stream_key=source_proof.stream_key,
+                execution_mode=runtime_contract.execution_mode,
+            )
+        except ReconciliationError as exc:
+            if (
+                runtime_contract.execution_mode == 'backfill'
+                and exc.code == 'RECONCILE_REQUIRED'
+            ):
+                state_store.record_partition_state(
+                    source_proof=source_proof,
+                    state='reconcile_required',
+                    reason='backfill_execution_requires_reconcile',
+                    run_id=context.run_id,
+                    recorded_at_utc=datetime.now(UTC),
+                    proof_details={'trigger_message': exc.message},
+                )
+            raise
+        fast_insert_mode = _resolve_fast_insert_mode_or_raise(
+            state_store=state_store,
+            partition_id=partition_date_str,
+            projection_mode=runtime_contract.projection_mode,
+            execution_mode=runtime_contract.execution_mode,
+        )
+        source_manifested_at_utc = datetime.now(UTC)
+        state_store.record_source_manifest(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            manifested_at_utc=source_manifested_at_utc,
+        )
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='source_manifested',
+            reason='source_manifest_recorded',
+            run_id=context.run_id,
+            recorded_at_utc=source_manifested_at_utc,
+        )
 
         write_summary = write_okx_spot_trades_to_canonical(
             client=client,
@@ -239,6 +324,7 @@ def insert_daily_okx_spot_trades_to_origo(
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
             canonical_partition_id=partition_date_str,
+            fast_insert_mode=fast_insert_mode,
         )
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
@@ -254,6 +340,19 @@ def insert_daily_okx_spot_trades_to_origo(
                 f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
                 f'rows_processed={rows_processed}'
             )
+        proof_recorded_at_utc = datetime.now(UTC)
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='canonical_written_unproved',
+            reason='canonical_write_completed',
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
+        partition_proof = state_store.prove_partition_or_quarantine(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
 
         projected_at_utc = datetime.now(UTC)
         source_partition_ids = {event.partition_id for event in events}
@@ -307,6 +406,8 @@ def insert_daily_okx_spot_trades_to_origo(
             'integrity_report': integrity_report.to_dict(),
             'native_projection_summary': native_projection_summary_dict,
             'aligned_projection_summary': aligned_projection_summary_dict,
+            'partition_proof_state': partition_proof.state,
+            'partition_proof_digest_sha256': partition_proof.proof_digest_sha256,
         }
         context.log.info('Successfully processed OKX daily file: ' + json.dumps(result_data))
         return result_data

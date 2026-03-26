@@ -25,6 +25,13 @@ from origo.data.historical_data import HistoricalData
 
 
 def _load_main_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
+    rights_module = importlib.import_module('api.origo_api.rights')
+    monkeypatch.setattr(
+        rights_module,
+        '_assert_promoted_serving_projection_coverage_or_raise',
+        lambda *, dataset: None,
+    )
+
     matrix_path = tmp_path / 'rights-matrix.json'
     binance_legal = tmp_path / 'binance-legal.md'
     okx_legal = tmp_path / 'okx-legal.md'

@@ -208,6 +208,7 @@ def _project_partition(
         projector_id=projector_id,
         stream_key=stream_key,
         batch_size=batch_size,
+        require_terminal_partition_proof=True,
     )
     runtime.start()
     batches_processed = 0

@@ -1,3 +1,15 @@
+from .backfill_state import (
+    CanonicalBackfillStateStore,
+    PartitionCanonicalProof,
+    PartitionExecutionAssessment,
+    PartitionProofState,
+    PartitionSourceProof,
+    QuarantineState,
+    RangeProofState,
+    SourceIdentityMaterial,
+    SourceManifestState,
+    build_partition_source_proof,
+)
 from .aligned_projector import (
     Aligned1sAggregateRow,
     AlignedBackfillResult,
@@ -54,8 +66,10 @@ from .projector import (
     ProjectorWatermarkState,
 )
 from .quarantine import (
+    NoopStreamQuarantineRegistry,
     QuarantinedStreamState,
     StreamQuarantineRegistry,
+    StreamQuarantineRegistryProtocol,
     load_stream_quarantine_state_path,
 )
 from .runtime_audit import (
@@ -84,6 +98,16 @@ __all__ = [
     'AlignedProjectionPolicyState',
     'CanonicalAligned1sProjector',
     'CanonicalAlignedPolicyStore',
+    'build_partition_source_proof',
+    'SourceManifestState',
+    'SourceIdentityMaterial',
+    'RangeProofState',
+    'QuarantineState',
+    'PartitionSourceProof',
+    'PartitionProofState',
+    'PartitionExecutionAssessment',
+    'PartitionCanonicalProof',
+    'CanonicalBackfillStateStore',
     'CanonicalCursorState',
     'CanonicalEventEnvelopeContract',
     'CanonicalEventEnvelopeField',
@@ -116,6 +140,8 @@ __all__ = [
     'QuarantinedStreamState',
     'ReconciliationError',
     'StreamQuarantineError',
+    'StreamQuarantineRegistryProtocol',
+    'NoopStreamQuarantineRegistry',
     'StreamQuarantineRegistry',
     'aligned_projection_policy_id',
     'assert_payload_json_has_no_float_values',

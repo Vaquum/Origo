@@ -711,35 +711,71 @@ Every slice must pass:
    11. `bitcoin_network_hashrate_estimate`
    12. `bitcoin_circulating_supply`
 2. Backfill order is fixed and must be executed step-by-step:
-   1. Binance market dataset (`binance_spot_trades`)
-   2. OKX and Bybit market datasets
-   3. ETF dataset
-   4. FRED dataset
-   5. Bitcoin base streams (`headers`, `transactions`, `mempool`)
-   6. Bitcoin derived datasets (`fees`, `subsidy`, `hashrate`, `supply`)
+   1. Slice 34 hardening tranche (execution, proof, reconcile, and promotion contracts)
+   2. Binance market dataset (`binance_spot_trades`)
+   3. OKX and Bybit market datasets
+   4. ETF dataset
+   5. FRED dataset
+   6. Bitcoin base streams (`headers`, `transactions`, `mempool`)
+   7. Bitcoin derived datasets (`fees`, `subsidy`, `hashrate`, `supply`)
 3. All backfill reads must come from original first-party sources already contracted in the repo; no third-party data APIs are allowed.
 4. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
-5. Exchange backfill canonical ingest must run in high-throughput canonical mode:
-   1. `ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`
-   2. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE=summary`
-   3. partition must fail-loud if target canonical partition already contains rows
-6. Deploy contract must synchronize backfill-critical env keys from root `.env.example` into deploy runtime env on every deploy:
-   1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
-   2. `ORIGO_CANONICAL_FAST_INSERT_MODE`
-   3. `ORIGO_BACKFILL_PROJECTION_MODE`
-7. Every backfill partition must emit deterministic provenance:
+5. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
+   1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.
+   2. Deferred backfill mode may use fast canonical insert only when proof state confirms the target partition has no prior proof state, no canonical rows, and no active quarantine.
+   3. Any partition that does not satisfy that empty-partition precondition must fail loudly; there is no implicit alternate execution path.
+   4. Runtime audit mode remains explicit and fail-loud (`event` or `summary`).
+6. Dagster is the execution runner for Slice 34 backfill partitions:
+   1. direct asset invocation from custom process pools is disallowed in the live backfill path
+   2. any submit/monitor utility may only launch or observe Dagster partition runs
+   3. canonical writer and proof state remain the correctness layer; Dagster does not replace exact-once enforcement
+7. ClickHouse is the only authoritative live state for backfill correctness:
+   1. authoritative progress, proof, and quarantine state must live in ClickHouse
+   2. file-backed run-state and file-backed quarantine are forbidden in the live control path
+   3. file artifacts may exist only as immutable evidence outputs
+8. Every backfill partition must follow an explicit fail-closed state machine keyed by `(source_id, stream_id, partition_id)`:
+   1. `source_manifested`
+   2. `canonical_written_unproved`
+   3. `proved_complete`
+   4. `empty_proved`
+   5. `quarantined`
+   6. `reconcile_required`
+9. Normal backfill execution is fail-closed:
+   1. completed partitions must fail loudly on rerun
+   2. ambiguous partitions with canonical rows but no terminal proof must fail with `RECONCILE_REQUIRED`
+   3. only explicit reconcile flow may touch `reconcile_required` or `quarantined` partitions
+10. Every backfill partition must emit deterministic provenance and proof material:
    1. source artifact identity/checksum
    2. ingest cursor/offset window
    3. row-count and hash fingerprint
-8. Backfill must be resumable from cursor state with no destructive rewrites of canonical raw events.
-9. Gap/no-miss checks are fail-loud during backfill and trigger quarantine behavior for affected streams/partitions.
-10. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+   4. source identity digest
+   5. canonical identity digest
+   6. gap and duplicate metrics
+11. Backfill completion is defined only by proof state:
+   1. source and canonical row counts match
+   2. source and canonical identity digests match exactly
+   3. first/last offsets match where applicable
+   4. dataset-specific no-gap rule passes
+12. Backfill resume and promotion rules are proof-driven:
+   1. resume truth comes from terminal partition proof state, not file state and not bare cursor max
+   2. projection rebuild may consume only terminally proved partitions
+   3. serving promotion requires native and aligned watermarks to exactly match the proved canonical boundary
+13. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
+   1. reconcile re-reads the first-party source for the partition
+   2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
+   3. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
+14. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
+   1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
+   2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
+   3. `ORIGO_S34_BACKFILL_CONCURRENCY`
+15. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
    1. `native` everywhere
    2. `aligned_1s` everywhere currently aligned-capable by contract
-11. Slice closeout requires cross-surface validation:
+16. Slice closeout requires cross-surface validation:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods
+17. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
 
 ## Slice 35 (Automated Daily Backfill Scheduling) Locked Details
 1. Objective is to make daily backfill fully automatic at configured daily run time, without manual triggering in normal operation.
@@ -756,7 +792,7 @@ Every slice must pass:
    1. `ORIGO_BACKFILL_DAILY_LAG_DAYS`
    2. `target_end_date = utc_today - lag_days`
    3. `lag_days` must be integer `>= 1`.
-5. Resume state for scheduled runs must come from ClickHouse canonical cursor state (`canonical_ingest_cursor_state`), not file-based run-state.
+5. Resume state for scheduled runs must come from ClickHouse backfill proof state (`canonical_backfill_partition_proofs` terminal coverage), not file-based run-state and not raw ingest cursors.
 6. Scheduled orchestration must enforce non-overlap per dataset (one active run per dataset; overlap attempt fails loudly).
 7. Missing source artifacts at or before the computed target boundary are hard failures (no silent skip/no fallback).
 8. Every scheduled run must emit deterministic operations evidence:

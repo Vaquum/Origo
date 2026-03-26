@@ -1,7 +1,6 @@
 import gzip
 import hashlib
 import json
-import os
 import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,11 +9,19 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
+from origo.events.errors import ReconciliationError
+from origo_control_plane.backfill import (
+    apply_runtime_audit_mode_or_raise,
+    load_backfill_runtime_contract_or_raise,
+)
+from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.bybit_aligned_projector import (
     project_bybit_spot_trades_aligned,
 )
 from origo_control_plane.utils.bybit_canonical_event_ingest import (
+    build_bybit_partition_source_proof,
     parse_bybit_spot_trade_csv,
     write_bybit_spot_trades_to_canonical,
 )
@@ -37,18 +44,41 @@ _BYBIT_SYMBOL = 'BTCUSDT'
 _REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2020-03-25')
-_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
 
 
-def _load_backfill_projection_mode_or_raise() -> str:
-    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
-    normalized = raw_mode.strip().lower()
-    if normalized not in {'inline', 'deferred'}:
-        raise RuntimeError(
-            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
-            f'got={raw_mode!r}'
+def _resolve_fast_insert_mode_or_raise(
+    *,
+    state_store: CanonicalBackfillStateStore,
+    partition_id: str,
+    projection_mode: str,
+    execution_mode: str,
+) -> FastInsertMode:
+    if projection_mode != 'deferred' or execution_mode != 'backfill':
+        return 'writer'
+    assessment = state_store.assess_partition_execution(
+        stream_key=CanonicalStreamKey(
+            source_id='bybit',
+            stream_id='bybit_spot_trades',
+            partition_id=partition_id,
         )
-    return normalized
+    )
+    if assessment.latest_proof_state is not None:
+        raise RuntimeError(
+            'Fast canonical insert requires partition with no prior proof state, '
+            f'found state={assessment.latest_proof_state} for partition_id={partition_id}'
+        )
+    if assessment.canonical_row_count != 0:
+        raise RuntimeError(
+            'Fast canonical insert requires empty canonical partition, '
+            f'found canonical_row_count={assessment.canonical_row_count} '
+            f'for partition_id={partition_id}'
+        )
+    if assessment.active_quarantine:
+        raise RuntimeError(
+            'Fast canonical insert requires non-quarantined partition, '
+            f'found active quarantine for partition_id={partition_id}'
+        )
+    return 'assume_new_partition'
 
 
 def _bybit_day_window_utc_ms(date_str: str) -> tuple[int, int]:
@@ -74,7 +104,11 @@ def _resolve_bybit_daily_file_url(*, date_str: str) -> tuple[str, str]:
 def insert_daily_bybit_spot_trades_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
-    projection_mode = _load_backfill_projection_mode_or_raise()
+    runtime_contract = load_backfill_runtime_contract_or_raise(context)
+    apply_runtime_audit_mode_or_raise(
+        runtime_audit_mode=runtime_contract.runtime_audit_mode
+    )
+    projection_mode = runtime_contract.projection_mode
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
     day_start_ts_utc_ms, day_end_ts_utc_ms = _bybit_day_window_utc_ms(date_str)
@@ -133,6 +167,57 @@ def insert_daily_bybit_spot_trades_to_origo(
             compression=True,
             send_receive_timeout=900,
         )
+        state_store = CanonicalBackfillStateStore(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+        )
+        source_proof = build_bybit_partition_source_proof(
+            partition_id=partition_date_str,
+            events=events,
+            source_file_url=file_url,
+            source_filename=filename,
+            gzip_sha256=gzip_sha256,
+            csv_sha256=csv_sha256,
+            source_etag=source_etag,
+        )
+        try:
+            state_store.assert_partition_can_execute_or_raise(
+                stream_key=source_proof.stream_key,
+                execution_mode=runtime_contract.execution_mode,
+            )
+        except ReconciliationError as exc:
+            if (
+                runtime_contract.execution_mode == 'backfill'
+                and exc.code == 'RECONCILE_REQUIRED'
+            ):
+                state_store.record_partition_state(
+                    source_proof=source_proof,
+                    state='reconcile_required',
+                    reason='backfill_execution_requires_reconcile',
+                    run_id=context.run_id,
+                    recorded_at_utc=datetime.now(UTC),
+                    proof_details={'trigger_message': exc.message},
+                )
+            raise
+        fast_insert_mode = _resolve_fast_insert_mode_or_raise(
+            state_store=state_store,
+            partition_id=partition_date_str,
+            projection_mode=runtime_contract.projection_mode,
+            execution_mode=runtime_contract.execution_mode,
+        )
+        source_manifested_at_utc = datetime.now(UTC)
+        state_store.record_source_manifest(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            manifested_at_utc=source_manifested_at_utc,
+        )
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='source_manifested',
+            reason='source_manifest_recorded',
+            run_id=context.run_id,
+            recorded_at_utc=source_manifested_at_utc,
+        )
 
         write_summary = write_bybit_spot_trades_to_canonical(
             client=client,
@@ -140,6 +225,7 @@ def insert_daily_bybit_spot_trades_to_origo(
             events=events,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
+            fast_insert_mode=fast_insert_mode,
         )
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
@@ -155,6 +241,19 @@ def insert_daily_bybit_spot_trades_to_origo(
                 f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
                 f'rows_processed={rows_processed}'
             )
+        proof_recorded_at_utc = datetime.now(UTC)
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='canonical_written_unproved',
+            reason='canonical_write_completed',
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
+        partition_proof = state_store.prove_partition_or_quarantine(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
 
         projected_at_utc = datetime.now(UTC)
         partition_ids = {event.partition_id for event in events}
@@ -207,6 +306,8 @@ def insert_daily_bybit_spot_trades_to_origo(
             'integrity_report': integrity_report.to_dict(),
             'native_projection_summary': native_projection_summary_dict,
             'aligned_projection_summary': aligned_projection_summary_dict,
+            'partition_proof_state': partition_proof.state,
+            'partition_proof_digest_sha256': partition_proof.proof_digest_sha256,
         }
         context.log.info(
             'Successfully processed Bybit daily file: ' + json.dumps(result_data)

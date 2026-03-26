@@ -1,57 +1,103 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import os
-from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
+import time
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from clickhouse_driver import Client as ClickHouseClient
-from dagster import build_asset_context
+from dagster import DagsterInstance
 
-from origo.events import StreamQuarantineRegistry, load_stream_quarantine_state_path
+# NOTE: Slice 34 Dagster partition submission currently depends on private
+# dagster._core symbols validated against Dagster 1.12.17. Treat any Dagster
+# upgrade as a breaking change for this module until the private imports are removed.
+from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
+from dagster._core.execution.job_backfill import create_backfill_run
+from dagster._core.remote_representation.code_location import CodeLocation
+from dagster._core.remote_representation.external import (
+    RemoteJob,
+    RemotePartitionSet,
+    RemoteRepository,
+)
+from dagster._core.remote_representation.external_data import (
+    PartitionSetExecutionParamSnap,
+)
+from dagster._core.storage.dagster_run import NOT_FINISHED_STATUSES, DagsterRunStatus
+from dagster._core.workspace.context import BaseWorkspaceRequestContext
+from dagster._core.workspace.load import load_workspace_process_context_from_yaml_paths
+from dagster._time import get_current_timestamp
+
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
 from origo_control_plane.backfill import (
+    BACKFILL_EXECUTION_MODE_TAG,
+    BACKFILL_PROJECTION_MODE_TAG,
+    BACKFILL_RUNTIME_AUDIT_MODE_TAG,
     S34BackfillDataset,
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
     load_backfill_manifest_log_path,
     load_last_completed_daily_partition_from_canonical_or_raise,
-    record_partition_cursor_and_checkpoint_or_raise,
     remaining_daily_partitions_or_raise,
     write_backfill_manifest_event,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 
-_DAILY_ASSET_RUNNER_IMPORTS: dict[S34BackfillDataset, tuple[str, str]] = {
-    'binance_spot_trades': (
-        'origo_control_plane.assets.daily_trades_to_origo',
-        'insert_daily_binance_trades_to_origo',
-    ),
-    'okx_spot_trades': (
-        'origo_control_plane.assets.daily_okx_spot_trades_to_origo',
-        'insert_daily_okx_spot_trades_to_origo',
-    ),
-    'bybit_spot_trades': (
-        'origo_control_plane.assets.daily_bybit_spot_trades_to_origo',
-        'insert_daily_bybit_spot_trades_to_origo',
-    ),
+_DAILY_JOB_NAMES: dict[S34BackfillDataset, str] = {
+    'binance_spot_trades': 'insert_daily_trades_to_origo_job',
+    'okx_spot_trades': 'insert_daily_okx_spot_trades_to_origo_job',
+    'bybit_spot_trades': 'insert_daily_bybit_spot_trades_to_origo_job',
 }
 ProjectionMode = Literal['inline', 'deferred']
 RuntimeAuditMode = Literal['event', 'summary']
+ExecutionMode = Literal['backfill', 'reconcile']
 _PATH_ENV_NAMES: tuple[str, str] = (
     'ORIGO_BACKFILL_MANIFEST_LOG_PATH',
     'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
 )
 _MIN_DAILY_CONCURRENCY: int = 10
 _S34_BACKFILL_CONCURRENCY_ENV = 'ORIGO_S34_BACKFILL_CONCURRENCY'
+_DAGSTER_HOME_ENV = 'DAGSTER_HOME'
+_RUN_POLL_INTERVAL_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class _DagsterPartitionHandles:
+    workspace_process_context: Any
+    request_context: BaseWorkspaceRequestContext
+    code_location: CodeLocation
+    remote_repository: RemoteRepository
+    remote_job: RemoteJob
+    remote_partition_set: RemotePartitionSet
+
+
+@dataclass(frozen=True)
+class _ActiveRun:
+    partition_id: str
+    run_id: str
+    submitted_at_utc: datetime
+
+
+@dataclass(frozen=True)
+class _CompletedRun:
+    partition_id: str
+    run_id: str
+    started_at_utc: datetime
+    finished_at_utc: datetime
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _workspace_yaml_path_or_raise() -> Path:
+    path = _repo_root() / 'control-plane' / 'workspace.yaml'
+    if not path.is_file():
+        raise RuntimeError(f'Dagster workspace.yaml is missing: {path}')
+    return path
 
 
 def _normalize_path_envs_or_raise() -> None:
@@ -84,54 +130,23 @@ def _normalize_runtime_audit_mode_or_raise(value: str) -> RuntimeAuditMode:
     return cast(RuntimeAuditMode, normalized)
 
 
-def _load_daily_asset_runner_or_raise(
-    dataset: S34BackfillDataset,
-) -> Callable[[Any], dict[str, Any]]:
-    import_spec = _DAILY_ASSET_RUNNER_IMPORTS.get(dataset)
-    if import_spec is None:
+def _normalize_execution_mode_or_raise(value: str) -> ExecutionMode:
+    normalized = value.strip().lower()
+    if normalized not in {'backfill', 'reconcile'}:
+        raise RuntimeError(
+            f'Invalid execution mode={value!r}; expected backfill|reconcile'
+        )
+    return cast(ExecutionMode, normalized)
+
+
+def _load_daily_job_name_or_raise(dataset: S34BackfillDataset) -> str:
+    job_name = _DAILY_JOB_NAMES.get(dataset)
+    if job_name is None:
         raise RuntimeError(
             'S34 exchange backfill runner only supports exchange datasets, '
             f'got dataset={dataset}'
         )
-    module_name, attribute_name = import_spec
-    module = importlib.import_module(module_name)
-    runner = getattr(module, attribute_name, None)
-    if runner is None or not callable(runner):
-        raise RuntimeError(
-            'Failed to load exchange asset runner '
-            f'for dataset={dataset} module={module_name} attr={attribute_name}'
-        )
-    return cast(Callable[[Any], dict[str, Any]], runner)
-
-
-def _run_partition_asset_in_worker(
-    payload: tuple[
-        S34BackfillDataset,
-        str,
-        ProjectionMode,
-        RuntimeAuditMode,
-        str,
-        str,
-    ],
-) -> tuple[str, dict[str, Any], datetime]:
-    (
-        dataset,
-        partition_id,
-        projection_mode,
-        runtime_audit_mode,
-        fast_insert_mode,
-        runtime_audit_path,
-    ) = payload
-    os.environ['ORIGO_BACKFILL_PROJECTION_MODE'] = projection_mode
-    os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'] = runtime_audit_mode
-    os.environ['ORIGO_CANONICAL_FAST_INSERT_MODE'] = fast_insert_mode
-    os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH'] = runtime_audit_path
-    runtime_audit_module = importlib.import_module('origo.events.runtime_audit')
-    setattr(runtime_audit_module, '_runtime_audit_singleton', None)
-    asset_runner = _load_daily_asset_runner_or_raise(dataset)
-    partition_started_at_utc = datetime.now(UTC)
-    context = build_asset_context(partition_key=partition_id)
-    return partition_id, asset_runner(context), partition_started_at_utc
+    return job_name
 
 
 def _parse_iso_date(value: str) -> date:
@@ -141,6 +156,55 @@ def _parse_iso_date(value: str) -> date:
         raise RuntimeError(
             f'Invalid --end-date value={value!r}; expected YYYY-MM-DD'
         ) from exc
+
+
+def _parse_daily_partition_id_or_raise(value: str, *, label: str) -> str:
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{label} must be YYYY-MM-DD daily partition id, got {value!r}'
+        ) from exc
+
+
+def _normalize_reconcile_partition_ids_or_raise(
+    *,
+    contract: Any,
+    partition_ids: list[str] | None,
+) -> list[str]:
+    if contract.partition_scheme != 'daily':
+        raise RuntimeError(
+            'S34 exchange backfill runner reconcile path supports daily partition '
+            f'datasets only, got partition_scheme={contract.partition_scheme}'
+        )
+    if partition_ids is None or partition_ids == []:
+        raise RuntimeError(
+            'execution_mode=reconcile requires at least one explicit --partition-id'
+        )
+    normalized = sorted(
+        {
+            _parse_daily_partition_id_or_raise(
+                partition_id,
+                label='partition_id',
+            )
+            for partition_id in partition_ids
+        }
+    )
+    earliest_partition_date = contract.earliest_partition_date
+    if earliest_partition_date is None:
+        raise RuntimeError(
+            'Daily partition contract must define earliest_partition_date for '
+            f'dataset={contract.dataset}'
+        )
+    earliest_partition_id = earliest_partition_date.isoformat()
+    for partition_id in normalized:
+        if partition_id < earliest_partition_id:
+            raise RuntimeError(
+                'Reconcile partition is before contract earliest partition: '
+                f'dataset={contract.dataset} '
+                f'partition_id={partition_id} earliest={earliest_partition_id}'
+            )
+    return normalized
 
 
 def _load_env_backfill_concurrency_or_raise() -> int:
@@ -165,21 +229,156 @@ def _load_env_backfill_concurrency_or_raise() -> int:
 
 
 def _default_run_id(dataset: str) -> str:
-    return (
-        f's34-backfill-{dataset}-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
+    return f's34-backfill-{dataset}-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
+
+
+def _require_dagster_home_or_raise() -> str:
+    value = os.environ.get(_DAGSTER_HOME_ENV)
+    if value is None or value.strip() == '':
+        raise RuntimeError(f'{_DAGSTER_HOME_ENV} must be set and non-empty')
+    return value
+
+
+def _load_dagster_partition_handles_or_raise(
+    *, instance: DagsterInstance, job_name: str
+) -> _DagsterPartitionHandles:
+    _require_dagster_home_or_raise()
+    workspace_yaml_path = _workspace_yaml_path_or_raise()
+    workspace_process_context: Any = load_workspace_process_context_from_yaml_paths(
+        instance,
+        [str(workspace_yaml_path)],
+    )
+    workspace_process_context.__enter__()
+    request_context = workspace_process_context.create_request_context()
+    for entry in request_context.get_code_location_entries().values():
+        code_location = entry.code_location
+        if code_location is None:
+            continue
+        for remote_repository in code_location.get_repositories().values():
+            if not remote_repository.has_job(job_name):
+                continue
+            remote_job = remote_repository.get_full_job(job_name)
+            for remote_partition_set in remote_repository.get_partition_sets():
+                if remote_partition_set.job_name == job_name:
+                    return _DagsterPartitionHandles(
+                        workspace_process_context=workspace_process_context,
+                        request_context=request_context,
+                        code_location=code_location,
+                        remote_repository=remote_repository,
+                        remote_job=remote_job,
+                        remote_partition_set=remote_partition_set,
+                    )
+    workspace_process_context.__exit__(None, None, None)
+    raise RuntimeError(
+        f'Failed to resolve Dagster remote job + partition set for job_name={job_name}'
+    )
+
+
+def _build_partition_run_tags(
+    *,
+    dataset: S34BackfillDataset,
+    run_id: str,
+    projection_mode: ProjectionMode,
+    runtime_audit_mode: RuntimeAuditMode,
+    execution_mode: ExecutionMode,
+) -> dict[str, str]:
+    return {
+        BACKFILL_PROJECTION_MODE_TAG: projection_mode,
+        BACKFILL_RUNTIME_AUDIT_MODE_TAG: runtime_audit_mode,
+        BACKFILL_EXECUTION_MODE_TAG: execution_mode,
+        'origo.backfill.dataset': dataset,
+        'origo.backfill.control_run_id': run_id,
+    }
+
+
+def _submit_partition_run_or_raise(
+    *,
+    handles: _DagsterPartitionHandles,
+    instance: DagsterInstance,
+    backfill_job: PartitionBackfill,
+    partition_data: Any,
+) -> _ActiveRun:
+    dagster_run = create_backfill_run(
+        request_context=handles.request_context,
+        instance=instance,
+        code_location=handles.code_location,
+        remote_job=handles.remote_job,
+        remote_partition_set=handles.remote_partition_set,
+        backfill_job=backfill_job,
+        partition_key_or_range=partition_data.name,
+        run_tags=partition_data.tags,
+        run_config=partition_data.run_config,
+    )
+    if dagster_run is None:
+        raise RuntimeError(
+            'Dagster refused to create partition run '
+            f'for partition_id={partition_data.name}'
+        )
+    instance.submit_run(dagster_run.run_id, handles.request_context)
+    return _ActiveRun(
+        partition_id=str(partition_data.name),
+        run_id=dagster_run.run_id,
+        submitted_at_utc=datetime.now(UTC),
+    )
+
+
+def _load_completed_run_or_raise(
+    *,
+    instance: DagsterInstance,
+    active_run: _ActiveRun,
+) -> _CompletedRun | None:
+    dagster_run = instance.get_run_by_id(active_run.run_id)
+    if dagster_run is None:
+        raise RuntimeError(
+            'Dagster run disappeared after submission '
+            f'for partition_id={active_run.partition_id} run_id={active_run.run_id}'
+        )
+    if dagster_run.status in NOT_FINISHED_STATUSES:
+        return None
+    if dagster_run.status != DagsterRunStatus.SUCCESS:
+        raise RuntimeError(
+            'Dagster partition run failed '
+            f'for partition_id={active_run.partition_id} run_id={active_run.run_id} '
+            f'status={dagster_run.status.value}'
+        )
+    run_record = instance.get_run_record_by_id(active_run.run_id)
+    if run_record is None:
+        raise RuntimeError(
+            'Dagster run record missing after success '
+            f'for partition_id={active_run.partition_id} run_id={active_run.run_id}'
+        )
+    start_timestamp = run_record.start_time
+    end_timestamp = run_record.end_time
+    started_at_utc = (
+        datetime.fromtimestamp(start_timestamp, tz=UTC)
+        if start_timestamp is not None
+        else active_run.submitted_at_utc
+    )
+    finished_at_utc = (
+        datetime.fromtimestamp(end_timestamp, tz=UTC)
+        if end_timestamp is not None
+        else datetime.now(UTC)
+    )
+    return _CompletedRun(
+        partition_id=active_run.partition_id,
+        run_id=active_run.run_id,
+        started_at_utc=started_at_utc,
+        finished_at_utc=finished_at_utc,
     )
 
 
 def run_exchange_backfill(
     *,
     dataset: S34BackfillDataset,
-    end_date: date,
+    end_date: date | None,
     max_partitions: int | None,
     run_id: str | None,
     dry_run: bool,
     projection_mode: ProjectionMode,
     runtime_audit_mode: RuntimeAuditMode,
     concurrency: int,
+    execution_mode: ExecutionMode = 'backfill',
+    partition_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     _normalize_path_envs_or_raise()
     assert_s34_backfill_contract_consistency_or_raise()
@@ -199,42 +398,18 @@ def run_exchange_backfill(
     normalized_runtime_audit_mode = _normalize_runtime_audit_mode_or_raise(
         runtime_audit_mode
     )
-
+    normalized_execution_mode = _normalize_execution_mode_or_raise(execution_mode)
     normalized_run_id = (run_id or _default_run_id(dataset)).strip()
     if normalized_run_id == '':
         raise RuntimeError('run_id must be non-empty')
 
     settings = resolve_clickhouse_native_settings()
     manifest_path = load_backfill_manifest_log_path()
-    quarantine_registry = StreamQuarantineRegistry(
-        path=load_stream_quarantine_state_path()
-    )
-
     processed: list[dict[str, Any]] = []
+    range_proof = None
     client: ClickHouseClient | None = None
-    previous_projection_mode = os.environ.get('ORIGO_BACKFILL_PROJECTION_MODE')
-    previous_runtime_audit_mode = os.environ.get('ORIGO_CANONICAL_RUNTIME_AUDIT_MODE')
-    previous_fast_insert_mode = os.environ.get('ORIGO_CANONICAL_FAST_INSERT_MODE')
-    previous_runtime_audit_path = os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH']
-    base_runtime_audit_path = Path(previous_runtime_audit_path)
-    if not base_runtime_audit_path.is_absolute():
-        base_runtime_audit_path = Path.cwd() / base_runtime_audit_path
-    per_run_runtime_audit_path = base_runtime_audit_path.with_name(
-        f'{base_runtime_audit_path.stem}-{normalized_run_id}{base_runtime_audit_path.suffix}'
-    )
-    os.environ['ORIGO_BACKFILL_PROJECTION_MODE'] = normalized_projection_mode
-    os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'] = normalized_runtime_audit_mode
-    os.environ['ORIGO_CANONICAL_FAST_INSERT_MODE'] = (
-        'assume_new_partition'
-        if normalized_projection_mode == 'deferred'
-        else 'writer'
-    )
-    os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH'] = str(
-        per_run_runtime_audit_path
-    )
-    runtime_audit_module = importlib.import_module('origo.events.runtime_audit')
-    setattr(runtime_audit_module, '_runtime_audit_singleton', None)
-    fast_insert_mode = os.environ['ORIGO_CANONICAL_FAST_INSERT_MODE']
+    dagster_instance: DagsterInstance | None = None
+    dagster_handles: _DagsterPartitionHandles | None = None
     try:
         client = ClickHouseClient(
             host=settings.host,
@@ -245,22 +420,56 @@ def run_exchange_backfill(
             compression=True,
             send_receive_timeout=900,
         )
-        last_completed_partition = (
-            load_last_completed_daily_partition_from_canonical_or_raise(
-                client=client,
-                database=settings.database,
-                contract=contract,
-            )
+        state_store = CanonicalBackfillStateStore(
+            client=client,
+            database=settings.database,
         )
-        remaining_partitions = list(
-            remaining_daily_partitions_or_raise(
+        last_completed_partition: str | None = None
+        if normalized_execution_mode == 'reconcile':
+            if max_partitions is not None:
+                raise RuntimeError(
+                    'execution_mode=reconcile does not allow --max-partitions'
+                )
+            remaining_partitions = _normalize_reconcile_partition_ids_or_raise(
                 contract=contract,
-                plan_end_date=end_date,
-                last_completed_partition=last_completed_partition,
+                partition_ids=partition_ids,
             )
-        )
-        if max_partitions is not None:
-            remaining_partitions = remaining_partitions[:max_partitions]
+        else:
+            if partition_ids not in (None, []):
+                raise RuntimeError(
+                    'execution_mode=backfill does not allow explicit --partition-id '
+                    'selection'
+                )
+            if end_date is None:
+                raise RuntimeError(
+                    'execution_mode=backfill requires --end-date'
+                )
+            last_completed_partition = (
+                load_last_completed_daily_partition_from_canonical_or_raise(
+                    client=client,
+                    database=settings.database,
+                    contract=contract,
+                )
+            )
+            remaining_partitions = list(
+                remaining_daily_partitions_or_raise(
+                    contract=contract,
+                    plan_end_date=end_date,
+                    last_completed_partition=last_completed_partition,
+                )
+            )
+            if max_partitions is not None:
+                remaining_partitions = remaining_partitions[:max_partitions]
+
+        for partition_id in remaining_partitions:
+            state_store.assert_partition_can_execute_or_raise(
+                stream_key=CanonicalStreamKey(
+                    source_id=contract.source_id,
+                    stream_id=contract.stream_id,
+                    partition_id=partition_id,
+                ),
+                execution_mode=normalized_execution_mode,
+            )
 
         if dry_run:
             return {
@@ -270,113 +479,185 @@ def run_exchange_backfill(
                 'planned_partitions': remaining_partitions,
                 'planned_partition_count': len(remaining_partitions),
                 'last_completed_partition': last_completed_partition,
-                'resume_state_source': 'canonical_ingest_cursor_state',
-                'end_date': end_date.isoformat(),
+                'resume_state_source': 'canonical_backfill_partition_proofs',
+                'end_date': None if end_date is None else end_date.isoformat(),
+                'partition_ids': remaining_partitions,
+                'execution_mode': normalized_execution_mode,
             }
 
-        partition_results: dict[str, dict[str, Any]] = {}
-        partition_start_times: dict[str, datetime] = {}
-        worker_payloads = [
-            (
-                dataset,
-                partition_id,
-                normalized_projection_mode,
-                normalized_runtime_audit_mode,
-                fast_insert_mode,
-                str(
-                    per_run_runtime_audit_path.with_name(
-                        f'{per_run_runtime_audit_path.stem}-{partition_id}'
-                        f'{per_run_runtime_audit_path.suffix}'
-                    )
-                ),
-            )
-            for partition_id in remaining_partitions
-        ]
-        with ProcessPoolExecutor(max_workers=concurrency) as executor:
-            for partition_id, asset_result, partition_started_at_utc in executor.map(
-                _run_partition_asset_in_worker,
-                worker_payloads,
-            ):
-                partition_results[partition_id] = asset_result
-                partition_start_times[partition_id] = partition_started_at_utc
-
-        for partition_id in remaining_partitions:
-            partition_started_at_utc = partition_start_times[partition_id]
-            asset_result = partition_results[partition_id]
-            checkpoint = record_partition_cursor_and_checkpoint_or_raise(
-                client=client,
-                database=settings.database,
-                contract=contract,
-                partition_id=partition_id,
-                run_id=normalized_run_id,
-                checked_at_utc=datetime.now(UTC),
-                quarantine_registry=quarantine_registry,
-            )
-            partition_event = {
-                'event_type': 's34_backfill_partition_completed',
-                'dataset': dataset,
-                'source_id': contract.source_id,
-                'stream_id': contract.stream_id,
-                'partition_id': partition_id,
-                'run_id': normalized_run_id,
-                'completed_at_utc': datetime.now(UTC).isoformat(),
-                'started_at_utc': partition_started_at_utc.isoformat(),
-                'checkpoint': {
-                    'observed_event_count': checkpoint.observed_event_count,
-                    'expected_event_count': checkpoint.expected_event_count,
-                    'gap_count': checkpoint.gap_count,
-                    'cursor_status': checkpoint.cursor_status,
-                    'checkpoint_status': checkpoint.checkpoint_status,
-                    'last_source_offset_or_equivalent': (
-                        checkpoint.last_source_offset_or_equivalent
-                    ),
-                },
-                'asset_result': asset_result,
-            }
-            write_backfill_manifest_event(path=manifest_path, payload=partition_event)
-            processed.append(partition_event)
-    finally:
-        if previous_projection_mode is None:
-            os.environ.pop('ORIGO_BACKFILL_PROJECTION_MODE', None)
-        else:
-            os.environ['ORIGO_BACKFILL_PROJECTION_MODE'] = previous_projection_mode
-        if previous_runtime_audit_mode is None:
-            os.environ.pop('ORIGO_CANONICAL_RUNTIME_AUDIT_MODE', None)
-        else:
-            os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'] = (
-                previous_runtime_audit_mode
-            )
-        if previous_fast_insert_mode is None:
-            os.environ.pop('ORIGO_CANONICAL_FAST_INSERT_MODE', None)
-        else:
-            os.environ['ORIGO_CANONICAL_FAST_INSERT_MODE'] = previous_fast_insert_mode
-        os.environ['ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH'] = (
-            previous_runtime_audit_path
+        dagster_instance = DagsterInstance.get()
+        dagster_handles = _load_dagster_partition_handles_or_raise(
+            instance=dagster_instance,
+            job_name=_load_daily_job_name_or_raise(dataset)
         )
-        runtime_audit_module = importlib.import_module('origo.events.runtime_audit')
-        setattr(runtime_audit_module, '_runtime_audit_singleton', None)
+        partition_execution_data = (
+            dagster_handles.code_location.get_partition_set_execution_params(
+                repository_handle=dagster_handles.remote_repository.handle,
+                partition_set_name=dagster_handles.remote_partition_set.name,
+                partition_names=remaining_partitions,
+                instance=dagster_instance,
+            )
+        )
+        if not isinstance(partition_execution_data, PartitionSetExecutionParamSnap):
+            raise RuntimeError(
+                'Dagster partition execution parameter lookup failed '
+                f'for dataset={dataset}: {partition_execution_data.error}'
+            )
+        partition_data_by_id = {
+            str(partition_data.name): partition_data
+            for partition_data in partition_execution_data.partition_data
+        }
+        if sorted(partition_data_by_id) != sorted(remaining_partitions):
+            raise RuntimeError(
+                'Dagster partition execution params mismatch: '
+                f'expected={sorted(remaining_partitions)} '
+                f'observed={sorted(partition_data_by_id)}'
+            )
+        backfill_job = PartitionBackfill(
+            backfill_id=normalized_run_id,
+            partition_set_origin=dagster_handles.remote_partition_set.get_remote_origin(),
+            status=BulkActionStatus.REQUESTED,
+            partition_names=remaining_partitions,
+            from_failure=False,
+            reexecution_steps=None,
+            tags=_build_partition_run_tags(
+                dataset=dataset,
+                run_id=normalized_run_id,
+                projection_mode=normalized_projection_mode,
+                runtime_audit_mode=normalized_runtime_audit_mode,
+                execution_mode=normalized_execution_mode,
+            ),
+            backfill_timestamp=get_current_timestamp(),
+        )
+
+        pending_partition_ids = list(remaining_partitions)
+        active_runs: dict[str, _ActiveRun] = {}
+        completed_partitions: list[str] = []
+        while pending_partition_ids or active_runs:
+            while pending_partition_ids and len(active_runs) < concurrency:
+                partition_id = pending_partition_ids.pop(0)
+                active_run = _submit_partition_run_or_raise(
+                    handles=dagster_handles,
+                    instance=dagster_instance,
+                    backfill_job=backfill_job,
+                    partition_data=partition_data_by_id[partition_id],
+                )
+                active_runs[partition_id] = active_run
+
+            if active_runs == {}:
+                break
+
+            time.sleep(_RUN_POLL_INTERVAL_SECONDS)
+            for partition_id in tuple(active_runs):
+                completed_run = _load_completed_run_or_raise(
+                    instance=dagster_instance,
+                    active_run=active_runs[partition_id],
+                )
+                if completed_run is None:
+                    continue
+                latest_proof = state_store.fetch_latest_partition_proof(
+                    stream_key=CanonicalStreamKey(
+                        source_id=contract.source_id,
+                        stream_id=contract.stream_id,
+                        partition_id=partition_id,
+                    )
+                )
+                if latest_proof is None:
+                    raise RuntimeError(
+                        'Dagster partition run completed but no partition proof exists '
+                        f'for dataset={dataset} partition_id={partition_id}'
+                    )
+                if latest_proof.state not in {'proved_complete', 'empty_proved'}:
+                    raise RuntimeError(
+                        'Dagster partition run completed without terminal proof state '
+                        f'for dataset={dataset} partition_id={partition_id} '
+                        f'state={latest_proof.state}'
+                    )
+                partition_event = {
+                    'event_type': 's34_backfill_partition_completed',
+                    'dataset': dataset,
+                    'source_id': contract.source_id,
+                    'stream_id': contract.stream_id,
+                    'partition_id': partition_id,
+                    'run_id': normalized_run_id,
+                    'dagster_run_id': completed_run.run_id,
+                    'execution_mode': normalized_execution_mode,
+                    'completed_at_utc': completed_run.finished_at_utc.isoformat(),
+                    'started_at_utc': completed_run.started_at_utc.isoformat(),
+                    'partition_proof': {
+                        'state': latest_proof.state,
+                        'reason': latest_proof.reason,
+                        'source_row_count': latest_proof.source_row_count,
+                        'canonical_row_count': latest_proof.canonical_row_count,
+                        'canonical_unique_offset_count': latest_proof.canonical_unique_offset_count,
+                        'gap_count': latest_proof.gap_count,
+                        'duplicate_count': latest_proof.duplicate_count,
+                        'proof_digest_sha256': latest_proof.proof_digest_sha256,
+                    },
+                }
+                write_backfill_manifest_event(path=manifest_path, payload=partition_event)
+                processed.append(partition_event)
+                completed_partitions.append(partition_id)
+                del active_runs[partition_id]
+
+        if completed_partitions != []:
+            range_proof = state_store.record_range_proof(
+                source_id=contract.source_id,
+                stream_id=contract.stream_id,
+                partition_ids=sorted(completed_partitions),
+                run_id=normalized_run_id,
+                recorded_at_utc=datetime.now(UTC),
+            )
+            write_backfill_manifest_event(
+                path=manifest_path,
+                payload={
+                    'event_type': 's34_backfill_range_proved',
+                    'dataset': dataset,
+                    'source_id': contract.source_id,
+                    'stream_id': contract.stream_id,
+                    'run_id': normalized_run_id,
+                    'range_start_partition_id': range_proof.range_start_partition_id,
+                    'range_end_partition_id': range_proof.range_end_partition_id,
+                    'partition_count': range_proof.partition_count,
+                    'range_digest_sha256': range_proof.range_digest_sha256,
+                    'recorded_at_utc': range_proof.recorded_at_utc.isoformat(),
+                },
+            )
+    finally:
+        if dagster_handles is not None:
+            dagster_handles.workspace_process_context.__exit__(None, None, None)
         if client is not None:
             client.disconnect()
 
-    return {
+    response: dict[str, Any] = {
         'dataset': dataset,
         'run_id': normalized_run_id,
         'dry_run': False,
         'processed_partition_count': len(processed),
         'processed_partitions': [item['partition_id'] for item in processed],
         'manifest_path': str(manifest_path),
-        'end_date': end_date.isoformat(),
+        'end_date': None if end_date is None else end_date.isoformat(),
         'projection_mode': normalized_projection_mode,
         'runtime_audit_mode': normalized_runtime_audit_mode,
         'concurrency': concurrency,
+        'execution_mode': normalized_execution_mode,
+        'dagster_orchestration_mode': 'submit_and_poll_partition_runs',
     }
+    if range_proof is not None:
+        response['range_proof'] = {
+            'range_start_partition_id': range_proof.range_start_partition_id,
+            'range_end_partition_id': range_proof.range_end_partition_id,
+            'partition_count': range_proof.partition_count,
+            'range_digest_sha256': range_proof.range_digest_sha256,
+        }
+    return response
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            'Run S34 exchange dataset backfill partitions with canonical-cursor '
-            'resume controls (live ClickHouse connection required, including dry-run).'
+            'Run S34 exchange dataset backfill partitions by submitting Dagster '
+            'partition runs and validating ClickHouse proof state.'
         ),
     )
     parser.add_argument(
@@ -391,8 +672,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '--end-date',
-        required=True,
+        default=None,
         help='Inclusive end date (YYYY-MM-DD).',
+    )
+    parser.add_argument(
+        '--partition-id',
+        action='append',
+        default=None,
+        help=(
+            'Explicit daily partition id (YYYY-MM-DD). Required for reconcile mode; '
+            'repeat to reconcile multiple partitions.'
+        ),
     )
     parser.add_argument(
         '--max-partitions',
@@ -409,8 +699,8 @@ def _build_parser() -> argparse.ArgumentParser:
         '--dry-run',
         action='store_true',
         help=(
-            'Only print planned partitions without executing asset ingestion; '
-            'still requires a live ClickHouse connection to read canonical cursor state.'
+            'Only print planned partitions without submitting Dagster partition runs; '
+            'still requires a live ClickHouse connection to read proof state.'
         ),
     )
     parser.add_argument(
@@ -426,18 +716,20 @@ def _build_parser() -> argparse.ArgumentParser:
         '--runtime-audit-mode',
         choices=['event', 'summary'],
         default='summary',
-        help=(
-            'Runtime audit emission mode during backfill: event emits per-event audit '
-            'rows, summary emits one immutable batch summary row per write batch.'
-        ),
+        help='Runtime audit emission mode passed into Dagster run tags.',
+    )
+    parser.add_argument(
+        '--execution-mode',
+        choices=['backfill', 'reconcile'],
+        default='backfill',
+        help='Normal backfill refuses ambiguous/completed partitions; reconcile is explicit repair mode.',
     )
     parser.add_argument(
         '--concurrency',
         type=int,
         default=None,
         help=(
-            'Max number of partition workers to run in parallel. '
-            f'Use carefully to avoid memory pressure. '
+            'Max number of Dagster partition runs to keep active at once. '
             f'If omitted, {_S34_BACKFILL_CONCURRENCY_ENV} is required.'
         ),
     )
@@ -454,13 +746,15 @@ def main() -> None:
     )
     result = run_exchange_backfill(
         dataset=cast(S34BackfillDataset, args.dataset),
-        end_date=_parse_iso_date(args.end_date),
+        end_date=None if args.end_date is None else _parse_iso_date(args.end_date),
         max_partitions=args.max_partitions,
         run_id=args.run_id,
         dry_run=bool(args.dry_run),
         projection_mode=cast(ProjectionMode, args.projection_mode),
         runtime_audit_mode=cast(RuntimeAuditMode, args.runtime_audit_mode),
         concurrency=resolved_concurrency,
+        execution_mode=cast(ExecutionMode, args.execution_mode),
+        partition_ids=cast(list[str] | None, args.partition_id),
     )
     print(json.dumps(result, sort_keys=True, indent=2))
 

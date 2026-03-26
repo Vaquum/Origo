@@ -93,7 +93,6 @@ def test_bybit_canonical_write_uses_trd_match_id_as_source_offset(
 ) -> None:
     import origo.events.runtime_audit as runtime_audit
 
-    monkeypatch.setenv('ORIGO_CANONICAL_FAST_INSERT_MODE', 'assume_new_partition')
     monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
     monkeypatch.setenv(
         'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
@@ -142,6 +141,7 @@ def test_bybit_canonical_write_uses_trd_match_id_as_source_offset(
         events=events,
         run_id='contract-bybit-offset',
         ingested_at_utc=datetime(2026, 3, 13, 0, 0, 1, tzinfo=UTC),
+        fast_insert_mode='assume_new_partition',
     )
 
     assert summary['rows_processed'] == 2

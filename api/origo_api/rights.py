@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from clickhouse_driver import Client as ClickHouseClient
+
+from origo.events.backfill_state import CanonicalBackfillStateStore
+
 from .schemas import RawQueryDataset
+
+logger = logging.getLogger(__name__)
 
 RightsState = Literal['Hosted Allowed', 'BYOK Required', 'Ingest Only']
 ShadowPromotionState = Literal['shadow', 'promoted']
@@ -51,6 +58,30 @@ _ALLOWED_QUERY_DATASETS: frozenset[RawQueryDataset] = frozenset(
 )
 _ETF_QUERY_SERVING_STATE_ENV = 'ORIGO_ETF_QUERY_SERVING_STATE'
 _FRED_QUERY_SERVING_STATE_ENV = 'ORIGO_FRED_QUERY_SERVING_STATE'
+
+
+@dataclass(frozen=True)
+class QueryServingPromotionContract:
+    source_id: str
+    stream_id: str
+    native_projector_id: str
+    aligned_projector_id: str
+
+
+_QUERY_SERVING_PROMOTION_CONTRACTS: dict[RawQueryDataset, QueryServingPromotionContract] = {
+    'etf_daily_metrics': QueryServingPromotionContract(
+        source_id='etf',
+        stream_id='etf_daily_metrics',
+        native_projector_id='etf_daily_metrics_native_v1',
+        aligned_projector_id='etf_daily_metrics_aligned_1s_v1',
+    ),
+    'fred_series_metrics': QueryServingPromotionContract(
+        source_id='fred',
+        stream_id='fred_series_metrics',
+        native_projector_id='fred_series_metrics_native_v1',
+        aligned_projector_id='fred_series_metrics_aligned_1s_v1',
+    ),
+}
 
 
 class RightsGateError(RuntimeError):
@@ -107,6 +138,14 @@ def _require_env(name: str) -> str:
     if value is None or value.strip() == '':
         raise RuntimeError(f'{name} must be set and non-empty')
     return value
+
+
+def _require_int_env(name: str) -> int:
+    raw = _require_env(name)
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f'{name} must be an integer, got {raw!r}') from exc
 
 
 def _expect_dict(value: Any, label: str) -> dict[str, Any]:
@@ -244,7 +283,65 @@ def _resolve_query_serving_state(*, dataset: RawQueryDataset) -> ShadowPromotion
                 'while serving state is shadow (promotion required)'
             ),
         )
+    _assert_promoted_serving_projection_coverage_or_raise(dataset=dataset)
     return serving_state
+
+
+def _build_clickhouse_native_client() -> ClickHouseClient:
+    return ClickHouseClient(
+        host=_require_env('CLICKHOUSE_HOST'),
+        port=_require_int_env('CLICKHOUSE_PORT'),
+        user=_require_env('CLICKHOUSE_USER'),
+        password=_require_env('CLICKHOUSE_PASSWORD'),
+        database=_require_env('CLICKHOUSE_DATABASE'),
+        secure=False,
+    )
+
+
+def _assert_promoted_serving_projection_coverage_or_raise(
+    *,
+    dataset: RawQueryDataset,
+) -> None:
+    promotion_contract = _QUERY_SERVING_PROMOTION_CONTRACTS.get(dataset)
+    if promotion_contract is None:
+        return
+
+    # This check is intentionally evaluated on every rights decision while the
+    # dataset is marked promoted. Serving must fail closed immediately if the
+    # promoted projection coverage drifts away from terminal proof coverage.
+    client = _build_clickhouse_native_client()
+    try:
+        state_store = CanonicalBackfillStateStore(
+            client=client,
+            database=_require_env('CLICKHOUSE_DATABASE'),
+        )
+        for projector_id in (
+            promotion_contract.native_projector_id,
+            promotion_contract.aligned_projector_id,
+        ):
+            try:
+                state_store.assert_projector_partition_coverage_matches_terminal_proof_or_raise(
+                    projector_id=projector_id,
+                    source_id=promotion_contract.source_id,
+                    stream_id=promotion_contract.stream_id,
+                )
+            except Exception as exc:
+                raise RightsGateError(
+                    code='QUERY_SERVING_PROMOTION_INCOMPLETE',
+                    message=(
+                        'Query serving cannot be promoted because projector coverage '
+                        'does not exactly match terminal proof coverage '
+                        f'for dataset={dataset}, projector_id={projector_id}: {exc}'
+                    ),
+                ) from exc
+    finally:
+        try:
+            client.disconnect()
+        except Exception as exc:
+            logger.warning(
+                'Failed to close ClickHouse native client cleanly: %s',
+                exc,
+            )
 
 
 def _collect_source_decisions_for_dataset(

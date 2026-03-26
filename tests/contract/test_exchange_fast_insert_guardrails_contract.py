@@ -104,15 +104,14 @@ def test_fast_insert_rejects_multi_partition_batch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ) -> None:
-    monkeypatch.setenv('ORIGO_CANONICAL_FAST_INSERT_MODE', 'assume_new_partition')
+    import origo.events.runtime_audit as runtime_audit
+
+    runtime_audit._runtime_audit_singleton = None
     monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
     monkeypatch.setenv(
         'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
         str(tmp_path / f'{exchange_name}-runtime-audit.jsonl'),
     )
-    import origo.events.runtime_audit as runtime_audit
-
-    runtime_audit._runtime_audit_singleton = None
 
     client = _RecordingClickHouseClient(partition_has_rows=False)
     start = datetime(2021, 5, 19, 0, 0, 1, tzinfo=UTC)
@@ -128,6 +127,7 @@ def test_fast_insert_rejects_multi_partition_batch(
             events=events,
             run_id='run-fast-insert',
             ingested_at_utc=datetime(2026, 3, 12, 0, 0, 1, tzinfo=UTC),
+            fast_insert_mode='assume_new_partition',
         )
 
     assert client.select_calls == 0
@@ -142,14 +142,13 @@ def test_fast_insert_rejects_non_empty_partition(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ) -> None:
-    monkeypatch.setenv('ORIGO_CANONICAL_FAST_INSERT_MODE', 'assume_new_partition')
+    import origo.events.runtime_audit as runtime_audit
+
     monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
     monkeypatch.setenv(
         'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
         str(tmp_path / f'{exchange_name}-runtime-audit.jsonl'),
     )
-    import origo.events.runtime_audit as runtime_audit
-
     runtime_audit._runtime_audit_singleton = None
 
     client = _RecordingClickHouseClient(partition_has_rows=True)
@@ -163,6 +162,7 @@ def test_fast_insert_rejects_non_empty_partition(
             events=events,
             run_id='run-fast-insert',
             ingested_at_utc=datetime(2026, 3, 12, 0, 0, 1, tzinfo=UTC),
+            fast_insert_mode='assume_new_partition',
         )
 
     assert client.select_calls == 1
@@ -173,14 +173,13 @@ def test_okx_fast_insert_allows_multi_day_events_with_partition_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ) -> None:
-    monkeypatch.setenv('ORIGO_CANONICAL_FAST_INSERT_MODE', 'assume_new_partition')
+    import origo.events.runtime_audit as runtime_audit
+
     monkeypatch.setenv('ORIGO_AUDIT_LOG_RETENTION_DAYS', '365')
     monkeypatch.setenv(
         'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
         str(tmp_path / 'okx-runtime-audit.jsonl'),
     )
-    import origo.events.runtime_audit as runtime_audit
-
     runtime_audit._runtime_audit_singleton = None
 
     client = _RecordingClickHouseClient(partition_has_rows=False)
@@ -197,6 +196,7 @@ def test_okx_fast_insert_allows_multi_day_events_with_partition_override(
         run_id='run-fast-insert-override',
         ingested_at_utc=datetime(2026, 3, 12, 0, 0, 1, tzinfo=UTC),
         canonical_partition_id='2021-05-19',
+        fast_insert_mode='assume_new_partition',
     )
 
     assert summary['rows_processed'] == 2

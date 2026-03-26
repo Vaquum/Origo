@@ -1,5 +1,4 @@
 import hashlib
-import os
 import sys
 import zipfile
 from datetime import UTC, datetime
@@ -11,11 +10,19 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
+from origo.events.errors import ReconciliationError
+from origo_control_plane.backfill import (
+    apply_runtime_audit_mode_or_raise,
+    load_backfill_runtime_contract_or_raise,
+)
+from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.binance_aligned_projector import (
     project_binance_spot_trades_aligned,
 )
 from origo_control_plane.utils.binance_canonical_event_ingest import (
+    build_binance_partition_source_proof,
     parse_binance_spot_trade_csv_frame,
     write_binance_spot_trade_frame_to_canonical,
 )
@@ -34,18 +41,41 @@ CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
 
 daily_partitions = DailyPartitionsDefinition(start_date='2017-08-17')
-_BACKFILL_PROJECTION_MODE_ENV = 'ORIGO_BACKFILL_PROJECTION_MODE'
 
 
-def _load_backfill_projection_mode_or_raise() -> str:
-    raw_mode = os.environ.get(_BACKFILL_PROJECTION_MODE_ENV, 'inline')
-    normalized = raw_mode.strip().lower()
-    if normalized not in {'inline', 'deferred'}:
-        raise RuntimeError(
-            f'{_BACKFILL_PROJECTION_MODE_ENV} must be one of [inline, deferred], '
-            f'got={raw_mode!r}'
+def _resolve_fast_insert_mode_or_raise(
+    *,
+    state_store: CanonicalBackfillStateStore,
+    partition_id: str,
+    projection_mode: str,
+    execution_mode: str,
+) -> FastInsertMode:
+    if projection_mode != 'deferred' or execution_mode != 'backfill':
+        return 'writer'
+    assessment = state_store.assess_partition_execution(
+        stream_key=CanonicalStreamKey(
+            source_id='binance',
+            stream_id='binance_spot_trades',
+            partition_id=partition_id,
         )
-    return normalized
+    )
+    if assessment.latest_proof_state is not None:
+        raise RuntimeError(
+            'Fast canonical insert requires partition with no prior proof state, '
+            f'found state={assessment.latest_proof_state} for partition_id={partition_id}'
+        )
+    if assessment.canonical_row_count != 0:
+        raise RuntimeError(
+            'Fast canonical insert requires empty canonical partition, '
+            f'found canonical_row_count={assessment.canonical_row_count} '
+            f'for partition_id={partition_id}'
+        )
+    if assessment.active_quarantine:
+        raise RuntimeError(
+            'Fast canonical insert requires non-quarantined partition, '
+            f'found active quarantine for partition_id={partition_id}'
+        )
+    return 'assume_new_partition'
 
 
 @asset(
@@ -69,7 +99,11 @@ def _process_day(
     day_file_name: str,
     partition_date_str: str,
 ) -> dict[str, Any]:
-    projection_mode = _load_backfill_projection_mode_or_raise()
+    runtime_contract = load_backfill_runtime_contract_or_raise(context)
+    apply_runtime_audit_mode_or_raise(
+        runtime_audit_mode=runtime_contract.runtime_audit_mode
+    )
+    projection_mode = runtime_contract.projection_mode
     base_url = 'https://data.binance.vision/data/spot/daily/trades/BTCUSDT/'
     file_url = base_url + day_file_name
     checksum_url = file_url + '.CHECKSUM'
@@ -140,6 +174,57 @@ def _process_day(
             compression=True,
             send_receive_timeout=900,
         )
+        state_store = CanonicalBackfillStateStore(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+        )
+        source_proof = build_binance_partition_source_proof(
+            frame=events_frame,
+            partition_id=partition_date_str,
+            file_url=file_url,
+            checksum_url=checksum_url,
+            zip_sha256=actual_checksum,
+            csv_sha256=csv_checksum,
+            csv_filename=csv_filename,
+        )
+        try:
+            state_store.assert_partition_can_execute_or_raise(
+                stream_key=source_proof.stream_key,
+                execution_mode=runtime_contract.execution_mode,
+            )
+        except ReconciliationError as exc:
+            if (
+                runtime_contract.execution_mode == 'backfill'
+                and exc.code == 'RECONCILE_REQUIRED'
+            ):
+                state_store.record_partition_state(
+                    source_proof=source_proof,
+                    state='reconcile_required',
+                    reason='backfill_execution_requires_reconcile',
+                    run_id=context.run_id,
+                    recorded_at_utc=datetime.now(UTC),
+                    proof_details={'trigger_message': exc.message},
+                )
+            raise
+        fast_insert_mode = _resolve_fast_insert_mode_or_raise(
+            state_store=state_store,
+            partition_id=partition_date_str,
+            projection_mode=runtime_contract.projection_mode,
+            execution_mode=runtime_contract.execution_mode,
+        )
+        source_manifested_at_utc = datetime.now(UTC)
+        state_store.record_source_manifest(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            manifested_at_utc=source_manifested_at_utc,
+        )
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='source_manifested',
+            reason='source_manifest_recorded',
+            run_id=context.run_id,
+            recorded_at_utc=source_manifested_at_utc,
+        )
 
         write_summary = write_binance_spot_trade_frame_to_canonical(
             client=client,
@@ -148,6 +233,7 @@ def _process_day(
             frame=events_frame,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
+            fast_insert_mode=fast_insert_mode,
         )
         context.log.info(f'Canonical write summary: {write_summary}')
 
@@ -165,6 +251,19 @@ def _process_day(
                 f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
                 f'rows_processed={rows_processed}'
             )
+        proof_recorded_at_utc = datetime.now(UTC)
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='canonical_written_unproved',
+            reason='canonical_write_completed',
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
+        partition_proof = state_store.prove_partition_or_quarantine(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
 
         projected_at_utc = datetime.now(UTC)
         partition_ids = {partition_date_str}
@@ -211,6 +310,8 @@ def _process_day(
             'integrity_report': integrity_report.to_dict(),
             'native_projection_summary': native_projection_summary_dict,
             'aligned_projection_summary': aligned_projection_summary_dict,
+            'partition_proof_state': partition_proof.state,
+            'partition_proof_digest_sha256': partition_proof.proof_digest_sha256,
         }
 
         context.log.info(f'Successfully processed {day_file_name}')

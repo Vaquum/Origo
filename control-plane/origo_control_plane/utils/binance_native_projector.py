@@ -121,6 +121,7 @@ def _project_partition(
         stream_key=stream_key,
         batch_size=batch_size,
         fetch_order='source_offset_numeric',
+        require_terminal_partition_proof=True,
     )
     runtime.start()
     batches_processed = 0

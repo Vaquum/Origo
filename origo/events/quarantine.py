@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from origo.pathing import resolve_repo_relative_path
 
@@ -36,6 +36,22 @@ class QuarantinedStreamState:
     gap_details: dict[str, Any]
 
 
+class StreamQuarantineRegistryProtocol(Protocol):
+    def get(self, *, stream_key: CanonicalStreamKey) -> QuarantinedStreamState | None: ...
+
+    def assert_not_quarantined(self, *, stream_key: CanonicalStreamKey) -> None: ...
+
+    def quarantine(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        run_id: str,
+        reason: str,
+        gap_details: dict[str, Any],
+        quarantined_at_utc: datetime,
+    ) -> QuarantinedStreamState: ...
+
+
 def _stream_key_id(stream_key: CanonicalStreamKey) -> str:
     return (
         f'{stream_key.source_id.strip()}|'
@@ -61,6 +77,34 @@ def _ensure_utc(value: datetime, *, field_name: str) -> datetime:
             message=f'{field_name} must be timezone-aware UTC datetime',
         )
     return value.astimezone(UTC)
+
+
+class NoopStreamQuarantineRegistry:
+    def get(self, *, stream_key: CanonicalStreamKey) -> QuarantinedStreamState | None:
+        return None
+
+    def assert_not_quarantined(self, *, stream_key: CanonicalStreamKey) -> None:
+        return None
+
+    def quarantine(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        run_id: str,
+        reason: str,
+        gap_details: dict[str, Any],
+        quarantined_at_utc: datetime,
+    ) -> QuarantinedStreamState:
+        return QuarantinedStreamState(
+            stream_key=stream_key,
+            quarantined_at_utc=_ensure_utc(
+                quarantined_at_utc,
+                field_name='quarantined_at_utc',
+            ),
+            run_id=_require_non_empty(run_id, field_name='run_id'),
+            reason=_require_non_empty(reason, field_name='reason'),
+            gap_details=gap_details,
+        )
 
 
 class StreamQuarantineRegistry:

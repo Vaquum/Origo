@@ -9,6 +9,7 @@ from typing import Any
 
 from clickhouse_driver import Client as ClickhouseClient
 
+from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 
 _SOURCE_ID = 'bitcoin_core'
@@ -85,7 +86,11 @@ def write_bitcoin_events_to_canonical(
             'rows_duplicate': 0,
         }
 
-    writer = CanonicalEventWriter(client=client, database=database)
+    writer = CanonicalEventWriter(
+        client=client,
+        database=database,
+        quarantine_registry=NoopStreamQuarantineRegistry(),
+    )
     normalized_ingested_at_utc = _require_utc(
         ingested_at_utc,
         label='ingested_at_utc',

@@ -9,9 +9,12 @@ description = "Origo Control Plane"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "dagster",
-  "dagster-webserver",
-  "dagster-cloud",
+  # Slice 34 Dagster backfill submission currently uses private dagster._core
+  # APIs validated against 1.12.17. Treat any upgrade as a breaking change
+  # for the backfill runner until those imports are removed.
+  "dagster==1.12.17",
+  "dagster-webserver==1.12.17",
+  "dagster-cloud==1.12.17",
   "boto3",
   "pandas",
   "requests",

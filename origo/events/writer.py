@@ -16,7 +16,11 @@ from .precision import (
     assert_payload_json_has_no_float_values,
     canonicalize_payload_json_with_precision,
 )
-from .quarantine import StreamQuarantineRegistry, load_stream_quarantine_state_path
+from .quarantine import (
+    StreamQuarantineRegistry,
+    StreamQuarantineRegistryProtocol,
+    load_stream_quarantine_state_path,
+)
 from .runtime_audit import get_canonical_runtime_audit_log
 
 _CANONICAL_EVENT_NAMESPACE: Final[UUID] = UUID(
@@ -301,7 +305,7 @@ class CanonicalEventWriter:
         client: ClickHouseClient,
         database: str,
         table: str = 'canonical_event_log',
-        quarantine_registry: StreamQuarantineRegistry | None = None,
+        quarantine_registry: StreamQuarantineRegistryProtocol | None = None,
     ) -> None:
         self._client = client
         self._database = database

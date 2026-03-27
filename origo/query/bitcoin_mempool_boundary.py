@@ -63,10 +63,11 @@ def resolve_bitcoin_mempool_capture_boundary_or_raise(
                 'terminal proved partition exists'
             )
         boundary_rows = client.query(
-            
+            (
                 f'SELECT min(snapshot_at) FROM {settings.database}.{_BITCOIN_MEMPOOL_NATIVE_TABLE} '
-                f"WHERE toDate(snapshot_at) = toDate('{partition_id}')"
-            
+                'WHERE toDate(snapshot_at) = toDate({partition_id:String})'
+            ),
+            parameters={'partition_id': str(partition_id)},
         ).result_rows
     finally:
         _close_client_quietly(client)

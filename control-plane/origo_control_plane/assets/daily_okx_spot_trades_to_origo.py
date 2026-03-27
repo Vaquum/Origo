@@ -11,7 +11,7 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
-from origo.events import CanonicalBackfillStateStore
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
@@ -27,6 +27,7 @@ from origo_control_plane.utils.okx_aligned_projector import (
 )
 from origo_control_plane.utils.okx_canonical_event_ingest import (
     build_okx_partition_source_proof,
+    deduplicate_okx_exact_duplicate_events_or_raise,
     parse_okx_spot_trade_csv,
     write_okx_spot_trades_to_canonical,
 )
@@ -54,26 +55,32 @@ daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
 
 def _resolve_fast_insert_mode_or_raise(
     *,
-    latest_proof_state: str | None,
-    canonical_row_count: int,
-    active_quarantine: bool,
+    state_store: CanonicalBackfillStateStore,
     partition_id: str,
     projection_mode: str,
     execution_mode: str,
 ) -> FastInsertMode:
     if projection_mode != 'deferred' or execution_mode != 'backfill':
         return 'writer'
-    if latest_proof_state is not None:
+    assessment = state_store.assess_partition_execution(
+        stream_key=CanonicalStreamKey(
+            source_id='okx',
+            stream_id='okx_spot_trades',
+            partition_id=partition_id,
+        )
+    )
+    if assessment.latest_proof_state is not None:
         raise RuntimeError(
             'Fast canonical insert requires partition with no prior proof state, '
-            f'found state={latest_proof_state} for partition_id={partition_id}'
+            f'found state={assessment.latest_proof_state} for partition_id={partition_id}'
         )
-    if canonical_row_count != 0:
+    if assessment.canonical_row_count != 0:
         raise RuntimeError(
             'Fast canonical insert requires empty canonical partition, '
-            f'found canonical_row_count={canonical_row_count} for partition_id={partition_id}'
+            f'found canonical_row_count={assessment.canonical_row_count} '
+            f'for partition_id={partition_id}'
         )
-    if active_quarantine:
+    if assessment.active_quarantine:
         raise RuntimeError(
             'Fast canonical insert requires non-quarantined partition, '
             f'found active quarantine for partition_id={partition_id}'
@@ -244,6 +251,14 @@ def insert_daily_okx_spot_trades_to_origo(
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
+    deduplication = deduplicate_okx_exact_duplicate_events_or_raise(events)
+    if deduplication.exact_duplicate_row_count > 0:
+        context.log.info(
+            'OKX exact duplicate source rows collapsed before proof/canonical write: '
+            f'raw_row_count={deduplication.raw_row_count} '
+            f'deduplicated_exact_duplicate_rows={deduplication.exact_duplicate_row_count}'
+        )
+    events = deduplication.events
 
     client: ClickhouseClient | None = None
     try:
@@ -326,9 +341,7 @@ def insert_daily_okx_spot_trades_to_origo(
             write_path = 'reconcile_proof_only'
         else:
             fast_insert_mode = _resolve_fast_insert_mode_or_raise(
-                latest_proof_state=execution_assessment.latest_proof_state,
-                canonical_row_count=execution_assessment.canonical_row_count,
-                active_quarantine=execution_assessment.active_quarantine,
+                state_store=state_store,
                 partition_id=partition_date_str,
                 projection_mode=runtime_contract.projection_mode,
                 execution_mode=runtime_contract.execution_mode,

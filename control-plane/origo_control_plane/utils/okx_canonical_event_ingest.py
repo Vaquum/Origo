@@ -119,6 +119,22 @@ class OKXSpotTradeEvent:
             self.event_time_utc,
         )
 
+    def duplicate_identity_tuple(self) -> tuple[int, str, str, str, int]:
+        return (
+            self.trade_id,
+            self.side,
+            self.price_text,
+            self.size_text,
+            self.timestamp,
+        )
+
+
+@dataclass(frozen=True)
+class OKXDeduplicatedTradeEvents:
+    events: list[OKXSpotTradeEvent]
+    raw_row_count: int
+    exact_duplicate_row_count: int
+
 
 def parse_okx_spot_trade_csv(csv_content: bytes) -> list[OKXSpotTradeEvent]:
     csv_text = csv_content.decode('utf-8')
@@ -177,6 +193,34 @@ def parse_okx_spot_trade_csv(csv_content: bytes) -> list[OKXSpotTradeEvent]:
     return events
 
 
+def deduplicate_okx_exact_duplicate_events_or_raise(
+    events: list[OKXSpotTradeEvent],
+) -> OKXDeduplicatedTradeEvents:
+    deduplicated_events: list[OKXSpotTradeEvent] = []
+    seen_by_trade_id: dict[int, tuple[int, str, str, str, int]] = {}
+    exact_duplicate_row_count = 0
+
+    for event in events:
+        identity = event.duplicate_identity_tuple()
+        previous_identity = seen_by_trade_id.get(event.trade_id)
+        if previous_identity is None:
+            seen_by_trade_id[event.trade_id] = identity
+            deduplicated_events.append(event)
+            continue
+        if previous_identity != identity:
+            raise RuntimeError(
+                'OKX source contains conflicting duplicate trade_id payloads: '
+                f'trade_id={event.trade_id}'
+            )
+        exact_duplicate_row_count += 1
+
+    return OKXDeduplicatedTradeEvents(
+        events=deduplicated_events,
+        raw_row_count=len(events),
+        exact_duplicate_row_count=exact_duplicate_row_count,
+    )
+
+
 def build_okx_partition_source_proof(
     *,
     canonical_partition_id: str,
@@ -187,8 +231,9 @@ def build_okx_partition_source_proof(
     csv_sha256: str,
     content_md5_b64: str,
 ) -> PartitionSourceProof:
+    deduplicated = deduplicate_okx_exact_duplicate_events_or_raise(events)
     materials: list[SourceIdentityMaterial] = []
-    for event in events:
+    for event in deduplicated.events:
         payload_json = json.dumps(
             event.to_payload(),
             sort_keys=True,
@@ -227,6 +272,8 @@ def build_okx_partition_source_proof(
             'zip_sha256': zip_sha256,
             'csv_sha256': csv_sha256,
             'content_md5_b64': content_md5_b64,
+            'raw_csv_row_count': deduplicated.raw_row_count,
+            'deduplicated_exact_duplicate_rows': deduplicated.exact_duplicate_row_count,
         },
         materials=materials,
         allow_empty_partition=False,
@@ -243,6 +290,7 @@ def write_okx_spot_trades_to_canonical(
     canonical_partition_id: str | None = None,
     fast_insert_mode: FastInsertMode = _FAST_INSERT_MODE_DEFAULT,
 ) -> dict[str, int]:
+    deduplicated = deduplicate_okx_exact_duplicate_events_or_raise(events)
     resolved_partition_id: str | None = None
     if canonical_partition_id is not None:
         normalized_partition_id = canonical_partition_id.strip()
@@ -251,7 +299,7 @@ def write_okx_spot_trades_to_canonical(
         resolved_partition_id = normalized_partition_id
 
     canonical_events: list[dict[str, object]] = []
-    for event in events:
+    for event in deduplicated.events:
         canonical_events.append(
             {
                 'partition_id': resolved_partition_id or event.partition_id,
@@ -267,7 +315,10 @@ def write_okx_spot_trades_to_canonical(
         run_id=run_id,
         ingested_at_utc=ingested_at_utc,
         fast_insert_mode=fast_insert_mode,
-    )
+    ) | {
+        'raw_row_count': deduplicated.raw_row_count,
+        'deduplicated_exact_duplicate_rows': deduplicated.exact_duplicate_row_count,
+    }
 
 
 def _write_events_to_canonical(

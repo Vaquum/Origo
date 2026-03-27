@@ -185,7 +185,7 @@ def _process_day(
         stage_table = create_staged_binance_spot_trade_csv_or_raise(
             client=client,
             database=CLICKHOUSE_DATABASE,
-            csv_content=csv_content,
+            frame=events_frame,
         )
         source_proof = build_binance_partition_source_proof(
             client=client,

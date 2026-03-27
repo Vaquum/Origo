@@ -4,11 +4,9 @@ import hashlib
 import io
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import uuid4
 
 import polars as pl
-from clickhouse_connect import get_client as get_clickhouse_http_client
 from clickhouse_driver import Client as ClickhouseClient
 
 from origo.events.backfill_state import (
@@ -25,7 +23,6 @@ from origo.events.writer import (
     canonical_event_id_from_key,
 )
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
-from origo_control_plane.config import resolve_clickhouse_http_settings
 
 _SOURCE_ID = 'binance'
 _STREAM_ID = 'binance_spot_trades'
@@ -35,17 +32,6 @@ _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
 _INSERT_CHUNK_SIZE = 100000
 _CANONICAL_EVENT_NAMESPACE_HEX = 'f1d1ef1795ce4f9fbd81f9958cdf8ee5'
-
-
-def _build_clickhouse_http_client_or_raise() -> Any:
-    settings = resolve_clickhouse_http_settings()
-    return get_clickhouse_http_client(
-        host=settings.host,
-        port=settings.port,
-        username=settings.user,
-        password=settings.password,
-        database=settings.database,
-    )
 
 
 @dataclass(frozen=True)
@@ -249,28 +235,11 @@ def _first_row_text_or_raise(csv_content: bytes) -> str:
     return first_line_bytes.decode('utf-8')
 
 
-def _normalized_binance_csv_payload_for_stage_insert_or_raise(
-    csv_content: bytes,
-) -> bytes:
-    first_line = _first_row_text_or_raise(csv_content)
-    first_cell = first_line.split(',', 1)[0].strip().lstrip('\ufeff').lower()
-    has_header = first_cell in {'id', 'trade_id'}
-    if not has_header:
-        return csv_content
-    first_newline = csv_content.find(b'\n')
-    if first_newline == -1:
-        raise RuntimeError('CSV payload contains header row but no data rows')
-    normalized_payload = csv_content[first_newline + 1 :]
-    if normalized_payload == b'':
-        raise RuntimeError('CSV payload contains header row but no data rows')
-    return normalized_payload
-
-
 def create_staged_binance_spot_trade_csv_or_raise(
     *,
     client: ClickhouseClient,
     database: str,
-    csv_content: bytes,
+    frame: pl.DataFrame,
 ) -> str:
     stage_table = f'__origo_binance_stage_{uuid4().hex}'
     client.execute(
@@ -288,25 +257,67 @@ def create_staged_binance_spot_trade_csv_or_raise(
         ENGINE = Memory
         '''
     )
-    http_client: Any | None = None
     try:
-        http_client = _build_clickhouse_http_client_or_raise()
-        if http_client is None:
-            raise RuntimeError('Failed to build ClickHouse HTTP client')
-        http_client.raw_insert(
-            table=f'{database}.{stage_table}',
-            insert_block=_normalized_binance_csv_payload_for_stage_insert_or_raise(
-                csv_content
-            ),
-            fmt='CSV',
+        _insert_binance_stage_frame_or_raise(
+            client=client,
+            database=database,
+            stage_table=stage_table,
+            frame=frame,
         )
     except Exception:
         client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
         raise
-    finally:
-        if http_client is not None:
-            http_client.close()
     return stage_table
+
+
+def _insert_binance_stage_frame_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+    frame: pl.DataFrame,
+) -> None:
+    stage_frame = frame.select(
+        pl.col('trade_id').cast(pl.Utf8).alias('trade_id'),
+        pl.col('price_text').cast(pl.Utf8).alias('price_text'),
+        pl.col('quantity_text').cast(pl.Utf8).alias('quantity_text'),
+        pl.col('quote_quantity_text').cast(pl.Utf8).alias('quote_quantity_text'),
+        pl.col('timestamp_raw').cast(pl.Utf8).alias('timestamp_raw'),
+        pl.when(pl.col('is_buyer_maker'))
+        .then(pl.lit('1'))
+        .otherwise(pl.lit('0'))
+        .alias('is_buyer_maker_raw'),
+        pl.when(pl.col('is_best_match'))
+        .then(pl.lit('1'))
+        .otherwise(pl.lit('0'))
+        .alias('is_best_match_raw'),
+    )
+    insert_sql = (
+        f'INSERT INTO {database}.{stage_table} '
+        '('
+        'trade_id,'
+        'price_text,'
+        'quantity_text,'
+        'quote_quantity_text,'
+        'timestamp_raw,'
+        'is_buyer_maker_raw,'
+        'is_best_match_raw'
+        ') VALUES'
+    )
+    for chunk in stage_frame.iter_slices(n_rows=_INSERT_CHUNK_SIZE):
+        client.execute(
+            insert_sql,
+            [
+                chunk.get_column('trade_id').to_list(),
+                chunk.get_column('price_text').to_list(),
+                chunk.get_column('quantity_text').to_list(),
+                chunk.get_column('quote_quantity_text').to_list(),
+                chunk.get_column('timestamp_raw').to_list(),
+                chunk.get_column('is_buyer_maker_raw').to_list(),
+                chunk.get_column('is_best_match_raw').to_list(),
+            ],
+            columnar=True,
+        )
 
 
 def drop_staged_binance_spot_trade_csv_or_raise(

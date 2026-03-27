@@ -779,6 +779,7 @@ Every slice must pass:
    1. OKX partition execution must respect an explicit source-safe run concurrency for the download-link endpoint.
    2. Source-safe concurrency must be enforced by runtime contract or Dagster queue controls, not by operator memory.
    3. Source-rate-limit breaches must fail loudly and stop clean recovery at the first missing partition; no silent skip or silent concurrency clamp is allowed.
+   4. Any increase to OKX or Bybit exchange-concurrency contracts must be backed by empirical proof against real source fetch paths, not inference from file size or system headroom.
 17. Backfill resume and promotion rules are proof-driven:
    1. resume truth comes from terminal partition proof state, not file state and not bare cursor max
    2. projection rebuild may consume only terminally proved partitions

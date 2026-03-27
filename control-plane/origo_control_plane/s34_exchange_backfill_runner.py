@@ -325,17 +325,10 @@ def _assert_requested_concurrency_allowed_or_raise(
         max_concurrent_partition_runs is not None
         and concurrency > max_concurrent_partition_runs
     ):
-        guidance = ''
-        if dataset == 'okx_spot_trades':
-            guidance = (
-                ' For OKX, pass explicit --concurrency=1 because '
-                f'{_S34_BACKFILL_CONCURRENCY_ENV} remains reserved for high-throughput '
-                'exchange backfill defaults.'
-            )
         raise RuntimeError(
             'Requested backfill concurrency exceeds source-safe partition-run limit: '
             f'dataset={dataset} requested={concurrency} '
-            f'source_safe_limit={max_concurrent_partition_runs}.{guidance}'
+            f'source_safe_limit={max_concurrent_partition_runs}.'
         )
 
 

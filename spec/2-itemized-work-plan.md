@@ -776,9 +776,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4b` Build repo-native exchange sequence controller for post-Binance `okx_spot_trades -> bybit_spot_trades` execution.
 - [x] `S34-C4c` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
 - [x] `S34-C4d` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
-- [ ] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
-- [ ] `S34-C4f` Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
-- [ ] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
+- [x] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
+- [x] `S34-C4f` Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
+- [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.

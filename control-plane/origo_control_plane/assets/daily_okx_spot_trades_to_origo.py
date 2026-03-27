@@ -14,7 +14,9 @@ from origo.events import CanonicalBackfillStateStore
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    get_s34_dataset_contract,
     load_backfill_runtime_contract_or_raise,
+    wait_for_source_rate_gate_or_raise,
 )
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
@@ -92,6 +94,17 @@ def insert_daily_okx_spot_trades_to_origo(
     projection_mode = runtime_contract.projection_mode
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
+    contract = get_s34_dataset_contract('okx_spot_trades')
+    min_interval_seconds = contract.source_safe_min_request_interval_seconds
+    if min_interval_seconds is None:
+        raise RuntimeError(
+            'OKX Slice 34 contract must define source_safe_min_request_interval_seconds'
+        )
+    wait_for_source_rate_gate_or_raise(
+        source_id='okx_download_link_resolution',
+        min_interval_seconds=min_interval_seconds,
+        log_fn=context.log.info,
+    )
     filename, file_url = resolve_okx_daily_file_url_or_raise(date_str=date_str)
     context.log.info(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'

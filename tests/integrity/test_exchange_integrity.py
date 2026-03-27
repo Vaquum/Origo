@@ -324,3 +324,44 @@ def test_bybit_spot_trades_integrity_allows_non_monotonic_timestamp_order() -> N
     assert report.sequence_gap_count == 0
     assert report.min_id == 1
     assert report.max_id == 2
+
+
+def test_bybit_spot_trades_integrity_allows_zero_size_source_rows() -> None:
+    rows = [
+        (
+            'BTCUSDT',
+            1,
+            '82c4f9a7-00e7-5c4b-b4bb-1159ae58b81f',
+            'sell',
+            9221.0,
+            0.0,
+            0.0001,
+            1594115944436,
+            datetime(2020, 7, 7, 9, 19, 4, 436000, tzinfo=UTC),
+            'ZeroMinusTick',
+            10000.0,
+            0.0,
+            0.0001,
+        ),
+        (
+            'BTCUSDT',
+            2,
+            '18e1af4f-2a35-5d4d-bd5a-370650397bbb',
+            'buy',
+            9221.1,
+            0.001,
+            9.2211,
+            1594115944500,
+            datetime(2020, 7, 7, 9, 19, 4, 500000, tzinfo=UTC),
+            'PlusTick',
+            10001.0,
+            0.001,
+            9.2211,
+        ),
+    ]
+
+    report = run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
+    assert report.rows_checked == 2
+    assert report.sequence_gap_count == 0
+    assert report.min_id == 1
+    assert report.max_id == 2

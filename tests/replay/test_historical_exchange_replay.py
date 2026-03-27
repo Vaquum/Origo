@@ -511,6 +511,16 @@ def test_historical_bitcoin_dataset_replay_is_deterministic_for_native_and_align
 ) -> None:
     monkeypatch.setattr(
         historical_endpoints,
+        'enforce_bitcoin_mempool_historical_window_or_raise',
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'enforce_bitcoin_mempool_query_window_or_raise',
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
         'query_bitcoin_native_data',
         lambda **kwargs: _bitcoin_native_frame(kwargs['dataset']),
     )
@@ -563,6 +573,16 @@ def test_historical_bitcoin_aligned_date_window_uses_time_range_window(
     monkeypatch: Any,
     dataset: str,
 ) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'enforce_bitcoin_mempool_historical_window_or_raise',
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'enforce_bitcoin_mempool_query_window_or_raise',
+        lambda **kwargs: None,
+    )
     captured_window: list[TimeRangeWindow] = []
 
     def _fake_query_aligned_data(**kwargs: Any) -> pl.DataFrame:
@@ -609,6 +629,16 @@ def test_historical_bitcoin_outputs_match_raw_query_shape_for_equivalent_windows
     monkeypatch: Any,
     dataset: str,
 ) -> None:
+    monkeypatch.setattr(
+        historical_endpoints,
+        'enforce_bitcoin_mempool_historical_window_or_raise',
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        historical_endpoints,
+        'enforce_bitcoin_mempool_query_window_or_raise',
+        lambda **kwargs: None,
+    )
     monkeypatch.setattr(
         historical_endpoints,
         'query_bitcoin_native_data',

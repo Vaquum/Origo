@@ -70,7 +70,12 @@ def parse_bybit_timestamp_ms_or_raise(*, raw_value: str, row_index: int) -> int:
     return timestamp_ms
 
 
-def _parse_decimal_text(raw_value: str, *, label: str) -> str:
+def _parse_decimal_text(
+    raw_value: str,
+    *,
+    label: str,
+    allow_zero: bool = False,
+) -> str:
     candidate = raw_value.strip()
     if candidate == '':
         raise RuntimeError(f'{label} must be non-empty decimal text')
@@ -78,7 +83,10 @@ def _parse_decimal_text(raw_value: str, *, label: str) -> str:
         parsed = Decimal(candidate)
     except InvalidOperation as exc:
         raise RuntimeError(f'{label} must be valid decimal text, got {raw_value!r}') from exc
-    if parsed <= 0:
+    if allow_zero:
+        if parsed < 0:
+            raise RuntimeError(f'{label} must be non-negative, got {raw_value!r}')
+    elif parsed <= 0:
         raise RuntimeError(f'{label} must be positive, got {raw_value!r}')
     return candidate
 
@@ -226,6 +234,7 @@ def parse_bybit_spot_trade_csv(
         size_text = _parse_decimal_text(
             row[3],
             label=f'Bybit row {row_index} size',
+            allow_zero=True,
         )
         price_text = _parse_decimal_text(
             row[4],
@@ -252,6 +261,7 @@ def parse_bybit_spot_trade_csv(
         home_notional_text = _parse_decimal_text(
             row[8],
             label=f'Bybit row {row_index} homeNotional',
+            allow_zero=True,
         )
         foreign_notional_text = _parse_decimal_text(
             row[9],

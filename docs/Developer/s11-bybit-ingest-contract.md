@@ -33,14 +33,17 @@
   - `trd_match_id` `String` source match id (non-null)
   - `side` `LowCardinality(String)` (`buy|sell`, non-null)
   - `price` `Float64` (non-null)
-  - `size` `Float64` (non-null)
+  - `size` `Float64` (non-null, official source may emit `0.0`)
   - `quote_quantity` `Float64` (non-null)
   - `timestamp` `UInt64` epoch milliseconds UTC (non-null)
   - `datetime` `DateTime64(3, 'UTC')` (non-null)
   - `tick_direction` `LowCardinality(String)` (non-null)
   - `gross_value` `Float64` (non-null)
-  - `home_notional` `Float64` (non-null)
+  - `home_notional` `Float64` (non-null, official source may emit `0.0`)
   - `foreign_notional` `Float64` (non-null)
+- Source nuance:
+  - official Bybit daily files can contain zero-valued `size` and matching zero-valued `homeNotional` rows while keeping positive `price`, `grossValue`, and `foreignNotional`
+  - Origo preserves those rows source-natively; only negative or empty numeric fields fail loudly
 
 ## Source/provenance and freshness semantics
 - Source of truth is first-party Bybit-hosted daily files.

@@ -76,7 +76,7 @@ def _ordered_identity_materials_or_raise(
     offset_ordering: OffsetOrdering,
     materials: list[tuple[str, str, str]],
 ) -> list[tuple[str, str, str]]:
-    if offset_ordering == 'numeric':
+    if offset_ordering in {'numeric', 'numeric_monotonic'}:
         numeric_materials: list[tuple[int, str, str, str]] = []
         for offset, event_id, payload_sha256_raw in materials:
             try:
@@ -1223,7 +1223,18 @@ class CanonicalBackfillStateStore:
         source_proof: PartitionSourceProof,
     ) -> PartitionCanonicalProof:
         stream_key = source_proof.stream_key
-        if source_proof.offset_ordering == 'numeric':
+        if source_proof.offset_ordering in {'numeric', 'numeric_monotonic'}:
+            gap_count_sql = (
+                '''
+                if(
+                    row_count = 0,
+                    0,
+                    greatest(max_offset_int - min_offset_int + 1 - unique_offset_count, 0)
+                )
+                '''
+                if source_proof.offset_ordering == 'numeric'
+                else '0'
+            )
             digest_query = f'''
             SELECT
                 row_count,
@@ -1269,11 +1280,7 @@ class CanonicalBackfillStateStore:
                         '\\n'
                     ))))
                 ) AS canonical_identity_digest_sha256,
-                if(
-                    row_count = 0,
-                    0,
-                    greatest(max_offset_int - min_offset_int + 1 - unique_offset_count, 0)
-                ) AS gap_count,
+                {gap_count_sql} AS gap_count,
                 row_count - unique_offset_count AS duplicate_count
             FROM
             (

@@ -12,6 +12,7 @@ type ExchangeDataset = Literal[
     'okx_spot_trades',
     'bybit_spot_trades',
 ]
+type ExchangeIdOrdering = Literal['contiguous', 'monotonic']
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class _ExchangeIntegritySpec:
     datetime_index: int | None
     enforce_monotonic_timestamp: bool
     allow_exact_duplicate_rows_for_same_id: bool
+    id_ordering: ExchangeIdOrdering
     frame_columns: tuple[str, ...]
 
 
@@ -65,6 +67,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=None,
         enforce_monotonic_timestamp=False,
         allow_exact_duplicate_rows_for_same_id=False,
+        id_ordering='contiguous',
         frame_columns=(
             'trade_id',
             'price',
@@ -88,6 +91,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=7,
         enforce_monotonic_timestamp=False,
         allow_exact_duplicate_rows_for_same_id=True,
+        id_ordering='monotonic',
         frame_columns=(
             'instrument_name',
             'trade_id',
@@ -112,6 +116,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=8,
         enforce_monotonic_timestamp=True,
         allow_exact_duplicate_rows_for_same_id=False,
+        id_ordering='contiguous',
         frame_columns=(
             'symbol',
             'trade_id',
@@ -246,10 +251,13 @@ def run_exchange_integrity_suite_rows(
                     )
             elif id_value < previous_id:
                 raise ValueError(
-                    f'Exchange integrity sequence-gap check failed for {dataset}: '
+                    f'Exchange integrity monotonic-trade-id check failed for {dataset}: '
                     f'row={row_number}, previous_id={previous_id}, current_id={id_value}'
                 )
-            elif id_value != previous_id + 1:
+            elif (
+                spec.id_ordering == 'contiguous'
+                and id_value != previous_id + 1
+            ):
                 raise ValueError(
                     f'Exchange integrity sequence-gap check failed for {dataset}: '
                     f'row={row_number}, expected_next_id={previous_id + 1}, got={id_value}'
@@ -351,8 +359,10 @@ def run_exchange_integrity_suite_rows(
             f'Exchange integrity internal error for {dataset}: id bounds missing after validation'
         )
 
-    contiguous_span = max_id - min_id + 1
-    sequence_gap_count = contiguous_span - unique_id_count
+    sequence_gap_count = 0
+    if spec.id_ordering == 'contiguous':
+        contiguous_span = max_id - min_id + 1
+        sequence_gap_count = contiguous_span - unique_id_count
     if sequence_gap_count != 0:
         raise ValueError(
             f'Exchange integrity sequence-gap check failed for {dataset}: '

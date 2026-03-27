@@ -11,7 +11,7 @@ from clickhouse_driver import Client as ClickHouseClient
 from .errors import ReconciliationError, StreamQuarantineError
 from .quarantine import StreamQuarantineRegistryProtocol
 
-OffsetOrdering = Literal['numeric', 'lexicographic', 'opaque']
+OffsetOrdering = Literal['numeric', 'numeric_monotonic', 'lexicographic', 'opaque']
 CursorWriteStatus = Literal['advanced', 'duplicate']
 CheckpointWriteStatus = Literal['recorded', 'duplicate']
 CompletenessStatus = Literal['ok', 'gap_detected']
@@ -41,7 +41,7 @@ def _ensure_utc(value: datetime, *, field_name: str) -> datetime:
 def _compare_offsets(
     previous: str, current: str, *, offset_ordering: OffsetOrdering
 ) -> int:
-    if offset_ordering == 'numeric':
+    if offset_ordering in {'numeric', 'numeric_monotonic'}:
         try:
             previous_number = int(previous)
         except ValueError as exc:

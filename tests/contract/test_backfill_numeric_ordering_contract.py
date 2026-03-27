@@ -53,8 +53,11 @@ class _FakeCanonicalRowsClient:
                         )
                     ]
                 unique_offsets = sorted({row[1] for row in ordered_rows}, key=int)
-                gap_count = (int(unique_offsets[-1]) - int(unique_offsets[0]) + 1) - len(
-                    unique_offsets
+                gap_count = (
+                    (int(unique_offsets[-1]) - int(unique_offsets[0]) + 1)
+                    - len(unique_offsets)
+                    if 'greatest(max_offset_int - min_offset_int + 1 - unique_offset_count, 0)' in query
+                    else 0
                 )
                 return [
                     (
@@ -170,3 +173,98 @@ def test_compute_canonical_partition_proof_orders_numeric_offsets_numerically() 
         ]
     )
     assert proof.gap_count == 7
+
+
+def test_build_partition_source_proof_orders_numeric_monotonic_offsets_numerically() -> None:
+    proof = build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id='okx',
+            stream_id='okx_spot_trades',
+            partition_id='2024-01-01',
+        ),
+        offset_ordering='numeric_monotonic',
+        source_artifact_identity={'source_file': 'okx-2024-01-01.zip'},
+        materials=[
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='10',
+                event_id='event-10',
+                payload_sha256_raw='sha-10',
+            ),
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='2',
+                event_id='event-2',
+                payload_sha256_raw='sha-2',
+            ),
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='1',
+                event_id='event-1',
+                payload_sha256_raw='sha-1',
+            ),
+        ],
+        allow_empty_partition=False,
+    )
+
+    assert proof.first_offset_or_equivalent == '1'
+    assert proof.last_offset_or_equivalent == '10'
+    assert proof.source_offset_digest_sha256 == _sha256_lines(['1', '2', '10'])
+    assert proof.source_identity_digest_sha256 == _sha256_lines(
+        [
+            '1|event-1|sha-1',
+            '2|event-2|sha-2',
+            '10|event-10|sha-10',
+        ]
+    )
+
+
+def test_compute_canonical_partition_proof_orders_numeric_monotonic_offsets_without_gap_math() -> None:
+    source_proof = build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id='okx',
+            stream_id='okx_spot_trades',
+            partition_id='2024-01-01',
+        ),
+        offset_ordering='numeric_monotonic',
+        source_artifact_identity={'source_file': 'okx-2024-01-01.zip'},
+        materials=[
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='1',
+                event_id='event-1',
+                payload_sha256_raw='sha-1',
+            ),
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='2',
+                event_id='event-2',
+                payload_sha256_raw='sha-2',
+            ),
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='10',
+                event_id='event-10',
+                payload_sha256_raw='sha-10',
+            ),
+        ],
+        allow_empty_partition=False,
+    )
+    store = CanonicalBackfillStateStore(
+        client=_FakeCanonicalRowsClient(
+            rows=[
+                ('10', 'event-10', 'sha-10'),
+                ('1', 'event-1', 'sha-1'),
+                ('2', 'event-2', 'sha-2'),
+            ]
+        ),
+        database='origo',
+    )
+
+    proof = store.compute_canonical_partition_proof_or_raise(source_proof=source_proof)
+
+    assert proof.first_offset_or_equivalent == '1'
+    assert proof.last_offset_or_equivalent == '10'
+    assert proof.canonical_offset_digest_sha256 == _sha256_lines(['1', '2', '10'])
+    assert proof.canonical_identity_digest_sha256 == _sha256_lines(
+        [
+            '1|event-1|sha-1',
+            '2|event-2|sha-2',
+            '10|event-10|sha-10',
+        ]
+    )
+    assert proof.gap_count == 0

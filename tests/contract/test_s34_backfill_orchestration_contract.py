@@ -9,6 +9,7 @@ from origo_control_plane.backfill.s34_orchestrator import (
     build_daily_partitions,
     evaluate_numeric_offset_gaps_or_raise,
     load_last_completed_daily_partition_from_canonical_or_raise,
+    load_missing_daily_partitions_from_canonical_or_raise,
     remaining_daily_partitions_or_raise,
 )
 
@@ -138,6 +139,48 @@ def test_load_last_completed_daily_partition_from_canonical_surfaces_reconcile_r
             database='origo',
             contract=contract,
         )
+
+
+def test_load_missing_daily_partitions_from_canonical_delegates_to_state_store(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_load(
+        self: CanonicalBackfillStateStore,
+        *,
+        source_id: str,
+        stream_id: str,
+        earliest_partition_date: date,
+        plan_end_date: date,
+    ) -> tuple[str, ...]:
+        captured['source_id'] = source_id
+        captured['stream_id'] = stream_id
+        captured['earliest_partition_date'] = earliest_partition_date
+        captured['plan_end_date'] = plan_end_date
+        return ('2017-08-21', '2017-08-22')
+
+    monkeypatch.setattr(
+        CanonicalBackfillStateStore,
+        'plan_missing_daily_partitions_or_raise',
+        _fake_load,
+    )
+
+    contract = get_s34_dataset_contract('binance_spot_trades')
+    value = load_missing_daily_partitions_from_canonical_or_raise(
+        client=cast(Any, object()),
+        database='origo',
+        contract=contract,
+        plan_end_date=date(2026, 3, 12),
+    )
+
+    assert value == ('2017-08-21', '2017-08-22')
+    assert captured == {
+        'source_id': 'binance',
+        'stream_id': 'binance_spot_trades',
+        'earliest_partition_date': date(2017, 8, 17),
+        'plan_end_date': date(2026, 3, 12),
+    }
 
 
 def test_assert_partition_can_execute_allows_reconcile_for_ambiguous_partition(

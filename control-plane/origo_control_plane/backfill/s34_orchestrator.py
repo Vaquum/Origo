@@ -144,6 +144,35 @@ def load_last_completed_daily_partition_from_canonical_or_raise(
     )
 
 
+def load_missing_daily_partitions_from_canonical_or_raise(
+    *,
+    client: ClickHouseClient,
+    database: str,
+    contract: S34DatasetBackfillContract,
+    plan_end_date: date,
+) -> tuple[str, ...]:
+    if contract.partition_scheme != 'daily':
+        raise RuntimeError(
+            'load_missing_daily_partitions_from_canonical_or_raise requires '
+            f'daily partition scheme, got={contract.partition_scheme} '
+            f'for dataset={contract.dataset}'
+        )
+    if contract.earliest_partition_date is None:
+        raise RuntimeError(
+            'Daily partition contract must define earliest_partition_date for '
+            f'dataset={contract.dataset}'
+        )
+    return CanonicalBackfillStateStore(
+        client=client,
+        database=database,
+    ).plan_missing_daily_partitions_or_raise(
+        source_id=contract.source_id,
+        stream_id=contract.stream_id,
+        earliest_partition_date=contract.earliest_partition_date,
+        plan_end_date=plan_end_date,
+    )
+
+
 def evaluate_numeric_offset_gaps_or_raise(
     *,
     offsets: list[str],

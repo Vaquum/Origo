@@ -36,8 +36,8 @@ def test_s34_exchange_backfill_runner_dry_run_uses_contract_planner(
     monkeypatch.setattr(backfill_runner, 'ClickHouseClient', _FakeClickHouseClient)
     monkeypatch.setattr(
         backfill_runner,
-        'load_last_completed_daily_partition_from_canonical_or_raise',
-        lambda **_: None,
+        'load_missing_daily_partitions_from_canonical_or_raise',
+        lambda **_: ('2017-08-17', '2017-08-18', '2017-08-19'),
     )
     monkeypatch.setattr(
         backfill_runner.CanonicalBackfillStateStore,
@@ -83,8 +83,8 @@ def test_s34_exchange_backfill_runner_reconcile_dry_run_requires_explicit_partit
     monkeypatch.setattr(backfill_runner, 'ClickHouseClient', _FakeClickHouseClient)
     monkeypatch.setattr(
         backfill_runner,
-        'load_last_completed_daily_partition_from_canonical_or_raise',
-        lambda **_: (_ for _ in ()).throw(AssertionError('resume loader must not run')),
+        'load_missing_daily_partitions_from_canonical_or_raise',
+        lambda **_: (_ for _ in ()).throw(AssertionError('missing-partition planner must not run')),
     )
     monkeypatch.setattr(
         backfill_runner.CanonicalBackfillStateStore,
@@ -112,6 +112,50 @@ def test_s34_exchange_backfill_runner_reconcile_dry_run_requires_explicit_partit
     assert result['partition_ids'] == ['2017-08-17', '2017-08-19']
     assert result['last_completed_partition'] is None
     assert result['end_date'] is None
+
+
+def test_s34_exchange_backfill_runner_dry_run_plans_missing_gap_behind_frontier(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(
+        'ORIGO_BACKFILL_MANIFEST_LOG_PATH',
+        str(tmp_path / 'manifest.jsonl'),
+    )
+    monkeypatch.setenv(
+        'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
+        str(tmp_path / 'runtime-audit.jsonl'),
+    )
+    monkeypatch.setenv('CLICKHOUSE_HOST', 'clickhouse')
+    monkeypatch.setenv('CLICKHOUSE_PORT', '9000')
+    monkeypatch.setenv('CLICKHOUSE_USER', 'default')
+    monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
+    monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setattr(backfill_runner, 'ClickHouseClient', _FakeClickHouseClient)
+    monkeypatch.setattr(
+        backfill_runner,
+        'load_missing_daily_partitions_from_canonical_or_raise',
+        lambda **_: ('2017-08-21', '2017-08-22'),
+    )
+    monkeypatch.setattr(
+        backfill_runner.CanonicalBackfillStateStore,
+        'assert_partition_can_execute_or_raise',
+        lambda *args, **kwargs: None,
+    )
+
+    result = backfill_runner.run_exchange_backfill(
+        dataset='binance_spot_trades',
+        end_date=date(2026, 3, 12),
+        max_partitions=None,
+        run_id='s34-test-dry-run-gap',
+        dry_run=True,
+        projection_mode='deferred',
+        runtime_audit_mode='summary',
+        concurrency=10,
+    )
+
+    assert result['planned_partitions'] == ['2017-08-21', '2017-08-22']
+    assert result['last_completed_partition'] == '2017-08-20'
 
 
 def test_s34_exchange_backfill_runner_reconcile_requires_partition_ids(

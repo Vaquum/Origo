@@ -277,6 +277,7 @@ def build_okx_partition_source_proof(
         },
         materials=materials,
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
 
 

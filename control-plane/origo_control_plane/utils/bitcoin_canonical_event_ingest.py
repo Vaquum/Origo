@@ -246,6 +246,7 @@ def build_bitcoin_partition_source_proof_or_raise(
         source_artifact_identity=source_artifact_identity,
         materials=materials,
         allow_empty_partition=allow_empty_partition,
+        allow_duplicate_offsets=False,
     )
 
 

@@ -222,6 +222,7 @@ def build_binance_partition_source_proof(
         source_offset_digest_sha256=str(row[3]),
         source_identity_digest_sha256=str(row[4]),
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
 
 

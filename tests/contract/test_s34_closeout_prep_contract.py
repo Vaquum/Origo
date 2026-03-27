@@ -118,6 +118,7 @@ def test_s34_closeout_prep_summary_surfaces_remaining_gaps_and_terminal_evidence
         source_offset_digest_sha256='3' * 64,
         source_identity_digest_sha256='4' * 64,
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
         manifested_by_run_id='s34-test',
         manifested_at_utc=datetime(2026, 3, 26, 12, 0, tzinfo=UTC),
     )
@@ -230,6 +231,7 @@ def test_s34_runner_manifest_payload_helpers_include_checksum_and_digest_evidenc
         source_offset_digest_sha256='3' * 64,
         source_identity_digest_sha256='4' * 64,
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
         manifested_by_run_id='s34-test',
         manifested_at_utc=datetime(2026, 3, 26, 12, 0, tzinfo=UTC),
     )
@@ -278,6 +280,7 @@ def test_s34_runner_manifest_payload_helpers_include_checksum_and_digest_evidenc
     range_proof_payload = _build_range_proof_payload_or_raise(range_proof)
 
     assert source_manifest_payload['source_artifact_identity']['csv_sha256'] == '2' * 64
+    assert source_manifest_payload['allow_duplicate_offsets'] is False
     assert partition_proof_payload['canonical_identity_digest_sha256'] == '6' * 64
     assert partition_proof_payload['proof_details'] == {'status': 'ok'}
     assert range_proof_payload['range_details'] == {'partition_ids': ['2017-08-17']}

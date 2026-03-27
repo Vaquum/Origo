@@ -218,6 +218,7 @@ def _fetch_latest_source_manifests_or_raise(
             manifests.source_offset_digest_sha256,
             manifests.source_identity_digest_sha256,
             manifests.allow_empty_partition,
+            manifests.allow_duplicate_offsets,
             manifests.manifested_by_run_id,
             manifests.manifested_at_utc
         FROM {database}.canonical_backfill_source_manifests AS manifests
@@ -259,8 +260,9 @@ def _fetch_latest_source_manifests_or_raise(
             source_offset_digest_sha256=str(row[10]),
             source_identity_digest_sha256=str(row[11]),
             allow_empty_partition=bool(row[12]),
-            manifested_by_run_id=str(row[13]),
-            manifested_at_utc=row[14],
+            allow_duplicate_offsets=bool(row[13]),
+            manifested_by_run_id=str(row[14]),
+            manifested_at_utc=row[15],
         )
         manifests[_partition_key(str(row[0]), str(row[1]), str(row[2]))] = state
     return manifests

@@ -602,6 +602,12 @@ def build_fixture_canonical_events(
     rows_by_dataset: dict[str, list[dict[str, Any]]],
 ) -> list[BitcoinCanonicalEvent]:
     events: list[BitcoinCanonicalEvent] = []
+    for dataset in BITCOIN_CHAIN_HEIGHT_RANGE_DATASETS:
+        if dataset not in rows_by_dataset:
+            raise RuntimeError(
+                'build_fixture_canonical_events requires every Bitcoin chain dataset, '
+                f'missing dataset={dataset}'
+            )
     chain_partition_id_by_dataset = {
         dataset: _chain_height_range_partition_id_or_raise(
             dataset=dataset,
@@ -1099,7 +1105,9 @@ def _query_legacy_native_rows(
         'bitcoin_circulating_supply': 'datetime ASC, block_height ASC',
     }[dataset]
 
-    rows = client.execute(
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT {', '.join(columns)}
         FROM {database}.{_LEGACY_TABLE_BY_DATASET[dataset]}
@@ -1108,6 +1116,7 @@ def _query_legacy_native_rows(
         ORDER BY {order_by}
         ''',
         {'start': start_ch, 'end': end_ch},
+        ),
     )
 
     output: list[dict[str, Any]] = []

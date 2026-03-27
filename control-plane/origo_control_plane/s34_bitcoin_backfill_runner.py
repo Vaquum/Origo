@@ -436,6 +436,11 @@ def plan_next_bitcoin_chain_batch_or_raise(
     database: str | None = None,
 ) -> BitcoinHeightBatchPlan | None:
     assert_s34_backfill_contract_consistency_or_raise()
+    if (client is None) != (database is None):
+        raise RuntimeError(
+            'plan_next_bitcoin_chain_batch_or_raise requires client and database '
+            'to both be provided or both be None'
+        )
     contract = get_s34_dataset_contract(dataset)
     if contract.partition_scheme != 'height_range':
         raise RuntimeError(
@@ -695,6 +700,11 @@ def run_bitcoin_chain_sequence_controller_or_raise(
     datasets: tuple[S34BackfillDataset, ...] | None = None,
     max_batches_per_dataset: int | None = None,
 ) -> dict[str, Any]:
+    if max_batches_per_dataset is not None:
+        raise RuntimeError(
+            'Bitcoin chain sequence controller requires full dataset completion; '
+            'max_batches_per_dataset is unsupported. Use --mode chain for bounded runs.'
+        )
     sequence_datasets = (
         list_bitcoin_chain_datasets_or_raise() if datasets is None else datasets
     )

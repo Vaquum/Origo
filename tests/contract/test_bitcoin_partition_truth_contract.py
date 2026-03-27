@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from origo_control_plane.bitcoin_core import (
     format_bitcoin_height_range_partition_id_or_raise,
 )
@@ -43,3 +44,14 @@ def test_bitcoin_mempool_fixture_events_remain_daily_snapshot_partitioned() -> N
     assert mempool_partition_ids == {
         datetime(2024, 4, 20, 0, 0, 2, tzinfo=UTC).date().isoformat()
     }
+
+
+def test_build_fixture_canonical_events_fails_loud_on_missing_chain_dataset() -> None:
+    rows_by_dataset = build_fixture_rows_by_dataset()
+    del rows_by_dataset['bitcoin_block_transactions']
+
+    with pytest.raises(
+        RuntimeError,
+        match='missing dataset=bitcoin_block_transactions',
+    ):
+        build_fixture_canonical_events(rows_by_dataset=rows_by_dataset)

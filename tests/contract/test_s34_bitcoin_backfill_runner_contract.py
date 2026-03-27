@@ -102,6 +102,20 @@ def test_plan_next_bitcoin_chain_batch_returns_none_when_range_is_complete(
     assert batch is None
 
 
+def test_plan_next_bitcoin_chain_batch_requires_client_and_database_together() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='client and database to both be provided or both be None',
+    ):
+        plan_next_bitcoin_chain_batch_or_raise(
+            dataset='bitcoin_block_headers',
+            plan_end_height=840999,
+            batch_size_blocks=144,
+            client=cast(Any, object()),
+            database=None,
+        )
+
+
 def test_run_bitcoin_chain_sequence_controller_uses_chain_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -136,6 +150,20 @@ def test_run_bitcoin_chain_sequence_controller_uses_chain_order(
         'bitcoin_circulating_supply',
     ]
     assert result['controller_stopped_reason'] == 'no_remaining_work'
+
+
+def test_run_bitcoin_chain_sequence_controller_rejects_partial_batch_limit() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='max_batches_per_dataset is unsupported',
+    ):
+        run_bitcoin_chain_sequence_controller_or_raise(
+            plan_end_height=840999,
+            batch_size_blocks=144,
+            projection_mode='deferred',
+            runtime_audit_mode='summary',
+            max_batches_per_dataset=1,
+        )
 
 
 def test_run_bitcoin_mempool_daily_path_rejects_historical_partition() -> None:

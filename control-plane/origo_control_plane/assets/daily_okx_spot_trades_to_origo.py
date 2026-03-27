@@ -232,6 +232,7 @@ def insert_daily_okx_spot_trades_to_origo(
         )
 
         current_canonical_matches_source = False
+        current_canonical_proof = None
         if reconcile_existing_canonical_rows:
             current_canonical_proof = state_store.compute_canonical_partition_proof_or_raise(
                 source_proof=source_proof
@@ -328,6 +329,7 @@ def insert_daily_okx_spot_trades_to_origo(
             source_proof=source_proof,
             run_id=context.run_id,
             recorded_at_utc=proof_recorded_at_utc,
+            canonical_proof=current_canonical_proof,
         )
 
         projected_at_utc = datetime.now(UTC)

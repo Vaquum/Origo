@@ -116,6 +116,7 @@ def _build_source_manifest_payload_or_raise(
         'source_offset_digest_sha256': source_manifest.source_offset_digest_sha256,
         'source_identity_digest_sha256': source_manifest.source_identity_digest_sha256,
         'allow_empty_partition': source_manifest.allow_empty_partition,
+        'allow_duplicate_offsets': source_manifest.allow_duplicate_offsets,
         'manifested_by_run_id': source_manifest.manifested_by_run_id,
         'manifested_at_utc': source_manifest.manifested_at_utc.isoformat(),
     }

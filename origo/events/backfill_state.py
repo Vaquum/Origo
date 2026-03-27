@@ -323,6 +323,7 @@ class SourceManifestState:
     source_offset_digest_sha256: str
     source_identity_digest_sha256: str
     allow_empty_partition: bool
+    allow_duplicate_offsets: bool
     manifested_by_run_id: str
     manifested_at_utc: datetime
 
@@ -533,6 +534,7 @@ class CanonicalBackfillStateStore:
                 source_offset_digest_sha256,
                 source_identity_digest_sha256,
                 allow_empty_partition,
+                allow_duplicate_offsets,
                 manifested_by_run_id,
                 manifested_at_utc
             )
@@ -553,6 +555,7 @@ class CanonicalBackfillStateStore:
                     source_proof.source_offset_digest_sha256,
                     source_proof.source_identity_digest_sha256,
                     source_proof.allow_empty_partition,
+                    source_proof.allow_duplicate_offsets,
                     normalized_run_id,
                     normalized_manifested_at_utc,
                 )
@@ -582,6 +585,7 @@ class CanonicalBackfillStateStore:
                 source_offset_digest_sha256,
                 source_identity_digest_sha256,
                 allow_empty_partition,
+                allow_duplicate_offsets,
                 manifested_by_run_id,
                 manifested_at_utc
             FROM {self._database}.canonical_backfill_source_manifests
@@ -612,8 +616,9 @@ class CanonicalBackfillStateStore:
             source_offset_digest_sha256=str(row[7]),
             source_identity_digest_sha256=str(row[8]),
             allow_empty_partition=bool(row[9]),
-            manifested_by_run_id=str(row[10]),
-            manifested_at_utc=row[11],
+            allow_duplicate_offsets=bool(row[10]),
+            manifested_by_run_id=str(row[11]),
+            manifested_at_utc=row[12],
         )
 
     def record_partition_state(
@@ -1465,39 +1470,40 @@ class CanonicalBackfillStateStore:
         source_proof: PartitionSourceProof,
         run_id: str,
         recorded_at_utc: datetime,
+        canonical_proof: PartitionCanonicalProof | None = None,
     ) -> PartitionProofState:
-        canonical_proof = self.compute_canonical_partition_proof_or_raise(
+        proof = canonical_proof or self.compute_canonical_partition_proof_or_raise(
             source_proof=source_proof
         )
         details: dict[str, Any] = {}
         state: BackfillPartitionState
         reason: str
-        if source_proof.source_row_count == 0 and canonical_proof.canonical_row_count == 0:
+        if source_proof.source_row_count == 0 and proof.canonical_row_count == 0:
             state = 'empty_proved'
             reason = 'source_and_canonical_empty_proved'
         else:
             mismatch_reasons: list[str] = []
-            if source_proof.source_row_count != canonical_proof.canonical_row_count:
+            if source_proof.source_row_count != proof.canonical_row_count:
                 mismatch_reasons.append('row_count_mismatch')
             if (
                 source_proof.source_identity_digest_sha256
-                != canonical_proof.canonical_identity_digest_sha256
+                != proof.canonical_identity_digest_sha256
             ):
                 mismatch_reasons.append('identity_digest_mismatch')
             if (
                 source_proof.first_offset_or_equivalent
-                != canonical_proof.first_offset_or_equivalent
+                != proof.first_offset_or_equivalent
             ):
                 mismatch_reasons.append('first_offset_mismatch')
             if (
                 source_proof.last_offset_or_equivalent
-                != canonical_proof.last_offset_or_equivalent
+                != proof.last_offset_or_equivalent
             ):
                 mismatch_reasons.append('last_offset_mismatch')
-            if canonical_proof.gap_count > 0:
+            if proof.gap_count > 0:
                 mismatch_reasons.append('gap_detected')
             if (
-                canonical_proof.duplicate_count > 0
+                proof.duplicate_count > 0
                 and not source_proof.allow_duplicate_offsets
             ):
                 mismatch_reasons.append('duplicate_offsets_detected')
@@ -1510,11 +1516,11 @@ class CanonicalBackfillStateStore:
                 details = {
                     'mismatch_reasons': mismatch_reasons,
                     'source_row_count': source_proof.source_row_count,
-                    'canonical_row_count': canonical_proof.canonical_row_count,
+                    'canonical_row_count': proof.canonical_row_count,
                     'source_identity_digest_sha256': source_proof.source_identity_digest_sha256,
-                    'canonical_identity_digest_sha256': canonical_proof.canonical_identity_digest_sha256,
-                    'gap_count': canonical_proof.gap_count,
-                    'duplicate_count': canonical_proof.duplicate_count,
+                    'canonical_identity_digest_sha256': proof.canonical_identity_digest_sha256,
+                    'gap_count': proof.gap_count,
+                    'duplicate_count': proof.duplicate_count,
                 }
         proof_state = self.record_partition_state(
             source_proof=source_proof,
@@ -1522,7 +1528,7 @@ class CanonicalBackfillStateStore:
             reason=reason,
             run_id=run_id,
             recorded_at_utc=recorded_at_utc,
-            canonical_proof=canonical_proof,
+            canonical_proof=proof,
             proof_details=details,
         )
         if state == 'quarantined':

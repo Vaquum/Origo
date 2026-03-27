@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import statistics
 import time
@@ -24,6 +23,8 @@ from origo_control_plane.utils.exchange_source_contracts import (
 
 Dataset = Literal['okx_spot_trades', 'bybit_spot_trades']
 ProbeMode = Literal['concurrency', 'okx_rate_interval']
+_BYBIT_GZIP_MAGIC = b'\x1f\x8b'
+_BYBIT_ADMISSION_READ_BYTES = 65536
 
 
 @dataclass(frozen=True)
@@ -172,22 +173,24 @@ def _probe_bybit_once(*, date_str: str) -> ProbeAttemptResult:
     bytes_downloaded = 0
     try:
         _, file_url = resolve_bybit_daily_file_url(date_str=date_str)
-        response = requests.get(
+        with requests.get(
             file_url,
             timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        gzip_payload = response.content
-        bytes_downloaded = len(gzip_payload)
-        if len(gzip_payload) == 0:
-            raise RuntimeError('Bybit source file payload is empty')
-        source_etag = response.headers.get('ETag')
-        if source_etag is None or source_etag.strip() == '':
-            raise RuntimeError('Bybit source response is missing ETag header')
-        with gzip.GzipFile(fileobj=BytesIO(gzip_payload)) as gzip_file:
-            first_byte = gzip_file.read(1)
-        if len(first_byte) == 0:
-            raise RuntimeError('Bybit CSV payload is empty after gzip decompression')
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            source_etag = response.headers.get('ETag')
+            if source_etag is None or source_etag.strip() == '':
+                raise RuntimeError('Bybit source response is missing ETag header')
+            chunk_iterator = response.iter_content(chunk_size=_BYBIT_ADMISSION_READ_BYTES)
+            first_chunk = next(chunk_iterator, b'')
+            bytes_downloaded = len(first_chunk)
+            if first_chunk == b'':
+                raise RuntimeError('Bybit source file payload is empty')
+            if not first_chunk.startswith(_BYBIT_GZIP_MAGIC):
+                raise RuntimeError(
+                    'Bybit source payload does not begin with gzip magic bytes'
+                )
         return ProbeAttemptResult(
             dataset='bybit_spot_trades',
             date_str=date_str,
@@ -597,7 +600,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--max-concurrency-cap',
         type=int,
-        required=True,
+        default=None,
         help='Upper bound for the ceiling search.',
     )
     parser.add_argument(
@@ -632,13 +635,17 @@ def main() -> None:
     args = parser.parse_args()
     probe_mode = cast(ProbeMode, args.probe_mode)
     if probe_mode == 'concurrency':
+        if args.max_concurrency_cap is None:
+            raise RuntimeError(
+                'probe_mode=concurrency requires explicit --max-concurrency-cap'
+            )
         result: ProbeSearchResult | OkxRateSearchResult = _search_concurrency_ceiling_or_raise(
             dataset=args.dataset,
             sample_start_date=args.sample_start_date,
             sample_day_count=args.sample_day_count,
             rounds_per_level=args.rounds_per_level,
             initial_concurrency=args.initial_concurrency,
-            max_concurrency_cap=args.max_concurrency_cap,
+            max_concurrency_cap=int(args.max_concurrency_cap),
         )
     else:
         if args.dataset != 'okx_spot_trades':

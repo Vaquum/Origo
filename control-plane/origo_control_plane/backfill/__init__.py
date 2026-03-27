@@ -24,6 +24,7 @@ from .s34_orchestrator import (
     evaluate_numeric_offset_gaps_or_raise,
     load_backfill_manifest_log_path,
     load_last_completed_daily_partition_from_canonical_or_raise,
+    load_missing_daily_partitions_from_canonical_or_raise,
     remaining_daily_partitions_or_raise,
     write_backfill_manifest_event,
 )
@@ -50,6 +51,7 @@ __all__ = [
     'load_backfill_manifest_log_path',
     'load_backfill_runtime_contract_or_raise',
     'load_last_completed_daily_partition_from_canonical_or_raise',
+    'load_missing_daily_partitions_from_canonical_or_raise',
     'remaining_daily_partitions_or_raise',
     'write_backfill_manifest_event',
 ]

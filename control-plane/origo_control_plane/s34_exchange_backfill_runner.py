@@ -5,7 +5,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -40,8 +40,7 @@ from origo_control_plane.backfill import (
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
     load_backfill_manifest_log_path,
-    load_last_completed_daily_partition_from_canonical_or_raise,
-    remaining_daily_partitions_or_raise,
+    load_missing_daily_partitions_from_canonical_or_raise,
     write_backfill_manifest_event,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
@@ -444,20 +443,29 @@ def run_exchange_backfill(
                 raise RuntimeError(
                     'execution_mode=backfill requires --end-date'
                 )
-            last_completed_partition = (
-                load_last_completed_daily_partition_from_canonical_or_raise(
+            remaining_partitions = list(
+                load_missing_daily_partitions_from_canonical_or_raise(
                     client=client,
                     database=settings.database,
                     contract=contract,
-                )
-            )
-            remaining_partitions = list(
-                remaining_daily_partitions_or_raise(
-                    contract=contract,
                     plan_end_date=end_date,
-                    last_completed_partition=last_completed_partition,
                 )
             )
+            if contract.earliest_partition_date is None:
+                raise RuntimeError(
+                    'Daily dataset contract must define earliest_partition_date '
+                    f'for dataset={dataset}'
+                )
+            if remaining_partitions == []:
+                last_completed_partition = end_date.isoformat()
+            else:
+                first_remaining_partition = date.fromisoformat(remaining_partitions[0])
+                if first_remaining_partition <= contract.earliest_partition_date:
+                    last_completed_partition = None
+                else:
+                    last_completed_partition = (
+                        first_remaining_partition - timedelta(days=1)
+                    ).isoformat()
             if max_partitions is not None:
                 remaining_partitions = remaining_partitions[:max_partitions]
 

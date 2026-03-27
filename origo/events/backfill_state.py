@@ -1622,6 +1622,123 @@ class CanonicalBackfillStateStore:
             expected_day += timedelta(days=1)
         return terminal_partition_ids[-1]
 
+    def plan_missing_daily_partitions_or_raise(
+        self,
+        *,
+        source_id: str,
+        stream_id: str,
+        earliest_partition_date: date,
+        plan_end_date: date,
+    ) -> tuple[str, ...]:
+        if plan_end_date < earliest_partition_date:
+            raise RuntimeError(
+                'plan_end_date must be >= earliest_partition_date for '
+                f'{source_id}/{stream_id}: earliest={earliest_partition_date.isoformat()} '
+                f'end={plan_end_date.isoformat()}'
+            )
+        blocking_rows = self._client.execute(
+            f'''
+            SELECT partition_id, state
+            FROM
+            (
+                SELECT
+                    partition_id,
+                    argMax(state, proof_revision) AS state
+                FROM {self._database}.canonical_backfill_partition_proofs
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                GROUP BY partition_id
+            )
+            WHERE state IN %(blocking_states)s
+            ORDER BY partition_id ASC
+            LIMIT 1
+            ''',
+            {
+                'source_id': source_id,
+                'stream_id': stream_id,
+                'blocking_states': tuple(_BLOCKING_PARTITION_STATES),
+            },
+        )
+        if blocking_rows != []:
+            row = blocking_rows[0]
+            raise ReconciliationError(
+                code='RECONCILE_REQUIRED',
+                message=(
+                    'Dataset resume blocked by non-terminal partition proof state '
+                    f'for {source_id}/{stream_id}/{row[0]} state={row[1]}'
+                ),
+            )
+        ambiguous_rows = self._client.execute(
+            f'''
+            SELECT partition_id
+            FROM
+            (
+                SELECT DISTINCT partition_id
+                FROM {self._database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+            ) AS event_partitions
+            LEFT JOIN
+            (
+                SELECT partition_id, argMax(state, proof_revision) AS state
+                FROM {self._database}.canonical_backfill_partition_proofs
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                GROUP BY partition_id
+            ) AS proofs
+            ON event_partitions.partition_id = proofs.partition_id
+            WHERE proofs.state IS NULL OR proofs.state NOT IN %(terminal_states)s
+            ORDER BY partition_id ASC
+            LIMIT 1
+            ''',
+            {
+                'source_id': source_id,
+                'stream_id': stream_id,
+                'terminal_states': tuple(_TERMINAL_PARTITION_STATES),
+            },
+        )
+        if ambiguous_rows != []:
+            raise ReconciliationError(
+                code='RECONCILE_REQUIRED',
+                message=(
+                    'Dataset resume blocked by canonical rows without terminal proof state '
+                    f'for {source_id}/{stream_id}/{ambiguous_rows[0][0]}'
+                ),
+            )
+        terminal_rows = self._client.execute(
+            f'''
+            SELECT partition_id
+            FROM
+            (
+                SELECT partition_id, argMax(state, proof_revision) AS state
+                FROM {self._database}.canonical_backfill_partition_proofs
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                GROUP BY partition_id
+            )
+            WHERE state IN %(terminal_states)s
+              AND partition_id >= %(earliest_partition_id)s
+              AND partition_id <= %(plan_end_partition_id)s
+            ORDER BY partition_id ASC
+            ''',
+            {
+                'source_id': source_id,
+                'stream_id': stream_id,
+                'terminal_states': tuple(_TERMINAL_PARTITION_STATES),
+                'earliest_partition_id': earliest_partition_date.isoformat(),
+                'plan_end_partition_id': plan_end_date.isoformat(),
+            },
+        )
+        terminal_partition_ids = {str(row[0]) for row in terminal_rows}
+        planned: list[str] = []
+        current_day = earliest_partition_date
+        while current_day <= plan_end_date:
+            partition_id = current_day.isoformat()
+            if partition_id not in terminal_partition_ids:
+                planned.append(partition_id)
+            current_day += timedelta(days=1)
+        return tuple(planned)
+
     def record_range_proof(
         self,
         *,

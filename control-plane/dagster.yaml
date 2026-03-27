@@ -24,6 +24,10 @@ schedule_storage:
 
 run_queue:
   max_concurrent_runs: 20
+  tag_concurrency_limits:
+    - key: origo.backfill.dataset
+      value: okx_spot_trades
+      limit: 1
 
 run_monitoring:
   enabled: true

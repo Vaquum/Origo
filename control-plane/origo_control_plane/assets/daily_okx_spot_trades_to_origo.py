@@ -133,6 +133,13 @@ def _resolve_okx_daily_file_url(*, date_str: str) -> tuple[str, str]:
         json=payload,
         timeout=_REQUEST_TIMEOUT_SECONDS,
     )
+    if response.status_code == 429:
+        retry_after = response.headers.get('Retry-After')
+        raise RuntimeError(
+            'OKX download-link endpoint rate-limited the request: '
+            f'date={date_str} retry_after={retry_after!r} '
+            'requested partition execution exceeded the source-safe link resolution rate'
+        )
     response.raise_for_status()
 
     body = _expect_dict(response.json(), 'OKX download-link response')

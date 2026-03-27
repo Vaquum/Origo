@@ -6,6 +6,9 @@ from typing import Any, cast
 
 import origo_control_plane.s34_exchange_backfill_runner as backfill_runner
 import pytest
+import yaml
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class _FakeClickHouseClient:
@@ -204,6 +207,39 @@ def test_s34_exchange_backfill_concurrency_env_requires_integer_ge_10(
 
     monkeypatch.setenv('ORIGO_S34_BACKFILL_CONCURRENCY', '15')
     assert backfill_runner._load_env_backfill_concurrency_or_raise() == 15
+
+
+def test_s34_exchange_backfill_runner_rejects_okx_concurrency_above_source_safe_limit() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='Requested backfill concurrency exceeds source-safe partition-run limit',
+    ):
+        backfill_runner._assert_requested_concurrency_allowed_or_raise(
+            dataset='okx_spot_trades',
+            concurrency=2,
+        )
+
+    backfill_runner._assert_requested_concurrency_allowed_or_raise(
+        dataset='okx_spot_trades',
+        concurrency=1,
+    )
+    backfill_runner._assert_requested_concurrency_allowed_or_raise(
+        dataset='binance_spot_trades',
+        concurrency=20,
+    )
+
+
+def test_dagster_yaml_enforces_okx_dataset_run_queue_limit() -> None:
+    dagster_config = yaml.safe_load(
+        (_REPO_ROOT / 'control-plane' / 'dagster.yaml').read_text(encoding='utf-8')
+    )
+    run_queue = cast(dict[str, Any], dagster_config['run_queue'])
+    tag_limits = cast(list[dict[str, Any]], run_queue['tag_concurrency_limits'])
+    assert {
+        'key': 'origo.backfill.dataset',
+        'value': 'okx_spot_trades',
+        'limit': 1,
+    } in tag_limits
 
 
 def test_s34_exchange_backfill_runner_builds_required_partition_run_tags() -> None:

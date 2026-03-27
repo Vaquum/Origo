@@ -27,6 +27,7 @@ class _ExchangeIntegritySpec:
     first_last_trade_indices: tuple[int, int] | None
     datetime_index: int | None
     enforce_monotonic_timestamp: bool
+    allow_exact_duplicate_rows_for_same_id: bool
     frame_columns: tuple[str, ...]
 
 
@@ -63,6 +64,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         first_last_trade_indices=None,
         datetime_index=None,
         enforce_monotonic_timestamp=False,
+        allow_exact_duplicate_rows_for_same_id=False,
         frame_columns=(
             'trade_id',
             'price',
@@ -85,6 +87,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         first_last_trade_indices=None,
         datetime_index=7,
         enforce_monotonic_timestamp=False,
+        allow_exact_duplicate_rows_for_same_id=True,
         frame_columns=(
             'instrument_name',
             'trade_id',
@@ -108,6 +111,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         first_last_trade_indices=None,
         datetime_index=8,
         enforce_monotonic_timestamp=True,
+        allow_exact_duplicate_rows_for_same_id=False,
         frame_columns=(
             'symbol',
             'trade_id',
@@ -202,11 +206,14 @@ def run_exchange_integrity_suite_rows(
     max_id: int | None = None
     previous_id: int | None = None
     previous_timestamp: int | None = None
+    previous_row: tuple[Any, ...] | None = None
     rows_checked = 0
     anomaly_checks_performed = 0
+    unique_id_count = 0
 
     for row_number, row in enumerate(rows, start=1):
         _expect_row_size(row=row, expected_size=spec.tuple_size, row_number=row_number)
+        row_tuple = tuple(row)
 
         id_value = _expect_int(
             value=row[spec.id_index],
@@ -218,18 +225,39 @@ def run_exchange_integrity_suite_rows(
                 f'expected >= 0, got={id_value}'
             )
 
+        is_exact_duplicate_delivery = False
         if previous_id is not None:
-            if id_value <= previous_id:
+            if id_value == previous_id:
+                if (
+                    spec.allow_exact_duplicate_rows_for_same_id
+                    and previous_row is not None
+                    and row_tuple == previous_row
+                ):
+                    is_exact_duplicate_delivery = True
+                elif spec.allow_exact_duplicate_rows_for_same_id:
+                    raise ValueError(
+                        f'Exchange integrity conflicting-duplicate-id check failed for {dataset}: '
+                        f'row={row_number}, trade_id={id_value}'
+                    )
+                else:
+                    raise ValueError(
+                        f'Exchange integrity sequence-gap check failed for {dataset}: '
+                        f'row={row_number}, previous_id={previous_id}, current_id={id_value}'
+                    )
+            elif id_value < previous_id:
                 raise ValueError(
                     f'Exchange integrity sequence-gap check failed for {dataset}: '
                     f'row={row_number}, previous_id={previous_id}, current_id={id_value}'
                 )
-            if id_value != previous_id + 1:
+            elif id_value != previous_id + 1:
                 raise ValueError(
                     f'Exchange integrity sequence-gap check failed for {dataset}: '
                     f'row={row_number}, expected_next_id={previous_id + 1}, got={id_value}'
                 )
+        if not is_exact_duplicate_delivery:
+            unique_id_count += 1
         previous_id = id_value
+        previous_row = row_tuple
 
         if min_id is None or id_value < min_id:
             min_id = id_value
@@ -324,11 +352,11 @@ def run_exchange_integrity_suite_rows(
         )
 
     contiguous_span = max_id - min_id + 1
-    sequence_gap_count = contiguous_span - rows_checked
+    sequence_gap_count = contiguous_span - unique_id_count
     if sequence_gap_count != 0:
         raise ValueError(
             f'Exchange integrity sequence-gap check failed for {dataset}: '
-            f'min_id={min_id}, max_id={max_id}, rows={rows_checked}, '
+            f'min_id={min_id}, max_id={max_id}, unique_ids={unique_id_count}, rows={rows_checked}, '
             f'gap_count={sequence_gap_count}'
         )
 

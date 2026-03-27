@@ -27,6 +27,7 @@ from origo_control_plane.utils.okx_aligned_projector import (
 )
 from origo_control_plane.utils.okx_canonical_event_ingest import (
     build_okx_partition_source_proof,
+    deduplicate_okx_exact_duplicate_events_or_raise,
     parse_okx_spot_trade_csv,
     write_okx_spot_trades_to_canonical,
 )
@@ -244,6 +245,14 @@ def insert_daily_okx_spot_trades_to_origo(
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
+    deduplication = deduplicate_okx_exact_duplicate_events_or_raise(events)
+    if deduplication.exact_duplicate_row_count > 0:
+        context.log.info(
+            'OKX exact duplicate source rows detected and will be collapsed inside '
+            'proof/canonical write paths: '
+            f'raw_row_count={deduplication.raw_row_count} '
+            f'deduplicated_exact_duplicate_rows={deduplication.exact_duplicate_row_count}'
+        )
 
     client: ClickhouseClient | None = None
     try:
@@ -347,10 +356,21 @@ def insert_daily_okx_spot_trades_to_origo(
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])
-        if rows_processed != len(events):
+        raw_row_count = int(write_summary.get('raw_row_count', rows_processed))
+        deduplicated_exact_duplicate_rows = int(
+            write_summary.get('deduplicated_exact_duplicate_rows', 0)
+        )
+        if raw_row_count != len(events):
             raise RuntimeError(
-                'Canonical writer summary mismatch: '
-                f'rows_processed={rows_processed} expected={len(events)}'
+                'Canonical writer raw row count mismatch: '
+                f'raw_row_count={raw_row_count} expected={len(events)}'
+            )
+        if rows_processed + deduplicated_exact_duplicate_rows != raw_row_count:
+            raise RuntimeError(
+                'Canonical writer deduplication summary mismatch: '
+                f'rows_processed+deduplicated_exact_duplicate_rows='
+                f'{rows_processed + deduplicated_exact_duplicate_rows} '
+                f'raw_row_count={raw_row_count}'
             )
         if rows_inserted + rows_duplicate != rows_processed:
             raise RuntimeError(
@@ -412,6 +432,8 @@ def insert_daily_okx_spot_trades_to_origo(
             'source_url': file_url,
             'projection_mode': projection_mode,
             'write_path': write_path,
+            'raw_row_count': raw_row_count,
+            'deduplicated_exact_duplicate_rows': deduplicated_exact_duplicate_rows,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,

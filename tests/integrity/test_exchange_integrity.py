@@ -97,7 +97,7 @@ def test_okx_spot_trades_integrity_passes_for_valid_rows() -> None:
         ),
         (
             'BTC-USDT',
-            465953985,
+            465954111,
             'sell',
             42457.6,
             0.00604855,
@@ -110,7 +110,7 @@ def test_okx_spot_trades_integrity_passes_for_valid_rows() -> None:
     assert report.rows_checked == 2
     assert report.sequence_gap_count == 0
     assert report.min_id == 465953984
-    assert report.max_id == 465953985
+    assert report.max_id == 465954111
 
 
 def test_okx_spot_trades_integrity_fails_on_invalid_side() -> None:
@@ -154,7 +154,7 @@ def test_okx_spot_trades_integrity_allows_exact_duplicate_rows() -> None:
         ),
         (
             'BTC-USDT',
-            465953985,
+            465954111,
             'sell',
             42457.6,
             0.00604855,
@@ -167,7 +167,34 @@ def test_okx_spot_trades_integrity_allows_exact_duplicate_rows() -> None:
     assert report.rows_checked == 3
     assert report.sequence_gap_count == 0
     assert report.min_id == 465953984
-    assert report.max_id == 465953985
+    assert report.max_id == 465954111
+
+
+def test_okx_spot_trades_integrity_fails_on_non_monotonic_trade_id() -> None:
+    rows = [
+        (
+            'BTC-USDT',
+            465954111,
+            'buy',
+            42457.6,
+            0.00118219,
+            50.190759744,
+            1704038400149,
+            datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        (
+            'BTC-USDT',
+            465953984,
+            'sell',
+            42457.6,
+            0.00604855,
+            256.79700568000004,
+            1704038401149,
+            datetime(2024, 1, 1, 0, 0, 1, 149000, tzinfo=UTC),
+        ),
+    ]
+    with pytest.raises(ValueError, match='monotonic-trade-id check failed'):
+        run_exchange_integrity_suite_rows(dataset='okx_spot_trades', rows=rows)
 
 
 def test_okx_spot_trades_integrity_fails_on_conflicting_duplicate_trade_id() -> None:

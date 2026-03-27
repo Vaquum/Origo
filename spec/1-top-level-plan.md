@@ -510,7 +510,8 @@ Every slice must pass:
 2. Writes move to canonical events with existing source checksum/provenance guarantees preserved.
 3. Slice closeout requires `native` + `aligned_1s` parity for OKX.
 4. Exchange integrity suite remains mandatory in event + projection paths.
-5. Slice closeout requires exactly-once/no-miss ingest proof and raw-fidelity/precision proof for OKX events.
+5. OKX `trade_id` is treated as a monotonic unique-per-symbol offset, not as a contiguous sequence.
+6. Slice closeout requires exactly-once/no-miss ingest proof and raw-fidelity/precision proof for OKX events.
 
 ## Slice 19 (Bybit Event-Sourcing Port) Locked Details
 1. Scope includes `bybit_spot_trades`.
@@ -751,31 +752,35 @@ Every slice must pass:
    4. source identity digest
    5. canonical identity digest
    6. gap and duplicate metrics
-11. Backfill completion is defined only by proof state:
+11. Exchange offset semantics remain source-native in Slice 34 proofs:
+   1. Binance `trade_id` is numeric contiguous.
+   2. OKX `trade_id` is numeric monotonic but not contiguous.
+   3. Bybit trade identity is ordered lexicographically by source event key.
+12. Backfill completion is defined only by proof state:
    1. source and canonical row counts match
    2. source and canonical identity digests match exactly
    3. first/last offsets match where applicable
    4. dataset-specific no-gap rule passes
-12. Backfill resume and promotion rules are proof-driven:
+13. Backfill resume and promotion rules are proof-driven:
    1. resume truth comes from terminal partition proof state, not file state and not bare cursor max
    2. projection rebuild may consume only terminally proved partitions
    3. serving promotion requires native and aligned watermarks to exactly match the proved canonical boundary
-13. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
+14. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
    1. reconcile re-reads the first-party source for the partition
    2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
    3. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
-14. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
+15. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
    1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
    2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
    3. `ORIGO_S34_BACKFILL_CONCURRENCY`
-15. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+16. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
    1. `native` everywhere
    2. `aligned_1s` everywhere currently aligned-capable by contract
-16. Slice closeout requires cross-surface validation:
+17. Slice closeout requires cross-surface validation:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods
-17. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
+18. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
 
 ## Slice 35 (Automated Daily Backfill Scheduling) Locked Details
 1. Objective is to make daily backfill fully automatic at configured daily run time, without manual triggering in normal operation.

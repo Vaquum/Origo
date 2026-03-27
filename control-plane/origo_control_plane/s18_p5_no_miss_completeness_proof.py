@@ -153,7 +153,7 @@ def run_s18_p5_proof() -> dict[str, Any]:
 
         checkpoint_input = CompletenessCheckpointInput(
             stream_key=stream_key,
-            offset_ordering='numeric',
+            offset_ordering='numeric_monotonic',
             check_scope_start_offset='5001',
             check_scope_end_offset='5005',
             last_checked_source_offset_or_equivalent='5005',
@@ -195,7 +195,7 @@ def run_s18_p5_proof() -> dict[str, Any]:
                     stream_key=stream_key,
                     next_source_offset_or_equivalent='5006',
                     event_id=UUID('00000000-0000-0000-0000-000000000001'),
-                    offset_ordering='numeric',
+                    offset_ordering='numeric_monotonic',
                     run_id='s18-p5-proof-post-quarantine',
                     change_reason='post-gap-should-block',
                     ingested_at_utc=datetime(2026, 3, 10, 22, 20, 20, tzinfo=UTC),

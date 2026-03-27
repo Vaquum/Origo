@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from origo_control_plane.backfill.s34_contract import (
     assert_s34_backfill_contract_consistency_or_raise,
+    get_s34_dataset_contract,
     list_s34_dataset_contracts,
 )
 
@@ -27,3 +28,8 @@ def test_s34_backfill_contract_matches_locked_dataset_order() -> None:
 
 def test_s34_backfill_contract_is_consistent() -> None:
     assert_s34_backfill_contract_consistency_or_raise()
+
+
+def test_s34_okx_contract_uses_numeric_monotonic_ordering() -> None:
+    contract = get_s34_dataset_contract('okx_spot_trades')
+    assert contract.offset_ordering == 'numeric_monotonic'

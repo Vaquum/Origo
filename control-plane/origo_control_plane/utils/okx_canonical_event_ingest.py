@@ -265,7 +265,7 @@ def build_okx_partition_source_proof(
             stream_id=_STREAM_ID,
             partition_id=canonical_partition_id,
         ),
-        offset_ordering='numeric',
+        offset_ordering='numeric_monotonic',
         source_artifact_identity={
             'source_file_url': source_file_url,
             'source_filename': source_filename,

@@ -230,7 +230,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Guardrails
 - [x] `S8-G1` Add rights/legal classification artifacts for OKX serving/export decisions.
-- [x] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, sequence-gap, anomaly checks).
+- [x] `S8-G2` Apply exchange integrity suite profile for OKX dataset (schema/type, monotonic trade-id ordering, exact-duplicate detection, anomaly checks).
 - [x] `S8-G3` Apply aligned-mode guardrails to OKX paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
 - [x] `S8-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S8-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
@@ -772,7 +772,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
-- [ ] `S34-C4b` Fix OKX source-duplicate contract so exact duplicate trade rows are deduplicated before proof/canonical write while conflicting duplicate payloads fail loudly.
+- [x] `S34-C4b` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
+- [x] `S34-C4c` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
@@ -2066,37 +2067,41 @@ Done looks like: both datasets are complete in canonical events with partition-l
 Constraints: first-party exchange source artifacts only.
 15. `S34-04b`
 Action: Fix OKX source-duplicate contract for Slice 34 backfill.
-Done looks like: exact duplicate OKX trade rows are accepted as duplicate delivery of the same source event, conflicting duplicate trade payloads still fail loudly, and canonical/source-proof identity stays stable for already-ingested unique partitions.
+Done looks like: raw-row counts remain truthful, exact duplicate OKX trade rows are accepted as duplicate delivery of the same source event, conflicting duplicate trade payloads still fail loudly, and canonical/source-proof identity stays stable for already-ingested unique partitions.
 Constraints: no weakening of no-miss or exactly-once semantics, no silent deduplication of conflicting rows, and no identity drift for previously valid OKX canonical events.
-16. `S34-05`
+16. `S34-04c`
+Action: Fix OKX offset-order contract for Slice 34 backfill.
+Done looks like: OKX integrity and partition proofs treat `trade_id` as numeric monotonic and unique-per-symbol rather than contiguous, while source-vs-canonical identity equality remains the no-miss proof.
+Constraints: no weakening of exactly-once semantics, no suppression of conflicting duplicate IDs, and no fallback to opaque ordering.
+17. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-17. `S34-06`
+18. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-18. `S34-07`
+19. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-19. `S34-08`
+20. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-20. `S34-09`
+21. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-21. `S34-10`
+22. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-22. `S34-10a`
+23. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-23. `S34-11`
+24. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.

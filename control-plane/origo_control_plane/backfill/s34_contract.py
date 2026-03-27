@@ -29,7 +29,7 @@ S34BackfillPhase = Literal[
 ]
 
 S34PartitionScheme = Literal['daily', 'height_range']
-S34OffsetOrdering = Literal['numeric', 'lexicographic', 'opaque']
+S34OffsetOrdering = Literal['numeric', 'numeric_monotonic', 'lexicographic', 'opaque']
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         partition_scheme='daily',
         earliest_partition_date=date(2021, 9, 1),
         earliest_height=None,
-        offset_ordering='numeric',
+        offset_ordering='numeric_monotonic',
         aligned_capable=True,
     ),
     S34DatasetBackfillContract(

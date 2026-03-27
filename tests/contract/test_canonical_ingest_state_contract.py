@@ -141,9 +141,20 @@ def test_compare_offsets_numeric_mode_enforces_monotonicity() -> None:
     assert _compare_offsets('3', '2', offset_ordering='numeric') == -1
 
 
+def test_compare_offsets_numeric_monotonic_mode_enforces_monotonicity() -> None:
+    assert _compare_offsets('1', '2', offset_ordering='numeric_monotonic') == 1
+    assert _compare_offsets('2', '2', offset_ordering='numeric_monotonic') == 0
+    assert _compare_offsets('3', '2', offset_ordering='numeric_monotonic') == -1
+
+
 def test_compare_offsets_numeric_mode_rejects_non_integer_offsets() -> None:
     with pytest.raises(RuntimeError, match='Numeric offset ordering requires integer'):
         _compare_offsets('abc', '2', offset_ordering='numeric')
+
+
+def test_compare_offsets_numeric_monotonic_mode_rejects_non_integer_offsets() -> None:
+    with pytest.raises(RuntimeError, match='Numeric offset ordering requires integer'):
+        _compare_offsets('abc', '2', offset_ordering='numeric_monotonic')
 
 
 def test_compare_offsets_lexicographic_mode() -> None:

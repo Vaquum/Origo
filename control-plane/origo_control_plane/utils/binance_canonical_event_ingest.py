@@ -612,6 +612,7 @@ def parse_binance_spot_trade_csv_frame(
             'quote_quantity_text': cast_frame.get_column('quote_quantity_text').cast(
                 pl.Utf8
             ),
+            'timestamp_raw': cast_frame.get_column('timestamp_raw').cast(pl.Utf8),
             'timestamp_ms': cast_frame.get_column('timestamp_ms').cast(pl.Int64),
             'is_buyer_maker': is_buyer_maker.cast(pl.Boolean),
             'is_best_match': is_best_match.cast(pl.Boolean),
@@ -639,7 +640,16 @@ def parse_binance_spot_trade_csv(
             is_buyer_maker=bool(is_buyer_maker),
             is_best_match=bool(is_best_match),
         )
-        for partition_value, trade_id, price_text, quantity_text, quote_quantity_text, timestamp_ms, is_buyer_maker, is_best_match in frame.iter_rows()
+        for partition_value, trade_id, price_text, quantity_text, quote_quantity_text, timestamp_ms, is_buyer_maker, is_best_match in frame.select(
+            'partition_id',
+            'trade_id',
+            'price_text',
+            'quantity_text',
+            'quote_quantity_text',
+            'timestamp_ms',
+            'is_buyer_maker',
+            'is_best_match',
+        ).iter_rows()
     ]
 
 

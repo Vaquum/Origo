@@ -3,6 +3,7 @@ from __future__ import annotations
 import polars as pl
 from origo_control_plane.utils.binance_canonical_event_ingest import (
     create_staged_binance_spot_trade_csv_or_raise,
+    parse_binance_spot_trade_csv_frame,
 )
 
 
@@ -69,3 +70,24 @@ def test_create_staged_binance_spot_trade_csv_uses_native_columnar_insert() -> N
         ['0', '1'],
         ['1', '0'],
     ]
+
+
+def test_parsed_binance_frame_retains_timestamp_raw_for_stage_insert() -> None:
+    client = _RecordingClickHouseClient()
+    csv_content = (
+        b'1,41000.10,0.01,410.001,1710000000000,false,true\n'
+        b'2,41001.20,0.02,820.024,1710000001000,true,false\n'
+    )
+    frame = parse_binance_spot_trade_csv_frame(
+        csv_content,
+        partition_id='2024-03-09',
+    )
+
+    stage_table = create_staged_binance_spot_trade_csv_or_raise(
+        client=client,  # type: ignore[arg-type]
+        database='origo',
+        frame=frame,
+    )
+
+    assert stage_table.startswith('__origo_binance_stage_')
+    assert client.insert_params[0][4] == ['1710000000000', '1710000001000']

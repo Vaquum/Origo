@@ -381,7 +381,7 @@ _CANONICAL_SOURCE_PRECISION_RULES: Final[
         CanonicalNumericFieldRule(
             field_path='size',
             numeric_kind='decimal',
-            scale=8,
+            scale=20,
             description='OKX base-asset trade quantity.',
         ),
         CanonicalNumericFieldRule(

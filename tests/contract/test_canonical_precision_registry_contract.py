@@ -88,9 +88,62 @@ def test_canonicalize_payload_json_supports_okx_spot_trade_payload() -> None:
         'instrument_name': 'BTC-USDT',
         'price': '42500.12340000',
         'side': 'buy',
-        'size': '0.01000000',
+        'size': '0.01000000000000000000',
         'timestamp': 1704067200000,
         'trade_id': 12345,
+    }
+    assert_payload_json_has_no_float_values(
+        source_id='okx',
+        stream_id='okx_spot_trades',
+        payload_json=payload_json,
+    )
+
+
+def test_canonicalize_payload_json_supports_okx_high_precision_size_payload() -> None:
+    payload_json = canonicalize_payload_json_with_precision(
+        source_id='okx',
+        stream_id='okx_spot_trades',
+        payload_raw=(
+            b'{"instrument_name":"BTC-USDT","trade_id":"12346","side":"sell",'
+            b'"price":"104933.5","size":"0.00044782999999999997",'
+            b'"timestamp":"1737331200000"}'
+        ),
+        payload_encoding='utf-8',
+    )
+    parsed = json.loads(payload_json)
+    assert parsed == {
+        'instrument_name': 'BTC-USDT',
+        'price': '104933.50000000',
+        'side': 'sell',
+        'size': '0.00044782999999999997',
+        'timestamp': 1737331200000,
+        'trade_id': 12346,
+    }
+    assert_payload_json_has_no_float_values(
+        source_id='okx',
+        stream_id='okx_spot_trades',
+        payload_json=payload_json,
+    )
+
+
+def test_canonicalize_payload_json_supports_okx_scientific_notation_size_payload() -> None:
+    payload_json = canonicalize_payload_json_with_precision(
+        source_id='okx',
+        stream_id='okx_spot_trades',
+        payload_raw=(
+            b'{"instrument_name":"BTC-USDT","trade_id":"12347","side":"buy",'
+            b'"price":"104933.5","size":"1e-05","timestamp":"1737331201000"}'
+        ),
+        payload_encoding='utf-8',
+    )
+    parsed = json.loads(payload_json)
+    assert parsed == {
+        'instrument_name': 'BTC-USDT',
+        'price': '104933.50000000',
+        'side': 'buy',
+        'size': '0.00001000000000000000',
+        'timestamp': 1737331201000,
+        'trade_id': 12347,
     }
     assert_payload_json_has_no_float_values(
         source_id='okx',

@@ -766,9 +766,10 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2d` Implement strict partition state machine and explicit reconcile flow for completed, ambiguous, and quarantined partitions.
 - [x] `S34-C2e` Implement deterministic partition-local source/canonical proof records and range-level proof folding.
 - [x] `S34-C2f` Gate fast insert, resume, projection rebuild, and serving promotion on terminal proof state only.
-- [ ] `S34-C2g` Add reconcile fast path that proves existing canonical partitions directly from source and canonical evidence without duplicate-writer replay.
-- [ ] `S34-C2h` Remove Binance canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution.
+- [x] `S34-C2g` Add reconcile fast path that proves existing canonical partitions directly from source and canonical evidence without duplicate-writer replay.
+- [x] `S34-C2h` Remove Binance canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution.
 - [x] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
+- [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [ ] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
@@ -2050,43 +2051,47 @@ Constraints: preserve canonical identity, payload fidelity, and fail-loud proof 
 Action: Remove immutable runtime-audit append bottleneck from Binance fresh-write path.
 Done looks like: canonical fresh writes no longer spend tens of seconds re-validating the full runtime-audit chain per append, while audit append remains immutable, fail-loud, and cryptographically chained.
 Constraints: no weakened audit integrity contract, no silent skip of audit validation, and no fallback to lossy/no-op audit behavior.
-12. `S34-03`
+12. `S34-02j`
+Action: Fix exchange fast-insert guard semantics so fresh backfill decisions are based on pre-manifest partition assessment.
+Done looks like: Binance, OKX, and Bybit daily assets can still use fast insert for genuinely new empty partitions after recording `source_manifested`, because the fast-insert decision is taken from the pre-manifest execution assessment rather than re-reading the just-written proof state.
+Constraints: no relaxed empty-partition requirements, no bypass of quarantine checks, and no hidden fallback to the writer path.
+13. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.
 Constraints: first-party Binance source artifacts only.
-13. `S34-04`
+14. `S34-04`
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
-14. `S34-05`
+15. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-15. `S34-06`
+16. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-16. `S34-07`
+17. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-17. `S34-08`
+18. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-18. `S34-09`
+19. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-19. `S34-10`
+20. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-20. `S34-10a`
+21. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-21. `S34-11`
+22. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.

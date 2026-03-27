@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -94,6 +96,30 @@ _CASES: list[tuple[str, _WriteFn, _EventFactory]] = [
     ('okx', cast(_WriteFn, write_okx_spot_trades_to_canonical), _okx_event),
     ('bybit', cast(_WriteFn, write_bybit_spot_trades_to_canonical), _bybit_event),
 ]
+
+_FAST_INSERT_HELPER_MODULES: list[tuple[str, str]] = [
+    ('binance', 'origo_control_plane.assets.daily_trades_to_origo'),
+    ('okx', 'origo_control_plane.assets.daily_okx_spot_trades_to_origo'),
+    ('bybit', 'origo_control_plane.assets.daily_bybit_spot_trades_to_origo'),
+]
+
+
+def _load_fast_insert_resolver(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+) -> Callable[..., str]:
+    monkeypatch.setenv('CLICKHOUSE_HOST', 'clickhouse')
+    monkeypatch.setenv('CLICKHOUSE_PORT', '9000')
+    monkeypatch.setenv('CLICKHOUSE_USER', 'default')
+    monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
+    monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+    resolver = getattr(module, '_resolve_fast_insert_mode_or_raise', None)
+    if not callable(resolver):
+        raise RuntimeError(f'{module_name} does not expose fast-insert resolver')
+    return cast(Callable[..., str], resolver)
 
 
 @pytest.mark.parametrize(('exchange_name', 'write_fn', 'event_factory'), _CASES)
@@ -204,3 +230,34 @@ def test_okx_fast_insert_allows_multi_day_events_with_partition_override(
     assert summary['rows_duplicate'] == 0
     assert client.select_calls == 1
     assert client.insert_calls > 0
+
+
+@pytest.mark.parametrize(('exchange_name', 'module_name'), _FAST_INSERT_HELPER_MODULES)
+def test_asset_fast_insert_resolver_uses_pre_manifest_assessment(
+    exchange_name: str,
+    module_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = _load_fast_insert_resolver(
+        monkeypatch=monkeypatch,
+        module_name=module_name,
+    )
+
+    assert resolver(
+        latest_proof_state=None,
+        canonical_row_count=0,
+        active_quarantine=False,
+        partition_id='2021-05-19',
+        projection_mode='deferred',
+        execution_mode='backfill',
+    ) == 'assume_new_partition'
+
+    with pytest.raises(RuntimeError, match='no prior proof state'):
+        resolver(
+            latest_proof_state='source_manifested',
+            canonical_row_count=0,
+            active_quarantine=False,
+            partition_id='2021-05-19',
+            projection_mode='deferred',
+            execution_mode='backfill',
+        )

@@ -111,3 +111,86 @@ def test_probe_search_fails_loud_when_initial_level_fails(monkeypatch: Any) -> N
             initial_concurrency=1,
             max_concurrency_cap=8,
         )
+
+
+def test_okx_rate_probe_returns_first_passing_interval(monkeypatch: Any) -> None:
+    observed_intervals: list[float] = []
+
+    def fake_run_okx_rate_level_or_raise(
+        *,
+        interval_seconds: float,
+        attempts_per_level: int,
+        sample_dates: list[str],
+        cooldown_seconds: float,
+    ) -> probe.ProbeRateLevelResult:
+        assert attempts_per_level == 5
+        assert sample_dates[0] == '2024-01-01'
+        assert cooldown_seconds == 6.0
+        observed_intervals.append(interval_seconds)
+        return probe.ProbeRateLevelResult(
+            interval_seconds=interval_seconds,
+            passed=interval_seconds >= 0.75,
+            attempts=5,
+            success_count=5 if interval_seconds >= 0.75 else 4,
+            failure_count=0 if interval_seconds >= 0.75 else 1,
+            failure_kinds={} if interval_seconds >= 0.75 else {'http_429': 1},
+            status_code_counts={} if interval_seconds >= 0.75 else {'429': 1},
+            median_duration_seconds=0.5,
+            p95_duration_seconds=0.7,
+            max_duration_seconds=1.0,
+            bytes_downloaded=1024,
+        )
+
+    monkeypatch.setattr(
+        probe,
+        '_run_okx_rate_level_or_raise',
+        fake_run_okx_rate_level_or_raise,
+    )
+
+    result = probe._search_okx_min_safe_interval_or_raise(
+        sample_start_date='2024-01-01',
+        sample_day_count=8,
+        attempts_per_level=5,
+        cooldown_seconds=6.0,
+        initial_interval_seconds=0.0,
+        max_interval_seconds=1.0,
+        interval_step_seconds=0.25,
+    )
+
+    assert result.minimal_passing_interval_seconds == 0.75
+    assert result.maximal_safe_requests_per_second == 1.333333
+    assert observed_intervals == [0.0, 0.25, 0.5, 0.75]
+
+
+def test_okx_rate_probe_fails_loud_when_no_interval_passes(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        probe,
+        '_run_okx_rate_level_or_raise',
+        lambda **_: probe.ProbeRateLevelResult(
+            interval_seconds=0.0,
+            passed=False,
+            attempts=5,
+            success_count=4,
+            failure_count=1,
+            failure_kinds={'http_429': 1},
+            status_code_counts={'429': 1},
+            median_duration_seconds=0.5,
+            p95_duration_seconds=0.7,
+            max_duration_seconds=1.0,
+            bytes_downloaded=1024,
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='No passing OKX rate interval found',
+    ):
+        probe._search_okx_min_safe_interval_or_raise(
+            sample_start_date='2024-01-01',
+            sample_day_count=8,
+            attempts_per_level=5,
+            cooldown_seconds=6.0,
+            initial_interval_seconds=0.0,
+            max_interval_seconds=1.0,
+            interval_step_seconds=0.25,
+        )

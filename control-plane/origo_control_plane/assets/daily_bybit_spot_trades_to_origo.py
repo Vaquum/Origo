@@ -31,6 +31,10 @@ from origo_control_plane.utils.bybit_native_projector import (
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
 )
+from origo_control_plane.utils.exchange_source_contracts import (
+    EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    resolve_bybit_daily_file_url,
+)
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
 CLICKHOUSE_HOST = _CLICKHOUSE.host
@@ -38,10 +42,6 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-
-_BYBIT_BASE_URL = 'https://public.bybit.com/trading/BTCUSDT/'
-_BYBIT_SYMBOL = 'BTCUSDT'
-_REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2020-03-25')
 
@@ -85,11 +85,6 @@ def _bybit_day_window_utc_ms(date_str: str) -> tuple[int, int]:
     )
 
 
-def _resolve_bybit_daily_file_url(*, date_str: str) -> tuple[str, str]:
-    filename = f'{_BYBIT_SYMBOL}{date_str}.csv.gz'
-    return filename, _BYBIT_BASE_URL + filename
-
-
 @asset(
     partitions_def=daily_partitions,
     group_name='bybit_data',
@@ -107,13 +102,16 @@ def insert_daily_bybit_spot_trades_to_origo(
     date_str = partition_date_str
     day_start_ts_utc_ms, day_end_ts_utc_ms = _bybit_day_window_utc_ms(date_str)
 
-    filename, file_url = _resolve_bybit_daily_file_url(date_str=date_str)
+    filename, file_url = resolve_bybit_daily_file_url(date_str=date_str)
     context.log.info(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'
     )
     context.log.info(f'Downloading Bybit trade data from {file_url}')
 
-    file_response = requests.get(file_url, timeout=_REQUEST_TIMEOUT_SECONDS)
+    file_response = requests.get(
+        file_url,
+        timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    )
     file_response.raise_for_status()
     gzip_payload = file_response.content
     if len(gzip_payload) == 0:

@@ -776,7 +776,7 @@ Every slice must pass:
    2. OKX `trade_id` is numeric monotonic but not contiguous.
    3. Bybit trade identity is ordered lexicographically by source event key.
 16. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
-   1. OKX partition execution must respect an explicit source-safe run concurrency for the download-link endpoint.
+   1. OKX download-link resolution must respect an explicit source-safe request pace derived from live probe evidence; partition concurrency alone is not an adequate safety model.
    2. Source-safe concurrency must be enforced by runtime contract or Dagster queue controls, not by operator memory.
    3. Source-rate-limit breaches must fail loudly and stop clean recovery at the first missing partition; no silent skip or silent concurrency clamp is allowed.
    4. Any increase to OKX or Bybit exchange-concurrency contracts must be backed by empirical proof against real source fetch paths, not inference from file size or system headroom.

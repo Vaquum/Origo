@@ -1,11 +1,10 @@
-import base64
 import hashlib
 import json
 import sys
 import zipfile
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from io import BytesIO
-from typing import Any, cast
+from typing import Any
 
 import requests
 from clickhouse_driver import Client as ClickhouseClient
@@ -15,12 +14,19 @@ from origo.events import CanonicalBackfillStateStore
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    get_s34_dataset_contract,
     load_backfill_runtime_contract_or_raise,
+    wait_for_source_rate_gate_or_raise,
 )
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_rows,
+)
+from origo_control_plane.utils.exchange_source_contracts import (
+    EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    resolve_okx_daily_file_url_or_raise,
+    verify_md5_base64_or_raise,
 )
 from origo_control_plane.utils.okx_aligned_projector import (
     project_okx_spot_trades_aligned,
@@ -40,14 +46,6 @@ CLICKHOUSE_PORT = _CLICKHOUSE.port
 CLICKHOUSE_USER = _CLICKHOUSE.user
 CLICKHOUSE_PASSWORD = _CLICKHOUSE.password
 CLICKHOUSE_DATABASE = _CLICKHOUSE.database
-
-_OKX_TRADE_DATA_DOWNLOAD_LINK_ENDPOINT = (
-    'https://www.okx.com/priapi/v5/broker/public/trade-data/download-link'
-)
-_OKX_SPOT_INSTRUMENT_ID = 'BTC-USDT'
-_OKX_TRADE_HISTORY_MODULE = '1'
-_OKX_SOURCE_DAY_UTC_OFFSET_HOURS = 8
-_REQUEST_TIMEOUT_SECONDS = 120
 
 daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
 
@@ -81,122 +79,6 @@ def _resolve_fast_insert_mode_or_raise(
     return 'assume_new_partition'
 
 
-def _expect_dict(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise RuntimeError(f'{label} must be an object')
-    raw_map = cast(dict[Any, Any], value)
-    normalized: dict[str, Any] = {}
-    for raw_key, raw_value in raw_map.items():
-        if not isinstance(raw_key, str):
-            raise RuntimeError(f'{label} keys must be strings')
-        normalized[raw_key] = raw_value
-    return normalized
-
-
-def _expect_list(value: Any, label: str) -> list[Any]:
-    if not isinstance(value, list):
-        raise RuntimeError(f'{label} must be a list')
-    return cast(list[Any], value)
-
-
-def _expect_non_empty_str(value: Any, label: str) -> str:
-    if not isinstance(value, str) or value.strip() == '':
-        raise RuntimeError(f'{label} must be a non-empty string')
-    return value
-
-
-def _okx_source_day_window_utc_ms(date_str: str) -> tuple[int, int]:
-    parsed_day = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
-    start_utc = parsed_day - timedelta(hours=_OKX_SOURCE_DAY_UTC_OFFSET_HOURS)
-    end_utc_exclusive = start_utc + timedelta(days=1)
-    return (
-        int(start_utc.timestamp() * 1000),
-        int(end_utc_exclusive.timestamp() * 1000),
-    )
-
-
-def _resolve_okx_daily_file_url(*, date_str: str) -> tuple[str, str]:
-    begin_ms, _ = _okx_source_day_window_utc_ms(date_str)
-    payload = {
-        'module': _OKX_TRADE_HISTORY_MODULE,
-        'instType': 'SPOT',
-        'instQueryParam': {'instIdList': [_OKX_SPOT_INSTRUMENT_ID]},
-        'dateQuery': {
-            'dateAggrType': 'daily',
-            'begin': str(begin_ms),
-            'end': str(begin_ms),
-        },
-    }
-
-    response = requests.post(
-        _OKX_TRADE_DATA_DOWNLOAD_LINK_ENDPOINT,
-        json=payload,
-        timeout=_REQUEST_TIMEOUT_SECONDS,
-    )
-    if response.status_code == 429:
-        retry_after = response.headers.get('Retry-After')
-        raise RuntimeError(
-            'OKX download-link endpoint rate-limited the request: '
-            f'date={date_str} retry_after={retry_after!r} '
-            'requested partition execution exceeded the source-safe link resolution rate'
-        )
-    response.raise_for_status()
-
-    body = _expect_dict(response.json(), 'OKX download-link response')
-    code = body.get('code')
-    if code != '0':
-        raise RuntimeError(f'OKX download-link API returned non-zero code: {code}')
-
-    raw_data = _expect_dict(body.get('data'), 'OKX download-link response.data')
-    raw_details = _expect_list(raw_data.get('details'), 'OKX download-link response.details')
-    if len(raw_details) != 1:
-        raise RuntimeError(
-            'OKX download-link response data.details must contain exactly one item '
-            f'for date={date_str}, got={raw_details}'
-        )
-    detail = _expect_dict(raw_details[0], 'OKX download-link response.details[0]')
-    raw_group_details = _expect_list(
-        detail.get('groupDetails'),
-        'OKX download-link response.details[0].groupDetails',
-    )
-    if len(raw_group_details) != 1:
-        raise RuntimeError(
-            'OKX download-link response detail.groupDetails must contain exactly one '
-            f'item for date={date_str}, got={raw_group_details}'
-        )
-    group_detail = _expect_dict(
-        raw_group_details[0],
-        'OKX download-link response.details[0].groupDetails[0]',
-    )
-
-    filename = _expect_non_empty_str(
-        group_detail.get('filename'),
-        'OKX download-link response filename',
-    )
-    url = _expect_non_empty_str(
-        group_detail.get('url'),
-        'OKX download-link response url',
-    )
-
-    expected_filename = f'{_OKX_SPOT_INSTRUMENT_ID}-trades-{date_str}.zip'
-    if filename != expected_filename:
-        raise RuntimeError(
-            'OKX download-link filename mismatch for requested day: '
-            f'expected={expected_filename} got={filename}'
-        )
-    return filename, url
-
-
-def _verify_source_content_md5_or_raise(*, payload: bytes, content_md5_b64: str) -> None:
-    digest_md5 = hashlib.md5(payload).digest()
-    actual_b64 = base64.b64encode(digest_md5).decode('ascii')
-    if actual_b64 != content_md5_b64:
-        raise RuntimeError(
-            'OKX source content-md5 mismatch: '
-            f'expected={content_md5_b64} actual={actual_b64}'
-        )
-
-
 @asset(
     partitions_def=daily_partitions,
     group_name='okx_data',
@@ -212,20 +94,34 @@ def insert_daily_okx_spot_trades_to_origo(
     projection_mode = runtime_contract.projection_mode
     partition_date_str = context.asset_partition_key_for_output()
     date_str = partition_date_str
-    filename, file_url = _resolve_okx_daily_file_url(date_str=date_str)
+    contract = get_s34_dataset_contract('okx_spot_trades')
+    min_interval_seconds = contract.source_safe_min_request_interval_seconds
+    if min_interval_seconds is None:
+        raise RuntimeError(
+            'OKX Slice 34 contract must define source_safe_min_request_interval_seconds'
+        )
+    wait_for_source_rate_gate_or_raise(
+        source_id='okx_download_link_resolution',
+        min_interval_seconds=min_interval_seconds,
+        log_fn=context.log.info,
+    )
+    filename, file_url = resolve_okx_daily_file_url_or_raise(date_str=date_str)
     context.log.info(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'
     )
     context.log.info(f'Downloading OKX trade data from {file_url}')
 
-    file_response = requests.get(file_url, timeout=_REQUEST_TIMEOUT_SECONDS)
+    file_response = requests.get(
+        file_url,
+        timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    )
     file_response.raise_for_status()
     zip_data = file_response.content
 
     source_content_md5 = file_response.headers.get('Content-MD5')
     if source_content_md5 is None or source_content_md5.strip() == '':
         raise RuntimeError('OKX source response is missing Content-MD5 header')
-    _verify_source_content_md5_or_raise(
+    verify_md5_base64_or_raise(
         payload=zip_data,
         content_md5_b64=source_content_md5,
     )

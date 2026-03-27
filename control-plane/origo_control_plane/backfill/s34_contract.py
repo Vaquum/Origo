@@ -45,6 +45,8 @@ class S34DatasetBackfillContract:
     offset_ordering: S34OffsetOrdering
     aligned_capable: bool
     max_concurrent_partition_runs: int | None
+    source_safe_concurrency_ceiling: int | None
+    source_safe_min_request_interval_seconds: float | None
 
 
 _S34_EXPECTED_DATASET_ORDER: Final[tuple[S34BackfillDataset, ...]] = (
@@ -75,6 +77,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=20,
+        source_safe_concurrency_ceiling=20,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='okx_spot_trades',
@@ -87,7 +91,9 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='numeric_monotonic',
         aligned_capable=True,
-        max_concurrent_partition_runs=1,
+        max_concurrent_partition_runs=20,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=0.75,
     ),
     S34DatasetBackfillContract(
         dataset='bybit_spot_trades',
@@ -100,7 +106,9 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
-        max_concurrent_partition_runs=20,
+        max_concurrent_partition_runs=1280,
+        source_safe_concurrency_ceiling=1280,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='etf_daily_metrics',
@@ -114,6 +122,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='lexicographic',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='fred_series_metrics',
@@ -127,6 +137,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='lexicographic',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_headers',
@@ -140,6 +152,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_transactions',
@@ -153,6 +167,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='lexicographic',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_mempool_state',
@@ -166,6 +182,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='lexicographic',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_fee_totals',
@@ -179,6 +197,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_subsidy_schedule',
@@ -192,6 +212,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_network_hashrate_estimate',
@@ -205,6 +227,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_circulating_supply',
@@ -218,6 +242,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         offset_ordering='numeric',
         aligned_capable=True,
         max_concurrent_partition_runs=None,
+        source_safe_concurrency_ceiling=None,
+        source_safe_min_request_interval_seconds=None,
     ),
 )
 
@@ -304,4 +330,22 @@ def assert_s34_backfill_contract_consistency_or_raise() -> None:
                 raise RuntimeError(
                     'S34 exchange dataset max_concurrent_partition_runs must be > 0 '
                     f'for dataset={contract.dataset}'
+                )
+            if (
+                contract.source_safe_concurrency_ceiling is not None
+                and contract.source_safe_concurrency_ceiling
+                < contract.max_concurrent_partition_runs
+            ):
+                raise RuntimeError(
+                    'S34 exchange dataset source_safe_concurrency_ceiling must be >= '
+                    'max_concurrent_partition_runs '
+                    f'for dataset={contract.dataset}'
+                )
+            if (
+                contract.source_safe_min_request_interval_seconds is not None
+                and contract.source_safe_min_request_interval_seconds <= 0
+            ):
+                raise RuntimeError(
+                    'S34 exchange dataset source_safe_min_request_interval_seconds '
+                    f'must be > 0 for dataset={contract.dataset}'
                 )

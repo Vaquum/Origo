@@ -776,7 +776,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4b` Build repo-native exchange sequence controller for post-Binance `okx_spot_trades -> bybit_spot_trades` execution.
 - [x] `S34-C4c` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
 - [x] `S34-C4d` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
-- [ ] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
+- [x] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
+- [x] `S34-C4f` Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
+- [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
@@ -2119,19 +2121,27 @@ Constraints: no weakening of exactly-once semantics, no suppression of conflicti
 Action: Enforce source-aware OKX backfill concurrency in the Dagster run queue and Slice-34 runtime contract.
 Done looks like: OKX partition waves cannot exceed the source-safe run concurrency for the download-link endpoint, 429-driven batch holes are prevented by orchestration contract, and the limit is explicit in tests/docs/spec.
 Constraints: no silent concurrency clamp, no source-specific hardcoding in deployment scripts, and no weakening of fail-loud batch behavior.
-20. `S34-05`
+20. `S34-04f`
+Action: Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
+Done looks like: live source probes establish the highest passing concurrency for each exchange under repeated real fetches, contract limits are updated to the proven ceilings, and the evidence is recorded in spec/log artifacts.
+Constraints: probe real source paths only, no fake dry-runs, no silent acceptance of flaky levels, and no contract increase without empirical proof.
+21. `S34-04g`
+Action: Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
+Done looks like: OKX link resolution is controlled by an explicit paced source gate derived from live probe evidence, partition execution no longer relies on concurrency=1 as a proxy for rate safety, and the contract/test/docs reflect the true source constraint.
+Constraints: no silent sleeps hidden in operators, no downgrade of fail-loud 429 handling, and no contract claim without live probe evidence.
+22. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-21. `S34-05a`
+23. `S34-05a`
 Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
 Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.
-22. `S34-06`
+24. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-23. `S34-07`
+25. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.

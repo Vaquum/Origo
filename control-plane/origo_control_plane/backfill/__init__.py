@@ -32,6 +32,7 @@ from .s34_orchestrator import (
     remaining_daily_partitions_or_raise,
     write_backfill_manifest_event,
 )
+from .source_rate_gate import wait_for_source_rate_gate_or_raise
 
 __all__ = [
     'BACKFILL_EXECUTION_MODE_TAG',
@@ -61,5 +62,6 @@ __all__ = [
     'load_last_completed_daily_partition_from_canonical_or_raise',
     'load_missing_daily_partitions_from_canonical_or_raise',
     'remaining_daily_partitions_or_raise',
+    'wait_for_source_rate_gate_or_raise',
     'write_backfill_manifest_event',
 ]

@@ -9,6 +9,10 @@ from clickhouse_connect import get_client as _raw_get_client
 
 from origo.query.aligned_core import AlignedDataset, query_aligned_data
 from origo.query.binance_native import BinanceDataset, query_binance_native_data
+from origo.query.bitcoin_mempool_boundary import (
+    enforce_bitcoin_mempool_historical_window_or_raise,
+    enforce_bitcoin_mempool_query_window_or_raise,
+)
 from origo.query.bitcoin_native import BitcoinDataset, query_bitcoin_native_data
 from origo.query.bybit_native import BybitDataset, query_bybit_native_data
 from origo.query.etf_native import ETFDataset, query_etf_native_data
@@ -451,6 +455,11 @@ def query_native(
     window = _resolve_window(
         month_year=month_year, n_rows=n_rows, n_random=n_random, time_range=time_range
     )
+    if dataset == 'bitcoin_mempool_state':
+        enforce_bitcoin_mempool_query_window_or_raise(
+            window=window,
+            auth_token=auth_token,
+        )
 
     if dataset == 'binance_spot_trades':
         frame = query_binance_native_data(
@@ -553,6 +562,11 @@ def query_aligned(
         n_random=n_random,
         time_range=time_range,
     )
+    if dataset == 'bitcoin_mempool_state':
+        enforce_bitcoin_mempool_query_window_or_raise(
+            window=window,
+            auth_token=auth_token,
+        )
     frame = query_aligned_data(
         dataset=dataset,
         window=window,
@@ -974,6 +988,22 @@ def query_bitcoin_dataset_data(
 
     table_name = _BITCOIN_HISTORICAL_TABLE[dataset]
     datetime_column = _BITCOIN_HISTORICAL_DATETIME_COLUMN[dataset]
+    if dataset == 'bitcoin_mempool_state':
+        resolved_start_date = (
+            _parse_strict_date(label='start_date', value=start_date)
+            if start_date is not None
+            else None
+        )
+        resolved_end_date = (
+            _parse_strict_date(label='end_date', value=end_date)
+            if end_date is not None
+            else None
+        )
+        enforce_bitcoin_mempool_historical_window_or_raise(
+            start_date=resolved_start_date,
+            end_date=resolved_end_date,
+            auth_token=auth_token,
+        )
     window = _resolve_historical_window(
         table_name=table_name,
         datetime_column=datetime_column,

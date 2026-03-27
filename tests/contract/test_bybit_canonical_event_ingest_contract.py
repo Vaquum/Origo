@@ -15,11 +15,22 @@ _HEADER = (
 )
 
 
-def _csv_payload(*, trd_match_id: str, timestamp_seconds: str) -> bytes:
+def _csv_payload(
+    *,
+    trd_match_id: str,
+    timestamp_seconds: str,
+    size: str = '0.001',
+    price: str = '42000.0',
+    gross_value: str = '42000000.0',
+    home_notional: str = '0.001',
+    foreign_notional: str = '42.0',
+    side: str = 'buy',
+    tick_direction: str = 'PlusTick',
+) -> bytes:
     return (
         _HEADER
-        + f'{timestamp_seconds},BTCUSDT,buy,0.001,42000.0,PlusTick,'
-        + f'{trd_match_id},42000000.0,0.001,42.0\n'
+        + f'{timestamp_seconds},BTCUSDT,{side},{size},{price},{tick_direction},'
+        + f'{trd_match_id},{gross_value},{home_notional},{foreign_notional}\n'
     ).encode('utf-8')
 
 
@@ -68,6 +79,30 @@ def test_bybit_parser_rejects_unsupported_trd_match_id_format() -> None:
             day_start_ts_utc_ms=1704067200000,
             day_end_ts_utc_ms=1704153600000,
         )
+
+
+def test_bybit_parser_accepts_zero_size_and_zero_home_notional_from_official_source() -> None:
+    events = parse_bybit_spot_trade_csv(
+        csv_content=_csv_payload(
+            trd_match_id='82c4f9a7-00e7-5c4b-b4bb-1159ae58b81f',
+            timestamp_seconds='1594115944.4363',
+            size='0.0',
+            price='9221.0',
+            gross_value='10000.0',
+            home_notional='0.0',
+            foreign_notional='0.0001',
+            side='Sell',
+            tick_direction='ZeroMinusTick',
+        ),
+        date_str='2020-07-07',
+        day_start_ts_utc_ms=1594080000000,
+        day_end_ts_utc_ms=1594166400000,
+    )
+
+    assert len(events) == 1
+    assert events[0].size_text == '0.0'
+    assert events[0].home_notional_text == '0.0'
+    assert events[0].quote_quantity_text == '0.0001'
 
 
 class _RecordingClient:

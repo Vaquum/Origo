@@ -780,6 +780,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4f` Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
 - [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 - [x] `S34-C4h` Fix Bybit timestamp-order contract so Slice 34 backfill accepts non-monotonic source row timestamps while preserving schema, identity, and UTC-day validity checks.
+- [x] `S34-C4i` Fix Bybit zero-value source-row contract so official daily-file rows with `size=0` and `homeNotional=0` are accepted source-natively while negatives and empty numerics still fail loudly.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
@@ -788,7 +789,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
 - [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
 - [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
-- [ ] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
+- [x] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof

@@ -29,6 +29,7 @@ class _ExchangeIntegritySpec:
     datetime_index: int | None
     enforce_monotonic_timestamp: bool
     allow_exact_duplicate_rows_for_same_id: bool
+    allow_zero_quantity: bool
     id_ordering: ExchangeIdOrdering
     frame_columns: tuple[str, ...]
 
@@ -67,6 +68,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=None,
         enforce_monotonic_timestamp=False,
         allow_exact_duplicate_rows_for_same_id=False,
+        allow_zero_quantity=False,
         id_ordering='contiguous',
         frame_columns=(
             'trade_id',
@@ -91,6 +93,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=7,
         enforce_monotonic_timestamp=False,
         allow_exact_duplicate_rows_for_same_id=True,
+        allow_zero_quantity=False,
         id_ordering='monotonic',
         frame_columns=(
             'instrument_name',
@@ -116,6 +119,7 @@ _EXCHANGE_INTEGRITY_SPECS: dict[ExchangeDataset, _ExchangeIntegritySpec] = {
         datetime_index=8,
         enforce_monotonic_timestamp=False,
         allow_exact_duplicate_rows_for_same_id=False,
+        allow_zero_quantity=True,
         id_ordering='contiguous',
         frame_columns=(
             'symbol',
@@ -173,6 +177,33 @@ def _expect_positive_number(*, value: Any, label: str) -> float:
         raise ValueError(
             f'Exchange integrity anomaly check failed for {label}: '
             f'expected positive number, got={numeric_value}'
+        )
+    return numeric_value
+
+
+def _expect_non_negative_number(*, value: Any, label: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f'Exchange integrity schema/type check failed for {label}')
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized == '':
+            raise ValueError(
+                f'Exchange integrity schema/type check failed for {label}'
+            )
+        try:
+            numeric_value = float(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                f'Exchange integrity schema/type check failed for {label}'
+            ) from exc
+    elif isinstance(value, (int, float)):
+        numeric_value = float(value)
+    else:
+        raise ValueError(f'Exchange integrity schema/type check failed for {label}')
+    if numeric_value < 0:
+        raise ValueError(
+            f'Exchange integrity anomaly check failed for {label}: '
+            f'expected non-negative number, got={numeric_value}'
         )
     return numeric_value
 
@@ -298,10 +329,16 @@ def run_exchange_integrity_suite_rows(
         )
         anomaly_checks_performed += 1
 
-        _expect_positive_number(
-            value=row[spec.quantity_index],
-            label=f'{dataset}.row[{row_number}].quantity',
-        )
+        if spec.allow_zero_quantity:
+            _expect_non_negative_number(
+                value=row[spec.quantity_index],
+                label=f'{dataset}.row[{row_number}].quantity',
+            )
+        else:
+            _expect_positive_number(
+                value=row[spec.quantity_index],
+                label=f'{dataset}.row[{row_number}].quantity',
+            )
         anomaly_checks_performed += 1
 
         if spec.quote_quantity_index is not None:

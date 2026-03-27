@@ -276,7 +276,9 @@ def _load_ambiguous_height_range_partition_ids_or_raise(
             'Bitcoin height-range planner requires height_range partition scheme, '
             f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
         )
-    rows = client.execute(
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             event_partitions.partition_id
@@ -306,6 +308,7 @@ def _load_ambiguous_height_range_partition_ids_or_raise(
             'stream_id': contract.stream_id,
             'terminal_states': _TERMINAL_PARTITION_STATES,
         },
+        ),
     )
     normalized: list[str] = []
     for row in rows:
@@ -322,7 +325,9 @@ def _load_terminal_height_range_partition_ids_or_raise(
     dataset: S34BackfillDataset,
 ) -> tuple[str, ...]:
     contract = get_s34_dataset_contract(dataset)
-    rows = client.execute(
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT partition_id
         FROM
@@ -343,6 +348,7 @@ def _load_terminal_height_range_partition_ids_or_raise(
             'stream_id': contract.stream_id,
             'terminal_states': _TERMINAL_PARTITION_STATES,
         },
+        ),
     )
     normalized: list[str] = []
     for row in rows:

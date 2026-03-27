@@ -8,6 +8,8 @@ import origo_control_plane.s34_exchange_backfill_runner as backfill_runner
 import pytest
 import yaml
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 class _FakeClickHouseClient:
     def __init__(self, **_: Any) -> None:
@@ -229,7 +231,7 @@ def test_s34_exchange_backfill_runner_rejects_okx_concurrency_above_source_safe_
 
 def test_dagster_yaml_enforces_okx_dataset_run_queue_limit() -> None:
     dagster_config = yaml.safe_load(
-        Path('control-plane/dagster.yaml').read_text(encoding='utf-8')
+        (_REPO_ROOT / 'control-plane' / 'dagster.yaml').read_text(encoding='utf-8')
     )
     run_queue = cast(dict[str, Any], dagster_config['run_queue'])
     tag_limits = cast(list[dict[str, Any]], run_queue['tag_concurrency_limits'])

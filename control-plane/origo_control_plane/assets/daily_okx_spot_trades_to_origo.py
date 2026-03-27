@@ -27,7 +27,6 @@ from origo_control_plane.utils.okx_aligned_projector import (
 )
 from origo_control_plane.utils.okx_canonical_event_ingest import (
     build_okx_partition_source_proof,
-    deduplicate_okx_exact_duplicate_events_or_raise,
     parse_okx_spot_trade_csv,
     write_okx_spot_trades_to_canonical,
 )
@@ -245,14 +244,6 @@ def insert_daily_okx_spot_trades_to_origo(
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
-    deduplication = deduplicate_okx_exact_duplicate_events_or_raise(events)
-    if deduplication.exact_duplicate_row_count > 0:
-        context.log.info(
-            'OKX exact duplicate source rows collapsed before proof/canonical write: '
-            f'raw_row_count={deduplication.raw_row_count} '
-            f'deduplicated_exact_duplicate_rows={deduplication.exact_duplicate_row_count}'
-        )
-    events = deduplication.events
 
     client: ClickhouseClient | None = None
     try:

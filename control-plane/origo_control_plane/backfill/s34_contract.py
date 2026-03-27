@@ -44,6 +44,7 @@ class S34DatasetBackfillContract:
     earliest_height: int | None
     offset_ordering: S34OffsetOrdering
     aligned_capable: bool
+    max_concurrent_partition_runs: int | None
 
 
 _S34_EXPECTED_DATASET_ORDER: Final[tuple[S34BackfillDataset, ...]] = (
@@ -73,6 +74,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=20,
     ),
     S34DatasetBackfillContract(
         dataset='okx_spot_trades',
@@ -85,6 +87,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='numeric_monotonic',
         aligned_capable=True,
+        max_concurrent_partition_runs=1,
     ),
     S34DatasetBackfillContract(
         dataset='bybit_spot_trades',
@@ -97,6 +100,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
+        max_concurrent_partition_runs=20,
     ),
     S34DatasetBackfillContract(
         dataset='etf_daily_metrics',
@@ -109,6 +113,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='fred_series_metrics',
@@ -121,6 +126,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_headers',
@@ -133,6 +139,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_transactions',
@@ -145,6 +152,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='lexicographic',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_mempool_state',
@@ -157,6 +165,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_fee_totals',
@@ -169,6 +178,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_block_subsidy_schedule',
@@ -181,6 +191,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_network_hashrate_estimate',
@@ -193,6 +204,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
     S34DatasetBackfillContract(
         dataset='bitcoin_circulating_supply',
@@ -205,6 +217,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=0,
         offset_ordering='numeric',
         aligned_capable=True,
+        max_concurrent_partition_runs=None,
     ),
 )
 
@@ -279,4 +292,16 @@ def assert_s34_backfill_contract_consistency_or_raise() -> None:
                 raise RuntimeError(
                     'S34 height_range contract earliest_height must be >= 0 for '
                     f'dataset={contract.dataset}'
+                )
+        if contract.phase in {'exchange_primary', 'exchange_parallel'}:
+            if contract.max_concurrent_partition_runs is None:
+                raise RuntimeError(
+                    'S34 exchange dataset contract must define '
+                    'max_concurrent_partition_runs for '
+                    f'dataset={contract.dataset}'
+                )
+            if contract.max_concurrent_partition_runs <= 0:
+                raise RuntimeError(
+                    'S34 exchange dataset max_concurrent_partition_runs must be > 0 '
+                    f'for dataset={contract.dataset}'
                 )

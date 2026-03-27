@@ -775,26 +775,30 @@ Every slice must pass:
    1. Binance `trade_id` is numeric contiguous.
    2. OKX `trade_id` is numeric monotonic but not contiguous.
    3. Bybit trade identity is ordered lexicographically by source event key.
-16. Backfill resume and promotion rules are proof-driven:
+16. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
+   1. OKX partition execution must respect an explicit source-safe run concurrency for the download-link endpoint.
+   2. Source-safe concurrency must be enforced by runtime contract or Dagster queue controls, not by operator memory.
+   3. Source-rate-limit breaches must fail loudly and stop clean recovery at the first missing partition; no silent skip or silent concurrency clamp is allowed.
+17. Backfill resume and promotion rules are proof-driven:
    1. resume truth comes from terminal partition proof state, not file state and not bare cursor max
    2. projection rebuild may consume only terminally proved partitions
    3. serving promotion requires native and aligned watermarks to exactly match the proved canonical boundary
-17. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
+18. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
    1. reconcile re-reads the first-party source for the partition
    2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
    3. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
-18. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
+19. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
    1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
    2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
    3. `ORIGO_S34_BACKFILL_CONCURRENCY`
-19. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+20. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
    1. `native` everywhere
    2. `aligned_1s` everywhere currently aligned-capable by contract
-20. Slice closeout requires cross-surface validation:
+21. Slice closeout requires cross-surface validation:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods
-21. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
+22. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
 
 ## Slice 35 (Automated Daily Backfill Scheduling) Locked Details
 1. Objective is to make daily backfill fully automatic at configured daily run time, without manual triggering in normal operation.

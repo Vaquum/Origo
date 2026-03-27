@@ -57,7 +57,8 @@ _PATH_ENV_NAMES: tuple[str, str] = (
     'ORIGO_BACKFILL_MANIFEST_LOG_PATH',
     'ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH',
 )
-_MIN_DAILY_CONCURRENCY: int = 10
+_MIN_ENV_BACKFILL_CONCURRENCY: int = 10
+_MIN_EXPLICIT_BACKFILL_CONCURRENCY: int = 1
 _S34_BACKFILL_CONCURRENCY_ENV = 'ORIGO_S34_BACKFILL_CONCURRENCY'
 _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
 _RUN_POLL_INTERVAL_SECONDS = 2.0
@@ -296,9 +297,9 @@ def _load_env_backfill_concurrency_or_raise() -> int:
         raise RuntimeError(
             f'{_S34_BACKFILL_CONCURRENCY_ENV} must be integer, got {raw!r}'
         ) from exc
-    if concurrency < _MIN_DAILY_CONCURRENCY:
+    if concurrency < _MIN_ENV_BACKFILL_CONCURRENCY:
         raise RuntimeError(
-            f'{_S34_BACKFILL_CONCURRENCY_ENV} must be >= {_MIN_DAILY_CONCURRENCY}, '
+            f'{_S34_BACKFILL_CONCURRENCY_ENV} must be >= {_MIN_ENV_BACKFILL_CONCURRENCY}, '
             f'got {concurrency}'
         )
     return concurrency
@@ -306,6 +307,29 @@ def _load_env_backfill_concurrency_or_raise() -> int:
 
 def _default_run_id(dataset: str) -> str:
     return f's34-backfill-{dataset}-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
+
+
+def _assert_requested_concurrency_allowed_or_raise(
+    *,
+    dataset: S34BackfillDataset,
+    concurrency: int,
+) -> None:
+    contract = get_s34_dataset_contract(dataset)
+    if concurrency < _MIN_EXPLICIT_BACKFILL_CONCURRENCY:
+        raise RuntimeError(
+            f'--concurrency must be >= {_MIN_EXPLICIT_BACKFILL_CONCURRENCY}, '
+            f'got {concurrency}'
+        )
+    max_concurrent_partition_runs = contract.max_concurrent_partition_runs
+    if (
+        max_concurrent_partition_runs is not None
+        and concurrency > max_concurrent_partition_runs
+    ):
+        raise RuntimeError(
+            'Requested backfill concurrency exceeds source-safe partition-run limit: '
+            f'dataset={dataset} requested={concurrency} '
+            f'source_safe_limit={max_concurrent_partition_runs}'
+        )
 
 
 def _require_dagster_home_or_raise() -> str:
@@ -466,10 +490,10 @@ def run_exchange_backfill(
         )
     if max_partitions is not None and max_partitions <= 0:
         raise RuntimeError('--max-partitions must be > 0 when set')
-    if concurrency < _MIN_DAILY_CONCURRENCY:
-        raise RuntimeError(
-            f'--concurrency must be >= {_MIN_DAILY_CONCURRENCY} for daily backfill'
-        )
+    _assert_requested_concurrency_allowed_or_raise(
+        dataset=dataset,
+        concurrency=concurrency,
+    )
     normalized_projection_mode = _normalize_projection_mode_or_raise(projection_mode)
     normalized_runtime_audit_mode = _normalize_runtime_audit_mode_or_raise(
         runtime_audit_mode

@@ -286,7 +286,7 @@ def test_bybit_spot_trades_integrity_fails_on_invalid_side() -> None:
         run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
 
 
-def test_bybit_spot_trades_integrity_fails_on_non_monotonic_timestamp() -> None:
+def test_bybit_spot_trades_integrity_allows_non_monotonic_timestamp_order() -> None:
     rows = [
         (
             'BTCUSDT',
@@ -319,5 +319,8 @@ def test_bybit_spot_trades_integrity_fails_on_non_monotonic_timestamp() -> None:
             42.325,
         ),
     ]
-    with pytest.raises(ValueError, match='monotonic-time check failed'):
-        run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
+    report = run_exchange_integrity_suite_rows(dataset='bybit_spot_trades', rows=rows)
+    assert report.rows_checked == 2
+    assert report.sequence_gap_count == 0
+    assert report.min_id == 1
+    assert report.max_id == 2

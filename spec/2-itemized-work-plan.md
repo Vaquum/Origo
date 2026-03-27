@@ -271,7 +271,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Guardrails
 - [x] `S11-G1` Add rights/legal classification artifacts for Bybit serving/export decisions.
-- [x] `S11-G2` Apply exchange integrity suite profile for Bybit dataset (schema/type, monotonic-time and uniqueness checks, anomaly checks).
+- [x] `S11-G2` Apply exchange integrity suite profile for Bybit dataset (schema/type, uniqueness checks, UTC-day validity, and anomaly checks).
 - [x] `S11-G3` Apply aligned-mode guardrails to Bybit paths (strict/warnings/freshness/rights+audit parity with existing aligned sources).
 - [x] `S11-G4` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete contracts/operations notes).
 - [x] `S11-G5` User docs closeout for slice (`docs/`, full reference + taxonomy updates).
@@ -779,6 +779,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
 - [x] `S34-C4f` Empirically prove source-safe max concurrency for OKX and Bybit against real source fetch paths and lock the contracts to the highest passing ceilings.
 - [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
+- [x] `S34-C4h` Fix Bybit timestamp-order contract so Slice 34 backfill accepts non-monotonic source row timestamps while preserving schema, identity, and UTC-day validity checks.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
@@ -2129,63 +2130,67 @@ Constraints: probe real source paths only, no fake dry-runs, no silent acceptanc
 Action: Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 Done looks like: OKX link resolution is controlled by an explicit paced source gate derived from live probe evidence, partition execution no longer relies on concurrency=1 as a proxy for rate safety, and the contract/test/docs reflect the true source constraint.
 Constraints: no silent sleeps hidden in operators, no downgrade of fail-loud 429 handling, and no contract claim without live probe evidence.
-22. `S34-05`
+22. `S34-04h`
+Action: Fix Bybit timestamp-order contract for Slice 34 backfill.
+Done looks like: Bybit backfill and integrity enforcement accept non-monotonic source row timestamps inside a valid UTC day while preserving schema/type checks, identity checks, and all existing fail-loud behavior unrelated to timestamp ordering.
+Constraints: no weakening of source-identity proof, no silent timestamp normalization or reordering in canonical ingest, and no change to UTC-day boundary validation.
+23. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-23. `S34-05a`
+24. `S34-05a`
 Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
 Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.
-24. `S34-06`
+25. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-25. `S34-07`
+26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-24. `S34-07a`
+27. `S34-07a`
 Action: Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 Done looks like: height-based Bitcoin assets read `start_height` / `end_height` from explicit run tags, reject missing/invalid ranges, and no longer take per-run backfill boundaries from static env.
 Constraints: no fallback to env for asset run-window selection; non-height datasets remain out of scope.
-25. `S34-07b`
+28. `S34-07b`
 Action: Convert Bitcoin chain datasets to true `height_range` partition ids and make the mempool partition model explicitly daily/time-native.
 Done looks like: the six chain-derived Bitcoin datasets stamp canonical `partition_id` by zero-padded `height_range`, proof fixtures use the same contract, and `bitcoin_mempool_state` is explicitly modeled as daily in the Slice-34 contract instead of being implicitly forced into height ranges.
 Constraints: no synthetic “daily chain” fallback; mempool remains a separate time-native partition model.
-26. `S34-07c`
+29. `S34-07c`
 Action: Integrate all Bitcoin assets into the Slice-34 proof state machine.
 Done looks like: every Bitcoin asset records source manifest and partition-state transitions in ClickHouse, uses explicit source proof before canonical write, supports reconcile proof-only fast path where applicable, and returns terminal proof metadata in its result contract.
 Constraints: no direct canonical-write bypass; no silent divergence between chain and mempool proof semantics.
-27. `S34-07d`
+30. `S34-07d`
 Action: Build repo-native Bitcoin backfill/controller path for split partition models.
 Done looks like: one repo-native controller/runner launches Bitcoin chain jobs by explicit height-range batches, treats `bitcoin_mempool_state` as a separate daily snapshot path, fails loudly for unsupported historical mempool replay, derives resume truth from ClickHouse proof state, and fails loudly if any dataset is sent through the wrong planner or if a batch does not end in clean proof state.
 Constraints: Dagster execution only; no direct asset invocation, no mixed planner fallback, and no hidden env-driven batch boundary selection.
-28. `S34-07e`
+31. `S34-07e`
 Action: Formalize mempool capture-boundary contract and fail-loud serving behavior.
 Done looks like: the system records and exposes the first captured mempool snapshot boundary from the Origo-controlled node runtime, historical/native/aligned requests before that boundary fail loudly, and docs/specs state explicitly that blockchain history does not reconstruct historical mempool state.
 Constraints: no synthetic mempool reconstruction, no silent truncation to available range, and no fallback to block-confirmed transaction history.
-29. `S34-08`
+32. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-30. `S34-09`
+33. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-31. `S34-10`
+34. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-32. `S34-10a`
+35. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-33. `S34-11`
+36. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.
-34. `S34-11a`
+37. `S34-11a`
 Action: Build Slice 34 closeout-prep reporting from authoritative backfill proof/manifests.
 Done looks like: one deterministic prep tool can summarize per-dataset proof coverage, manifest evidence, and remaining closeout gaps straight from ClickHouse/live manifest artifacts without hand-editing.
 Constraints: prep/reporting only; do not mark Slice 34 closed and do not create fake final artifacts.

@@ -242,20 +242,17 @@ def insert_daily_okx_spot_trades_to_origo(
                 canonical_proof=current_canonical_proof,
             )
         if reconcile_existing_canonical_rows and current_canonical_matches_source:
+            source_artifact_identity = json.loads(source_proof.source_artifact_identity_json)
             write_summary = _build_reconcile_existing_partition_summary(
                 source_row_count=source_proof.source_row_count,
                 raw_row_count=int(
-                    source_proof.source_artifact_identity_json
-                    and json.loads(source_proof.source_artifact_identity_json).get(
+                    source_artifact_identity.get(
                         'raw_csv_row_count',
                         source_proof.source_row_count,
                     )
                 ),
                 deduplicated_exact_duplicate_rows=int(
-                    json.loads(source_proof.source_artifact_identity_json).get(
-                        'deduplicated_exact_duplicate_rows',
-                        0,
-                    )
+                    source_artifact_identity.get('deduplicated_exact_duplicate_rows', 0)
                 ),
             )
             context.log.info(

@@ -781,8 +781,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 - [x] `S34-C4h` Fix Bybit timestamp-order contract so Slice 34 backfill accepts non-monotonic source row timestamps while preserving schema, identity, and UTC-day validity checks.
 - [x] `S34-C4i` Fix Bybit zero-value source-row contract so official daily-file rows with `size=0` and `homeNotional=0` are accepted source-natively while negatives and empty numerics still fail loudly.
-- [ ] `S34-C4j` Fix Bybit repeated-`trdMatchID` proof contract so historical files with repeated raw offsets prove against full identity-digest equality instead of failing on duplicate-offset rejection.
-- [ ] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
+- [x] `S34-C4j` Fix Bybit repeated-`trdMatchID` proof contract so historical files with repeated raw offsets prove against full identity-digest equality instead of failing on duplicate-offset rejection.
+- [x] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.

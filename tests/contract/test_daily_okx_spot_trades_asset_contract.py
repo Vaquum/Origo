@@ -162,9 +162,10 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
         ),
     )
     monkeypatch.setattr(module, 'apply_runtime_audit_mode_or_raise', lambda **_kwargs: None)
+    monkeypatch.setattr(module, 'wait_for_source_rate_gate_or_raise', lambda **_kwargs: None)
     monkeypatch.setattr(
         module,
-        '_resolve_okx_daily_file_url',
+        'resolve_okx_daily_file_url_or_raise',
         lambda *, date_str: (f'BTC-USDT-trades-{date_str}.zip', 'https://example.test/okx.zip'),
     )
     monkeypatch.setattr(

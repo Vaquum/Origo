@@ -97,7 +97,7 @@ class OkxRateSearchResult:
     max_interval_seconds: float
     interval_step_seconds: float
     minimal_passing_interval_seconds: float
-    maximal_safe_requests_per_second: float
+    maximal_safe_requests_per_second: float | None
     level_results: list[ProbeRateLevelResult]
 
 
@@ -524,9 +524,7 @@ def _search_okx_min_safe_interval_or_raise(
         level_results.append(level_result)
         if level_result.passed:
             requests_per_second = (
-                float('inf')
-                if interval_seconds == 0
-                else round(1.0 / interval_seconds, 6)
+                None if interval_seconds == 0 else round(1.0 / interval_seconds, 6)
             )
             return OkxRateSearchResult(
                 dataset='okx_spot_trades',

@@ -68,6 +68,39 @@ def _stream_key(source_id: str, stream_id: str) -> tuple[str, str]:
     return (source_id, stream_id)
 
 
+def _sql_string_literal_or_raise(value: str) -> str:
+    if value == '':
+        raise RuntimeError('S34 stream filter cannot contain empty SQL literal values')
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _render_s34_stream_pair_in_clause_or_raise(
+    *,
+    source_field: str,
+    stream_field: str,
+) -> str:
+    stream_pairs = sorted(
+        {
+            (contract.source_id, contract.stream_id)
+            for contract in list_s34_dataset_contracts()
+        }
+    )
+    if stream_pairs == []:
+        raise RuntimeError('S34 closeout prep requires at least one configured stream pair')
+    rendered_pairs = ', '.join(
+        (
+            '('
+            f'{_sql_string_literal_or_raise(source_id)}, '
+            f'{_sql_string_literal_or_raise(stream_id)}'
+            ')'
+        )
+        for source_id, stream_id in stream_pairs
+    )
+    return (
+        f'({source_field}, {stream_field}) IN ({rendered_pairs})'
+    )
+
+
 def _sort_partition_ids_or_raise(
     contract: S34DatasetBackfillContract,
     partition_ids: list[str],
@@ -159,7 +192,17 @@ def _fetch_latest_source_manifests_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str, str], SourceManifestState]:
-    rows = client.execute(
+    stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='manifests.source_id',
+        stream_field='manifests.stream_id',
+    )
+    latest_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             manifests.source_id,
@@ -186,14 +229,17 @@ def _fetch_latest_source_manifests_or_raise(
                 partition_id,
                 max(manifest_revision) AS manifest_revision
             FROM {database}.canonical_backfill_source_manifests
+            WHERE {latest_stream_filter}
             GROUP BY source_id, stream_id, partition_id
         ) AS latest
         ON manifests.source_id = latest.source_id
         AND manifests.stream_id = latest.stream_id
         AND manifests.partition_id = latest.partition_id
         AND manifests.manifest_revision = latest.manifest_revision
+        WHERE {stream_filter}
         ORDER BY manifests.source_id, manifests.stream_id, manifests.partition_id
         '''
+        ),
     )
     manifests: dict[tuple[str, str, str], SourceManifestState] = {}
     for row in rows:
@@ -225,7 +271,17 @@ def _fetch_latest_partition_proofs_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str, str], PartitionProofState]:
-    rows = client.execute(
+    stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='proofs.source_id',
+        stream_field='proofs.stream_id',
+    )
+    latest_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             proofs.source_id,
@@ -260,14 +316,17 @@ def _fetch_latest_partition_proofs_or_raise(
                 partition_id,
                 max(proof_revision) AS proof_revision
             FROM {database}.canonical_backfill_partition_proofs
+            WHERE {latest_stream_filter}
             GROUP BY source_id, stream_id, partition_id
         ) AS latest
         ON proofs.source_id = latest.source_id
         AND proofs.stream_id = latest.stream_id
         AND proofs.partition_id = latest.partition_id
         AND proofs.proof_revision = latest.proof_revision
+        WHERE {stream_filter}
         ORDER BY proofs.source_id, proofs.stream_id, proofs.partition_id
         '''
+        ),
     )
     proofs: dict[tuple[str, str, str], PartitionProofState] = {}
     for row in rows:
@@ -307,7 +366,17 @@ def _fetch_latest_quarantines_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str, str], QuarantineState]:
-    rows = client.execute(
+    stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='quarantines.source_id',
+        stream_field='quarantines.stream_id',
+    )
+    latest_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             quarantines.source_id,
@@ -328,14 +397,17 @@ def _fetch_latest_quarantines_or_raise(
                 partition_id,
                 max(quarantine_revision) AS quarantine_revision
             FROM {database}.canonical_quarantined_streams
+            WHERE {latest_stream_filter}
             GROUP BY source_id, stream_id, partition_id
         ) AS latest
         ON quarantines.source_id = latest.source_id
         AND quarantines.stream_id = latest.stream_id
         AND quarantines.partition_id = latest.partition_id
         AND quarantines.quarantine_revision = latest.quarantine_revision
+        WHERE {stream_filter}
         ORDER BY quarantines.source_id, quarantines.stream_id, quarantines.partition_id
         '''
+        ),
     )
     quarantines: dict[tuple[str, str, str], QuarantineState] = {}
     for row in rows:
@@ -361,7 +433,17 @@ def _fetch_latest_range_proofs_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str], list[RangeProofState]]:
-    rows = client.execute(
+    stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='proofs.source_id',
+        stream_field='proofs.stream_id',
+    )
+    latest_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             proofs.source_id,
@@ -385,6 +467,7 @@ def _fetch_latest_range_proofs_or_raise(
                 range_end_partition_id,
                 max(range_revision) AS range_revision
             FROM {database}.canonical_backfill_range_proofs
+            WHERE {latest_stream_filter}
             GROUP BY source_id, stream_id, range_start_partition_id, range_end_partition_id
         ) AS latest
         ON proofs.source_id = latest.source_id
@@ -392,8 +475,10 @@ def _fetch_latest_range_proofs_or_raise(
         AND proofs.range_start_partition_id = latest.range_start_partition_id
         AND proofs.range_end_partition_id = latest.range_end_partition_id
         AND proofs.range_revision = latest.range_revision
+        WHERE {stream_filter}
         ORDER BY proofs.source_id, proofs.stream_id, proofs.range_start_partition_id, proofs.range_end_partition_id
         '''
+        ),
     )
     grouped: dict[tuple[str, str], list[RangeProofState]] = defaultdict(list)
     for row in rows:
@@ -420,7 +505,17 @@ def _fetch_ambiguous_canonical_partition_ids_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str], list[str]]:
-    rows = client.execute(
+    event_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    proof_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='source_id',
+        stream_field='stream_id',
+    )
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             event_partitions.source_id,
@@ -430,6 +525,7 @@ def _fetch_ambiguous_canonical_partition_ids_or_raise(
         (
             SELECT DISTINCT source_id, stream_id, partition_id
             FROM {database}.canonical_event_log
+            WHERE {event_stream_filter}
         ) AS event_partitions
         LEFT JOIN
         (
@@ -439,6 +535,7 @@ def _fetch_ambiguous_canonical_partition_ids_or_raise(
                 partition_id,
                 argMax(state, proof_revision) AS state
             FROM {database}.canonical_backfill_partition_proofs
+            WHERE {proof_stream_filter}
             GROUP BY source_id, stream_id, partition_id
         ) AS proofs
         ON event_partitions.source_id = proofs.source_id
@@ -448,6 +545,7 @@ def _fetch_ambiguous_canonical_partition_ids_or_raise(
         ORDER BY event_partitions.source_id, event_partitions.stream_id, event_partitions.partition_id
         ''',
         {'terminal_states': tuple(sorted(_TERMINAL_PROOF_STATES))},
+        ),
     )
     grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
     for row in rows:

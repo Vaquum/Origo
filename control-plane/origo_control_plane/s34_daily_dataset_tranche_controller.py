@@ -12,6 +12,7 @@ from origo_control_plane.backfill import (
     ProjectionMode,
     RuntimeAuditMode,
     S34BackfillDataset,
+    S34DatasetBackfillContract,
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
     list_s34_dataset_contracts,
@@ -84,7 +85,9 @@ def _load_ambiguous_daily_partition_ids_or_raise(
             'Daily tranche controller requires daily partition scheme, '
             f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
         )
-    rows = client.execute(
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT
             event_partitions.partition_id
@@ -114,6 +117,7 @@ def _load_ambiguous_daily_partition_ids_or_raise(
             'stream_id': contract.stream_id,
             'terminal_states': _TERMINAL_PARTITION_STATES,
         },
+        ),
     )
     return tuple(str(row[0]) for row in rows)
 
@@ -142,6 +146,23 @@ def _parse_runtime_audit_mode_or_raise(value: str) -> RuntimeAuditMode:
     return cast(RuntimeAuditMode, normalized)
 
 
+def _require_exchange_daily_dataset_contract_or_raise(
+    dataset: S34BackfillDataset,
+) -> S34DatasetBackfillContract:
+    contract = get_s34_dataset_contract(dataset)
+    if contract.partition_scheme != 'daily':
+        raise RuntimeError(
+            'Daily tranche controller requires daily partition scheme, '
+            f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
+        )
+    if contract.phase not in {'exchange_primary', 'exchange_parallel'}:
+        raise RuntimeError(
+            'Daily tranche controller supports exchange datasets only, '
+            f'got dataset={dataset} phase={contract.phase}'
+        )
+    return contract
+
+
 def plan_next_daily_batch_or_raise(
     *,
     dataset: S34BackfillDataset,
@@ -154,11 +175,12 @@ def plan_next_daily_batch_or_raise(
     assert_s34_backfill_contract_consistency_or_raise()
     if batch_size_days <= 0:
         raise RuntimeError(f'batch_size_days must be > 0, got {batch_size_days}')
-    contract = get_s34_dataset_contract(dataset)
-    if contract.partition_scheme != 'daily':
+    contract = _require_exchange_daily_dataset_contract_or_raise(dataset)
+
+    if (client is None) != (database is None):
         raise RuntimeError(
-            'Daily tranche controller requires daily partition scheme, '
-            f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
+            'plan_next_daily_batch_or_raise requires client and database to both '
+            'be provided or both be None'
         )
 
     owns_client = client is None

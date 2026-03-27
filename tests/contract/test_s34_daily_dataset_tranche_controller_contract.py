@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any
 
 import origo_control_plane.s34_daily_dataset_tranche_controller as controller
+import pytest
 
 
 class _FakeClickHouseClient:
@@ -69,6 +70,20 @@ def test_plan_next_daily_batch_falls_through_to_backfill_from_terminal_frontier(
     assert batch.partition_ids == ('2021-09-03', '2021-09-04')
     assert batch.end_date == date(2021, 9, 4)
     assert batch.run_id == 's34-tranche-okx_spot_trades-backfill-2021-09-03-2021-09-04'
+
+
+def test_plan_next_daily_batch_rejects_non_exchange_daily_dataset() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='supports exchange datasets only',
+    ):
+        controller.plan_next_daily_batch_or_raise(
+            dataset='etf_daily_metrics',
+            plan_end_date=date(2024, 1, 12),
+            batch_size_days=1,
+            client=_FakeClickHouseClient(),
+            database='origo',
+        )
 
 
 def test_daily_dataset_tranche_controller_chains_batches_until_no_remaining_work(

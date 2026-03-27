@@ -13,6 +13,7 @@ from origo_control_plane.s34_exchange_backfill_runner import (
 )
 from origo_control_plane.s34_g1_g2_closeout_prep import (
     _load_manifest_event_summary_or_raise,
+    _render_s34_stream_pair_in_clause_or_raise,
     build_s34_closeout_prep_summary,
 )
 
@@ -76,6 +77,17 @@ def test_s34_manifest_event_summary_counts_partition_and_range_events(
         ]
         == '2017-08-17'
     )
+
+
+def test_s34_closeout_stream_filter_is_limited_to_slice_34_streams() -> None:
+    clause = _render_s34_stream_pair_in_clause_or_raise(
+        source_field='proofs.source_id',
+        stream_field='proofs.stream_id',
+    )
+
+    assert "(proofs.source_id, proofs.stream_id) IN (" in clause
+    assert "'binance', 'binance_spot_trades'" in clause
+    assert "'bitcoin_core', 'bitcoin_block_headers'" in clause
 
 
 def test_s34_closeout_prep_summary_surfaces_remaining_gaps_and_terminal_evidence() -> None:

@@ -11,6 +11,7 @@ from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
 from origo.events import CanonicalBackfillStateStore
+from origo.events.backfill_state import canonical_proof_matches_source_proof
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
@@ -77,6 +78,21 @@ def _resolve_fast_insert_mode_or_raise(
             f'found active quarantine for partition_id={partition_id}'
         )
     return 'assume_new_partition'
+
+
+def _build_reconcile_existing_partition_summary(
+    *,
+    source_row_count: int,
+    raw_row_count: int,
+    deduplicated_exact_duplicate_rows: int,
+) -> dict[str, int]:
+    return {
+        'rows_processed': source_row_count,
+        'rows_inserted': 0,
+        'rows_duplicate': source_row_count,
+        'raw_row_count': raw_row_count,
+        'deduplicated_exact_duplicate_rows': deduplicated_exact_duplicate_rows,
+    }
 
 
 @asset(
@@ -197,7 +213,7 @@ def insert_daily_okx_spot_trades_to_origo(
         execution_assessment = state_store.assess_partition_execution(
             stream_key=source_proof.stream_key
         )
-        prove_existing_canonical_without_write = (
+        reconcile_existing_canonical_rows = (
             runtime_contract.execution_mode == 'reconcile'
             and execution_assessment.canonical_row_count > 0
         )
@@ -215,15 +231,35 @@ def insert_daily_okx_spot_trades_to_origo(
             recorded_at_utc=source_manifested_at_utc,
         )
 
-        if prove_existing_canonical_without_write:
-            write_summary = {
-                'rows_processed': source_proof.source_row_count,
-                'rows_inserted': 0,
-                'rows_duplicate': source_proof.source_row_count,
-            }
+        current_canonical_matches_source = False
+        if reconcile_existing_canonical_rows:
+            current_canonical_proof = state_store.compute_canonical_partition_proof_or_raise(
+                source_proof=source_proof
+            )
+            current_canonical_matches_source = canonical_proof_matches_source_proof(
+                source_proof=source_proof,
+                canonical_proof=current_canonical_proof,
+            )
+        if reconcile_existing_canonical_rows and current_canonical_matches_source:
+            write_summary = _build_reconcile_existing_partition_summary(
+                source_row_count=source_proof.source_row_count,
+                raw_row_count=int(
+                    source_proof.source_artifact_identity_json
+                    and json.loads(source_proof.source_artifact_identity_json).get(
+                        'raw_csv_row_count',
+                        source_proof.source_row_count,
+                    )
+                ),
+                deduplicated_exact_duplicate_rows=int(
+                    json.loads(source_proof.source_artifact_identity_json).get(
+                        'deduplicated_exact_duplicate_rows',
+                        0,
+                    )
+                ),
+            )
             context.log.info(
-                'Reconcile detected existing canonical rows; proving partition '
-                'directly without duplicate-writer replay'
+                'Reconcile detected existing canonical rows that already match '
+                'the current source proof; proving partition without writer replay'
             )
             proof_reason = 'reconcile_existing_canonical_rows_detected'
             write_path = 'reconcile_proof_only'
@@ -245,8 +281,16 @@ def insert_daily_okx_spot_trades_to_origo(
                 canonical_partition_id=partition_date_str,
                 fast_insert_mode=fast_insert_mode,
             )
-            proof_reason = 'canonical_write_completed'
-            write_path = 'writer'
+            if reconcile_existing_canonical_rows:
+                context.log.info(
+                    'Reconcile detected mismatched existing canonical rows; '
+                    'running idempotent writer repair before re-proof'
+                )
+                proof_reason = 'reconcile_writer_repair_completed'
+                write_path = 'reconcile_writer_repair'
+            else:
+                proof_reason = 'canonical_write_completed'
+                write_path = 'writer'
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])

@@ -54,5 +54,6 @@ def test_bybit_partition_source_proof_uses_trd_match_id_lexicographic_identity()
     )
 
     assert proof.offset_ordering == 'lexicographic'
+    assert proof.allow_duplicate_offsets is True
     assert proof.first_offset_or_equivalent == '00000000-0000-0000-0000-000000000001'
     assert proof.last_offset_or_equivalent == 'ffffffff-ffff-ffff-ffff-ffffffffffff'

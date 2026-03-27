@@ -121,6 +121,7 @@ def _source_manifest_id(*, source_proof: PartitionSourceProof) -> UUID:
                 source_proof.source_offset_digest_sha256,
                 source_proof.source_identity_digest_sha256,
                 'true' if source_proof.allow_empty_partition else 'false',
+                'true' if source_proof.allow_duplicate_offsets else 'false',
             )
         ),
     )
@@ -205,6 +206,35 @@ def _partition_proof_digest(
     ).hexdigest()
 
 
+def canonical_proof_matches_source_proof(
+    *,
+    source_proof: PartitionSourceProof,
+    canonical_proof: PartitionCanonicalProof,
+) -> bool:
+    if source_proof.source_row_count != canonical_proof.canonical_row_count:
+        return False
+    if (
+        source_proof.source_identity_digest_sha256
+        != canonical_proof.canonical_identity_digest_sha256
+    ):
+        return False
+    if (
+        source_proof.first_offset_or_equivalent
+        != canonical_proof.first_offset_or_equivalent
+    ):
+        return False
+    if (
+        source_proof.last_offset_or_equivalent
+        != canonical_proof.last_offset_or_equivalent
+    ):
+        return False
+    if canonical_proof.gap_count > 0:
+        return False
+    if canonical_proof.duplicate_count > 0 and not source_proof.allow_duplicate_offsets:
+        return False
+    return True
+
+
 def _range_proof_id(
     *,
     source_id: str,
@@ -240,6 +270,7 @@ class PartitionSourceProof:
     source_offset_digest_sha256: str
     source_identity_digest_sha256: str
     allow_empty_partition: bool
+    allow_duplicate_offsets: bool
 
 
 @dataclass(frozen=True)
@@ -354,6 +385,7 @@ def build_partition_source_proof_from_precomputed(
     source_offset_digest_sha256: str,
     source_identity_digest_sha256: str,
     allow_empty_partition: bool,
+    allow_duplicate_offsets: bool,
 ) -> PartitionSourceProof:
     artifact_identity_json = _canonical_json(source_artifact_identity)
     if source_row_count < 0:
@@ -380,6 +412,7 @@ def build_partition_source_proof_from_precomputed(
             source_offset_digest_sha256=_EMPTY_SHA256,
             source_identity_digest_sha256=_EMPTY_SHA256,
             allow_empty_partition=True,
+            allow_duplicate_offsets=allow_duplicate_offsets,
         )
     normalized_first_offset = _require_non_empty(
         first_offset_or_equivalent or '',
@@ -407,6 +440,7 @@ def build_partition_source_proof_from_precomputed(
         source_offset_digest_sha256=normalized_source_offset_digest,
         source_identity_digest_sha256=normalized_source_identity_digest,
         allow_empty_partition=allow_empty_partition,
+        allow_duplicate_offsets=allow_duplicate_offsets,
     )
 
 
@@ -417,6 +451,7 @@ def build_partition_source_proof(
     source_artifact_identity: dict[str, Any],
     materials: list[SourceIdentityMaterial],
     allow_empty_partition: bool,
+    allow_duplicate_offsets: bool,
 ) -> PartitionSourceProof:
     if materials == []:
         return build_partition_source_proof_from_precomputed(
@@ -429,6 +464,7 @@ def build_partition_source_proof(
             source_offset_digest_sha256=_EMPTY_SHA256,
             source_identity_digest_sha256=_EMPTY_SHA256,
             allow_empty_partition=allow_empty_partition,
+            allow_duplicate_offsets=allow_duplicate_offsets,
         )
 
     normalized_materials = _ordered_identity_materials_or_raise(
@@ -454,6 +490,7 @@ def build_partition_source_proof(
         source_offset_digest_sha256=_sha256_lines(offsets),
         source_identity_digest_sha256=_sha256_lines(identity_lines),
         allow_empty_partition=allow_empty_partition,
+        allow_duplicate_offsets=allow_duplicate_offsets,
     )
 
 
@@ -1459,7 +1496,10 @@ class CanonicalBackfillStateStore:
                 mismatch_reasons.append('last_offset_mismatch')
             if canonical_proof.gap_count > 0:
                 mismatch_reasons.append('gap_detected')
-            if canonical_proof.duplicate_count > 0:
+            if (
+                canonical_proof.duplicate_count > 0
+                and not source_proof.allow_duplicate_offsets
+            ):
                 mismatch_reasons.append('duplicate_offsets_detected')
             if mismatch_reasons == []:
                 state = 'proved_complete'

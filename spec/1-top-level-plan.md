@@ -774,7 +774,7 @@ Every slice must pass:
 15. Exchange offset semantics remain source-native in Slice 34 proofs:
    1. Binance `trade_id` is numeric contiguous.
    2. OKX `trade_id` is numeric monotonic but not contiguous.
-   3. Bybit trade identity is ordered lexicographically by source event key.
+   3. Bybit daily source rows are ordered lexicographically by `trdMatchID`, but historical files are not guaranteed unique by raw `trdMatchID`; Slice-34 proof for Bybit must rely on full source-vs-canonical identity digest equality rather than duplicate-offset rejection.
    4. Bybit daily source rows are not guaranteed monotonic by timestamp; integrity checks must rely on schema, identity, and UTC-day boundary validity rather than timestamp ordering.
 16. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
    1. OKX download-link resolution must respect an explicit source-safe request pace of `0.75s` between requests (approximately `1.33 requests/s`) derived from live probe evidence; partition concurrency alone is not an adequate safety model.
@@ -788,7 +788,8 @@ Every slice must pass:
 18. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
    1. reconcile re-reads the first-party source for the partition
    2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
-   3. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
+   3. reconcile must use proof-only when existing canonical rows already match the current source proof and must use writer-repair when existing canonical rows are partial or mismatched but still recoverable by idempotent replay
+   4. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
 19. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
    1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
    2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`

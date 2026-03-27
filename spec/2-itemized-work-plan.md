@@ -781,6 +781,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4g` Replace OKX partition-concurrency-only throttling with an empirically-proved source-rate gate for download-link resolution.
 - [x] `S34-C4h` Fix Bybit timestamp-order contract so Slice 34 backfill accepts non-monotonic source row timestamps while preserving schema, identity, and UTC-day validity checks.
 - [x] `S34-C4i` Fix Bybit zero-value source-row contract so official daily-file rows with `size=0` and `homeNotional=0` are accepted source-natively while negatives and empty numerics still fail loudly.
+- [ ] `S34-C4j` Fix Bybit repeated-`trdMatchID` proof contract so historical files with repeated raw offsets prove against full identity-digest equality instead of failing on duplicate-offset rejection.
+- [ ] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
@@ -2135,11 +2137,23 @@ Constraints: no silent sleeps hidden in operators, no downgrade of fail-loud 429
 Action: Fix Bybit timestamp-order contract for Slice 34 backfill.
 Done looks like: Bybit backfill and integrity enforcement accept non-monotonic source row timestamps inside a valid UTC day while preserving schema/type checks, identity checks, and all existing fail-loud behavior unrelated to timestamp ordering.
 Constraints: no weakening of source-identity proof, no silent timestamp normalization or reordering in canonical ingest, and no change to UTC-day boundary validation.
-23. `S34-05`
+23. `S34-04i`
+Action: Fix Bybit zero-value source-row contract for Slice 34 backfill.
+Done looks like: official Bybit daily-file rows with `size=0` and `homeNotional=0` are accepted source-natively while negative or empty numeric fields still fail loudly.
+Constraints: no coercion of missing values, no fallback defaults, and no weakening of source checksum or UTC-day validation.
+24. `S34-04j`
+Action: Fix Bybit repeated-`trdMatchID` proof contract for Slice 34 backfill.
+Done looks like: historical Bybit daily files can repeat raw `trdMatchID` values without forcing false quarantine, proof completion relies on source-vs-canonical identity digest equality for the repeated-offset dataset contract, and true source/canonical mismatches still fail loudly.
+Constraints: no silent row dropping, no weakening of source-vs-canonical identity proof, and no hiding of real payload drift under repeated raw offsets.
+25. `S34-04k`
+Action: Add exchange reconcile writer-repair path for poisoned partial canonical partitions.
+Done looks like: reconcile uses proof-only when existing canonical rows already match source proof, falls back to idempotent writer-repair when canonical rows are partial or mismatched, and then re-proves/quarantines deterministically.
+Constraints: no destructive cleanup, no blind rewrite, and no silent promotion of still-mismatched partitions.
+26. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-24. `S34-05a`
+27. `S34-05a`
 Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
 Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.

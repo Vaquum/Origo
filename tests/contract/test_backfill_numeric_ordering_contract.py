@@ -4,8 +4,10 @@ import hashlib
 
 from origo.events.backfill_state import (
     CanonicalBackfillStateStore,
+    PartitionCanonicalProof,
     SourceIdentityMaterial,
     build_partition_source_proof,
+    canonical_proof_matches_source_proof,
 )
 from origo.events.ingest_state import CanonicalStreamKey
 
@@ -107,6 +109,7 @@ def test_build_partition_source_proof_orders_numeric_offsets_numerically() -> No
             ),
         ],
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
 
     assert proof.first_offset_or_equivalent == '1'
@@ -148,6 +151,7 @@ def test_compute_canonical_partition_proof_orders_numeric_offsets_numerically() 
             ),
         ],
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
     store = CanonicalBackfillStateStore(
         client=_FakeCanonicalRowsClient(
@@ -202,6 +206,7 @@ def test_build_partition_source_proof_orders_numeric_monotonic_offsets_numerical
             ),
         ],
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
 
     assert proof.first_offset_or_equivalent == '1'
@@ -243,6 +248,7 @@ def test_compute_canonical_partition_proof_orders_numeric_monotonic_offsets_with
             ),
         ],
         allow_empty_partition=False,
+        allow_duplicate_offsets=False,
     )
     store = CanonicalBackfillStateStore(
         client=_FakeCanonicalRowsClient(
@@ -268,3 +274,43 @@ def test_compute_canonical_partition_proof_orders_numeric_monotonic_offsets_with
         ]
     )
     assert proof.gap_count == 0
+
+
+def test_canonical_proof_match_allows_duplicate_offsets_when_source_contract_allows_them() -> None:
+    source_proof = build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id='bybit',
+            stream_id='bybit_spot_trades',
+            partition_id='2020-11-24',
+        ),
+        offset_ordering='lexicographic',
+        source_artifact_identity={'source_file': 'BTCUSDT2020-11-24.csv.gz'},
+        materials=[
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='dup-id',
+                event_id='event-a',
+                payload_sha256_raw='sha-a',
+            ),
+            SourceIdentityMaterial(
+                source_offset_or_equivalent='dup-id',
+                event_id='event-a',
+                payload_sha256_raw='sha-a',
+            ),
+        ],
+        allow_empty_partition=False,
+        allow_duplicate_offsets=True,
+    )
+
+    assert canonical_proof_matches_source_proof(
+        source_proof=source_proof,
+        canonical_proof=PartitionCanonicalProof(
+            canonical_row_count=2,
+            canonical_unique_offset_count=1,
+            first_offset_or_equivalent='dup-id',
+            last_offset_or_equivalent='dup-id',
+            canonical_offset_digest_sha256=source_proof.source_offset_digest_sha256,
+            canonical_identity_digest_sha256=source_proof.source_identity_digest_sha256,
+            gap_count=0,
+            duplicate_count=1,
+        ),
+    )

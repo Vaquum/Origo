@@ -11,7 +11,7 @@ import requests
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 
-from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
+from origo.events import CanonicalBackfillStateStore
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
@@ -54,32 +54,26 @@ daily_partitions = DailyPartitionsDefinition(start_date='2021-09-01')
 
 def _resolve_fast_insert_mode_or_raise(
     *,
-    state_store: CanonicalBackfillStateStore,
+    latest_proof_state: str | None,
+    canonical_row_count: int,
+    active_quarantine: bool,
     partition_id: str,
     projection_mode: str,
     execution_mode: str,
 ) -> FastInsertMode:
     if projection_mode != 'deferred' or execution_mode != 'backfill':
         return 'writer'
-    assessment = state_store.assess_partition_execution(
-        stream_key=CanonicalStreamKey(
-            source_id='okx',
-            stream_id='okx_spot_trades',
-            partition_id=partition_id,
-        )
-    )
-    if assessment.latest_proof_state is not None:
+    if latest_proof_state is not None:
         raise RuntimeError(
             'Fast canonical insert requires partition with no prior proof state, '
-            f'found state={assessment.latest_proof_state} for partition_id={partition_id}'
+            f'found state={latest_proof_state} for partition_id={partition_id}'
         )
-    if assessment.canonical_row_count != 0:
+    if canonical_row_count != 0:
         raise RuntimeError(
             'Fast canonical insert requires empty canonical partition, '
-            f'found canonical_row_count={assessment.canonical_row_count} '
-            f'for partition_id={partition_id}'
+            f'found canonical_row_count={canonical_row_count} for partition_id={partition_id}'
         )
-    if assessment.active_quarantine:
+    if active_quarantine:
         raise RuntimeError(
             'Fast canonical insert requires non-quarantined partition, '
             f'found active quarantine for partition_id={partition_id}'
@@ -332,7 +326,9 @@ def insert_daily_okx_spot_trades_to_origo(
             write_path = 'reconcile_proof_only'
         else:
             fast_insert_mode = _resolve_fast_insert_mode_or_raise(
-                state_store=state_store,
+                latest_proof_state=execution_assessment.latest_proof_state,
+                canonical_row_count=execution_assessment.canonical_row_count,
+                active_quarantine=execution_assessment.active_quarantine,
                 partition_id=partition_date_str,
                 projection_mode=runtime_contract.projection_mode,
                 execution_mode=runtime_contract.execution_mode,

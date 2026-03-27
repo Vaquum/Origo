@@ -248,11 +248,11 @@ def insert_daily_okx_spot_trades_to_origo(
     deduplication = deduplicate_okx_exact_duplicate_events_or_raise(events)
     if deduplication.exact_duplicate_row_count > 0:
         context.log.info(
-            'OKX exact duplicate source rows detected and will be collapsed inside '
-            'proof/canonical write paths: '
+            'OKX exact duplicate source rows collapsed before proof/canonical write: '
             f'raw_row_count={deduplication.raw_row_count} '
             f'deduplicated_exact_duplicate_rows={deduplication.exact_duplicate_row_count}'
         )
+    events = deduplication.events
 
     client: ClickhouseClient | None = None
     try:

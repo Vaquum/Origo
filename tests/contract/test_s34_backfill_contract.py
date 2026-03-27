@@ -33,3 +33,47 @@ def test_s34_backfill_contract_is_consistent() -> None:
 def test_s34_okx_contract_uses_numeric_monotonic_ordering() -> None:
     contract = get_s34_dataset_contract('okx_spot_trades')
     assert contract.offset_ordering == 'numeric_monotonic'
+
+
+def test_s34_bitcoin_partition_scheme_split_is_explicit() -> None:
+    assert get_s34_dataset_contract('bitcoin_block_headers').partition_scheme == 'height_range'
+    assert (
+        get_s34_dataset_contract('bitcoin_block_transactions').partition_scheme
+        == 'height_range'
+    )
+    assert get_s34_dataset_contract('bitcoin_mempool_state').partition_scheme == 'daily'
+    assert (
+        get_s34_dataset_contract('bitcoin_block_fee_totals').partition_scheme
+        == 'height_range'
+    )
+    assert (
+        get_s34_dataset_contract('bitcoin_block_subsidy_schedule').partition_scheme
+        == 'height_range'
+    )
+    assert (
+        get_s34_dataset_contract('bitcoin_network_hashrate_estimate').partition_scheme
+        == 'height_range'
+    )
+    assert (
+        get_s34_dataset_contract('bitcoin_circulating_supply').partition_scheme
+        == 'height_range'
+    )
+
+
+def test_s34_bitcoin_offset_ordering_split_is_explicit() -> None:
+    assert get_s34_dataset_contract('bitcoin_block_headers').offset_ordering == 'numeric'
+    assert (
+        get_s34_dataset_contract('bitcoin_block_transactions').offset_ordering
+        == 'lexicographic'
+    )
+    assert get_s34_dataset_contract('bitcoin_mempool_state').offset_ordering == 'lexicographic'
+    assert get_s34_dataset_contract('bitcoin_block_fee_totals').offset_ordering == 'numeric'
+    assert (
+        get_s34_dataset_contract('bitcoin_block_subsidy_schedule').offset_ordering
+        == 'numeric'
+    )
+    assert (
+        get_s34_dataset_contract('bitcoin_network_hashrate_estimate').offset_ordering
+        == 'numeric'
+    )
+    assert get_s34_dataset_contract('bitcoin_circulating_supply').offset_ordering == 'numeric'

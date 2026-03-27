@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-26
-- Slice reference: S34 (`S34-C7a`, `S34-07a`)
+- Last updated: 2026-03-27
+- Slice reference: S34 (`S34-C7a`, `S34-07a`, `S34-C7b`, `S34-07b`, `S34-C7c`, `S34-07c`)
 
 ## Purpose and scope
 - Defines the explicit Dagster run-tag contract for height-based Bitcoin backfill runs in Slice 34.
@@ -14,6 +14,7 @@
   - `bitcoin_block_subsidy_schedule`
   - `bitcoin_network_hashrate_estimate`
   - `bitcoin_circulating_supply`
+- `bitcoin_mempool_state` is intentionally out of scope for this contract because it remains time-native and daily snapshot-partitioned.
 
 ## Inputs and outputs with contract shape
 - Required Dagster run tags:
@@ -39,6 +40,15 @@
 ## Source/provenance and freshness semantics
 - Height-based Bitcoin assets no longer take per-run backfill boundaries from static env.
 - Dagster run tags are now the per-run range authority for height-based Bitcoin backfill execution.
+- Height-based Bitcoin canonical events now stamp one zero-padded `height_range` `partition_id` per Dagster run window:
+  - format: `000000840000-000000840999`
+  - ordering: lexicographically sortable in the same order as numeric height windows
+- `bitcoin_mempool_state` remains time-native and keeps UTC-day snapshot partitions; it is not coerced into the height-range contract.
+- All seven Bitcoin Slice 34 assets now enter the canonical proof state machine before a partition can be treated as complete:
+  - record source manifest in ClickHouse
+  - record explicit partition-state transitions
+  - emit terminal proof or quarantine outcome
+- Reconcile mode may prove an already-written Bitcoin partition directly from source-vs-canonical evidence; it must not silently bypass proof state.
 - RPC connection/auth/network still come from env contract.
 
 ## Failure modes, warnings, and error codes
@@ -49,9 +59,13 @@
 
 ## Determinism/replay notes
 - The same run tags must produce the same requested node height window.
+- The same height window must produce the same canonical `partition_id` for all six chain-derived Bitcoin datasets.
+- Bitcoin assets must not write canonical rows without recording `source_manifested`, `canonical_written_unproved`, and terminal proof/quarantine state.
 - Contract coverage lives in:
   - `tests/contract/test_backfill_runtime_contract.py`
   - `tests/contract/test_bitcoin_core_height_range_contract.py`
+  - `tests/contract/test_bitcoin_partition_truth_contract.py`
+  - `tests/contract/test_bitcoin_canonical_event_ingest_contract.py`
 
 ## Environment variables and required config
 - Still required for node access:

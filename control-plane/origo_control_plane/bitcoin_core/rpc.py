@@ -96,6 +96,11 @@ def resolve_bitcoin_core_node_settings() -> BitcoinCoreNodeSettings:
     headers_end_height = _require_non_negative_int_env(
         'ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT'
     )
+    if headers_end_height < headers_start_height:
+        raise RuntimeError(
+            'ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT must be >= '
+            'ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT'
+        )
     return _build_bitcoin_core_node_settings_or_raise(
         headers_start_height=headers_start_height,
         headers_end_height=headers_end_height,

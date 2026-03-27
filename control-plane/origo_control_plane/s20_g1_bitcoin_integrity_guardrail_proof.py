@@ -8,6 +8,9 @@ from typing import Any
 
 from clickhouse_driver import Client as ClickHouseClient
 
+from origo_control_plane.bitcoin_core import (
+    format_bitcoin_height_range_partition_id_or_raise,
+)
 from origo_control_plane.migrations import MigrationRunner, MigrationSettings
 from origo_control_plane.utils.bitcoin_canonical_event_ingest import (
     BitcoinCanonicalEvent,
@@ -71,10 +74,14 @@ def _restore_proof_runtime_env(previous: dict[str, str | None]) -> None:
 def _bad_header_events() -> list[BitcoinCanonicalEvent]:
     event_time_0 = datetime(2024, 4, 20, 0, 0, 0, tzinfo=UTC)
     event_time_1 = datetime(2024, 4, 20, 0, 0, 1, tzinfo=UTC)
+    partition_id = format_bitcoin_height_range_partition_id_or_raise(
+        start_height=840000,
+        end_height=840002,
+    )
     return [
         BitcoinCanonicalEvent(
             stream_id='bitcoin_block_headers',
-            partition_id='2024-04-20',
+            partition_id=partition_id,
             source_offset_or_equivalent='840000',
             source_event_time_utc=event_time_0,
             payload={
@@ -91,7 +98,7 @@ def _bad_header_events() -> list[BitcoinCanonicalEvent]:
         ),
         BitcoinCanonicalEvent(
             stream_id='bitcoin_block_headers',
-            partition_id='2024-04-20',
+            partition_id=partition_id,
             source_offset_or_equivalent='840002',
             source_event_time_utc=event_time_1,
             payload={
@@ -130,7 +137,12 @@ def _run_projection_linkage_guardrail(
         project_bitcoin_block_headers_native(
             client=admin_client,
             database=proof_database,
-            partition_ids={'2024-04-20'},
+            partition_ids={
+                format_bitcoin_height_range_partition_id_or_raise(
+                    start_height=840000,
+                    end_height=840002,
+                )
+            },
             run_id='s20-g1-linkage-project',
             projected_at_utc=datetime(2026, 3, 10, 23, 55, 5, tzinfo=UTC),
         )

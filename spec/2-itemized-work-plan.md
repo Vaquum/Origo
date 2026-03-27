@@ -772,11 +772,19 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
-- [x] `S34-C4b` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
-- [x] `S34-C4c` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
+- [x] `S34-C4a` Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+- [x] `S34-C4b` Build repo-native exchange sequence controller for post-Binance `okx_spot_trades -> bybit_spot_trades` execution.
+- [x] `S34-C4c` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
+- [x] `S34-C4d` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
+- [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
+- [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
+- [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
+- [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
+- [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
+- [ ] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof
@@ -814,6 +822,31 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S35-G2` Add operational runbook controls for pause/resume/force catch-up of scheduled backfill.
 - [ ] `S35-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete schedule/backfill operations contract).
 - [ ] `S35-G4` User docs closeout for slice (`docs/`, full reference for daily schedule behavior, freshness boundaries, and status interpretation).
+
+## Slice 36: Bitcoin Mempool Sequenced Capture Windows
+
+### Capability
+- [ ] `S36-C1` Freeze the canonical mempool capture contract around Bitcoin Core `sequence` plus snapshot-opened windows.
+- [ ] `S36-C2` Add fail-loud runtime/env contract for Bitcoin Core ZMQ mempool sequence capture and reconciliation settings.
+- [ ] `S36-C3` Implement the always-on mempool capture worker that consumes Bitcoin Core `sequence`, enforces contiguous mempool sequence ordering, and writes observed canonical events exactly once.
+- [ ] `S36-C4` Implement explicit window lifecycle events (`WindowOpened`, `WindowBroken`) backed by immutable snapshot artifacts and deterministic window metadata.
+- [ ] `S36-C5` Implement reconcile path that snapshots current mempool state, diffs against last known state, emits inferred canonical events, and re-opens a new capture window without fictional healing.
+- [ ] `S36-C6` Implement canonical mempool event model and storage contract for observed/inferred entry-removal events with enrichment status kept separate from capture completeness.
+- [ ] `S36-C7` Rebuild `bitcoin_mempool_state` native projection from sequenced windowed canonical events and make query boundaries fail loudly on pre-capture or in-gap timestamps.
+- [ ] `S36-C8` Rebuild `bitcoin_mempool_state` `aligned_1s` projection from sequenced windowed canonical events with explicit gap markers and no interpolation across broken windows.
+
+### Proof
+- [ ] `S36-P1` Prove contiguous-sequence completeness inside a clean capture window and fail-loud detection on every forced sequence break.
+- [ ] `S36-P2` Prove restart/reconnect behavior: process crash, node restart, and ZMQ drop all emit `WindowBroken`, reconcile, and reopen deterministically.
+- [ ] `S36-P3` Prove observed-vs-inferred event semantics and deterministic replay across fixed mempool fixture windows.
+- [ ] `S36-P4` Run live-node proof against the self-hosted Bitcoin Core runtime and capture coverage/gap evidence from the real node.
+- [ ] `S36-P5` Run full quality gates (`style`, `type`, `contract`, `replay`, `integrity`) on the slice branch.
+
+### Guardrails
+- [ ] `S36-G1` Add fail-loud monitoring and alerting for stale capture windows, sequence gaps, reconcile loops, and enrichment degradation.
+- [ ] `S36-G2` Add immutable operational evidence for mempool windows (snapshot checksums, seq ranges, gap intervals, reconcile ids, projection watermarks).
+- [ ] `S36-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete mempool runtime/proof/ops contract).
+- [ ] `S36-G4` User docs closeout for slice (`docs/`, full reference for mempool availability boundary, gap semantics, native fields, and `aligned_1s` behavior).
 
 
 ## Slice Detail Sub-Slices
@@ -2065,46 +2098,82 @@ Constraints: first-party Binance source artifacts only.
 Action: Run OKX and Bybit full-history backfill (`okx_spot_trades`, `bybit_spot_trades`).
 Done looks like: both datasets are complete in canonical events with partition-level source checksums and gap-free coverage.
 Constraints: first-party exchange source artifacts only.
-15. `S34-04b`
+15. `S34-04a`
+Action: Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
+Done looks like: one controller can plan immediate next batches from authoritative proof state, choose reconcile vs backfill fail-loud, and chain batches without idle gaps.
+Constraints: daily partition datasets only; no hidden fallback planning rules.
+16. `S34-04b`
+Action: Build repo-native exchange sequence controller for `okx_spot_trades -> bybit_spot_trades`.
+Done looks like: one controller can execute the post-Binance exchange order deterministically, refuse out-of-order or non-exchange datasets, and stop loudly on the first dataset that does not fully complete.
+Constraints: exchange datasets only; no schedule automation and no manual shell chaining contract.
+17. `S34-04c`
 Action: Fix OKX source-duplicate contract for Slice 34 backfill.
 Done looks like: raw-row counts remain truthful, exact duplicate OKX trade rows are accepted as duplicate delivery of the same source event, conflicting duplicate trade payloads still fail loudly, and canonical/source-proof identity stays stable for already-ingested unique partitions.
 Constraints: no weakening of no-miss or exactly-once semantics, no silent deduplication of conflicting rows, and no identity drift for previously valid OKX canonical events.
-16. `S34-04c`
+18. `S34-04d`
 Action: Fix OKX offset-order contract for Slice 34 backfill.
 Done looks like: OKX integrity and partition proofs treat `trade_id` as numeric monotonic and unique-per-symbol rather than contiguous, while source-vs-canonical identity equality remains the no-miss proof.
 Constraints: no weakening of exactly-once semantics, no suppression of conflicting duplicate IDs, and no fallback to opaque ordering.
-17. `S34-05`
+19. `S34-05`
 Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configured issuers.
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
-18. `S34-06`
+20. `S34-05a`
+Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
+Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
+Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.
+21. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
-19. `S34-07`
+22. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.
 Constraints: self-hosted Bitcoin Core node source only.
-20. `S34-08`
+23. `S34-07a`
+Action: Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
+Done looks like: height-based Bitcoin assets read `start_height` / `end_height` from explicit run tags, reject missing/invalid ranges, and no longer take per-run backfill boundaries from static env.
+Constraints: no fallback to env for asset run-window selection; non-height datasets remain out of scope.
+24. `S34-07b`
+Action: Convert Bitcoin chain datasets to true `height_range` partition ids and make the mempool partition model explicitly daily/time-native.
+Done looks like: the six chain-derived Bitcoin datasets stamp canonical `partition_id` by zero-padded `height_range`, proof fixtures use the same contract, and `bitcoin_mempool_state` is explicitly modeled as daily in the Slice-34 contract instead of being implicitly forced into height ranges.
+Constraints: no synthetic “daily chain” fallback; mempool remains a separate time-native partition model.
+25. `S34-07c`
+Action: Integrate all Bitcoin assets into the Slice-34 proof state machine.
+Done looks like: every Bitcoin asset records source manifest and partition-state transitions in ClickHouse, uses explicit source proof before canonical write, supports reconcile proof-only fast path where applicable, and returns terminal proof metadata in its result contract.
+Constraints: no direct canonical-write bypass; no silent divergence between chain and mempool proof semantics.
+26. `S34-07d`
+Action: Build repo-native Bitcoin backfill/controller path for split partition models.
+Done looks like: one repo-native controller/runner launches Bitcoin chain jobs by explicit height-range batches, treats `bitcoin_mempool_state` as a separate daily snapshot path, fails loudly for unsupported historical mempool replay, derives resume truth from ClickHouse proof state, and fails loudly if any dataset is sent through the wrong planner or if a batch does not end in clean proof state.
+Constraints: Dagster execution only; no direct asset invocation, no mixed planner fallback, and no hidden env-driven batch boundary selection.
+27. `S34-07e`
+Action: Formalize mempool capture-boundary contract and fail-loud serving behavior.
+Done looks like: the system records and exposes the first captured mempool snapshot boundary from the Origo-controlled node runtime, historical/native/aligned requests before that boundary fail loudly, and docs/specs state explicitly that blockchain history does not reconstruct historical mempool state.
+Constraints: no synthetic mempool reconstruction, no silent truncation to available range, and no fallback to block-confirmed transaction history.
+28. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.
 Constraints: deterministic formulas only.
-21. `S34-09`
+29. `S34-09`
 Action: Rebuild native projections and `canonical_aligned_1s_aggregates` from canonical events for all relevant datasets.
 Done looks like: projection watermarks reach backfill boundary and both serving modes are queryable for the full intended history.
 Constraints: projection rebuild only; no alternate serving tables.
-22. `S34-10`
+30. `S34-10`
 Action: Execute comprehensive proof suite (completeness, acceptance, replay determinism, state-machine, and range-proof validation) across raw and historical surfaces.
 Done looks like: all backfilled datasets pass cross-surface proofs for `native` and `aligned_1s` where applicable, and backfill correctness is self-proved exactly-once/no-miss.
 Constraints: fixed proof windows and deterministic fixtures.
-23. `S34-10a`
+31. `S34-10a`
 Action: Run formal live/server-side performance proof on Binance backfill phases.
 Done looks like: phase timings, throughput, and resource snapshots are captured for source fetch, source proof, canonical write, reconcile, and proof phases, with bottlenecks explicitly identified from live server evidence.
 Constraints: live server only; no local dry-run substitutes.
-24. `S34-11`
+32. `S34-11`
 Action: Close guardrails and artifacts (audit manifests, docs, version/changelog, `.env.example`, slice artifacts).
 Done looks like: slice closeout package is complete with no dangling contract gaps for next-slice execution.
 Constraints: closeout only; no new capability expansion.
+33. `S34-11a`
+Action: Build Slice 34 closeout-prep reporting from authoritative backfill proof/manifests.
+Done looks like: one deterministic prep tool can summarize per-dataset proof coverage, manifest evidence, and remaining closeout gaps straight from ClickHouse/live manifest artifacts without hand-editing.
+Constraints: prep/reporting only; do not mark Slice 34 closed and do not create fake final artifacts.
 
 ## Slice 35 Sub-Slices
 1. `S35-01`
@@ -2130,4 +2199,54 @@ Constraints: proof must run against deployed server stack with real source calls
 6. `S35-06`
 Action: Close guardrails/docs/artifacts/version/changelog/env contract for Slice 35.
 Done looks like: docs and slice artifacts are complete and the schedule contract is fully reflected in developer and user references.
+Constraints: closeout only; no new capability expansion.
+
+## Slice 36 Sub-Slices
+1. `S36-01`
+Action: Freeze the sequenced mempool capture contract and canonical event vocabulary.
+Done looks like: the contract explicitly defines node-relative truth, capture windows, observed vs inferred events, source-event identity, and the rule that contiguous mempool sequence is the proof of completeness inside a window.
+Constraints: contract only; no runtime implementation yet.
+2. `S36-02`
+Action: Define and validate the runtime env/config contract for Bitcoin Core ZMQ mempool capture and reconciliation.
+Done looks like: required vars for ZMQ endpoint, HWM, snapshot/reconcile limits, and worker behavior are explicit and fail loudly when missing or invalid.
+Constraints: no hidden defaults and no deployment-specific hardcoding.
+3. `S36-03`
+Action: Implement the always-on `sequence` subscriber and ordered write buffer.
+Done looks like: the worker consumes Bitcoin Core `sequence`, preserves mempool event order by sequence number, and writes observed canonical events only when sequence contiguity is satisfied.
+Constraints: no direct write path that can bypass ordered sequence checks.
+4. `S36-04`
+Action: Implement window-open path using full mempool snapshot artifacts and explicit window metadata.
+Done looks like: startup and post-reconcile paths create `WindowOpened` from immutable snapshot evidence with snapshot checksum, mempool sequence anchor, and node/tip metadata, without embedding giant snapshot blobs inline in canonical events.
+Constraints: snapshot artifact and canonical event metadata must stay deterministic.
+5. `S36-05`
+Action: Implement fail-loud gap detection and `WindowBroken` emission.
+Done looks like: sequence discontinuity, node restart, process restart, and explicit operator interruption all terminate the current window with explicit reason and boundary metadata.
+Constraints: no silent gap healing and no implicit continuation across broken windows.
+6. `S36-06`
+Action: Implement reconcile diff path and inferred event emission.
+Done looks like: on a broken window, the system snapshots current mempool state, diffs against last known state, emits deterministic inferred entry/removal events, and opens a fresh window without rewriting prior truth.
+Constraints: inferred events must remain visibly distinct from observed events.
+7. `S36-07`
+Action: Implement metadata enrichment policy as a separate concern from capture completeness.
+Done looks like: transaction metadata lookup races or timeouts do not invalidate the fact that the source event was observed; enrichment status is explicit and replay-safe.
+Constraints: no coupling of enrichment success to sequence-completeness proof.
+8. `S36-08`
+Action: Rebuild native mempool serving from sequenced canonical windows.
+Done looks like: native mempool queries replay canonical windowed events, respect first-capture and gap boundaries, and fail loudly when the requested time falls outside valid coverage.
+Constraints: no synthetic reconstruction from blocks and no silent truncation to available state.
+9. `S36-09`
+Action: Rebuild `aligned_1s` mempool serving from sequenced canonical windows.
+Done looks like: aligned mempool state is computed only inside valid windows, and any second inside a gap is explicitly marked unavailable rather than interpolated.
+Constraints: no forward fill or interpolation across `WindowBroken -> WindowOpened` gaps.
+10. `S36-10`
+Action: Execute proof suite for clean windows, broken windows, reconcile reopen, and deterministic replay.
+Done looks like: forced sequence breaks are detected, window transitions are recorded exactly once, and repeated proof runs produce the same fingerprints.
+Constraints: proofs must cover observed and inferred event paths.
+11. `S36-11`
+Action: Execute live-node proof against the self-hosted Bitcoin Core runtime.
+Done looks like: the real node produces capture windows with explicit sequence evidence, gap handling, and native/aligned queryability from the declared mempool capture boundary.
+Constraints: live node only; no simulation-only closeout.
+12. `S36-12`
+Action: Close guardrails/docs/artifacts/version/changelog/env contract for Slice 36.
+Done looks like: alerting/evidence are active, docs/specs are canonical, and slice artifacts fully describe the mempool capture subsystem for the next engineer.
 Constraints: closeout only; no new capability expansion.

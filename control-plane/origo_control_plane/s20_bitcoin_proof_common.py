@@ -13,6 +13,9 @@ from typing import Any, cast
 from clickhouse_driver import Client as ClickHouseClient
 
 from origo.data._internal.generic_endpoints import query_aligned, query_native
+from origo_control_plane.bitcoin_core import (
+    format_bitcoin_height_range_partition_id_or_raise,
+)
 from origo_control_plane.migrations import MigrationSettings
 from origo_control_plane.utils.bitcoin_canonical_event_ingest import (
     BitcoinCanonicalEvent,
@@ -53,6 +56,15 @@ BITCOIN_NATIVE_DATASETS: tuple[str, ...] = (
 )
 
 BITCOIN_DERIVED_ALIGNED_DATASETS: tuple[str, ...] = (
+    'bitcoin_block_fee_totals',
+    'bitcoin_block_subsidy_schedule',
+    'bitcoin_network_hashrate_estimate',
+    'bitcoin_circulating_supply',
+)
+
+BITCOIN_CHAIN_HEIGHT_RANGE_DATASETS: tuple[str, ...] = (
+    'bitcoin_block_headers',
+    'bitcoin_block_transactions',
     'bitcoin_block_fee_totals',
     'bitcoin_block_subsidy_schedule',
     'bitcoin_network_hashrate_estimate',
@@ -557,18 +569,59 @@ def _derive_metric_metadata(dataset: str) -> tuple[str, str, str]:
     raise RuntimeError(f'Unsupported derived dataset: {dataset}')
 
 
+def _chain_height_range_partition_id_or_raise(
+    *,
+    dataset: str,
+    rows: list[dict[str, Any]],
+) -> str:
+    if dataset not in BITCOIN_CHAIN_HEIGHT_RANGE_DATASETS:
+        raise RuntimeError(
+            'Height-range partition helper supports chain datasets only, '
+            f'got dataset={dataset}'
+        )
+    if rows == []:
+        raise RuntimeError(f'Height-range partition helper requires rows for dataset={dataset}')
+    height_field = 'height' if dataset == 'bitcoin_block_headers' else 'block_height'
+    heights: list[int] = []
+    for row in rows:
+        raw_height = row.get(height_field)
+        if isinstance(raw_height, bool) or not isinstance(raw_height, int):
+            raise RuntimeError(
+                f'{dataset} row height field={height_field} must be int, '
+                f'got {type(raw_height).__name__}'
+            )
+        heights.append(raw_height)
+    return format_bitcoin_height_range_partition_id_or_raise(
+        start_height=min(heights),
+        end_height=max(heights),
+    )
+
+
 def build_fixture_canonical_events(
     *,
     rows_by_dataset: dict[str, list[dict[str, Any]]],
 ) -> list[BitcoinCanonicalEvent]:
     events: list[BitcoinCanonicalEvent] = []
+    for dataset in BITCOIN_CHAIN_HEIGHT_RANGE_DATASETS:
+        if dataset not in rows_by_dataset:
+            raise RuntimeError(
+                'build_fixture_canonical_events requires every Bitcoin chain dataset, '
+                f'missing dataset={dataset}'
+            )
+    chain_partition_id_by_dataset = {
+        dataset: _chain_height_range_partition_id_or_raise(
+            dataset=dataset,
+            rows=rows_by_dataset[dataset],
+        )
+        for dataset in BITCOIN_CHAIN_HEIGHT_RANGE_DATASETS
+    }
 
     for row in rows_by_dataset['bitcoin_block_headers']:
         event_time = cast(datetime, row['datetime']).astimezone(UTC)
         events.append(
             BitcoinCanonicalEvent(
                 stream_id='bitcoin_block_headers',
-                partition_id=event_time.date().isoformat(),
+                partition_id=chain_partition_id_by_dataset['bitcoin_block_headers'],
                 source_offset_or_equivalent=str(cast(int, row['height'])),
                 source_event_time_utc=event_time,
                 payload={
@@ -598,7 +651,7 @@ def build_fixture_canonical_events(
         events.append(
             BitcoinCanonicalEvent(
                 stream_id='bitcoin_block_transactions',
-                partition_id=event_time.date().isoformat(),
+                partition_id=chain_partition_id_by_dataset['bitcoin_block_transactions'],
                 source_offset_or_equivalent=source_offset,
                 source_event_time_utc=event_time,
                 payload={
@@ -700,7 +753,7 @@ def build_fixture_canonical_events(
             events.append(
                 BitcoinCanonicalEvent(
                     stream_id=dataset,
-                    partition_id=event_time.date().isoformat(),
+                    partition_id=chain_partition_id_by_dataset[dataset],
                     source_offset_or_equivalent=source_offset,
                     source_event_time_utc=event_time,
                     payload=payload,
@@ -1052,7 +1105,9 @@ def _query_legacy_native_rows(
         'bitcoin_circulating_supply': 'datetime ASC, block_height ASC',
     }[dataset]
 
-    rows = client.execute(
+    rows = cast(
+        list[tuple[Any, ...]],
+        client.execute(
         f'''
         SELECT {', '.join(columns)}
         FROM {database}.{_LEGACY_TABLE_BY_DATASET[dataset]}
@@ -1061,6 +1116,7 @@ def _query_legacy_native_rows(
         ORDER BY {order_by}
         ''',
         {'start': start_ch, 'end': end_ch},
+        ),
     )
 
     output: list[dict[str, Any]] = []

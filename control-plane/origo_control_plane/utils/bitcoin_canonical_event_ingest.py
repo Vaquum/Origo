@@ -5,10 +5,20 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 
 from clickhouse_driver import Client as ClickhouseClient
 
+from origo.events import (
+    CanonicalBackfillStateStore,
+    CanonicalStreamKey,
+    PartitionSourceProof,
+    SourceIdentityMaterial,
+    build_partition_source_proof,
+    canonical_event_id_from_key,
+    canonical_event_idempotency_key,
+)
+from origo.events.errors import ReconciliationError
 from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 
@@ -69,6 +79,26 @@ class BitcoinCanonicalEvent:
     source_offset_or_equivalent: str
     source_event_time_utc: datetime | None
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BitcoinPartitionBackfillSummary:
+    rows_processed: int
+    rows_inserted: int
+    rows_duplicate: int
+    write_path: Literal['writer', 'reconcile_proof_only']
+    partition_proof_state: str
+    partition_proof_digest_sha256: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'rows_processed': self.rows_processed,
+            'rows_inserted': self.rows_inserted,
+            'rows_duplicate': self.rows_duplicate,
+            'write_path': self.write_path,
+            'partition_proof_state': self.partition_proof_state,
+            'partition_proof_digest_sha256': self.partition_proof_digest_sha256,
+        }
 
 
 def write_bitcoin_events_to_canonical(
@@ -160,3 +190,169 @@ def write_bitcoin_events_to_canonical(
         'rows_inserted': rows_inserted,
         'rows_duplicate': rows_duplicate,
     }
+
+
+def build_bitcoin_partition_source_proof_or_raise(
+    *,
+    stream_id: str,
+    partition_id: str,
+    offset_ordering: Literal['numeric', 'lexicographic', 'opaque'],
+    source_artifact_identity: dict[str, Any],
+    events: list[BitcoinCanonicalEvent],
+    allow_empty_partition: bool,
+) -> PartitionSourceProof:
+    normalized_stream_id = _require_non_empty(stream_id, label='stream_id')
+    normalized_partition_id = _require_non_empty(partition_id, label='partition_id')
+
+    materials: list[SourceIdentityMaterial] = []
+    for event in events:
+        if event.stream_id != normalized_stream_id:
+            raise RuntimeError(
+                'Bitcoin partition source proof stream mismatch: '
+                f'expected={normalized_stream_id} actual={event.stream_id}'
+            )
+        if event.partition_id != normalized_partition_id:
+            raise RuntimeError(
+                'Bitcoin partition source proof partition mismatch: '
+                f'expected={normalized_partition_id} actual={event.partition_id}'
+            )
+        source_offset = _require_non_empty(
+            event.source_offset_or_equivalent,
+            label='event.source_offset_or_equivalent',
+        )
+        payload_json = canonical_json_string(event.payload)
+        payload_sha256_raw = hashlib.sha256(payload_json.encode(_PAYLOAD_ENCODING)).hexdigest()
+        event_key = canonical_event_idempotency_key(
+            source_id=_SOURCE_ID,
+            stream_id=normalized_stream_id,
+            partition_id=normalized_partition_id,
+            source_offset_or_equivalent=source_offset,
+        )
+        materials.append(
+            SourceIdentityMaterial(
+                source_offset_or_equivalent=source_offset,
+                event_id=str(canonical_event_id_from_key(event_key)),
+                payload_sha256_raw=payload_sha256_raw,
+            )
+        )
+
+    return build_partition_source_proof(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=normalized_stream_id,
+            partition_id=normalized_partition_id,
+        ),
+        offset_ordering=offset_ordering,
+        source_artifact_identity=source_artifact_identity,
+        materials=materials,
+        allow_empty_partition=allow_empty_partition,
+    )
+
+
+def execute_bitcoin_partition_backfill_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    source_proof: PartitionSourceProof,
+    events: list[BitcoinCanonicalEvent],
+    run_id: str,
+    ingested_at_utc: datetime,
+    execution_mode: Literal['backfill', 'reconcile'],
+) -> BitcoinPartitionBackfillSummary:
+    state_store = CanonicalBackfillStateStore(
+        client=client,
+        database=database,
+    )
+    try:
+        state_store.assert_partition_can_execute_or_raise(
+            stream_key=source_proof.stream_key,
+            execution_mode=execution_mode,
+        )
+    except ReconciliationError as exc:
+        if execution_mode == 'backfill' and exc.code == 'RECONCILE_REQUIRED':
+            state_store.record_partition_state(
+                source_proof=source_proof,
+                state='reconcile_required',
+                reason='backfill_execution_requires_reconcile',
+                run_id=run_id,
+                recorded_at_utc=datetime.now(UTC),
+                proof_details={'trigger_message': exc.message},
+            )
+        raise
+
+    execution_assessment = state_store.assess_partition_execution(
+        stream_key=source_proof.stream_key
+    )
+    prove_existing_canonical_without_write = (
+        execution_mode == 'reconcile' and execution_assessment.canonical_row_count > 0
+    )
+
+    source_manifested_at_utc = datetime.now(UTC)
+    state_store.record_source_manifest(
+        source_proof=source_proof,
+        run_id=run_id,
+        manifested_at_utc=source_manifested_at_utc,
+    )
+    state_store.record_partition_state(
+        source_proof=source_proof,
+        state='source_manifested',
+        reason='source_manifest_recorded',
+        run_id=run_id,
+        recorded_at_utc=source_manifested_at_utc,
+    )
+
+    if prove_existing_canonical_without_write:
+        write_summary = {
+            'rows_processed': source_proof.source_row_count,
+            'rows_inserted': 0,
+            'rows_duplicate': source_proof.source_row_count,
+        }
+        proof_reason = 'reconcile_existing_canonical_rows_detected'
+        write_path: Literal['writer', 'reconcile_proof_only'] = 'reconcile_proof_only'
+    else:
+        write_summary = write_bitcoin_events_to_canonical(
+            client=client,
+            database=database,
+            events=events,
+            run_id=run_id,
+            ingested_at_utc=ingested_at_utc,
+        )
+        proof_reason = 'canonical_write_completed'
+        write_path = 'writer'
+
+    rows_processed = int(write_summary['rows_processed'])
+    rows_inserted = int(write_summary['rows_inserted'])
+    rows_duplicate = int(write_summary['rows_duplicate'])
+    if rows_processed != len(events):
+        raise RuntimeError(
+            'Bitcoin partition canonical writer summary mismatch: '
+            f'rows_processed={rows_processed} expected={len(events)}'
+        )
+    if rows_inserted + rows_duplicate != rows_processed:
+        raise RuntimeError(
+            'Bitcoin partition canonical writer summary mismatch: '
+            f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+            f'rows_processed={rows_processed}'
+        )
+
+    proof_recorded_at_utc = datetime.now(UTC)
+    state_store.record_partition_state(
+        source_proof=source_proof,
+        state='canonical_written_unproved',
+        reason=proof_reason,
+        run_id=run_id,
+        recorded_at_utc=proof_recorded_at_utc,
+    )
+    partition_proof = state_store.prove_partition_or_quarantine(
+        source_proof=source_proof,
+        run_id=run_id,
+        recorded_at_utc=proof_recorded_at_utc,
+    )
+    return BitcoinPartitionBackfillSummary(
+        rows_processed=rows_processed,
+        rows_inserted=rows_inserted,
+        rows_duplicate=rows_duplicate,
+        write_path=write_path,
+        partition_proof_state=partition_proof.state,
+        partition_proof_digest_sha256=partition_proof.proof_digest_sha256,
+    )

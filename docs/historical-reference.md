@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-12
-- Slice/version reference: S31 (API v0.1.22)
+- Last updated: 2026-03-26
+- Slice/version reference: S31 + S34 prep (API v0.1.28 branch state)
 
 ## Purpose and scope
 - Canonical end-user reference for all historical dataset interfaces.
@@ -31,6 +31,10 @@ Window rules:
 - at most one of date-window, `n_latest_rows`, `n_random_rows`
 - no selector means full available history (`earliest -> now`)
 - dates are strict UTC `YYYY-MM-DD`
+
+Historical availability rule:
+- full available history means full currently proved history for that dataset
+- see `docs/backfill-status-reference.md`
 
 ## Historical dataset matrix
 

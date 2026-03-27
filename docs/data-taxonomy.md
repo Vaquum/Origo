@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-12
-- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28, S29, S30, S31 (platform v0.1.22)
+- Last updated: 2026-03-26
+- Slice/version reference: S1-S8, S10, S11, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26, S27, S28, S29, S30, S31, S34 prep (platform v0.1.28 branch state)
 
 ## Purpose and scope
 - Canonical user reference for all currently exposed sources, fields, modes, and status taxonomies.
@@ -152,6 +152,8 @@
 - Bitcoin canonical source is direct Bitcoin Core RPC from one unpruned self-hosted node.
 - Bitcoin native and aligned serving (stream + derived) are event-driven from canonical Bitcoin projections as of S20/S29.
 - Provenance fields (`provenance_json`, checksums, source keys) are replay-critical.
+- During Slice 34 full-history backfill, user-visible historical availability is bounded by terminal proof coverage rather than raw upstream source coverage.
+- Backfill-status semantics are maintained in `docs/backfill-status-reference.md`.
 
 ## Failure modes, warnings, and error codes
 - Query warning taxonomy:

@@ -1,7 +1,10 @@
 from .runtime_contract import (
     BACKFILL_EXECUTION_MODE_TAG,
+    BACKFILL_HEIGHT_END_TAG,
+    BACKFILL_HEIGHT_START_TAG,
     BACKFILL_PROJECTION_MODE_TAG,
     BACKFILL_RUNTIME_AUDIT_MODE_TAG,
+    BackfillHeightWindow,
     BackfillRuntimeContract,
     ExecutionMode,
     FastInsertMode,
@@ -9,6 +12,7 @@ from .runtime_contract import (
     RuntimeAuditMode,
     apply_runtime_audit_mode_or_raise,
     default_exchange_runtime_tags,
+    load_backfill_height_window_or_raise,
     load_backfill_runtime_contract_or_raise,
 )
 from .s34_contract import (
@@ -31,8 +35,11 @@ from .s34_orchestrator import (
 
 __all__ = [
     'BACKFILL_EXECUTION_MODE_TAG',
+    'BACKFILL_HEIGHT_END_TAG',
+    'BACKFILL_HEIGHT_START_TAG',
     'BACKFILL_PROJECTION_MODE_TAG',
     'BACKFILL_RUNTIME_AUDIT_MODE_TAG',
+    'BackfillHeightWindow',
     'BackfillRuntimeContract',
     'ExecutionMode',
     'FastInsertMode',
@@ -48,6 +55,7 @@ __all__ = [
     'evaluate_numeric_offset_gaps_or_raise',
     'get_s34_dataset_contract',
     'list_s34_dataset_contracts',
+    'load_backfill_height_window_or_raise',
     'load_backfill_manifest_log_path',
     'load_backfill_runtime_contract_or_raise',
     'load_last_completed_daily_partition_from_canonical_or_raise',

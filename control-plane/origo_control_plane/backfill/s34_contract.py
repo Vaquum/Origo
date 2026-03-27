@@ -143,7 +143,7 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         partition_scheme='height_range',
         earliest_partition_date=None,
         earliest_height=0,
-        offset_ordering='numeric',
+        offset_ordering='lexicographic',
         aligned_capable=True,
     ),
     S34DatasetBackfillContract(
@@ -152,10 +152,10 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         stream_id='bitcoin_mempool_state',
         execution_rank=8,
         phase='bitcoin_base',
-        partition_scheme='height_range',
+        partition_scheme='daily',
         earliest_partition_date=None,
-        earliest_height=0,
-        offset_ordering='numeric',
+        earliest_height=None,
+        offset_ordering='lexicographic',
         aligned_capable=True,
     ),
     S34DatasetBackfillContract(
@@ -259,7 +259,7 @@ def assert_s34_backfill_contract_consistency_or_raise() -> None:
             )
         if contract.partition_scheme == 'daily':
             if contract.earliest_partition_date is None:
-                if contract.dataset != 'fred_series_metrics':
+                if contract.dataset not in {'fred_series_metrics', 'bitcoin_mempool_state'}:
                     raise RuntimeError(
                         'S34 daily dataset contract missing earliest_partition_date for '
                         f'dataset={contract.dataset}'

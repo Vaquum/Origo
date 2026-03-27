@@ -9,18 +9,25 @@ from typing import Any
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, asset
 
+from origo_control_plane.backfill import (
+    apply_runtime_audit_mode_or_raise,
+    load_backfill_height_window_or_raise,
+    load_backfill_runtime_contract_or_raise,
+)
 from origo_control_plane.bitcoin_core import (
     BitcoinCoreNodeContract,
     BitcoinCoreNodeSettings,
     BitcoinCoreRpcClient,
-    resolve_bitcoin_core_node_settings,
+    format_bitcoin_height_range_partition_id_or_raise,
+    resolve_bitcoin_core_node_settings_with_height_range_or_raise,
     validate_bitcoin_core_node_contract_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.bitcoin_canonical_event_ingest import (
     BitcoinCanonicalEvent,
     bitcoin_decimal_text,
-    write_bitcoin_events_to_canonical,
+    build_bitcoin_partition_source_proof_or_raise,
+    execute_bitcoin_partition_backfill_or_raise,
 )
 from origo_control_plane.utils.bitcoin_integrity import (
     run_bitcoin_block_header_integrity,
@@ -219,7 +226,15 @@ def _fetch_headers_or_raise(
 def insert_bitcoin_block_headers_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, Any]:
-    settings = resolve_bitcoin_core_node_settings()
+    runtime_contract = load_backfill_runtime_contract_or_raise(context)
+    apply_runtime_audit_mode_or_raise(
+        runtime_audit_mode=runtime_contract.runtime_audit_mode
+    )
+    height_window = load_backfill_height_window_or_raise(context)
+    settings = resolve_bitcoin_core_node_settings_with_height_range_or_raise(
+        headers_start_height=height_window.start_height,
+        headers_end_height=height_window.end_height,
+    )
     context.log.info(
         'Fetching Bitcoin block headers '
         f'for range=[{settings.headers_start_height}, {settings.headers_end_height}]'
@@ -245,11 +260,15 @@ def insert_bitcoin_block_headers_to_origo(
         rows=[header.as_canonical_map() for header in headers]
     )
     headers_sha256 = _canonical_headers_sha256(headers)
+    partition_id = format_bitcoin_height_range_partition_id_or_raise(
+        start_height=settings.headers_start_height,
+        end_height=settings.headers_end_height,
+    )
 
     canonical_events = [
         BitcoinCanonicalEvent(
             stream_id='bitcoin_block_headers',
-            partition_id=header.datetime_utc.date().isoformat(),
+            partition_id=partition_id,
             source_offset_or_equivalent=str(header.height),
             source_event_time_utc=header.datetime_utc,
             payload={
@@ -281,53 +300,81 @@ def insert_bitcoin_block_headers_to_origo(
             compression=True,
             send_receive_timeout=900,
         )
-        write_summary = write_bitcoin_events_to_canonical(
+        source_proof = build_bitcoin_partition_source_proof_or_raise(
+            stream_id='bitcoin_block_headers',
+            partition_id=partition_id,
+            offset_ordering='numeric',
+            source_artifact_identity={
+                'source_kind': 'bitcoin_core_rpc_height_range',
+                'source_chain': node_contract.chain,
+                'range_start_height': settings.headers_start_height,
+                'range_end_height': settings.headers_end_height,
+                'headers_sha256': headers_sha256,
+                'node_best_block_height': node_contract.best_block_height,
+                'node_best_block_hash': node_contract.best_block_hash,
+            },
+            events=canonical_events,
+            allow_empty_partition=False,
+        )
+        backfill_summary = execute_bitcoin_partition_backfill_or_raise(
             client=client,
             database=CLICKHOUSE_DATABASE,
+            source_proof=source_proof,
             events=canonical_events,
             run_id=context.run_id,
             ingested_at_utc=datetime.now(UTC),
+            execution_mode=runtime_contract.execution_mode,
         )
-        rows_processed = int(write_summary['rows_processed'])
-        rows_inserted = int(write_summary['rows_inserted'])
-        rows_duplicate = int(write_summary['rows_duplicate'])
-        if rows_processed != len(canonical_events):
-            raise RuntimeError(
-                'Bitcoin block-header canonical writer summary mismatch: '
-                f'rows_processed={rows_processed} expected={len(canonical_events)}'
-            )
-        if rows_inserted + rows_duplicate != rows_processed:
-            raise RuntimeError(
-                'Bitcoin block-header canonical writer summary mismatch: '
-                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
-                f'rows_processed={rows_processed}'
-            )
+        rows_processed = backfill_summary.rows_processed
+        rows_inserted = backfill_summary.rows_inserted
+        rows_duplicate = backfill_summary.rows_duplicate
 
-        native_projection_summary = project_bitcoin_block_headers_native(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids={event.partition_id for event in canonical_events},
-            run_id=context.run_id,
-            projected_at_utc=datetime.now(UTC),
-        )
-        aligned_projection_summary = project_bitcoin_block_headers_aligned(
-            client=client,
-            database=CLICKHOUSE_DATABASE,
-            partition_ids={event.partition_id for event in canonical_events},
-            run_id=context.run_id,
-            projected_at_utc=datetime.now(UTC),
-        )
+        partition_ids = {partition_id}
+        if runtime_contract.projection_mode == 'inline':
+            native_projection_summary_dict = project_bitcoin_block_headers_native(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=datetime.now(UTC),
+            ).to_dict()
+            aligned_projection_summary_dict = project_bitcoin_block_headers_aligned(
+                client=client,
+                database=CLICKHOUSE_DATABASE,
+                partition_ids=partition_ids,
+                run_id=context.run_id,
+                projected_at_utc=datetime.now(UTC),
+            ).to_dict()
+        else:
+            native_projection_summary_dict = {
+                'partitions_processed': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
+            aligned_projection_summary_dict = {
+                'partitions_processed': 0,
+                'policies_recorded': 0,
+                'policies_duplicate': 0,
+                'batches_processed': 0,
+                'events_processed': 0,
+                'rows_written': 0,
+            }
 
         result_data: dict[str, Any] = {
             'range_start_height': settings.headers_start_height,
             'range_end_height': settings.headers_end_height,
+            'projection_mode': runtime_contract.projection_mode,
+            'write_path': backfill_summary.write_path,
             'rows_processed': rows_processed,
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
             'headers_sha256': headers_sha256,
             'integrity_report': integrity_report.to_dict(),
-            'native_projection_summary': native_projection_summary.to_dict(),
-            'aligned_projection_summary': aligned_projection_summary.to_dict(),
+            'native_projection_summary': native_projection_summary_dict,
+            'aligned_projection_summary': aligned_projection_summary_dict,
+            'partition_proof_state': backfill_summary.partition_proof_state,
+            'partition_proof_digest_sha256': backfill_summary.partition_proof_digest_sha256,
             'source_chain': node_contract.chain,
             'node_best_block_height': node_contract.best_block_height,
             'node_best_block_hash': node_contract.best_block_hash,

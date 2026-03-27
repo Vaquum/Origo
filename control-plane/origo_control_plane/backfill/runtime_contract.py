@@ -14,6 +14,8 @@ FastInsertMode = Literal['writer', 'assume_new_partition']
 BACKFILL_PROJECTION_MODE_TAG: Final[str] = 'origo.backfill.projection_mode'
 BACKFILL_EXECUTION_MODE_TAG: Final[str] = 'origo.backfill.execution_mode'
 BACKFILL_RUNTIME_AUDIT_MODE_TAG: Final[str] = 'origo.backfill.runtime_audit_mode'
+BACKFILL_HEIGHT_START_TAG: Final[str] = 'origo.backfill.height_start'
+BACKFILL_HEIGHT_END_TAG: Final[str] = 'origo.backfill.height_end'
 _RUNTIME_AUDIT_MODE_ENV: Final[str] = 'ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'
 
 
@@ -22,6 +24,12 @@ class BackfillRuntimeContract:
     projection_mode: ProjectionMode
     execution_mode: ExecutionMode
     runtime_audit_mode: RuntimeAuditMode
+
+
+@dataclass(frozen=True)
+class BackfillHeightWindow:
+    start_height: int
+    end_height: int
 
 
 def _require_run_tag_or_raise(
@@ -79,6 +87,43 @@ def apply_runtime_audit_mode_or_raise(*, runtime_audit_mode: RuntimeAuditMode) -
             f'runtime_audit_mode must be one of [event, summary], got={runtime_audit_mode!r}'
         )
     os.environ[_RUNTIME_AUDIT_MODE_ENV] = runtime_audit_mode
+
+
+def load_backfill_height_window_or_raise(
+    context: AssetExecutionContext,
+) -> BackfillHeightWindow:
+    start_raw = _require_run_tag_or_raise(
+        context,
+        tag_name=BACKFILL_HEIGHT_START_TAG,
+    )
+    end_raw = _require_run_tag_or_raise(
+        context,
+        tag_name=BACKFILL_HEIGHT_END_TAG,
+    )
+    try:
+        start_height = int(start_raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{BACKFILL_HEIGHT_START_TAG} must be integer, got={start_raw!r}'
+        ) from exc
+    try:
+        end_height = int(end_raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{BACKFILL_HEIGHT_END_TAG} must be integer, got={end_raw!r}'
+        ) from exc
+    if start_height < 0:
+        raise RuntimeError(f'{BACKFILL_HEIGHT_START_TAG} must be >= 0')
+    if end_height < 0:
+        raise RuntimeError(f'{BACKFILL_HEIGHT_END_TAG} must be >= 0')
+    if end_height < start_height:
+        raise RuntimeError(
+            f'{BACKFILL_HEIGHT_END_TAG} must be >= {BACKFILL_HEIGHT_START_TAG}'
+        )
+    return BackfillHeightWindow(
+        start_height=start_height,
+        end_height=end_height,
+    )
 
 
 def default_exchange_runtime_tags() -> dict[str, str]:

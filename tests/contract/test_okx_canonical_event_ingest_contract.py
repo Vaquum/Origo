@@ -6,6 +6,7 @@ import pytest
 from origo_control_plane.utils.okx_canonical_event_ingest import (
     OKXSpotTradeEvent,
     deduplicate_okx_exact_duplicate_events_or_raise,
+    parse_okx_spot_trade_csv,
 )
 
 
@@ -54,3 +55,25 @@ def test_deduplicate_okx_exact_duplicate_events_fails_on_conflicting_duplicate_p
         match='OKX source contains conflicting duplicate trade_id payloads',
     ):
         deduplicate_okx_exact_duplicate_events_or_raise(events)
+
+
+def test_parse_okx_spot_trade_csv_preserves_high_precision_size_text() -> None:
+    events = parse_okx_spot_trade_csv(
+        b'instrument_name,trade_id,side,price,size,created_time\n'
+        b'BTC-USDT,465953984,buy,104933.5,0.00044782999999999997,1737331200000\n'
+    )
+
+    assert len(events) == 1
+    assert events[0].price_text == '104933.5'
+    assert events[0].size_text == '0.00044782999999999997'
+
+
+def test_parse_okx_spot_trade_csv_preserves_scientific_notation_size_text() -> None:
+    events = parse_okx_spot_trade_csv(
+        b'instrument_name,trade_id,side,price,size,created_time\n'
+        b'BTC-USDT,465953985,sell,104933.5,1e-05,1737331201000\n'
+    )
+
+    assert len(events) == 1
+    assert events[0].price_text == '104933.5'
+    assert events[0].size_text == '1e-05'

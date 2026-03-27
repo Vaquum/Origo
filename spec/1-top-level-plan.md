@@ -776,6 +776,7 @@ Every slice must pass:
    2. OKX `trade_id` is numeric monotonic but not contiguous.
    3. Bybit daily source rows are ordered lexicographically by `trdMatchID`, but historical files are not guaranteed unique by raw `trdMatchID`; Slice-34 proof for Bybit must rely on full source-vs-canonical identity digest equality rather than duplicate-offset rejection.
    4. Bybit daily source rows are not guaranteed monotonic by timestamp; integrity checks must rely on schema, identity, and UTC-day boundary validity rather than timestamp ordering.
+   5. OKX decimal source fields must remain source-native decimal text through canonical payload normalization, and the canonical precision contract must admit first-party OKX `size` values up to scale `20` so valid source data does not fail live reconcile/write.
 16. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
    1. OKX download-link resolution must respect an explicit source-safe request pace of `0.75s` between requests (approximately `1.33 requests/s`) derived from live probe evidence; partition concurrency alone is not an adequate safety model.
    2. Source-safe concurrency must be enforced by runtime contract or Dagster queue controls, not by operator memory.

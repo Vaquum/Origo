@@ -788,7 +788,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
 - [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
 - [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
-- [ ] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
+- [x] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof

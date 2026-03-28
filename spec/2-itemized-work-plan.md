@@ -805,6 +805,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6b` Make FRED historical source replay deterministic by fetching and normalizing revision-history vintages instead of request-time latest snapshots.
 - [ ] `S34-C6c` Add FRED audited partition reset-and-rewrite so explicit reconcile can clear stale request-time canonical rows and rewrite from deterministic source truth.
 - [ ] `S34-C6d` Batch FRED revision-history fetches against official vintage-date count limits so deterministic history replay remains valid for long-revision series such as `CPIAUCSL`.
+- [ ] `S34-C6e` Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits so revision-history replay survives long vintage lists without reverting to non-deterministic snapshots.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.

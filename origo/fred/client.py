@@ -224,6 +224,14 @@ def _normalize_series_vintage_dates(
     return vintage_dates
 
 
+def _is_series_observations_uri_too_long_error(exc: RuntimeError) -> bool:
+    message = str(exc)
+    return (
+        'endpoint=series/observations' in message
+        and 'status_code=414' in message
+    )
+
+
 def _normalize_output_type_1_observations(
     *, series_id: str, payload: dict[str, object]
 ) -> list[FREDObservation]:
@@ -657,6 +665,36 @@ class FREDClient:
 
         merged_observations: list[object] = []
         chunk_payloads: list[dict[str, object]] = []
+
+        def _fetch_revision_history_chunk(
+            *,
+            vintage_date_chunk: Sequence[date],
+        ) -> list[dict[str, object]]:
+            try:
+                return [
+                    self.fetch_series_observations_payload(
+                        series_id=series_id,
+                        observation_start=observation_start,
+                        observation_end=observation_end,
+                        vintage_dates=vintage_date_chunk,
+                        output_type=2,
+                        sort_order='asc',
+                        limit=None,
+                    )
+                ]
+            except RuntimeError as exc:
+                if (
+                    _is_series_observations_uri_too_long_error(exc)
+                    and len(vintage_date_chunk) > 1
+                ):
+                    midpoint = len(vintage_date_chunk) // 2
+                    return _fetch_revision_history_chunk(
+                        vintage_date_chunk=vintage_date_chunk[:midpoint]
+                    ) + _fetch_revision_history_chunk(
+                        vintage_date_chunk=vintage_date_chunk[midpoint:]
+                    )
+                raise
+
         for start_index in range(
             0,
             len(vintage_dates),
@@ -665,22 +703,16 @@ class FREDClient:
             vintage_date_chunk = vintage_dates[
                 start_index : start_index + _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST
             ]
-            chunk_payload = self.fetch_series_observations_payload(
-                series_id=series_id,
-                observation_start=observation_start,
-                observation_end=observation_end,
-                vintage_dates=vintage_date_chunk,
-                output_type=2,
-                sort_order='asc',
-                limit=None,
-            )
-            merged_observations.extend(
-                _require_list(
-                    chunk_payload.get('observations'),
-                    'FRED payload.observations',
+            for chunk_payload in _fetch_revision_history_chunk(
+                vintage_date_chunk=vintage_date_chunk
+            ):
+                merged_observations.extend(
+                    _require_list(
+                        chunk_payload.get('observations'),
+                        'FRED payload.observations',
+                    )
                 )
-            )
-            chunk_payloads.append(chunk_payload)
+                chunk_payloads.append(chunk_payload)
 
         return {
             'output_type': 2,

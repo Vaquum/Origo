@@ -766,6 +766,7 @@ Every slice must pass:
    2. partitions with already-matching canonical rows must close via proof-only reconcile rather than blind rewrite
    3. the repo-native FRED runner must expose terminal proof boundary and any remaining ambiguous partitions from ClickHouse
    4. deterministic FRED revision-history replay must respect first-party vintage-date limits; long-revision series must batch `series/observations` requests over explicit `series/vintagedates` windows instead of issuing one oversized all-history request
+   5. explicit `vintage_dates` observation requests must also stay under the live FRED HTTP URI ceiling; the client must shrink request windows deterministically on `414 Request-URI Too Long` rather than falling back to request-time latest snapshots
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

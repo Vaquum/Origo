@@ -26,7 +26,7 @@ from origo.events import (
     canonical_event_idempotency_key,
 )
 from origo.events.backfill_state import canonical_proof_matches_source_proof
-from origo.events.errors import ReconciliationError
+from origo.events.errors import EventWriterError, ReconciliationError
 from origo.scraper.contracts import (
     NormalizedMetricRecord,
     PersistedRawArtifact,
@@ -65,6 +65,14 @@ _ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER = 'official_date_parameter'
 _ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD = 'archive_capture_forward'
 _ISHARES_NO_DATA_MARKER = 'Fund Holdings as of,"-"'
 _ISHARES_SOURCE_ID = 'etf_ishares_ibit_daily'
+_ETF_NATIVE_PROJECTOR_ID = 'etf_daily_metrics_native_v1'
+_ETF_ALIGNED_PROJECTOR_ID = 'etf_daily_metrics_aligned_1s_v1'
+_WRITER_RESETTABLE_CONFLICT_CODES = frozenset(
+    {
+        'WRITER_IDENTITY_EVENT_ID_CONFLICT',
+        'WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1017,6 +1025,196 @@ def _filter_terminal_partitions_for_backfill_or_raise(
     return filtered
 
 
+def _count_partition_rows_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+) -> dict[str, int]:
+    rows = client.execute(
+        f'''
+        SELECT
+            (
+                SELECT count()
+                FROM {database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            ) AS canonical_event_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_etf_daily_metrics_native_v1
+                WHERE toDate(observed_at_utc) = toDate(%(partition_id)s)
+            ) AS native_projection_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_aligned_1s_aggregates
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            ) AS aligned_projection_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_projector_checkpoints
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+                  AND projector_id IN %(projector_ids)s
+            ) AS projector_checkpoint_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_projector_watermarks
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+                  AND projector_id IN %(projector_ids)s
+            ) AS projector_watermark_rows
+        ''',
+        {
+            'source_id': _CANONICAL_SOURCE_ID,
+            'stream_id': _CANONICAL_STREAM_ID,
+            'partition_id': partition_id,
+            'projector_ids': (
+                _ETF_NATIVE_PROJECTOR_ID,
+                _ETF_ALIGNED_PROJECTOR_ID,
+            ),
+        },
+    )
+    if len(rows) != 1:
+        raise RuntimeError(
+            'ETF partition reset count query returned unexpected row count: '
+            f'partition_id={partition_id} rows={len(rows)}'
+        )
+    row = rows[0]
+    return {
+        'canonical_event_rows': int(row[0]),
+        'native_projection_rows': int(row[1]),
+        'aligned_projection_rows': int(row[2]),
+        'projector_checkpoint_rows': int(row[3]),
+        'projector_watermark_rows': int(row[4]),
+    }
+
+
+def _delete_partition_rows_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+) -> None:
+    delete_settings = {'mutations_sync': 2}
+    params = {
+        'source_id': _CANONICAL_SOURCE_ID,
+        'stream_id': _CANONICAL_STREAM_ID,
+        'partition_id': partition_id,
+        'projector_ids': (
+            _ETF_NATIVE_PROJECTOR_ID,
+            _ETF_ALIGNED_PROJECTOR_ID,
+        ),
+    }
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_event_log
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_etf_daily_metrics_native_v1
+        DELETE WHERE toDate(observed_at_utc) = toDate(%(partition_id)s)
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_aligned_1s_aggregates
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_projector_checkpoints
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+          AND projector_id IN %(projector_ids)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_projector_watermarks
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+          AND projector_id IN %(projector_ids)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+
+
+def _reset_etf_partition_for_reconcile_or_raise(
+    *,
+    context: OpExecutionContext,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+    source_proof: Any,
+    state_store: CanonicalBackfillStateStore,
+    writer_error: EventWriterError,
+) -> dict[str, int]:
+    recorded_at_utc = datetime.now(UTC)
+    state_store.record_partition_state(
+        source_proof=source_proof,
+        state='reconcile_required',
+        reason='legacy_canonical_payload_reset_required',
+        run_id=context.run_id,
+        recorded_at_utc=recorded_at_utc,
+        proof_details={
+            'writer_error_code': writer_error.code,
+            'writer_error_message': writer_error.message,
+        },
+    )
+    counts_before_reset = _count_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    _delete_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    counts_after_reset = _count_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    if any(count != 0 for count in counts_after_reset.values()):
+        raise RuntimeError(
+            'ETF reconcile partition reset did not clear partition state fully: '
+            + json.dumps(
+                {
+                    'partition_id': partition_id,
+                    'counts_after_reset': counts_after_reset,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    return counts_before_reset
+
+
 def _canonical_payload_sha256(record: NormalizedMetricRecord) -> str:
     payload_raw = json.dumps(
         build_etf_canonical_payload(record=record),
@@ -1176,19 +1374,58 @@ def _execute_etf_partition_backfill_or_raise(
         write_path = 'reconcile_proof_only'
         proof_reason = 'reconcile_existing_canonical_rows_detected'
     else:
-        write_summary = write_etf_normalized_records_to_canonical(
-            client=client,
-            database=database,
-            records=records,
-            run_id=context.run_id,
-            ingested_at_utc=datetime.now(UTC),
-        ).to_dict()
-        if reconcile_existing_canonical_rows:
-            write_path = 'reconcile_writer_repair'
-            proof_reason = 'reconcile_writer_repair_completed'
-        else:
-            write_path = 'writer'
-            proof_reason = 'canonical_write_completed'
+        try:
+            write_summary = write_etf_normalized_records_to_canonical(
+                client=client,
+                database=database,
+                records=records,
+                run_id=context.run_id,
+                ingested_at_utc=datetime.now(UTC),
+            ).to_dict()
+            if reconcile_existing_canonical_rows:
+                write_path = 'reconcile_writer_repair'
+                proof_reason = 'reconcile_writer_repair_completed'
+            else:
+                write_path = 'writer'
+                proof_reason = 'canonical_write_completed'
+        except EventWriterError as exc:
+            if (
+                not reconcile_existing_canonical_rows
+                or runtime_contract.execution_mode != 'reconcile'
+                or exc.code not in _WRITER_RESETTABLE_CONFLICT_CODES
+            ):
+                raise
+            reset_summary = _reset_etf_partition_for_reconcile_or_raise(
+                context=context,
+                client=client,
+                database=database,
+                partition_id=partition_id,
+                source_proof=source_proof,
+                state_store=state_store,
+                writer_error=exc,
+            )
+            context.log.warning(
+                'ETF reconcile reset legacy canonical partition rows before rewrite: '
+                + json.dumps(
+                    {
+                        'partition_id': partition_id,
+                        'writer_error_code': exc.code,
+                        'writer_error_message': exc.message,
+                        'counts_before_reset': reset_summary,
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                )
+            )
+            write_summary = write_etf_normalized_records_to_canonical(
+                client=client,
+                database=database,
+                records=records,
+                run_id=context.run_id,
+                ingested_at_utc=datetime.now(UTC),
+            ).to_dict()
+            write_path = 'reconcile_partition_reset_rewrite'
+            proof_reason = 'reconcile_partition_reset_rewrite_completed'
 
     rows_processed = int(write_summary['rows_processed'])
     rows_inserted = int(write_summary['rows_inserted'])

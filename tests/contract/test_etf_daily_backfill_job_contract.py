@@ -8,6 +8,7 @@ import origo_control_plane.jobs.etf_daily_ingest as etf_job
 import pytest
 from origo_control_plane.backfill.runtime_contract import BackfillRuntimeContract
 
+from origo.events.errors import EventWriterError
 from origo.scraper.contracts import (
     NormalizedMetricRecord,
     ParsedRecord,
@@ -483,6 +484,164 @@ def test_execute_etf_partition_backfill_projects_only_after_proof(
         'project_native',
         'project_aligned',
     ]
+
+
+def test_reset_etf_partition_for_reconcile_deletes_existing_partition_state(
+    monkeypatch: Any,
+) -> None:
+    recorded_states: list[dict[str, Any]] = []
+    executed_queries: list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]] = []
+    count_calls = 0
+
+    class _FakeClient:
+        def execute(
+            self,
+            query: str,
+            params: dict[str, Any] | None = None,
+            settings: dict[str, Any] | None = None,
+        ) -> list[tuple[int, ...]]:
+            nonlocal count_calls
+            normalized_query = ' '.join(query.split())
+            executed_queries.append((normalized_query, params, settings))
+            if normalized_query.startswith('SELECT ('):
+                count_calls += 1
+                if count_calls == 1:
+                    return [(11, 7, 3, 2, 2)]
+                return [(0, 0, 0, 0, 0)]
+            return []
+
+    class _FakeStateStore:
+        def record_partition_state(self, **kwargs: Any) -> None:
+            recorded_states.append(kwargs)
+
+    summary = etf_job._reset_etf_partition_for_reconcile_or_raise(
+        context=_FakeContext(run_id='run-1', tags={}),
+        client=_FakeClient(),
+        database='origo',
+        partition_id='2024-01-11',
+        source_proof=SimpleNamespace(),
+        state_store=_FakeStateStore(),
+        writer_error=EventWriterError(
+            code='WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
+            message='Canonical identity conflict: payload hash mismatch for existing source-event identity',
+        ),
+    )
+
+    assert summary == {
+        'canonical_event_rows': 11,
+        'native_projection_rows': 7,
+        'aligned_projection_rows': 3,
+        'projector_checkpoint_rows': 2,
+        'projector_watermark_rows': 2,
+    }
+    assert [item['state'] for item in recorded_states] == ['reconcile_required']
+    assert recorded_states[0]['reason'] == 'legacy_canonical_payload_reset_required'
+    alter_queries = [query for query, _params, _settings in executed_queries if query.startswith('ALTER TABLE')]
+    assert len(alter_queries) == 5
+    assert any('canonical_event_log' in query for query in alter_queries)
+    assert any('canonical_etf_daily_metrics_native_v1' in query for query in alter_queries)
+    assert any('canonical_aligned_1s_aggregates' in query for query in alter_queries)
+    assert any('canonical_projector_checkpoints' in query for query in alter_queries)
+    assert any('canonical_projector_watermarks' in query for query in alter_queries)
+    for query, _params, settings in executed_queries:
+        if query.startswith('ALTER TABLE'):
+            assert settings == {'mutations_sync': 2}
+
+
+def test_execute_etf_partition_backfill_resets_legacy_conflict_once_on_reconcile(
+    monkeypatch: Any,
+) -> None:
+    write_attempts: list[int] = []
+    reset_calls: list[dict[str, Any]] = []
+
+    class _FakeStateStore:
+        def __init__(self, **_: Any) -> None:
+            return None
+
+        def assert_partition_can_execute_or_raise(self, **_: Any) -> None:
+            return None
+
+        def assess_partition_execution(self, **_: Any) -> Any:
+            return SimpleNamespace(
+                latest_proof_state='reconcile_required',
+                canonical_row_count=11,
+                active_quarantine=False,
+            )
+
+        def record_source_manifest(self, **_: Any) -> None:
+            return None
+
+        def record_partition_state(self, **_: Any) -> None:
+            return None
+
+        def compute_canonical_partition_proof_or_raise(self, **_: Any) -> Any:
+            return SimpleNamespace()
+
+        def prove_partition_or_quarantine(self, **_: Any) -> Any:
+            return SimpleNamespace(
+                state='proved_complete',
+                proof_digest_sha256='proof-sha',
+            )
+
+    monkeypatch.setattr(etf_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+    monkeypatch.setattr(
+        etf_job,
+        'canonical_proof_matches_source_proof',
+        lambda **_: False,
+    )
+
+    def _write(**kwargs: Any) -> Any:
+        write_attempts.append(len(kwargs['records']))
+        if len(write_attempts) == 1:
+            raise EventWriterError(
+                code='WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
+                message='Canonical identity conflict: payload hash mismatch for existing source-event identity',
+            )
+        return SimpleNamespace(
+            to_dict=lambda: {
+                'rows_processed': len(kwargs['records']),
+                'rows_inserted': len(kwargs['records']),
+                'rows_duplicate': 0,
+            }
+        )
+
+    monkeypatch.setattr(etf_job, 'write_etf_normalized_records_to_canonical', _write)
+    monkeypatch.setattr(
+        etf_job,
+        '_reset_etf_partition_for_reconcile_or_raise',
+        lambda **kwargs: (
+            reset_calls.append(kwargs),
+            {
+                'canonical_event_rows': 11,
+                'native_projection_rows': 0,
+                'aligned_projection_rows': 0,
+                'projector_checkpoint_rows': 0,
+                'projector_watermark_rows': 0,
+            },
+        )[1],
+    )
+
+    source_result = _build_source_result(partition_id='2026-03-26')
+    batches = etf_job._build_partition_batches_or_raise([source_result])['2026-03-26']
+
+    result = etf_job._execute_etf_partition_backfill_or_raise(
+        context=_FakeContext(run_id='run-2', tags={}),
+        client=SimpleNamespace(),
+        database='origo',
+        partition_id='2026-03-26',
+        batches=batches,
+        runtime_contract=BackfillRuntimeContract(
+            projection_mode='deferred',
+            execution_mode='reconcile',
+            runtime_audit_mode='summary',
+        ),
+    )
+
+    assert write_attempts == [1, 1]
+    assert len(reset_calls) == 1
+    assert reset_calls[0]['partition_id'] == '2026-03-26'
+    assert result.write_path == 'reconcile_partition_reset_rewrite'
+    assert result.partition_proof_state == 'proved_complete'
 
 
 def test_load_etf_archived_source_results_fails_on_missing_partition_coverage(

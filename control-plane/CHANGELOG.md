@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.76 on 28th of March, 2026
+- Tightened Slice 34 ETF explicit reconcile for legacy canonical payload drift:
+  - explicit ETF `reconcile` now resets a poisoned partition when existing canonical rows conflict with the current deterministic payload contract for the same source-event identities
+  - the reset clears canonical ETF rows plus ETF projector rows/checkpoints/watermarks for that partition before rewriting from archived source truth
+  - added contract coverage for the reset mutation contract and the reset-and-rewrite reconcile path
+
 ## v1.2.75 on 28th of March, 2026
 - Tightened Slice 34 ETF resume and reconcile control:
   - added `origo.backfill.partition_ids` tagging so ETF Dagster runs can scope work to explicit daily partitions

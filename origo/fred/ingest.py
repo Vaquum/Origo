@@ -5,9 +5,14 @@ import json
 from dataclasses import dataclass
 from datetime import date
 
-from .client import FREDClient
+from .client import (
+    FREDClient,
+    normalize_fred_series_metadata_payload_or_raise,
+    normalize_fred_series_observations_payload_or_raise,
+)
 from .contracts import FREDSeriesRegistryEntry, FREDSeriesSnapshot
 from .normalize import FREDLongMetricRow, normalize_fred_snapshots_to_long_metrics
+from .persistence import FREDRawSeriesBundle
 
 
 def _stable_hash_rows(rows: list[FREDLongMetricRow]) -> str:
@@ -176,6 +181,64 @@ def run_fred_historical_backfill(
         per_series=tuple(per_series),
         rows=tuple(normalized_rows),
         rows_hash_sha256=rows_hash,
+    )
+
+
+def normalize_fred_raw_bundles_to_long_metrics_or_raise(
+    *,
+    bundles: list[FREDRawSeriesBundle],
+    registry_entries: list[FREDSeriesRegistryEntry],
+    registry_version: str,
+) -> list[FREDLongMetricRow]:
+    if bundles == []:
+        raise ValueError('bundles must be non-empty')
+    if registry_entries == []:
+        raise ValueError('registry_entries must be non-empty')
+    if registry_version.strip() == '':
+        raise ValueError('registry_version must be non-empty')
+
+    registry_by_series_id = {entry.series_id: entry for entry in registry_entries}
+    snapshots: list[FREDSeriesSnapshot] = []
+    for bundle in bundles:
+        if bundle.registry_version != registry_version:
+            raise RuntimeError(
+                'FRED raw bundle registry version mismatch: '
+                f'bundle={bundle.registry_version} expected={registry_version} '
+                f'series_id={bundle.series_id}'
+            )
+        registry_entry = registry_by_series_id.get(bundle.series_id)
+        if registry_entry is None:
+            raise RuntimeError(
+                'FRED raw bundle series_id is missing from registry: '
+                f'series_id={bundle.series_id}'
+            )
+        metadata = normalize_fred_series_metadata_payload_or_raise(
+            series_id=bundle.series_id,
+            payload=bundle.metadata_payload,
+        )
+        if (
+            registry_entry.metric_unit is not None
+            and registry_entry.metric_unit != metadata.units
+        ):
+            raise RuntimeError(
+                'Registry metric_unit must match FRED metadata units, '
+                f'series_id={bundle.series_id} registry={registry_entry.metric_unit} '
+                f'metadata={metadata.units}'
+            )
+        observations = normalize_fred_series_observations_payload_or_raise(
+            series_id=bundle.series_id,
+            payload=bundle.observations_payload,
+        )
+        snapshots.append(
+            FREDSeriesSnapshot(
+                registry_entry=registry_entry,
+                metadata=metadata,
+                observations=observations,
+            )
+        )
+    return normalize_fred_snapshots_to_long_metrics(
+        snapshots=snapshots,
+        registry_version=registry_version,
     )
 
 

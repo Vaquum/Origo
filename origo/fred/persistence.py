@@ -72,6 +72,14 @@ def _artifact_id_from_bundle(bundle: FREDRawSeriesBundle, content_sha256: str) -
     return digest.hexdigest()
 
 
+def fred_raw_bundle_content_sha256(bundle: FREDRawSeriesBundle) -> str:
+    payload = _series_bundle_payload(bundle)
+    content = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode(
+        'utf-8'
+    )
+    return _artifact_sha256(content)
+
+
 def persist_fred_long_metrics_to_clickhouse(
     *,
     rows: list[FREDLongMetricRow],

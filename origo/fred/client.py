@@ -208,6 +208,22 @@ def _normalize_series_observations(
     return observations
 
 
+def normalize_fred_series_metadata_payload_or_raise(
+    *, series_id: str, payload: dict[str, object]
+) -> FREDSeriesMetadata:
+    if series_id.strip() == '':
+        raise ValueError('series_id must be non-empty')
+    return _normalize_series_metadata(series_id=series_id, payload=payload)
+
+
+def normalize_fred_series_observations_payload_or_raise(
+    *, series_id: str, payload: dict[str, object]
+) -> list[FREDObservation]:
+    if series_id.strip() == '':
+        raise ValueError('series_id must be non-empty')
+    return _normalize_series_observations(series_id=series_id, payload=payload)
+
+
 @dataclass(frozen=True)
 class FREDAPIConfig:
     api_key: str
@@ -306,7 +322,10 @@ class FREDClient:
         if series_id.strip() == '':
             raise ValueError('series_id must be non-empty')
         payload = self.fetch_series_metadata_payload(series_id=series_id)
-        return _normalize_series_metadata(series_id=series_id, payload=payload)
+        return normalize_fred_series_metadata_payload_or_raise(
+            series_id=series_id,
+            payload=payload,
+        )
 
     def fetch_series_metadata_payload(self, *, series_id: str) -> dict[str, object]:
         if series_id.strip() == '':
@@ -334,7 +353,10 @@ class FREDClient:
             sort_order=sort_order,
             limit=limit,
         )
-        return _normalize_series_observations(series_id=series_id, payload=payload)
+        return normalize_fred_series_observations_payload_or_raise(
+            series_id=series_id,
+            payload=payload,
+        )
 
     def fetch_series_observations_payload(
         self,

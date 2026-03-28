@@ -787,7 +787,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4m` Fix exchange reconcile writer-repair flow so partition proof is recomputed from fresh canonical state instead of reusing stale pre-repair canonical proof snapshots.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
-- [ ] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
+- [x] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
+- [ ] `S34-C5c` Provision the live S3-compatible object-store runtime (service, bucket bootstrap, and deploy env sync) so ETF/FRED raw-artifact persistence works on the hardened backfill path.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -795,7 +796,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
 - [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
 - [x] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
-- [ ] `S34-C7f` Fix repo-native Bitcoin Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
+- [x] `S34-C7f` Fix repo-native Bitcoin Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof
@@ -2165,6 +2166,10 @@ Constraints: use Dagster job execution only; no direct op invocation and no fake
 Action: Fix the repo-native ETF runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
 Done looks like: ETF backfill can be launched with readable control ids, Dagster accepts the run submission, and returned summaries preserve both the control run id and the Dagster UUID run id.
 Constraints: no loss of operator traceability and no fallback to opaque auto-generated control ids.
+27c. `S34-05c`
+Action: Provision the live S3-compatible object-store runtime for ETF/FRED raw-artifact persistence.
+Done looks like: local and server Docker stacks include a real object-store service plus deterministic bucket bootstrap, the deploy workflow synchronizes the object-store env contract instead of preserving broken placeholders, and live ETF/FRED Dagster runs can persist raw artifacts without container-localhost failures.
+Constraints: no filesystem fallback, no manual bucket creation outside the declared runtime contract, and no hidden deploy-only hostnames.
 25. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.

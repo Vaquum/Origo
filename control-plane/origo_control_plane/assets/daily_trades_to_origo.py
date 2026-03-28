@@ -314,11 +314,14 @@ def _process_day(
             run_id=context.run_id,
             recorded_at_utc=proof_recorded_at_utc,
         )
+        proof_input = (
+            current_canonical_proof if write_path == 'reconcile_proof_only' else None
+        )
         partition_proof = state_store.prove_partition_or_quarantine(
             source_proof=source_proof,
             run_id=context.run_id,
             recorded_at_utc=proof_recorded_at_utc,
-            canonical_proof=current_canonical_proof,
+            canonical_proof=proof_input,
         )
 
         projected_at_utc = datetime.now(UTC)

@@ -121,7 +121,8 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
         def record_partition_state(self, **_kwargs: Any) -> None:
             return None
 
-        def prove_partition_or_quarantine(self, **_kwargs: Any) -> SimpleNamespace:
+        def prove_partition_or_quarantine(self, **kwargs: Any) -> SimpleNamespace:
+            assert kwargs['canonical_proof'] is None
             return SimpleNamespace(
                 state='proved_complete',
                 proof_digest_sha256='digest-okx-2021-10-08',

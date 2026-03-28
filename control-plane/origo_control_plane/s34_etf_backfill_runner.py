@@ -32,6 +32,9 @@ from origo_control_plane.backfill.runtime_contract import (
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.jobs.etf_daily_ingest import origo_etf_daily_backfill_job
+from origo_control_plane.s34_partition_authority import (
+    load_nonterminal_partition_ids_for_stream_or_raise,
+)
 
 _ETF_JOB_NAME = 'origo_etf_daily_backfill_job'
 _DATASET = 'etf_daily_metrics'
@@ -230,38 +233,13 @@ def _load_ambiguous_daily_partition_ids_or_raise(
     database: str,
 ) -> tuple[str, ...]:
     contract = get_s34_dataset_contract(_DATASET)
-    rows = client.execute(
-        f'''
-        SELECT
-            event_partitions.partition_id
-        FROM
-        (
-            SELECT DISTINCT partition_id
-            FROM {database}.canonical_event_log
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-        ) AS event_partitions
-        LEFT JOIN
-        (
-            SELECT
-                partition_id,
-                argMax(state, proof_revision) AS state
-            FROM {database}.canonical_backfill_partition_proofs
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-            GROUP BY partition_id
-        ) AS proofs
-        ON event_partitions.partition_id = proofs.partition_id
-        WHERE proofs.state IS NULL OR proofs.state NOT IN %(terminal_states)s
-        ORDER BY event_partitions.partition_id ASC
-        ''',
-        {
-            'source_id': contract.source_id,
-            'stream_id': contract.stream_id,
-            'terminal_states': _TERMINAL_PARTITION_STATES,
-        },
+    return load_nonterminal_partition_ids_for_stream_or_raise(
+        client=client,
+        database=database,
+        source_id=contract.source_id,
+        stream_id=contract.stream_id,
+        terminal_states=_TERMINAL_PARTITION_STATES,
     )
-    return tuple(str(row[0]) for row in rows)
 
 
 def _load_terminal_partition_count_or_raise(

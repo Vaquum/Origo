@@ -21,6 +21,9 @@ from origo_control_plane.backfill import (
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.s34_exchange_backfill_runner import run_exchange_backfill
+from origo_control_plane.s34_partition_authority import (
+    load_nonterminal_partition_ids_for_stream_or_raise,
+)
 
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 
@@ -85,41 +88,13 @@ def _load_ambiguous_daily_partition_ids_or_raise(
             'Daily tranche controller requires daily partition scheme, '
             f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
         )
-    rows = cast(
-        list[tuple[Any, ...]],
-        client.execute(
-        f'''
-        SELECT
-            event_partitions.partition_id
-        FROM
-        (
-            SELECT DISTINCT partition_id
-            FROM {database}.canonical_event_log
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-        ) AS event_partitions
-        LEFT JOIN
-        (
-            SELECT
-                partition_id,
-                argMax(state, proof_revision) AS state
-            FROM {database}.canonical_backfill_partition_proofs
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-            GROUP BY partition_id
-        ) AS proofs
-        ON event_partitions.partition_id = proofs.partition_id
-        WHERE proofs.state IS NULL OR proofs.state NOT IN %(terminal_states)s
-        ORDER BY event_partitions.partition_id ASC
-        ''',
-        {
-            'source_id': contract.source_id,
-            'stream_id': contract.stream_id,
-            'terminal_states': _TERMINAL_PARTITION_STATES,
-        },
-        ),
+    return load_nonterminal_partition_ids_for_stream_or_raise(
+        client=client,
+        database=database,
+        source_id=contract.source_id,
+        stream_id=contract.stream_id,
+        terminal_states=_TERMINAL_PARTITION_STATES,
     )
-    return tuple(str(row[0]) for row in rows)
 
 
 def _parse_dataset_or_raise(value: str) -> S34BackfillDataset:

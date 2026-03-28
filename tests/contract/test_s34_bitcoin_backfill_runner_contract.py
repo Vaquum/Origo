@@ -54,6 +54,34 @@ def test_plan_next_bitcoin_chain_batch_prefers_ambiguous_partition(
     assert batch.partition_id == '000000840288-000000840431'
 
 
+def test_load_ambiguous_height_range_partition_ids_use_authoritative_partition_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_helper(**kwargs: Any) -> tuple[str, ...]:
+        captured.update(kwargs)
+        return ('000000840288-000000840431',)
+
+    monkeypatch.setattr(
+        'origo_control_plane.s34_bitcoin_backfill_runner.load_nonterminal_partition_ids_for_stream_or_raise',
+        _fake_helper,
+    )
+
+    result = runner._load_ambiguous_height_range_partition_ids_or_raise(
+        dataset='bitcoin_block_headers',
+        client=cast(Any, object()),
+        database='origo',
+    )
+
+    assert result == ('000000840288-000000840431',)
+    assert captured['database'] == 'origo'
+    assert captured['source_id'] == 'bitcoin_core'
+    assert captured['stream_id'] == 'bitcoin_block_headers'
+    assert captured['terminal_states'] == ('proved_complete', 'empty_proved')
+    assert captured['client'] is not None
+
+
 def test_plan_next_bitcoin_chain_batch_uses_contiguous_terminal_frontier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

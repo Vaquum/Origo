@@ -40,6 +40,34 @@ def test_load_etf_backfill_summary_requires_clean_terminal_proof_state(
         runner._load_etf_backfill_summary_or_raise()
 
 
+def test_load_ambiguous_daily_partition_ids_use_authoritative_partition_helper(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_helper(**kwargs: Any) -> tuple[str, ...]:
+        captured.update(kwargs)
+        return ('2024-01-11',)
+
+    monkeypatch.setattr(
+        runner,
+        'load_nonterminal_partition_ids_for_stream_or_raise',
+        _fake_helper,
+    )
+
+    result = runner._load_ambiguous_daily_partition_ids_or_raise(
+        client=SimpleNamespace(),
+        database='origo',
+    )
+
+    assert result == ('2024-01-11',)
+    assert captured['database'] == 'origo'
+    assert captured['source_id'] == 'etf'
+    assert captured['stream_id'] == 'etf_daily_metrics'
+    assert captured['terminal_states'] == ('proved_complete', 'empty_proved')
+    assert captured['client'] is not None
+
+
 def test_run_s34_etf_backfill_submits_job_and_returns_summary(
     monkeypatch: Any,
 ) -> None:

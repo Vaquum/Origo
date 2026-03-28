@@ -1,0 +1,63 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command finished successfully",
+    "detail_code": "short validation summary for the proof step",
+    "row_count": "logical assertion count when applicable; null for image build metadata",
+    "body_sha256": "SHA256 hash of the canonical runtime-proof fingerprint payload"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-control-plane-playwright-runtime-proof",
+    "captured_at_utc": "2026-03-28T16:29:37Z",
+    "notes": "Two consecutive local validation runs against the same branch state; run 1 performed a full image build and run 2 rebuilt the same image deterministically."
+  },
+  "source_checksums": [
+    {
+      "name": "dockerfile_control_plane",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "8c8bc70c307d46e6cfe76b1927351e57d08c430fcc11c61e5763554491aca853",
+      "path": "docker/Dockerfile.control-plane"
+    },
+    {
+      "name": "control_plane_pyproject",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "c0d40b56352dace3579e09f75fbc269d00306f925e37a4bb0f46c6763f4e080d",
+      "path": "control-plane/pyproject.toml"
+    },
+    {
+      "name": "etf_browser_runtime_contract_test",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "b825f5304f5f0679099ffe04cd23c2df4b0819c650ac6ec8a438af75114bb198",
+      "path": "tests/contract/test_s34_etf_browser_runtime_contract.py"
+    },
+    {
+      "name": "developer_doc_s34_etf_backfill_runner",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "06f6baf0cadd3b3b2960125d58aa46dad4469713674c7c86e0972917b2adc300",
+      "path": "docs/Developer/s34-etf-backfill-runner.md"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_playwright_runtime_proof",
+      "status_code": 0,
+      "detail_code": "pytest=3 passed in 0.01s; ruff=All checks passed!; pyright=0 errors, 0 warnings, 0 informations; docker build completed with Playwright Chromium install",
+      "row_count": 3,
+      "body_sha256": "f452c7a3c7e2e7d7e91dce2e978a91315e7eb02857ca206ad320054c2e0ddf51"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_playwright_runtime_proof",
+      "status_code": 0,
+      "detail_code": "pytest=3 passed in 0.01s; ruff=All checks passed!; pyright=0 errors, 0 warnings, 0 informations; docker build completed with Playwright Chromium install",
+      "row_count": 3,
+      "body_sha256": "f452c7a3c7e2e7d7e91dce2e978a91315e7eb02857ca206ad320054c2e0ddf51"
+    }
+  ]
+}

@@ -23,6 +23,8 @@ _FRED_FILE_TYPE = 'json'
 _DEFAULT_USER_AGENT = 'origo-fred-client/1.0'
 _LAST_UPDATED_SUFFIX_PATTERN = re.compile(r'([+-]\d{2})(?::?(\d{2}))?$')
 _FRED_OUTPUT_TYPE_VINTAGE_COLUMN_PATTERN = re.compile(r'^(?P<series_id>[A-Z0-9]+)_(?P<vintage>\d{8})$')
+_FRED_VINTAGE_DATES_MAX_LIMIT = 10000
+_FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST = 2000
 
 
 def _require_env(name: str) -> str:
@@ -195,6 +197,33 @@ def _normalize_series_observations(
     )
 
 
+def _normalize_series_vintage_dates(
+    *, series_id: str, payload: dict[str, object]
+) -> list[date]:
+    raw_vintage_dates = _require_list(
+        payload.get('vintage_dates'), 'FRED payload.vintage_dates'
+    )
+    vintage_dates: list[date] = []
+    seen_vintage_dates: set[date] = set()
+    for index, raw_vintage_date in enumerate(raw_vintage_dates):
+        if not isinstance(raw_vintage_date, str) or raw_vintage_date.strip() == '':
+            raise RuntimeError(
+                f'payload.vintage_dates[{index}] must be a non-empty string'
+            )
+        vintage_date = _parse_date(
+            raw_vintage_date,
+            f'payload.vintage_dates[{index}]',
+        )
+        if vintage_date in seen_vintage_dates:
+            raise RuntimeError(
+                f'FRED vintage dates must be unique for series_id={series_id}, '
+                f'duplicate={vintage_date.isoformat()}'
+            )
+        seen_vintage_dates.add(vintage_date)
+        vintage_dates.append(vintage_date)
+    return vintage_dates
+
+
 def _normalize_output_type_1_observations(
     *, series_id: str, payload: dict[str, object]
 ) -> list[FREDObservation]:
@@ -317,6 +346,14 @@ def normalize_fred_series_observations_payload_or_raise(
     return _normalize_series_observations(series_id=series_id, payload=payload)
 
 
+def normalize_fred_series_vintage_dates_payload_or_raise(
+    *, series_id: str, payload: dict[str, object]
+) -> list[date]:
+    if series_id.strip() == '':
+        raise ValueError('series_id must be non-empty')
+    return _normalize_series_vintage_dates(series_id=series_id, payload=payload)
+
+
 @dataclass(frozen=True)
 class FREDAPIConfig:
     api_key: str
@@ -433,6 +470,7 @@ class FREDClient:
         observation_end: date | None = None,
         realtime_start: date | None = None,
         realtime_end: date | None = None,
+        vintage_dates: Sequence[date] | None = None,
         output_type: Literal[1, 2, 3, 4] = 1,
         sort_order: Literal['asc', 'desc'] = 'asc',
         limit: int | None = None,
@@ -448,6 +486,7 @@ class FREDClient:
             observation_end=observation_end,
             realtime_start=realtime_start,
             realtime_end=realtime_end,
+            vintage_dates=vintage_dates,
             output_type=output_type,
             sort_order=sort_order,
             limit=limit,
@@ -465,6 +504,7 @@ class FREDClient:
         observation_end: date | None = None,
         realtime_start: date | None = None,
         realtime_end: date | None = None,
+        vintage_dates: Sequence[date] | None = None,
         output_type: Literal[1, 2, 3, 4] = 1,
         sort_order: Literal['asc', 'desc'] = 'asc',
         limit: int | None = None,
@@ -478,6 +518,10 @@ class FREDClient:
                 'realtime_start must be <= realtime_end, got '
                 f'{realtime_start.isoformat()} > {realtime_end.isoformat()}'
             )
+        if vintage_dates is not None and (realtime_start is not None or realtime_end is not None):
+            raise ValueError(
+                'vintage_dates cannot be combined with realtime_start/realtime_end'
+            )
         params: dict[str, str] = {'series_id': series_id, 'sort_order': sort_order}
         if observation_start is not None:
             params['observation_start'] = observation_start.isoformat()
@@ -487,10 +531,175 @@ class FREDClient:
             params['realtime_start'] = realtime_start.isoformat()
         if realtime_end is not None:
             params['realtime_end'] = realtime_end.isoformat()
+        if vintage_dates is not None:
+            normalized_vintage_dates: list[str] = []
+            seen_vintage_dates: set[date] = set()
+            for vintage_date in vintage_dates:
+                if vintage_date in seen_vintage_dates:
+                    raise ValueError(
+                        f'vintage_dates must be unique, got duplicate={vintage_date.isoformat()}'
+                    )
+                seen_vintage_dates.add(vintage_date)
+                normalized_vintage_dates.append(vintage_date.isoformat())
+            if normalized_vintage_dates == []:
+                raise ValueError('vintage_dates must be non-empty when provided')
+            if len(normalized_vintage_dates) > _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST:
+                raise ValueError(
+                    'vintage_dates exceeds FRED output_type=2 request limit, '
+                    f'got {len(normalized_vintage_dates)} > '
+                    f'{_FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST}'
+                )
+            params['vintage_dates'] = ','.join(normalized_vintage_dates)
         params['output_type'] = str(output_type)
         if limit is not None:
             params['limit'] = str(limit)
         return self._request_json(endpoint='series/observations', params=params)
+
+    def fetch_series_vintage_dates_payload(
+        self,
+        *,
+        series_id: str,
+        realtime_start: date | None = None,
+        realtime_end: date | None = None,
+        limit: int = _FRED_VINTAGE_DATES_MAX_LIMIT,
+        offset: int = 0,
+        sort_order: Literal['asc', 'desc'] = 'asc',
+    ) -> dict[str, object]:
+        if series_id.strip() == '':
+            raise ValueError('series_id must be non-empty')
+        if limit <= 0 or limit > _FRED_VINTAGE_DATES_MAX_LIMIT:
+            raise ValueError(
+                f'limit must be between 1 and {_FRED_VINTAGE_DATES_MAX_LIMIT}, got {limit}'
+            )
+        if offset < 0:
+            raise ValueError(f'offset must be >= 0, got {offset}')
+        if realtime_start is not None and realtime_end is not None and realtime_start > realtime_end:
+            raise ValueError(
+                'realtime_start must be <= realtime_end, got '
+                f'{realtime_start.isoformat()} > {realtime_end.isoformat()}'
+            )
+        params: dict[str, str] = {
+            'series_id': series_id,
+            'limit': str(limit),
+            'offset': str(offset),
+            'sort_order': sort_order,
+        }
+        if realtime_start is not None:
+            params['realtime_start'] = realtime_start.isoformat()
+        if realtime_end is not None:
+            params['realtime_end'] = realtime_end.isoformat()
+        return self._request_json(endpoint='series/vintagedates', params=params)
+
+    def fetch_all_series_vintage_dates(
+        self,
+        *,
+        series_id: str,
+        realtime_start: date | None = None,
+        realtime_end: date | None = None,
+    ) -> list[date]:
+        if series_id.strip() == '':
+            raise ValueError('series_id must be non-empty')
+        all_vintage_dates: list[date] = []
+        expected_count: int | None = None
+        offset = 0
+        while True:
+            payload = self.fetch_series_vintage_dates_payload(
+                series_id=series_id,
+                realtime_start=realtime_start,
+                realtime_end=realtime_end,
+                limit=_FRED_VINTAGE_DATES_MAX_LIMIT,
+                offset=offset,
+                sort_order='asc',
+            )
+            if expected_count is None:
+                expected_count = _require_int(
+                    payload,
+                    'count',
+                    'FRED payload',
+                )
+            page_vintage_dates = normalize_fred_series_vintage_dates_payload_or_raise(
+                series_id=series_id,
+                payload=payload,
+            )
+            if page_vintage_dates == []:
+                if expected_count != 0 and offset < expected_count:
+                    raise RuntimeError(
+                        'FRED vintage date pagination ended before expected count was reached, '
+                        f'series_id={series_id} offset={offset} expected_count={expected_count}'
+                    )
+                break
+            all_vintage_dates.extend(page_vintage_dates)
+            offset += len(page_vintage_dates)
+            if offset >= expected_count:
+                break
+        return all_vintage_dates
+
+    def fetch_series_revision_history_payload(
+        self,
+        *,
+        series_id: str,
+        observation_start: date | None = None,
+        observation_end: date | None = None,
+        realtime_start: date,
+        realtime_end: date,
+    ) -> dict[str, object]:
+        if series_id.strip() == '':
+            raise ValueError('series_id must be non-empty')
+        vintage_dates = self.fetch_all_series_vintage_dates(
+            series_id=series_id,
+            realtime_start=realtime_start,
+            realtime_end=realtime_end,
+        )
+        if vintage_dates == []:
+            raise RuntimeError(
+                f'FRED revision history returned no vintage dates for series_id={series_id}'
+            )
+
+        merged_observations: list[object] = []
+        chunk_payloads: list[dict[str, object]] = []
+        for start_index in range(
+            0,
+            len(vintage_dates),
+            _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
+        ):
+            vintage_date_chunk = vintage_dates[
+                start_index : start_index + _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST
+            ]
+            chunk_payload = self.fetch_series_observations_payload(
+                series_id=series_id,
+                observation_start=observation_start,
+                observation_end=observation_end,
+                vintage_dates=vintage_date_chunk,
+                output_type=2,
+                sort_order='asc',
+                limit=None,
+            )
+            merged_observations.extend(
+                _require_list(
+                    chunk_payload.get('observations'),
+                    'FRED payload.observations',
+                )
+            )
+            chunk_payloads.append(chunk_payload)
+
+        return {
+            'output_type': 2,
+            'sort_order': 'asc',
+            'realtime_start': realtime_start.isoformat(),
+            'realtime_end': realtime_end.isoformat(),
+            'observation_start': (
+                observation_start.isoformat() if observation_start is not None else None
+            ),
+            'observation_end': (
+                observation_end.isoformat() if observation_end is not None else None
+            ),
+            'requested_vintage_dates': [
+                vintage_date.isoformat() for vintage_date in vintage_dates
+            ],
+            'request_chunk_count': len(chunk_payloads),
+            'request_chunk_size_limit': _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
+            'observations': merged_observations,
+        }
 
 
 def build_fred_client_from_env() -> FREDClient:

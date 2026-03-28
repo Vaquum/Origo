@@ -145,15 +145,12 @@ def build_fred_raw_bundles(
         fetched_at_utc = datetime.now(UTC)
         metadata_payload = client.fetch_series_metadata_payload(series_id=entry.series_id)
         if observations_mode == 'revision_history':
-            observations_payload = client.fetch_series_observations_payload(
+            observations_payload = client.fetch_series_revision_history_payload(
                 series_id=entry.series_id,
                 observation_start=observation_start,
                 observation_end=observation_end,
                 realtime_start=_FRED_REVISION_HISTORY_REALTIME_START,
                 realtime_end=_FRED_REVISION_HISTORY_REALTIME_END,
-                output_type=2,
-                sort_order='asc',
-                limit=None,
             )
         else:
             observations_payload = client.fetch_series_observations_payload(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import origo_control_plane.s34_etf_backfill_runner as runner
 import pytest
@@ -68,7 +69,10 @@ def test_run_s34_etf_backfill_submits_job_and_returns_summary(
     monkeypatch.setattr(
         runner,
         '_create_and_submit_etf_run_or_raise',
-        lambda **kwargs: submitted.setdefault('run_id', kwargs['run_id']) or kwargs['run_id'],
+        lambda **kwargs: (
+            submitted.__setitem__('control_run_id', kwargs['control_run_id']),
+            '11111111-1111-1111-1111-111111111111',
+        )[1],
     )
     monkeypatch.setattr(
         runner,
@@ -92,14 +96,72 @@ def test_run_s34_etf_backfill_submits_job_and_returns_summary(
 
     result = runner.run_s34_etf_backfill_or_raise(run_id='s34-etf-test')
 
-    assert submitted['run_id'] == 's34-etf-test'
+    assert submitted['control_run_id'] == 's34-etf-test'
     assert result['dataset'] == 'etf_daily_metrics'
-    assert result['dagster_run_id'] == 's34-etf-test'
+    assert result['dagster_run_id'] == '11111111-1111-1111-1111-111111111111'
     assert result['proof_summary']['proof_boundary_partition_id'] == '2026-03-25'
 
 
 def test_build_run_tags_are_deterministic() -> None:
-    assert runner._build_run_tags(run_id='s34-etf-test') == {
+    assert runner._build_run_tags(control_run_id='s34-etf-test') == {
+        'origo.backfill.dataset': 'etf_daily_metrics',
+        'origo.backfill.control_run_id': 's34-etf-test',
+    }
+
+
+def test_create_and_submit_etf_run_uses_uuid_dagster_run_id(
+    monkeypatch: Any,
+) -> None:
+    submitted: dict[str, Any] = {}
+
+    class _FakeDagsterRun:
+        def __init__(self, run_id: str) -> None:
+            self.run_id = run_id
+
+    class _FakeInstance:
+        def get_ref(self) -> str:
+            return 'ref'
+
+        def create_run_for_job(self, **kwargs: Any) -> _FakeDagsterRun:
+            submitted['create_run_for_job'] = kwargs
+            return _FakeDagsterRun(kwargs['run_id'])
+
+        def submit_run(self, run_id: str, request_context: object) -> None:
+            submitted['submit_run'] = {
+                'run_id': run_id,
+                'request_context': request_context,
+            }
+
+    monkeypatch.setattr(
+        runner,
+        'create_execution_plan',
+        lambda *args, **kwargs: 'plan',
+    )
+
+    handle = runner._DagsterJobHandle(
+        workspace_process_context=object(),
+        request_context=object(),
+        code_location=object(),
+        remote_repository=object(),
+        remote_job=type(
+            '_RemoteJob',
+            (),
+            {
+                'get_remote_origin': staticmethod(lambda: 'remote-origin'),
+                'get_python_origin': staticmethod(lambda: 'python-origin'),
+            },
+        )(),
+    )
+
+    dagster_run_id = runner._create_and_submit_etf_run_or_raise(
+        instance=_FakeInstance(),
+        handle=handle,
+        control_run_id='s34-etf-test',
+    )
+
+    assert dagster_run_id == submitted['submit_run']['run_id']
+    assert UUID(dagster_run_id)
+    assert submitted['create_run_for_job']['tags'] == {
         'origo.backfill.dataset': 'etf_daily_metrics',
         'origo.backfill.control_run_id': 's34-etf-test',
     }

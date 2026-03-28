@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from clickhouse_driver import Client as ClickHouseClient
 from dagster import DagsterInstance
@@ -149,9 +150,10 @@ def _create_and_submit_job_run_or_raise(
     instance: DagsterInstance,
     handle: _DagsterJobHandle,
     job_def: Any,
-    run_id: str,
+    control_run_id: str,
     tags: dict[str, str],
 ) -> str:
+    dagster_run_id = str(uuid4())
     execution_plan = create_execution_plan(
         job_def,
         run_config={},
@@ -161,7 +163,7 @@ def _create_and_submit_job_run_or_raise(
     dagster_run = instance.create_run_for_job(
         job_def=job_def,
         execution_plan=execution_plan,
-        run_id=run_id,
+        run_id=dagster_run_id,
         run_config={},
         tags=tags,
         remote_job_origin=handle.remote_job.get_remote_origin(),
@@ -638,7 +640,7 @@ def run_bitcoin_chain_backfill_or_raise(
                 instance=instance,
                 handle=handle,
                 job_def=job_def,
-                run_id=batch.run_id,
+                control_run_id=batch.run_id,
                 tags=_build_chain_run_tags_or_raise(
                     dataset=batch.dataset,
                     execution_mode=batch.execution_mode,
@@ -785,7 +787,7 @@ def run_bitcoin_mempool_daily_path_or_raise(
             instance=instance,
             handle=handle,
             job_def=mempool_job_def,
-            run_id=normalized_run_id,
+            control_run_id=normalized_run_id,
             tags={
                 'origo.backfill.dataset': _MEMPOOL_DATASET,
                 'origo.backfill.control_run_id': normalized_run_id,

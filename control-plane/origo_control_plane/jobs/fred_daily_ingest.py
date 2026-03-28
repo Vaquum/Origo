@@ -22,6 +22,7 @@ from origo.events import (
     canonical_event_idempotency_key,
 )
 from origo.events.backfill_state import canonical_proof_matches_source_proof
+from origo.events.errors import EventWriterError
 from origo.fred import (
     FREDLongMetricRow,
     FREDRawSeriesBundle,
@@ -59,6 +60,14 @@ _CANONICAL_SOURCE_ID = 'fred'
 _CANONICAL_STREAM_ID = 'fred_series_metrics'
 _PAYLOAD_ENCODING = 'utf-8'
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
+_FRED_NATIVE_PROJECTOR_ID = 'fred_series_metrics_native_v1'
+_FRED_ALIGNED_PROJECTOR_ID = 'fred_series_metrics_aligned_1s_v1'
+_WRITER_RESETTABLE_CONFLICT_CODES = frozenset(
+    {
+        'WRITER_IDENTITY_EVENT_ID_CONFLICT',
+        'WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -175,6 +184,194 @@ def _resolve_source_window_for_partition_ids(
     )
 
 
+def _count_partition_rows_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+) -> dict[str, int]:
+    rows = client.execute(
+        f'''
+        SELECT
+            (
+                SELECT count()
+                FROM {database}.canonical_event_log
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            ) AS canonical_event_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_fred_series_metrics_native_v1
+                WHERE toDate(observed_at_utc) = toDate(%(partition_id)s)
+            ) AS native_projection_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_aligned_1s_aggregates
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+            ) AS aligned_projection_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_projector_checkpoints
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+                  AND projector_id IN %(projector_ids)s
+            ) AS projector_checkpoint_rows,
+            (
+                SELECT count()
+                FROM {database}.canonical_projector_watermarks
+                WHERE source_id = %(source_id)s
+                  AND stream_id = %(stream_id)s
+                  AND partition_id = %(partition_id)s
+                  AND projector_id IN %(projector_ids)s
+            ) AS projector_watermark_rows
+        ''',
+        {
+            'source_id': _CANONICAL_SOURCE_ID,
+            'stream_id': _CANONICAL_STREAM_ID,
+            'partition_id': partition_id,
+            'projector_ids': (
+                _FRED_NATIVE_PROJECTOR_ID,
+                _FRED_ALIGNED_PROJECTOR_ID,
+            ),
+        },
+    )
+    if len(rows) != 1:
+        raise RuntimeError(
+            'FRED partition reset count query returned unexpected row count: '
+            f'partition_id={partition_id} rows={len(rows)}'
+        )
+    row = rows[0]
+    return {
+        'canonical_event_rows': int(row[0]),
+        'native_projection_rows': int(row[1]),
+        'aligned_projection_rows': int(row[2]),
+        'projector_checkpoint_rows': int(row[3]),
+        'projector_watermark_rows': int(row[4]),
+    }
+
+
+def _delete_partition_rows_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+) -> None:
+    delete_settings = {'mutations_sync': 2}
+    params = {
+        'source_id': _CANONICAL_SOURCE_ID,
+        'stream_id': _CANONICAL_STREAM_ID,
+        'partition_id': partition_id,
+        'projector_ids': (
+            _FRED_NATIVE_PROJECTOR_ID,
+            _FRED_ALIGNED_PROJECTOR_ID,
+        ),
+    }
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_event_log
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_fred_series_metrics_native_v1
+        DELETE WHERE toDate(observed_at_utc) = toDate(%(partition_id)s)
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_aligned_1s_aggregates
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_projector_checkpoints
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+          AND projector_id IN %(projector_ids)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+    client.execute(
+        f'''
+        ALTER TABLE {database}.canonical_projector_watermarks
+        DELETE WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+          AND projector_id IN %(projector_ids)s
+        ''',
+        params,
+        settings=delete_settings,
+    )
+
+
+def _reset_fred_partition_for_reconcile_or_raise(
+    *,
+    context: OpExecutionContext,
+    client: ClickhouseClient,
+    database: str,
+    partition_id: str,
+    source_proof: Any,
+    state_store: CanonicalBackfillStateStore,
+    reset_reason: str,
+    reset_details: dict[str, Any],
+) -> dict[str, int]:
+    recorded_at_utc = datetime.now(UTC)
+    state_store.record_partition_state(
+        source_proof=source_proof,
+        state='reconcile_required',
+        reason=reset_reason,
+        run_id=context.run_id,
+        recorded_at_utc=recorded_at_utc,
+        proof_details=reset_details,
+    )
+    counts_before_reset = _count_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    _delete_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    counts_after_reset = _count_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
+    if any(count != 0 for count in counts_after_reset.values()):
+        raise RuntimeError(
+            'FRED reconcile partition reset did not clear partition state fully: '
+            + json.dumps(
+                {
+                    'partition_id': partition_id,
+                    'counts_after_reset': counts_after_reset,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    return counts_before_reset
+
+
 def _build_persisted_bundles_or_raise(*, context: OpExecutionContext) -> list[_PersistedFREDBundle]:
     registry_version, registry_entries = load_fred_series_registry()
     source_window = _resolve_source_window_for_partition_ids(
@@ -187,6 +384,7 @@ def _build_persisted_bundles_or_raise(*, context: OpExecutionContext) -> list[_P
         registry_version=registry_version,
         observation_start=source_window.observation_start,
         observation_end=source_window.observation_end,
+        observations_mode='revision_history',
     )
     persisted_artifacts = persist_fred_raw_bundles_to_object_store(
         bundles=bundles,
@@ -487,19 +685,62 @@ def _execute_partition_backfill_or_raise(
         write_path = 'reconcile_proof_only'
         proof_reason = 'reconcile_existing_canonical_rows_detected'
     else:
-        write_summary = write_fred_long_metrics_to_canonical(
-            client=client,
-            database=database,
-            rows=rows,
-            run_id=context.run_id,
-            ingested_at_utc=datetime.now(UTC),
-        ).to_dict()
-        if reconcile_existing_canonical_rows:
-            write_path = 'reconcile_writer_repair'
-            proof_reason = 'reconcile_writer_repair_completed'
-        else:
-            write_path = 'writer'
-            proof_reason = 'canonical_write_completed'
+        try:
+            write_summary = write_fred_long_metrics_to_canonical(
+                client=client,
+                database=database,
+                rows=rows,
+                run_id=context.run_id,
+                ingested_at_utc=datetime.now(UTC),
+            ).to_dict()
+            if reconcile_existing_canonical_rows:
+                write_path = 'reconcile_writer_repair'
+                proof_reason = 'reconcile_writer_repair_completed'
+            else:
+                write_path = 'writer'
+                proof_reason = 'canonical_write_completed'
+        except EventWriterError as exc:
+            if (
+                not reconcile_existing_canonical_rows
+                or runtime_contract.execution_mode != 'reconcile'
+                or exc.code not in _WRITER_RESETTABLE_CONFLICT_CODES
+            ):
+                raise
+            reset_summary = _reset_fred_partition_for_reconcile_or_raise(
+                context=context,
+                client=client,
+                database=database,
+                partition_id=partition_id,
+                source_proof=source_proof,
+                state_store=state_store,
+                reset_reason='legacy_request_time_canonical_reset_required',
+                reset_details={
+                    'writer_error_code': exc.code,
+                    'writer_error_message': exc.message,
+                },
+            )
+            context.log.warning(
+                'FRED reconcile reset legacy canonical partition rows before rewrite: '
+                + json.dumps(
+                    {
+                        'partition_id': partition_id,
+                        'writer_error_code': exc.code,
+                        'writer_error_message': exc.message,
+                        'counts_before_reset': reset_summary,
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                )
+            )
+            write_summary = write_fred_long_metrics_to_canonical(
+                client=client,
+                database=database,
+                rows=rows,
+                run_id=context.run_id,
+                ingested_at_utc=datetime.now(UTC),
+            ).to_dict()
+            write_path = 'reconcile_partition_reset_rewrite'
+            proof_reason = 'reconcile_partition_reset_rewrite_completed'
 
     rows_processed = int(write_summary['rows_processed'])
     rows_inserted = int(write_summary['rows_inserted'])
@@ -534,6 +775,76 @@ def _execute_partition_backfill_or_raise(
         recorded_at_utc=proof_recorded_at_utc,
         canonical_proof=proof_input,
     )
+    if (
+        reconcile_existing_canonical_rows
+        and runtime_contract.execution_mode == 'reconcile'
+        and write_path != 'reconcile_proof_only'
+        and partition_proof.state != 'proved_complete'
+    ):
+        reset_summary = _reset_fred_partition_for_reconcile_or_raise(
+            context=context,
+            client=client,
+            database=database,
+            partition_id=partition_id,
+            source_proof=source_proof,
+            state_store=state_store,
+            reset_reason='legacy_request_time_canonical_reset_required',
+            reset_details={
+                'quarantine_reason': partition_proof.reason,
+                'quarantine_state': partition_proof.state,
+                'quarantine_proof_digest_sha256': partition_proof.proof_digest_sha256,
+            },
+        )
+        context.log.warning(
+            'FRED reconcile reset stale canonical partition rows after proof mismatch: '
+            + json.dumps(
+                {
+                    'partition_id': partition_id,
+                    'initial_write_path': write_path,
+                    'quarantine_reason': partition_proof.reason,
+                    'counts_before_reset': reset_summary,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+        write_summary = write_fred_long_metrics_to_canonical(
+            client=client,
+            database=database,
+            rows=rows,
+            run_id=context.run_id,
+            ingested_at_utc=datetime.now(UTC),
+        ).to_dict()
+        write_path = 'reconcile_partition_reset_rewrite'
+        proof_reason = 'reconcile_partition_reset_rewrite_completed'
+        rows_processed = int(write_summary['rows_processed'])
+        rows_inserted = int(write_summary['rows_inserted'])
+        rows_duplicate = int(write_summary['rows_duplicate'])
+        if rows_processed != len(rows):
+            raise RuntimeError(
+                'FRED canonical writer summary mismatch after partition reset rewrite: '
+                f'rows_processed={rows_processed} expected={len(rows)} '
+                f'partition_id={partition_id}'
+            )
+        if rows_inserted + rows_duplicate != rows_processed:
+            raise RuntimeError(
+                'FRED canonical writer summary mismatch after partition reset rewrite: '
+                f'rows_inserted+rows_duplicate={rows_inserted + rows_duplicate} '
+                f'rows_processed={rows_processed} partition_id={partition_id}'
+            )
+        proof_recorded_at_utc = datetime.now(UTC)
+        state_store.record_partition_state(
+            source_proof=source_proof,
+            state='canonical_written_unproved',
+            reason=proof_reason,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
+        partition_proof = state_store.prove_partition_or_quarantine(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+        )
 
     projected_at_utc = datetime.now(UTC)
     if runtime_contract.projection_mode == 'inline':

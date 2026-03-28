@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import origo_control_plane.jobs.fred_daily_ingest as fred_job
@@ -7,9 +9,19 @@ import origo_control_plane.s34_fred_backfill_runner as fred_runner
 import pytest
 from origo_control_plane.backfill.runtime_contract import BackfillRuntimeContract
 
+from origo.fred import FREDLongMetricRow, FREDRawSeriesBundle
+from origo.scraper.contracts import PersistedRawArtifact
+
 
 class _FakeClickHouseClient:
     pass
+
+
+class _FakeDagsterContext:
+    def __init__(self) -> None:
+        self.run = SimpleNamespace(tags={}, run_id='dagster-run-id')
+        self.run_id = 'dagster-run-id'
+        self.log = SimpleNamespace(warning=lambda *_args, **_kwargs: None)
 
 
 def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambiguity(
@@ -94,3 +106,187 @@ def test_s34_fred_backfill_runner_builds_required_run_tags() -> None:
         'origo.backfill.runtime_audit_mode': 'summary',
         'origo.backfill.partition_ids': '2026-02-01,2026-03-01',
     }
+
+
+def test_fred_job_builds_revision_history_source_bundles(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        fred_job,
+        'load_fred_series_registry',
+        lambda: (
+            '2026-03-06-s6-c1',
+            [
+                SimpleNamespace(
+                    series_id='CPIAUCSL',
+                    source_id='fred_cpiaucsl',
+                    metric_name='consumer_price_index_all_items',
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(fred_job, 'build_fred_client_from_env', lambda: object())
+
+    bundle = FREDRawSeriesBundle(
+        source_id='fred_cpiaucsl',
+        series_id='CPIAUCSL',
+        source_uri='fred://series/CPIAUCSL',
+        fetched_at_utc=datetime(2026, 3, 28, 12, 0, tzinfo=UTC),
+        registry_version='2026-03-06-s6-c1',
+        metadata_payload={'seriess': [{'id': 'CPIAUCSL'}]},
+        observations_payload={'observations': [{'date': '1947-01-01'}]},
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'build_fred_raw_bundles',
+        lambda **kwargs: (
+            captured.setdefault('kwargs', kwargs),
+            [bundle],
+        )[1],
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'persist_fred_raw_bundles_to_object_store',
+        lambda **_: [
+            PersistedRawArtifact(
+                artifact_id='artifact-1',
+                storage_uri='s3://bucket/fred/1.json',
+                manifest_uri='s3://bucket/fred/1.manifest.json',
+                persisted_at_utc=datetime(2026, 3, 28, 12, 1, tzinfo=UTC),
+            )
+        ],
+    )
+
+    result = fred_job._build_persisted_bundles_or_raise(context=_FakeDagsterContext())
+
+    assert len(result) == 1
+    assert captured['kwargs']['observations_mode'] == 'revision_history'
+
+
+def test_fred_reconcile_resets_partition_after_proof_mismatch(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='reconcile',
+        runtime_audit_mode='summary',
+    )
+    row = FREDLongMetricRow(
+        metric_id='metric-1',
+        source_id='fred_cpiaucsl',
+        metric_name='consumer_price_index_all_items',
+        metric_unit='Index 1982-1984=100',
+        metric_value_string='21.48',
+        metric_value_int=None,
+        metric_value_float=21.48,
+        metric_value_bool=None,
+        observed_at_utc=datetime(1947, 1, 1, tzinfo=UTC),
+        dimensions_json='{"series_id":"CPIAUCSL"}',
+        provenance_json='{"realtime_start":"2026-03-11","realtime_end":"2026-03-11"}',
+    )
+    source_proof = SimpleNamespace(
+        stream_key=SimpleNamespace(
+            source_id='fred',
+            stream_id='fred_series_metrics',
+            partition_id='1947-01-01',
+        ),
+        source_row_count=1,
+    )
+    canonical_assessment = SimpleNamespace(canonical_row_count=1)
+    initial_quarantine = SimpleNamespace(
+        state='quarantined',
+        reason='row_count_mismatch,identity_digest_mismatch',
+        proof_digest_sha256='proof-1',
+    )
+    final_proof = SimpleNamespace(
+        state='proved_complete',
+        reason='source_and_canonical_match',
+        proof_digest_sha256='proof-2',
+    )
+
+    class _FakeStateStore:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.prove_calls = 0
+
+        def assert_partition_can_execute_or_raise(self, **_: Any) -> None:
+            return None
+
+        def assess_partition_execution(self, **_: Any) -> Any:
+            return canonical_assessment
+
+        def record_source_manifest(self, **_: Any) -> None:
+            return None
+
+        def record_partition_state(self, **_: Any) -> None:
+            return None
+
+        def compute_canonical_partition_proof_or_raise(self, **_: Any) -> Any:
+            return SimpleNamespace(
+                canonical_row_count=1,
+                canonical_unique_offset_count=1,
+                first_offset_or_equivalent='old-offset',
+                last_offset_or_equivalent='old-offset',
+                canonical_identity_digest_sha256='old-digest',
+                gap_count=0,
+                duplicate_count=0,
+            )
+
+        def prove_partition_or_quarantine(self, **_: Any) -> Any:
+            self.prove_calls += 1
+            return initial_quarantine if self.prove_calls == 1 else final_proof
+
+    write_calls: list[str] = []
+    reset_calls: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(fred_job, '_build_partition_source_proof_or_raise', lambda **_: source_proof)
+    monkeypatch.setattr(fred_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+    monkeypatch.setattr(
+        fred_job,
+        'canonical_proof_matches_source_proof',
+        lambda **_: False,
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'write_fred_long_metrics_to_canonical',
+        lambda **_: (
+            write_calls.append('write'),
+            SimpleNamespace(
+                to_dict=lambda: {
+                    'rows_processed': 1,
+                    'rows_inserted': 1,
+                    'rows_duplicate': 0,
+                }
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        fred_job,
+        '_reset_fred_partition_for_reconcile_or_raise',
+        lambda **kwargs: (
+            reset_calls.append(kwargs),
+            {
+                'canonical_event_rows': 1,
+                'native_projection_rows': 0,
+                'aligned_projection_rows': 0,
+                'projector_checkpoint_rows': 0,
+                'projector_watermark_rows': 0,
+            },
+        )[1],
+    )
+
+    result = fred_job._execute_partition_backfill_or_raise(
+        context=_FakeDagsterContext(),
+        client=_FakeClickHouseClient(),
+        database='origo',
+        partition_id='1947-01-01',
+        rows=[row],
+        persisted_bundles_by_source_id={'fred_cpiaucsl': object()},
+        runtime_contract=runtime_contract,
+    )
+
+    assert result.write_path == 'reconcile_partition_reset_rewrite'
+    assert result.partition_proof_state == 'proved_complete'
+    assert len(write_calls) == 2
+    assert len(reset_calls) == 1

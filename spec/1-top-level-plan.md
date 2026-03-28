@@ -822,7 +822,8 @@ Every slice must pass:
    1. reconcile re-reads the first-party source for the partition
    2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
    3. reconcile must use proof-only when existing canonical rows already match the current source proof and must use writer-repair when existing canonical rows are partial or mismatched but still recoverable by idempotent replay
-   4. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
+   4. explicit reconcile may perform an audited partition reset-and-rewrite when legacy canonical rows were produced under a stale source-identity contract and cannot be repaired by idempotent replay
+   5. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
 21. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
    1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
    2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`

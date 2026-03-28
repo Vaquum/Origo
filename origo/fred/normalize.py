@@ -103,7 +103,6 @@ def _build_provenance_json(
     provenance = {
         'fetched_from': 'fred_api',
         'frequency': snapshot.metadata.frequency,
-        'last_updated_utc': snapshot.metadata.last_updated_utc.isoformat(),
         'realtime_end': realtime_end.isoformat(),
         'realtime_start': realtime_start.isoformat(),
         'registry_version': registry_version,

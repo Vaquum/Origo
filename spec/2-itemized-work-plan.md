@@ -800,8 +800,10 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5k` Add ETF proof-driven resume/reconcile control so live reruns skip terminal partitions, explicitly reconcile ambiguous partitions, and continue full-history execution from authoritative proof state.
 - [ ] `S34-C5l` Add ETF audited partition reset-and-rewrite for legacy canonical payload drift so explicit reconcile can clear old non-deterministic rows and rewrite the partition from archived source truth.
 - [ ] `S34-C5m` Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile partition resets fail loudly by explicit config instead of client timeouts.
-- [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
-- [ ] `S34-C6a` Build repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
+- [ ] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
+- [x] `S34-C6a` Build repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
+- [ ] `S34-C6b` Make FRED historical source replay deterministic by fetching and normalizing revision-history vintages instead of request-time latest snapshots.
+- [ ] `S34-C6c` Add FRED audited partition reset-and-rewrite so explicit reconcile can clear stale request-time canonical rows and rewrite from deterministic source truth.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2234,6 +2236,14 @@ Constraints: official FRED source only.
 Action: Build repo-native FRED Dagster backfill runner/job with proof-driven reconcile and missing-partition closure.
 Done looks like: one repo-native runner can launch the real FRED Dagster backfill job, FRED backfill records Slice-34 manifests/proofs from source history while using proof-only for already-matching canonical partitions, and the returned summary exposes the terminal proof boundary plus any remaining ambiguous partitions from ClickHouse.
 Constraints: Dagster execution only, no direct source-to-canonical shell path, and no synthetic dense-calendar planning outside real FRED observation dates.
+25b. `S34-06b`
+Action: Make FRED historical replay deterministic by fetching and normalizing official revision-history vintages instead of request-time latest snapshots.
+Done looks like: FRED source bundles request an explicit deterministic revision-history shape, normalization expands vintages into stable source events, and repeated historical proofs no longer depend on the day the job was run.
+Constraints: official FRED source only, no request-time default realtime windows, and no weakening of publish/revision provenance.
+25c. `S34-06c`
+Action: Add FRED audited partition reset-and-rewrite for legacy request-time canonical drift.
+Done looks like: explicit FRED reconcile can detect stale canonical rows created under the old request-time identity contract, clear only the affected partition state, rewrite from deterministic revision-history source truth, and re-prove the partition fail-loud.
+Constraints: reconcile only, no dataset-wide destructive cleanup, and no silent acceptance of stale canonical extras.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

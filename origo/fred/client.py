@@ -22,6 +22,7 @@ _FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 _FRED_FILE_TYPE = 'json'
 _DEFAULT_USER_AGENT = 'origo-fred-client/1.0'
 _LAST_UPDATED_SUFFIX_PATTERN = re.compile(r'([+-]\d{2})(?::?(\d{2}))?$')
+_FRED_OUTPUT_TYPE_VINTAGE_COLUMN_PATTERN = re.compile(r'^(?P<series_id>[A-Z0-9]+)_(?P<vintage>\d{8})$')
 
 
 def _require_env(name: str) -> str:
@@ -174,6 +175,29 @@ def _normalize_series_metadata(
 def _normalize_series_observations(
     *, series_id: str, payload: dict[str, object]
 ) -> list[FREDObservation]:
+    raw_output_type = payload.get('output_type', 1)
+    if isinstance(raw_output_type, int):
+        output_type = raw_output_type
+    elif isinstance(raw_output_type, str):
+        try:
+            output_type = int(raw_output_type)
+        except ValueError as exc:
+            raise RuntimeError('FRED payload.output_type must be an integer when set') from exc
+    else:
+        raise RuntimeError('FRED payload.output_type must be an integer when set')
+
+    if output_type == 1:
+        return _normalize_output_type_1_observations(series_id=series_id, payload=payload)
+    if output_type == 2:
+        return _normalize_output_type_2_observations(series_id=series_id, payload=payload)
+    raise RuntimeError(
+        f'FRED observations output_type={output_type} is not supported by the Origo normalizer'
+    )
+
+
+def _normalize_output_type_1_observations(
+    *, series_id: str, payload: dict[str, object]
+) -> list[FREDObservation]:
     raw_observations = _require_list(
         payload.get('observations'), 'FRED payload.observations'
     )
@@ -205,6 +229,75 @@ def _normalize_series_observations(
             )
         )
 
+    return observations
+
+
+def _normalize_output_type_2_observations(
+    *, series_id: str, payload: dict[str, object]
+) -> list[FREDObservation]:
+    raw_observations = _require_list(
+        payload.get('observations'), 'FRED payload.observations'
+    )
+    if len(raw_observations) == 0:
+        raise RuntimeError(f'FRED observations are empty for series_id={series_id}')
+
+    observations: list[FREDObservation] = []
+    for index, raw_observation in enumerate(raw_observations):
+        context = f'payload.observations[{index}]'
+        payload_observation = _require_object(raw_observation, context)
+        observation_date = _parse_date(
+            _require_string(payload_observation, 'date', context),
+            f'{context}.date',
+        )
+        vintage_column_count = 0
+        for raw_key, raw_value in payload_observation.items():
+            if raw_key == 'date':
+                continue
+            vintage_match = _FRED_OUTPUT_TYPE_VINTAGE_COLUMN_PATTERN.fullmatch(raw_key)
+            if vintage_match is None:
+                raise RuntimeError(
+                    f'{context} contains unexpected output_type=2 key {raw_key!r}'
+                )
+            vintage_series_id = vintage_match.group('series_id')
+            if vintage_series_id != series_id:
+                raise RuntimeError(
+                    f'{context} vintage column series_id mismatch: '
+                    f'{vintage_series_id!r} != {series_id!r}'
+                )
+            if not isinstance(raw_value, str) or raw_value.strip() == '':
+                raise RuntimeError(f'{context}.{raw_key} must be a non-empty string')
+            vintage_date = _parse_date(
+                (
+                    f'{vintage_match.group("vintage")[0:4]}-'
+                    f'{vintage_match.group("vintage")[4:6]}-'
+                    f'{vintage_match.group("vintage")[6:8]}'
+                ),
+                f'{context}.{raw_key}',
+            )
+            observations.append(
+                FREDObservation(
+                    series_id=series_id,
+                    realtime_start=vintage_date,
+                    realtime_end=vintage_date,
+                    observation_date=observation_date,
+                    value=_normalize_observation_value(raw_value),
+                    raw_value=raw_value,
+                )
+            )
+            vintage_column_count += 1
+        if vintage_column_count == 0:
+            raise RuntimeError(
+                f'{context} output_type=2 row must contain at least one vintage column'
+            )
+
+    observations.sort(
+        key=lambda observation: (
+            observation.observation_date,
+            observation.realtime_start,
+            observation.realtime_end,
+            observation.raw_value,
+        )
+    )
     return observations
 
 
@@ -338,6 +431,9 @@ class FREDClient:
         series_id: str,
         observation_start: date | None = None,
         observation_end: date | None = None,
+        realtime_start: date | None = None,
+        realtime_end: date | None = None,
+        output_type: Literal[1, 2, 3, 4] = 1,
         sort_order: Literal['asc', 'desc'] = 'asc',
         limit: int | None = None,
     ) -> list[FREDObservation]:
@@ -350,6 +446,9 @@ class FREDClient:
             series_id=series_id,
             observation_start=observation_start,
             observation_end=observation_end,
+            realtime_start=realtime_start,
+            realtime_end=realtime_end,
+            output_type=output_type,
             sort_order=sort_order,
             limit=limit,
         )
@@ -364,6 +463,9 @@ class FREDClient:
         series_id: str,
         observation_start: date | None = None,
         observation_end: date | None = None,
+        realtime_start: date | None = None,
+        realtime_end: date | None = None,
+        output_type: Literal[1, 2, 3, 4] = 1,
         sort_order: Literal['asc', 'desc'] = 'asc',
         limit: int | None = None,
     ) -> dict[str, object]:
@@ -371,11 +473,21 @@ class FREDClient:
             raise ValueError('series_id must be non-empty')
         if limit is not None and limit <= 0:
             raise ValueError(f'limit must be > 0 when set, got {limit}')
+        if realtime_start is not None and realtime_end is not None and realtime_start > realtime_end:
+            raise ValueError(
+                'realtime_start must be <= realtime_end, got '
+                f'{realtime_start.isoformat()} > {realtime_end.isoformat()}'
+            )
         params: dict[str, str] = {'series_id': series_id, 'sort_order': sort_order}
         if observation_start is not None:
             params['observation_start'] = observation_start.isoformat()
         if observation_end is not None:
             params['observation_end'] = observation_end.isoformat()
+        if realtime_start is not None:
+            params['realtime_start'] = realtime_start.isoformat()
+        if realtime_end is not None:
+            params['realtime_end'] = realtime_end.isoformat()
+        params['output_type'] = str(output_type)
         if limit is not None:
             params['limit'] = str(limit)
         return self._request_json(endpoint='series/observations', params=params)

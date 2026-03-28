@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from clickhouse_driver import Client as ClickHouseClient
 
@@ -15,6 +16,9 @@ from .canonical_event_ingest import write_fred_long_metrics_to_canonical
 from .client import FREDClient
 from .contracts import FREDSeriesRegistryEntry
 from .normalize import FREDLongMetricRow
+
+_FRED_REVISION_HISTORY_REALTIME_START = date(1776, 7, 4)
+_FRED_REVISION_HISTORY_REALTIME_END = date(9999, 12, 31)
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ def build_fred_raw_bundles(
     registry_version: str,
     observation_start: date | None = None,
     observation_end: date | None = None,
+    observations_mode: Literal['latest_snapshot', 'revision_history'] = 'latest_snapshot',
 ) -> list[FREDRawSeriesBundle]:
     if len(registry_entries) == 0:
         raise ValueError('registry_entries must be non-empty')
@@ -130,18 +135,35 @@ def build_fred_raw_bundles(
             'observation_start must be <= observation_end, got '
             f'{observation_start.isoformat()} > {observation_end.isoformat()}'
         )
+    if observations_mode not in {'latest_snapshot', 'revision_history'}:
+        raise ValueError(
+            f"observations_mode must be 'latest_snapshot' or 'revision_history', got {observations_mode!r}"
+        )
 
     bundles: list[FREDRawSeriesBundle] = []
     for entry in registry_entries:
         fetched_at_utc = datetime.now(UTC)
         metadata_payload = client.fetch_series_metadata_payload(series_id=entry.series_id)
-        observations_payload = client.fetch_series_observations_payload(
-            series_id=entry.series_id,
-            observation_start=observation_start,
-            observation_end=observation_end,
-            sort_order='asc',
-            limit=None,
-        )
+        if observations_mode == 'revision_history':
+            observations_payload = client.fetch_series_observations_payload(
+                series_id=entry.series_id,
+                observation_start=observation_start,
+                observation_end=observation_end,
+                realtime_start=_FRED_REVISION_HISTORY_REALTIME_START,
+                realtime_end=_FRED_REVISION_HISTORY_REALTIME_END,
+                output_type=2,
+                sort_order='asc',
+                limit=None,
+            )
+        else:
+            observations_payload = client.fetch_series_observations_payload(
+                series_id=entry.series_id,
+                observation_start=observation_start,
+                observation_end=observation_end,
+                output_type=1,
+                sort_order='asc',
+                limit=None,
+            )
         bundles.append(
             FREDRawSeriesBundle(
                 source_id=entry.source_id,

@@ -292,9 +292,10 @@ def _build_expected_etf_archive_partitions_by_source_or_raise(
     valid_partition_ids_by_source: dict[str, set[str]],
     no_data_partition_ids_by_source: dict[str, set[str]],
     required_partition_filter: set[str],
-) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]]]:
+) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]], list[dict[str, Any]]]:
     expected_partitions_by_source: dict[str, tuple[str, ...]] = {}
     unavailable_sources: list[dict[str, Any]] = []
+    zero_history_sources: list[dict[str, Any]] = []
 
     for source_id in sorted(_ETF_HISTORICAL_AVAILABILITY_CONTRACTS):
         contract = _ETF_HISTORICAL_AVAILABILITY_CONTRACTS[source_id]
@@ -302,13 +303,22 @@ def _build_expected_etf_archive_partitions_by_source_or_raise(
         no_data_partitions = set(no_data_partition_ids_by_source.get(source_id, set()))
         evidence_partitions = tuple(sorted(valid_partitions | no_data_partitions))
         if evidence_partitions == ():
-            unavailable_sources.append(
-                {
-                    'source_id': source_id,
-                    'history_mode': contract.history_mode,
-                    'reason': 'no_valid_archived_artifacts',
-                }
-            )
+            if contract.history_mode == _ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD:
+                zero_history_sources.append(
+                    {
+                        'source_id': source_id,
+                        'history_mode': contract.history_mode,
+                        'reason': 'zero_history_before_first_valid_archive',
+                    }
+                )
+            else:
+                unavailable_sources.append(
+                    {
+                        'source_id': source_id,
+                        'history_mode': contract.history_mode,
+                        'reason': 'no_valid_archived_artifacts',
+                    }
+                )
             continue
 
         if contract.history_mode == _ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER:
@@ -348,7 +358,7 @@ def _build_expected_etf_archive_partitions_by_source_or_raise(
 
         expected_partitions_by_source[source_id] = expected_partitions
 
-    return expected_partitions_by_source, unavailable_sources
+    return expected_partitions_by_source, unavailable_sources, zero_history_sources
 
 
 def _build_legacy_etf_daily_ingest_summary(
@@ -826,7 +836,7 @@ def _load_etf_archived_source_results_or_raise(
     valid_partition_ids_by_source: dict[str, set[str]] = defaultdict(set)
     for (source_id, partition_id), _entry in deduped_results.items():
         valid_partition_ids_by_source[source_id].add(partition_id)
-    expected_partitions_by_source, unavailable_sources = (
+    expected_partitions_by_source, unavailable_sources, zero_history_sources = (
         _build_expected_etf_archive_partitions_by_source_or_raise(
             valid_partition_ids_by_source=valid_partition_ids_by_source,
             no_data_partition_ids_by_source=no_data_partition_ids_by_source,
@@ -885,6 +895,18 @@ def _load_etf_archived_source_results_or_raise(
                 sort_keys=True,
             )
         )
+    if zero_history_sources != [] and log is not None:
+        log.warning(
+            'ETF archive replay surfaced zero-history snapshot-only issuers: '
+            + json.dumps(
+                {
+                    'zero_history_source_count': len(zero_history_sources),
+                    'zero_history_sources': zero_history_sources[:20],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
     if unavailable_sources != [] or missing_source_partitions != []:
         raise RuntimeError(
             'ETF historical archive coverage is incomplete: '
@@ -893,6 +915,7 @@ def _load_etf_archived_source_results_or_raise(
                     'required_source_count': len(expected_partitions_by_source),
                     'expected_source_ids': list(expected_source_ids),
                     'available_source_count': len(valid_partition_ids_by_source),
+                    'zero_history_sources': zero_history_sources[:20],
                     'unavailable_sources': unavailable_sources[:20],
                     'missing_source_partitions': missing_source_partitions[:20],
                 },

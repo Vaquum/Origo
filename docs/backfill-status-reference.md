@@ -43,6 +43,7 @@
   - snapshot-only ETF issuers can only claim history from their first valid archived artifact day forward
   - stale partial canonical ETF leftovers do not expand the claimed historical window
   - official iShares market-closure days only drop out of the required window when Origo has archived the first-party no-data response for that requested day
+  - snapshot-only ETF issuers with zero valid archived artifacts have an explicit zero-history boundary; they are surfaced in proof output but do not count as missing history for issuers whose archive window is non-empty
 
 ## Failure modes, warnings, and error codes
 - `404`:

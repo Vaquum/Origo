@@ -13,6 +13,7 @@
 - Updated Slice 34 docs, changelogs, and closeout artifacts to record the honest ETF historical contract: iShares is the only current first-party historical issuer source, while the remaining ETF issuers stay capture-forward from their first valid archived artifact day.
 - Added persisted iShares no-data evidence handling so official holiday / market-closure responses are archived and later honored as negative evidence instead of being misclassified as missing historical partitions.
 - Extended ETF replay contract coverage so iShares archived no-data artifacts remove official holiday dates from required coverage without weakening fail-loud behavior for genuine missing historical days.
+- Added explicit zero-history handling for snapshot-only ETF issuers so `archive_capture_forward` sources with zero valid archived artifacts do not block replay for issuers with non-empty historical claims, while still surfacing those zero-history sources in proof output.
 
 ## Current state
 - Local proof shows the control-plane image now builds successfully with Playwright and Chromium installed.
@@ -20,15 +21,15 @@
 - `S34-C5f` is live-proven on `main`: the deployed ETF Dagster path now gets past the missing-Playwright failure and reaches real issuer payload parsing.
 - `S34-C5e` is live-proven on `main`: the ETF backfill path is now archive-only and no longer falls back to live issuer requests.
 - `S34-C5g` is implemented on the current branch but still needs merge, deploy, and live rerun proof. The next honest live ETF failure after this branch should be missing valid archive coverage, not duplicate-revision or future-capture noise.
-- `S34-C5h` is implemented on the current branch and locally proven. ETF historical replay now derives expected coverage from explicit issuer contracts instead of canonical ETF leftovers, and the repo has a dedicated iShares archive bootstrap runner for building missing historical raw-artifact coverage.
-- `S34-C5i` is implemented on the current branch and locally proven. iShares no-data holiday responses now persist as first-party negative evidence, and ETF replay excludes only those explicitly archived no-data dates from official iShares required coverage.
+- `S34-C5h` is live-proven on `main`: ETF historical replay now derives expected coverage from explicit issuer contracts instead of canonical ETF leftovers, and the repo has a dedicated iShares archive bootstrap runner for building missing historical raw-artifact coverage.
+- `S34-C5i` is live-proven on `main`: iShares no-data holiday responses now persist as first-party negative evidence, and ETF replay excludes only those explicitly archived no-data dates from official iShares required coverage.
+- `S34-C5j` is implemented on the current branch and locally proven. Snapshot-only issuers with zero valid archived artifacts now have an explicit empty historical claim, so they no longer masquerade as historical coverage gaps for the issuers that do have archive-backed history.
 - The current server archive remains sparse. Historical ETF completeness cannot be claimed beyond the archived issuer artifacts already stored under `raw-artifacts/`.
 
 ## Watch out
-- Slice 34 as a whole is still open; these artifacts only close the local proof legs for `S34-C5g`, `S34-C5h`, and `S34-C5i`.
+- Slice 34 as a whole is still open; these artifacts only close the local proof legs for `S34-C5g` and `S34-C5j`.
 - The live ETF rerun for `S34-C5g` must happen on the deployed server Dagster runtime because the real proof depends on the actual archive inventory and current archived revision mix.
-- The live ETF proof for `S34-C5h` must bootstrap iShares artifacts on the deployed server before rerunning ETF backfill; otherwise the next failure will still be sparse archive coverage.
-- The live ETF proof for `S34-C5i` must verify that the holiday-gap list disappears after the redeploy; if holidays still show up as missing partitions, the no-data evidence is not being persisted or replayed correctly.
+- The live ETF proof for `S34-C5j` must verify that zero-history snapshot-only issuers are surfaced as such without blocking ETF replay progress for the issuers whose historical claim is non-empty.
 - Invalid archived issuer artifacts are still not acceptable historical coverage. The new selector only stops them from poisoning unrelated required windows; it does not make them valid.
 - The currently known Grayscale artifact on the live server is a `429` security-checkpoint payload. If no valid archived Grayscale artifact exists for the required historical window, replay must still fail loudly on missing valid coverage.
 - ETF historical completeness still depends on building out real archive coverage for every required issuer/day. This branch makes the runtime honest about that boundary, but it does not create history for the snapshot-only issuers.

@@ -68,6 +68,7 @@
   - `etf_ishares_ibit_daily` is an official date-parameter source and can claim business-day history from `2024-01-11` forward once those archived artifacts exist.
   - All other ETF issuers are snapshot-only in the current Origo capability and can only claim history from their first valid archived artifact day forward.
 - Official iShares holiday closures are not guessed from a hard-coded calendar. They are excluded from required coverage only when Origo has archived the first-party no-data response for that requested `asOfDate`.
+- Snapshot-only ETF issuers use capture-forward history honestly. If an issuer has zero valid archived artifacts, its historical claim is empty and the runner surfaces that source explicitly instead of blocking replay for issuers that do have a non-empty historical claim.
 - Stale partial canonical ETF leftovers do not define the historical replay window. Expected replay coverage comes from the issuer-specific archive contract plus the valid archived artifact inventory.
 - The iShares historical archive bootstrap path is separate from the replay runner:
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_etf_ishares_archive_bootstrap_runner`

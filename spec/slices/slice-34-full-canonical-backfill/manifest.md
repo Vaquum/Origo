@@ -7,6 +7,10 @@
 - Added focused archive-replay contract coverage in [tests/contract/test_etf_daily_backfill_job_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_etf_daily_backfill_job_contract.py) for missing coverage, exact duplicate artifact deduplication, and fail-loud invalid archive behavior.
 - Added deterministic latest-valid archive revision selection for ETF replay so the job chooses the newest valid archived artifact per issuer/day instead of failing on superseded revisions or irrelevant future captures.
 - Extended [tests/contract/test_etf_daily_backfill_job_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_etf_daily_backfill_job_contract.py) with revision-precedence and ignored-invalid-artifact coverage.
+- Added explicit ETF issuer-specific historical availability contracts in [control-plane/origo_control_plane/jobs/etf_daily_ingest.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/control-plane/origo_control_plane/jobs/etf_daily_ingest.py) so required replay coverage is derived from source truth instead of from stale ETF canonical leftovers.
+- Added [control-plane/origo_control_plane/s34_etf_ishares_archive_bootstrap_runner.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/control-plane/origo_control_plane/s34_etf_ishares_archive_bootstrap_runner.py) to bootstrap official iShares `asOfDate` artifacts into raw-artifact storage with validation before persistence.
+- Added focused contract coverage in [tests/contract/test_s34_etf_ishares_archive_bootstrap_runner_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_s34_etf_ishares_archive_bootstrap_runner_contract.py) and extended [tests/contract/test_etf_daily_backfill_job_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_etf_daily_backfill_job_contract.py) so Slice 34 fails loudly if issuer availability boundaries drift again.
+- Updated Slice 34 docs, changelogs, and closeout artifacts to record the honest ETF historical contract: iShares is the only current first-party historical issuer source, while the remaining ETF issuers stay capture-forward from their first valid archived artifact day.
 
 ## Current state
 - Local proof shows the control-plane image now builds successfully with Playwright and Chromium installed.
@@ -14,11 +18,13 @@
 - `S34-C5f` is live-proven on `main`: the deployed ETF Dagster path now gets past the missing-Playwright failure and reaches real issuer payload parsing.
 - `S34-C5e` is live-proven on `main`: the ETF backfill path is now archive-only and no longer falls back to live issuer requests.
 - `S34-C5g` is implemented on the current branch but still needs merge, deploy, and live rerun proof. The next honest live ETF failure after this branch should be missing valid archive coverage, not duplicate-revision or future-capture noise.
+- `S34-C5h` is implemented on the current branch and locally proven. ETF historical replay now derives expected coverage from explicit issuer contracts instead of canonical ETF leftovers, and the repo has a dedicated iShares archive bootstrap runner for building missing historical raw-artifact coverage.
 - The current server archive remains sparse. Historical ETF completeness cannot be claimed beyond the archived issuer artifacts already stored under `raw-artifacts/`.
 
 ## Watch out
 - Slice 34 as a whole is still open; these artifacts only close the local proof leg for `S34-C5f`.
 - The live ETF rerun for `S34-C5g` must happen on the deployed server Dagster runtime because the real proof depends on the actual archive inventory and current archived revision mix.
+- The live ETF proof for `S34-C5h` must bootstrap iShares artifacts on the deployed server before rerunning ETF backfill; otherwise the next failure will still be sparse archive coverage.
 - Invalid archived issuer artifacts are still not acceptable historical coverage. The new selector only stops them from poisoning unrelated required windows; it does not make them valid.
 - The currently known Grayscale artifact on the live server is a `429` security-checkpoint payload. If no valid archived Grayscale artifact exists for the required historical window, replay must still fail loudly on missing valid coverage.
-- ETF historical completeness still depends on building out real archive coverage for every required issuer/day. This branch only makes the runtime honest about that boundary.
+- ETF historical completeness still depends on building out real archive coverage for every required issuer/day. This branch makes the runtime honest about that boundary, but it does not create history for the snapshot-only issuers.

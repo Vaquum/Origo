@@ -1,0 +1,126 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the focused local validation bundle finished successfully",
+    "detail_code": "summary of the ETF issuer-specific history-contract validation bundle with runtime-only noise normalized",
+    "row_count": "logical assertion count when applicable; 17 indicates the focused ETF validation bundle passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-etf-history-contract-proof",
+    "captured_at_utc": "2026-03-28T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the ETF issuer-specific history-contract branch state after docs/changelog/artifact updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "etf_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0e83397de7f6fe224d9e25c69f4860cbf48749ae35ce302f86717d6fea19d771",
+      "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py"
+    },
+    {
+      "name": "s34_etf_ishares_archive_bootstrap_runner_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "84a7337e367491b2abcbbe38ff1073c548204f0616f11942063235a1e59f3ca7",
+      "path": "control-plane/origo_control_plane/s34_etf_ishares_archive_bootstrap_runner.py"
+    },
+    {
+      "name": "test_etf_daily_backfill_job_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f64357430e5702aa859b6ecd882005ac191abaf16f7377169aa9f0d6ef0f7869",
+      "path": "tests/contract/test_etf_daily_backfill_job_contract.py"
+    },
+    {
+      "name": "test_s34_etf_ishares_archive_bootstrap_runner_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e5bf87962da05c3354a42e9efec89327458c9f417869e44d835d253737f45ada",
+      "path": "tests/contract/test_s34_etf_ishares_archive_bootstrap_runner_contract.py"
+    },
+    {
+      "name": "s34_etf_backfill_runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3dc656cf421be311eae9275c4ea856fe30d669401352070daccb3df5e9715f7e",
+      "path": "docs/Developer/s34-etf-backfill-runner.md"
+    },
+    {
+      "name": "s34_etf_ishares_archive_bootstrap_runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "fc35ee8be520529ffb32d39d8e0b53e5aa97e4a451686344d9404373313939d5",
+      "path": "docs/Developer/s34-etf-ishares-archive-bootstrap-runner.md"
+    },
+    {
+      "name": "backfill_status_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "7aac44922ea60850be730da46001897098ef753fd65d8ab2b3dca1d41d806c8b",
+      "path": "docs/backfill-status-reference.md"
+    },
+    {
+      "name": "historical_etf_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "af5f891baec1ffab9d1114a67566653b0a0100ee4e09693bd39ed98da50852b5",
+      "path": "docs/historical-etf-reference.md"
+    },
+    {
+      "name": "1_top_level_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e6122ec76f38feac5789e85cb665a172a03f686067ebd76e35e528fe356b5113",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "2_itemized_work_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0a8ffe8da7b6c37b55d0c271318fc92b01b91b8da51f9e14eb7dbd0283f53664",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "live_performance_investigation_log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "55b70eca7ba4f69548b5c90980eecd2f0cc0d857ca135cf45631d8bf4da54b75",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "abdd564481cf15c3267d53956f501a5716bebee03ad286072f40072b63b0ad36",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "run_notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0575bbad83f15171a5eba2566df20afd0dbff7a5eede32c0c0b0e3fbdb7ac4be",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_etf_history_contract_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ................. [100%] ; 17 passed in <runtime>",
+      "row_count": 17,
+      "body_sha256": "13d36bb8722479403a504adf4521a6d60c45a4ecde5a447b0d86d312b0788567"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_etf_history_contract_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ................. [100%] ; 17 passed in <runtime>",
+      "row_count": 17,
+      "body_sha256": "13d36bb8722479403a504adf4521a6d60c45a4ecde5a447b0d86d312b0788567"
+    }
+  ]
+}

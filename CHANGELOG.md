@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-28
+- Tightened Slice 34 ETF historical availability so history claims now follow issuer-specific source truth instead of stale canonical leftovers:
+  - ETF archive replay now derives required issuer/day coverage from an explicit per-issuer historical availability contract
+  - added an iShares archive bootstrap runner that pulls official `asOfDate` history into the raw-artifact archive with validation before persistence
+  - snapshot-only ETF issuers are now limited to history from their first valid archived artifact forward
+  - updated Slice 34 docs, artifacts, and investigation notes so the next live ETF proof step is archive bootstrap plus honest per-issuer coverage, not canonical-window guesswork
+- Updated version to `origo-control-plane v1.2.72` (`Origo API` unchanged at `v0.1.28`).
+
 - Tightened Slice 34 ETF archive replay so irrelevant bad captures cannot poison a required historical window:
   - ETF archive replay now chooses the latest valid archived artifact deterministically for each issuer/day in the required replay window
   - invalid or superseded artifacts are surfaced in logs instead of hard-failing the whole replay when valid required coverage still exists

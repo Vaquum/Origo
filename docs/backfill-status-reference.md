@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-26
-- Slice/version reference: S34 prep (platform v0.1.28 branch state)
+- Last updated: 2026-03-28
+- Slice/version reference: S34 prep (platform v0.1.28, control-plane v1.2.72 branch state)
 
 ## Purpose and scope
 - User-facing reference for what Origo means by historical availability while full canonical backfill is in progress.
@@ -22,6 +22,8 @@
   - the latest partition/window that has passed canonical proof and is eligible for serving
 - `historical availability`:
   - the portion of dataset history that is currently queryable because it is both ingested and terminally proved
+- `source-specific availability boundary`:
+  - a dataset-specific lower bound determined by the real source contract rather than by already-written canonical leftovers
 - `full available history`:
   - for no-selector requests, the full currently available proved history, not speculative vendor history beyond the proof boundary
 - `in-progress backfill`:
@@ -36,6 +38,10 @@
 - During Slice 34, backfill status is dataset-specific and may differ by source.
 - Source existence alone does not make data queryable; proof completion is the serving gate.
 - No-selector requests resolve to `earliest -> latest proved boundary` for that dataset.
+- ETF history is issuer-specific:
+  - iShares can claim official historical business-day coverage from `2024-01-11` forward once raw artifacts are archived and terminally proved
+  - snapshot-only ETF issuers can only claim history from their first valid archived artifact day forward
+  - stale partial canonical ETF leftovers do not expand the claimed historical window
 
 ## Failure modes, warnings, and error codes
 - `404`:

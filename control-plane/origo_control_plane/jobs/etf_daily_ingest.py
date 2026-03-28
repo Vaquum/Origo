@@ -8,8 +8,8 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, cast
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Final, cast
 from urllib.parse import urlparse
 
 import dagster as dg
@@ -59,6 +59,8 @@ _CANONICAL_SOURCE_ID = 'etf'
 _CANONICAL_STREAM_ID = 'etf_daily_metrics'
 _PAYLOAD_ENCODING = 'utf-8'
 _RAW_ARTIFACTS_PREFIX = 'raw-artifacts/'
+_ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER = 'official_date_parameter'
+_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD = 'archive_capture_forward'
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,58 @@ class _ArchivedArtifactLoad:
     manifest_payload: dict[str, Any]
     raw_artifact: RawArtifact
     persisted_artifact: PersistedRawArtifact
+
+
+@dataclass(frozen=True)
+class _ETFHistoricalAvailabilityContract:
+    source_id: str
+    history_mode: str
+    first_partition_id: str | None = None
+
+
+_ETF_HISTORICAL_AVAILABILITY_CONTRACTS: Final[dict[str, _ETFHistoricalAvailabilityContract]] = {
+    'etf_ark_arkb_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_ark_arkb_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_bitwise_bitb_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_bitwise_bitb_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_coinshares_brrr_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_coinshares_brrr_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_fidelity_fbtc_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_fidelity_fbtc_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_franklin_ezbc_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_franklin_ezbc_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_grayscale_gbtc_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_grayscale_gbtc_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_hashdex_defi_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_hashdex_defi_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_invesco_btco_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_invesco_btco_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+    'etf_ishares_ibit_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_ishares_ibit_daily',
+        history_mode=_ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER,
+        first_partition_id='2024-01-11',
+    ),
+    'etf_vaneck_hodl_daily': _ETFHistoricalAvailabilityContract(
+        source_id='etf_vaneck_hodl_daily',
+        history_mode=_ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+    ),
+}
 
 
 def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
@@ -165,6 +219,90 @@ def _build_object_store_client_and_bucket_or_raise() -> tuple[Any, str]:
 
 def _partition_id_for_record_or_raise(record: NormalizedMetricRecord) -> str:
     return record.observed_at_utc.astimezone(UTC).date().isoformat()
+
+
+def _partition_id_to_date_or_raise(*, partition_id: str) -> date:
+    try:
+        return date.fromisoformat(partition_id)
+    except ValueError as exc:
+        raise RuntimeError(f'ETF partition_id must be ISO date, got {partition_id}') from exc
+
+
+def _iter_business_partition_ids_inclusive(
+    *,
+    start_partition_id: str,
+    end_partition_id: str,
+) -> tuple[str, ...]:
+    start_day = _partition_id_to_date_or_raise(partition_id=start_partition_id)
+    end_day = _partition_id_to_date_or_raise(partition_id=end_partition_id)
+    if start_day > end_day:
+        raise RuntimeError(
+            'ETF historical availability window is invalid: '
+            f'start_partition_id={start_partition_id} end_partition_id={end_partition_id}'
+        )
+    partition_ids: list[str] = []
+    current = start_day
+    while current <= end_day:
+        if current.weekday() < 5:
+            partition_ids.append(current.isoformat())
+        current += timedelta(days=1)
+    return tuple(partition_ids)
+
+
+def _build_expected_etf_archive_partitions_by_source_or_raise(
+    *,
+    valid_partition_ids_by_source: dict[str, set[str]],
+    required_partition_filter: set[str],
+) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]]]:
+    expected_partitions_by_source: dict[str, tuple[str, ...]] = {}
+    unavailable_sources: list[dict[str, Any]] = []
+
+    for source_id in sorted(_ETF_HISTORICAL_AVAILABILITY_CONTRACTS):
+        contract = _ETF_HISTORICAL_AVAILABILITY_CONTRACTS[source_id]
+        available_partitions = tuple(sorted(valid_partition_ids_by_source.get(source_id, set())))
+        if available_partitions == ():
+            unavailable_sources.append(
+                {
+                    'source_id': source_id,
+                    'history_mode': contract.history_mode,
+                    'reason': 'no_valid_archived_artifacts',
+                }
+            )
+            continue
+
+        if contract.history_mode == _ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER:
+            if contract.first_partition_id is None:
+                raise RuntimeError(
+                    'ETF official historical contract requires first_partition_id: '
+                    f'source_id={source_id}'
+                )
+            expected_partitions = _iter_business_partition_ids_inclusive(
+                start_partition_id=contract.first_partition_id,
+                end_partition_id=available_partitions[-1],
+            )
+        elif contract.history_mode == _ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD:
+            expected_partitions = _iter_business_partition_ids_inclusive(
+                start_partition_id=available_partitions[0],
+                end_partition_id=available_partitions[-1],
+            )
+        else:
+            raise RuntimeError(
+                'Unknown ETF historical availability mode: '
+                f'source_id={source_id} history_mode={contract.history_mode}'
+            )
+
+        if required_partition_filter:
+            expected_partitions = tuple(
+                partition_id
+                for partition_id in expected_partitions
+                if partition_id in required_partition_filter
+            )
+            if expected_partitions == ():
+                continue
+
+        expected_partitions_by_source[source_id] = expected_partitions
+
+    return expected_partitions_by_source, unavailable_sources
 
 
 def _build_legacy_etf_daily_ingest_summary(
@@ -499,31 +637,10 @@ def _archived_result_revision_order_key(
     )
 
 
-def _load_existing_etf_partition_ids_or_raise(
-    *,
-    client: ClickhouseClient,
-    database: str,
-) -> tuple[str, ...]:
-    rows = client.execute(
-        f'''
-        SELECT DISTINCT partition_id
-        FROM {database}.canonical_event_log
-        WHERE source_id = %(source_id)s
-          AND stream_id = %(stream_id)s
-        ORDER BY partition_id ASC
-        ''',
-        {
-            'source_id': _CANONICAL_SOURCE_ID,
-            'stream_id': _CANONICAL_STREAM_ID,
-        },
-    )
-    return tuple(str(row[0]) for row in rows)
-
-
 def _load_etf_archived_source_results_or_raise(
     *,
     run_context: ScrapeRunContext,
-    required_partition_ids: tuple[str, ...],
+    required_partition_ids: tuple[str, ...] = (),
     log: Any | None = None,
 ) -> list[PipelineSourceResult]:
     adapter_source_index = _build_etf_adapter_source_index_or_raise(
@@ -641,29 +758,30 @@ def _load_etf_archived_source_results_or_raise(
         )
         deduped_results[record_key] = (pipeline_source_result, records_fingerprint)
 
-    source_ids_by_partition: dict[str, set[str]] = defaultdict(set)
+    valid_partition_ids_by_source: dict[str, set[str]] = defaultdict(set)
     for (source_id, partition_id), _entry in deduped_results.items():
-        source_ids_by_partition[partition_id].add(source_id)
-    coverage_partitions = (
-        tuple(sorted(required_partition_ids))
-        if required_partition_ids != ()
-        else tuple(sorted(source_ids_by_partition))
+        valid_partition_ids_by_source[source_id].add(partition_id)
+    expected_partitions_by_source, unavailable_sources = (
+        _build_expected_etf_archive_partitions_by_source_or_raise(
+            valid_partition_ids_by_source=valid_partition_ids_by_source,
+            required_partition_filter=required_partition_set,
+        )
     )
-    missing_partitions = [
-        partition_id
-        for partition_id in coverage_partitions
-        if partition_id not in source_ids_by_partition
-    ]
-    incomplete_partitions = [
+    missing_source_partitions = [
         {
-            'partition_id': partition_id,
-            'missing_source_ids': sorted(
-                set(expected_source_ids) - source_ids_by_partition[partition_id]
-            ),
+            'source_id': source_id,
+            'history_mode': _ETF_HISTORICAL_AVAILABILITY_CONTRACTS[source_id].history_mode,
+            'missing_partition_ids': [
+                partition_id
+                for partition_id in expected_partitions
+                if partition_id not in valid_partition_ids_by_source[source_id]
+            ][:20],
         }
-        for partition_id in coverage_partitions
-        if partition_id in source_ids_by_partition
-        and source_ids_by_partition[partition_id] != set(expected_source_ids)
+        for source_id, expected_partitions in sorted(expected_partitions_by_source.items())
+        if any(
+            partition_id not in valid_partition_ids_by_source[source_id]
+            for partition_id in expected_partitions
+        )
     ]
     if invalid_artifacts != [] and log is not None:
         log.warning(
@@ -689,16 +807,16 @@ def _load_etf_archived_source_results_or_raise(
                 sort_keys=True,
             )
         )
-    if missing_partitions != [] or incomplete_partitions != []:
+    if unavailable_sources != [] or missing_source_partitions != []:
         raise RuntimeError(
             'ETF historical archive coverage is incomplete: '
             + json.dumps(
                 {
-                    'required_partition_count': len(coverage_partitions),
-                    'available_partition_count': len(source_ids_by_partition),
+                    'required_source_count': len(expected_partitions_by_source),
                     'expected_source_ids': list(expected_source_ids),
-                    'missing_partitions': missing_partitions[:20],
-                    'incomplete_partitions': incomplete_partitions[:20],
+                    'available_source_count': len(valid_partition_ids_by_source),
+                    'unavailable_sources': unavailable_sources[:20],
+                    'missing_source_partitions': missing_source_partitions[:20],
                 },
                 ensure_ascii=True,
                 sort_keys=True,
@@ -1006,13 +1124,8 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
     native_client, database = _build_clickhouse_client_or_raise()
 
     try:
-        required_partition_ids = _load_existing_etf_partition_ids_or_raise(
-            client=native_client,
-            database=database,
-        )
         collected_source_results = _load_etf_archived_source_results_or_raise(
             run_context=run_context,
-            required_partition_ids=required_partition_ids,
             log=context.log,
         )
         partition_batches = _build_partition_batches_or_raise(collected_source_results)

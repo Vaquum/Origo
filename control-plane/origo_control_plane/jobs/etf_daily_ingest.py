@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pyright: reportUnknownParameterType=false, reportMissingParameterType=false
-
 import hashlib
 import json
 import sys

@@ -519,7 +519,7 @@ def run_exchange_backfill(
             password=settings.password,
             database=settings.database,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=settings.send_receive_timeout_seconds,
         )
         state_store = CanonicalBackfillStateStore(
             client=client,

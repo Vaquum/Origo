@@ -118,7 +118,7 @@ def _process_month(
             password=CLICKHOUSE_PASSWORD,
             database=CLICKHOUSE_DATABASE,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=_CLICKHOUSE.send_receive_timeout_seconds,
         )
 
         write_summary = write_binance_spot_trades_to_canonical(

@@ -374,7 +374,7 @@ def insert_bitcoin_network_hashrate_estimate_to_origo(
             password=clickhouse_target.password,
             database=clickhouse_target.database,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=settings.send_receive_timeout_seconds,
         )
         source_proof = build_bitcoin_partition_source_proof_or_raise(
             stream_id='bitcoin_network_hashrate_estimate',

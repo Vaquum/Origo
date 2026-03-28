@@ -176,7 +176,7 @@ def insert_daily_okx_spot_trades_to_origo(
             password=CLICKHOUSE_PASSWORD,
             database=CLICKHOUSE_DATABASE,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=_CLICKHOUSE.send_receive_timeout_seconds,
         )
         state_store = CanonicalBackfillStateStore(
             client=client,

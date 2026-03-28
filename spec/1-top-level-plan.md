@@ -759,6 +759,7 @@ Every slice must pass:
          3. explicit ETF reconcile must be scopeable to selected partition ids through runtime tags so the repo-native runner can clear poisoned partitions before continuing full-history backfill
          4. explicit ETF reconcile may perform an audited partition reset-and-rewrite when legacy canonical rows violate the current deterministic payload contract for the same source-event identities
          5. any ETF partition reset must clear canonical rows plus projector rows/checkpoints/watermarks for that partition before rewriting from archived source truth
+         6. long-running ETF reconcile reset mutations must use the shared env-backed native ClickHouse receive-timeout contract so client-side timeouts do not outpace honest synchronous mutation completion
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

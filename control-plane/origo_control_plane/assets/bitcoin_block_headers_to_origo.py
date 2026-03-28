@@ -298,7 +298,7 @@ def insert_bitcoin_block_headers_to_origo(
             password=CLICKHOUSE_PASSWORD,
             database=CLICKHOUSE_DATABASE,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=_CLICKHOUSE.send_receive_timeout_seconds,
         )
         source_proof = build_bitcoin_partition_source_proof_or_raise(
             stream_id='bitcoin_block_headers',

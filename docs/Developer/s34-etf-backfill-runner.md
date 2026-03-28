@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-28
-- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-C5k`, `S34-C5l`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-05k`, `S34-05l`, `S34-G2`)
+- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-C5k`, `S34-C5l`, `S34-C5m`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-05k`, `S34-05l`, `S34-05m`, `S34-G2`)
 
 ## Purpose and scope
 - Defines the repo-native Slice 34 ETF backfill runner.
@@ -95,6 +95,7 @@
 - Blank, duplicate, or malformed `origo.backfill.partition_ids`: fail loudly.
 - Projector execution before terminal proof: fail loudly by contract.
 - Legacy ETF canonical payload drift for an explicit reconcile day triggers an audited partition reset-and-rewrite instead of silent duplicate acceptance.
+- If an explicit ETF reconcile reset requires a long-running synchronous ClickHouse mutation, the native client must survive that full mutation window via `CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS`; a client-side timeout is treated as a runtime contract failure.
 - Missing historical issuer artifacts for claimed ETF backfill coverage: fail loudly.
 - Missing valid archived issuer artifacts for the required replay window: fail loudly.
 - Issuer availability contract mismatch (`unavailable_sources` or `missing_source_partitions`): fail loudly.
@@ -114,6 +115,7 @@
   - `CLICKHOUSE_USER`
   - `CLICKHOUSE_PASSWORD`
   - `CLICKHOUSE_DATABASE`
+  - `CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS`
 - ETF job runtime inherits existing ETF ingest env contract.
 - Object-store runtime must be present for raw artifact persistence:
   - `ORIGO_OBJECT_STORE_ENDPOINT_URL`

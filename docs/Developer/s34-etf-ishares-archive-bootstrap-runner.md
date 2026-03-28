@@ -47,12 +47,15 @@
   - request days where the official iShares CSV returned the explicit no-data holdings marker
 - `persisted_days`:
   - days newly persisted into raw-artifact storage on this run
+- `persisted_no_data_days`:
+  - days where the official iShares response was explicit no-data and whose raw artifacts were still persisted as first-party negative evidence
 
 ## Source/provenance and freshness semantics
 - Source of truth is the official iShares IBIT holdings CSV endpoint with `asOfDate=<YYYYMMDD>`.
 - The runner persists raw artifacts first and leaves canonical replay to the ETF backfill job.
 - Existing archive days are revalidated by loading archived bytes from object storage and replaying the real adapter `parse()` and `normalize()` methods.
 - Market holidays are not inferred heuristically. The runner only treats a day as legitimate no-data when the official artifact contains the explicit iShares no-data marker.
+- Official no-data artifacts are still persisted to object storage. ETF replay later consumes them as negative evidence so those dates are excluded from required historical coverage instead of becoming fake gaps.
 
 ## Failure modes, warnings, and error codes
 - `start_date < 2024-01-11`: fail loudly.

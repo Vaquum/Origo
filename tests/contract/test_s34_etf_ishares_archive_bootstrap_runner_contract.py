@@ -52,11 +52,11 @@ def test_run_s34_etf_ishares_archive_bootstrap_skips_existing_and_no_data(
         lambda *, operation_name, operation, policy: operation(),
     )
 
-    def _validate(**kwargs: Any) -> str:
+    def _validate(**kwargs: Any) -> tuple[str, bool]:
         request_day = kwargs['request_day'].isoformat()
         if request_day == '2024-01-15':
-            raise RuntimeError('no_data:2024-01-15')
-        return request_day
+            return request_day, True
+        return request_day, False
 
     monkeypatch.setattr(runner, '_validate_ishares_artifact_or_raise', _validate)
     monkeypatch.setattr(
@@ -75,4 +75,6 @@ def test_run_s34_etf_ishares_archive_bootstrap_skips_existing_and_no_data(
     assert summary['skipped_existing_days'] == ['2024-01-11']
     assert summary['skipped_no_data_days'] == ['2024-01-15']
     assert summary['persisted_days'] == ['2024-01-12']
-    assert persisted_artifact_ids == ['artifact-2024-01-12']
+    assert summary['persisted_no_data_days'] == ['2024-01-15']
+    assert summary['persisted_artifact_count'] == 2
+    assert persisted_artifact_ids == ['artifact-2024-01-12', 'artifact-2024-01-15']

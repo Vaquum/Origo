@@ -42,6 +42,7 @@
   - iShares can claim official historical business-day coverage from `2024-01-11` forward once raw artifacts are archived and terminally proved
   - snapshot-only ETF issuers can only claim history from their first valid archived artifact day forward
   - stale partial canonical ETF leftovers do not expand the claimed historical window
+  - official iShares market-closure days only drop out of the required window when Origo has archived the first-party no-data response for that requested day
 
 ## Failure modes, warnings, and error codes
 - `404`:

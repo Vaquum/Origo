@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-28
+- Tightened Slice 34 ETF explicit reconcile so legacy canonical payload drift can be repaired honestly:
+  - ETF explicit `reconcile` now resets a poisoned partition when existing canonical rows reuse the same source-event identities but violate the current deterministic ETF payload contract
+  - the reset clears canonical ETF rows plus ETF projector rows/checkpoints/watermarks for just the affected partition before rewriting from archived source truth
+  - this closes the live blocker where early ETF canonical rows still carried run-volatile provenance fields and therefore could not be repaired by idempotent writer replay alone
+- Updated version to `origo-control-plane v1.2.76` (`Origo API` unchanged at `v0.1.28`).
+
 - Tightened Slice 34 ETF backfill resume semantics so the repo-native runner can clear stale partitions and continue:
   - ETF backfill now honors an explicit `origo.backfill.partition_ids` runtime tag for scoped partition execution
   - ETF backfill reruns now skip terminal-complete partitions in `backfill` mode instead of failing on already-proved historical days

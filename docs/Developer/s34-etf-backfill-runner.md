@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-28
-- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-G2`)
+- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-C5k`, `S34-C5l`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-05k`, `S34-05l`, `S34-G2`)
 
 ## Purpose and scope
 - Defines the repo-native Slice 34 ETF backfill runner.
@@ -66,6 +66,7 @@
   - if any ETF partition has canonical rows without terminal proof, the runner submits an explicit `reconcile` Dagster run scoped to that partition via `origo.backfill.partition_ids`
   - only after the ambiguous partition proves terminal again does the runner submit the normal full-history `backfill` run
   - `backfill` mode skips terminal-complete partitions and still fails loudly if it encounters any non-terminal ambiguous/quarantined partition
+  - if explicit ETF `reconcile` hits legacy canonical rows that reuse the same source-event identities but violate the current deterministic payload contract, the job resets just that partition's canonical/projector state and rewrites it from archived source truth before re-proof
 - Post-run proof state is read from:
   - `canonical_backfill_partition_proofs`
   - `canonical_event_log`
@@ -93,6 +94,7 @@
 - Ambiguous ETF partitions after success: fail loudly.
 - Blank, duplicate, or malformed `origo.backfill.partition_ids`: fail loudly.
 - Projector execution before terminal proof: fail loudly by contract.
+- Legacy ETF canonical payload drift for an explicit reconcile day triggers an audited partition reset-and-rewrite instead of silent duplicate acceptance.
 - Missing historical issuer artifacts for claimed ETF backfill coverage: fail loudly.
 - Missing valid archived issuer artifacts for the required replay window: fail loudly.
 - Issuer availability contract mismatch (`unavailable_sources` or `missing_source_partitions`): fail loudly.

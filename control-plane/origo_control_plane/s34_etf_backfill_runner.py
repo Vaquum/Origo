@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from clickhouse_driver import Client as ClickHouseClient
 from dagster import DagsterInstance
@@ -101,10 +102,10 @@ def _load_dagster_job_handle_or_raise(
     raise RuntimeError(f'Failed to resolve Dagster remote job for job_name={job_name}')
 
 
-def _build_run_tags(*, run_id: str) -> dict[str, str]:
+def _build_run_tags(*, control_run_id: str) -> dict[str, str]:
     return {
         'origo.backfill.dataset': _DATASET,
-        'origo.backfill.control_run_id': run_id,
+        'origo.backfill.control_run_id': control_run_id,
     }
 
 
@@ -112,9 +113,10 @@ def _create_and_submit_etf_run_or_raise(
     *,
     instance: DagsterInstance,
     handle: _DagsterJobHandle,
-    run_id: str,
+    control_run_id: str,
 ) -> str:
-    tags = _build_run_tags(run_id=run_id)
+    tags = _build_run_tags(control_run_id=control_run_id)
+    dagster_run_id = str(uuid4())
     execution_plan = create_execution_plan(
         origo_etf_daily_ingest_job,
         run_config={},
@@ -124,7 +126,7 @@ def _create_and_submit_etf_run_or_raise(
     dagster_run = instance.create_run_for_job(
         job_def=origo_etf_daily_ingest_job,
         execution_plan=execution_plan,
-        run_id=run_id,
+        run_id=dagster_run_id,
         run_config={},
         tags=tags,
         remote_job_origin=handle.remote_job.get_remote_origin(),
@@ -319,7 +321,7 @@ def run_s34_etf_backfill_or_raise(*, run_id: str | None = None) -> dict[str, Any
         dagster_run_id = _create_and_submit_etf_run_or_raise(
             instance=instance,
             handle=handle,
-            run_id=normalized_run_id,
+            control_run_id=normalized_run_id,
         )
         completed_run = _wait_for_run_success_or_raise(
             instance=instance,

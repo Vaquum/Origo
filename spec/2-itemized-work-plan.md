@@ -787,6 +787,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4m` Fix exchange reconcile writer-repair flow so partition proof is recomputed from fresh canonical state instead of reusing stale pre-repair canonical proof snapshots.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
+- [ ] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -794,6 +795,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
 - [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
 - [x] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
+- [ ] `S34-C7f` Fix repo-native Bitcoin Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof
@@ -2159,6 +2161,10 @@ Constraints: issuer official-source hierarchy only.
 Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
 Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.
+27b. `S34-05b`
+Action: Fix the repo-native ETF runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
+Done looks like: ETF backfill can be launched with readable control ids, Dagster accepts the run submission, and returned summaries preserve both the control run id and the Dagster UUID run id.
+Constraints: no loss of operator traceability and no fallback to opaque auto-generated control ids.
 25. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
@@ -2187,6 +2193,10 @@ Constraints: Dagster execution only; no direct asset invocation, no mixed planne
 Action: Formalize mempool capture-boundary contract and fail-loud serving behavior.
 Done looks like: the system records and exposes the first captured mempool snapshot boundary from the Origo-controlled node runtime, historical/native/aligned requests before that boundary fail loudly, and docs/specs state explicitly that blockchain history does not reconstruct historical mempool state.
 Constraints: no synthetic mempool reconstruction, no silent truncation to available range, and no fallback to block-confirmed transaction history.
+31a. `S34-07f`
+Action: Fix the repo-native Bitcoin runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
+Done looks like: Bitcoin chain and mempool runs can be launched with readable control ids, every Dagster submission uses a UUID run id, and returned results preserve both identifiers for proof and operations.
+Constraints: no planner behavior changes and no silent rewriting of the operator-facing control run id.
 32. `S34-08`
 Action: Run Bitcoin full-history backfill for derived datasets (`bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 Done looks like: derived datasets are complete in canonical events and reproducible from canonical base-chain events.

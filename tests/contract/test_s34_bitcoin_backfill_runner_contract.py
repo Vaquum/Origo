@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import UUID
 
+import origo_control_plane.s34_bitcoin_backfill_runner as runner
 import pytest
 from origo_control_plane.s34_bitcoin_backfill_runner import (
     list_bitcoin_chain_datasets_or_raise,
@@ -180,3 +182,62 @@ def test_run_bitcoin_mempool_daily_path_rejects_historical_partition() -> None:
             runtime_audit_mode='summary',
             requested_partition_id=historical_partition_id,
         )
+
+
+def test_create_and_submit_job_run_uses_uuid_dagster_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitted: dict[str, Any] = {}
+
+    class _FakeDagsterRun:
+        def __init__(self, run_id: str) -> None:
+            self.run_id = run_id
+
+    class _FakeInstance:
+        def get_ref(self) -> str:
+            return 'ref'
+
+        def create_run_for_job(self, **kwargs: Any) -> _FakeDagsterRun:
+            submitted['create_run_for_job'] = kwargs
+            return _FakeDagsterRun(kwargs['run_id'])
+
+        def submit_run(self, run_id: str, request_context: object) -> None:
+            submitted['submit_run'] = {
+                'run_id': run_id,
+                'request_context': request_context,
+            }
+
+    handle = runner._DagsterJobHandle(
+        workspace_process_context=object(),
+        request_context=object(),
+        code_location=object(),
+        remote_repository=object(),
+        remote_job=type(
+            '_RemoteJob',
+            (),
+            {
+                'get_remote_origin': staticmethod(lambda: 'remote-origin'),
+                'get_python_origin': staticmethod(lambda: 'python-origin'),
+            },
+        )(),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        'create_execution_plan',
+        lambda *args, **kwargs: 'plan',
+    )
+
+    dagster_run_id = runner._create_and_submit_job_run_or_raise(
+        instance=_FakeInstance(),
+        handle=handle,
+        job_def=object(),
+        control_run_id='s34-bitcoin-test',
+        tags={'origo.backfill.control_run_id': 's34-bitcoin-test'},
+    )
+
+    assert dagster_run_id == submitted['submit_run']['run_id']
+    assert UUID(dagster_run_id)
+    assert submitted['create_run_for_job']['tags'] == {
+        'origo.backfill.control_run_id': 's34-bitcoin-test'
+    }

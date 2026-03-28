@@ -749,8 +749,10 @@ Every slice must pass:
    8. ETF historical availability is issuer-specific:
       1. issuers with a proven first-party historical endpoint may claim explicit pre-captured history from their contracted first-available day
       2. snapshot-only issuers may only claim history from the first valid archived artifact day forward
-      3. stale partial canonical ETF leftovers must never define the historical replay window
-      4. first-party historical ETF endpoints must also persist and honor explicit no-data evidence (for example market-holiday responses); naive weekday expansion is not an acceptable completeness contract
+      3. snapshot-only issuers with zero valid archived artifacts have an explicit empty historical claim and must not block replay of issuers whose historical claim is non-empty
+      4. zero-history snapshot-only issuers must still be surfaced explicitly in proof/audit output; they may not be silently treated as historically complete
+      5. stale partial canonical ETF leftovers must never define the historical replay window
+      6. first-party historical ETF endpoints must also persist and honor explicit no-data evidence (for example market-holiday responses); naive weekday expansion is not an acceptable completeness contract
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

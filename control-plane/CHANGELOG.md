@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.74 on 28th of March, 2026
+- Formalized the zero-history ETF boundary for snapshot-only issuers:
+  - `archive_capture_forward` issuers with zero valid archived artifacts now have an explicit empty historical claim instead of blocking replay for issuers whose claim is non-empty
+  - ETF archive replay still surfaces those zero-history issuers explicitly in proof/log output instead of silently treating them as complete
+
 ## v1.2.73 on 28th of March, 2026
 - Tightened Slice 34 ETF iShares holiday coverage:
   - persist official iShares no-data responses as first-party negative evidence during archive bootstrap

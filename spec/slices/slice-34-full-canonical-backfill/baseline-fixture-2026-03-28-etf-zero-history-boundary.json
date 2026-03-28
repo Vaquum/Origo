@@ -1,0 +1,126 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command finished successfully",
+    "detail_code": "summary of the repo-wide static analysis plus focused ETF zero-history-boundary validation bundle with runtime-only noise normalized",
+    "row_count": "21 indicates the focused ETF zero-history-boundary proof suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-etf-zero-history-boundary-proof",
+    "captured_at_utc": "2026-03-28T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the ETF snapshot-only zero-history boundary branch state after plan, changelog, and closeout artifact updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "control_plane_origo_control_plane_jobs_etf_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "cc9e3d83372b39f484f7c0ac5da735a8b31bc6bb8167c1971a4b4d5ac9b3117b",
+      "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py"
+    },
+    {
+      "name": "tests_contract_test_etf_daily_backfill_job_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f0787abdc53f41f7bf0fa3d2868e04d8f5a6257d19eb6e8b195ce8d1a5434702",
+      "path": "tests/contract/test_etf_daily_backfill_job_contract.py"
+    },
+    {
+      "name": "docs_Developer_s34_etf_backfill_runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "b0134f171a9d663ba7600d50ae2fe1c28ea6b07fd4eed33514dbda24b6c3759b",
+      "path": "docs/Developer/s34-etf-backfill-runner.md"
+    },
+    {
+      "name": "docs_backfill_status_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "74a6344d22893189a301e7648583df53dbbaea796519fd3fd77ef4e7e148f81d",
+      "path": "docs/backfill-status-reference.md"
+    },
+    {
+      "name": "docs_historical_etf_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "74dc74c2af43c1f17d4b8dafb1e061cf7d12feaf8bb0978e306b6555878c4fff",
+      "path": "docs/historical-etf-reference.md"
+    },
+    {
+      "name": "spec_1_top_level_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "b7366ecfa86ae2cd2d9b2dde9a3f7d459a75e44903f77ddd64704a0379737e78",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2_itemized_work_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "6a459380e667fede72f8ccfc1bb09f33482106651713078b22d5451cefd4d8ac",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live_performance_investigation_log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "306ad306a23542c17828c2e4d2085f7f7ce3873eda1b0f12ac57a543f520155a",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "c4f74db3f8a03765dc499143afa61d7758cdbcd88577132df874254082f008af",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_run_notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "6ca2bbd4a89e900dc11c3c9f3dbf7fcd7208c7a4612596b5b90cf590e0c9a4f7",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d7a67784dcca42b01af2f67a3c3118ad3d71df7150296259f4e656da0b60f12e",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d956b3f4ae1cbac9f7fe6a2adeacb79eef89870f15c0c280268616df7ab05d06",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "329ea405488258818a1eedb89233a0274c2966ddb778542c3bec5905ebd266ad",
+      "path": "control-plane/pyproject.toml"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_etf_zero_history_boundary_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; .....................                                                    [100%] ; 21 passed in <runtime>",
+      "row_count": 21,
+      "body_sha256": "c87a18190903121f46597c315105846bb8f9b499b46865bee2cf2f49002c7277"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_etf_zero_history_boundary_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; .....................                                                    [100%] ; 21 passed in <runtime>",
+      "row_count": 21,
+      "body_sha256": "c87a18190903121f46597c315105846bb8f9b499b46865bee2cf2f49002c7277"
+    }
+  ]
+}

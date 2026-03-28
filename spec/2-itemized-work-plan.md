@@ -798,6 +798,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C5j` Formalize zero-history boundaries for snapshot-only ETF issuers so sources with no valid archived artifacts do not block replay of issuers whose historical claim is non-empty.
 - [ ] `S34-C5k` Add ETF proof-driven resume/reconcile control so live reruns skip terminal partitions, explicitly reconcile ambiguous partitions, and continue full-history execution from authoritative proof state.
 - [ ] `S34-C5l` Add ETF audited partition reset-and-rewrite for legacy canonical payload drift so explicit reconcile can clear old non-deterministic rows and rewrite the partition from archived source truth.
+- [ ] `S34-C5m` Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile partition resets fail loudly by explicit config instead of client timeouts.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -2211,6 +2212,10 @@ Constraints: no silent reconcile in backfill mode, no direct canonical writes ou
 Action: Add ETF audited partition reset-and-rewrite for legacy canonical payload drift.
 Done looks like: explicit ETF reconcile can detect legacy canonical rows whose source-event identities match but whose payload hashes no longer satisfy the current deterministic payload contract, clear canonical/projector state for just that partition, and rewrite the partition from archived source truth before re-proof.
 Constraints: reconcile only, fail loudly on incomplete reset, no silent payload drift acceptance, and no dataset-wide destructive cleanup.
+27l. `S34-05m`
+Action: Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile reset mutations do not die on the client boundary while the server mutation is still progressing.
+Done looks like: ETF explicit reconcile survives the full reset mutation window on live data, and native ClickHouse clients read timeout from one shared env-backed runtime contract instead of hard-coded `900`.
+Constraints: no deployment hard-codes, invalid timeout values fail loudly, and the contract must remain shared across Slice 34 runners/assets that use the native ClickHouse client.
 25a. `S34-05f`
 Action: Provision Playwright + Chromium in the deployed control-plane runtime for browser-backed ETF adapters.
 Done looks like: the control-plane package installs the Python `playwright` dependency, the deployed control-plane image installs Chromium via Playwright at build time, and live ETF Dagster runs no longer fail with missing-browser runtime errors before real source fetch/proof logic executes.

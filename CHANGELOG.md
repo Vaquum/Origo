@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-03-28
+- Added env-backed native ClickHouse receive-timeout contract so long-running ETF explicit reconcile resets no longer fail at the client boundary while the server-side mutation is still progressing.
 - Tightened Slice 34 ETF explicit reconcile so legacy canonical payload drift can be repaired honestly:
   - ETF explicit `reconcile` now resets a poisoned partition when existing canonical rows reuse the same source-event identities but violate the current deterministic ETF payload contract
   - the reset clears canonical ETF rows plus ETF projector rows/checkpoints/watermarks for just the affected partition before rewriting from archived source truth

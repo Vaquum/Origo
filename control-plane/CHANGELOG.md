@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.2.77 on 28th of March, 2026
+
+- Added env-backed native ClickHouse receive-timeout contract (`CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS`) and wired Slice 34 native clients to use it so long-running ETF reconcile reset mutations do not fail on the client timeout boundary.
+
 ## v1.2.76 on 28th of March, 2026
 - Tightened Slice 34 ETF explicit reconcile for legacy canonical payload drift:
   - explicit ETF `reconcile` now resets a poisoned partition when existing canonical rows conflict with the current deterministic payload contract for the same source-event identities

@@ -46,7 +46,7 @@ def _build_clickhouse_client_or_raise() -> tuple[ClickHouseClient, str]:
             password=settings.password,
             database=settings.database,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=settings.send_receive_timeout_seconds,
         ),
         settings.database,
     )

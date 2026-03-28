@@ -53,6 +53,7 @@ class _ClickHouseTarget:
     user: str
     password: str
     database: str
+    send_receive_timeout_seconds: int
 
 
 def _resolve_clickhouse_target() -> _ClickHouseTarget:
@@ -63,6 +64,7 @@ def _resolve_clickhouse_target() -> _ClickHouseTarget:
         user=settings.user,
         password=settings.password,
         database=settings.database,
+        send_receive_timeout_seconds=settings.send_receive_timeout_seconds,
     )
 
 
@@ -301,7 +303,7 @@ def insert_bitcoin_block_subsidy_schedule_to_origo(
             password=clickhouse_target.password,
             database=clickhouse_target.database,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=clickhouse_target.send_receive_timeout_seconds,
         )
         source_proof = build_bitcoin_partition_source_proof_or_raise(
             stream_id='bitcoin_block_subsidy_schedule',

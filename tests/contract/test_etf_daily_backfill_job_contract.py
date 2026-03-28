@@ -223,6 +223,36 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
     ]
 
 
+def test_build_clickhouse_client_uses_native_timeout_contract(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_client(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        etf_job,
+        'resolve_clickhouse_native_settings',
+        lambda: SimpleNamespace(
+            host='clickhouse',
+            port=9000,
+            user='default',
+            password='secret',
+            database='origo',
+            send_receive_timeout_seconds=3600,
+        ),
+    )
+    monkeypatch.setattr(etf_job, 'ClickhouseClient', _fake_client)
+
+    client, database = etf_job._build_clickhouse_client_or_raise()
+
+    assert client is not None
+    assert database == 'origo'
+    assert captured['send_receive_timeout'] == 3600
+
+
 def test_run_etf_backfill_honors_required_partition_ids_tag(
     monkeypatch: Any,
 ) -> None:

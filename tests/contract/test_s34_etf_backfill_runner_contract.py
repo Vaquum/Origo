@@ -7,6 +7,7 @@ from uuid import UUID
 
 import origo_control_plane.s34_etf_backfill_runner as runner
 import pytest
+from origo_control_plane.config import resolve_clickhouse_native_settings
 
 
 def test_load_etf_backfill_summary_requires_clean_terminal_proof_state(
@@ -216,6 +217,40 @@ def test_build_run_tags_include_partition_filter_when_present() -> None:
         'origo.backfill.runtime_audit_mode': 'summary',
         'origo.backfill.partition_ids': '2024-01-11',
     }
+
+
+def test_clickhouse_native_timeout_contract_defaults_and_overrides(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('CLICKHOUSE_HOST', 'clickhouse')
+    monkeypatch.setenv('CLICKHOUSE_PORT', '9000')
+    monkeypatch.setenv('CLICKHOUSE_USER', 'default')
+    monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'secret')
+    monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.delenv('CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS', raising=False)
+
+    assert resolve_clickhouse_native_settings().send_receive_timeout_seconds == 3600
+
+    monkeypatch.setenv('CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS', '5400')
+
+    assert resolve_clickhouse_native_settings().send_receive_timeout_seconds == 5400
+
+
+def test_clickhouse_native_timeout_contract_rejects_invalid_override(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('CLICKHOUSE_HOST', 'clickhouse')
+    monkeypatch.setenv('CLICKHOUSE_PORT', '9000')
+    monkeypatch.setenv('CLICKHOUSE_USER', 'default')
+    monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'secret')
+    monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS', 'oops')
+
+    with pytest.raises(
+        RuntimeError,
+        match="CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS must be an integer",
+    ):
+        resolve_clickhouse_native_settings()
 
 
 def test_run_s34_etf_backfill_reconciles_ambiguous_partition_before_backfill(

@@ -187,7 +187,7 @@ def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
             password=native_settings.password,
             database=native_settings.database,
             compression=True,
-            send_receive_timeout=900,
+            send_receive_timeout=native_settings.send_receive_timeout_seconds,
         ),
         native_settings.database,
     )

@@ -743,7 +743,9 @@ Every slice must pass:
    2. the live ETF daily scrape job is a current-snapshot ingest path and is not itself a historical replay contract
    3. missing archived issuer artifacts for any claimed historical day are a hard failure; there is no silent fallback to current issuer pages
    4. browser-backed ETF adapters require Playwright plus a Chromium runtime in the deployed control-plane image; missing browser runtime is a hard failure, not a manual post-deploy fixup
-   5. archived issuer artifacts only count toward historical coverage if they parse and normalize successfully; security checkpoints, interstitials, or conflicting duplicate artifacts are hard failures, not acceptable coverage
+   5. archived issuer artifacts only count toward historical coverage if they parse and normalize successfully
+   6. when multiple valid archived artifacts exist for the same issuer/day, replay must choose the latest valid artifact deterministically by fetched/persisted ordering; ambiguous ties are hard failures
+   7. invalid or superseded artifacts outside the required historical replay window must be surfaced in logs/audit output but must not silently poison otherwise-satisfied historical coverage
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

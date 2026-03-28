@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-28
+- Tightened Slice 34 ETF archive replay so irrelevant bad captures cannot poison a required historical window:
+  - ETF archive replay now chooses the latest valid archived artifact deterministically for each issuer/day in the required replay window
+  - invalid or superseded artifacts are surfaced in logs instead of hard-failing the whole replay when valid required coverage still exists
+  - updated Slice 34 plan/docs so ETF archive revision precedence is explicit instead of being treated as a duplicate-artifact error
+- Updated version to `origo-control-plane v1.2.71` (`Origo API` unchanged at `v0.1.28`).
+
 - Made the Slice 34 ETF historical backfill path archive-only instead of silently reusing the live issuer scrape path:
   - ETF backfill now enumerates archived raw-artifact manifests from object storage and replays adapter parse/normalize from archived issuer bytes
   - the job now fails loudly on missing archive coverage, invalid archived payloads, or conflicting duplicate archived artifacts for the same issuer/day

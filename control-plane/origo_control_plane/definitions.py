@@ -54,6 +54,7 @@ from .jobs.etf_daily_ingest import (
     origo_etf_daily_backfill_job,
     origo_etf_daily_ingest_job,
 )
+from .jobs.fred_daily_ingest import origo_fred_daily_backfill_job
 from .jobs.raw_export_native import origo_raw_export_native_job
 
 define_asset_job: Any = getattr(dg, 'define_asset_job')
@@ -393,6 +394,7 @@ defs = Definitions(
         insert_bitcoin_mempool_state_job,
         origo_etf_daily_backfill_job,
         origo_etf_daily_ingest_job,
+        origo_fred_daily_backfill_job,
         origo_raw_export_native_job,
     ],
 )

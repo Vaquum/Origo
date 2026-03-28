@@ -801,6 +801,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5l` Add ETF audited partition reset-and-rewrite for legacy canonical payload drift so explicit reconcile can clear old non-deterministic rows and rewrite the partition from archived source truth.
 - [ ] `S34-C5m` Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile partition resets fail loudly by explicit config instead of client timeouts.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
+- [ ] `S34-C6a` Build repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2229,6 +2230,10 @@ Constraints: runtime image only; no fake adapter fallbacks and no manual post-de
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
+25a. `S34-06a`
+Action: Build repo-native FRED Dagster backfill runner/job with proof-driven reconcile and missing-partition closure.
+Done looks like: one repo-native runner can launch the real FRED Dagster backfill job, FRED backfill records Slice-34 manifests/proofs from source history while using proof-only for already-matching canonical partitions, and the returned summary exposes the terminal proof boundary plus any remaining ambiguous partitions from ClickHouse.
+Constraints: Dagster execution only, no direct source-to-canonical shell path, and no synthetic dense-calendar planning outside real FRED observation dates.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

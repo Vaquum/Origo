@@ -761,6 +761,10 @@ Every slice must pass:
          5. ambiguous-partition planning and closeout reporting must stay authoritative after reconcile reset; deleting canonical rows for a poisoned partition must not cause non-terminal proof/source-manifest state to disappear from the Slice-34 planner
          5. any ETF partition reset must clear canonical rows plus projector rows/checkpoints/watermarks for that partition before rewriting from archived source truth
          6. long-running ETF reconcile reset mutations must use the shared env-backed native ClickHouse receive-timeout contract so client-side timeouts do not outpace honest synchronous mutation completion
+8a. FRED full-history backfill must also use a repo-native Dagster backfill path:
+   1. FRED backfill groups real source observation dates into Slice-34 daily partitions rather than inventing dense calendar partitions
+   2. partitions with already-matching canonical rows must close via proof-only reconcile rather than blind rewrite
+   3. the repo-native FRED runner must expose terminal proof boundary and any remaining ambiguous partitions from ClickHouse
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

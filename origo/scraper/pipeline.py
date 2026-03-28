@@ -105,6 +105,7 @@ def run_scraper_pipeline(
     *,
     adapter: ScraperAdapter,
     run_context: ScrapeRunContext,
+    persist_normalized_records: bool = True,
 ) -> PipelineRunResult:
     _audit_or_raise(
         event_type='scraper_run_started',
@@ -272,21 +273,24 @@ def run_scraper_pipeline(
                     details={'source_id': source.source_id},
                 )
 
-            try:
-                inserted_row_count = persist_normalized_records_to_clickhouse(
-                    records=normalized_records,
-                    run_id=run_context.run_id,
-                )
-            except Exception as exc:
-                raise as_scraper_error(
-                    code='SCRAPER_STAGING_PERSIST_ERROR',
-                    message=(
-                        'ClickHouse staging persistence failed '
-                        f'for source_id={source.source_id}'
-                    ),
-                    details={'source_id': source.source_id},
-                    cause=exc,
-                ) from exc
+            if persist_normalized_records:
+                try:
+                    inserted_row_count = persist_normalized_records_to_clickhouse(
+                        records=normalized_records,
+                        run_id=run_context.run_id,
+                    )
+                except Exception as exc:
+                    raise as_scraper_error(
+                        code='SCRAPER_STAGING_PERSIST_ERROR',
+                        message=(
+                            'ClickHouse staging persistence failed '
+                            f'for source_id={source.source_id}'
+                        ),
+                        details={'source_id': source.source_id},
+                        cause=exc,
+                    ) from exc
+            else:
+                inserted_row_count = 0
 
             _audit_or_raise(
                 event_type='scraper_source_completed',

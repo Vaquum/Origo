@@ -738,76 +738,80 @@ Every slice must pass:
    1. the Docker runtime must provide a real S3-compatible object-store service plus deterministic bucket bootstrap
    2. deploy must synchronize the object-store env contract instead of preserving placeholder or container-localhost values
    3. missing object-store service or unreachable object-store endpoint is a hard failure for ETF/FRED backfill, not an optional warning
-8. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
-9. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
+8. ETF historical backfill truth is artifact-driven, not live-page driven:
+   1. `etf_daily_metrics` historical replay may only use archived issuer-source artifacts already captured by Origo
+   2. the live ETF daily scrape job is a current-snapshot ingest path and is not itself a historical replay contract
+   3. missing archived issuer artifacts for any claimed historical day are a hard failure; there is no silent fallback to current issuer pages
+9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
+10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.
    2. Deferred backfill mode may use fast canonical insert only when proof state confirms the target partition has no prior proof state, no canonical rows, and no active quarantine.
    3. Any partition that does not satisfy that empty-partition precondition must fail loudly; there is no implicit alternate execution path.
    4. Runtime audit mode remains explicit and fail-loud (`event` or `summary`).
-10. Dagster is the execution runner for Slice 34 backfill partitions:
+11. Dagster is the execution runner for Slice 34 backfill partitions:
    1. direct asset invocation from custom process pools is disallowed in the live backfill path
    2. any submit/monitor utility may only launch or observe Dagster partition runs
    3. canonical writer and proof state remain the correctness layer; Dagster does not replace exact-once enforcement
-11. ClickHouse is the only authoritative live state for backfill correctness:
+12. ClickHouse is the only authoritative live state for backfill correctness:
    1. authoritative progress, proof, and quarantine state must live in ClickHouse
    2. file-backed run-state and file-backed quarantine are forbidden in the live control path
    3. file artifacts may exist only as immutable evidence outputs
-12. Every backfill partition must follow an explicit fail-closed state machine keyed by `(source_id, stream_id, partition_id)`:
+13. Every backfill partition must follow an explicit fail-closed state machine keyed by `(source_id, stream_id, partition_id)`:
    1. `source_manifested`
    2. `canonical_written_unproved`
    3. `proved_complete`
    4. `empty_proved`
    5. `quarantined`
    6. `reconcile_required`
-13. Normal backfill execution is fail-closed:
+14. Normal backfill execution is fail-closed:
    1. completed partitions must fail loudly on rerun
    2. ambiguous partitions with canonical rows but no terminal proof must fail with `RECONCILE_REQUIRED`
    3. only explicit reconcile flow may touch `reconcile_required` or `quarantined` partitions
-14. Every backfill partition must emit deterministic provenance and proof material:
+15. Every backfill partition must emit deterministic provenance and proof material:
    1. source artifact identity/checksum
    2. ingest cursor/offset window
    3. row-count and hash fingerprint
    4. source identity digest
    5. canonical identity digest
    6. gap and duplicate metrics
-15. Backfill completion is defined only by proof state:
+16. Backfill completion is defined only by proof state:
    1. source and canonical row counts match
    2. source and canonical identity digests match exactly
    3. first/last offsets match where applicable
    4. dataset-specific no-gap rule passes
-16. Exchange offset semantics remain source-native in Slice 34 proofs:
+17. Exchange offset semantics remain source-native in Slice 34 proofs:
    1. Binance `trade_id` is numeric contiguous.
    2. OKX `trade_id` is numeric monotonic but not contiguous.
    3. Bybit daily source rows are ordered lexicographically by `trdMatchID`, but historical files are not guaranteed unique by raw `trdMatchID`; Slice-34 proof for Bybit must rely on full source-vs-canonical identity digest equality rather than duplicate-offset rejection.
    4. Bybit daily source rows are not guaranteed monotonic by timestamp; integrity checks must rely on schema, identity, and UTC-day boundary validity rather than timestamp ordering.
    5. OKX decimal source fields must remain source-native decimal text through canonical payload normalization, and the canonical precision contract must admit first-party OKX `size` values up to scale `20` so valid source data does not fail live reconcile/write.
    6. Any exchange reconcile path that performs idempotent writer repair must recompute canonical proof from fresh canonical state afterward; precomputed canonical proof objects are valid only for the proof-only path.
-17. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
+18. Exchange source-rate constraints are first-class in Slice 34 daily backfills:
    1. OKX download-link resolution must respect an explicit source-safe request pace of `0.75s` between requests (approximately `1.33 requests/s`) derived from live probe evidence; partition concurrency alone is not an adequate safety model.
    2. Source-safe concurrency must be enforced by runtime contract or Dagster queue controls, not by operator memory.
    3. Source-rate-limit breaches must fail loudly and stop clean recovery at the first missing partition; no silent skip or silent concurrency clamp is allowed.
    4. Bybit source-safe concurrency must be backed by empirical proof against real source fetch paths; current live proof found no source failures through `1280` concurrent admission requests.
-18. Backfill resume and promotion rules are proof-driven:
+19. Backfill resume and promotion rules are proof-driven:
    1. resume truth comes from terminal partition proof state, not file state and not bare cursor max
    2. projection rebuild may consume only terminally proved partitions
    3. serving promotion requires native and aligned watermarks to exactly match the proved canonical boundary
-19. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
+20. Slice 34 must expose an explicit reconcile path for interrupted/drifted partitions:
    1. reconcile re-reads the first-party source for the partition
    2. reconcile recomputes source proof and canonical proof without blindly rewriting canonical truth
    3. reconcile must use proof-only when existing canonical rows already match the current source proof and must use writer-repair when existing canonical rows are partial or mismatched but still recoverable by idempotent replay
    4. reconcile either marks the partition terminal-complete or quarantines it with a precise reason
-20. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
+21. Deploy contract must synchronize only backfill runtime filesystem/concurrency env from root `.env.example`; execution semantics themselves are tag-driven, not env-driven:
    1. `ORIGO_CANONICAL_RUNTIME_AUDIT_MODE`
    2. `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
    3. `ORIGO_S34_BACKFILL_CONCURRENCY`
-21. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
+22. Slice closeout requires both serving modes to be queryable for all datasets that expose each mode:
    1. `native` everywhere
    2. `aligned_1s` everywhere currently aligned-capable by contract
-22. Slice closeout requires cross-surface validation:
+23. Slice closeout requires cross-surface validation:
    1. raw query and raw export
    2. historical HTTP endpoints
    3. historical Python methods
-23. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
+24. Slice closeout requires machine-checkable range proof for every completed backfill range, so the system can assert that a source range is present exactly once and with no missing partitions.
 
 ## Slice 35 (Automated Daily Backfill Scheduling) Locked Details
 1. Objective is to make daily backfill fully automatic at configured daily run time, without manual triggering in normal operation.

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.75 on 28th of March, 2026
+- Tightened Slice 34 ETF resume and reconcile control:
+  - added `origo.backfill.partition_ids` tagging so ETF Dagster runs can scope work to explicit daily partitions
+  - ETF backfill now skips terminal-complete partitions in `backfill` mode instead of failing on already-proved history
+  - the repo-native ETF runner now executes explicit `reconcile` runs for ambiguous ETF partitions before returning to full-history `backfill`
+
 ## v1.2.74 on 28th of March, 2026
 - Formalized the zero-history ETF boundary for snapshot-only issuers:
   - `archive_capture_forward` issuers with zero valid archived artifacts now have an explicit empty historical claim instead of blocking replay for issuers whose claim is non-empty

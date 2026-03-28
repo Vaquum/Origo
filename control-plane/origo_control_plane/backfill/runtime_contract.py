@@ -17,6 +17,7 @@ BACKFILL_EXECUTION_MODE_TAG: Final[str] = 'origo.backfill.execution_mode'
 BACKFILL_RUNTIME_AUDIT_MODE_TAG: Final[str] = 'origo.backfill.runtime_audit_mode'
 BACKFILL_HEIGHT_START_TAG: Final[str] = 'origo.backfill.height_start'
 BACKFILL_HEIGHT_END_TAG: Final[str] = 'origo.backfill.height_end'
+BACKFILL_PARTITION_IDS_TAG: Final[str] = 'origo.backfill.partition_ids'
 _RUNTIME_AUDIT_MODE_ENV: Final[str] = 'ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'
 
 

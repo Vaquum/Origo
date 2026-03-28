@@ -222,6 +222,164 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
     ]
 
 
+def test_run_etf_backfill_honors_required_partition_ids_tag(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakeClient:
+        def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        etf_job,
+        '_build_clickhouse_client_or_raise',
+        lambda: (_FakeClient(), 'origo'),
+    )
+
+    def _load_results(**kwargs: Any) -> list[PipelineSourceResult]:
+        captured['required_partition_ids'] = kwargs['required_partition_ids']
+        return [_build_source_result(partition_id='2026-03-26')]
+
+    monkeypatch.setattr(
+        etf_job,
+        '_load_etf_archived_source_results_or_raise',
+        _load_results,
+    )
+
+    class _FakeStateStore:
+        def __init__(self, **_: Any) -> None:
+            return None
+
+        def assert_partition_can_execute_or_raise(self, **_: Any) -> None:
+            return None
+
+        def assess_partition_execution(self, **_: Any) -> Any:
+            return SimpleNamespace(
+                latest_proof_state=None,
+                canonical_row_count=0,
+                active_quarantine=False,
+            )
+
+        def record_source_manifest(self, **_: Any) -> None:
+            return None
+
+        def record_partition_state(self, **_: Any) -> None:
+            return None
+
+        def prove_partition_or_quarantine(self, **_: Any) -> Any:
+            return SimpleNamespace(
+                state='proved_complete',
+                proof_digest_sha256='proof-sha',
+            )
+
+    monkeypatch.setattr(etf_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+    monkeypatch.setattr(
+        etf_job,
+        'write_etf_normalized_records_to_canonical',
+        lambda **kwargs: SimpleNamespace(
+            to_dict=lambda: {
+                'rows_processed': len(kwargs['records']),
+                'rows_inserted': len(kwargs['records']),
+                'rows_duplicate': 0,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        'project_etf_daily_metrics_native',
+        lambda **_: SimpleNamespace(to_dict=lambda: {'rows_written': 0}),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        'project_etf_daily_metrics_aligned',
+        lambda **_: SimpleNamespace(to_dict=lambda: {'rows_written': 0}),
+    )
+
+    etf_job._run_etf_backfill_or_raise(
+        context=_FakeContext(
+            run_id='run-1',
+            tags={
+                'origo.backfill.projection_mode': 'deferred',
+                'origo.backfill.execution_mode': 'reconcile',
+                'origo.backfill.runtime_audit_mode': 'summary',
+                'origo.backfill.partition_ids': '2026-03-26',
+            },
+        )
+    )
+
+    assert captured['required_partition_ids'] == ('2026-03-26',)
+
+
+def test_run_etf_backfill_skips_terminal_partitions_in_backfill_mode(
+    monkeypatch: Any,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeClient:
+        def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        etf_job,
+        '_build_clickhouse_client_or_raise',
+        lambda: (_FakeClient(), 'origo'),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_etf_archived_source_results_or_raise',
+        lambda **_: [
+            _build_source_result(partition_id='2026-03-25'),
+            _build_source_result(partition_id='2026-03-26'),
+        ],
+    )
+
+    class _FakeStateStore:
+        def __init__(self, **_: Any) -> None:
+            return None
+
+        def assess_partition_execution(self, *, stream_key: Any) -> Any:
+            if stream_key.partition_id == '2026-03-25':
+                return SimpleNamespace(
+                    latest_proof_state='proved_complete',
+                    canonical_row_count=1,
+                    active_quarantine=False,
+                )
+            return SimpleNamespace(
+                latest_proof_state=None,
+                canonical_row_count=0,
+                active_quarantine=False,
+            )
+
+    monkeypatch.setattr(etf_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+    monkeypatch.setattr(
+        etf_job,
+        '_execute_etf_partition_backfill_or_raise',
+        lambda **kwargs: (
+            executed.append(kwargs['partition_id']),
+            SimpleNamespace(
+                rows_inserted=1,
+                native_projection_summary={'rows_written': 0},
+                aligned_projection_summary={'rows_written': 0},
+            ),
+        )[1],
+    )
+
+    summary = etf_job._run_etf_backfill_or_raise(
+        context=_FakeContext(
+            run_id='run-1',
+            tags={
+                'origo.backfill.projection_mode': 'deferred',
+                'origo.backfill.execution_mode': 'backfill',
+                'origo.backfill.runtime_audit_mode': 'summary',
+            },
+        )
+    )
+
+    assert executed == ['2026-03-26']
+    assert summary.total_inserted_rows == 1
+
+
 def test_execute_etf_partition_backfill_projects_only_after_proof(
     monkeypatch: Any,
 ) -> None:

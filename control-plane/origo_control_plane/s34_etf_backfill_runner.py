@@ -17,6 +17,7 @@ from dagster._core.storage.dagster_run import NOT_FINISHED_STATUSES, DagsterRunS
 from dagster._core.workspace.context import BaseWorkspaceRequestContext
 from dagster._core.workspace.load import load_workspace_process_context_from_yaml_paths
 
+from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
 from origo_control_plane.backfill import (
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
@@ -24,8 +25,10 @@ from origo_control_plane.backfill import (
 )
 from origo_control_plane.backfill.runtime_contract import (
     BACKFILL_EXECUTION_MODE_TAG,
+    BACKFILL_PARTITION_IDS_TAG,
     BACKFILL_PROJECTION_MODE_TAG,
     BACKFILL_RUNTIME_AUDIT_MODE_TAG,
+    ExecutionMode,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.jobs.etf_daily_ingest import origo_etf_daily_backfill_job
@@ -51,6 +54,13 @@ class _CompletedRun:
     run_id: str
     started_at_utc: datetime
     finished_at_utc: datetime
+
+
+@dataclass(frozen=True)
+class _PlannedEtfRun:
+    execution_mode: ExecutionMode
+    partition_ids: tuple[str, ...]
+    proof_partition_id: str | None
 
 
 def _default_run_id() -> str:
@@ -107,14 +117,22 @@ def _load_dagster_job_handle_or_raise(
     raise RuntimeError(f'Failed to resolve Dagster remote job for job_name={job_name}')
 
 
-def _build_run_tags(*, control_run_id: str) -> dict[str, str]:
-    return {
+def _build_run_tags(
+    *,
+    control_run_id: str,
+    execution_mode: ExecutionMode,
+    partition_ids: tuple[str, ...] = (),
+) -> dict[str, str]:
+    tags = {
         'origo.backfill.dataset': _DATASET,
         'origo.backfill.control_run_id': control_run_id,
         BACKFILL_PROJECTION_MODE_TAG: 'deferred',
-        BACKFILL_EXECUTION_MODE_TAG: 'backfill',
+        BACKFILL_EXECUTION_MODE_TAG: execution_mode,
         BACKFILL_RUNTIME_AUDIT_MODE_TAG: 'summary',
     }
+    if partition_ids != ():
+        tags[BACKFILL_PARTITION_IDS_TAG] = ','.join(partition_ids)
+    return tags
 
 
 def _create_and_submit_etf_run_or_raise(
@@ -122,8 +140,14 @@ def _create_and_submit_etf_run_or_raise(
     instance: DagsterInstance,
     handle: _DagsterJobHandle,
     control_run_id: str,
+    execution_mode: ExecutionMode,
+    partition_ids: tuple[str, ...] = (),
 ) -> str:
-    tags = _build_run_tags(control_run_id=control_run_id)
+    tags = _build_run_tags(
+        control_run_id=control_run_id,
+        execution_mode=execution_mode,
+        partition_ids=partition_ids,
+    )
     dagster_run_id = str(uuid4())
     execution_plan = create_execution_plan(
         origo_etf_daily_backfill_job,
@@ -312,6 +336,69 @@ def _load_etf_backfill_summary_or_raise() -> dict[str, Any]:
         client.disconnect()
 
 
+def _load_partition_proof_summary_or_raise(
+    *,
+    client: ClickHouseClient,
+    database: str,
+    partition_id: str,
+) -> dict[str, Any]:
+    contract = get_s34_dataset_contract(_DATASET)
+    state_store = CanonicalBackfillStateStore(
+        client=client,
+        database=database,
+    )
+    proof = state_store.fetch_latest_partition_proof(
+        stream_key=CanonicalStreamKey(
+            source_id=contract.source_id,
+            stream_id=contract.stream_id,
+            partition_id=partition_id,
+        )
+    )
+    if proof is None:
+        raise RuntimeError(
+            'ETF Dagster run succeeded but latest partition proof is missing: '
+            f'partition_id={partition_id}'
+        )
+    if proof.state not in _TERMINAL_PARTITION_STATES:
+        raise RuntimeError(
+            'ETF Dagster run succeeded but partition proof is not terminal: '
+            f'partition_id={partition_id} state={proof.state}'
+        )
+    return {
+        'partition_id': partition_id,
+        'proof_state': proof.state,
+        'proof_reason': proof.reason,
+        'proof_digest_sha256': proof.proof_digest_sha256,
+        'source_row_count': proof.source_row_count,
+        'canonical_row_count': proof.canonical_row_count,
+        'gap_count': proof.gap_count,
+        'duplicate_count': proof.duplicate_count,
+    }
+
+
+def _plan_next_etf_run_or_raise(
+    *,
+    client: ClickHouseClient,
+    database: str,
+) -> _PlannedEtfRun:
+    ambiguous_partition_ids = _load_ambiguous_daily_partition_ids_or_raise(
+        client=client,
+        database=database,
+    )
+    if ambiguous_partition_ids != ():
+        partition_id = ambiguous_partition_ids[0]
+        return _PlannedEtfRun(
+            execution_mode='reconcile',
+            partition_ids=(partition_id,),
+            proof_partition_id=partition_id,
+        )
+    return _PlannedEtfRun(
+        execution_mode='backfill',
+        partition_ids=(),
+        proof_partition_id=None,
+    )
+
+
 def run_s34_etf_backfill_or_raise(*, run_id: str | None = None) -> dict[str, Any]:
     assert_s34_backfill_contract_consistency_or_raise()
     normalized_run_id = (run_id or _default_run_id()).strip()
@@ -320,32 +407,67 @@ def run_s34_etf_backfill_or_raise(*, run_id: str | None = None) -> dict[str, Any
 
     instance: DagsterInstance | None = None
     handle: _DagsterJobHandle | None = None
+    planning_client: ClickHouseClient | None = None
+    planning_database: str | None = None
     try:
         instance = DagsterInstance.get()
         handle = _load_dagster_job_handle_or_raise(
             instance=instance,
             job_name=_ETF_JOB_NAME,
         )
-        dagster_run_id = _create_and_submit_etf_run_or_raise(
-            instance=instance,
-            handle=handle,
-            control_run_id=normalized_run_id,
-        )
-        completed_run = _wait_for_run_success_or_raise(
-            instance=instance,
-            run_id=dagster_run_id,
-        )
+        planning_client, planning_database = _build_clickhouse_client_or_raise()
+        completed_runs: list[dict[str, Any]] = []
+        while True:
+            plan = _plan_next_etf_run_or_raise(
+                client=planning_client,
+                database=planning_database,
+            )
+            dagster_run_id = _create_and_submit_etf_run_or_raise(
+                instance=instance,
+                handle=handle,
+                control_run_id=normalized_run_id,
+                execution_mode=plan.execution_mode,
+                partition_ids=plan.partition_ids,
+            )
+            completed_run = _wait_for_run_success_or_raise(
+                instance=instance,
+                run_id=dagster_run_id,
+            )
+            run_summary: dict[str, Any] = {
+                'execution_mode': plan.execution_mode,
+                'partition_ids': list(plan.partition_ids),
+                'dagster_run_id': dagster_run_id,
+                'started_at_utc': completed_run.started_at_utc.isoformat(),
+                'finished_at_utc': completed_run.finished_at_utc.isoformat(),
+            }
+            if plan.execution_mode == 'reconcile':
+                if plan.proof_partition_id is None:
+                    raise RuntimeError(
+                        'ETF reconcile plan must include proof_partition_id'
+                    )
+                run_summary['proof_summary'] = _load_partition_proof_summary_or_raise(
+                    client=planning_client,
+                    database=planning_database,
+                    partition_id=plan.proof_partition_id,
+                )
+                completed_runs.append(run_summary)
+                continue
+            completed_runs.append(run_summary)
+            break
         summary = _load_etf_backfill_summary_or_raise()
         return {
             'dataset': _DATASET,
             'job_name': _ETF_JOB_NAME,
             'run_id': normalized_run_id,
-            'dagster_run_id': dagster_run_id,
-            'started_at_utc': completed_run.started_at_utc.isoformat(),
-            'finished_at_utc': completed_run.finished_at_utc.isoformat(),
+            'dagster_run_id': completed_runs[-1]['dagster_run_id'],
+            'started_at_utc': completed_runs[0]['started_at_utc'],
+            'finished_at_utc': completed_runs[-1]['finished_at_utc'],
+            'completed_runs': completed_runs,
             'proof_summary': summary,
         }
     finally:
+        if planning_client is not None:
+            planning_client.disconnect()
         if handle is not None:
             handle.workspace_process_context.__exit__(None, None, None)
 

@@ -770,6 +770,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2h` Remove Binance canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution.
 - [x] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
+- [ ] `S34-C2k` Fix Slice-34 ambiguous-partition planning/reporting so reconcile resets cannot hide non-terminal partitions once canonical rows are intentionally cleared.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S34-C4a` Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
@@ -2112,6 +2113,10 @@ Constraints: no weakened audit integrity contract, no silent skip of audit valid
 Action: Fix exchange fast-insert guard semantics so fresh backfill decisions are based on pre-manifest partition assessment.
 Done looks like: Binance, OKX, and Bybit daily assets can still use fast insert for genuinely new empty partitions after recording `source_manifested`, because the fast-insert decision is taken from the pre-manifest execution assessment rather than re-reading the just-written proof state.
 Constraints: no relaxed empty-partition requirements, no bypass of quarantine checks, and no hidden fallback to the writer path.
+12a. `S34-02k`
+Action: Fix Slice-34 ambiguous-partition planning/reporting so reset partitions remain visible until terminal proof is recorded.
+Done looks like: ETF, exchange, Bitcoin, and closeout prep ambiguity queries treat source manifests and non-terminal proofs as authoritative candidate partitions, so a reconcile reset that clears canonical rows cannot cause planners or reports to skip unresolved partitions.
+Constraints: no fallback to canonical-event presence as ambiguity truth, no silent dropping of proof-only partitions, and no weakening of terminal-proof gating.
 13. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.

@@ -24,6 +24,9 @@ from origo_control_plane.backfill import (
 )
 from origo_control_plane.backfill.s34_contract import S34DatasetBackfillContract
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.s34_partition_authority import (
+    load_grouped_nonterminal_partition_ids_or_raise,
+)
 
 _TERMINAL_PROOF_STATES = {'proved_complete', 'empty_proved'}
 _SLICE_DIR = Path('spec/slices/slice-34-full-canonical-backfill')
@@ -507,52 +510,16 @@ def _fetch_ambiguous_canonical_partition_ids_or_raise(
     client: ClickHouseClient,
     database: str,
 ) -> dict[tuple[str, str], list[str]]:
-    event_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
+    stream_filter = _render_s34_stream_pair_in_clause_or_raise(
         source_field='source_id',
         stream_field='stream_id',
     )
-    proof_stream_filter = _render_s34_stream_pair_in_clause_or_raise(
-        source_field='source_id',
-        stream_field='stream_id',
+    return load_grouped_nonterminal_partition_ids_or_raise(
+        client=client,
+        database=database,
+        stream_pair_filter_sql=stream_filter,
+        terminal_states=tuple(sorted(_TERMINAL_PROOF_STATES)),
     )
-    rows = cast(
-        list[tuple[Any, ...]],
-        client.execute(
-        f'''
-        SELECT
-            event_partitions.source_id,
-            event_partitions.stream_id,
-            event_partitions.partition_id
-        FROM
-        (
-            SELECT DISTINCT source_id, stream_id, partition_id
-            FROM {database}.canonical_event_log
-            WHERE {event_stream_filter}
-        ) AS event_partitions
-        LEFT JOIN
-        (
-            SELECT
-                source_id,
-                stream_id,
-                partition_id,
-                argMax(state, proof_revision) AS state
-            FROM {database}.canonical_backfill_partition_proofs
-            WHERE {proof_stream_filter}
-            GROUP BY source_id, stream_id, partition_id
-        ) AS proofs
-        ON event_partitions.source_id = proofs.source_id
-        AND event_partitions.stream_id = proofs.stream_id
-        AND event_partitions.partition_id = proofs.partition_id
-        WHERE proofs.state IS NULL OR proofs.state NOT IN %(terminal_states)s
-        ORDER BY event_partitions.source_id, event_partitions.stream_id, event_partitions.partition_id
-        ''',
-        {'terminal_states': tuple(sorted(_TERMINAL_PROOF_STATES))},
-        ),
-    )
-    grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for row in rows:
-        grouped[_stream_key(str(row[0]), str(row[1]))].append(str(row[2]))
-    return {key: value for key, value in grouped.items()}
 
 
 def _serialize_source_manifest_or_raise(source_manifest: SourceManifestState) -> dict[str, Any]:

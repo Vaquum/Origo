@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from origo_control_plane.backfill.s34_contract import get_s34_dataset_contract
@@ -12,6 +13,7 @@ from origo_control_plane.s34_exchange_backfill_runner import (
     _build_source_manifest_payload_or_raise,
 )
 from origo_control_plane.s34_g1_g2_closeout_prep import (
+    _fetch_ambiguous_canonical_partition_ids_or_raise,
     _load_manifest_event_summary_or_raise,
     _render_s34_stream_pair_in_clause_or_raise,
     build_s34_closeout_prep_summary,
@@ -88,6 +90,32 @@ def test_s34_closeout_stream_filter_is_limited_to_slice_34_streams() -> None:
     assert "(proofs.source_id, proofs.stream_id) IN (" in clause
     assert "'binance', 'binance_spot_trades'" in clause
     assert "'bitcoin_core', 'bitcoin_block_headers'" in clause
+
+
+def test_fetch_ambiguous_canonical_partition_ids_uses_authoritative_partition_helper(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_helper(**kwargs: Any) -> dict[tuple[str, str], list[str]]:
+        captured.update(kwargs)
+        return {('etf', 'etf_daily_metrics'): ['2024-01-11']}
+
+    monkeypatch.setattr(
+        'origo_control_plane.s34_g1_g2_closeout_prep.load_grouped_nonterminal_partition_ids_or_raise',
+        _fake_helper,
+    )
+
+    result = _fetch_ambiguous_canonical_partition_ids_or_raise(
+        client=object(),  # type: ignore[arg-type]
+        database='origo',
+    )
+
+    assert result == {('etf', 'etf_daily_metrics'): ['2024-01-11']}
+    assert captured['database'] == 'origo'
+    assert 'stream_pair_filter_sql' in captured
+    assert "'binance', 'binance_spot_trades'" in captured['stream_pair_filter_sql']
+    assert captured['terminal_states'] == ('empty_proved', 'proved_complete')
 
 
 def test_s34_closeout_prep_summary_surfaces_remaining_gaps_and_terminal_evidence() -> None:

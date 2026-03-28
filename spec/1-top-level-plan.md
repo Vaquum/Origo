@@ -758,6 +758,7 @@ Every slice must pass:
          2. any ETF partition with canonical rows and non-terminal proof state requires explicit `reconcile`
          3. explicit ETF reconcile must be scopeable to selected partition ids through runtime tags so the repo-native runner can clear poisoned partitions before continuing full-history backfill
          4. explicit ETF reconcile may perform an audited partition reset-and-rewrite when legacy canonical rows violate the current deterministic payload contract for the same source-event identities
+         5. ambiguous-partition planning and closeout reporting must stay authoritative after reconcile reset; deleting canonical rows for a poisoned partition must not cause non-terminal proof/source-manifest state to disappear from the Slice-34 planner
          5. any ETF partition reset must clear canonical rows plus projector rows/checkpoints/watermarks for that partition before rewriting from archived source truth
          6. long-running ETF reconcile reset mutations must use the shared env-backed native ClickHouse receive-timeout contract so client-side timeouts do not outpace honest synchronous mutation completion
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.

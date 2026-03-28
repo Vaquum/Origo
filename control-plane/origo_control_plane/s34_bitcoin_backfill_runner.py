@@ -37,6 +37,9 @@ from origo_control_plane.bitcoin_core import (
     parse_bitcoin_height_range_partition_id_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.s34_partition_authority import (
+    load_nonterminal_partition_ids_for_stream_or_raise,
+)
 
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 _RUN_POLL_INTERVAL_SECONDS = 2.0
@@ -278,43 +281,16 @@ def _load_ambiguous_height_range_partition_ids_or_raise(
             'Bitcoin height-range planner requires height_range partition scheme, '
             f'got dataset={dataset} partition_scheme={contract.partition_scheme}'
         )
-    rows = cast(
-        list[tuple[Any, ...]],
-        client.execute(
-        f'''
-        SELECT
-            event_partitions.partition_id
-        FROM
-        (
-            SELECT DISTINCT partition_id
-            FROM {database}.canonical_event_log
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-        ) AS event_partitions
-        LEFT JOIN
-        (
-            SELECT
-                partition_id,
-                argMax(state, proof_revision) AS state
-            FROM {database}.canonical_backfill_partition_proofs
-            WHERE source_id = %(source_id)s
-              AND stream_id = %(stream_id)s
-            GROUP BY partition_id
-        ) AS proofs
-        ON event_partitions.partition_id = proofs.partition_id
-        WHERE proofs.state IS NULL OR proofs.state NOT IN %(terminal_states)s
-        ORDER BY event_partitions.partition_id ASC
-        ''',
-        {
-            'source_id': contract.source_id,
-            'stream_id': contract.stream_id,
-            'terminal_states': _TERMINAL_PARTITION_STATES,
-        },
-        ),
+    rows = load_nonterminal_partition_ids_for_stream_or_raise(
+        client=client,
+        database=database,
+        source_id=contract.source_id,
+        stream_id=contract.stream_id,
+        terminal_states=_TERMINAL_PARTITION_STATES,
     )
     normalized: list[str] = []
     for row in rows:
-        partition_id = str(row[0])
+        partition_id = str(row)
         parse_bitcoin_height_range_partition_id_or_raise(partition_id)
         normalized.append(partition_id)
     return tuple(normalized)

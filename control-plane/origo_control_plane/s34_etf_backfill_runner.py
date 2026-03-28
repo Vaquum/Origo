@@ -22,10 +22,15 @@ from origo_control_plane.backfill import (
     get_s34_dataset_contract,
     load_last_completed_daily_partition_from_canonical_or_raise,
 )
+from origo_control_plane.backfill.runtime_contract import (
+    BACKFILL_EXECUTION_MODE_TAG,
+    BACKFILL_PROJECTION_MODE_TAG,
+    BACKFILL_RUNTIME_AUDIT_MODE_TAG,
+)
 from origo_control_plane.config import resolve_clickhouse_native_settings
-from origo_control_plane.jobs.etf_daily_ingest import origo_etf_daily_ingest_job
+from origo_control_plane.jobs.etf_daily_ingest import origo_etf_daily_backfill_job
 
-_ETF_JOB_NAME = 'origo_etf_daily_ingest_job'
+_ETF_JOB_NAME = 'origo_etf_daily_backfill_job'
 _DATASET = 'etf_daily_metrics'
 _RUN_POLL_INTERVAL_SECONDS = 2.0
 _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
@@ -106,6 +111,9 @@ def _build_run_tags(*, control_run_id: str) -> dict[str, str]:
     return {
         'origo.backfill.dataset': _DATASET,
         'origo.backfill.control_run_id': control_run_id,
+        BACKFILL_PROJECTION_MODE_TAG: 'deferred',
+        BACKFILL_EXECUTION_MODE_TAG: 'backfill',
+        BACKFILL_RUNTIME_AUDIT_MODE_TAG: 'summary',
     }
 
 
@@ -118,13 +126,13 @@ def _create_and_submit_etf_run_or_raise(
     tags = _build_run_tags(control_run_id=control_run_id)
     dagster_run_id = str(uuid4())
     execution_plan = create_execution_plan(
-        origo_etf_daily_ingest_job,
+        origo_etf_daily_backfill_job,
         run_config={},
         instance_ref=instance.get_ref(),
         tags=tags,
     )
     dagster_run = instance.create_run_for_job(
-        job_def=origo_etf_daily_ingest_job,
+        job_def=origo_etf_daily_backfill_job,
         execution_plan=execution_plan,
         run_id=dagster_run_id,
         run_config={},

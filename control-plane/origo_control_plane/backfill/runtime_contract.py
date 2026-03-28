@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 
@@ -41,11 +42,20 @@ def _require_run_tag_or_raise(
     return value.strip().lower()
 
 
-def load_backfill_runtime_contract_or_raise(
-    context: AssetExecutionContext,
+def _require_tag_value_or_raise(
+    tags: Mapping[str, str], *, tag_name: str
+) -> str:
+    value = tags.get(tag_name)
+    if value is None or value.strip() == '':
+        raise RuntimeError(f'{tag_name} must be set and non-empty on the Dagster run')
+    return value.strip().lower()
+
+
+def load_backfill_runtime_contract_from_tags_or_raise(
+    tags: Mapping[str, str],
 ) -> BackfillRuntimeContract:
-    projection_mode = _require_run_tag_or_raise(
-        context,
+    projection_mode = _require_tag_value_or_raise(
+        tags,
         tag_name=BACKFILL_PROJECTION_MODE_TAG,
     )
     if projection_mode not in {'inline', 'deferred'}:
@@ -54,8 +64,8 @@ def load_backfill_runtime_contract_or_raise(
             f'got={projection_mode!r}'
         )
 
-    execution_mode = _require_run_tag_or_raise(
-        context,
+    execution_mode = _require_tag_value_or_raise(
+        tags,
         tag_name=BACKFILL_EXECUTION_MODE_TAG,
     )
     if execution_mode not in {'backfill', 'reconcile'}:
@@ -64,8 +74,8 @@ def load_backfill_runtime_contract_or_raise(
             f'got={execution_mode!r}'
         )
 
-    runtime_audit_mode = _require_run_tag_or_raise(
-        context,
+    runtime_audit_mode = _require_tag_value_or_raise(
+        tags,
         tag_name=BACKFILL_RUNTIME_AUDIT_MODE_TAG,
     )
     if runtime_audit_mode not in {'event', 'summary'}:
@@ -78,6 +88,14 @@ def load_backfill_runtime_contract_or_raise(
         projection_mode=cast(ProjectionMode, projection_mode),
         execution_mode=cast(ExecutionMode, execution_mode),
         runtime_audit_mode=cast(RuntimeAuditMode, runtime_audit_mode),
+    )
+
+
+def load_backfill_runtime_contract_or_raise(
+    context: AssetExecutionContext,
+) -> BackfillRuntimeContract:
+    return load_backfill_runtime_contract_from_tags_or_raise(
+        context.run.tags,
     )
 
 

@@ -106,6 +106,9 @@ def test_build_run_tags_are_deterministic() -> None:
     assert runner._build_run_tags(control_run_id='s34-etf-test') == {
         'origo.backfill.dataset': 'etf_daily_metrics',
         'origo.backfill.control_run_id': 's34-etf-test',
+        'origo.backfill.projection_mode': 'deferred',
+        'origo.backfill.execution_mode': 'backfill',
+        'origo.backfill.runtime_audit_mode': 'summary',
     }
 
 
@@ -164,4 +167,7 @@ def test_create_and_submit_etf_run_uses_uuid_dagster_run_id(
     assert submitted['create_run_for_job']['tags'] == {
         'origo.backfill.dataset': 'etf_daily_metrics',
         'origo.backfill.control_run_id': 's34-etf-test',
+        'origo.backfill.projection_mode': 'deferred',
+        'origo.backfill.execution_mode': 'backfill',
+        'origo.backfill.runtime_audit_mode': 'summary',
     }

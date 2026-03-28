@@ -788,7 +788,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
-- [ ] `S34-C5c` Provision the live S3-compatible object-store runtime (service, bucket bootstrap, and deploy env sync) so ETF/FRED raw-artifact persistence works on the hardened backfill path.
+- [x] `S34-C5c` Provision the live S3-compatible object-store runtime (service, bucket bootstrap, and deploy env sync) so ETF/FRED raw-artifact persistence works on the hardened backfill path.
+- [ ] `S34-C5d` Fix ETF Dagster backfill execution so ETF source manifests and terminal partition proofs are recorded before any projection and Slice-34 runtime tags control deferred backfill versus explicit reconcile behavior.
+- [ ] `S34-C5e` Replay ETF history only from archived issuer-source artifacts and fail loudly on missing historical artifact coverage instead of pretending the live daily snapshot job is a historical backfill.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -2170,6 +2172,14 @@ Constraints: no loss of operator traceability and no fallback to opaque auto-gen
 Action: Provision the live S3-compatible object-store runtime for ETF/FRED raw-artifact persistence.
 Done looks like: local and server Docker stacks include a real object-store service plus deterministic bucket bootstrap, the deploy workflow synchronizes the object-store env contract instead of preserving broken placeholders, and live ETF/FRED Dagster runs can persist raw artifacts without container-localhost failures.
 Constraints: no filesystem fallback, no manual bucket creation outside the declared runtime contract, and no hidden deploy-only hostnames.
+27d. `S34-05d`
+Action: Fix the ETF Dagster backfill execution path so it enters the Slice-34 proof state machine before any projection work.
+Done looks like: ETF backfill reads explicit Slice-34 runtime tags, records source manifests and terminal partition proof state in ClickHouse before projection, supports explicit reconcile behavior for ambiguous ETF partitions, and never calls proof-gated projectors before proof exists.
+Constraints: no inline projection before proof, no backfill-time silent reconcile, and no direct canonical-write path outside the Slice-34 state machine.
+27e. `S34-05e`
+Action: Make ETF historical replay artifact-driven and fail loudly on archive coverage gaps.
+Done looks like: ETF historical backfill replays only archived issuer-source artifacts, computes deterministic archive coverage over the expected ETF date window, and fails loudly when any issuer/day artifact required for the historical claim is missing instead of silently falling back to live snapshot sources.
+Constraints: no synthetic historical reconstruction from current issuer pages, no silent gap tolerance, and no historical claim beyond archived artifact coverage.
 25. `S34-06`
 Action: Run FRED full-history backfill (`fred_series_metrics`) across configured series.
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.

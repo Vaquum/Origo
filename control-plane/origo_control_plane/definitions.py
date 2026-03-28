@@ -50,7 +50,10 @@ from .assets.daily_okx_spot_trades_to_origo import (
 from .assets.daily_trades_to_origo import insert_daily_binance_trades_to_origo
 from .assets.monthly_trades_to_origo import insert_monthly_binance_trades_to_origo
 from .backfill.runtime_contract import default_exchange_runtime_tags
-from .jobs.etf_daily_ingest import origo_etf_daily_ingest_job
+from .jobs.etf_daily_ingest import (
+    origo_etf_daily_backfill_job,
+    origo_etf_daily_ingest_job,
+)
 from .jobs.raw_export_native import origo_raw_export_native_job
 
 define_asset_job: Any = getattr(dg, 'define_asset_job')
@@ -388,6 +391,7 @@ defs = Definitions(
         insert_bitcoin_circulating_supply_job,
         insert_bitcoin_block_transactions_job,
         insert_bitcoin_mempool_state_job,
+        origo_etf_daily_backfill_job,
         origo_etf_daily_ingest_job,
         origo_raw_export_native_job,
     ],

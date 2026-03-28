@@ -195,6 +195,88 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
     ]
 
 
+def test_fetch_series_revision_history_payload_splits_vintage_date_requests_on_414(
+    monkeypatch: Any,
+) -> None:
+    client = _build_client()
+    vintage_dates = [
+        date(2026, 3, 11),
+        date(2026, 3, 12),
+        date(2026, 3, 13),
+    ]
+    captured_observation_calls: list[str] = []
+
+    monkeypatch.setattr(
+        client,
+        'fetch_all_series_vintage_dates',
+        lambda **_: vintage_dates,
+    )
+
+    def _fake_fetch_series_observations_payload(**kwargs: Any) -> dict[str, object]:
+        vintage_date_chunk = kwargs['vintage_dates']
+        chunk_label = ','.join(vintage_date.isoformat() for vintage_date in vintage_date_chunk)
+        captured_observation_calls.append(chunk_label)
+        if len(vintage_date_chunk) == 3:
+            raise RuntimeError(
+                'FRED request failed with HTTP error, endpoint=series/observations '
+                'status_code=414 body=Request-URI Too Long'
+            )
+        if vintage_date_chunk == vintage_dates[:1]:
+            return {
+                'output_type': 2,
+                'observations': [
+                    {
+                        'date': '1947-01-01',
+                        'CPIAUCSL_20260311': '21.48',
+                    }
+                ],
+            }
+        if vintage_date_chunk == vintage_dates[1:]:
+            return {
+                'output_type': 2,
+                'observations': [
+                    {
+                        'date': '1947-01-01',
+                        'CPIAUCSL_20260312': '21.48',
+                        'CPIAUCSL_20260313': '21.49',
+                    }
+                ],
+            }
+        raise AssertionError(f'unexpected observation request kwargs={kwargs!r}')
+
+    monkeypatch.setattr(
+        client,
+        'fetch_series_observations_payload',
+        _fake_fetch_series_observations_payload,
+    )
+
+    payload = client.fetch_series_revision_history_payload(
+        series_id='CPIAUCSL',
+        observation_start=date(1947, 1, 1),
+        observation_end=date(1947, 1, 1),
+        realtime_start=date(1776, 7, 4),
+        realtime_end=date(9999, 12, 31),
+    )
+
+    assert payload['request_chunk_count'] == 2
+    assert payload['observations'] == [
+        {
+            'date': '1947-01-01',
+            'CPIAUCSL_20260311': '21.48',
+        },
+        {
+            'date': '1947-01-01',
+            'CPIAUCSL_20260312': '21.48',
+            'CPIAUCSL_20260313': '21.49',
+        },
+    ]
+    assert captured_observation_calls == [
+        '2026-03-11,2026-03-12,2026-03-13',
+        '2026-03-11',
+        '2026-03-12,2026-03-13',
+    ]
+
+
 def test_fetch_series_observations_payload_rejects_oversized_vintage_date_requests() -> None:
     client = _build_client()
     oversized_vintage_dates = [

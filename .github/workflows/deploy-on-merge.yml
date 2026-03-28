@@ -197,6 +197,41 @@ jobs:
             echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY in .env.example must be >= 10." >&2
             exit 1
           fi
+          origo_object_store_endpoint_url="$(
+            read_root_env_example_value ORIGO_OBJECT_STORE_ENDPOINT_URL
+          )"
+          if [[ -z "${origo_object_store_endpoint_url}" ]]; then
+            echo "ERROR: ORIGO_OBJECT_STORE_ENDPOINT_URL must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          origo_object_store_access_key_id="$(
+            read_root_env_example_value ORIGO_OBJECT_STORE_ACCESS_KEY_ID
+          )"
+          if [[ -z "${origo_object_store_access_key_id}" ]]; then
+            echo "ERROR: ORIGO_OBJECT_STORE_ACCESS_KEY_ID must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          origo_object_store_secret_access_key="$(
+            read_root_env_example_value ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
+          )"
+          if [[ -z "${origo_object_store_secret_access_key}" ]]; then
+            echo "ERROR: ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          origo_object_store_bucket="$(
+            read_root_env_example_value ORIGO_OBJECT_STORE_BUCKET
+          )"
+          if [[ -z "${origo_object_store_bucket}" ]]; then
+            echo "ERROR: ORIGO_OBJECT_STORE_BUCKET must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          origo_object_store_region="$(
+            read_root_env_example_value ORIGO_OBJECT_STORE_REGION
+          )"
+          if [[ -z "${origo_object_store_region}" ]]; then
+            echo "ERROR: ORIGO_OBJECT_STORE_REGION must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
           origo_canonical_runtime_audit_log_path_b64="$(
             printf '%s' "${origo_canonical_runtime_audit_log_path}" | base64 -w0
           )"
@@ -211,6 +246,21 @@ jobs:
           )"
           origo_s34_backfill_concurrency_b64="$(
             printf '%s' "${origo_s34_backfill_concurrency}" | base64 -w0
+          )"
+          origo_object_store_endpoint_url_b64="$(
+            printf '%s' "${origo_object_store_endpoint_url}" | base64 -w0
+          )"
+          origo_object_store_access_key_id_b64="$(
+            printf '%s' "${origo_object_store_access_key_id}" | base64 -w0
+          )"
+          origo_object_store_secret_access_key_b64="$(
+            printf '%s' "${origo_object_store_secret_access_key}" | base64 -w0
+          )"
+          origo_object_store_bucket_b64="$(
+            printf '%s' "${origo_object_store_bucket}" | base64 -w0
+          )"
+          origo_object_store_region_b64="$(
+            printf '%s' "${origo_object_store_region}" | base64 -w0
           )"
           origo_api_image_b64="$(printf '%s' "${ORIGO_API_IMAGE}" | base64 -w0)"
           origo_control_plane_image_b64="$(printf '%s' "${ORIGO_CONTROL_PLANE_IMAGE}" | base64 -w0)"
@@ -229,6 +279,11 @@ jobs:
              ORIGO_STREAM_QUARANTINE_STATE_PATH_B64='${origo_stream_quarantine_state_path_b64}' \
              ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64='${origo_backfill_manifest_log_path_b64}' \
              ORIGO_S34_BACKFILL_CONCURRENCY_B64='${origo_s34_backfill_concurrency_b64}' \
+             ORIGO_OBJECT_STORE_ENDPOINT_URL_B64='${origo_object_store_endpoint_url_b64}' \
+             ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64='${origo_object_store_access_key_id_b64}' \
+             ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64='${origo_object_store_secret_access_key_b64}' \
+             ORIGO_OBJECT_STORE_BUCKET_B64='${origo_object_store_bucket_b64}' \
+             ORIGO_OBJECT_STORE_REGION_B64='${origo_object_store_region_b64}' \
              ORIGO_API_IMAGE_B64='${origo_api_image_b64}' \
              ORIGO_CONTROL_PLANE_IMAGE_B64='${origo_control_plane_image_b64}' \
              ORIGO_DEPLOY_COMPOSE_B64='${origo_deploy_compose_b64}' \
@@ -259,6 +314,11 @@ jobs:
           decode_env_b64_required ORIGO_STREAM_QUARANTINE_STATE_PATH_B64 ORIGO_STREAM_QUARANTINE_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64 ORIGO_BACKFILL_MANIFEST_LOG_PATH
           decode_env_b64_required ORIGO_S34_BACKFILL_CONCURRENCY_B64 ORIGO_S34_BACKFILL_CONCURRENCY
+          decode_env_b64_required ORIGO_OBJECT_STORE_ENDPOINT_URL_B64 ORIGO_OBJECT_STORE_ENDPOINT_URL
+          decode_env_b64_required ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64 ORIGO_OBJECT_STORE_ACCESS_KEY_ID
+          decode_env_b64_required ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64 ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
+          decode_env_b64_required ORIGO_OBJECT_STORE_BUCKET_B64 ORIGO_OBJECT_STORE_BUCKET
+          decode_env_b64_required ORIGO_OBJECT_STORE_REGION_B64 ORIGO_OBJECT_STORE_REGION
           decode_env_b64_required ORIGO_API_IMAGE_B64 ORIGO_API_IMAGE
           decode_env_b64_required ORIGO_CONTROL_PLANE_IMAGE_B64 ORIGO_CONTROL_PLANE_IMAGE
           decode_env_b64_required ORIGO_DEPLOY_COMPOSE_B64 ORIGO_DEPLOY_COMPOSE_CONTENT
@@ -287,6 +347,11 @@ jobs:
           require_env ORIGO_STREAM_QUARANTINE_STATE_PATH
           require_env ORIGO_BACKFILL_MANIFEST_LOG_PATH
           require_env ORIGO_S34_BACKFILL_CONCURRENCY
+          require_env ORIGO_OBJECT_STORE_ENDPOINT_URL
+          require_env ORIGO_OBJECT_STORE_ACCESS_KEY_ID
+          require_env ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
+          require_env ORIGO_OBJECT_STORE_BUCKET
+          require_env ORIGO_OBJECT_STORE_REGION
           require_env ORIGO_API_IMAGE
           require_env ORIGO_CONTROL_PLANE_IMAGE
           require_env ORIGO_DEPLOY_COMPOSE_CONTENT
@@ -499,6 +564,11 @@ jobs:
             $0 !~ /^ORIGO_STREAM_QUARANTINE_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_MANIFEST_LOG_PATH=/ &&
             $0 !~ /^ORIGO_S34_BACKFILL_CONCURRENCY=/ &&
+            $0 !~ /^ORIGO_OBJECT_STORE_ENDPOINT_URL=/ &&
+            $0 !~ /^ORIGO_OBJECT_STORE_ACCESS_KEY_ID=/ &&
+            $0 !~ /^ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=/ &&
+            $0 !~ /^ORIGO_OBJECT_STORE_BUCKET=/ &&
+            $0 !~ /^ORIGO_OBJECT_STORE_REGION=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_URL=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_USER=/ &&
             $0 !~ /^ORIGO_BITCOIN_CORE_RPC_PASSWORD=/ &&
@@ -522,6 +592,11 @@ jobs:
             echo "ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
             echo "ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
             echo "ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
+            echo "ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
+            echo "ORIGO_OBJECT_STORE_ACCESS_KEY_ID=${ORIGO_OBJECT_STORE_ACCESS_KEY_ID}"
+            echo "ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=${ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY}"
+            echo "ORIGO_OBJECT_STORE_BUCKET=${ORIGO_OBJECT_STORE_BUCKET}"
+            echo "ORIGO_OBJECT_STORE_REGION=${ORIGO_OBJECT_STORE_REGION}"
             echo "ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
             echo "ORIGO_BITCOIN_CORE_RPC_USER=${bitcoin_core_rpc_user}"
             echo "ORIGO_BITCOIN_CORE_RPC_PASSWORD=${bitcoin_core_rpc_password}"
@@ -548,6 +623,9 @@ jobs:
           echo "  ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
           echo "  ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
           echo "  ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
+          echo "  ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
+          echo "  ORIGO_OBJECT_STORE_BUCKET=${ORIGO_OBJECT_STORE_BUCKET}"
+          echo "  ORIGO_OBJECT_STORE_REGION=${ORIGO_OBJECT_STORE_REGION}"
           echo "  ORIGO_BITCOIN_CORE_RPC_URL=${bitcoin_core_rpc_url}"
           echo "  ORIGO_BITCOIN_CORE_NETWORK=${bitcoin_core_network}"
           echo "  ORIGO_BITCOIN_CORE_HEADERS_START_HEIGHT=${bitcoin_core_headers_start_height}"
@@ -1205,8 +1283,8 @@ jobs:
 
           echo "Pulling compose service images."
           compose_cmd pull
-          echo "Starting ClickHouse and Bitcoin Core before migrations."
-          compose_cmd up -d clickhouse bitcoin-core
+          echo "Starting ClickHouse, Bitcoin Core, and object store before migrations."
+          compose_cmd up -d clickhouse bitcoin-core object-store
 
           clickhouse_container_id="$(compose_cmd ps -q clickhouse)"
           if [[ -z "${clickhouse_container_id}" ]]; then
@@ -1231,13 +1309,17 @@ jobs:
             exit 1
           fi
 
+          echo "Ensuring object-store bucket exists."
+          refresh_sudo_ticket
+          compose_cmd run --rm -T object-store-init </dev/null
+
           echo "Running ClickHouse SQL migrations."
           refresh_sudo_ticket
           compose_cmd run --rm -T dagster-webserver python -m origo_control_plane.migrations.cli migrate </dev/null
           echo "Migrations completed."
 
-          echo "Applying ClickHouse and Bitcoin Core update without forced recreation."
-          compose_cmd up -d --remove-orphans clickhouse bitcoin-core
+          echo "Applying ClickHouse, Bitcoin Core, and object-store update without forced recreation."
+          compose_cmd up -d --remove-orphans clickhouse bitcoin-core object-store
 
           echo "Applying runtime stack update with forced recreation for application services."
           compose_cmd up -d --remove-orphans --force-recreate dagster-webserver dagster-daemon api

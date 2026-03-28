@@ -52,6 +52,41 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  object-store:
+    image: quay.io/minio/minio
+    command:
+      - server
+      - /data
+      - --console-address
+      - :9001
+    environment:
+      MINIO_ROOT_USER: ${ORIGO_OBJECT_STORE_ACCESS_KEY_ID:?ORIGO_OBJECT_STORE_ACCESS_KEY_ID must be set}
+      MINIO_ROOT_PASSWORD: ${ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY:?ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY must be set}
+      MINIO_REGION: ${ORIGO_OBJECT_STORE_REGION:?ORIGO_OBJECT_STORE_REGION must be set}
+    ports:
+      - '${ORIGO_DOCKER_OBJECT_STORE_PORT:?ORIGO_DOCKER_OBJECT_STORE_PORT must be set}:9000'
+      - '${ORIGO_DOCKER_OBJECT_STORE_CONSOLE_PORT:?ORIGO_DOCKER_OBJECT_STORE_CONSOLE_PORT must be set}:9001'
+    volumes:
+      - object-store-data:/data
+    restart: unless-stopped
+
+  object-store-init:
+    image: quay.io/minio/mc
+    env_file:
+      - .env
+    depends_on:
+      object-store:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://object-store:9000 "${ORIGO_OBJECT_STORE_ACCESS_KEY_ID}" "${ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY}"; do
+          sleep 1
+        done
+        mc mb --ignore-existing "local/${ORIGO_OBJECT_STORE_BUCKET}"
+    restart: "no"
+
   dagster-webserver:
     build:
       context: .
@@ -88,6 +123,8 @@ services:
         condition: service_healthy
       bitcoin-core:
         condition: service_healthy
+      object-store-init:
+        condition: service_completed_successfully
     command: dagster-webserver -h 0.0.0.0 -p 3000 -w /workspace/control-plane/workspace.yaml
     healthcheck:
       test: ['CMD-SHELL', 'curl --fail --silent http://localhost:3000 >/dev/null || exit 1']
@@ -133,6 +170,8 @@ services:
         condition: service_healthy
       dagster-webserver:
         condition: service_healthy
+      object-store-init:
+        condition: service_completed_successfully
     command: dagster-daemon run -w /workspace/control-plane/workspace.yaml
     restart: unless-stopped
 
@@ -196,4 +235,5 @@ volumes:
   clickhouse-data:
   bitcoin-core-data:
   dagster-instance:
+  object-store-data:
   origo-storage:

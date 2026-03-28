@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-27
+- Last updated: 2026-03-28
 
 ## Purpose
 - This folder is the engineering reference for Origo implementation slices.
@@ -24,6 +24,7 @@
   - `docs/Developer/s34-daily-tranche-controller.md`
   - `docs/Developer/s34-exchange-sequence-controller.md`
   - `docs/Developer/s34-etf-backfill-runner.md`
+  - `docs/Developer/s34-etf-ishares-archive-bootstrap-runner.md`
   - `docs/Developer/s34-bitcoin-height-window-contract.md`
   - `docs/Developer/s34-bitcoin-backfill-runner.md`
 

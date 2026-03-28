@@ -32,6 +32,26 @@ class _FakeContext:
         self.log = _FakeLog()
 
 
+def _patch_single_source_history_contract(
+    monkeypatch: Any,
+    *,
+    source_id: str,
+    history_mode: str,
+    first_partition_id: str | None = None,
+) -> None:
+    monkeypatch.setattr(
+        etf_job,
+        '_ETF_HISTORICAL_AVAILABILITY_CONTRACTS',
+        {
+            source_id: etf_job._ETFHistoricalAvailabilityContract(
+                source_id=source_id,
+                history_mode=history_mode,
+                first_partition_id=first_partition_id,
+            )
+        },
+    )
+
+
 def _build_source_result(*, partition_id: str) -> PipelineSourceResult:
     observed_at_utc = datetime.fromisoformat(f'{partition_id}T00:00:00+00:00')
     source = SourceDescriptor(
@@ -116,11 +136,6 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
         etf_job,
         '_build_clickhouse_client_or_raise',
         lambda: (_FakeClient(), 'origo'),
-    )
-    monkeypatch.setattr(
-        etf_job,
-        '_load_existing_etf_partition_ids_or_raise',
-        lambda **_: ('2026-03-26',),
     )
     monkeypatch.setattr(
         etf_job,
@@ -424,6 +439,12 @@ def test_load_etf_archived_source_results_fails_on_missing_partition_coverage(
             persisted_artifact=persisted,
         ),
     )
+    _patch_single_source_history_contract(
+        monkeypatch,
+        source_id=source.source_id,
+        history_mode=etf_job._ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER,
+        first_partition_id='2026-03-25',
+    )
 
     with pytest.raises(RuntimeError, match='ETF historical archive coverage is incomplete'):
         etf_job._load_etf_archived_source_results_or_raise(
@@ -552,6 +573,12 @@ def test_load_etf_archived_source_results_deduplicates_exact_duplicate_artifacts
             raw_artifact=artifact,
             persisted_artifact=persisted,
         ),
+    )
+    _patch_single_source_history_contract(
+        monkeypatch,
+        source_id=source.source_id,
+        history_mode=etf_job._ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER,
+        first_partition_id='2026-03-26',
     )
 
     results = etf_job._load_etf_archived_source_results_or_raise(
@@ -710,6 +737,12 @@ def test_load_etf_archived_source_results_prefers_latest_valid_artifact_revision
             persisted_artifact=persisted,
         ),
     )
+    _patch_single_source_history_contract(
+        monkeypatch,
+        source_id=source.source_id,
+        history_mode=etf_job._ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER,
+        first_partition_id='2026-03-26',
+    )
 
     results = etf_job._load_etf_archived_source_results_or_raise(
         run_context=ScrapeRunContext(
@@ -859,6 +892,12 @@ def test_load_etf_archived_source_results_ignores_invalid_artifacts_when_coverag
             persisted_artifact=persisted,
         ),
     )
+    _patch_single_source_history_contract(
+        monkeypatch,
+        source_id=source.source_id,
+        history_mode=etf_job._ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER,
+        first_partition_id='2026-03-26',
+    )
 
     results = etf_job._load_etf_archived_source_results_or_raise(
         run_context=ScrapeRunContext(
@@ -870,3 +909,59 @@ def test_load_etf_archived_source_results_ignores_invalid_artifacts_when_coverag
 
     assert len(results) == 1
     assert results[0].artifact.artifact_id == 'artifact-valid'
+
+
+def test_build_expected_etf_archive_partitions_by_source_expands_snapshot_capture_forward(
+    monkeypatch: Any,
+) -> None:
+    source_id = 'etf_test_snapshot_daily'
+    monkeypatch.setattr(
+        etf_job,
+        '_ETF_HISTORICAL_AVAILABILITY_CONTRACTS',
+        {
+            source_id: etf_job._ETFHistoricalAvailabilityContract(
+                source_id=source_id,
+                history_mode=etf_job._ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+            )
+        },
+    )
+
+    expected, unavailable = etf_job._build_expected_etf_archive_partitions_by_source_or_raise(
+        valid_partition_ids_by_source={source_id: {'2026-03-26', '2026-03-30'}},
+        required_partition_filter=set(),
+    )
+
+    assert unavailable == []
+    assert expected == {
+        source_id: ('2026-03-26', '2026-03-27', '2026-03-30')
+    }
+
+
+def test_build_expected_etf_archive_partitions_by_source_reports_unavailable_source(
+    monkeypatch: Any,
+) -> None:
+    source_id = 'etf_test_snapshot_daily'
+    monkeypatch.setattr(
+        etf_job,
+        '_ETF_HISTORICAL_AVAILABILITY_CONTRACTS',
+        {
+            source_id: etf_job._ETFHistoricalAvailabilityContract(
+                source_id=source_id,
+                history_mode=etf_job._ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+            )
+        },
+    )
+
+    expected, unavailable = etf_job._build_expected_etf_archive_partitions_by_source_or_raise(
+        valid_partition_ids_by_source={},
+        required_partition_filter=set(),
+    )
+
+    assert expected == {}
+    assert unavailable == [
+        {
+            'source_id': source_id,
+            'history_mode': etf_job._ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD,
+            'reason': 'no_valid_archived_artifacts',
+        }
+    ]

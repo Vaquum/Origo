@@ -1,6 +1,6 @@
 # Historical ETF API Reference
 
-- Last updated: 2026-03-11
+- Last updated: 2026-03-28
 - Scope: ETF historical daily metrics dataset (`etf_daily_metrics`)
 
 ## Endpoint
@@ -31,6 +31,25 @@ Date semantics:
 - `start_date` is inclusive at `00:00:00Z`.
 - `end_date` is inclusive via next-day exclusive bound.
 - Invalid dates (for example `2022-02-30`) return contract error.
+
+## Historical availability semantics
+
+- ETF historical availability is issuer-specific and proof-gated.
+- `etf_ishares_ibit_daily`:
+  - official historical source with date-parameter support
+  - can claim business-day history from `2024-01-11` forward once the raw-artifact archive and canonical proof boundary cover that day
+- Snapshot-only ETF issuers:
+  - `etf_ark_arkb_daily`
+  - `etf_bitwise_bitb_daily`
+  - `etf_coinshares_brrr_daily`
+  - `etf_fidelity_fbtc_daily`
+  - `etf_franklin_ezbc_daily`
+  - `etf_grayscale_gbtc_daily`
+  - `etf_hashdex_defi_daily`
+  - `etf_invesco_btco_daily`
+  - `etf_vaneck_hodl_daily`
+- Snapshot-only issuer history begins at the first valid archived raw artifact day and does not extend backward from later canonical leftovers.
+- No-selector ETF requests return the full currently proved history that satisfies those issuer-specific availability boundaries.
 
 ## Response contract
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.72 on 28th of March, 2026
+- Tightened Slice 34 ETF historical availability boundaries:
+  - ETF archive replay now derives required issuer/day coverage from an explicit per-issuer historical availability contract
+  - added an iShares historical archive bootstrap runner that fetches official `asOfDate` artifacts, validates them, and persists only valid raw artifacts
+  - limited snapshot-only ETF issuers to history from their first valid archived artifact forward instead of inferring replay scope from stale canonical leftovers
+
 ## v1.2.71 on 28th of March, 2026
 - Tightened Slice 34 ETF archive replay selection semantics:
   - choose the latest valid archived issuer artifact deterministically for each required issuer/day

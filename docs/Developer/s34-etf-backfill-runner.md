@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-28
-- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-G2`)
+- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-G2`)
 
 ## Purpose and scope
 - Defines the repo-native Slice 34 ETF backfill runner.
@@ -64,6 +64,12 @@
 - Historical replay enumerates raw-artifact manifests from object storage under `raw-artifacts/`, reloads the archived bytes, and replays adapter `parse()` / `normalize()` from those archived artifacts instead of issuing fresh issuer requests.
 - Historical replay selects the latest valid archived artifact deterministically for each issuer/day in the required replay window using fetched/persisted ordering plus artifact id.
 - Invalid or superseded archived artifacts are surfaced in logs and audit evidence, but only missing valid coverage inside the required replay window is allowed to fail the backfill.
+- Historical ETF replay derives required issuer/day coverage from `_ETF_HISTORICAL_AVAILABILITY_CONTRACTS`:
+  - `etf_ishares_ibit_daily` is an official date-parameter source and can claim business-day history from `2024-01-11` forward once those archived artifacts exist.
+  - All other ETF issuers are snapshot-only in the current Origo capability and can only claim history from their first valid archived artifact day forward.
+- Stale partial canonical ETF leftovers do not define the historical replay window. Expected replay coverage comes from the issuer-specific archive contract plus the valid archived artifact inventory.
+- The iShares historical archive bootstrap path is separate from the replay runner:
+  - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_etf_ishares_archive_bootstrap_runner`
 
 ## Failure modes, warnings, and error codes
 - Missing Dagster workspace/job resolution: fail loudly.
@@ -73,6 +79,7 @@
 - Projector execution before terminal proof: fail loudly by contract.
 - Missing historical issuer artifacts for claimed ETF backfill coverage: fail loudly.
 - Missing valid archived issuer artifacts for the required replay window: fail loudly.
+- Issuer availability contract mismatch (`unavailable_sources` or `missing_source_partitions`): fail loudly.
 - Ambiguous archive revision ordering for the same source/day: fail loudly.
 
 ## Determinism/replay notes

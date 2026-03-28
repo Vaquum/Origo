@@ -489,6 +489,16 @@ def _normalized_records_fingerprint(records: list[NormalizedMetricRecord]) -> st
     return digest.hexdigest()
 
 
+def _archived_result_revision_order_key(
+    result: PipelineSourceResult,
+) -> tuple[datetime, datetime, str]:
+    return (
+        result.artifact.fetched_at_utc,
+        result.persisted_artifact.persisted_at_utc,
+        result.artifact.artifact_id,
+    )
+
+
 def _load_existing_etf_partition_ids_or_raise(
     *,
     client: ClickhouseClient,
@@ -514,6 +524,7 @@ def _load_etf_archived_source_results_or_raise(
     *,
     run_context: ScrapeRunContext,
     required_partition_ids: tuple[str, ...],
+    log: Any | None = None,
 ) -> list[PipelineSourceResult]:
     adapter_source_index = _build_etf_adapter_source_index_or_raise(
         run_context=run_context
@@ -524,6 +535,7 @@ def _load_etf_archived_source_results_or_raise(
         bucket=bucket,
     )
     expected_source_ids = tuple(sorted(adapter_source_index))
+    required_partition_set = set(required_partition_ids)
     if manifest_payloads == []:
         raise RuntimeError(
             'ETF historical archive replay requires archived issuer artifacts, '
@@ -532,7 +544,7 @@ def _load_etf_archived_source_results_or_raise(
 
     deduped_results: dict[tuple[str, str], tuple[PipelineSourceResult, str]] = {}
     invalid_artifacts: list[dict[str, Any]] = []
-    conflicting_artifacts: list[dict[str, Any]] = []
+    superseded_artifacts: list[dict[str, Any]] = []
 
     for manifest_payload in sorted(
         manifest_payloads,
@@ -590,6 +602,8 @@ def _load_etf_archived_source_results_or_raise(
             continue
 
         partition_id = partition_ids[0]
+        if required_partition_set and partition_id not in required_partition_set:
+            continue
         pipeline_source_result = PipelineSourceResult(
             source=source,
             artifact=archived.raw_artifact,
@@ -604,21 +618,28 @@ def _load_etf_archived_source_results_or_raise(
         if existing_entry is None:
             deduped_results[record_key] = (pipeline_source_result, records_fingerprint)
             continue
-        existing_result, existing_fingerprint = existing_entry
-        same_artifact = (
-            existing_result.artifact.content_sha256
-            == pipeline_source_result.artifact.content_sha256
-        )
-        if same_artifact and existing_fingerprint == records_fingerprint:
+        existing_result, _existing_fingerprint = existing_entry
+        existing_order_key = _archived_result_revision_order_key(existing_result)
+        incoming_order_key = _archived_result_revision_order_key(pipeline_source_result)
+        if incoming_order_key <= existing_order_key:
+            superseded_artifacts.append(
+                {
+                    'source_id': source_id,
+                    'partition_id': partition_id,
+                    'selected_artifact_id': existing_result.artifact.artifact_id,
+                    'ignored_artifact_id': pipeline_source_result.artifact.artifact_id,
+                }
+            )
             continue
-        conflicting_artifacts.append(
+        superseded_artifacts.append(
             {
                 'source_id': source_id,
                 'partition_id': partition_id,
-                'existing_artifact_id': existing_result.artifact.artifact_id,
-                'new_artifact_id': pipeline_source_result.artifact.artifact_id,
+                'selected_artifact_id': pipeline_source_result.artifact.artifact_id,
+                'ignored_artifact_id': existing_result.artifact.artifact_id,
             }
         )
+        deduped_results[record_key] = (pipeline_source_result, records_fingerprint)
 
     source_ids_by_partition: dict[str, set[str]] = defaultdict(set)
     for (source_id, partition_id), _entry in deduped_results.items():
@@ -644,15 +665,25 @@ def _load_etf_archived_source_results_or_raise(
         if partition_id in source_ids_by_partition
         and source_ids_by_partition[partition_id] != set(expected_source_ids)
     ]
-    if invalid_artifacts != [] or conflicting_artifacts != []:
-        raise RuntimeError(
-            'ETF archived artifact validation failed: '
+    if invalid_artifacts != [] and log is not None:
+        log.warning(
+            'ETF archive replay ignored invalid archived artifacts: '
             + json.dumps(
                 {
                     'invalid_artifact_count': len(invalid_artifacts),
                     'invalid_artifacts': invalid_artifacts[:10],
-                    'conflicting_artifact_count': len(conflicting_artifacts),
-                    'conflicting_artifacts': conflicting_artifacts[:10],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    if superseded_artifacts != [] and log is not None:
+        log.warning(
+            'ETF archive replay selected later archived revisions: '
+            + json.dumps(
+                {
+                    'superseded_artifact_count': len(superseded_artifacts),
+                    'superseded_artifacts': superseded_artifacts[:10],
                 },
                 ensure_ascii=True,
                 sort_keys=True,
@@ -982,6 +1013,7 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
         collected_source_results = _load_etf_archived_source_results_or_raise(
             run_context=run_context,
             required_partition_ids=required_partition_ids,
+            log=context.log,
         )
         partition_batches = _build_partition_batches_or_raise(collected_source_results)
         partition_results = [

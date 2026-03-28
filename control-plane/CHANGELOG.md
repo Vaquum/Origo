@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.71 on 28th of March, 2026
+- Tightened Slice 34 ETF archive replay selection semantics:
+  - choose the latest valid archived issuer artifact deterministically for each required issuer/day
+  - log invalid or superseded artifacts instead of hard-failing when valid required coverage still exists
+  - extended ETF archive-replay contract coverage around revision precedence and ignored invalid artifacts
+
 ## v1.2.70 on 28th of March, 2026
 - Made the Slice 34 ETF historical backfill path replay archived issuer artifacts instead of silently falling back to live issuer pages:
   - enumerated ETF raw-artifact manifests from object storage and reloaded archived bytes for adapter parse/normalize replay

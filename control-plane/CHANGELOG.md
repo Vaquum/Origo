@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.70 on 28th of March, 2026
+- Made the Slice 34 ETF historical backfill path replay archived issuer artifacts instead of silently falling back to live issuer pages:
+  - enumerated ETF raw-artifact manifests from object storage and reloaded archived bytes for adapter parse/normalize replay
+  - added fail-loud archive coverage validation for missing issuer/day artifacts, invalid archived payloads, and conflicting duplicate artifacts
+  - extended ETF contract coverage around archive replay and coverage validation
+
 ## v1.2.69 on 28th of March, 2026
 - Added browser runtime packaging required by the hardened Slice 34 ETF backfill path:
   - added Python `playwright` to control-plane runtime dependencies

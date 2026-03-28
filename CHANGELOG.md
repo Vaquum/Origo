@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-28
+- Made the Slice 34 ETF historical backfill path archive-only instead of silently reusing the live issuer scrape path:
+  - ETF backfill now enumerates archived raw-artifact manifests from object storage and replays adapter parse/normalize from archived issuer bytes
+  - the job now fails loudly on missing archive coverage, invalid archived payloads, or conflicting duplicate archived artifacts for the same issuer/day
+  - updated Slice 34 plan/docs and slice artifacts so the next live ETF proof step is explicitly about archive completeness, not browser/runtime packaging
+- Updated version to `origo-control-plane v1.2.70` (`Origo API` unchanged at `v0.1.28`).
+
 - Fixed the deployed ETF backfill runtime so browser-backed issuer adapters can execute on the hardened Slice 34 path:
   - added `playwright` to `origo-control-plane` runtime dependencies
   - added Playwright Chromium installation to `docker/Dockerfile.control-plane`

@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-28
-- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-05a`, `S34-05d`, `S34-G2`)
+- Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-G2`)
 
 ## Purpose and scope
 - Defines the repo-native Slice 34 ETF backfill runner.
@@ -61,6 +61,8 @@
   - ETF terminal proof boundary exists
   - no ambiguous ETF partitions remain
 - Historical completeness still depends on archived issuer-source artifact coverage. Missing archived artifact coverage is a hard failure, not a fallback to the legacy live scrape job.
+- Historical replay enumerates raw-artifact manifests from object storage under `raw-artifacts/`, reloads the archived bytes, and replays adapter `parse()` / `normalize()` from those archived artifacts instead of issuing fresh issuer requests.
+- Invalid archived issuer artifacts, security-checkpoint/interstitial payloads, or conflicting duplicate artifacts for the same issuer/day are hard failures and do not count as historical coverage.
 
 ## Failure modes, warnings, and error codes
 - Missing Dagster workspace/job resolution: fail loudly.
@@ -69,6 +71,8 @@
 - Ambiguous ETF partitions after success: fail loudly.
 - Projector execution before terminal proof: fail loudly by contract.
 - Missing historical issuer artifacts for claimed ETF backfill coverage: fail loudly.
+- Invalid archived issuer payloads for claimed ETF backfill coverage: fail loudly.
+- Conflicting duplicate archived issuer artifacts for the same source/day: fail loudly.
 
 ## Determinism/replay notes
 - Runner tags are deterministic from `run_id`.

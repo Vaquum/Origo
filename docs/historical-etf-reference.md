@@ -38,6 +38,7 @@ Date semantics:
 - `etf_ishares_ibit_daily`:
   - official historical source with date-parameter support
   - can claim business-day history from `2024-01-11` forward once the raw-artifact archive and canonical proof boundary cover that day
+  - official market-closure days are excluded from required history only when Origo has archived the first-party no-data response for that `asOfDate`
 - Snapshot-only ETF issuers:
   - `etf_ark_arkb_daily`
   - `etf_bitwise_bitb_daily`

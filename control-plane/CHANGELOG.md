@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.73 on 28th of March, 2026
+- Tightened Slice 34 ETF iShares holiday coverage:
+  - persist official iShares no-data responses as first-party negative evidence during archive bootstrap
+  - honor archived no-data evidence when building required historical replay coverage for the official iShares endpoint
+  - added focused contract coverage for the holiday/no-data replay seam
+
 ## v1.2.72 on 28th of March, 2026
 - Tightened Slice 34 ETF historical availability boundaries:
   - ETF archive replay now derives required issuer/day coverage from an explicit per-issuer historical availability contract

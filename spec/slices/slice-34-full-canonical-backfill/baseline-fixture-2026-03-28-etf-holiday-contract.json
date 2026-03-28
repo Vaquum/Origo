@@ -1,0 +1,147 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command finished successfully",
+    "detail_code": "summary of the repo-wide static analysis plus focused ETF holiday-contract validation bundle with runtime-only noise normalized",
+    "row_count": "19 indicates the focused ETF holiday-contract proof suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-etf-holiday-contract-proof",
+    "captured_at_utc": "2026-03-28T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the ETF iShares holiday/no-data contract branch state after plan, changelog, and closeout artifact updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "control_plane_origo_control_plane_jobs_etf_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "856ee66563dcc5b4f8e874d183cc28700bc43f1b99a2122b1dd08ca62a059a61",
+      "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_s34_etf_ishares_archive_bootstrap_runner_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "dceb4cbda19a4d7b1c48c280b2a06299460b792a038fab284329db7ae4cbe102",
+      "path": "control-plane/origo_control_plane/s34_etf_ishares_archive_bootstrap_runner.py"
+    },
+    {
+      "name": "tests_contract_test_etf_daily_backfill_job_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "aa41b73c43fbb170dfae9eab56a2b3f0b3a734a0add16fbbf43d272f1547ad5a",
+      "path": "tests/contract/test_etf_daily_backfill_job_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_etf_ishares_archive_bootstrap_runner_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "9a71c13303e5454cbe4fc7d15971e554e9bb0e70187e7232ae757202b09304bb",
+      "path": "tests/contract/test_s34_etf_ishares_archive_bootstrap_runner_contract.py"
+    },
+    {
+      "name": "docs_Developer_s34_etf_backfill_runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4280e99af9d1a6a01a22d8ebc0ca8637911e80b26d27a2be316240c0fff52e4a",
+      "path": "docs/Developer/s34-etf-backfill-runner.md"
+    },
+    {
+      "name": "docs_Developer_s34_etf_ishares_archive_bootstrap_runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "55e0d621c5413753a92f4923a8a21bd5f960998630ab95b43827c0b06d00630c",
+      "path": "docs/Developer/s34-etf-ishares-archive-bootstrap-runner.md"
+    },
+    {
+      "name": "docs_backfill_status_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "8261a43e2381e4e315ff08d5d49e5f5c37795db836b97bb357f2dea687eff0fa",
+      "path": "docs/backfill-status-reference.md"
+    },
+    {
+      "name": "docs_historical_etf_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4614bb1f9fd1c762fe04a46eeb1047fa88153cdb745a9edd7ce15774f34a6432",
+      "path": "docs/historical-etf-reference.md"
+    },
+    {
+      "name": "spec_1_top_level_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "5edd261710308609a1ee4187c6539c101b79a4e1786ca88eb22a129f68a5d23a",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2_itemized_work_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "c31f90665b1f7f930cabbc0b816cf7290f828b35c7cf3e326d4ce54fc08a8412",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live_performance_investigation_log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "63dda974653d58f1e0496ba843793e935a5e485cb99d8243df2d6b971d6cbca6",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "c2da52be5a6ffb4e7f15492d7c7a6b3ef7fb6eb129e5a072b30088704d230b84",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_run_notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0f20ec869c2487ca510650ef733ebad242b0b9aa2f6830801e47e8ee3410f282",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "22ea68f29ab28f5630bd90e7abc81d17bb85082bef5d9b43493ab4134601d12d",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "450f467c36bafcf2d349bdfa49d392d0f1f71ba2f47e2e4e89402f4326eae459",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "ca8e07587e2893c111e8785752527d4cc3be2098c9a5c8cc9bf4c1b2f9586413",
+      "path": "control-plane/pyproject.toml"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_etf_holiday_contract_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ...................                                                      [100%] ; 19 passed in <runtime>",
+      "row_count": 19,
+      "body_sha256": "2e5a34030ee070c41c2119b95a372da001e46a7ba92e5a78c3c9af7fa0a1cd03"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_etf_holiday_contract_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ...................                                                      [100%] ; 19 passed in <runtime>",
+      "row_count": 19,
+      "body_sha256": "2e5a34030ee070c41c2119b95a372da001e46a7ba92e5a78c3c9af7fa0a1cd03"
+    }
+  ]
+}

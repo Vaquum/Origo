@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-28
+- Tightened Slice 34 ETF iShares history coverage so official market holidays stop showing up as fake missing partitions:
+  - iShares archive bootstrap now persists official no-data responses as first-party negative evidence
+  - ETF archive replay now honors archived no-data evidence when expanding official iShares historical coverage
+  - updated Slice 34 plan/docs so ETF holiday handling is source-evidenced instead of a naive weekday assumption
+- Updated version to `origo-control-plane v1.2.73` (`Origo API` unchanged at `v0.1.28`).
+
 - Tightened Slice 34 ETF historical availability so history claims now follow issuer-specific source truth instead of stale canonical leftovers:
   - ETF archive replay now derives required issuer/day coverage from an explicit per-issuer historical availability contract
   - added an iShares archive bootstrap runner that pulls official `asOfDate` history into the raw-artifact archive with validation before persistence

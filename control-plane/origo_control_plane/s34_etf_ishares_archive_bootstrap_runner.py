@@ -42,6 +42,7 @@ class _BootstrapSummary:
     skipped_existing_days: tuple[str, ...]
     skipped_no_data_days: tuple[str, ...]
     persisted_days: tuple[str, ...]
+    persisted_no_data_days: tuple[str, ...]
     persisted_artifact_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +56,7 @@ class _BootstrapSummary:
             'skipped_existing_days': list(self.skipped_existing_days),
             'skipped_no_data_days': list(self.skipped_no_data_days),
             'persisted_days': list(self.persisted_days),
+            'persisted_no_data_days': list(self.persisted_no_data_days),
             'persisted_artifact_count': self.persisted_artifact_count,
         }
 
@@ -387,10 +389,10 @@ def _validate_ishares_artifact_or_raise(
     source: SourceDescriptor,
     run_context: ScrapeRunContext,
     request_day: date,
-) -> str:
+) -> tuple[str, bool]:
     csv_text = artifact.content.decode('utf-8-sig', errors='replace')
     if _ISHARES_NO_DATA_MARKER in csv_text:
-        raise RuntimeError(f'no_data:{request_day.isoformat()}')
+        return request_day.isoformat(), True
     parsed_records = list(
         adapter.parse(
             artifact=artifact,
@@ -413,7 +415,7 @@ def _validate_ishares_artifact_or_raise(
             'iShares historical artifact partition mismatch: '
             f'request_day={request_day.isoformat()} partition_ids={partition_ids}'
         )
-    return partition_ids[0]
+    return partition_ids[0], False
 
 
 def run_s34_etf_ishares_archive_bootstrap_or_raise(
@@ -441,6 +443,7 @@ def run_s34_etf_ishares_archive_bootstrap_or_raise(
     skipped_existing_days: list[str] = []
     skipped_no_data_days: list[str] = []
     persisted_days: list[str] = []
+    persisted_no_data_days: list[str] = []
 
     for request_day in request_days:
         partition_id = request_day.isoformat()
@@ -459,23 +462,21 @@ def run_s34_etf_ishares_archive_bootstrap_or_raise(
             ),
             policy=fetch_policy,
         )
-        try:
-            validated_partition_id = _validate_ishares_artifact_or_raise(
-                adapter=adapter,
-                artifact=artifact,
-                source=source,
-                run_context=run_context,
-                request_day=request_day,
-            )
-        except RuntimeError as exc:
-            if str(exc) == f'no_data:{partition_id}':
-                skipped_no_data_days.append(partition_id)
-                continue
-            raise
+        validated_partition_id, is_no_data = _validate_ishares_artifact_or_raise(
+            adapter=adapter,
+            artifact=artifact,
+            source=source,
+            run_context=run_context,
+            request_day=request_day,
+        )
         persist_raw_artifact(
             artifact=artifact,
             run_context=run_context,
         )
+        if is_no_data:
+            skipped_no_data_days.append(validated_partition_id)
+            persisted_no_data_days.append(validated_partition_id)
+            continue
         persisted_days.append(validated_partition_id)
         existing_days.add(validated_partition_id)
 
@@ -487,7 +488,8 @@ def run_s34_etf_ishares_archive_bootstrap_or_raise(
         skipped_existing_days=tuple(sorted(skipped_existing_days)),
         skipped_no_data_days=tuple(sorted(skipped_no_data_days)),
         persisted_days=tuple(sorted(persisted_days)),
-        persisted_artifact_count=len(persisted_days),
+        persisted_no_data_days=tuple(sorted(persisted_no_data_days)),
+        persisted_artifact_count=len(persisted_days) + len(persisted_no_data_days),
     )
     return summary.to_dict()
 

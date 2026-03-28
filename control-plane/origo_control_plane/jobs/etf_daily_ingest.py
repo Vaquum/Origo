@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final, cast
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import dagster as dg
 from clickhouse_driver import Client as ClickhouseClient
@@ -61,6 +61,8 @@ _PAYLOAD_ENCODING = 'utf-8'
 _RAW_ARTIFACTS_PREFIX = 'raw-artifacts/'
 _ETF_HISTORY_MODE_OFFICIAL_DATE_PARAMETER = 'official_date_parameter'
 _ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD = 'archive_capture_forward'
+_ISHARES_NO_DATA_MARKER = 'Fund Holdings as of,"-"'
+_ISHARES_SOURCE_ID = 'etf_ishares_ibit_daily'
 
 
 @dataclass(frozen=True)
@@ -249,9 +251,46 @@ def _iter_business_partition_ids_inclusive(
     return tuple(partition_ids)
 
 
+def _partition_id_from_ishares_source_uri_or_raise(*, source_uri: str) -> str:
+    parsed = urlparse(source_uri)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    compact_value = params.get('asOfDate')
+    if compact_value is None or compact_value.strip() == '':
+        raise RuntimeError(
+            'iShares historical source_uri is missing asOfDate query parameter: '
+            f'{source_uri}'
+        )
+    if len(compact_value) != 8 or not compact_value.isdigit():
+        raise RuntimeError(
+            'iShares historical source_uri asOfDate must be YYYYMMDD digits, '
+            f'got {compact_value!r}'
+        )
+    try:
+        return datetime.strptime(compact_value, '%Y%m%d').date().isoformat()
+    except ValueError as exc:
+        raise RuntimeError(
+            'iShares historical source_uri asOfDate must be a valid calendar date, '
+            f'got {compact_value!r}'
+        ) from exc
+
+
+def _archived_no_data_partition_id_or_none(
+    *,
+    source_id: str,
+    artifact: RawArtifact,
+) -> str | None:
+    if source_id != _ISHARES_SOURCE_ID:
+        return None
+    csv_text = artifact.content.decode('utf-8-sig', errors='replace')
+    if _ISHARES_NO_DATA_MARKER not in csv_text:
+        return None
+    return _partition_id_from_ishares_source_uri_or_raise(source_uri=artifact.source_uri)
+
+
 def _build_expected_etf_archive_partitions_by_source_or_raise(
     *,
     valid_partition_ids_by_source: dict[str, set[str]],
+    no_data_partition_ids_by_source: dict[str, set[str]],
     required_partition_filter: set[str],
 ) -> tuple[dict[str, tuple[str, ...]], list[dict[str, Any]]]:
     expected_partitions_by_source: dict[str, tuple[str, ...]] = {}
@@ -259,8 +298,10 @@ def _build_expected_etf_archive_partitions_by_source_or_raise(
 
     for source_id in sorted(_ETF_HISTORICAL_AVAILABILITY_CONTRACTS):
         contract = _ETF_HISTORICAL_AVAILABILITY_CONTRACTS[source_id]
-        available_partitions = tuple(sorted(valid_partition_ids_by_source.get(source_id, set())))
-        if available_partitions == ():
+        valid_partitions = set(valid_partition_ids_by_source.get(source_id, set()))
+        no_data_partitions = set(no_data_partition_ids_by_source.get(source_id, set()))
+        evidence_partitions = tuple(sorted(valid_partitions | no_data_partitions))
+        if evidence_partitions == ():
             unavailable_sources.append(
                 {
                     'source_id': source_id,
@@ -278,12 +319,17 @@ def _build_expected_etf_archive_partitions_by_source_or_raise(
                 )
             expected_partitions = _iter_business_partition_ids_inclusive(
                 start_partition_id=contract.first_partition_id,
-                end_partition_id=available_partitions[-1],
+                end_partition_id=evidence_partitions[-1],
+            )
+            expected_partitions = tuple(
+                partition_id
+                for partition_id in expected_partitions
+                if partition_id not in no_data_partitions
             )
         elif contract.history_mode == _ETF_HISTORY_MODE_ARCHIVE_CAPTURE_FORWARD:
             expected_partitions = _iter_business_partition_ids_inclusive(
-                start_partition_id=available_partitions[0],
-                end_partition_id=available_partitions[-1],
+                start_partition_id=evidence_partitions[0],
+                end_partition_id=evidence_partitions[-1],
             )
         else:
             raise RuntimeError(
@@ -661,7 +707,9 @@ def _load_etf_archived_source_results_or_raise(
 
     deduped_results: dict[tuple[str, str], tuple[PipelineSourceResult, str]] = {}
     invalid_artifacts: list[dict[str, Any]] = []
+    no_data_artifacts: list[dict[str, Any]] = []
     superseded_artifacts: list[dict[str, Any]] = []
+    no_data_partition_ids_by_source: dict[str, set[str]] = defaultdict(set)
 
     for manifest_payload in sorted(
         manifest_payloads,
@@ -681,6 +729,23 @@ def _load_etf_archived_source_results_or_raise(
                 bucket=bucket,
                 manifest_payload=manifest_payload,
             )
+            no_data_partition_id = _archived_no_data_partition_id_or_none(
+                source_id=source_id,
+                artifact=archived.raw_artifact,
+            )
+            if no_data_partition_id is not None:
+                if required_partition_set and no_data_partition_id not in required_partition_set:
+                    continue
+                no_data_partition_ids_by_source[source_id].add(no_data_partition_id)
+                no_data_artifacts.append(
+                    {
+                        'source_id': source_id,
+                        'partition_id': no_data_partition_id,
+                        'artifact_id': archived.raw_artifact.artifact_id,
+                        'manifest_uri': manifest_payload.get('manifest_uri'),
+                    }
+                )
+                continue
             parsed_records = list(
                 adapter.parse(
                     artifact=archived.raw_artifact,
@@ -764,6 +829,7 @@ def _load_etf_archived_source_results_or_raise(
     expected_partitions_by_source, unavailable_sources = (
         _build_expected_etf_archive_partitions_by_source_or_raise(
             valid_partition_ids_by_source=valid_partition_ids_by_source,
+            no_data_partition_ids_by_source=no_data_partition_ids_by_source,
             required_partition_filter=required_partition_set,
         )
     )
@@ -790,6 +856,18 @@ def _load_etf_archived_source_results_or_raise(
                 {
                     'invalid_artifact_count': len(invalid_artifacts),
                     'invalid_artifacts': invalid_artifacts[:10],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    if no_data_artifacts != [] and log is not None:
+        log.warning(
+            'ETF archive replay honored archived no-data evidence: '
+            + json.dumps(
+                {
+                    'no_data_artifact_count': len(no_data_artifacts),
+                    'no_data_artifacts': no_data_artifacts[:10],
                 },
                 ensure_ascii=True,
                 sort_keys=True,

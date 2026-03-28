@@ -2,11 +2,15 @@ from __future__ import annotations
 
 # pyright: reportUnknownParameterType=false, reportMissingParameterType=false
 import hashlib
+import importlib
 import json
+import os
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import dagster as dg
 from clickhouse_driver import Client as ClickhouseClient
@@ -22,7 +26,13 @@ from origo.events import (
 )
 from origo.events.backfill_state import canonical_proof_matches_source_proof
 from origo.events.errors import ReconciliationError
-from origo.scraper.contracts import NormalizedMetricRecord, ScrapeRunContext
+from origo.scraper.contracts import (
+    NormalizedMetricRecord,
+    PersistedRawArtifact,
+    RawArtifact,
+    ScrapeRunContext,
+    SourceDescriptor,
+)
 from origo.scraper.etf_adapters import build_s4_03_issuer_adapters
 from origo.scraper.etf_canonical_event_ingest import (
     build_etf_canonical_payload,
@@ -48,6 +58,7 @@ op: Any = getattr(dg, 'op')
 _CANONICAL_SOURCE_ID = 'etf'
 _CANONICAL_STREAM_ID = 'etf_daily_metrics'
 _PAYLOAD_ENCODING = 'utf-8'
+_RAW_ARTIFACTS_PREFIX = 'raw-artifacts/'
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,13 @@ class _BackfillRunSummary:
     partition_results: list[_PartitionBackfillResult]
 
 
+@dataclass(frozen=True)
+class _ArchivedArtifactLoad:
+    manifest_payload: dict[str, Any]
+    raw_artifact: RawArtifact
+    persisted_artifact: PersistedRawArtifact
+
+
 def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
     native_settings = resolve_clickhouse_native_settings()
     return (
@@ -107,6 +125,42 @@ def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
         ),
         native_settings.database,
     )
+
+
+def _require_object_store_env_or_raise(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None or value.strip() == '':
+        raise RuntimeError(f'{name} must be set and non-empty')
+    return value
+
+
+def _build_object_store_client_and_bucket_or_raise() -> tuple[Any, str]:
+    try:
+        boto3_module = importlib.import_module('boto3')
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            'ETF historical archive replay requires boto3. Install with `uv add boto3`.'
+        ) from exc
+    client_factory = getattr(boto3_module, 'client', None)
+    if client_factory is None:
+        raise RuntimeError('boto3.client was not found')
+    endpoint_url = _require_object_store_env_or_raise('ORIGO_OBJECT_STORE_ENDPOINT_URL')
+    access_key_id = _require_object_store_env_or_raise(
+        'ORIGO_OBJECT_STORE_ACCESS_KEY_ID'
+    )
+    secret_access_key = _require_object_store_env_or_raise(
+        'ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY'
+    )
+    region = _require_object_store_env_or_raise('ORIGO_OBJECT_STORE_REGION')
+    bucket = _require_object_store_env_or_raise('ORIGO_OBJECT_STORE_BUCKET')
+    client = client_factory(
+        's3',
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        region_name=region,
+    )
+    return client, bucket
 
 
 def _partition_id_for_record_or_raise(record: NormalizedMetricRecord) -> str:
@@ -232,6 +286,404 @@ def _disconnect_clickhouse_client_or_raise(
             raise RuntimeError(
                 f'Failed to disconnect ClickHouse client cleanly: {exc}'
             ) from exc
+
+
+def _build_etf_adapter_source_index_or_raise(
+    *,
+    run_context: ScrapeRunContext,
+) -> dict[str, tuple[Any, SourceDescriptor]]:
+    source_index: dict[str, tuple[Any, SourceDescriptor]] = {}
+    for adapter in build_s4_03_issuer_adapters():
+        discovered_sources = list(adapter.discover_sources(run_context=run_context))
+        if len(discovered_sources) != 1:
+            raise RuntimeError(
+                'ETF archived replay requires exactly one source descriptor per adapter, '
+                f'got {len(discovered_sources)} for adapter={adapter.adapter_name}'
+            )
+        source = discovered_sources[0]
+        if source.source_id in source_index:
+            raise RuntimeError(
+                f'Duplicate ETF source_id discovered for archived replay: {source.source_id}'
+            )
+        source_index[source.source_id] = (adapter, source)
+    return source_index
+
+
+def _load_all_raw_artifact_manifest_payloads_or_raise(
+    *,
+    client: Any,
+    bucket: str,
+) -> list[dict[str, Any]]:
+    manifest_payloads: list[dict[str, Any]] = []
+    request_kwargs: dict[str, Any] = {
+        'Bucket': bucket,
+        'Prefix': _RAW_ARTIFACTS_PREFIX,
+    }
+    while True:
+        response = client.list_objects_v2(**request_kwargs)
+        for item in response.get('Contents', []):
+            key = item.get('Key')
+            if not isinstance(key, str) or not key.endswith('manifest.json'):
+                continue
+            body = client.get_object(Bucket=bucket, Key=key)['Body'].read()
+            try:
+                payload = json.loads(body.decode('utf-8'))
+            except Exception as exc:
+                raise RuntimeError(
+                    f'Failed to decode raw artifact manifest json for key={key}: {exc}'
+                ) from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError(
+                    f'Raw artifact manifest must decode to an object for key={key}'
+                )
+            payload_with_key: dict[str, Any] = {}
+            for payload_key, payload_value in cast(dict[object, object], payload).items():
+                if not isinstance(payload_key, str) or payload_key.strip() == '':
+                    raise RuntimeError(
+                        f'Raw artifact manifest keys must be non-empty strings for key={key}'
+                    )
+                payload_with_key[payload_key] = payload_value
+            payload_with_key['manifest_key'] = key
+            manifest_payloads.append(payload_with_key)
+        next_token = response.get('NextContinuationToken')
+        if not isinstance(next_token, str) or next_token.strip() == '':
+            break
+        request_kwargs['ContinuationToken'] = next_token
+    return manifest_payloads
+
+
+def _parse_iso_datetime_or_raise(*, value: Any, label: str) -> datetime:
+    if not isinstance(value, str) or value.strip() == '':
+        raise RuntimeError(f'{label} must be a non-empty ISO datetime string')
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise RuntimeError(f'{label} must be valid ISO datetime, got {value!r}') from exc
+    if parsed.tzinfo is None:
+        raise RuntimeError(f'{label} must include timezone information')
+    return parsed.astimezone(UTC)
+
+
+def _parse_s3_uri_or_raise(uri: str, *, label: str) -> tuple[str, str]:
+    parsed = urlparse(uri)
+    if parsed.scheme != 's3' or parsed.netloc.strip() == '' or parsed.path.strip() == '':
+        raise RuntimeError(f'{label} must be a valid s3:// URI, got {uri!r}')
+    return parsed.netloc, parsed.path.lstrip('/')
+
+
+def _load_archived_raw_artifact_from_manifest_or_raise(
+    *,
+    client: Any,
+    bucket: str,
+    manifest_payload: dict[str, Any],
+) -> _ArchivedArtifactLoad:
+    source_id = manifest_payload.get('source_id')
+    source_uri = manifest_payload.get('source_uri')
+    artifact_id = manifest_payload.get('artifact_id')
+    fetch_method = manifest_payload.get('fetch_method')
+    artifact_format = manifest_payload.get('artifact_format')
+    content_sha256 = manifest_payload.get('content_sha256')
+    fetched_at_utc = _parse_iso_datetime_or_raise(
+        value=manifest_payload.get('fetched_at_utc'),
+        label='manifest.fetched_at_utc',
+    )
+    persisted_at_utc = _parse_iso_datetime_or_raise(
+        value=manifest_payload.get('persisted_at_utc'),
+        label='manifest.persisted_at_utc',
+    )
+    metadata_raw = manifest_payload.get('metadata')
+    manifest_uri = manifest_payload.get('manifest_uri')
+    if not isinstance(source_id, str) or source_id.strip() == '':
+        raise RuntimeError('manifest.source_id must be non-empty')
+    if not isinstance(source_uri, str) or source_uri.strip() == '':
+        raise RuntimeError('manifest.source_uri must be non-empty')
+    if not isinstance(artifact_id, str) or artifact_id.strip() == '':
+        raise RuntimeError('manifest.artifact_id must be non-empty')
+    if not isinstance(fetch_method, str) or fetch_method.strip() == '':
+        raise RuntimeError('manifest.fetch_method must be non-empty')
+    if not isinstance(artifact_format, str) or artifact_format.strip() == '':
+        raise RuntimeError('manifest.artifact_format must be non-empty')
+    if not isinstance(content_sha256, str) or content_sha256.strip() == '':
+        raise RuntimeError('manifest.content_sha256 must be non-empty')
+    if not isinstance(metadata_raw, dict):
+        raise RuntimeError('manifest.metadata must be an object')
+    metadata: dict[str, str] = {}
+    for raw_key, raw_value in cast(dict[object, object], metadata_raw).items():
+        if not isinstance(raw_key, str) or raw_key.strip() == '':
+            raise RuntimeError('manifest.metadata keys must be non-empty strings')
+        if not isinstance(raw_value, str) or raw_value.strip() == '':
+            raise RuntimeError(
+                f'manifest.metadata[{raw_key!r}] must be a non-empty string'
+            )
+        metadata[raw_key] = raw_value
+    artifact_key_raw = manifest_payload.get('artifact_key')
+    if isinstance(artifact_key_raw, str) and artifact_key_raw.strip() != '':
+        artifact_key = artifact_key_raw
+    else:
+        storage_uri = manifest_payload.get('storage_uri')
+        if not isinstance(storage_uri, str) or storage_uri.strip() == '':
+            raise RuntimeError(
+                'manifest must provide artifact_key or storage_uri for archive replay'
+            )
+        storage_bucket, artifact_key = _parse_s3_uri_or_raise(
+            storage_uri,
+            label='manifest.storage_uri',
+        )
+        if storage_bucket != bucket:
+            raise RuntimeError(
+                'manifest.storage_uri bucket mismatch for archive replay: '
+                f'{storage_bucket} != {bucket}'
+            )
+    content = client.get_object(Bucket=bucket, Key=artifact_key)['Body'].read()
+    content_hash = hashlib.sha256(content).hexdigest()
+    if content_hash != content_sha256:
+        raise RuntimeError(
+            'Archived ETF artifact content hash mismatch: '
+            f'expected={content_sha256} actual={content_hash} '
+            f'source_id={source_id} artifact_id={artifact_id}'
+        )
+    manifest_key_raw = manifest_payload.get('manifest_key')
+    if not isinstance(manifest_key_raw, str) or manifest_key_raw.strip() == '':
+        raise RuntimeError('manifest_key must be present on archive manifest payload')
+    manifest_bucket, manifest_key = (
+        _parse_s3_uri_or_raise(manifest_uri, label='manifest.manifest_uri')
+        if isinstance(manifest_uri, str) and manifest_uri.strip() != ''
+        else (bucket, manifest_key_raw)
+    )
+    if manifest_bucket != bucket:
+        raise RuntimeError(
+            'manifest.manifest_uri bucket mismatch for archive replay: '
+            f'{manifest_bucket} != {bucket}'
+        )
+    raw_artifact = RawArtifact(
+        artifact_id=artifact_id,
+        source_id=source_id,
+        source_uri=source_uri,
+        fetched_at_utc=fetched_at_utc,
+        fetch_method=cast(Any, fetch_method),
+        artifact_format=cast(Any, artifact_format),
+        content_sha256=content_sha256,
+        content=content,
+        metadata=metadata,
+    )
+    persisted_artifact = PersistedRawArtifact(
+        artifact_id=artifact_id,
+        storage_uri=f's3://{bucket}/{artifact_key}',
+        manifest_uri=f's3://{bucket}/{manifest_key}',
+        persisted_at_utc=persisted_at_utc,
+    )
+    return _ArchivedArtifactLoad(
+        manifest_payload=manifest_payload,
+        raw_artifact=raw_artifact,
+        persisted_artifact=persisted_artifact,
+    )
+
+
+def _normalized_records_fingerprint(records: list[NormalizedMetricRecord]) -> str:
+    digest = hashlib.sha256()
+    for item in sorted(records, key=lambda record: record.metric_id):
+        digest.update(item.metric_id.encode(_PAYLOAD_ENCODING))
+        digest.update(b'|')
+        digest.update(_canonical_payload_sha256(item).encode(_PAYLOAD_ENCODING))
+        digest.update(b'\n')
+    return digest.hexdigest()
+
+
+def _load_existing_etf_partition_ids_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+) -> tuple[str, ...]:
+    rows = client.execute(
+        f'''
+        SELECT DISTINCT partition_id
+        FROM {database}.canonical_event_log
+        WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+        ORDER BY partition_id ASC
+        ''',
+        {
+            'source_id': _CANONICAL_SOURCE_ID,
+            'stream_id': _CANONICAL_STREAM_ID,
+        },
+    )
+    return tuple(str(row[0]) for row in rows)
+
+
+def _load_etf_archived_source_results_or_raise(
+    *,
+    run_context: ScrapeRunContext,
+    required_partition_ids: tuple[str, ...],
+) -> list[PipelineSourceResult]:
+    adapter_source_index = _build_etf_adapter_source_index_or_raise(
+        run_context=run_context
+    )
+    client, bucket = _build_object_store_client_and_bucket_or_raise()
+    manifest_payloads = _load_all_raw_artifact_manifest_payloads_or_raise(
+        client=client,
+        bucket=bucket,
+    )
+    expected_source_ids = tuple(sorted(adapter_source_index))
+    if manifest_payloads == []:
+        raise RuntimeError(
+            'ETF historical archive replay requires archived issuer artifacts, '
+            'but the object-store manifest inventory is empty'
+        )
+
+    deduped_results: dict[tuple[str, str], tuple[PipelineSourceResult, str]] = {}
+    invalid_artifacts: list[dict[str, Any]] = []
+    conflicting_artifacts: list[dict[str, Any]] = []
+
+    for manifest_payload in sorted(
+        manifest_payloads,
+        key=lambda item: (
+            str(item.get('source_id', '')),
+            str(item.get('fetched_at_utc', '')),
+            str(item.get('artifact_id', '')),
+        ),
+    ):
+        source_id = manifest_payload.get('source_id')
+        if not isinstance(source_id, str) or source_id not in adapter_source_index:
+            continue
+        adapter, source = adapter_source_index[source_id]
+        try:
+            archived = _load_archived_raw_artifact_from_manifest_or_raise(
+                client=client,
+                bucket=bucket,
+                manifest_payload=manifest_payload,
+            )
+            parsed_records = list(
+                adapter.parse(
+                    artifact=archived.raw_artifact,
+                    source=source,
+                    run_context=run_context,
+                )
+            )
+            normalized_records = list(
+                adapter.normalize(
+                    parsed_records=parsed_records,
+                    source=source,
+                    run_context=run_context,
+                )
+            )
+            if normalized_records == []:
+                raise RuntimeError(
+                    f'Archived ETF artifact produced zero normalized records for source_id={source_id}'
+                )
+            partition_ids = sorted(
+                {_partition_id_for_record_or_raise(record) for record in normalized_records}
+            )
+            if len(partition_ids) != 1:
+                raise RuntimeError(
+                    'Archived ETF artifact must map to exactly one daily partition, '
+                    f'got {partition_ids} for source_id={source_id}'
+                )
+        except Exception as exc:
+            invalid_artifacts.append(
+                {
+                    'source_id': source_id,
+                    'artifact_id': manifest_payload.get('artifact_id'),
+                    'manifest_uri': manifest_payload.get('manifest_uri'),
+                    'error': str(exc),
+                }
+            )
+            continue
+
+        partition_id = partition_ids[0]
+        pipeline_source_result = PipelineSourceResult(
+            source=source,
+            artifact=archived.raw_artifact,
+            persisted_artifact=archived.persisted_artifact,
+            parsed_records=parsed_records,
+            normalized_records=normalized_records,
+            inserted_row_count=0,
+        )
+        record_key = (source_id, partition_id)
+        records_fingerprint = _normalized_records_fingerprint(normalized_records)
+        existing_entry = deduped_results.get(record_key)
+        if existing_entry is None:
+            deduped_results[record_key] = (pipeline_source_result, records_fingerprint)
+            continue
+        existing_result, existing_fingerprint = existing_entry
+        same_artifact = (
+            existing_result.artifact.content_sha256
+            == pipeline_source_result.artifact.content_sha256
+        )
+        if same_artifact and existing_fingerprint == records_fingerprint:
+            continue
+        conflicting_artifacts.append(
+            {
+                'source_id': source_id,
+                'partition_id': partition_id,
+                'existing_artifact_id': existing_result.artifact.artifact_id,
+                'new_artifact_id': pipeline_source_result.artifact.artifact_id,
+            }
+        )
+
+    source_ids_by_partition: dict[str, set[str]] = defaultdict(set)
+    for (source_id, partition_id), _entry in deduped_results.items():
+        source_ids_by_partition[partition_id].add(source_id)
+    coverage_partitions = (
+        tuple(sorted(required_partition_ids))
+        if required_partition_ids != ()
+        else tuple(sorted(source_ids_by_partition))
+    )
+    missing_partitions = [
+        partition_id
+        for partition_id in coverage_partitions
+        if partition_id not in source_ids_by_partition
+    ]
+    incomplete_partitions = [
+        {
+            'partition_id': partition_id,
+            'missing_source_ids': sorted(
+                set(expected_source_ids) - source_ids_by_partition[partition_id]
+            ),
+        }
+        for partition_id in coverage_partitions
+        if partition_id in source_ids_by_partition
+        and source_ids_by_partition[partition_id] != set(expected_source_ids)
+    ]
+    if invalid_artifacts != [] or conflicting_artifacts != []:
+        raise RuntimeError(
+            'ETF archived artifact validation failed: '
+            + json.dumps(
+                {
+                    'invalid_artifact_count': len(invalid_artifacts),
+                    'invalid_artifacts': invalid_artifacts[:10],
+                    'conflicting_artifact_count': len(conflicting_artifacts),
+                    'conflicting_artifacts': conflicting_artifacts[:10],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    if missing_partitions != [] or incomplete_partitions != []:
+        raise RuntimeError(
+            'ETF historical archive coverage is incomplete: '
+            + json.dumps(
+                {
+                    'required_partition_count': len(coverage_partitions),
+                    'available_partition_count': len(source_ids_by_partition),
+                    'expected_source_ids': list(expected_source_ids),
+                    'missing_partitions': missing_partitions[:20],
+                    'incomplete_partitions': incomplete_partitions[:20],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
+    if deduped_results == {}:
+        raise RuntimeError(
+            'ETF historical archive replay found no valid archived issuer artifacts'
+        )
+    return [
+        item[0]
+        for _key, item in sorted(
+            deduped_results.items(),
+            key=lambda pair: (pair[0][1], pair[0][0]),
+        )
+    ]
 
 
 def _build_partition_batches_or_raise(
@@ -520,25 +972,18 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
         run_id=f'etf-daily-{context.run_id}',
         started_at_utc=started_at_utc,
     )
-
-    total_sources = 0
-    total_parsed_records = 0
-    total_normalized_records = 0
-    collected_source_results: list[PipelineSourceResult] = []
-    for adapter in build_s4_03_issuer_adapters():
-        pipeline_result = run_scraper_pipeline(
-            adapter=adapter,
-            run_context=run_context,
-            persist_normalized_records=False,
-        )
-        total_sources += pipeline_result.total_sources
-        total_parsed_records += pipeline_result.total_parsed_records
-        total_normalized_records += pipeline_result.total_normalized_records
-        collected_source_results.extend(pipeline_result.source_results)
-
-    partition_batches = _build_partition_batches_or_raise(collected_source_results)
     native_client, database = _build_clickhouse_client_or_raise()
+
     try:
+        required_partition_ids = _load_existing_etf_partition_ids_or_raise(
+            client=native_client,
+            database=database,
+        )
+        collected_source_results = _load_etf_archived_source_results_or_raise(
+            run_context=run_context,
+            required_partition_ids=required_partition_ids,
+        )
+        partition_batches = _build_partition_batches_or_raise(collected_source_results)
         partition_results = [
             _execute_etf_partition_backfill_or_raise(
                 context=context,
@@ -557,9 +1002,13 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
         )
 
     return _BackfillRunSummary(
-        total_sources=total_sources,
-        total_parsed_records=total_parsed_records,
-        total_normalized_records=total_normalized_records,
+        total_sources=len(collected_source_results),
+        total_parsed_records=sum(
+            len(item.parsed_records) for item in collected_source_results
+        ),
+        total_normalized_records=sum(
+            len(item.normalized_records) for item in collected_source_results
+        ),
         total_inserted_rows=sum(result.rows_inserted for result in partition_results),
         total_native_projected_rows=sum(
             result.native_projection_summary['rows_written']

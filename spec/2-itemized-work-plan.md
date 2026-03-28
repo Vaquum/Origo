@@ -791,7 +791,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C5c` Provision the live S3-compatible object-store runtime (service, bucket bootstrap, and deploy env sync) so ETF/FRED raw-artifact persistence works on the hardened backfill path.
 - [ ] `S34-C5d` Fix ETF Dagster backfill execution so ETF source manifests and terminal partition proofs are recorded before any projection and Slice-34 runtime tags control deferred backfill versus explicit reconcile behavior.
 - [ ] `S34-C5e` Replay ETF history only from archived issuer-source artifacts and fail loudly on missing historical artifact coverage instead of pretending the live daily snapshot job is a historical backfill.
-- [ ] `S34-C5f` Provision Playwright + Chromium in the deployed control-plane runtime so browser-backed ETF adapters can execute on the live hardened backfill path.
+- [x] `S34-C5f` Provision Playwright + Chromium in the deployed control-plane runtime so browser-backed ETF adapters can execute on the live hardened backfill path.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -2179,7 +2179,7 @@ Done looks like: ETF backfill reads explicit Slice-34 runtime tags, records sour
 Constraints: no inline projection before proof, no backfill-time silent reconcile, and no direct canonical-write path outside the Slice-34 state machine.
 27e. `S34-05e`
 Action: Make ETF historical replay artifact-driven and fail loudly on archive coverage gaps.
-Done looks like: ETF historical backfill replays only archived issuer-source artifacts, computes deterministic archive coverage over the expected ETF date window, and fails loudly when any issuer/day artifact required for the historical claim is missing instead of silently falling back to live snapshot sources.
+Done looks like: ETF historical backfill replays only archived issuer-source artifacts, computes deterministic archive coverage over the expected ETF date window, rejects invalid archived issuer payloads or conflicting duplicate artifacts, and fails loudly when any issuer/day artifact required for the historical claim is missing instead of silently falling back to live snapshot sources.
 Constraints: no synthetic historical reconstruction from current issuer pages, no silent gap tolerance, and no historical claim beyond archived artifact coverage.
 25a. `S34-05f`
 Action: Provision Playwright + Chromium in the deployed control-plane runtime for browser-backed ETF adapters.

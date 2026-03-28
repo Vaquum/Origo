@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import origo_control_plane.jobs.etf_daily_ingest as etf_job
+import pytest
 from origo_control_plane.backfill.runtime_contract import BackfillRuntimeContract
 
 from origo.scraper.contracts import (
@@ -98,19 +99,14 @@ def _build_source_result(*, partition_id: str) -> PipelineSourceResult:
 def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
     monkeypatch: Any,
 ) -> None:
-    pipeline_calls: list[bool] = []
+    def _unexpected_run_scraper_pipeline(**_: Any) -> PipelineRunResult:
+        raise AssertionError('live scraper pipeline must not run in ETF archive backfill mode')
 
-    def _fake_run_scraper_pipeline(**kwargs: Any) -> PipelineRunResult:
-        pipeline_calls.append(bool(kwargs['persist_normalized_records']))
-        return PipelineRunResult(
-            run_context=ScrapeRunContext(
-                run_id='etf-daily-run',
-                started_at_utc=datetime(2026, 3, 28, 10, 0, tzinfo=UTC),
-            ),
-            source_results=[_build_source_result(partition_id='2026-03-26')],
-        )
-
-    monkeypatch.setattr(etf_job, 'run_scraper_pipeline', _fake_run_scraper_pipeline)
+    monkeypatch.setattr(
+        etf_job,
+        'run_scraper_pipeline',
+        _unexpected_run_scraper_pipeline,
+    )
 
     class _FakeClient:
         def disconnect(self) -> None:
@@ -120,6 +116,16 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
         etf_job,
         '_build_clickhouse_client_or_raise',
         lambda: (_FakeClient(), 'origo'),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_existing_etf_partition_ids_or_raise',
+        lambda **_: ('2026-03-26',),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_etf_archived_source_results_or_raise',
+        lambda **_: [_build_source_result(partition_id='2026-03-26')],
     )
 
     class _FakeStateStore:
@@ -188,8 +194,10 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
         )
     )
 
-    assert pipeline_calls == [False] * len(pipeline_calls)
-    assert summary.total_inserted_rows == len(pipeline_calls)
+    assert summary.total_sources == 1
+    assert summary.total_parsed_records == 1
+    assert summary.total_normalized_records == 1
+    assert summary.total_inserted_rows == 1
     assert summary.total_native_projected_rows == 0
     assert summary.total_aligned_projected_rows == 0
     assert native_called is False
@@ -302,3 +310,257 @@ def test_execute_etf_partition_backfill_projects_only_after_proof(
         'project_native',
         'project_aligned',
     ]
+
+
+def test_load_etf_archived_source_results_fails_on_missing_partition_coverage(
+    monkeypatch: Any,
+) -> None:
+    observed_at_utc = datetime(2026, 3, 26, 0, 0, tzinfo=UTC)
+    source = SourceDescriptor(
+        source_id='etf_ishares_ibit_daily',
+        source_name='iShares IBIT',
+        source_uri='https://example.com/ibit.csv',
+        discovered_at_utc=observed_at_utc,
+        metadata={'issuer': 'ishares', 'ticker': 'IBIT', 'rights_source': 'ishares'},
+    )
+    artifact = RawArtifact(
+        artifact_id='artifact-1',
+        source_id=source.source_id,
+        source_uri=source.source_uri,
+        fetched_at_utc=observed_at_utc,
+        fetch_method='http',
+        artifact_format='csv',
+        content_sha256='artifact-sha',
+        content=b'csv',
+    )
+    persisted = PersistedRawArtifact(
+        artifact_id='artifact-1',
+        storage_uri='s3://bucket/raw/artifact.csv',
+        manifest_uri='s3://bucket/raw/manifest.json',
+        persisted_at_utc=observed_at_utc,
+    )
+    parsed_record = ParsedRecord(
+        record_id='record-1',
+        artifact_id='artifact-1',
+        payload={'as_of_date': '2026-03-26', 'btc_units': 1.25},
+        parser_name='parser',
+        parser_version='1.0.0',
+        parsed_at_utc=observed_at_utc,
+    )
+    provenance = ProvenanceMetadata(
+        source_id=source.source_id,
+        source_uri=source.source_uri,
+        artifact_id=artifact.artifact_id,
+        artifact_sha256=artifact.content_sha256,
+        fetch_method='http',
+        parser_name='parser',
+        parser_version='1.0.0',
+        fetched_at_utc=observed_at_utc,
+        parsed_at_utc=observed_at_utc,
+        normalized_at_utc=observed_at_utc,
+    )
+    normalized_record = NormalizedMetricRecord(
+        metric_id='metric-1',
+        source_id=source.source_id,
+        metric_name='btc_units',
+        metric_value=1.25,
+        metric_unit='BTC',
+        observed_at_utc=observed_at_utc,
+        dimensions={'issuer': 'iShares', 'ticker': 'IBIT'},
+        provenance=provenance,
+    )
+
+    class _FakeAdapter:
+        adapter_name = 'fake_etf'
+
+        def parse(
+            self,
+            *,
+            artifact: RawArtifact,
+            source: SourceDescriptor,
+            run_context: ScrapeRunContext,
+        ) -> list[ParsedRecord]:
+            del artifact, source, run_context
+            return [parsed_record]
+
+        def normalize(
+            self,
+            *,
+            parsed_records: list[ParsedRecord],
+            source: SourceDescriptor,
+            run_context: ScrapeRunContext,
+        ) -> list[NormalizedMetricRecord]:
+            del parsed_records, source, run_context
+            return [normalized_record]
+
+    monkeypatch.setattr(
+        etf_job,
+        '_build_etf_adapter_source_index_or_raise',
+        lambda **_: {source.source_id: (_FakeAdapter(), source)},
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_build_object_store_client_and_bucket_or_raise',
+        lambda: ('client', 'bucket'),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_all_raw_artifact_manifest_payloads_or_raise',
+        lambda **_: [
+            {
+                'source_id': source.source_id,
+                'artifact_id': artifact.artifact_id,
+                'manifest_uri': persisted.manifest_uri,
+                'fetched_at_utc': observed_at_utc.isoformat(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_archived_raw_artifact_from_manifest_or_raise',
+        lambda **_: etf_job._ArchivedArtifactLoad(
+            manifest_payload={},
+            raw_artifact=artifact,
+            persisted_artifact=persisted,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match='ETF historical archive coverage is incomplete'):
+        etf_job._load_etf_archived_source_results_or_raise(
+            run_context=ScrapeRunContext(
+                run_id='etf-daily-run',
+                started_at_utc=observed_at_utc,
+            ),
+            required_partition_ids=('2026-03-25', '2026-03-26'),
+        )
+
+
+def test_load_etf_archived_source_results_deduplicates_exact_duplicate_artifacts(
+    monkeypatch: Any,
+) -> None:
+    observed_at_utc = datetime(2026, 3, 26, 0, 0, tzinfo=UTC)
+    source = SourceDescriptor(
+        source_id='etf_ishares_ibit_daily',
+        source_name='iShares IBIT',
+        source_uri='https://example.com/ibit.csv',
+        discovered_at_utc=observed_at_utc,
+        metadata={'issuer': 'ishares', 'ticker': 'IBIT', 'rights_source': 'ishares'},
+    )
+    artifact = RawArtifact(
+        artifact_id='artifact-1',
+        source_id=source.source_id,
+        source_uri=source.source_uri,
+        fetched_at_utc=observed_at_utc,
+        fetch_method='http',
+        artifact_format='csv',
+        content_sha256='artifact-sha',
+        content=b'csv',
+    )
+    persisted = PersistedRawArtifact(
+        artifact_id='artifact-1',
+        storage_uri='s3://bucket/raw/artifact.csv',
+        manifest_uri='s3://bucket/raw/manifest.json',
+        persisted_at_utc=observed_at_utc,
+    )
+    parsed_record = ParsedRecord(
+        record_id='record-1',
+        artifact_id='artifact-1',
+        payload={'as_of_date': '2026-03-26', 'btc_units': 1.25},
+        parser_name='parser',
+        parser_version='1.0.0',
+        parsed_at_utc=observed_at_utc,
+    )
+    provenance = ProvenanceMetadata(
+        source_id=source.source_id,
+        source_uri=source.source_uri,
+        artifact_id=artifact.artifact_id,
+        artifact_sha256=artifact.content_sha256,
+        fetch_method='http',
+        parser_name='parser',
+        parser_version='1.0.0',
+        fetched_at_utc=observed_at_utc,
+        parsed_at_utc=observed_at_utc,
+        normalized_at_utc=observed_at_utc,
+    )
+    normalized_record = NormalizedMetricRecord(
+        metric_id='metric-1',
+        source_id=source.source_id,
+        metric_name='btc_units',
+        metric_value=1.25,
+        metric_unit='BTC',
+        observed_at_utc=observed_at_utc,
+        dimensions={'issuer': 'iShares', 'ticker': 'IBIT'},
+        provenance=provenance,
+    )
+
+    class _FakeAdapter:
+        adapter_name = 'fake_etf'
+
+        def parse(
+            self,
+            *,
+            artifact: RawArtifact,
+            source: SourceDescriptor,
+            run_context: ScrapeRunContext,
+        ) -> list[ParsedRecord]:
+            del artifact, source, run_context
+            return [parsed_record]
+
+        def normalize(
+            self,
+            *,
+            parsed_records: list[ParsedRecord],
+            source: SourceDescriptor,
+            run_context: ScrapeRunContext,
+        ) -> list[NormalizedMetricRecord]:
+            del parsed_records, source, run_context
+            return [normalized_record]
+
+    monkeypatch.setattr(
+        etf_job,
+        '_build_etf_adapter_source_index_or_raise',
+        lambda **_: {source.source_id: (_FakeAdapter(), source)},
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_build_object_store_client_and_bucket_or_raise',
+        lambda: ('client', 'bucket'),
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_all_raw_artifact_manifest_payloads_or_raise',
+        lambda **_: [
+            {
+                'source_id': source.source_id,
+                'artifact_id': artifact.artifact_id,
+                'manifest_uri': 's3://bucket/raw/manifest-1.json',
+                'fetched_at_utc': observed_at_utc.isoformat(),
+            },
+            {
+                'source_id': source.source_id,
+                'artifact_id': artifact.artifact_id,
+                'manifest_uri': 's3://bucket/raw/manifest-2.json',
+                'fetched_at_utc': observed_at_utc.isoformat(),
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_load_archived_raw_artifact_from_manifest_or_raise',
+        lambda **_: etf_job._ArchivedArtifactLoad(
+            manifest_payload={},
+            raw_artifact=artifact,
+            persisted_artifact=persisted,
+        ),
+    )
+
+    results = etf_job._load_etf_archived_source_results_or_raise(
+        run_context=ScrapeRunContext(
+            run_id='etf-daily-run',
+            started_at_utc=observed_at_utc,
+        ),
+        required_partition_ids=('2026-03-26',),
+    )
+
+    assert len(results) == 1
+    assert results[0].source.source_id == source.source_id

@@ -1,0 +1,77 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command finished successfully",
+    "detail_code": "summary of the focused ETF archive-replay validation bundle with runtime-only noise normalized",
+    "row_count": "logical assertion count when applicable; 11 indicates the focused ETF archive-replay proof suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-etf-archive-replay-proof",
+    "captured_at_utc": "2026-03-28T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the ETF archive-replay branch state after plan/changelog updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "etf_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "46d0a4f6aa71372c2f6cb96c01984458c5813379d4733c62ac25a47f31476554",
+      "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py"
+    },
+    {
+      "name": "test_etf_daily_backfill_job_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3c30c107e41e385bd2ba6411d2dddd7f709c9b85dfac3b6d73ad25d85e32db5d",
+      "path": "tests/contract/test_etf_daily_backfill_job_contract.py"
+    },
+    {
+      "name": "s34-etf-backfill-runner_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d46c5f775fcb3bb937e55fb669f108325dc0c4a3e5cdd9bb09439d96f81308ca",
+      "path": "docs/Developer/s34-etf-backfill-runner.md"
+    },
+    {
+      "name": "1-top-level-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "b63baf31a1d5c1f974f04a7f13cfd83e53921a28e1347f807c3047c648796ff2",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "2-itemized-work-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d5621fc8f5daeb1950ae29e14086ff0aaafe6871b380ba90c1fcbd6ca54ca3ce",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "live-performance-investigation-log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4982ff2d9289f70defa0d1cfb0314af13a708a3ac27f10b6f3071634b40bf433",
+      "path": "spec/live-performance-investigation-log.md"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_etf_archive_replay_proof",
+      "status_code": 0,
+      "detail_code": "...........                                                              [100%] ; 11 passed in <runtime> ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 11,
+      "body_sha256": "dee967a6bbc404f1cfce2cea87bfd534d52bba3be8fcf1d677a78518f8d75475"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_etf_archive_replay_proof",
+      "status_code": 0,
+      "detail_code": "...........                                                              [100%] ; 11 passed in <runtime> ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 11,
+      "body_sha256": "dee967a6bbc404f1cfce2cea87bfd534d52bba3be8fcf1d677a78518f8d75475"
+    }
+  ]
+}

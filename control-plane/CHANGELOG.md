@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.69 on 28th of March, 2026
+- Added browser runtime packaging required by the hardened Slice 34 ETF backfill path:
+  - added Python `playwright` to control-plane runtime dependencies
+  - installed Playwright Chromium during control-plane image build
+  - added contract coverage to prevent image/runtime drift for browser-backed ETF adapters
+
 ## v1.2.67 on 12th of March, 2026
 - Improved canonical exchange ingest throughput for backfill workloads:
   - switched Binance/OKX/Bybit canonical ingest writers from per-event writes to batched canonical writes

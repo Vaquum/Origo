@@ -91,6 +91,9 @@
   - `ORIGO_OBJECT_STORE_ACCESS_KEY_ID`
   - `ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY`
   - `ORIGO_OBJECT_STORE_BUCKET`
+- Browser-backed ETF adapters also require the deployed control-plane image to include:
+  - Python `playwright`
+  - Playwright-installed Chromium browser payload
 
 ## Minimal examples
 - Run ETF backfill with auto run id:

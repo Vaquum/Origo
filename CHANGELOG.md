@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-28
+- Fixed the deployed ETF backfill runtime so browser-backed issuer adapters can execute on the hardened Slice 34 path:
+  - added `playwright` to `origo-control-plane` runtime dependencies
+  - added Playwright Chromium installation to `docker/Dockerfile.control-plane`
+  - added focused contract coverage to pin the control-plane browser runtime contract:
+    - `tests/contract/test_s34_etf_browser_runtime_contract.py`
+  - updated Slice 34 plan/docs so missing Playwright/Chromium is treated as a hard runtime failure, not a manual server fix
+- Updated version to `origo-control-plane v1.2.69` (`Origo API` unchanged at `v0.1.28`).
+
 ## 2026-03-12
 - Fixed exchange backfill canonical ingest throughput bottlenecks and deployment env drift:
   - added fast canonical insert mode (`ORIGO_CANONICAL_FAST_INSERT_MODE=assume_new_partition`) for Binance/OKX/Bybit daily ingest paths with fail-loud non-empty-partition guard

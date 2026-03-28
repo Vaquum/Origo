@@ -25,6 +25,7 @@
   - `dagster_run_id`
   - `started_at_utc`
   - `finished_at_utc`
+  - `completed_runs`
   - `proof_summary`
 
 ## Data definitions (field names, types, units, timezone, nullability)
@@ -34,10 +35,18 @@
   - `origo_etf_daily_backfill_job`
 - Runner tags:
   - `origo.backfill.dataset=etf_daily_metrics`
-  - `origo.backfill.execution_mode=backfill`
   - `origo.backfill.projection_mode=deferred`
-  - `origo.backfill.runtime_audit_mode=summary`
   - `origo.backfill.control_run_id=<operator-facing id>`
+  - `origo.backfill.runtime_audit_mode=summary`
+  - `origo.backfill.execution_mode=backfill|reconcile`
+  - `origo.backfill.partition_ids=<comma-separated ISO partition ids>` when the runner scopes an explicit reconcile day
+- Completed-run fields:
+  - `execution_mode`
+  - `partition_ids`
+  - `dagster_run_id`
+  - `started_at_utc`
+  - `finished_at_utc`
+  - `proof_summary` for explicit reconcile runs
 - Proof summary fields:
   - `dataset`
   - `proof_boundary_partition_id`
@@ -53,6 +62,10 @@
   - terminal proof or quarantine
 - Projectors run only after terminal proof and only when the runtime contract explicitly requests inline projection.
 - The Slice-34 runner submits ETF backfill with deferred projection so projector promotion never outruns proof.
+- The repo-native ETF runner is proof-driven:
+  - if any ETF partition has canonical rows without terminal proof, the runner submits an explicit `reconcile` Dagster run scoped to that partition via `origo.backfill.partition_ids`
+  - only after the ambiguous partition proves terminal again does the runner submit the normal full-history `backfill` run
+  - `backfill` mode skips terminal-complete partitions and still fails loudly if it encounters any non-terminal ambiguous/quarantined partition
 - Post-run proof state is read from:
   - `canonical_backfill_partition_proofs`
   - `canonical_event_log`
@@ -78,6 +91,7 @@
 - Dagster job failure: fail loudly.
 - No ETF terminal proof boundary after success: fail loudly.
 - Ambiguous ETF partitions after success: fail loudly.
+- Blank, duplicate, or malformed `origo.backfill.partition_ids`: fail loudly.
 - Projector execution before terminal proof: fail loudly by contract.
 - Missing historical issuer artifacts for claimed ETF backfill coverage: fail loudly.
 - Missing valid archived issuer artifacts for the required replay window: fail loudly.
@@ -114,3 +128,6 @@
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_etf_backfill_runner`
 - Run ETF backfill with explicit run id:
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_etf_backfill_runner --run-id s34-etf-20260326`
+- Internal reconcile tag shape used by the runner:
+  - `origo.backfill.execution_mode=reconcile`
+  - `origo.backfill.partition_ids=2024-01-11`

@@ -795,7 +795,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5g` Make ETF archive replay choose the latest valid archived issuer artifact per required partition deterministically, while logging but not failing on invalid or superseded artifacts outside the required replay window.
 - [x] `S34-C5h` Freeze ETF issuer-specific historical availability boundaries, bootstrap iShares historical raw artifacts into object-store archive coverage, and make ETF archive replay enforce per-issuer expected coverage instead of deriving scope from stale partial canonical leftovers.
 - [x] `S34-C5i` Persist and honor iShares no-data holiday evidence so official market-closure days do not fail ETF historical coverage as fake missing partitions.
-- [ ] `S34-C5j` Formalize zero-history boundaries for snapshot-only ETF issuers so sources with no valid archived artifacts do not block replay of issuers whose historical claim is non-empty.
+- [x] `S34-C5j` Formalize zero-history boundaries for snapshot-only ETF issuers so sources with no valid archived artifacts do not block replay of issuers whose historical claim is non-empty.
+- [ ] `S34-C5k` Add ETF proof-driven resume/reconcile control so live reruns skip terminal partitions, explicitly reconcile ambiguous partitions, and continue full-history execution from authoritative proof state.
 - [x] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
@@ -2201,6 +2202,10 @@ Constraints: no hard-coded holiday calendar, no silent holiday inference without
 Action: Formalize zero-history boundaries for snapshot-only ETF issuers.
 Done looks like: archive-capture-forward issuers with zero valid archived artifacts are treated as having an explicit empty historical claim, ETF replay does not fail just because such a source has no history yet, and proof/audit output still names those zero-history issuers explicitly.
 Constraints: no synthetic history for snapshot-only issuers, no silent treatment of zero-history sources as complete, and no weakening of fail-loud behavior once a snapshot-only issuer has a non-empty claimed range.
+27j. `S34-05k`
+Action: Add ETF proof-driven resume/reconcile control for live Slice-34 backfill.
+Done looks like: ETF backfill reruns skip terminal-complete partitions, explicit reconcile can be scoped to required partition ids via runtime tags, and the repo-native ETF runner plans `reconcile` before `backfill` from authoritative proof state instead of forcing operators to restart from day zero.
+Constraints: no silent reconcile in backfill mode, no direct canonical writes outside Dagster/state-machine execution, and no synthetic partition planning outside archived-source evidence.
 25a. `S34-05f`
 Action: Provision Playwright + Chromium in the deployed control-plane runtime for browser-backed ETF adapters.
 Done looks like: the control-plane package installs the Python `playwright` dependency, the deployed control-plane image installs Chromium via Playwright at build time, and live ETF Dagster runs no longer fail with missing-browser runtime errors before real source fetch/proof logic executes.

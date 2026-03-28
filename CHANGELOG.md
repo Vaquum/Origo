@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-28
+- Tightened Slice 34 ETF backfill resume semantics so the repo-native runner can clear stale partitions and continue:
+  - ETF backfill now honors an explicit `origo.backfill.partition_ids` runtime tag for scoped partition execution
+  - ETF backfill reruns now skip terminal-complete partitions in `backfill` mode instead of failing on already-proved historical days
+  - the repo-native ETF runner now plans `reconcile` first for ambiguous ETF partitions and only returns to `backfill` once those poisoned days are terminal again
+- Updated version to `origo-control-plane v1.2.75` (`Origo API` unchanged at `v0.1.28`).
+
 - Formalized the zero-history ETF boundary for snapshot-only issuers:
   - `archive_capture_forward` issuers with zero valid archived artifacts now have an explicit empty historical claim instead of blocking replay for issuers whose claim is non-empty
   - ETF archive replay now surfaces those zero-history issuers explicitly in proof/log output instead of silently treating them as complete

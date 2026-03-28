@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final, cast
@@ -41,6 +42,7 @@ from origo.scraper.etf_canonical_event_ingest import (
 from origo.scraper.pipeline import PipelineSourceResult, run_scraper_pipeline
 from origo_control_plane.backfill import apply_runtime_audit_mode_or_raise
 from origo_control_plane.backfill.runtime_contract import (
+    BACKFILL_PARTITION_IDS_TAG,
     BackfillRuntimeContract,
     load_backfill_runtime_contract_from_tags_or_raise,
 )
@@ -228,6 +230,36 @@ def _partition_id_to_date_or_raise(*, partition_id: str) -> date:
         return date.fromisoformat(partition_id)
     except ValueError as exc:
         raise RuntimeError(f'ETF partition_id must be ISO date, got {partition_id}') from exc
+
+
+def _load_required_partition_ids_from_tags_or_none(
+    tags: Mapping[str, str],
+) -> tuple[str, ...] | None:
+    raw = tags.get(BACKFILL_PARTITION_IDS_TAG)
+    if raw is None:
+        return None
+    normalized = raw.strip()
+    if normalized == '':
+        raise RuntimeError(
+            f'{BACKFILL_PARTITION_IDS_TAG} must be non-empty when provided'
+        )
+    partition_ids: list[str] = []
+    seen: set[str] = set()
+    for item in normalized.split(','):
+        partition_id = item.strip()
+        if partition_id == '':
+            raise RuntimeError(
+                f'{BACKFILL_PARTITION_IDS_TAG} must not contain empty partition ids'
+            )
+        _partition_id_to_date_or_raise(partition_id=partition_id)
+        if partition_id in seen:
+            raise RuntimeError(
+                f'{BACKFILL_PARTITION_IDS_TAG} must not contain duplicates: '
+                f'partition_id={partition_id}'
+            )
+        seen.add(partition_id)
+        partition_ids.append(partition_id)
+    return tuple(partition_ids)
 
 
 def _iter_business_partition_ids_inclusive(
@@ -960,6 +992,31 @@ def _build_partition_batches_or_raise(
     return grouped
 
 
+def _filter_terminal_partitions_for_backfill_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    partition_batches: dict[str, list[_PartitionSourceBatch]],
+) -> dict[str, list[_PartitionSourceBatch]]:
+    state_store = CanonicalBackfillStateStore(
+        client=client,
+        database=database,
+    )
+    filtered: dict[str, list[_PartitionSourceBatch]] = {}
+    for partition_id in sorted(partition_batches):
+        assessment = state_store.assess_partition_execution(
+            stream_key=CanonicalStreamKey(
+                source_id=_CANONICAL_SOURCE_ID,
+                stream_id=_CANONICAL_STREAM_ID,
+                partition_id=partition_id,
+            )
+        )
+        if assessment.latest_proof_state in {'proved_complete', 'empty_proved'}:
+            continue
+        filtered[partition_id] = partition_batches[partition_id]
+    return filtered
+
+
 def _canonical_payload_sha256(record: NormalizedMetricRecord) -> str:
     payload_raw = json.dumps(
         build_etf_canonical_payload(record=record),
@@ -1214,6 +1271,9 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
     runtime_contract = load_backfill_runtime_contract_from_tags_or_raise(
         context.run.tags,
     )
+    required_partition_ids = _load_required_partition_ids_from_tags_or_none(
+        context.run.tags
+    )
     apply_runtime_audit_mode_or_raise(
         runtime_audit_mode=runtime_contract.runtime_audit_mode
     )
@@ -1227,9 +1287,16 @@ def _run_etf_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSu
     try:
         collected_source_results = _load_etf_archived_source_results_or_raise(
             run_context=run_context,
+            required_partition_ids=(() if required_partition_ids is None else required_partition_ids),
             log=context.log,
         )
         partition_batches = _build_partition_batches_or_raise(collected_source_results)
+        if runtime_contract.execution_mode == 'backfill':
+            partition_batches = _filter_terminal_partitions_for_backfill_or_raise(
+                client=native_client,
+                database=database,
+                partition_batches=partition_batches,
+            )
         partition_results = [
             _execute_etf_partition_backfill_or_raise(
                 context=context,

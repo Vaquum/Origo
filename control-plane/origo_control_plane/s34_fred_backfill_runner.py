@@ -17,7 +17,10 @@ from dagster._core.storage.dagster_run import NOT_FINISHED_STATUSES, DagsterRunS
 from dagster._core.workspace.context import BaseWorkspaceRequestContext
 from dagster._core.workspace.load import load_workspace_process_context_from_yaml_paths
 
-from origo.events import CanonicalBackfillStateStore
+from origo.events import (
+    LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL,
+    CanonicalBackfillStateStore,
+)
 from origo_control_plane.backfill import (
     BACKFILL_EXECUTION_MODE_TAG,
     BACKFILL_PARTITION_IDS_TAG,
@@ -313,11 +316,20 @@ def _load_reconcile_partition_batch_summary_or_raise(
         f'''
         SELECT
             partition_id,
-            argMax(state, proof_revision) AS state,
-            argMax(reason, proof_revision) AS reason,
-            argMax(proof_digest_sha256, proof_revision) AS proof_digest_sha256,
-            argMax(source_row_count, proof_revision) AS source_row_count,
-            argMax(canonical_row_count, proof_revision) AS canonical_row_count
+            argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state,
+            argMax(reason, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS reason,
+            argMax(
+                proof_digest_sha256,
+                {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL},
+            ) AS proof_digest_sha256,
+            argMax(
+                source_row_count,
+                {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL},
+            ) AS source_row_count,
+            argMax(
+                canonical_row_count,
+                {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL},
+            ) AS canonical_row_count
         FROM {database}.canonical_backfill_partition_proofs
         WHERE source_id = %(source_id)s
           AND stream_id = %(stream_id)s

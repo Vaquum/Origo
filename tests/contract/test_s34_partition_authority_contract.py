@@ -40,6 +40,10 @@ def test_load_nonterminal_partition_ids_for_stream_uses_event_manifest_and_proof
     assert 'canonical_event_log_active_v1' in client.query
     assert 'canonical_backfill_source_manifests' in client.query
     assert 'canonical_backfill_partition_proofs' in client.query
+    assert (
+        'argMax(state, tuple(proof_revision, recorded_at_utc, proof_id)) AS state'
+        in client.query
+    )
     assert client.params == {
         'source_id': 'etf',
         'stream_id': 'etf_daily_metrics',
@@ -70,6 +74,10 @@ def test_load_grouped_nonterminal_partition_ids_uses_all_slice34_candidate_table
     assert 'canonical_event_log_active_v1' in client.query
     assert 'canonical_backfill_source_manifests' in client.query
     assert 'canonical_backfill_partition_proofs' in client.query
+    assert (
+        'argMax(state, tuple(proof_revision, recorded_at_utc, proof_id)) AS state'
+        in client.query
+    )
     assert client.params == {
         'terminal_states': ('proved_complete', 'empty_proved')
     }

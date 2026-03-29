@@ -17,7 +17,11 @@ from dagster._core.storage.dagster_run import NOT_FINISHED_STATUSES, DagsterRunS
 from dagster._core.workspace.context import BaseWorkspaceRequestContext
 from dagster._core.workspace.load import load_workspace_process_context_from_yaml_paths
 
-from origo.events import CanonicalBackfillStateStore, CanonicalStreamKey
+from origo.events import (
+    LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL,
+    CanonicalBackfillStateStore,
+    CanonicalStreamKey,
+)
 from origo_control_plane.backfill import (
     assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
@@ -255,7 +259,7 @@ def _load_terminal_partition_count_or_raise(
         (
             SELECT
                 partition_id,
-                argMax(state, proof_revision) AS state
+                argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
             FROM {database}.canonical_backfill_partition_proofs
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s

@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from clickhouse_driver import Client as ClickHouseClient
 
+from origo.events import LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL
 from origo.events.storage import CANONICAL_EVENT_LOG_READ_TABLE
 
 
@@ -47,7 +48,7 @@ def load_nonterminal_partition_ids_for_stream_or_raise(
             (
                 SELECT
                     partition_id,
-                    argMax(state, proof_revision) AS state
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -106,7 +107,7 @@ def load_grouped_nonterminal_partition_ids_or_raise(
                     source_id,
                     stream_id,
                     partition_id,
-                    argMax(state, proof_revision) AS state
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {database}.canonical_backfill_partition_proofs
                 WHERE {stream_pair_filter_sql}
                 GROUP BY source_id, stream_id, partition_id

@@ -31,6 +31,12 @@ _EMPTY_SHA256: Final[str] = hashlib.sha256(b'').hexdigest()
 _MANIFEST_NAMESPACE: Final[UUID] = UUID('19a9ec6d-7b53-4e5f-b33c-6afcb283c3e8')
 _PARTITION_PROOF_NAMESPACE: Final[UUID] = UUID('67f9bd64-9e12-4a31-8d04-9ea64c76cb69')
 _RANGE_PROOF_NAMESPACE: Final[UUID] = UUID('53d2631f-5522-4cb4-a2bc-d8a5858db925')
+LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL: Final[str] = (
+    'tuple(proof_revision, recorded_at_utc, proof_id)'
+)
+LATEST_PARTITION_PROOF_ORDER_BY_SQL: Final[str] = (
+    'proof_revision DESC, recorded_at_utc DESC, proof_id DESC'
+)
 _TERMINAL_PARTITION_STATES: Final[frozenset[str]] = frozenset(
     {'proved_complete', 'empty_proved'}
 )
@@ -812,7 +818,7 @@ class CanonicalBackfillStateStore:
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
               AND partition_id = %(partition_id)s
-            ORDER BY proof_revision DESC
+            ORDER BY {LATEST_PARTITION_PROOF_ORDER_BY_SQL}
             LIMIT 1
             ''',
             {
@@ -1129,7 +1135,7 @@ class CanonicalBackfillStateStore:
             f'''
             SELECT
                 partition_id,
-                argMax(state, proof_revision) AS state
+                argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
             FROM {self._database}.canonical_backfill_partition_proofs
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
@@ -1193,7 +1199,7 @@ class CanonicalBackfillStateStore:
             f'''
             SELECT
                 partition_id,
-                argMax(state, proof_revision) AS state
+                argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
             FROM {self._database}.canonical_backfill_partition_proofs
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
@@ -1689,7 +1695,7 @@ class CanonicalBackfillStateStore:
             (
                 SELECT
                     partition_id,
-                    argMax(state, proof_revision) AS state
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1726,7 +1732,9 @@ class CanonicalBackfillStateStore:
             ) AS event_partitions
             LEFT JOIN
             (
-                SELECT partition_id, argMax(state, proof_revision) AS state
+                SELECT
+                    partition_id,
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1756,7 +1764,9 @@ class CanonicalBackfillStateStore:
             SELECT partition_id
             FROM
             (
-                SELECT partition_id, argMax(state, proof_revision) AS state
+                SELECT
+                    partition_id,
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1810,7 +1820,7 @@ class CanonicalBackfillStateStore:
             (
                 SELECT
                     partition_id,
-                    argMax(state, proof_revision) AS state
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1847,7 +1857,9 @@ class CanonicalBackfillStateStore:
             ) AS event_partitions
             LEFT JOIN
             (
-                SELECT partition_id, argMax(state, proof_revision) AS state
+                SELECT
+                    partition_id,
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1877,7 +1889,9 @@ class CanonicalBackfillStateStore:
             SELECT partition_id
             FROM
             (
-                SELECT partition_id, argMax(state, proof_revision) AS state
+                SELECT
+                    partition_id,
+                    argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
                 FROM {self._database}.canonical_backfill_partition_proofs
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
@@ -1928,8 +1942,11 @@ class CanonicalBackfillStateStore:
             f'''
             SELECT
                 partition_id,
-                argMax(proof_digest_sha256, proof_revision) AS proof_digest_sha256,
-                argMax(state, proof_revision) AS state
+                argMax(
+                    proof_digest_sha256,
+                    {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL},
+                ) AS proof_digest_sha256,
+                argMax(state, {LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL}) AS state
             FROM {self._database}.canonical_backfill_partition_proofs
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s

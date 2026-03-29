@@ -9,6 +9,8 @@ from .aligned_projector import (
     aligned_projection_policy_id,
 )
 from .backfill_state import (
+    LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL,
+    LATEST_PARTITION_PROOF_ORDER_BY_SQL,
     CanonicalBackfillStateStore,
     PartitionCanonicalProof,
     PartitionExecutionAssessment,
@@ -99,6 +101,8 @@ __all__ = [
     'CANONICAL_EVENT_LOG_WRITE_TABLE',
     'CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE',
     'CANONICAL_SOURCE_PRECISION_REGISTRY_VERSION',
+    'LATEST_PARTITION_PROOF_ARGMAX_KEY_SQL',
+    'LATEST_PARTITION_PROOF_ORDER_BY_SQL',
     'Aligned1sAggregateRow',
     'AlignedBackfillResult',
     'AlignedPolicyRecordResult',

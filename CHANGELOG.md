@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-29
+- Tightened Slice 34 FRED bounded backfill/reconcile planning so early historical windows no longer fail on fake empty-observation errors:
+  - bounded raw-bundle construction now normalizes FRED metadata first and intersects the requested observation window with each series' actual availability
+  - true no-overlap series such as early-window `FEDFUNDS` are skipped explicitly instead of being fetched into an empty payload failure
+  - fully non-overlapping bounded requests now fail loudly with a precise request summary
+- Updated version to `origo-control-plane v1.2.78` (`Origo API` unchanged at `v0.1.28`).
+
 ## 2026-03-28
 - Added env-backed native ClickHouse receive-timeout contract so long-running ETF explicit reconcile resets no longer fail at the client boundary while the server-side mutation is still progressing.
 - Tightened Slice 34 ETF explicit reconcile so legacy canonical payload drift can be repaired honestly:

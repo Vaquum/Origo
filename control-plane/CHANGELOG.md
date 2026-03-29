@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.78 on 29th of March, 2026
+
+- Tightened Slice 34 FRED bounded raw-bundle planning:
+  - normalize each series metadata payload before bounded history/reconcile observation fetch
+  - intersect the requested window with the series' actual metadata availability
+  - skip true no-overlap series such as early-window `FEDFUNDS` instead of surfacing fake empty-observation failures
+  - fail loudly when the entire requested window overlaps no configured FRED series
+  - added focused contract coverage for the no-overlap skip path and the all-series-no-overlap fail-loud path
+
 ## v1.2.77 on 28th of March, 2026
 
 - Added env-backed native ClickHouse receive-timeout contract (`CLICKHOUSE_NATIVE_SEND_RECEIVE_TIMEOUT_SECONDS`) and wired Slice 34 native clients to use it so long-running ETF reconcile reset mutations do not fail on the client timeout boundary.

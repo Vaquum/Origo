@@ -9,6 +9,7 @@ import origo_control_plane.s34_fred_backfill_runner as fred_runner
 import pytest
 from origo_control_plane.backfill.runtime_contract import BackfillRuntimeContract
 
+from origo.events.errors import ReconciliationError
 from origo.fred import FREDLongMetricRow, FREDRawSeriesBundle
 from origo.scraper.contracts import PersistedRawArtifact
 
@@ -387,6 +388,7 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
     class _FakeStateStore:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             self.prove_calls = 0
+            self.latest_partition_proof: Any | None = None
 
         def assert_partition_can_execute_or_raise(self, **_: Any) -> None:
             return None
@@ -413,7 +415,27 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
 
         def prove_partition_or_quarantine(self, **_: Any) -> Any:
             self.prove_calls += 1
-            return initial_quarantine if self.prove_calls == 1 else final_proof
+            if self.prove_calls == 1:
+                self.latest_partition_proof = initial_quarantine
+                raise ReconciliationError(
+                    code='BACKFILL_PARTITION_PROOF_FAILED',
+                    message=(
+                        'Partition proof failed and stream was quarantined '
+                        'for fred/fred_series_metrics/1947-01-01: '
+                        'row_count_mismatch,identity_digest_mismatch'
+                    ),
+                    context={
+                        'mismatch_reasons': [
+                            'row_count_mismatch',
+                            'identity_digest_mismatch',
+                        ]
+                    },
+                )
+            self.latest_partition_proof = final_proof
+            return final_proof
+
+        def fetch_latest_partition_proof(self, **_: Any) -> Any:
+            return self.latest_partition_proof
 
     write_calls: list[str] = []
     reset_calls: list[dict[str, Any]] = []

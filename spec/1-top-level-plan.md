@@ -772,6 +772,7 @@ Every slice must pass:
    8. repo-native FRED reconcile must tranche authoritative ambiguous partition ids into deterministic bounded batches, and each successful batch must leave every targeted partition in a terminal proof state before the next batch begins
    9. FRED reconcile tranche planning must bound the derived source window explicitly; partition-count ceilings alone are insufficient because sparse observation-date partitions can still expand into multi-year revision-history fetch windows
    10. FRED bounded raw-bundle construction must intersect the requested observation window with each series' metadata availability before fetching observations; non-overlapping series are skipped explicitly, and a fully non-overlapping request fails loudly instead of surfacing fake empty-observation errors
+   11. FRED explicit reconcile reset-and-rewrite must treat proof quarantine as an actionable control path even though `prove_partition_or_quarantine(...)` raises immediately on quarantine; the job must load the just-recorded proof row and continue the audited reset-and-rewrite flow instead of aborting at the first stale canonical mismatch
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

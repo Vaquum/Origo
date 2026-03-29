@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.79 on 29th of March, 2026
+
+- Fixed Slice 34 FRED explicit reconcile so quarantining proof mismatches can still reach the audited reset-and-rewrite path:
+  - catch `BACKFILL_PARTITION_PROOF_FAILED` during FRED reconcile writer-repair
+  - load the just-recorded quarantined proof row from ClickHouse instead of assuming the proof API returns it
+  - continue into the existing reset-and-rewrite flow and then re-prove
+  - tightened the FRED reconcile contract test to match the real state-store raise-on-quarantine behavior
+
 ## v1.2.78 on 29th of March, 2026
 
 - Tightened Slice 34 FRED bounded raw-bundle planning:

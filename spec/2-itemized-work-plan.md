@@ -810,6 +810,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C6h` Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
 - [x] `S34-C6i` Bound FRED reconcile tranche planning by explicit source-window span so sparse partition prefixes cannot expand into oversized multi-year revision-history fetch windows.
 - [x] `S34-C6j` Skip non-overlapping FRED series during bounded raw-bundle construction so early historical and reconcile windows do not fail on legitimate empty-observation payloads such as `FEDFUNDS`.
+- [x] `S34-C6k` Fix FRED reconcile proof-mismatch reset flow so a quarantining proof can still trigger the audited partition reset-and-rewrite path instead of aborting immediately on `prove_partition_or_quarantine(...)`.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2278,6 +2279,10 @@ Constraints: no partition-count-only batching, no silent default source-window c
 Action: Skip non-overlapping FRED series during bounded raw-bundle construction before observation fetch.
 Done looks like: FRED raw-bundle planning normalizes each series metadata payload first, intersects the requested bounded observation window with the series' actual metadata availability, skips only true no-overlap series, and fails loudly if the entire requested window overlaps no configured FRED series.
 Constraints: no silent downgrade of empty observation payloads into success, no fake live-source retries for series that cannot overlap the requested window, and no bounded reconcile/history run may die on a metadata-proved non-overlap such as early-window `FEDFUNDS`.
+25k. `S34-06k`
+Action: Let FRED explicit reconcile continue into reset-and-rewrite when proof quarantine is the first stale-canonical signal.
+Done looks like: the FRED job catches `BACKFILL_PARTITION_PROOF_FAILED` during reconcile writer-repair, loads the just-recorded quarantined proof row from ClickHouse, performs the audited partition reset-and-rewrite, and then re-proves instead of aborting immediately at the first quarantining proof.
+Constraints: no swallowing unrelated reconciliation failures, no reset outside explicit `reconcile`, and no assumption that `prove_partition_or_quarantine(...)` returns a quarantined proof object instead of raising.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

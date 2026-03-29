@@ -197,6 +197,21 @@ jobs:
             echo "ERROR: ORIGO_S34_BACKFILL_CONCURRENCY in .env.example must be >= 10." >&2
             exit 1
           fi
+          origo_s34_fred_reconcile_max_partitions_per_run="$(
+            read_root_env_example_value ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN
+          )"
+          if [[ -z "${origo_s34_fred_reconcile_max_partitions_per_run}" ]]; then
+            echo "ERROR: ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ ! "${origo_s34_fred_reconcile_max_partitions_per_run}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN in .env.example must be an integer > 0." >&2
+            exit 1
+          fi
+          if [[ "${origo_s34_fred_reconcile_max_partitions_per_run}" -le 0 ]]; then
+            echo "ERROR: ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN in .env.example must be > 0." >&2
+            exit 1
+          fi
           origo_object_store_endpoint_url="$(
             read_root_env_example_value ORIGO_OBJECT_STORE_ENDPOINT_URL
           )"
@@ -247,6 +262,9 @@ jobs:
           origo_s34_backfill_concurrency_b64="$(
             printf '%s' "${origo_s34_backfill_concurrency}" | base64 -w0
           )"
+          origo_s34_fred_reconcile_max_partitions_per_run_b64="$(
+            printf '%s' "${origo_s34_fred_reconcile_max_partitions_per_run}" | base64 -w0
+          )"
           origo_object_store_endpoint_url_b64="$(
             printf '%s' "${origo_object_store_endpoint_url}" | base64 -w0
           )"
@@ -279,6 +297,7 @@ jobs:
              ORIGO_STREAM_QUARANTINE_STATE_PATH_B64='${origo_stream_quarantine_state_path_b64}' \
              ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64='${origo_backfill_manifest_log_path_b64}' \
              ORIGO_S34_BACKFILL_CONCURRENCY_B64='${origo_s34_backfill_concurrency_b64}' \
+             ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_B64='${origo_s34_fred_reconcile_max_partitions_per_run_b64}' \
              ORIGO_OBJECT_STORE_ENDPOINT_URL_B64='${origo_object_store_endpoint_url_b64}' \
              ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64='${origo_object_store_access_key_id_b64}' \
              ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64='${origo_object_store_secret_access_key_b64}' \
@@ -314,6 +333,7 @@ jobs:
           decode_env_b64_required ORIGO_STREAM_QUARANTINE_STATE_PATH_B64 ORIGO_STREAM_QUARANTINE_STATE_PATH
           decode_env_b64_required ORIGO_BACKFILL_MANIFEST_LOG_PATH_B64 ORIGO_BACKFILL_MANIFEST_LOG_PATH
           decode_env_b64_required ORIGO_S34_BACKFILL_CONCURRENCY_B64 ORIGO_S34_BACKFILL_CONCURRENCY
+          decode_env_b64_required ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_B64 ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN
           decode_env_b64_required ORIGO_OBJECT_STORE_ENDPOINT_URL_B64 ORIGO_OBJECT_STORE_ENDPOINT_URL
           decode_env_b64_required ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64 ORIGO_OBJECT_STORE_ACCESS_KEY_ID
           decode_env_b64_required ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64 ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
@@ -347,6 +367,7 @@ jobs:
           require_env ORIGO_STREAM_QUARANTINE_STATE_PATH
           require_env ORIGO_BACKFILL_MANIFEST_LOG_PATH
           require_env ORIGO_S34_BACKFILL_CONCURRENCY
+          require_env ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN
           require_env ORIGO_OBJECT_STORE_ENDPOINT_URL
           require_env ORIGO_OBJECT_STORE_ACCESS_KEY_ID
           require_env ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
@@ -564,6 +585,7 @@ jobs:
             $0 !~ /^ORIGO_STREAM_QUARANTINE_STATE_PATH=/ &&
             $0 !~ /^ORIGO_BACKFILL_MANIFEST_LOG_PATH=/ &&
             $0 !~ /^ORIGO_S34_BACKFILL_CONCURRENCY=/ &&
+            $0 !~ /^ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_ENDPOINT_URL=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_ACCESS_KEY_ID=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=/ &&
@@ -592,6 +614,7 @@ jobs:
             echo "ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
             echo "ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
             echo "ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
+            echo "ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=${ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN}"
             echo "ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
             echo "ORIGO_OBJECT_STORE_ACCESS_KEY_ID=${ORIGO_OBJECT_STORE_ACCESS_KEY_ID}"
             echo "ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=${ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY}"
@@ -623,6 +646,7 @@ jobs:
           echo "  ORIGO_STREAM_QUARANTINE_STATE_PATH=${ORIGO_STREAM_QUARANTINE_STATE_PATH}"
           echo "  ORIGO_BACKFILL_MANIFEST_LOG_PATH=${ORIGO_BACKFILL_MANIFEST_LOG_PATH}"
           echo "  ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
+          echo "  ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=${ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN}"
           echo "  ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
           echo "  ORIGO_OBJECT_STORE_BUCKET=${ORIGO_OBJECT_STORE_BUCKET}"
           echo "  ORIGO_OBJECT_STORE_REGION=${ORIGO_OBJECT_STORE_REGION}"

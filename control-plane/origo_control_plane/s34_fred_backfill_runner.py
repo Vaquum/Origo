@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,6 +38,9 @@ _DATASET = 'fred_series_metrics'
 _FRED_JOB_NAME = 'origo_fred_daily_backfill_job'
 _RUN_POLL_INTERVAL_SECONDS = 2.0
 _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
+_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV = (
+    'ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN'
+)
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 
 
@@ -65,6 +69,27 @@ class _PlannedFREDRun:
 
 def _default_run_id() -> str:
     return f's34-backfill-fred-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
+
+
+def _load_fred_reconcile_max_partitions_per_run_or_raise() -> int:
+    raw = os.environ.get(_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV)
+    if raw is None or raw.strip() == '':
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be set and non-empty'
+        )
+    normalized = raw.strip()
+    try:
+        value = int(normalized)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be an integer, '
+            f"got '{normalized}'"
+        ) from exc
+    if value <= 0:
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be > 0, got {value}'
+        )
+    return value
 
 
 def _repo_root() -> Path:
@@ -273,6 +298,87 @@ def _load_fred_backfill_summary_or_raise(
     }
 
 
+def _load_reconcile_partition_batch_summary_or_raise(
+    *,
+    client: ClickHouseClient,
+    database: str,
+    partition_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    if partition_ids == ():
+        raise RuntimeError(
+            'FRED reconcile batch summary requires at least one partition id'
+        )
+    contract = get_s34_dataset_contract(_DATASET)
+    rows = client.execute(
+        f'''
+        SELECT
+            partition_id,
+            argMax(state, proof_revision) AS state,
+            argMax(reason, proof_revision) AS reason,
+            argMax(proof_digest_sha256, proof_revision) AS proof_digest_sha256,
+            argMax(source_row_count, proof_revision) AS source_row_count,
+            argMax(canonical_row_count, proof_revision) AS canonical_row_count
+        FROM {database}.canonical_backfill_partition_proofs
+        WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id IN %(partition_ids)s
+        GROUP BY partition_id
+        ORDER BY partition_id ASC
+        ''',
+        {
+            'source_id': contract.source_id,
+            'stream_id': contract.stream_id,
+            'partition_ids': partition_ids,
+        },
+    )
+    proofs_by_partition: dict[str, dict[str, Any]] = {
+        str(row[0]): {
+            'state': str(row[1]),
+            'reason': str(row[2]),
+            'proof_digest_sha256': str(row[3]),
+            'source_row_count': int(row[4]),
+            'canonical_row_count': int(row[5]),
+        }
+        for row in rows
+    }
+    missing_partition_ids = [
+        partition_id
+        for partition_id in partition_ids
+        if partition_id not in proofs_by_partition
+    ]
+    if missing_partition_ids != []:
+        raise RuntimeError(
+            'Dagster FRED reconcile run succeeded but latest partition proofs are '
+            f'missing for targeted partitions: count={len(missing_partition_ids)} '
+            f'preview={missing_partition_ids[:10]}'
+        )
+    nonterminal_partitions = [
+        {
+            'partition_id': partition_id,
+            'state': proofs_by_partition[partition_id]['state'],
+            'reason': proofs_by_partition[partition_id]['reason'],
+        }
+        for partition_id in partition_ids
+        if proofs_by_partition[partition_id]['state'] not in _TERMINAL_PARTITION_STATES
+    ]
+    if nonterminal_partitions != []:
+        raise RuntimeError(
+            'Dagster FRED reconcile run succeeded but targeted partitions remain '
+            f'non-terminal: count={len(nonterminal_partitions)} '
+            f'preview={nonterminal_partitions[:10]}'
+        )
+    state_counts: dict[str, int] = {}
+    for partition_id in partition_ids:
+        state = proofs_by_partition[partition_id]['state']
+        state_counts[state] = state_counts.get(state, 0) + 1
+    return {
+        'partition_count': len(partition_ids),
+        'first_partition_id': partition_ids[0],
+        'last_partition_id': partition_ids[-1],
+        'state_counts': state_counts,
+    }
+
+
 def _plan_next_fred_run_or_raise(
     *,
     client: ClickHouseClient,
@@ -283,9 +389,12 @@ def _plan_next_fred_run_or_raise(
         database=database,
     )
     if ambiguous_partition_ids != ():
+        reconcile_partition_limit = (
+            _load_fred_reconcile_max_partitions_per_run_or_raise()
+        )
         return _PlannedFREDRun(
             execution_mode='reconcile',
-            partition_ids=(),
+            partition_ids=ambiguous_partition_ids[:reconcile_partition_limit],
             ambiguous_partition_count=len(ambiguous_partition_ids),
         )
     return _PlannedFREDRun(
@@ -329,6 +438,19 @@ def run_s34_fred_backfill_or_raise(*, run_id: str | None = None) -> dict[str, An
                 instance=instance,
                 run_id=dagster_run_id,
             )
+            reconcile_batch_summary: dict[str, Any] | None = None
+            if plan.execution_mode == 'reconcile':
+                if plan.partition_ids == ():
+                    raise RuntimeError(
+                        'FRED reconcile plan must include at least one partition id'
+                    )
+                reconcile_batch_summary = (
+                    _load_reconcile_partition_batch_summary_or_raise(
+                        client=planning_client,
+                        database=planning_database,
+                        partition_ids=plan.partition_ids,
+                    )
+                )
             completed_runs.append(
                 {
                     'execution_mode': plan.execution_mode,
@@ -337,6 +459,7 @@ def run_s34_fred_backfill_or_raise(*, run_id: str | None = None) -> dict[str, An
                     'dagster_run_id': dagster_run_id,
                     'started_at_utc': completed_run.started_at_utc.isoformat(),
                     'finished_at_utc': completed_run.finished_at_utc.isoformat(),
+                    'reconcile_batch_summary': reconcile_batch_summary,
                 }
             )
             if plan.execution_mode == 'reconcile':

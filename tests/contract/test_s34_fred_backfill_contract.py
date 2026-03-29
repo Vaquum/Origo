@@ -17,6 +17,14 @@ class _FakeClickHouseClient:
     pass
 
 
+class _ProofQueryClickHouseClient:
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def execute(self, *_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
 class _FakeDagsterContext:
     def __init__(self) -> None:
         self.run = SimpleNamespace(tags={}, run_id='dagster-run-id')
@@ -78,10 +86,11 @@ def test_fred_job_explicit_partition_ids_must_exist_in_source_history() -> None:
 def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     monkeypatch: Any,
 ) -> None:
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN', '2')
     monkeypatch.setattr(
         fred_runner,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('1947-01-01', '1947-02-01'),
+        lambda **_: ('1947-01-01', '1947-02-01', '1947-03-01'),
     )
 
     plan = fred_runner._plan_next_fred_run_or_raise(
@@ -90,8 +99,48 @@ def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     )
 
     assert plan.execution_mode == 'reconcile'
-    assert plan.partition_ids == ()
-    assert plan.ambiguous_partition_count == 2
+    assert plan.partition_ids == ('1947-01-01', '1947-02-01')
+    assert plan.ambiguous_partition_count == 3
+
+
+def test_s34_fred_backfill_runner_requires_reconcile_tranche_env(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.delenv(
+        'ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN',
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN must be set and non-empty',
+    ):
+        fred_runner._load_fred_reconcile_max_partitions_per_run_or_raise()
+
+
+def test_s34_fred_backfill_runner_reconcile_batch_summary_requires_terminal_proofs() -> None:
+    client = _ProofQueryClickHouseClient(
+        [
+            (
+                '1947-01-01',
+                'reconcile_required',
+                'source_manifest_recorded',
+                'proof-1',
+                1,
+                0,
+            )
+        ]
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='targeted partitions remain non-terminal',
+    ):
+        fred_runner._load_reconcile_partition_batch_summary_or_raise(
+            client=client,
+            database='origo',
+            partition_ids=('1947-01-01',),
+        )
 
 
 def test_s34_fred_backfill_runner_builds_required_run_tags() -> None:

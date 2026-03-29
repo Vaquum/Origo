@@ -76,6 +76,25 @@ class _PlannedFREDRun:
     source_window_days: int | None
 
 
+def _raise_if_partition_ids_precede_supported_fred_history(
+    *,
+    partition_ids: tuple[str, ...],
+    source_label: str,
+) -> None:
+    too_early = [
+        partition_id
+        for partition_id in partition_ids
+        if parse_fred_partition_id_as_date_or_raise(partition_id=partition_id)
+        < _FRED_HISTORY_START_DATE
+    ]
+    if too_early != []:
+        raise RuntimeError(
+            f'{source_label} must be on or after supported FRED history start '
+            f'{_FRED_HISTORY_START_DATE.isoformat()}, '
+            f'got count={len(too_early)} preview={too_early[:10]}'
+        )
+
+
 def _default_run_id() -> str:
     return f's34-backfill-fred-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
 
@@ -152,6 +171,10 @@ def _build_run_tags(
     execution_mode: ExecutionMode,
     partition_ids: tuple[str, ...] = (),
 ) -> dict[str, str]:
+    _raise_if_partition_ids_precede_supported_fred_history(
+        partition_ids=partition_ids,
+        source_label=BACKFILL_PARTITION_IDS_TAG,
+    )
     tags = {
         'origo.backfill.dataset': _DATASET,
         'origo.backfill.control_run_id': control_run_id,

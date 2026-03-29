@@ -15,6 +15,7 @@ from origo.events.backfill_state import canonical_proof_matches_source_proof
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    build_backfill_runtime_config_schema,
     get_s34_dataset_contract,
     load_backfill_runtime_contract_or_raise,
     wait_for_source_rate_gate_or_raise,
@@ -97,6 +98,9 @@ def _build_reconcile_existing_partition_summary(
 
 @asset(
     partitions_def=daily_partitions,
+    config_schema=build_backfill_runtime_config_schema(
+        default_projection_mode='deferred'
+    ),
     group_name='okx_data',
     description='Downloads, validates, and writes OKX BTC spot trades into canonical event log',
 )

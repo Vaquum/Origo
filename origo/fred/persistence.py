@@ -13,12 +13,38 @@ from origo.scraper.contracts import PersistedRawArtifact, RawArtifact, ScrapeRun
 from origo.scraper.object_store import persist_raw_artifact
 
 from .canonical_event_ingest import write_fred_long_metrics_to_canonical
-from .client import FREDClient
+from .client import FREDClient, normalize_fred_series_metadata_payload_or_raise
 from .contracts import FREDSeriesRegistryEntry
 from .normalize import FREDLongMetricRow
 
 _FRED_REVISION_HISTORY_REALTIME_START = date(1776, 7, 4)
 _FRED_REVISION_HISTORY_REALTIME_END = date(9999, 12, 31)
+
+
+def _resolve_effective_observation_window_or_none(
+    *,
+    metadata_payload: dict[str, object],
+    series_id: str,
+    observation_start: date | None,
+    observation_end: date | None,
+) -> tuple[date, date] | None:
+    metadata = normalize_fred_series_metadata_payload_or_raise(
+        series_id=series_id,
+        payload=metadata_payload,
+    )
+    effective_start = (
+        metadata.observation_start
+        if observation_start is None
+        else max(metadata.observation_start, observation_start)
+    )
+    effective_end = (
+        metadata.observation_end
+        if observation_end is None
+        else min(metadata.observation_end, observation_end)
+    )
+    if effective_start > effective_end:
+        return None
+    return (effective_start, effective_end)
 
 
 @dataclass(frozen=True)
@@ -141,22 +167,35 @@ def build_fred_raw_bundles(
         )
 
     bundles: list[FREDRawSeriesBundle] = []
+    skipped_series_ids: list[str] = []
     for entry in registry_entries:
         fetched_at_utc = datetime.now(UTC)
         metadata_payload = client.fetch_series_metadata_payload(series_id=entry.series_id)
+        effective_observation_window = _resolve_effective_observation_window_or_none(
+            metadata_payload=metadata_payload,
+            series_id=entry.series_id,
+            observation_start=observation_start,
+            observation_end=observation_end,
+        )
+        if effective_observation_window is None:
+            skipped_series_ids.append(entry.series_id)
+            continue
+        effective_observation_start, effective_observation_end = (
+            effective_observation_window
+        )
         if observations_mode == 'revision_history':
             observations_payload = client.fetch_series_revision_history_payload(
                 series_id=entry.series_id,
-                observation_start=observation_start,
-                observation_end=observation_end,
+                observation_start=effective_observation_start,
+                observation_end=effective_observation_end,
                 realtime_start=_FRED_REVISION_HISTORY_REALTIME_START,
                 realtime_end=_FRED_REVISION_HISTORY_REALTIME_END,
             )
         else:
             observations_payload = client.fetch_series_observations_payload(
                 series_id=entry.series_id,
-                observation_start=observation_start,
-                observation_end=observation_end,
+                observation_start=effective_observation_start,
+                observation_end=effective_observation_end,
                 output_type=1,
                 sort_order='asc',
                 limit=None,
@@ -171,6 +210,21 @@ def build_fred_raw_bundles(
                 metadata_payload=metadata_payload,
                 observations_payload=observations_payload,
             )
+        )
+    if bundles == []:
+        requested_window = {
+            'observation_start': (
+                None if observation_start is None else observation_start.isoformat()
+            ),
+            'observation_end': (
+                None if observation_end is None else observation_end.isoformat()
+            ),
+            'registry_series_count': len(registry_entries),
+            'skipped_series_ids': skipped_series_ids,
+        }
+        raise RuntimeError(
+            'FRED raw bundle request did not overlap any configured series: '
+            + json.dumps(requested_window, ensure_ascii=True, sort_keys=True)
         )
     return bundles
 

@@ -809,6 +809,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
 - [x] `S34-C6h` Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
 - [x] `S34-C6i` Bound FRED reconcile tranche planning by explicit source-window span so sparse partition prefixes cannot expand into oversized multi-year revision-history fetch windows.
+- [x] `S34-C6j` Skip non-overlapping FRED series during bounded raw-bundle construction so early historical and reconcile windows do not fail on legitimate empty-observation payloads such as `FEDFUNDS`.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2273,6 +2274,10 @@ Constraints: no dataset-wide reconcile submissions when ambiguity is large, no s
 Action: Bound FRED reconcile tranche planning by explicit source-window span in addition to partition count.
 Done looks like: the FRED runner reads an explicit env-backed max source-window span, selects only the first deterministic prefix of ambiguous partition ids that stays inside both ceilings, and surfaces that derived source window in run summaries.
 Constraints: no partition-count-only batching, no silent default source-window ceiling, and no reconcile tranche may expand into a larger source observation window than the explicit env contract allows.
+25j. `S34-06j`
+Action: Skip non-overlapping FRED series during bounded raw-bundle construction before observation fetch.
+Done looks like: FRED raw-bundle planning normalizes each series metadata payload first, intersects the requested bounded observation window with the series' actual metadata availability, skips only true no-overlap series, and fails loudly if the entire requested window overlaps no configured FRED series.
+Constraints: no silent downgrade of empty observation payloads into success, no fake live-source retries for series that cannot overlap the requested window, and no bounded reconcile/history run may die on a metadata-proved non-overlap such as early-window `FEDFUNDS`.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

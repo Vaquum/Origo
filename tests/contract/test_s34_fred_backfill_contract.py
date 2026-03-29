@@ -21,7 +21,10 @@ class _FakeDagsterContext:
     def __init__(self) -> None:
         self.run = SimpleNamespace(tags={}, run_id='dagster-run-id')
         self.run_id = 'dagster-run-id'
-        self.log = SimpleNamespace(warning=lambda *_args, **_kwargs: None)
+        self.log = SimpleNamespace(
+            info=lambda *_args, **_kwargs: None,
+            warning=lambda *_args, **_kwargs: None,
+        )
 
 
 def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambiguity(
@@ -159,10 +162,98 @@ def test_fred_job_builds_revision_history_source_bundles(
         ],
     )
 
-    result = fred_job._build_persisted_bundles_or_raise(context=_FakeDagsterContext())
+    result = fred_job._build_persisted_bundles_or_raise(
+        context=_FakeDagsterContext(),
+        source_partition_ids=None,
+    )
 
     assert len(result) == 1
     assert captured['kwargs']['observations_mode'] == 'revision_history'
+
+
+def test_fred_job_builds_revision_history_source_bundles_for_bounded_window(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        fred_job,
+        'load_fred_series_registry',
+        lambda: (
+            '2026-03-06-s6-c1',
+            [
+                SimpleNamespace(
+                    series_id='CPIAUCSL',
+                    source_id='fred_cpiaucsl',
+                    metric_name='consumer_price_index_all_items',
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(fred_job, 'build_fred_client_from_env', lambda: object())
+
+    bundle = FREDRawSeriesBundle(
+        source_id='fred_cpiaucsl',
+        series_id='CPIAUCSL',
+        source_uri='fred://series/CPIAUCSL',
+        fetched_at_utc=datetime(2026, 3, 28, 12, 0, tzinfo=UTC),
+        registry_version='2026-03-06-s6-c1',
+        metadata_payload={'seriess': [{'id': 'CPIAUCSL'}]},
+        observations_payload={'observations': [{'date': '1947-01-01'}]},
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'build_fred_raw_bundles',
+        lambda **kwargs: (
+            captured.setdefault('kwargs', kwargs),
+            [bundle],
+        )[1],
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'persist_fred_raw_bundles_to_object_store',
+        lambda **_: [
+            PersistedRawArtifact(
+                artifact_id='artifact-1',
+                storage_uri='s3://bucket/fred/1.json',
+                manifest_uri='s3://bucket/fred/1.manifest.json',
+                persisted_at_utc=datetime(2026, 3, 28, 12, 1, tzinfo=UTC),
+            )
+        ],
+    )
+
+    result = fred_job._build_persisted_bundles_or_raise(
+        context=_FakeDagsterContext(),
+        source_partition_ids=('1947-01-01', '1947-01-03'),
+    )
+
+    assert len(result) == 1
+    assert captured['kwargs']['observation_start'].isoformat() == '1947-01-01'
+    assert captured['kwargs']['observation_end'].isoformat() == '1947-01-03'
+
+
+def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='reconcile',
+        runtime_audit_mode='summary',
+    )
+    monkeypatch.setattr(
+        fred_job,
+        '_load_ambiguous_partition_ids_or_raise',
+        lambda **_: ('1947-01-01', '1947-01-02'),
+    )
+
+    result = fred_job._resolve_source_partition_scope_ids_or_raise(
+        client=_FakeClickHouseClient(),
+        database='origo',
+        runtime_contract=runtime_contract,
+        explicit_partition_ids=None,
+    )
+
+    assert result == ('1947-01-01', '1947-01-02')
 
 
 def test_fred_reconcile_resets_partition_after_proof_mismatch(

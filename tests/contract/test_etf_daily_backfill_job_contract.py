@@ -520,6 +520,7 @@ def test_reset_etf_partition_for_reconcile_deletes_existing_partition_state(
     monkeypatch: Any,
 ) -> None:
     recorded_states: list[dict[str, Any]] = []
+    recorded_reset_boundaries: list[dict[str, Any]] = []
     executed_queries: list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]] = []
     count_calls = 0
 
@@ -544,12 +545,21 @@ def test_reset_etf_partition_for_reconcile_deletes_existing_partition_state(
         def record_partition_state(self, **kwargs: Any) -> None:
             recorded_states.append(kwargs)
 
+        def record_partition_reset_boundary(self, **kwargs: Any) -> None:
+            recorded_reset_boundaries.append(kwargs)
+
     summary = etf_job._reset_etf_partition_for_reconcile_or_raise(
         context=_FakeContext(run_id='run-1', tags={}),
         client=_FakeClient(),
         database='origo',
         partition_id='2024-01-11',
-        source_proof=SimpleNamespace(),
+        source_proof=SimpleNamespace(
+            stream_key=SimpleNamespace(
+                source_id='etf',
+                stream_id='etf_daily_metrics',
+                partition_id='2024-01-11',
+            )
+        ),
         state_store=_FakeStateStore(),
         writer_error=EventWriterError(
             code='WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
@@ -566,9 +576,11 @@ def test_reset_etf_partition_for_reconcile_deletes_existing_partition_state(
     }
     assert [item['state'] for item in recorded_states] == ['reconcile_required']
     assert recorded_states[0]['reason'] == 'legacy_canonical_payload_reset_required'
+    assert len(recorded_reset_boundaries) == 1
+    assert recorded_reset_boundaries[0]['reason'] == 'legacy_canonical_payload_reset_required'
     alter_queries = [query for query, _params, _settings in executed_queries if query.startswith('ALTER TABLE')]
-    assert len(alter_queries) == 5
-    assert any('canonical_event_log' in query for query in alter_queries)
+    assert len(alter_queries) == 4
+    assert all('canonical_event_log' not in query for query in alter_queries)
     assert any('canonical_etf_daily_metrics_native_v1' in query for query in alter_queries)
     assert any('canonical_aligned_1s_aggregates' in query for query in alter_queries)
     assert any('canonical_projector_checkpoints' in query for query in alter_queries)
@@ -602,6 +614,9 @@ def test_execute_etf_partition_backfill_resets_legacy_conflict_once_on_reconcile
             return None
 
         def record_partition_state(self, **_: Any) -> None:
+            return None
+
+        def record_partition_reset_boundary(self, **_: Any) -> None:
             return None
 
         def compute_canonical_partition_proof_or_raise(self, **_: Any) -> Any:

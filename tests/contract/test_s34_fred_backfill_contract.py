@@ -402,6 +402,9 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
         def record_partition_state(self, **_: Any) -> None:
             return None
 
+        def record_partition_reset_boundary(self, **_: Any) -> None:
+            return None
+
         def compute_canonical_partition_proof_or_raise(self, **_: Any) -> Any:
             return SimpleNamespace(
                 canonical_row_count=1,
@@ -490,3 +493,75 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
     assert result.partition_proof_state == 'proved_complete'
     assert len(write_calls) == 2
     assert len(reset_calls) == 1
+
+
+def test_reset_fred_partition_for_reconcile_records_reset_boundary_without_event_log_delete() -> None:
+    recorded_states: list[dict[str, Any]] = []
+    recorded_reset_boundaries: list[dict[str, Any]] = []
+    executed_queries: list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]] = []
+    count_calls = 0
+
+    class _FakeClient:
+        def execute(
+            self,
+            query: str,
+            params: dict[str, Any] | None = None,
+            settings: dict[str, Any] | None = None,
+        ) -> list[tuple[int, ...]]:
+            nonlocal count_calls
+            normalized_query = ' '.join(query.split())
+            executed_queries.append((normalized_query, params, settings))
+            if normalized_query.startswith('SELECT ('):
+                count_calls += 1
+                if count_calls == 1:
+                    return [(11, 7, 3, 2, 2)]
+                return [(0, 0, 0, 0, 0)]
+            return []
+
+    class _FakeStateStore:
+        def record_partition_state(self, **kwargs: Any) -> None:
+            recorded_states.append(kwargs)
+
+        def record_partition_reset_boundary(self, **kwargs: Any) -> None:
+            recorded_reset_boundaries.append(kwargs)
+
+    source_proof = SimpleNamespace(
+        stream_key=SimpleNamespace(
+            source_id='fred',
+            stream_id='fred_series_metrics',
+            partition_id='1947-02-01',
+        )
+    )
+
+    summary = fred_job._reset_fred_partition_for_reconcile_or_raise(
+        context=_FakeDagsterContext(),
+        client=_FakeClient(),
+        database='origo',
+        partition_id='1947-02-01',
+        source_proof=source_proof,
+        state_store=_FakeStateStore(),
+        reset_reason='legacy_request_time_canonical_reset_required',
+        reset_details={'proof_reason': 'row_count_mismatch,identity_digest_mismatch'},
+    )
+
+    assert summary == {
+        'canonical_event_rows': 11,
+        'native_projection_rows': 7,
+        'aligned_projection_rows': 3,
+        'projector_checkpoint_rows': 2,
+        'projector_watermark_rows': 2,
+    }
+    assert [item['state'] for item in recorded_states] == ['reconcile_required']
+    assert recorded_states[0]['reason'] == 'legacy_request_time_canonical_reset_required'
+    assert len(recorded_reset_boundaries) == 1
+    assert (
+        recorded_reset_boundaries[0]['reason']
+        == 'legacy_request_time_canonical_reset_required'
+    )
+    alter_queries = [query for query, _params, _settings in executed_queries if query.startswith('ALTER TABLE')]
+    assert len(alter_queries) == 4
+    assert all('canonical_event_log' not in query for query in alter_queries)
+    assert any('canonical_fred_series_metrics_native_v1' in query for query in alter_queries)
+    assert any('canonical_aligned_1s_aggregates' in query for query in alter_queries)
+    assert any('canonical_projector_checkpoints' in query for query in alter_queries)
+    assert any('canonical_projector_watermarks' in query for query in alter_queries)

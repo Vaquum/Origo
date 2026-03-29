@@ -11,6 +11,10 @@ from clickhouse_driver import Client as ClickHouseClient
 
 from .errors import ReconciliationError
 from .ingest_state import CanonicalStreamKey, OffsetOrdering
+from .storage import (
+    CANONICAL_EVENT_LOG_READ_TABLE,
+    CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE,
+)
 
 BackfillPartitionState = Literal[
     'source_manifested',
@@ -333,6 +337,16 @@ class QuarantineState:
     stream_key: CanonicalStreamKey
     quarantine_revision: int
     status: QuarantineStatus
+    reason: str
+    details_json: str
+    recorded_by_run_id: str
+    recorded_at_utc: datetime
+
+
+@dataclass(frozen=True)
+class PartitionResetBoundaryState:
+    stream_key: CanonicalStreamKey
+    reset_revision: int
     reason: str
     details_json: str
     recorded_by_run_id: str
@@ -951,11 +965,111 @@ class CanonicalBackfillStateStore:
             recorded_at_utc=recorded_at_utc,
         )
 
+    def fetch_latest_partition_reset_boundary(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+    ) -> PartitionResetBoundaryState | None:
+        rows = self._client.execute(
+            f'''
+            SELECT
+                reset_revision,
+                reason,
+                details_json,
+                recorded_by_run_id,
+                recorded_at_utc
+            FROM {self._database}.{CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE}
+            WHERE source_id = %(source_id)s
+              AND stream_id = %(stream_id)s
+              AND partition_id = %(partition_id)s
+            ORDER BY reset_revision DESC
+            LIMIT 1
+            ''',
+            {
+                'source_id': stream_key.source_id,
+                'stream_id': stream_key.stream_id,
+                'partition_id': stream_key.partition_id,
+            },
+        )
+        if rows == []:
+            return None
+        row = rows[0]
+        return PartitionResetBoundaryState(
+            stream_key=stream_key,
+            reset_revision=int(row[0]),
+            reason=str(row[1]),
+            details_json=str(row[2]),
+            recorded_by_run_id=str(row[3]),
+            recorded_at_utc=_ensure_utc(row[4], field_name='recorded_at_utc'),
+        )
+
+    def record_partition_reset_boundary(
+        self,
+        *,
+        stream_key: CanonicalStreamKey,
+        reason: str,
+        details: dict[str, Any],
+        run_id: str,
+        recorded_at_utc: datetime,
+    ) -> PartitionResetBoundaryState:
+        normalized_reason = _require_non_empty(reason, field_name='reason')
+        normalized_run_id = _require_non_empty(run_id, field_name='run_id')
+        normalized_recorded_at_utc = _ensure_utc(
+            recorded_at_utc, field_name='recorded_at_utc'
+        )
+        details_json = _canonical_json(details)
+        latest_boundary = self.fetch_latest_partition_reset_boundary(
+            stream_key=stream_key
+        )
+        next_revision = (
+            1 if latest_boundary is None else latest_boundary.reset_revision + 1
+        )
+        self._client.execute(
+            f'''
+            INSERT INTO {self._database}.{CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE}
+            (
+                source_id,
+                stream_id,
+                partition_id,
+                reset_revision,
+                reason,
+                details_json,
+                recorded_by_run_id,
+                recorded_at_utc
+            )
+            VALUES
+            ''',
+            [
+                (
+                    stream_key.source_id,
+                    stream_key.stream_id,
+                    stream_key.partition_id,
+                    next_revision,
+                    normalized_reason,
+                    details_json,
+                    normalized_run_id,
+                    normalized_recorded_at_utc,
+                )
+            ],
+        )
+        latest_after_insert = self.fetch_latest_partition_reset_boundary(
+            stream_key=stream_key
+        )
+        if latest_after_insert is None:
+            raise ReconciliationError(
+                code='BACKFILL_RESET_BOUNDARY_MISSING_AFTER_INSERT',
+                message=(
+                    'Partition reset boundary insert succeeded but latest boundary '
+                    'could not be loaded'
+                ),
+            )
+        return latest_after_insert
+
     def count_canonical_rows(self, *, stream_key: CanonicalStreamKey) -> int:
         rows = self._client.execute(
             f'''
             SELECT count()
-            FROM {self._database}.canonical_event_log
+            FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
               AND partition_id = %(partition_id)s
@@ -1341,7 +1455,7 @@ class CanonicalBackfillStateStore:
                             )
                         )
                     ) AS materials
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
                   AND partition_id = %(partition_id)s
@@ -1409,7 +1523,7 @@ class CanonicalBackfillStateStore:
                             )
                         )
                     ) AS materials
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
                   AND partition_id = %(partition_id)s
@@ -1606,7 +1720,7 @@ class CanonicalBackfillStateStore:
             FROM
             (
                 SELECT DISTINCT partition_id
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
             ) AS event_partitions
@@ -1727,7 +1841,7 @@ class CanonicalBackfillStateStore:
             FROM
             (
                 SELECT DISTINCT partition_id
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
             ) AS event_partitions

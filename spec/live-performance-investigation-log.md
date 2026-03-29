@@ -258,6 +258,18 @@ Format per entry: `I tried -> I found -> Progress/Next`.
 - I found: FRED coverage jumped to `19,495` canonical rows with max partition `2026-03-11` (from low double-digit row counts previously), confirming the batch-writer path materially changed ingestion throughput; ETF continued forward progression (`max partition` advanced into `2024-01-17`).
 - Progress/Next: Keep both runs active, wait for FRED process exit/final summary emission, and continue ETF progression monitoring before deciding whether ETF also needs an explicit batch-writer override path.
 
+## 2026-03-29
+
+### Entry 050
+- I tried: Reran live FRED after merged `#104` and inspected the resulting Dagster run plus ClickHouse mutation state.
+- I found: Dagster run `affcd2a9-3538-4a54-a638-996da5027e74` got past the old proof-quarantine abort, recorded the expected `source_manifested -> canonical_written_unproved -> quarantined -> reconcile_required` states for `fred/fred_series_metrics/1947-02-01`, and then stalled inside the reset path because ETF/FRED reconcile still issued a synchronous `ALTER TABLE ... DELETE` against the append-only `canonical_event_log`. The live mutation (`mutation_24566.txt`) was blocked on one March-2026 part `202603_14571_16831_156_24563` containing `636,743,036` rows / `95,761,156,920` bytes.
+- Progress/Next: Remove destructive canonical-event-log deletes from reconcile reset-and-rewrite and replace them with an append-only logical reset boundary contract.
+
+### Entry 051
+- I tried: Patched the Slice-34 runtime so ETF/FRED reconcile records `canonical_partition_reset_boundaries`, reads live canonical truth through `canonical_event_log_active_v1`, and resets only projection/checkpoint/watermark state.
+- I found: Focused contract coverage for the reset-boundary path passed (`55 passed`), `ruff` passed, and `pyright` reported `0 errors, 0 warnings, 0 informations`. The migration sequence also needed correction because the first draft reused existing migration version `0044`; the branch now uses contiguous `0045` / `0046`.
+- Progress/Next: Merge/deploy this append-only reset-boundary patch and rerun the same live FRED reconcile window to verify that the partition resets immediately without a giant `canonical_event_log` mutation and reaches fresh terminal proof.
+
 ### Entry 050
 - I tried: Validated FRED completion state directly from canonical events by grouping on `dimensions.series_id`, then terminated the lingering batch process once all four registry series showed full historical coverage.
 - I found: FRED now has complete per-series ranges in canonical (`CPIAUCSL`, `DGS10`, `FEDFUNDS`, `UNRATE`) through expected latest partitions, and only ETF backfill remains actively running.

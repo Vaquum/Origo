@@ -37,7 +37,7 @@ def test_load_nonterminal_partition_ids_for_stream_uses_event_manifest_and_proof
 
     assert result == ('2024-01-11', '2024-01-12')
     assert client.query is not None
-    assert 'canonical_event_log' in client.query
+    assert 'canonical_event_log_active_v1' in client.query
     assert 'canonical_backfill_source_manifests' in client.query
     assert 'canonical_backfill_partition_proofs' in client.query
     assert client.params == {
@@ -67,7 +67,7 @@ def test_load_grouped_nonterminal_partition_ids_uses_all_slice34_candidate_table
         ('bitcoin_core', 'bitcoin_block_headers'): ['000000840288-000000840431'],
     }
     assert client.query is not None
-    assert 'canonical_event_log' in client.query
+    assert 'canonical_event_log_active_v1' in client.query
     assert 'canonical_backfill_source_manifests' in client.query
     assert 'canonical_backfill_partition_proofs' in client.query
     assert client.params == {

@@ -15,6 +15,7 @@ from origo.events.writer import CanonicalEventWriteInput, CanonicalEventWriter
 class _RecordingClickHouseClient:
     def __init__(self) -> None:
         self.select_identity_batch_sizes: list[int] = []
+        self.select_queries: list[str] = []
         self.insert_calls = 0
 
     def execute(
@@ -24,6 +25,7 @@ class _RecordingClickHouseClient:
         if normalized.startswith('SELECT'):
             if not isinstance(params, dict):
                 raise RuntimeError('SELECT params must be dict')
+            self.select_queries.append(query)
             identity_keys = params.get('identity_keys')
             if not isinstance(identity_keys, list):
                 raise RuntimeError('identity_keys must be list')
@@ -90,6 +92,8 @@ def test_canonical_event_writer_chunks_identity_lookup_query_size(
     assert client.select_identity_batch_sizes != []
     assert max(client.select_identity_batch_sizes) <= 1_500
     assert sum(client.select_identity_batch_sizes) == total_events
+    assert client.select_queries != []
+    assert all('canonical_event_log_active_v1' in query for query in client.select_queries)
 
 
 def test_canonical_event_writer_summary_audit_mode_writes_batch_event(

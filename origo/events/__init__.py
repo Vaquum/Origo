@@ -76,6 +76,11 @@ from .runtime_audit import (
     CanonicalRuntimeAuditLog,
     get_canonical_runtime_audit_log,
 )
+from .storage import (
+    CANONICAL_EVENT_LOG_READ_TABLE,
+    CANONICAL_EVENT_LOG_WRITE_TABLE,
+    CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE,
+)
 from .writer import (
     CanonicalEventRow,
     CanonicalEventWriteInput,
@@ -90,6 +95,9 @@ __all__ = [
     'CANONICAL_EVENT_ENVELOPE_FIELDS',
     'CANONICAL_EVENT_ENVELOPE_VERSION',
     'CANONICAL_EVENT_IDENTITY_FIELDS',
+    'CANONICAL_EVENT_LOG_READ_TABLE',
+    'CANONICAL_EVENT_LOG_WRITE_TABLE',
+    'CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE',
     'CANONICAL_SOURCE_PRECISION_REGISTRY_VERSION',
     'Aligned1sAggregateRow',
     'AlignedBackfillResult',

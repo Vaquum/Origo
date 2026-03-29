@@ -5,6 +5,8 @@ from typing import Any, cast
 
 from clickhouse_driver import Client as ClickHouseClient
 
+from origo.events.storage import CANONICAL_EVENT_LOG_READ_TABLE
+
 
 def load_nonterminal_partition_ids_for_stream_or_raise(
     *,
@@ -26,7 +28,7 @@ def load_nonterminal_partition_ids_for_stream_or_raise(
                 FROM
                 (
                     SELECT partition_id
-                    FROM {database}.canonical_event_log
+                    FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                     WHERE source_id = %(source_id)s
                       AND stream_id = %(stream_id)s
                     UNION DISTINCT
@@ -86,7 +88,7 @@ def load_grouped_nonterminal_partition_ids_or_raise(
                 FROM
                 (
                     SELECT source_id, stream_id, partition_id
-                    FROM {database}.canonical_event_log
+                    FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                     WHERE {stream_pair_filter_sql}
                     UNION DISTINCT
                     SELECT source_id, stream_id, partition_id

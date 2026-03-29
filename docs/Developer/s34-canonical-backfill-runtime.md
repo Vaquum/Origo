@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-26
-- Slice reference: S34 (`S34-C1..C8`, `S34-P1..P4`, `S34-G1..G2`)
+- Last updated: 2026-03-29
+- Slice reference: S34 (`S34-C1..C8`, `S34-C2l`, `S34-P1..P4`, `S34-G1..G2`)
 
 ## Purpose and scope
 - Defines the live Slice 34 canonical backfill runtime contract.
@@ -25,6 +25,10 @@
   - `canonical_backfill_partition_proofs`
   - `canonical_quarantined_streams`
   - `canonical_backfill_range_proofs`
+- Canonical reset/read tables:
+  - `canonical_event_log` is the append-only write table
+  - `canonical_partition_reset_boundaries` records audited logical reset cutovers per `(source_id, stream_id, partition_id)`
+  - `canonical_event_log_active_v1` is the required live read surface for proof, planner, projector, and writer-identity lookups after a reset
 - Partition proof states:
   - `source_manifested`
   - `canonical_written_unproved`
@@ -47,6 +51,7 @@
 
 ## Source/provenance and freshness semantics
 - ClickHouse is the only live authority for backfill progress, proof, and quarantine state.
+- Canonical reset-and-rewrite keeps `canonical_event_log` append-only; logical partition clears are expressed by `canonical_partition_reset_boundaries` and enforced through `canonical_event_log_active_v1`.
 - Manifest JSONL is immutable evidence, not resume truth.
 - Projection rebuild and serving promotion are gated strictly on terminal proof coverage.
 - Historical availability is bounded by the terminal-proof frontier, not by raw source existence alone.
@@ -58,6 +63,7 @@
   - missing source manifest after a completed Dagster partition run
   - missing terminal proof after a completed Dagster partition run
 - Reconcile is the only valid path for ambiguous or quarantined partitions.
+- Any live Slice-34 runtime path that reads the base `canonical_event_log` instead of `canonical_event_log_active_v1` after a reconcile reset is a contract violation because it can resurrect stale pre-reset rows or reintroduce destructive delete pressure.
 - Any malformed proof/manifold JSON payload in authoritative tables or manifest log is a hard runtime error.
 
 ## Determinism/replay notes

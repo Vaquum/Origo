@@ -12,6 +12,7 @@ from .backfill_state import CanonicalBackfillStateStore
 from .errors import ProjectorRuntimeError
 from .ingest_state import CanonicalStreamKey
 from .runtime_audit import get_canonical_runtime_audit_log
+from .storage import CANONICAL_EVENT_LOG_READ_TABLE
 
 ProjectorCommitStatus = Literal['checkpointed', 'duplicate']
 ProjectorFetchOrder = Literal['ingested_event_id', 'source_offset_numeric']
@@ -273,7 +274,7 @@ class CanonicalProjectorRuntime:
                     ingested_at_utc,
                     payload_json,
                     payload_sha256_raw
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                     AND stream_id = %(stream_id)s
                     AND partition_id = %(partition_id)s
@@ -300,7 +301,7 @@ class CanonicalProjectorRuntime:
                     ingested_at_utc,
                     payload_json,
                     payload_sha256_raw
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                     AND stream_id = %(stream_id)s
                     AND partition_id = %(partition_id)s
@@ -346,7 +347,7 @@ class CanonicalProjectorRuntime:
                     ingested_at_utc,
                     payload_json,
                     payload_sha256_raw
-                FROM {self._database}.canonical_event_log
+                FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                     AND stream_id = %(stream_id)s
                     AND partition_id = %(partition_id)s
@@ -381,7 +382,7 @@ class CanonicalProjectorRuntime:
                 ingested_at_utc,
                 payload_json,
                 payload_sha256_raw
-            FROM {self._database}.canonical_event_log
+            FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
             WHERE source_id = %(source_id)s
                 AND stream_id = %(stream_id)s
                 AND partition_id = %(partition_id)s
@@ -412,7 +413,7 @@ class CanonicalProjectorRuntime:
             SELECT
                 count() AS non_numeric_count,
                 any(source_offset_or_equivalent) AS sample_offset
-            FROM {self._database}.canonical_event_log
+            FROM {self._database}.{CANONICAL_EVENT_LOG_READ_TABLE}
             WHERE source_id = %(source_id)s
                 AND stream_id = %(stream_id)s
                 AND partition_id = %(partition_id)s

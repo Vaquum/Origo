@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -275,7 +275,12 @@ def test_fred_job_builds_revision_history_source_bundles(
 
     result = fred_job._build_persisted_bundles_or_raise(
         context=_FakeDagsterContext(),
+        source_window=fred_job._SourceWindow(
+            observation_start=None,
+            observation_end=None,
+        ),
         source_partition_ids=None,
+        resume_from_terminal_partition_id=None,
     )
 
     assert len(result) == 1
@@ -335,12 +340,93 @@ def test_fred_job_builds_revision_history_source_bundles_for_bounded_window(
 
     result = fred_job._build_persisted_bundles_or_raise(
         context=_FakeDagsterContext(),
+        source_window=fred_job._SourceWindow(
+            observation_start=date(1947, 1, 1),
+            observation_end=date(1947, 1, 3),
+        ),
         source_partition_ids=('1947-01-01', '1947-01-03'),
+        resume_from_terminal_partition_id=None,
     )
 
     assert len(result) == 1
     assert captured['kwargs']['observation_start'].isoformat() == '1947-01-01'
     assert captured['kwargs']['observation_end'].isoformat() == '1947-01-03'
+
+
+def test_fred_job_backfill_source_window_resumes_from_latest_terminal_partition(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='backfill',
+        runtime_audit_mode='summary',
+    )
+
+    monkeypatch.setattr(
+        fred_job,
+        '_load_ambiguous_partition_ids_or_raise',
+        lambda **_: (),
+    )
+
+    class _FakeStateStore:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def list_terminal_partition_ids(
+            self,
+            *,
+            source_id: str,
+            stream_id: str,
+        ) -> tuple[str, ...]:
+            assert source_id == 'fred'
+            assert stream_id == 'fred_series_metrics'
+            return ('1947-01-01', '1947-02-01')
+
+    monkeypatch.setattr(fred_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+
+    source_window, resume_from_terminal_partition_id = (
+        fred_job._resolve_source_window_or_raise(
+            client=_FakeClickHouseClient(),
+            database='origo',
+            runtime_contract=runtime_contract,
+            explicit_partition_ids=None,
+            source_partition_scope_ids=None,
+        )
+    )
+
+    assert source_window == fred_job._SourceWindow(
+        observation_start=date(1947, 2, 1),
+        observation_end=None,
+    )
+    assert resume_from_terminal_partition_id == '1947-02-01'
+
+
+def test_fred_job_backfill_source_window_requires_reconcile_when_nonterminal_partitions_exist(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='backfill',
+        runtime_audit_mode='summary',
+    )
+
+    monkeypatch.setattr(
+        fred_job,
+        '_load_ambiguous_partition_ids_or_raise',
+        lambda **_: ('1947-02-01', '1947-03-01'),
+    )
+
+    with pytest.raises(
+        ReconciliationError,
+        match='FRED backfill requires explicit reconcile before resume',
+    ):
+        fred_job._resolve_source_window_or_raise(
+            client=_FakeClickHouseClient(),
+            database='origo',
+            runtime_contract=runtime_contract,
+            explicit_partition_ids=None,
+            source_partition_scope_ids=None,
+        )
 
 
 def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(

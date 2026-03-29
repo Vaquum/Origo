@@ -14,6 +14,7 @@ from origo.events.backfill_state import canonical_proof_matches_source_proof
 from origo.events.errors import ReconciliationError
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    build_backfill_runtime_config_schema,
     load_backfill_runtime_contract_or_raise,
 )
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
@@ -88,6 +89,9 @@ def _bybit_day_window_utc_ms(date_str: str) -> tuple[int, int]:
 
 @asset(
     partitions_def=daily_partitions,
+    config_schema=build_backfill_runtime_config_schema(
+        default_projection_mode='deferred'
+    ),
     group_name='bybit_data',
     description='Downloads, validates, and writes Bybit BTC spot trades into canonical event log',
 )

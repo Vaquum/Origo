@@ -277,6 +277,18 @@ def test_s34_fred_backfill_runner_builds_required_run_tags() -> None:
     }
 
 
+def test_s34_fred_backfill_runner_rejects_precap_partition_ids_in_run_tags() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match=r'origo.backfill.partition_ids must be on or after supported FRED history start 2009-01-01',
+    ):
+        fred_runner._build_run_tags(
+            control_run_id='s34-fred-test',
+            execution_mode='reconcile',
+            partition_ids=('2008-12-31',),
+        )
+
+
 def test_fred_job_builds_revision_history_source_bundles(
     monkeypatch: Any,
 ) -> None:
@@ -633,6 +645,94 @@ def test_fred_job_explicit_partition_ids_before_supported_history_fail_loud() ->
         )
 
 
+def test_fred_job_normalized_rows_before_supported_history_fail_loud(
+    monkeypatch: Any,
+) -> None:
+    row = FREDLongMetricRow(
+        metric_id='metric-1',
+        source_id='fred_cpiaucsl',
+        metric_name='consumer_price_index_all_items',
+        metric_unit='Index 1982-1984=100',
+        metric_value_string='210.228',
+        metric_value_int=None,
+        metric_value_float=210.228,
+        metric_value_bool=None,
+        observed_at_utc=datetime(2008, 12, 31, tzinfo=UTC),
+        dimensions_json='{"series_id":"CPIAUCSL"}',
+        provenance_json='{"realtime_start":"2026-03-29","realtime_end":"2026-03-29"}',
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'load_fred_series_registry',
+        lambda: ('registry-v1', [object()]),
+    )
+    monkeypatch.setattr(
+        fred_job,
+        'normalize_fred_raw_bundles_to_long_metrics_or_raise',
+        lambda **_: [row],
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='FRED raw bundles produced rows before supported history start',
+    ):
+        fred_job._normalize_partition_rows_or_raise(
+            persisted_bundles=[SimpleNamespace(bundle=object())]
+        )
+
+
+def test_fred_job_source_proof_rejects_precap_partition_id() -> None:
+    row = FREDLongMetricRow(
+        metric_id='metric-1',
+        source_id='fred_cpiaucsl',
+        metric_name='consumer_price_index_all_items',
+        metric_unit='Index 1982-1984=100',
+        metric_value_string='210.228',
+        metric_value_int=None,
+        metric_value_float=210.228,
+        metric_value_bool=None,
+        observed_at_utc=datetime(2009, 1, 1, tzinfo=UTC),
+        dimensions_json='{"series_id":"CPIAUCSL"}',
+        provenance_json='{"realtime_start":"2026-03-29","realtime_end":"2026-03-29"}',
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"partition_id must be on or after supported FRED history start 2009-01-01, got '2008-12-31'",
+    ):
+        fred_job._build_partition_source_proof_or_raise(
+            partition_id='2008-12-31',
+            rows=[row],
+            persisted_bundles_by_source_id={},
+        )
+
+
+def test_fred_job_source_proof_rejects_rows_from_other_partition_dates() -> None:
+    row = FREDLongMetricRow(
+        metric_id='metric-1',
+        source_id='fred_cpiaucsl',
+        metric_name='consumer_price_index_all_items',
+        metric_unit='Index 1982-1984=100',
+        metric_value_string='210.228',
+        metric_value_int=None,
+        metric_value_float=210.228,
+        metric_value_bool=None,
+        observed_at_utc=datetime(2009, 1, 1, tzinfo=UTC),
+        dimensions_json='{"series_id":"CPIAUCSL"}',
+        provenance_json='{"realtime_start":"2026-03-29","realtime_end":"2026-03-29"}',
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='FRED partition source proof rows must match partition_id exactly',
+    ):
+        fred_job._build_partition_source_proof_or_raise(
+            partition_id='2009-01-02',
+            rows=[row],
+            persisted_bundles_by_source_id={},
+        )
+
+
 def test_fred_reconcile_resets_partition_after_proof_mismatch(
     monkeypatch: Any,
 ) -> None:
@@ -650,7 +750,7 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
         metric_value_int=None,
         metric_value_float=21.48,
         metric_value_bool=None,
-        observed_at_utc=datetime(1947, 1, 1, tzinfo=UTC),
+        observed_at_utc=datetime(2009, 1, 1, tzinfo=UTC),
         dimensions_json='{"series_id":"CPIAUCSL"}',
         provenance_json='{"realtime_start":"2026-03-11","realtime_end":"2026-03-11"}',
     )
@@ -658,7 +758,7 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
         stream_key=SimpleNamespace(
             source_id='fred',
             stream_id='fred_series_metrics',
-            partition_id='1947-01-01',
+            partition_id='2009-01-01',
         ),
         source_row_count=1,
     )
@@ -713,7 +813,7 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
                     code='BACKFILL_PARTITION_PROOF_FAILED',
                     message=(
                         'Partition proof failed and stream was quarantined '
-                        'for fred/fred_series_metrics/1947-01-01: '
+                        'for fred/fred_series_metrics/2009-01-01: '
                         'row_count_mismatch,identity_digest_mismatch'
                     ),
                     context={
@@ -772,7 +872,7 @@ def test_fred_reconcile_resets_partition_after_proof_mismatch(
         context=_FakeDagsterContext(),
         client=_FakeClickHouseClient(),
         database='origo',
-        partition_id='1947-01-01',
+        partition_id='2009-01-01',
         rows=[row],
         persisted_bundles_by_source_id={'fred_cpiaucsl': object()},
         runtime_contract=runtime_contract,
@@ -818,7 +918,7 @@ def test_reset_fred_partition_for_reconcile_records_reset_boundary_without_event
         stream_key=SimpleNamespace(
             source_id='fred',
             stream_id='fred_series_metrics',
-            partition_id='1947-02-01',
+            partition_id='2009-02-01',
         )
     )
 
@@ -826,7 +926,7 @@ def test_reset_fred_partition_for_reconcile_records_reset_boundary_without_event
         context=_FakeDagsterContext(),
         client=_FakeClient(),
         database='origo',
-        partition_id='1947-02-01',
+        partition_id='2009-02-01',
         source_proof=source_proof,
         state_store=_FakeStateStore(),
         reset_reason='legacy_request_time_canonical_reset_required',

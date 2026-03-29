@@ -177,6 +177,27 @@ def _raise_if_partition_ids_precede_supported_fred_history(
         )
 
 
+def _parse_supported_fred_partition_id_or_raise(
+    *,
+    partition_id: str,
+    source_label: str,
+) -> date:
+    try:
+        partition_date = date.fromisoformat(partition_id)
+    except ValueError as exc:
+        raise RuntimeError(
+            'FRED partition ids must be ISO dates, '
+            f"got partition_id='{partition_id}'"
+        ) from exc
+    if partition_date < _FRED_HISTORY_START_DATE:
+        raise RuntimeError(
+            f'{source_label} must be on or after supported FRED history start '
+            f'{_FRED_HISTORY_START_DATE.isoformat()}, '
+            f'got {partition_id!r}'
+        )
+    return partition_date
+
+
 def _load_required_partition_ids_from_tags_or_none(
     tags: Mapping[str, str],
 ) -> tuple[str, ...] | None:
@@ -500,6 +521,10 @@ def _reset_fred_partition_for_reconcile_or_raise(
     reset_reason: str,
     reset_details: dict[str, Any],
 ) -> dict[str, int]:
+    _parse_supported_fred_partition_id_or_raise(
+        partition_id=partition_id,
+        source_label='partition_id',
+    )
     recorded_at_utc = datetime.now(UTC)
     counts_before_reset = _count_partition_rows_or_raise(
         client=client,
@@ -625,11 +650,23 @@ def _normalize_partition_rows_or_raise(
     )
     if rows == []:
         raise RuntimeError('FRED raw bundles normalized to zero rows')
+    precap_partition_ids = sorted(
+        {
+            row.observed_at_utc.date().isoformat()
+            for row in rows
+            if row.observed_at_utc.date() < _FRED_HISTORY_START_DATE
+        }
+    )
+    if precap_partition_ids != []:
+        raise RuntimeError(
+            'FRED raw bundles produced rows before supported history start despite '
+            'bounded source-window planning: '
+            f'history_start={_FRED_HISTORY_START_DATE.isoformat()} '
+            f'count={len(precap_partition_ids)} preview={precap_partition_ids[:10]}'
+        )
     partition_rows: dict[str, list[FREDLongMetricRow]] = defaultdict(list)
     for row in rows:
         observed_date = row.observed_at_utc.date()
-        if observed_date < _FRED_HISTORY_START_DATE:
-            continue
         partition_rows[observed_date.isoformat()].append(row)
     if partition_rows == {}:
         raise RuntimeError(
@@ -743,6 +780,10 @@ def _build_partition_source_proof_or_raise(
     rows: list[FREDLongMetricRow],
     persisted_bundles_by_source_id: dict[str, _PersistedFREDBundle],
 ) -> Any:
+    partition_date = _parse_supported_fred_partition_id_or_raise(
+        partition_id=partition_id,
+        source_label='partition_id',
+    )
     if rows == []:
         raise RuntimeError(
             f'FRED source proof requires non-empty rows for partition_id={partition_id}'
@@ -757,6 +798,13 @@ def _build_partition_source_proof_or_raise(
             item.metric_id,
         ),
     ):
+        observed_date = row.observed_at_utc.date()
+        if observed_date != partition_date:
+            raise RuntimeError(
+                'FRED partition source proof rows must match partition_id exactly, '
+                f'partition_id={partition_id} observed_date={observed_date.isoformat()} '
+                f'metric_id={row.metric_id}'
+            )
         source_row_counts[row.source_id] += 1
         idempotency_key = canonical_event_idempotency_key(
             source_id=_CANONICAL_SOURCE_ID,

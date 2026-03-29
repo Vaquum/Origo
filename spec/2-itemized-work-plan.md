@@ -815,6 +815,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6l` Synchronize the required FRED revision-history vintage-window env through deploy so merged runtime contracts actually reach `/opt/origo/deploy/.env` on the live server.
 - [x] `S34-C6m` Apply the env-backed bounded FRED reconcile partition/window planner inside the Dagster job itself when `reconcile` is launched without explicit partition ids.
 - [ ] `S34-C6n` Bound FRED plain backfill raw-bundle fetches to the latest terminal proof boundary so live reruns do not re-fetch full-history revision bundles once authoritative proof coverage exists.
+- [x] `S34-C6o` Cap FRED Slice-34 history coverage at `2009-01-01` and make the boundary authoritative in planning/runtime so live Dagster runs never fetch, reconcile, or process pre-cap partitions.
+- [x] `S34-C6p` Make FRED latest-proof selection deterministic when duplicate proof revisions exist so freshly completed reconcile ranges are not immediately reselected.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.

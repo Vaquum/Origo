@@ -210,6 +210,70 @@ def _resolve_source_partition_scope_ids_or_raise(
     )
 
 
+def _load_latest_terminal_partition_id_for_backfill_resume_or_none_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+) -> str | None:
+    nonterminal_partition_ids = _load_ambiguous_partition_ids_or_raise(
+        client=client,
+        database=database,
+    )
+    if nonterminal_partition_ids != ():
+        raise ReconciliationError(
+            code='RECONCILE_REQUIRED',
+            message=(
+                'FRED backfill requires explicit reconcile before resume because '
+                f'non-terminal partitions remain: count={len(nonterminal_partition_ids)} '
+                f'preview={list(nonterminal_partition_ids[:10])}'
+            ),
+            context={
+                'nonterminal_partition_count': len(nonterminal_partition_ids),
+                'nonterminal_partition_preview': list(nonterminal_partition_ids[:10]),
+            },
+        )
+    state_store = CanonicalBackfillStateStore(
+        client=client,
+        database=database,
+    )
+    terminal_partition_ids = state_store.list_terminal_partition_ids(
+        source_id=_CANONICAL_SOURCE_ID,
+        stream_id=_CANONICAL_STREAM_ID,
+    )
+    if terminal_partition_ids == ():
+        return None
+    return terminal_partition_ids[-1]
+
+
+def _resolve_source_window_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    runtime_contract: BackfillRuntimeContract,
+    explicit_partition_ids: tuple[str, ...] | None,
+    source_partition_scope_ids: tuple[str, ...] | None,
+) -> tuple[_SourceWindow, str | None]:
+    if explicit_partition_ids is not None:
+        return _resolve_source_window_for_partition_ids(explicit_partition_ids), None
+    if runtime_contract.execution_mode == 'reconcile':
+        return _resolve_source_window_for_partition_ids(source_partition_scope_ids), None
+    resume_from_terminal_partition_id = (
+        _load_latest_terminal_partition_id_for_backfill_resume_or_none_or_raise(
+            client=client,
+            database=database,
+        )
+    )
+    if resume_from_terminal_partition_id is None:
+        return _SourceWindow(observation_start=None, observation_end=None), None
+    return (
+        _SourceWindow(
+            observation_start=date.fromisoformat(resume_from_terminal_partition_id),
+            observation_end=None,
+        ),
+        resume_from_terminal_partition_id,
+    )
+
+
 def _count_partition_rows_or_raise(
     *,
     client: ClickhouseClient,
@@ -398,10 +462,11 @@ def _reset_fred_partition_for_reconcile_or_raise(
 def _build_persisted_bundles_or_raise(
     *,
     context: OpExecutionContext,
+    source_window: _SourceWindow,
     source_partition_ids: tuple[str, ...] | None,
+    resume_from_terminal_partition_id: str | None,
 ) -> list[_PersistedFREDBundle]:
     registry_version, registry_entries = load_fred_series_registry()
-    source_window = _resolve_source_window_for_partition_ids(source_partition_ids)
     context.log.info(
         'FRED raw bundle source window '
         + json.dumps(
@@ -420,6 +485,7 @@ def _build_persisted_bundles_or_raise(
                     if source_window.observation_end is None
                     else source_window.observation_end.isoformat()
                 ),
+                'resume_from_terminal_partition_id': resume_from_terminal_partition_id,
             },
             ensure_ascii=True,
             sort_keys=True,
@@ -977,9 +1043,20 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
             runtime_contract=runtime_contract,
             explicit_partition_ids=explicit_partition_ids,
         )
+        source_window, resume_from_terminal_partition_id = (
+            _resolve_source_window_or_raise(
+                client=native_client,
+                database=database,
+                runtime_contract=runtime_contract,
+                explicit_partition_ids=explicit_partition_ids,
+                source_partition_scope_ids=source_partition_scope_ids,
+            )
+        )
         persisted_bundles = _build_persisted_bundles_or_raise(
             context=context,
+            source_window=source_window,
             source_partition_ids=source_partition_scope_ids,
+            resume_from_terminal_partition_id=resume_from_terminal_partition_id,
         )
         persisted_bundles_by_source_id = {
             item.bundle.source_id: item for item in persisted_bundles

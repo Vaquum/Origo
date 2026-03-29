@@ -813,6 +813,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C6j` Skip non-overlapping FRED series during bounded raw-bundle construction so early historical and reconcile windows do not fail on legitimate empty-observation payloads such as `FEDFUNDS`.
 - [x] `S34-C6k` Fix FRED reconcile proof-mismatch reset flow so a quarantining proof can still trigger the audited partition reset-and-rewrite path instead of aborting immediately on `prove_partition_or_quarantine(...)`.
 - [ ] `S34-C6l` Synchronize the required FRED revision-history vintage-window env through deploy so merged runtime contracts actually reach `/opt/origo/deploy/.env` on the live server.
+- [x] `S34-C6m` Apply the env-backed bounded FRED reconcile partition/window planner inside the Dagster job itself when `reconcile` is launched without explicit partition ids.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2293,6 +2294,10 @@ Constraints: no swallowing unrelated reconciliation failures, no reset outside e
 Action: Synchronize the required FRED revision-history vintage-window env through the deploy workflow.
 Done looks like: deploy reads `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` from root `.env.example`, validates and transfers it to the remote runtime env file, and the merged live Dagster runtime sees the same required FRED env contract as local code/tests.
 Constraints: no deploy-side hard-coded default, no manual server env edit as the contract path, and no silent omission of newly required runtime env keys.
+25m. `S34-06m`
+Action: Apply bounded FRED reconcile planning inside the Dagster job when explicit partition ids are omitted.
+Done looks like: direct Dagster `reconcile` launches without `origo.backfill.partition_ids` use the same env-backed ambiguous-prefix and source-window ceilings as the repo-native runner, the logged `partition_scope_count` reflects the bounded subset rather than the full ambiguity set, and dashboard/manual launches cannot silently bypass the runner safety contract.
+Constraints: no duplicated planning logic that can drift from the runner contract, no fallback to dataset-wide ambiguity on missing explicit tags, and no weakening of fail-loud behavior when reconcile env limits are missing or invalid.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

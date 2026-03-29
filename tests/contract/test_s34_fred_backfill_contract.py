@@ -44,10 +44,31 @@ def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambig
         execution_mode='reconcile',
         runtime_audit_mode='summary',
     )
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN', '2')
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS', '31')
     monkeypatch.setattr(
         fred_job,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('2026-02-01', '2026-03-01'),
+        lambda **_: ('2026-02-01', '2026-02-15', '2026-03-01'),
+    )
+
+    result = fred_job._resolve_source_partition_scope_ids_or_raise(
+        client=_FakeClickHouseClient(),
+        database='origo',
+        runtime_contract=runtime_contract,
+        explicit_partition_ids=None,
+    )
+
+    assert result == ('2026-02-01', '2026-02-15')
+
+
+def test_fred_job_reconcile_processes_bounded_scope_ids_without_requerying_ambiguity(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='reconcile',
+        runtime_audit_mode='summary',
     )
 
     result = fred_job._resolve_partition_ids_to_process_or_raise(
@@ -56,12 +77,13 @@ def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambig
         runtime_contract=runtime_contract,
         source_partition_rows={
             '2026-02-01': [object()],
-            '2026-03-01': [object()],
+            '2026-02-15': [object()],
         },
+        source_partition_scope_ids=('2026-02-01', '2026-02-15'),
         explicit_partition_ids=None,
     )
 
-    assert result == ('2026-02-01', '2026-03-01')
+    assert result == ('2026-02-01', '2026-02-15')
 
 
 def test_fred_job_explicit_partition_ids_must_exist_in_source_history() -> None:
@@ -80,6 +102,7 @@ def test_fred_job_explicit_partition_ids_must_exist_in_source_history() -> None:
             database='origo',
             runtime_contract=runtime_contract,
             source_partition_rows={'2026-02-01': [object()]},
+            source_partition_scope_ids=None,
             explicit_partition_ids=('2026-02-01', '2026-03-01'),
         )
 
@@ -120,7 +143,7 @@ def test_s34_fred_backfill_runner_requires_reconcile_tranche_env(
         RuntimeError,
         match='ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN must be set and non-empty',
     ):
-        fred_runner._load_fred_reconcile_max_partitions_per_run_or_raise()
+        fred_runner.load_fred_reconcile_max_partitions_per_run_or_raise()
 
 
 def test_s34_fred_backfill_runner_requires_reconcile_source_window_env(
@@ -135,11 +158,11 @@ def test_s34_fred_backfill_runner_requires_reconcile_source_window_env(
         RuntimeError,
         match='ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS must be set and non-empty',
     ):
-        fred_runner._load_fred_reconcile_max_source_window_days_or_raise()
+        fred_runner.load_fred_reconcile_max_source_window_days_or_raise()
 
 
 def test_s34_fred_backfill_runner_selects_prefix_by_source_window_and_count() -> None:
-    result = fred_runner._select_reconcile_partition_ids_or_raise(
+    result = fred_runner.select_fred_reconcile_partition_ids_or_raise(
         ambiguous_partition_ids=(
             '1947-01-01',
             '1947-02-01',
@@ -328,10 +351,12 @@ def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
         execution_mode='reconcile',
         runtime_audit_mode='summary',
     )
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN', '2')
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS', '31')
     monkeypatch.setattr(
         fred_job,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('1947-01-01', '1947-01-02'),
+        lambda **_: ('1947-01-01', '1947-01-02', '1947-03-01'),
     )
 
     result = fred_job._resolve_source_partition_scope_ids_or_raise(

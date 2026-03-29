@@ -44,6 +44,9 @@ from origo_control_plane.backfill.runtime_contract import (
     load_backfill_runtime_contract_from_tags_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.s34_fred_reconcile_planning import (
+    select_fred_reconcile_partition_ids_from_env_or_raise,
+)
 from origo_control_plane.s34_partition_authority import (
     load_nonterminal_partition_ids_for_stream_or_raise,
 )
@@ -202,7 +205,9 @@ def _resolve_source_partition_scope_ids_or_raise(
     )
     if ambiguous_partition_ids == ():
         raise RuntimeError('FRED reconcile requested but no ambiguous partitions exist')
-    return ambiguous_partition_ids
+    return select_fred_reconcile_partition_ids_from_env_or_raise(
+        ambiguous_partition_ids=ambiguous_partition_ids
+    )
 
 
 def _count_partition_rows_or_raise(
@@ -492,6 +497,7 @@ def _resolve_partition_ids_to_process_or_raise(
     database: str,
     runtime_contract: BackfillRuntimeContract,
     source_partition_rows: dict[str, list[FREDLongMetricRow]],
+    source_partition_scope_ids: tuple[str, ...] | None,
     explicit_partition_ids: tuple[str, ...] | None,
 ) -> tuple[str, ...]:
     available_partition_ids = tuple(sorted(source_partition_rows))
@@ -512,25 +518,21 @@ def _resolve_partition_ids_to_process_or_raise(
         return explicit_partition_ids
 
     if runtime_contract.execution_mode == 'reconcile':
-        ambiguous_partition_ids = _load_ambiguous_partition_ids_or_raise(
-            client=client,
-            database=database,
-        )
-        if ambiguous_partition_ids == ():
+        if source_partition_scope_ids is None or source_partition_scope_ids == ():
             raise RuntimeError(
-                'FRED reconcile requested but no ambiguous partitions exist'
+                'FRED reconcile requested but no bounded partition scope was resolved'
             )
         missing = [
             partition_id
-            for partition_id in ambiguous_partition_ids
+            for partition_id in source_partition_scope_ids
             if partition_id not in source_partition_rows
         ]
         if missing != []:
             raise RuntimeError(
-                'Ambiguous FRED partitions are missing from source history: '
+                'Bounded FRED reconcile partitions are missing from source history: '
                 f'count={len(missing)} preview={missing[:10]}'
             )
-        return ambiguous_partition_ids
+        return source_partition_scope_ids
 
     return available_partition_ids
 
@@ -992,6 +994,7 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
             database=database,
             runtime_contract=runtime_contract,
             source_partition_rows=partition_rows,
+            source_partition_scope_ids=source_partition_scope_ids,
             explicit_partition_ids=explicit_partition_ids,
         )
         if runtime_contract.execution_mode == 'backfill':

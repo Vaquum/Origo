@@ -3,8 +3,8 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-29
-- Slice reference: S6 (`S6-C1`, `S6-C2`), S34 (`S34-C6f`)
-- Version reference: `control-plane v1.2.82`
+- Slice reference: S6 (`S6-C1`, `S6-C2`), S34 (`S34-C6f`, `S34-C6m`)
+- Version reference: `control-plane v1.2.83`
 
 ## Purpose and scope
 - Define strict contracts for FRED source registry loading, metadata fetch, and normalization into Origo long-metric rows.

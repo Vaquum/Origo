@@ -25,6 +25,7 @@ _LAST_UPDATED_SUFFIX_PATTERN = re.compile(r'([+-]\d{2})(?::?(\d{2}))?$')
 _FRED_OUTPUT_TYPE_VINTAGE_COLUMN_PATTERN = re.compile(r'^(?P<series_id>[A-Z0-9]+)_(?P<vintage>\d{8})$')
 _FRED_VINTAGE_DATES_MAX_LIMIT = 10000
 _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST = 2000
+_FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST = 275
 
 
 def _require_env(name: str) -> str:
@@ -224,12 +225,17 @@ def _normalize_series_vintage_dates(
     return vintage_dates
 
 
-def _is_series_observations_uri_too_long_error(exc: RuntimeError) -> bool:
+def _is_series_observations_split_required_error(exc: RuntimeError) -> bool:
     message = str(exc)
-    return (
-        'endpoint=series/observations' in message
-        and 'status_code=414' in message
-    )
+    if 'endpoint=series/observations' not in message:
+        return False
+    if 'status_code=414' in message:
+        return True
+    if 'status_code=400' in message and 'Bad Request' in message:
+        return True
+    if 'reason=timed_out' in message:
+        return True
+    return False
 
 
 def _normalize_output_type_1_observations(
@@ -422,6 +428,10 @@ class FREDClient:
             raise RuntimeError(
                 'FRED request failed with HTTP error, '
                 f'endpoint={endpoint} status_code={exc.code} body={raw_error}'
+            ) from exc
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f'FRED request transport failure, endpoint={endpoint}, reason=timed_out'
             ) from exc
         except URLError as exc:
             raise RuntimeError(
@@ -684,7 +694,7 @@ class FREDClient:
                 ]
             except RuntimeError as exc:
                 if (
-                    _is_series_observations_uri_too_long_error(exc)
+                    _is_series_observations_split_required_error(exc)
                     and len(vintage_date_chunk) > 1
                 ):
                     midpoint = len(vintage_date_chunk) // 2
@@ -698,10 +708,10 @@ class FREDClient:
         for start_index in range(
             0,
             len(vintage_dates),
-            _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
+            _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST,
         ):
             vintage_date_chunk = vintage_dates[
-                start_index : start_index + _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST
+                start_index : start_index + _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST
             ]
             for chunk_payload in _fetch_revision_history_chunk(
                 vintage_date_chunk=vintage_date_chunk
@@ -729,7 +739,8 @@ class FREDClient:
                 vintage_date.isoformat() for vintage_date in vintage_dates
             ],
             'request_chunk_count': len(chunk_payloads),
-            'request_chunk_size_limit': _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
+            'request_chunk_size_limit': _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST,
+            'request_chunk_hard_limit': _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
             'observations': merged_observations,
         }
 

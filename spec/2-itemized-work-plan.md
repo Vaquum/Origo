@@ -806,6 +806,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6c` Add FRED audited partition reset-and-rewrite so explicit reconcile can clear stale request-time canonical rows and rewrite from deterministic source truth.
 - [ ] `S34-C6d` Batch FRED revision-history fetches against official vintage-date count limits so deterministic history replay remains valid for long-revision series such as `CPIAUCSL`.
 - [ ] `S34-C6e` Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits so revision-history replay survives long vintage lists without reverting to non-deterministic snapshots.
+- [ ] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2246,6 +2247,18 @@ Constraints: official FRED source only, no request-time default realtime windows
 Action: Add FRED audited partition reset-and-rewrite for legacy request-time canonical drift.
 Done looks like: explicit FRED reconcile can detect stale canonical rows created under the old request-time identity contract, clear only the affected partition state, rewrite from deterministic revision-history source truth, and re-prove the partition fail-loud.
 Constraints: reconcile only, no dataset-wide destructive cleanup, and no silent acceptance of stale canonical extras.
+25d. `S34-06d`
+Action: Batch FRED revision-history fetches against official vintage-date count limits.
+Done looks like: long-revision FRED series fetch `series/vintagedates`, then request `series/observations` in explicit vintage-date windows that stay under the documented `output_type=2` ceiling.
+Constraints: official FRED source only, no fallback to request-time latest snapshots, and no silent tolerance of oversized vintage windows.
+25e. `S34-06e`
+Action: Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits.
+Done looks like: `series/observations` requests that still exceed live URI limits shrink deterministically on `414 Request-URI Too Long` until the source accepts the request or a single-date request fails loudly.
+Constraints: no silent retries against the same oversized URI and no downgrade to non-deterministic source windows.
+25f. `S34-06f`
+Action: Freeze and enforce the live source-safe FRED revision-history window ceiling.
+Done looks like: the FRED client starts from a live-proved safe `vintage_dates` window size, and any remaining `series/observations` edge `400 Bad Request` or timeout still causes deterministic chunk splitting rather than a hard stop.
+Constraints: no deployment-specific hard-coding, no blind retry loops, and no hidden fallback to request-time snapshots.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

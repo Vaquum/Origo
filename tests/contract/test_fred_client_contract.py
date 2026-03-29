@@ -95,10 +95,13 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
     ]
     captured_observation_calls: list[dict[str, str]] = []
 
+    def _fake_fetch_all_series_vintage_dates(**_: Any) -> list[date]:
+        return vintage_dates
+
     monkeypatch.setattr(
         client,
         'fetch_all_series_vintage_dates',
-        lambda **_: vintage_dates,
+        _fake_fetch_all_series_vintage_dates,
     )
 
     def _fake_fetch_series_observations_payload(**kwargs: Any) -> dict[str, object]:
@@ -144,7 +147,7 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
         _fake_fetch_series_observations_payload,
     )
     monkeypatch.setattr(
-        'origo.fred.client._FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST',
+        'origo.fred.client._FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST',
         2,
     )
 
@@ -159,6 +162,7 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
     assert payload['output_type'] == 2
     assert payload['request_chunk_count'] == 2
     assert payload['request_chunk_size_limit'] == 2
+    assert payload['request_chunk_hard_limit'] == 2000
     assert payload['requested_vintage_dates'] == [
         '2026-03-11',
         '2026-03-12',
@@ -195,8 +199,41 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
     ]
 
 
-def test_fetch_series_revision_history_payload_splits_vintage_date_requests_on_414(
+@pytest.mark.parametrize(
+    ('failure_message', 'expected_calls'),
+    [
+        (
+            'FRED request failed with HTTP error, endpoint=series/observations '
+            'status_code=414 body=Request-URI Too Long',
+            [
+                '2026-03-11,2026-03-12,2026-03-13',
+                '2026-03-11',
+                '2026-03-12,2026-03-13',
+            ],
+        ),
+        (
+            'FRED request failed with HTTP error, endpoint=series/observations '
+            'status_code=400 body=<H1>Bad Request</H1>',
+            [
+                '2026-03-11,2026-03-12,2026-03-13',
+                '2026-03-11',
+                '2026-03-12,2026-03-13',
+            ],
+        ),
+        (
+            'FRED request transport failure, endpoint=series/observations, reason=timed_out',
+            [
+                '2026-03-11,2026-03-12,2026-03-13',
+                '2026-03-11',
+                '2026-03-12,2026-03-13',
+            ],
+        ),
+    ],
+)
+def test_fetch_series_revision_history_payload_splits_retryable_vintage_date_requests(
     monkeypatch: Any,
+    failure_message: str,
+    expected_calls: list[str],
 ) -> None:
     client = _build_client()
     vintage_dates = [
@@ -206,10 +243,13 @@ def test_fetch_series_revision_history_payload_splits_vintage_date_requests_on_4
     ]
     captured_observation_calls: list[str] = []
 
+    def _fake_fetch_all_series_vintage_dates(**_: Any) -> list[date]:
+        return vintage_dates
+
     monkeypatch.setattr(
         client,
         'fetch_all_series_vintage_dates',
-        lambda **_: vintage_dates,
+        _fake_fetch_all_series_vintage_dates,
     )
 
     def _fake_fetch_series_observations_payload(**kwargs: Any) -> dict[str, object]:
@@ -217,10 +257,7 @@ def test_fetch_series_revision_history_payload_splits_vintage_date_requests_on_4
         chunk_label = ','.join(vintage_date.isoformat() for vintage_date in vintage_date_chunk)
         captured_observation_calls.append(chunk_label)
         if len(vintage_date_chunk) == 3:
-            raise RuntimeError(
-                'FRED request failed with HTTP error, endpoint=series/observations '
-                'status_code=414 body=Request-URI Too Long'
-            )
+            raise RuntimeError(failure_message)
         if vintage_date_chunk == vintage_dates[:1]:
             return {
                 'output_type': 2,
@@ -270,11 +307,7 @@ def test_fetch_series_revision_history_payload_splits_vintage_date_requests_on_4
             'CPIAUCSL_20260313': '21.49',
         },
     ]
-    assert captured_observation_calls == [
-        '2026-03-11,2026-03-12,2026-03-13',
-        '2026-03-11',
-        '2026-03-12,2026-03-13',
-    ]
+    assert captured_observation_calls == expected_calls
 
 
 def test_fetch_series_observations_payload_rejects_oversized_vintage_date_requests() -> None:

@@ -91,6 +91,7 @@
   - `FRED_API_KEY`
   - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
   - `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
+  - deploy-on-merge must synchronize required FRED env keys from root `.env.example` into `/opt/origo/deploy/.env`; a merged code contract that does not reach the live server env is a hard runtime failure
 
 ## Minimal examples
 - Generate Slice 34 closeout-prep summary:

@@ -227,6 +227,21 @@ jobs:
             echo "ERROR: ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS in .env.example must be > 0." >&2
             exit 1
           fi
+          origo_fred_revision_history_initial_vintage_dates_per_request="$(
+            read_root_env_example_value ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST
+          )"
+          if [[ -z "${origo_fred_revision_history_initial_vintage_dates_per_request}" ]]; then
+            echo "ERROR: ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST must be present and non-empty in .env.example." >&2
+            exit 1
+          fi
+          if [[ ! "${origo_fred_revision_history_initial_vintage_dates_per_request}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST in .env.example must be an integer in range 1..2000." >&2
+            exit 1
+          fi
+          if [[ "${origo_fred_revision_history_initial_vintage_dates_per_request}" -lt 1 || "${origo_fred_revision_history_initial_vintage_dates_per_request}" -gt 2000 ]]; then
+            echo "ERROR: ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST in .env.example must be in range 1..2000." >&2
+            exit 1
+          fi
           origo_object_store_endpoint_url="$(
             read_root_env_example_value ORIGO_OBJECT_STORE_ENDPOINT_URL
           )"
@@ -283,6 +298,9 @@ jobs:
           origo_s34_fred_reconcile_max_source_window_days_b64="$(
             printf '%s' "${origo_s34_fred_reconcile_max_source_window_days}" | base64 -w0
           )"
+          origo_fred_revision_history_initial_vintage_dates_per_request_b64="$(
+            printf '%s' "${origo_fred_revision_history_initial_vintage_dates_per_request}" | base64 -w0
+          )"
           origo_object_store_endpoint_url_b64="$(
             printf '%s' "${origo_object_store_endpoint_url}" | base64 -w0
           )"
@@ -317,6 +335,7 @@ jobs:
              ORIGO_S34_BACKFILL_CONCURRENCY_B64='${origo_s34_backfill_concurrency_b64}' \
              ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_B64='${origo_s34_fred_reconcile_max_partitions_per_run_b64}' \
              ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_B64='${origo_s34_fred_reconcile_max_source_window_days_b64}' \
+             ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST_B64='${origo_fred_revision_history_initial_vintage_dates_per_request_b64}' \
              ORIGO_OBJECT_STORE_ENDPOINT_URL_B64='${origo_object_store_endpoint_url_b64}' \
              ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64='${origo_object_store_access_key_id_b64}' \
              ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64='${origo_object_store_secret_access_key_b64}' \
@@ -354,6 +373,7 @@ jobs:
           decode_env_b64_required ORIGO_S34_BACKFILL_CONCURRENCY_B64 ORIGO_S34_BACKFILL_CONCURRENCY
           decode_env_b64_required ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_B64 ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN
           decode_env_b64_required ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_B64 ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS
+          decode_env_b64_required ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST_B64 ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST
           decode_env_b64_required ORIGO_OBJECT_STORE_ENDPOINT_URL_B64 ORIGO_OBJECT_STORE_ENDPOINT_URL
           decode_env_b64_required ORIGO_OBJECT_STORE_ACCESS_KEY_ID_B64 ORIGO_OBJECT_STORE_ACCESS_KEY_ID
           decode_env_b64_required ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY_B64 ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
@@ -389,6 +409,7 @@ jobs:
           require_env ORIGO_S34_BACKFILL_CONCURRENCY
           require_env ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN
           require_env ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS
+          require_env ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST
           require_env ORIGO_OBJECT_STORE_ENDPOINT_URL
           require_env ORIGO_OBJECT_STORE_ACCESS_KEY_ID
           require_env ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY
@@ -435,6 +456,14 @@ jobs:
           fi
           if [[ "${ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS}" -le 0 ]]; then
             echo "ERROR: ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS must be > 0." >&2
+            exit 1
+          fi
+          if [[ ! "${ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST must be an integer in range 1..2000." >&2
+            exit 1
+          fi
+          if [[ "${ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST}" -lt 1 || "${ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST}" -gt 2000 ]]; then
+            echo "ERROR: ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST must be in range 1..2000." >&2
             exit 1
           fi
 
@@ -616,6 +645,7 @@ jobs:
             $0 !~ /^ORIGO_S34_BACKFILL_CONCURRENCY=/ &&
             $0 !~ /^ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=/ &&
             $0 !~ /^ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS=/ &&
+            $0 !~ /^ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_ENDPOINT_URL=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_ACCESS_KEY_ID=/ &&
             $0 !~ /^ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=/ &&
@@ -646,6 +676,7 @@ jobs:
             echo "ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
             echo "ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=${ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN}"
             echo "ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS=${ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS}"
+            echo "ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST=${ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST}"
             echo "ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
             echo "ORIGO_OBJECT_STORE_ACCESS_KEY_ID=${ORIGO_OBJECT_STORE_ACCESS_KEY_ID}"
             echo "ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY=${ORIGO_OBJECT_STORE_SECRET_ACCESS_KEY}"
@@ -679,6 +710,7 @@ jobs:
           echo "  ORIGO_S34_BACKFILL_CONCURRENCY=${ORIGO_S34_BACKFILL_CONCURRENCY}"
           echo "  ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN=${ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN}"
           echo "  ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS=${ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS}"
+          echo "  ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST=${ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST}"
           echo "  ORIGO_OBJECT_STORE_ENDPOINT_URL=${ORIGO_OBJECT_STORE_ENDPOINT_URL}"
           echo "  ORIGO_OBJECT_STORE_BUCKET=${ORIGO_OBJECT_STORE_BUCKET}"
           echo "  ORIGO_OBJECT_STORE_REGION=${ORIGO_OBJECT_STORE_REGION}"

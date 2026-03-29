@@ -4,7 +4,7 @@
 - Owner: Origo Engineering
 - Last updated: 2026-03-29
 - Slice reference: S6 (`S6-C1`, `S6-C2`), S34 (`S34-C6f`)
-- Version reference: `control-plane v1.2.81`
+- Version reference: `control-plane v1.2.82`
 
 ## Purpose and scope
 - Define strict contracts for FRED source registry loading, metadata fetch, and normalization into Origo long-metric rows.
@@ -46,6 +46,7 @@
 - Missing/empty `FRED_API_KEY` fails loudly at runtime.
 - Missing/empty timeout env fails loudly.
 - Missing/empty revision-history window env fails loudly.
+- A deployed runtime missing `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` is also a hard failure; deploy must synchronize required FRED env keys from root `.env.example` into `/opt/origo/deploy/.env`.
 - Invalid registry contract fails loudly during registry load.
 - Invalid/partial FRED payloads fail loudly during decode/normalize.
 - No swallowed exceptions; parse/fetch errors propagate as runtime failures.

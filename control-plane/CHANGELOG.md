@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.82 on 29th of March, 2026
+
+- Fixed the Slice 34 FRED deploy/runtime env contract so live Dagster receives the required revision-history window setting:
+  - deploy-on-merge now reads `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` from root `.env.example`
+  - validates and base64-transfers the value into the remote deploy script
+  - decodes, requires, range-checks, rewrites, and logs the value into `/opt/origo/deploy/.env`
+  - added focused deploy-workflow contract coverage so future FRED runtime env additions fail loudly if deploy stops syncing them
+
 ## v1.2.81 on 29th of March, 2026
 
 - Made the live-safe FRED revision-history vintage window an explicit runtime contract:

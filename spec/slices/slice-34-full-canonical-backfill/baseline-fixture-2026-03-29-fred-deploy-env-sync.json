@@ -1,0 +1,140 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local validation bundle finished successfully",
+    "detail_code": "summary of focused deploy-workflow contract tests, workflow YAML parse, repo-wide ruff, and repo-wide pyright with runtime-only noise normalized",
+    "row_count": "4 indicates the focused deploy-workflow contract suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-fred-deploy-env-sync-proof",
+    "captured_at_utc": "2026-03-29T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the Slice 34 FRED deploy/runtime env-sync contract after workflow, tests, specs, docs, changelog, version, and slice artifacts were updated. Pytest duration noise is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "_env_example",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "27dd7c40155d3f16ad3c15ebbd6931a8a054c5bae8f48872a83f6fa3d68a2040",
+      "path": ".env.example"
+    },
+    {
+      "name": "_github_workflows_deploy-on-merge_yml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "7c4ef88a25a4ad014f9f4b5891c4b0e04bf813ddffa3a16b95449ac23bd10cf2",
+      "path": ".github/workflows/deploy-on-merge.yml"
+    },
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d349e83154179bd4e01b40fd3ec557d894ba5aa41d3c20df2bfbe34c07cecb8a",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "9fe1981ee208858e36c6c375c987b49d50ffacae303048b285d7dcb5ff94c66b",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f6111cfd7dea658fca9fd58a10182b80eef43ed6144566583438644094343778",
+      "path": "control-plane/pyproject.toml"
+    },
+    {
+      "name": "docs_Developer_s34-canonical-backfill-runtime_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "ed3f7a2f3611584756397d668eea3cc685e1dad39565643c6dd33b08a8e76381",
+      "path": "docs/Developer/s34-canonical-backfill-runtime.md"
+    },
+    {
+      "name": "docs_Developer_s6-fred-connector-contracts_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "742c1221d74f8521233b9968a7f798ff6296ebb18040205689af8c4e44ec7cc1",
+      "path": "docs/Developer/s6-fred-connector-contracts.md"
+    },
+    {
+      "name": "docs_fred-reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "8eaf48e2663682f94a2480e14161e02b49de925f95c9a653f1b749fcc8bae0b7",
+      "path": "docs/fred-reference.md"
+    },
+    {
+      "name": "spec_1-top-level-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "69dcb52162986b0360eb7632d4f6b14bee0675b159eae3b2b994ac3c507bf557",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2-itemized-work-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e64a77db2614fa2bfc8bef635089ebc20f72693bbd7f8db850c9e277dc84a2ec",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live-performance-investigation-log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "364a08d4468149d7d36ac9a49a8a339992de8380210e4aeb608438683eaea98d",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "264aba33e7d8192794fd28342ac4525af48032c53ced8ba67221ea77c7188358",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_run-notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e4c912ebd8aaefcef89195b53ede3e0a21bd3d642a84e2e5fed9f9004bc1bd2a",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "tests_contract_test_s34_fred_deploy_env_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "af529ae408f95d7c7b13a2e345ecead6f839c8884b2c9655f2777d9a8a9de377",
+      "path": "tests/contract/test_s34_fred_deploy_env_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_object_store_runtime_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "961a9ba921f5931a8216f603e16a35c52495c7efc07fc95ea23f8b0d08d1a409",
+      "path": "tests/contract/test_s34_object_store_runtime_contract.py"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_fred_deploy_env_sync_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 4 items ;  ; tests/contract/test_s34_object_store_runtime_contract.py ...             [ 75%] ; tests/contract/test_s34_fred_deploy_env_contract.py .                    [100%] ;  ; ============================== 4 passed in <runtime> =============================== ; workflow yaml ok ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 4,
+      "body_sha256": "2c7673eaf79d267485a13fc00b44b93e72760ab95b2965c18d0f1271bfaf3d67"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_fred_deploy_env_sync_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 4 items ;  ; tests/contract/test_s34_object_store_runtime_contract.py ...             [ 75%] ; tests/contract/test_s34_fred_deploy_env_contract.py .                    [100%] ;  ; ============================== 4 passed in <runtime> =============================== ; workflow yaml ok ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 4,
+      "body_sha256": "2c7673eaf79d267485a13fc00b44b93e72760ab95b2965c18d0f1271bfaf3d67"
+    }
+  ]
+}

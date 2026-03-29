@@ -66,6 +66,7 @@ _PAYLOAD_ENCODING = 'utf-8'
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 _FRED_NATIVE_PROJECTOR_ID = 'fred_series_metrics_native_v1'
 _FRED_ALIGNED_PROJECTOR_ID = 'fred_series_metrics_aligned_1s_v1'
+_FRED_HISTORY_START_DATE = date(2009, 1, 1)
 _WRITER_RESETTABLE_CONFLICT_CODES = frozenset(
     {
         'WRITER_IDENTITY_EVENT_ID_CONFLICT',
@@ -140,6 +141,42 @@ def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
     )
 
 
+def _filter_partition_ids_to_supported_fred_history_or_raise(
+    partition_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    filtered: list[str] = []
+    for partition_id in partition_ids:
+        try:
+            partition_date = date.fromisoformat(partition_id)
+        except ValueError as exc:
+            raise RuntimeError(
+                'FRED partition ids must be ISO dates, '
+                f"got partition_id='{partition_id}'"
+            ) from exc
+        if partition_date < _FRED_HISTORY_START_DATE:
+            continue
+        filtered.append(partition_id)
+    return tuple(filtered)
+
+
+def _raise_if_partition_ids_precede_supported_fred_history(
+    *,
+    partition_ids: tuple[str, ...],
+    source_label: str,
+) -> None:
+    too_early = [
+        partition_id
+        for partition_id in partition_ids
+        if date.fromisoformat(partition_id) < _FRED_HISTORY_START_DATE
+    ]
+    if too_early != []:
+        raise RuntimeError(
+            f'{source_label} must be on or after supported FRED history start '
+            f'{_FRED_HISTORY_START_DATE.isoformat()}, '
+            f'got count={len(too_early)} preview={too_early[:10]}'
+        )
+
+
 def _load_required_partition_ids_from_tags_or_none(
     tags: Mapping[str, str],
 ) -> tuple[str, ...] | None:
@@ -173,7 +210,12 @@ def _load_required_partition_ids_from_tags_or_none(
         raise RuntimeError(
             f'{BACKFILL_PARTITION_IDS_TAG} must contain at least one partition id'
         )
-    return tuple(sorted(partition_ids))
+    explicit_partition_ids = tuple(sorted(partition_ids))
+    _raise_if_partition_ids_precede_supported_fred_history(
+        partition_ids=explicit_partition_ids,
+        source_label=BACKFILL_PARTITION_IDS_TAG,
+    )
+    return explicit_partition_ids
 
 
 def _resolve_source_window_for_partition_ids(
@@ -185,6 +227,27 @@ def _resolve_source_window_for_partition_ids(
     return _SourceWindow(
         observation_start=min(parsed),
         observation_end=max(parsed),
+    )
+
+
+def _clamp_source_window_to_supported_fred_history_or_raise(
+    source_window: _SourceWindow,
+) -> _SourceWindow:
+    if (
+        source_window.observation_end is not None
+        and source_window.observation_end < _FRED_HISTORY_START_DATE
+    ):
+        raise RuntimeError(
+            'Requested FRED source window ends before supported history start: '
+            f'observation_end={source_window.observation_end.isoformat()} '
+            f'history_start={_FRED_HISTORY_START_DATE.isoformat()}'
+        )
+    observation_start = source_window.observation_start
+    if observation_start is None or observation_start < _FRED_HISTORY_START_DATE:
+        observation_start = _FRED_HISTORY_START_DATE
+    return _SourceWindow(
+        observation_start=observation_start,
+        observation_end=source_window.observation_end,
     )
 
 
@@ -204,7 +267,10 @@ def _resolve_source_partition_scope_ids_or_raise(
         database=database,
     )
     if ambiguous_partition_ids == ():
-        raise RuntimeError('FRED reconcile requested but no ambiguous partitions exist')
+        raise RuntimeError(
+            'FRED reconcile requested but no ambiguous partitions exist within '
+            f'supported history start { _FRED_HISTORY_START_DATE.isoformat() }'
+        )
     return select_fred_reconcile_partition_ids_from_env_or_raise(
         ambiguous_partition_ids=ambiguous_partition_ids
     )
@@ -240,6 +306,9 @@ def _load_latest_terminal_partition_id_for_backfill_resume_or_none_or_raise(
         source_id=_CANONICAL_SOURCE_ID,
         stream_id=_CANONICAL_STREAM_ID,
     )
+    terminal_partition_ids = _filter_partition_ids_to_supported_fred_history_or_raise(
+        terminal_partition_ids
+    )
     if terminal_partition_ids == ():
         return None
     return terminal_partition_ids[-1]
@@ -254,9 +323,19 @@ def _resolve_source_window_or_raise(
     source_partition_scope_ids: tuple[str, ...] | None,
 ) -> tuple[_SourceWindow, str | None]:
     if explicit_partition_ids is not None:
-        return _resolve_source_window_for_partition_ids(explicit_partition_ids), None
+        return (
+            _clamp_source_window_to_supported_fred_history_or_raise(
+                _resolve_source_window_for_partition_ids(explicit_partition_ids)
+            ),
+            None,
+        )
     if runtime_contract.execution_mode == 'reconcile':
-        return _resolve_source_window_for_partition_ids(source_partition_scope_ids), None
+        return (
+            _clamp_source_window_to_supported_fred_history_or_raise(
+                _resolve_source_window_for_partition_ids(source_partition_scope_ids)
+            ),
+            None,
+        )
     resume_from_terminal_partition_id = (
         _load_latest_terminal_partition_id_for_backfill_resume_or_none_or_raise(
             client=client,
@@ -264,11 +343,19 @@ def _resolve_source_window_or_raise(
         )
     )
     if resume_from_terminal_partition_id is None:
-        return _SourceWindow(observation_start=None, observation_end=None), None
+        return (
+            _SourceWindow(
+                observation_start=_FRED_HISTORY_START_DATE,
+                observation_end=None,
+            ),
+            None,
+        )
     return (
-        _SourceWindow(
-            observation_start=date.fromisoformat(resume_from_terminal_partition_id),
-            observation_end=None,
+        _clamp_source_window_to_supported_fred_history_or_raise(
+            _SourceWindow(
+                observation_start=date.fromisoformat(resume_from_terminal_partition_id),
+                observation_end=None,
+            )
         ),
         resume_from_terminal_partition_id,
     )
@@ -472,6 +559,7 @@ def _build_persisted_bundles_or_raise(
         + json.dumps(
             {
                 'execution_mode': context.run.tags.get('origo.backfill.execution_mode'),
+                'history_start_boundary': _FRED_HISTORY_START_DATE.isoformat(),
                 'partition_scope_count': (
                     0 if source_partition_ids is None else len(source_partition_ids)
                 ),
@@ -539,7 +627,15 @@ def _normalize_partition_rows_or_raise(
         raise RuntimeError('FRED raw bundles normalized to zero rows')
     partition_rows: dict[str, list[FREDLongMetricRow]] = defaultdict(list)
     for row in rows:
-        partition_rows[row.observed_at_utc.date().isoformat()].append(row)
+        observed_date = row.observed_at_utc.date()
+        if observed_date < _FRED_HISTORY_START_DATE:
+            continue
+        partition_rows[observed_date.isoformat()].append(row)
+    if partition_rows == {}:
+        raise RuntimeError(
+            'FRED raw bundles normalized to zero rows within supported history '
+            f'start { _FRED_HISTORY_START_DATE.isoformat() }'
+        )
     return dict(partition_rows)
 
 
@@ -548,12 +644,15 @@ def _load_ambiguous_partition_ids_or_raise(
     client: ClickhouseClient,
     database: str,
 ) -> tuple[str, ...]:
-    return load_nonterminal_partition_ids_for_stream_or_raise(
+    ambiguous_partition_ids = load_nonterminal_partition_ids_for_stream_or_raise(
         client=client,
         database=database,
         source_id=_CANONICAL_SOURCE_ID,
         stream_id=_CANONICAL_STREAM_ID,
         terminal_states=_TERMINAL_PARTITION_STATES,
+    )
+    return _filter_partition_ids_to_supported_fred_history_or_raise(
+        ambiguous_partition_ids
     )
 
 

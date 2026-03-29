@@ -2303,6 +2303,10 @@ Constraints: no duplicated planning logic that can drift from the runner contrac
 Action: Bound FRED plain backfill source fetches to the latest authoritative terminal proof boundary before raw revision-history bundle construction.
 Done looks like: once FRED has terminal proof coverage and no non-terminal partitions, plain Dagster `backfill` launches fetch only from the latest terminal observed-date boundary forward, log that resume boundary explicitly, and no longer replay full-history revision bundles on every rerun.
 Constraints: no dense synthetic daily partition planning for sparse FRED history, no bypass of reconcile-required non-terminal partitions, and no hidden fallback to unbounded full-history fetch when authoritative proof state exists.
+25o. `S34-06o`
+Action: Cap FRED Slice-34 history coverage at `2009-01-01` and make the boundary authoritative in planning/runtime.
+Done looks like: FRED backfill/reconcile source windows never fetch before `2009-01-01`, explicit partition ids before that boundary fail loudly, ambiguity/terminal-proof planning ignores pre-cap partitions, and live Dagster runs stop spending time repairing legacy pre-2009 partitions.
+Constraints: no cosmetic post-fetch filtering without source-window enforcement, no silent acceptance of pre-cap explicit requests, and no reconcile-required blocking on ignored pre-cap stale state.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

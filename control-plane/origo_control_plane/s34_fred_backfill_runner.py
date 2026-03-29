@@ -41,6 +41,7 @@ from origo_control_plane.s34_partition_authority import (
 
 _DATASET = 'fred_series_metrics'
 _FRED_JOB_NAME = 'origo_fred_daily_backfill_job'
+_FRED_HISTORY_START_DATE = datetime(2009, 1, 1, tzinfo=UTC).date()
 _RUN_POLL_INTERVAL_SECONDS = 2.0
 _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
@@ -239,12 +240,18 @@ def _load_ambiguous_partition_ids_or_raise(
     database: str,
 ) -> tuple[str, ...]:
     contract = get_s34_dataset_contract(_DATASET)
-    return load_nonterminal_partition_ids_for_stream_or_raise(
+    ambiguous_partition_ids = load_nonterminal_partition_ids_for_stream_or_raise(
         client=client,
         database=database,
         source_id=contract.source_id,
         stream_id=contract.stream_id,
         terminal_states=_TERMINAL_PARTITION_STATES,
+    )
+    return tuple(
+        partition_id
+        for partition_id in ambiguous_partition_ids
+        if parse_fred_partition_id_as_date_or_raise(partition_id=partition_id)
+        >= _FRED_HISTORY_START_DATE
     )
 
 
@@ -262,8 +269,17 @@ def _load_fred_backfill_summary_or_raise(
         source_id=contract.source_id,
         stream_id=contract.stream_id,
     )
+    terminal_partition_ids = tuple(
+        partition_id
+        for partition_id in terminal_partition_ids
+        if parse_fred_partition_id_as_date_or_raise(partition_id=partition_id)
+        >= _FRED_HISTORY_START_DATE
+    )
     if terminal_partition_ids == ():
-        raise RuntimeError('FRED backfill completed without a terminal proof boundary')
+        raise RuntimeError(
+            'FRED backfill completed without a terminal proof boundary within '
+            f'supported history start {_FRED_HISTORY_START_DATE.isoformat()}'
+        )
     ambiguous_partition_ids = _load_ambiguous_partition_ids_or_raise(
         client=client,
         database=database,

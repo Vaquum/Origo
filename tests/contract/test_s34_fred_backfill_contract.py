@@ -115,7 +115,7 @@ def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     monkeypatch.setattr(
         fred_runner,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('1947-01-01', '1947-02-01', '1947-03-01'),
+        lambda **_: ('2009-01-01', '2009-02-01', '2009-03-01'),
     )
 
     plan = fred_runner._plan_next_fred_run_or_raise(
@@ -124,11 +124,30 @@ def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     )
 
     assert plan.execution_mode == 'reconcile'
-    assert plan.partition_ids == ('1947-01-01',)
+    assert plan.partition_ids == ('2009-01-01',)
     assert plan.ambiguous_partition_count == 3
-    assert plan.source_window_start == '1947-01-01'
-    assert plan.source_window_end == '1947-01-01'
+    assert plan.source_window_start == '2009-01-01'
+    assert plan.source_window_end == '2009-01-01'
     assert plan.source_window_days == 1
+
+
+def test_s34_fred_backfill_runner_ignores_precap_ambiguity(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN', '2')
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS', '31')
+    monkeypatch.setattr(
+        fred_runner,
+        'load_nonterminal_partition_ids_for_stream_or_raise',
+        lambda **_: ('1947-01-01', '2009-01-01', '2009-01-15'),
+    )
+
+    ambiguous_partition_ids = fred_runner._load_ambiguous_partition_ids_or_raise(
+        client=_FakeClickHouseClient(),
+        database='origo',
+    )
+
+    assert ambiguous_partition_ids == ('2009-01-01', '2009-01-15')
 
 
 def test_s34_fred_backfill_runner_requires_reconcile_tranche_env(
@@ -380,6 +399,54 @@ def test_fred_job_backfill_source_window_resumes_from_latest_terminal_partition(
         ) -> tuple[str, ...]:
             assert source_id == 'fred'
             assert stream_id == 'fred_series_metrics'
+            return ('2009-01-01', '2009-02-01')
+
+    monkeypatch.setattr(fred_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+
+    source_window, resume_from_terminal_partition_id = (
+        fred_job._resolve_source_window_or_raise(
+            client=_FakeClickHouseClient(),
+            database='origo',
+            runtime_contract=runtime_contract,
+            explicit_partition_ids=None,
+            source_partition_scope_ids=None,
+        )
+    )
+
+    assert source_window == fred_job._SourceWindow(
+        observation_start=date(2009, 2, 1),
+        observation_end=None,
+    )
+    assert resume_from_terminal_partition_id == '2009-02-01'
+
+
+def test_fred_job_backfill_source_window_starts_at_supported_history_when_only_precap_terminal_partitions_exist(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='backfill',
+        runtime_audit_mode='summary',
+    )
+
+    monkeypatch.setattr(
+        fred_job,
+        '_load_ambiguous_partition_ids_or_raise',
+        lambda **_: (),
+    )
+
+    class _FakeStateStore:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def list_terminal_partition_ids(
+            self,
+            *,
+            source_id: str,
+            stream_id: str,
+        ) -> tuple[str, ...]:
+            assert source_id == 'fred'
+            assert stream_id == 'fred_series_metrics'
             return ('1947-01-01', '1947-02-01')
 
     monkeypatch.setattr(fred_job, 'CanonicalBackfillStateStore', _FakeStateStore)
@@ -395,10 +462,10 @@ def test_fred_job_backfill_source_window_resumes_from_latest_terminal_partition(
     )
 
     assert source_window == fred_job._SourceWindow(
-        observation_start=date(1947, 2, 1),
+        observation_start=date(2009, 1, 1),
         observation_end=None,
     )
-    assert resume_from_terminal_partition_id == '1947-02-01'
+    assert resume_from_terminal_partition_id is None
 
 
 def test_fred_job_backfill_source_window_requires_reconcile_when_nonterminal_partitions_exist(
@@ -413,7 +480,7 @@ def test_fred_job_backfill_source_window_requires_reconcile_when_nonterminal_par
     monkeypatch.setattr(
         fred_job,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('1947-02-01', '1947-03-01'),
+        lambda **_: ('2009-02-01', '2009-03-01'),
     )
 
     with pytest.raises(
@@ -429,6 +496,54 @@ def test_fred_job_backfill_source_window_requires_reconcile_when_nonterminal_par
         )
 
 
+def test_fred_job_backfill_source_window_ignores_precap_nonterminal_partitions(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='backfill',
+        runtime_audit_mode='summary',
+    )
+
+    monkeypatch.setattr(
+        fred_job,
+        'load_nonterminal_partition_ids_for_stream_or_raise',
+        lambda **_: ('1947-02-01', '1947-03-01'),
+    )
+
+    class _FakeStateStore:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def list_terminal_partition_ids(
+            self,
+            *,
+            source_id: str,
+            stream_id: str,
+        ) -> tuple[str, ...]:
+            assert source_id == 'fred'
+            assert stream_id == 'fred_series_metrics'
+            return ()
+
+    monkeypatch.setattr(fred_job, 'CanonicalBackfillStateStore', _FakeStateStore)
+
+    source_window, resume_from_terminal_partition_id = (
+        fred_job._resolve_source_window_or_raise(
+            client=_FakeClickHouseClient(),
+            database='origo',
+            runtime_contract=runtime_contract,
+            explicit_partition_ids=None,
+            source_partition_scope_ids=None,
+        )
+    )
+
+    assert source_window == fred_job._SourceWindow(
+        observation_start=date(2009, 1, 1),
+        observation_end=None,
+    )
+    assert resume_from_terminal_partition_id is None
+
+
 def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
     monkeypatch: Any,
 ) -> None:
@@ -442,7 +557,7 @@ def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
     monkeypatch.setattr(
         fred_job,
         '_load_ambiguous_partition_ids_or_raise',
-        lambda **_: ('1947-01-01', '1947-01-02', '1947-03-01'),
+        lambda **_: ('2009-01-01', '2009-01-02', '2009-03-01'),
     )
 
     result = fred_job._resolve_source_partition_scope_ids_or_raise(
@@ -452,7 +567,34 @@ def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
         explicit_partition_ids=None,
     )
 
-    assert result == ('1947-01-01', '1947-01-02')
+    assert result == ('2009-01-01', '2009-01-02')
+
+
+def test_fred_job_ambiguous_partition_loader_ignores_precap_history(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        fred_job,
+        'load_nonterminal_partition_ids_for_stream_or_raise',
+        lambda **_: ('1947-01-01', '2009-01-01', '2009-01-02'),
+    )
+
+    result = fred_job._load_ambiguous_partition_ids_or_raise(
+        client=_FakeClickHouseClient(),
+        database='origo',
+    )
+
+    assert result == ('2009-01-01', '2009-01-02')
+
+
+def test_fred_job_explicit_partition_ids_before_supported_history_fail_loud() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match=r'origo.backfill.partition_ids must be on or after supported FRED history start 2009-01-01',
+    ):
+        fred_job._load_required_partition_ids_from_tags_or_none(
+            {'origo.backfill.partition_ids': '2008-12-31,2009-01-01'}
+        )
 
 
 def test_fred_reconcile_resets_partition_after_proof_mismatch(

@@ -750,6 +750,10 @@ Every slice must pass:
    8. ETF historical availability is issuer-specific:
       1. issuers with a proven first-party historical endpoint may claim explicit pre-captured history from their contracted first-available day
       2. snapshot-only issuers may only claim history from the first valid archived artifact day forward
+9. FRED Slice-34 historical coverage is explicitly capped:
+   1. canonical backfill/reconcile coverage starts at `2009-01-01`
+   2. Dagster/manual/repo-native FRED runs must never fetch or reconcile partitions before that boundary
+   3. explicit FRED partition requests before `2009-01-01` must fail loudly
       3. snapshot-only issuers with zero valid archived artifacts have an explicit empty historical claim and must not block replay of issuers whose historical claim is non-empty
       4. zero-history snapshot-only issuers must still be surfaced explicitly in proof/audit output; they may not be silently treated as historically complete
       5. stale partial canonical ETF leftovers must never define the historical replay window

@@ -22,7 +22,7 @@ from origo.events import (
     canonical_event_idempotency_key,
 )
 from origo.events.backfill_state import canonical_proof_matches_source_proof
-from origo.events.errors import EventWriterError
+from origo.events.errors import EventWriterError, ReconciliationError
 from origo.fred import (
     FREDLongMetricRow,
     FREDRawSeriesBundle,
@@ -814,12 +814,35 @@ def _execute_partition_backfill_or_raise(
     proof_input = (
         current_canonical_proof if write_path == 'reconcile_proof_only' else None
     )
-    partition_proof = state_store.prove_partition_or_quarantine(
-        source_proof=source_proof,
-        run_id=context.run_id,
-        recorded_at_utc=proof_recorded_at_utc,
-        canonical_proof=proof_input,
-    )
+    try:
+        partition_proof = state_store.prove_partition_or_quarantine(
+            source_proof=source_proof,
+            run_id=context.run_id,
+            recorded_at_utc=proof_recorded_at_utc,
+            canonical_proof=proof_input,
+        )
+    except ReconciliationError as exc:
+        if (
+            not reconcile_existing_canonical_rows
+            or runtime_contract.execution_mode != 'reconcile'
+            or write_path == 'reconcile_proof_only'
+            or exc.code != 'BACKFILL_PARTITION_PROOF_FAILED'
+        ):
+            raise
+        latest_partition_proof = state_store.fetch_latest_partition_proof(
+            stream_key=source_proof.stream_key
+        )
+        if latest_partition_proof is None:
+            raise RuntimeError(
+                'FRED reconcile proof failure did not leave a latest proof row: '
+                f'partition_id={partition_id}'
+            ) from exc
+        if latest_partition_proof.state != 'quarantined':
+            raise RuntimeError(
+                'FRED reconcile proof failure expected quarantined latest proof state, '
+                f'got state={latest_partition_proof.state} partition_id={partition_id}'
+            ) from exc
+        partition_proof = latest_partition_proof
     if (
         reconcile_existing_canonical_rows
         and runtime_contract.execution_mode == 'reconcile'

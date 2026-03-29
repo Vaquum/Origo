@@ -87,6 +87,7 @@ def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN', '2')
+    monkeypatch.setenv('ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS', '31')
     monkeypatch.setattr(
         fred_runner,
         '_load_ambiguous_partition_ids_or_raise',
@@ -99,8 +100,11 @@ def test_s34_fred_backfill_runner_prefers_reconcile_when_ambiguity_exists(
     )
 
     assert plan.execution_mode == 'reconcile'
-    assert plan.partition_ids == ('1947-01-01', '1947-02-01')
+    assert plan.partition_ids == ('1947-01-01',)
     assert plan.ambiguous_partition_count == 3
+    assert plan.source_window_start == '1947-01-01'
+    assert plan.source_window_end == '1947-01-01'
+    assert plan.source_window_days == 1
 
 
 def test_s34_fred_backfill_runner_requires_reconcile_tranche_env(
@@ -116,6 +120,40 @@ def test_s34_fred_backfill_runner_requires_reconcile_tranche_env(
         match='ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN must be set and non-empty',
     ):
         fred_runner._load_fred_reconcile_max_partitions_per_run_or_raise()
+
+
+def test_s34_fred_backfill_runner_requires_reconcile_source_window_env(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.delenv(
+        'ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS',
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS must be set and non-empty',
+    ):
+        fred_runner._load_fred_reconcile_max_source_window_days_or_raise()
+
+
+def test_s34_fred_backfill_runner_selects_prefix_by_source_window_and_count() -> None:
+    result = fred_runner._select_reconcile_partition_ids_or_raise(
+        ambiguous_partition_ids=(
+            '1947-01-01',
+            '1947-02-01',
+            '1947-12-31',
+            '1948-01-02',
+        ),
+        max_partitions_per_run=3,
+        max_source_window_days=365,
+    )
+
+    assert result == (
+        '1947-01-01',
+        '1947-02-01',
+        '1947-12-31',
+    )
 
 
 def test_s34_fred_backfill_runner_reconcile_batch_summary_requires_terminal_proofs() -> None:

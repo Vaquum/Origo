@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.81 on 29th of March, 2026
+
+- Made the live-safe FRED revision-history vintage window an explicit runtime contract:
+  - added required env `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
+  - plumbed the value through `FREDAPIConfig` and the revision-history chunk planner instead of hiding `275` as a code constant
+  - fail loudly on missing, non-integer, non-positive, or `>2000` values while preserving deterministic split-on-`400`/`414`/timeout behavior for remaining FRED transport edge cases
+
 ## v1.2.80 on 29th of March, 2026
 
 - Preserved append-only canonical truth during Slice 34 ETF/FRED reconcile resets:

@@ -2,9 +2,9 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-07
-- Slice reference: S6 (`S6-C1`, `S6-C2`)
-- Version reference: `control-plane v1.2.49`
+- Last updated: 2026-03-29
+- Slice reference: S6 (`S6-C1`, `S6-C2`), S34 (`S34-C6f`)
+- Version reference: `control-plane v1.2.81`
 
 ## Purpose and scope
 - Define strict contracts for FRED source registry loading, metadata fetch, and normalization into Origo long-metric rows.
@@ -13,7 +13,7 @@
 ## Inputs and outputs
 - Inputs:
   - Registry file: `contracts/fred-series-registry.json`
-  - Runtime env: `FRED_API_KEY`, `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
+  - Runtime env: `FRED_API_KEY`, `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`, `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
   - FRED endpoints: `/fred/series`, `/fred/series/observations`
 - Outputs:
   - typed series metadata records
@@ -45,6 +45,7 @@
 ## Failure modes, warnings, and error semantics
 - Missing/empty `FRED_API_KEY` fails loudly at runtime.
 - Missing/empty timeout env fails loudly.
+- Missing/empty revision-history window env fails loudly.
 - Invalid registry contract fails loudly during registry load.
 - Invalid/partial FRED payloads fail loudly during decode/normalize.
 - No swallowed exceptions; parse/fetch errors propagate as runtime failures.
@@ -58,6 +59,7 @@
 ## Environment variables
 - `FRED_API_KEY`
 - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
+- `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
 
 ## Minimal examples
 - Connector proof:

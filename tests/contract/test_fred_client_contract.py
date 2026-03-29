@@ -5,14 +5,19 @@ from typing import Any
 
 import pytest
 
-from origo.fred.client import FREDAPIConfig, FREDClient
+from origo.fred.client import FREDAPIConfig, FREDClient, load_fred_api_config_from_env
 
 
-def _build_client() -> FREDClient:
+def _build_client(
+    *, revision_history_initial_vintage_dates_per_request: int = 275
+) -> FREDClient:
     return FREDClient(
         FREDAPIConfig(
             api_key='test-key',
             timeout_seconds=1.0,
+            revision_history_initial_vintage_dates_per_request=(
+                revision_history_initial_vintage_dates_per_request
+            ),
         )
     )
 
@@ -87,7 +92,7 @@ def test_fetch_all_series_vintage_dates_pages_until_expected_count(
 def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_type_2(
     monkeypatch: Any,
 ) -> None:
-    client = _build_client()
+    client = _build_client(revision_history_initial_vintage_dates_per_request=2)
     vintage_dates = [
         date(2026, 3, 11),
         date(2026, 3, 12),
@@ -146,11 +151,6 @@ def test_fetch_series_revision_history_payload_batches_vintage_dates_for_output_
         'fetch_series_observations_payload',
         _fake_fetch_series_observations_payload,
     )
-    monkeypatch.setattr(
-        'origo.fred.client._FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST',
-        2,
-    )
-
     payload = client.fetch_series_revision_history_payload(
         series_id='CPIAUCSL',
         observation_start=date(1947, 1, 1),
@@ -235,7 +235,7 @@ def test_fetch_series_revision_history_payload_splits_retryable_vintage_date_req
     failure_message: str,
     expected_calls: list[str],
 ) -> None:
-    client = _build_client()
+    client = _build_client(revision_history_initial_vintage_dates_per_request=3)
     vintage_dates = [
         date(2026, 3, 11),
         date(2026, 3, 12),
@@ -326,3 +326,38 @@ def test_fetch_series_observations_payload_rejects_oversized_vintage_date_reques
             vintage_dates=oversized_vintage_dates,
             output_type=2,
         )
+
+
+def test_load_fred_api_config_from_env_requires_revision_history_window(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('FRED_API_KEY', 'test-key')
+    monkeypatch.setenv('ORIGO_FRED_HTTP_TIMEOUT_SECONDS', '20')
+    monkeypatch.setenv(
+        'ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST',
+        '275',
+    )
+
+    config = load_fred_api_config_from_env()
+
+    assert config.api_key == 'test-key'
+    assert config.timeout_seconds == 20.0
+    assert config.revision_history_initial_vintage_dates_per_request == 275
+
+
+def test_load_fred_api_config_from_env_rejects_invalid_revision_history_window(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('FRED_API_KEY', 'test-key')
+    monkeypatch.setenv('ORIGO_FRED_HTTP_TIMEOUT_SECONDS', '20')
+    monkeypatch.setenv(
+        'ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST',
+        '2001',
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST exceeds '
+        'FRED output_type=2 request limit',
+    ):
+        load_fred_api_config_from_env()

@@ -1,0 +1,133 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command bundle finished successfully",
+    "detail_code": "summary of the focused FRED transport/backfill contract bundle plus repo gates with runtime-only noise normalized",
+    "row_count": "21 indicates the focused FRED validation suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-fred-vintage-window-env-proof",
+    "captured_at_utc": "2026-03-29T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the final env-backed FRED live-safe revision-history window contract after code, spec, docs, changelog, version, and .env.example updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "_env_example",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "27dd7c40155d3f16ad3c15ebbd6931a8a054c5bae8f48872a83f6fa3d68a2040",
+      "path": ".env.example"
+    },
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "cb841187ceb430f5f19d1a1edfd430ce0c084c5df64be4a635114433992d154a",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "88f92f179f2a6ca8f88aa48675c26d11749d5f4609f887fd3832665afbe73443",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "799344158f579b2ac0675b4ac2bbfc341ef061f95a0704f9cb626016e9d8d767",
+      "path": "control-plane/pyproject.toml"
+    },
+    {
+      "name": "docs_Developer_s34-canonical-backfill-runtime_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "00d255912ad1f6777e9e2e2dd135001b0e1eb10c0ee88d115c4f8c03a8da8a52",
+      "path": "docs/Developer/s34-canonical-backfill-runtime.md"
+    },
+    {
+      "name": "docs_Developer_s6-fred-connector-contracts_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f46d30c95e546efbc51686564f3bcf35ee96529f4c3079e6e34bb54441395e9e",
+      "path": "docs/Developer/s6-fred-connector-contracts.md"
+    },
+    {
+      "name": "docs_fred-reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f04ee5c4564c706f33f2b641d9e4e6cd758132538457283dd017cda560a20767",
+      "path": "docs/fred-reference.md"
+    },
+    {
+      "name": "origo_fred_client_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "84a61263db3b59c9934478f680a8adc788337aa5503201d408bbe78ebaf76a76",
+      "path": "origo/fred/client.py"
+    },
+    {
+      "name": "spec_1-top-level-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "1190db812e450b986f716c1ce9edca8d85f5dab1da69074523f9f9bcb3454690",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2-itemized-work-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3bcf323672d721bc013ab661c063bcd89a92b1727a3c212da1e4630ef63b6521",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live-performance-investigation-log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "bb562a82388d2f917e8ddd5a671440ff122ed0ac3dd30a4610a8167c55f3a416",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d0a027faee6bdfa6ecdeb35ff232822a694127a2fc656a8caee57ddc8dd523c4",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_run-notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "8a1b746aac335364bc750a9d211bb8974f28118cde44a15ebc848892c6b2f9bf",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "tests_contract_test_fred_client_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "a097dc4c699b677a13580584cb580e97dd5075dd18d3490b977849554c302ae3",
+      "path": "tests/contract/test_fred_client_contract.py"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_fred_vintage_window_env_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 21 items ;  ; tests/contract/test_fred_client_contract.py ........                     [ 38%] ; tests/contract/test_s34_fred_backfill_contract.py .............          [100%] ;  ; ============================== 21 passed in <runtime> ============================== ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 21,
+      "body_sha256": "f1553a03becb37e8e30f8af6c52dcbb48a42a23ace311d3001f1a7eac22d7cdf"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_fred_vintage_window_env_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 21 items ;  ; tests/contract/test_fred_client_contract.py ........                     [ 38%] ; tests/contract/test_s34_fred_backfill_contract.py .............          [100%] ;  ; ============================== 21 passed in <runtime> ============================== ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 21,
+      "body_sha256": "f1553a03becb37e8e30f8af6c52dcbb48a42a23ace311d3001f1a7eac22d7cdf"
+    }
+  ]
+}

@@ -25,7 +25,6 @@ _LAST_UPDATED_SUFFIX_PATTERN = re.compile(r'([+-]\d{2})(?::?(\d{2}))?$')
 _FRED_OUTPUT_TYPE_VINTAGE_COLUMN_PATTERN = re.compile(r'^(?P<series_id>[A-Z0-9]+)_(?P<vintage>\d{8})$')
 _FRED_VINTAGE_DATES_MAX_LIMIT = 10000
 _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST = 2000
-_FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST = 275
 
 
 def _require_env(name: str) -> str:
@@ -43,6 +42,30 @@ def _require_positive_float_env(name: str) -> float:
         raise RuntimeError(f"{name} must be a float, got '{raw_value}'") from exc
     if parsed <= 0:
         raise RuntimeError(f'{name} must be > 0, got {parsed}')
+    return parsed
+
+
+def _require_positive_int_env(name: str) -> int:
+    raw_value = _require_env(name)
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got '{raw_value}'") from exc
+    if parsed <= 0:
+        raise RuntimeError(f'{name} must be > 0, got {parsed}')
+    return parsed
+
+
+def _require_fred_revision_history_window_env() -> int:
+    parsed = _require_positive_int_env(
+        'ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST'
+    )
+    if parsed > _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST:
+        raise RuntimeError(
+            'ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST exceeds '
+            'FRED output_type=2 request limit, '
+            f'got {parsed} > {_FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST}'
+        )
     return parsed
 
 
@@ -372,6 +395,7 @@ def normalize_fred_series_vintage_dates_payload_or_raise(
 class FREDAPIConfig:
     api_key: str
     timeout_seconds: float
+    revision_history_initial_vintage_dates_per_request: int
     base_url: str = _FRED_BASE_URL
     user_agent: str = _DEFAULT_USER_AGENT
 
@@ -380,6 +404,18 @@ class FREDAPIConfig:
             raise ValueError('api_key must be non-empty')
         if self.timeout_seconds <= 0:
             raise ValueError('timeout_seconds must be > 0')
+        if self.revision_history_initial_vintage_dates_per_request <= 0:
+            raise ValueError(
+                'revision_history_initial_vintage_dates_per_request must be > 0'
+            )
+        if (
+            self.revision_history_initial_vintage_dates_per_request
+            > _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST
+        ):
+            raise ValueError(
+                'revision_history_initial_vintage_dates_per_request exceeds '
+                'FRED output_type=2 request limit'
+            )
         if self.base_url.strip() == '':
             raise ValueError('base_url must be non-empty')
         if self.user_agent.strip() == '':
@@ -390,6 +426,7 @@ def load_fred_api_config_from_env() -> FREDAPIConfig:
     return FREDAPIConfig(
         api_key=_require_env('FRED_API_KEY'),
         timeout_seconds=_require_positive_float_env('ORIGO_FRED_HTTP_TIMEOUT_SECONDS'),
+        revision_history_initial_vintage_dates_per_request=_require_fred_revision_history_window_env(),
     )
 
 
@@ -708,10 +745,11 @@ class FREDClient:
         for start_index in range(
             0,
             len(vintage_dates),
-            _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST,
+            self._config.revision_history_initial_vintage_dates_per_request,
         ):
             vintage_date_chunk = vintage_dates[
-                start_index : start_index + _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST
+                start_index : start_index
+                + self._config.revision_history_initial_vintage_dates_per_request
             ]
             for chunk_payload in _fetch_revision_history_chunk(
                 vintage_date_chunk=vintage_date_chunk
@@ -739,7 +777,9 @@ class FREDClient:
                 vintage_date.isoformat() for vintage_date in vintage_dates
             ],
             'request_chunk_count': len(chunk_payloads),
-            'request_chunk_size_limit': _FRED_OUTPUT_TYPE_2_LIVE_SAFE_VINTAGE_DATES_PER_REQUEST,
+            'request_chunk_size_limit': (
+                self._config.revision_history_initial_vintage_dates_per_request
+            ),
             'request_chunk_hard_limit': _FRED_OUTPUT_TYPE_2_MAX_VINTAGE_DATES_PER_REQUEST,
             'observations': merged_observations,
         }

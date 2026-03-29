@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-03-29
+- Made the live-safe FRED revision-history vintage window an explicit runtime contract:
+  - added required env `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
+  - plumbed the value through `FREDAPIConfig` and the revision-history chunk planner instead of hiding `275` as a code constant
+  - fail loudly on missing, non-integer, non-positive, or `>2000` values while preserving deterministic split-on-`400`/`414`/timeout behavior for remaining transport edge cases
+- Updated version to `origo-control-plane v1.2.81` (`Origo API` unchanged at `v0.1.28`).
+
 - Preserved append-only canonical truth during Slice 34 ETF/FRED reconcile resets:
   - added `canonical_partition_reset_boundaries` plus the boundary-aware read surface `canonical_event_log_active_v1`
   - switched live canonical proof/planner/projector/writer-identity reads to the active view instead of reading stale pre-reset rows from the base append-only table

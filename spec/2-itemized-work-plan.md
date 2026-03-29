@@ -808,6 +808,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6e` Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits so revision-history replay survives long vintage lists without reverting to non-deterministic snapshots.
 - [ ] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
 - [x] `S34-C6h` Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
+- [x] `S34-C6i` Bound FRED reconcile tranche planning by explicit source-window span so sparse partition prefixes cannot expand into oversized multi-year revision-history fetch windows.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2268,6 +2269,10 @@ Constraints: no full-history replay for narrow reconcile windows, no planner/tag
 Action: Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids.
 Done looks like: the FRED runner reads an explicit env-backed max tranche size, submits only the first deterministic slice of ambiguous partition ids per reconcile run, and verifies that every targeted partition reaches terminal proof before advancing to the next tranche.
 Constraints: no dataset-wide reconcile submissions when ambiguity is large, no silent batch-size defaults outside the env contract, and no successful Dagster run may advance the runner if targeted partitions remain non-terminal.
+25i. `S34-06i`
+Action: Bound FRED reconcile tranche planning by explicit source-window span in addition to partition count.
+Done looks like: the FRED runner reads an explicit env-backed max source-window span, selects only the first deterministic prefix of ambiguous partition ids that stays inside both ceilings, and surfaces that derived source window in run summaries.
+Constraints: no partition-count-only batching, no silent default source-window ceiling, and no reconcile tranche may expand into a larger source observation window than the explicit env contract allows.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

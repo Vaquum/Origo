@@ -4,7 +4,7 @@ import argparse
 import os
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -41,6 +41,9 @@ _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
 _FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV = (
     'ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN'
 )
+_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV = (
+    'ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS'
+)
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 
 
@@ -65,6 +68,9 @@ class _PlannedFREDRun:
     execution_mode: ExecutionMode
     partition_ids: tuple[str, ...]
     ambiguous_partition_count: int
+    source_window_start: str | None
+    source_window_end: str | None
+    source_window_days: int | None
 
 
 def _default_run_id() -> str:
@@ -90,6 +96,82 @@ def _load_fred_reconcile_max_partitions_per_run_or_raise() -> int:
             f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be > 0, got {value}'
         )
     return value
+
+
+def _load_fred_reconcile_max_source_window_days_or_raise() -> int:
+    raw = os.environ.get(_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV)
+    if raw is None or raw.strip() == '':
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be set and non-empty'
+        )
+    normalized = raw.strip()
+    try:
+        value = int(normalized)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be an integer, '
+            f"got '{normalized}'"
+        ) from exc
+    if value <= 0:
+        raise RuntimeError(
+            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be > 0, got {value}'
+        )
+    return value
+
+
+def _parse_partition_id_as_date_or_raise(*, partition_id: str) -> date:
+    try:
+        return date.fromisoformat(partition_id)
+    except ValueError as exc:
+        raise RuntimeError(
+            'FRED partition ids must be ISO dates, '
+            f"got partition_id='{partition_id}'"
+        ) from exc
+
+
+def _select_reconcile_partition_ids_or_raise(
+    *,
+    ambiguous_partition_ids: tuple[str, ...],
+    max_partitions_per_run: int,
+    max_source_window_days: int,
+) -> tuple[str, ...]:
+    if ambiguous_partition_ids == ():
+        raise RuntimeError('ambiguous_partition_ids must be non-empty')
+    if max_partitions_per_run <= 0:
+        raise RuntimeError('max_partitions_per_run must be > 0')
+    if max_source_window_days <= 0:
+        raise RuntimeError('max_source_window_days must be > 0')
+
+    first_partition_date = _parse_partition_id_as_date_or_raise(
+        partition_id=ambiguous_partition_ids[0]
+    )
+    max_partition_date = first_partition_date + timedelta(
+        days=max_source_window_days - 1
+    )
+    selected_partition_ids: list[str] = []
+    previous_partition_date = first_partition_date
+    for partition_id in ambiguous_partition_ids:
+        partition_date = _parse_partition_id_as_date_or_raise(
+            partition_id=partition_id
+        )
+        if partition_date < previous_partition_date:
+            raise RuntimeError(
+                'FRED ambiguous partition ids must be sorted ascending, '
+                f"got previous='{previous_partition_date.isoformat()}' "
+                f"current='{partition_id}'"
+            )
+        if len(selected_partition_ids) >= max_partitions_per_run:
+            break
+        if partition_date > max_partition_date:
+            break
+        selected_partition_ids.append(partition_id)
+        previous_partition_date = partition_date
+
+    if selected_partition_ids == []:
+        raise RuntimeError(
+            'FRED reconcile tranche selection produced zero partition ids'
+        )
+    return tuple(selected_partition_ids)
 
 
 def _repo_root() -> Path:
@@ -392,15 +474,35 @@ def _plan_next_fred_run_or_raise(
         reconcile_partition_limit = (
             _load_fred_reconcile_max_partitions_per_run_or_raise()
         )
+        reconcile_source_window_days = (
+            _load_fred_reconcile_max_source_window_days_or_raise()
+        )
+        partition_ids = _select_reconcile_partition_ids_or_raise(
+            ambiguous_partition_ids=ambiguous_partition_ids,
+            max_partitions_per_run=reconcile_partition_limit,
+            max_source_window_days=reconcile_source_window_days,
+        )
+        first_partition_date = _parse_partition_id_as_date_or_raise(
+            partition_id=partition_ids[0]
+        )
+        last_partition_date = _parse_partition_id_as_date_or_raise(
+            partition_id=partition_ids[-1]
+        )
         return _PlannedFREDRun(
             execution_mode='reconcile',
-            partition_ids=ambiguous_partition_ids[:reconcile_partition_limit],
+            partition_ids=partition_ids,
             ambiguous_partition_count=len(ambiguous_partition_ids),
+            source_window_start=partition_ids[0],
+            source_window_end=partition_ids[-1],
+            source_window_days=(last_partition_date - first_partition_date).days + 1,
         )
     return _PlannedFREDRun(
         execution_mode='backfill',
         partition_ids=(),
         ambiguous_partition_count=0,
+        source_window_start=None,
+        source_window_end=None,
+        source_window_days=None,
     )
 
 
@@ -456,6 +558,9 @@ def run_s34_fred_backfill_or_raise(*, run_id: str | None = None) -> dict[str, An
                     'execution_mode': plan.execution_mode,
                     'partition_ids': list(plan.partition_ids),
                     'ambiguous_partition_count': plan.ambiguous_partition_count,
+                    'source_window_start': plan.source_window_start,
+                    'source_window_end': plan.source_window_end,
+                    'source_window_days': plan.source_window_days,
                     'dagster_run_id': dagster_run_id,
                     'started_at_utc': completed_run.started_at_utc.isoformat(),
                     'finished_at_utc': completed_run.finished_at_utc.isoformat(),

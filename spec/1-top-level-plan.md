@@ -770,6 +770,7 @@ Every slice must pass:
    6. live FRED revision-history replay must also respect the empirically proved response-size ceiling under the runtime timeout contract; with `ORIGO_FRED_HTTP_TIMEOUT_SECONDS=20`, the source-safe initial `vintage_dates` window is `275`, and any remaining `series/observations` edge `400 Bad Request` or timeout must trigger deterministic window splitting rather than a hard failure or snapshot fallback
    7. FRED reconcile must derive its source fetch window from authoritative ambiguous partition ids before raw bundle construction; a one-day reconcile may not trigger a full-history revision replay just because explicit partition tags were omitted
    8. repo-native FRED reconcile must tranche authoritative ambiguous partition ids into deterministic bounded batches, and each successful batch must leave every targeted partition in a terminal proof state before the next batch begins
+   9. FRED reconcile tranche planning must bound the derived source window explicitly; partition-count ceilings alone are insufficient because sparse observation-date partitions can still expand into multi-year revision-history fetch windows
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

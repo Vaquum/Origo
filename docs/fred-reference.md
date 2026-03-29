@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-29
-- Slice/version reference: S6, S17, S28, S34-C6f (API v0.1.28, control-plane v1.2.81)
+- Slice/version reference: S6, S17, S28, S34-C6f, S34-C6l (API v0.1.28, control-plane v1.2.82)
 
 ## Purpose and scope
 - User-facing reference for FRED data in Origo.
@@ -76,6 +76,7 @@
 - `FRED_API_KEY`
 - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
 - `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
+  - self-hosted live runtimes must sync this required key into `/opt/origo/deploy/.env`; if it is missing, FRED backfill/reconcile fails before source fetch
 - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
 - `ORIGO_FRED_QUERY_SERVING_STATE`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`

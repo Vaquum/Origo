@@ -1,6 +1,6 @@
 ## Run metadata
 - Date: 2026-03-28 to 2026-03-29
-- Scope: Slice 34 ETF sub-slices `S34-C5f` live runtime proof, `S34-C5e` live archive-only replay proof, `S34-C5g` local archive-revision-selection proof, `S34-C5h` live issuer-specific history-contract proof, `S34-C5i` live iShares holiday/no-data proof, `S34-C5j` local zero-history snapshot-boundary proof, and `S34-C6f` local FRED live-safe vintage-window env-contract proof.
+- Scope: Slice 34 ETF sub-slices `S34-C5f` live runtime proof, `S34-C5e` live archive-only replay proof, `S34-C5g` local archive-revision-selection proof, `S34-C5h` live issuer-specific history-contract proof, `S34-C5i` live iShares holiday/no-data proof, `S34-C5j` local zero-history snapshot-boundary proof, `S34-C6f` local FRED live-safe vintage-window env-contract proof, and `S34-C6l` local deploy/runtime env-sync proof for the required FRED revision-history window.
 - Fixture window:
   - `S34-C5f`: 2026-03-28 local runtime-proof replay (`run 1` uncached image build, `run 2` cached rebuild).
   - `S34-C5e`: 2026-03-28 local archive-replay validation (`run 1` and `run 2` on the focused ETF archive-replay contract bundle).
@@ -9,6 +9,7 @@
   - `S34-C5i`: 2026-03-28 live iShares holiday/no-data validation (bootstrap persisted `22` official no-data days followed by live ETF rerun with no holiday-gap failure).
   - `S34-C5j`: 2026-03-28 local zero-history snapshot-boundary validation (`run 1` and `run 2` on the focused ETF zero-history bundle).
   - `S34-C6f`: 2026-03-29 local FRED env-contract validation (`run 1` and `run 2` on the focused FRED client/backfill contract bundle plus `ruff` and `pyright`).
+  - `S34-C6l`: 2026-03-29 live Dagster failure capture plus local deploy-workflow env-sync validation (`run 1` and `run 2` on focused deploy contract tests, workflow YAML parse, repo-wide `ruff`, and repo-wide `pyright`).
 - Runtime environment:
   - Local workspace: `/Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo`
   - Branches:
@@ -20,6 +21,7 @@
     - `codex/s34-etf-zero-history-boundary`
     - `codex/s34-fred-live-post-104`
     - `codex/s34-fred-vintage-window-env`
+    - `codex/s34-fred-deploy-env-sync`
   - Local host: macOS workstation
   - Docker target: `docker/Dockerfile.control-plane`
   - Live runtime target for ETF proofs: `deploy-dagster-daemon-1` on the production host after `main` deploy
@@ -41,6 +43,8 @@
 - Captured live FRED evidence showing the old proof-mismatch blocker was fixed but the reset path stalled on a huge synchronous `canonical_event_log` delete mutation against one March-2026 part.
 - Rewired live canonical proof/planner/projector/writer-identity reads to use `canonical_event_log_active_v1` and patched ETF/FRED reconcile reset paths to leave `canonical_event_log` append-only.
 - Added required env `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` and rewired the FRED revision-history chunk planner to read the initial live-safe window from runtime config instead of a hidden code constant.
+- Queried the live Dagster GraphQL endpoint on `159.69.57.19:14000`, launched FRED Dagster run `5bc5d7ae-7538-4b52-ae16-51b2dc647b93`, and confirmed from Dagster error logs that the deployed runtime still lacked `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`.
+- Patched the deploy workflow so that required FRED env now flows from root `.env.example` into `/opt/origo/deploy/.env`, and added focused deploy-workflow contract coverage for that sync path.
 
 ## Known warnings and disposition
 - Local Docker proof required one cache cleanup because the builder’s apt archive area was exhausted. Acceptable for the proof run; this was a local builder-state issue, not a repo/runtime contract issue.
@@ -52,15 +56,17 @@
 - `S34-C5j` is locally proven but not yet live-proven. The merged runtime still needs the zero-history snapshot-only issuer contract deployed so those sources stop blocking ETF replay as fake incomplete coverage.
 - `S34-C2l` is locally proven but not yet live-proven. The merged runtime still needs the append-only reset-boundary patch deployed so FRED can finish the reset-and-rewrite phase without opening another giant `canonical_event_log` mutation.
 - `S34-C6f` is locally proven but not yet live-proven. The next merged FRED rerun must confirm the deployed env file carries the new vintage-window variable and that Dagster no longer depends on a hidden code default.
+- `S34-C6l` is locally proven but not yet live-proven. The next merged deploy must prove that the server env file actually contains `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` and that the same FRED Dagster tranche now moves past env bootstrap into real source/proof work.
 
 ## Deferred guardrails
 - None inside `S34-C5f` / `S34-C5e` / `S34-C5g` scope. Remaining ETF historical completeness work is now about acquiring or validating enough first-party archive coverage, not about replay/runtime fallbacks.
 - Remaining work after `S34-C2l` is live proof, not local contract work: merge/deploy the patch, rerun the same FRED reconcile window, and verify terminal proof without destructive canonical deletes.
 - Remaining work after `S34-C6f` is live proof, not local transport logic: merge/deploy the env contract, rerun the same bounded FRED tranche, and treat Dagster logs as the source of truth for whatever blocker remains.
+- Remaining work after `S34-C6l` is live proof, not local deploy logic: merge/deploy the sync fix, rerun the same Dagster FRED tranche immediately, and verify the failure boundary moves beyond missing-env bootstrap.
 
 ## Closeout confirmation
-- Work-plan checkboxes updated: partially. `S34-C2l`, `S34-C5e`, `S34-C5h`, `S34-C5i`, and `S34-C6f` are now checked off locally/live as noted above, while `S34-C5g`, `S34-C5j`, and the remaining live Slice-34 dataset closures are still open pending merge/deploy/live proof.
-- Version updated: yes (`origo_control_plane 1.2.81`).
+- Work-plan checkboxes updated: partially. `S34-C2l`, `S34-C5e`, `S34-C5h`, `S34-C5i`, and `S34-C6f` are now checked off locally/live as noted above; `S34-C6l` has been added for the newly discovered live deploy-env blocker and remains open pending merge/deploy/live proof, alongside `S34-C5g`, `S34-C5j`, and the remaining Slice-34 dataset closures.
+- Version updated: yes (`origo_control_plane 1.2.82`).
 - Changelog updated: yes (`CHANGELOG.md` and `control-plane/CHANGELOG.md`).
-- `.env.example` reviewed against slice changes: yes; added `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` and removed the hidden code default for that runtime contract.
-- Slice artifacts created: yes (`manifest.md`, `run-notes.md`, `baseline-fixture-2026-03-28.json`, `baseline-fixture-2026-03-28-etf-archive-replay.json`, `baseline-fixture-2026-03-28-etf-archive-revision-selection.json`, `baseline-fixture-2026-03-28-etf-history-contract.json`, `baseline-fixture-2026-03-28-etf-holiday-contract.json`, `baseline-fixture-2026-03-28-etf-zero-history-boundary.json`, `baseline-fixture-2026-03-29-fred-append-only-reset-boundary.json`, `baseline-fixture-2026-03-29-fred-vintage-window-env.json`).
+- `.env.example` reviewed against slice changes: yes; no new FRED env value was introduced in this sub-slice, but deploy now fail-loud synchronizes the already-required `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST` contract into the live server env file.
+- Slice artifacts created: yes (`manifest.md`, `run-notes.md`, `baseline-fixture-2026-03-28.json`, `baseline-fixture-2026-03-28-etf-archive-replay.json`, `baseline-fixture-2026-03-28-etf-archive-revision-selection.json`, `baseline-fixture-2026-03-28-etf-history-contract.json`, `baseline-fixture-2026-03-28-etf-holiday-contract.json`, `baseline-fixture-2026-03-28-etf-zero-history-boundary.json`, `baseline-fixture-2026-03-29-fred-append-only-reset-boundary.json`, `baseline-fixture-2026-03-29-fred-vintage-window-env.json`, and `baseline-fixture-2026-03-29-fred-deploy-env-sync.json`).

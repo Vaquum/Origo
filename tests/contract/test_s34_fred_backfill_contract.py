@@ -21,8 +21,10 @@ class _FakeClickHouseClient:
 class _ProofQueryClickHouseClient:
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self._rows = rows
+        self.query: str | None = None
 
-    def execute(self, *_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+    def execute(self, query: str, *_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        self.query = query
         return self._rows
 
 
@@ -222,6 +224,40 @@ def test_s34_fred_backfill_runner_reconcile_batch_summary_requires_terminal_proo
             database='origo',
             partition_ids=('1947-01-01',),
         )
+
+
+def test_s34_fred_backfill_runner_reconcile_batch_summary_uses_deterministic_latest_proof_key() -> None:
+    client = _ProofQueryClickHouseClient(
+        [
+            (
+                '1947-01-01',
+                'proved_complete',
+                'source_and_canonical_match',
+                'proof-1',
+                1,
+                1,
+            )
+        ]
+    )
+
+    summary = fred_runner._load_reconcile_partition_batch_summary_or_raise(
+        client=client,
+        database='origo',
+        partition_ids=('1947-01-01',),
+    )
+
+    assert summary['partition_count'] == 1
+    assert summary['first_partition_id'] == '1947-01-01'
+    assert summary['last_partition_id'] == '1947-01-01'
+    assert client.query is not None
+    assert (
+        'argMax(state, tuple(proof_revision, recorded_at_utc, proof_id)) AS state'
+        in client.query
+    )
+    assert (
+        'argMax(reason, tuple(proof_revision, recorded_at_utc, proof_id)) AS reason'
+        in client.query
+    )
 
 
 def test_s34_fred_backfill_runner_builds_required_run_tags() -> None:

@@ -807,7 +807,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6c` Add FRED audited partition reset-and-rewrite so explicit reconcile can clear stale request-time canonical rows and rewrite from deterministic source truth.
 - [ ] `S34-C6d` Batch FRED revision-history fetches against official vintage-date count limits so deterministic history replay remains valid for long-revision series such as `CPIAUCSL`.
 - [ ] `S34-C6e` Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits so revision-history replay survives long vintage lists without reverting to non-deterministic snapshots.
-- [ ] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
+- [x] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
 - [x] `S34-C6h` Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
 - [x] `S34-C6i` Bound FRED reconcile tranche planning by explicit source-window span so sparse partition prefixes cannot expand into oversized multi-year revision-history fetch windows.
 - [x] `S34-C6j` Skip non-overlapping FRED series during bounded raw-bundle construction so early historical and reconcile windows do not fail on legitimate empty-observation payloads such as `FEDFUNDS`.

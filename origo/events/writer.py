@@ -22,6 +22,7 @@ from .quarantine import (
     load_stream_quarantine_state_path,
 )
 from .runtime_audit import get_canonical_runtime_audit_log
+from .storage import CANONICAL_EVENT_LOG_READ_TABLE, CANONICAL_EVENT_LOG_WRITE_TABLE
 
 _CANONICAL_EVENT_NAMESPACE: Final[UUID] = UUID(
     'f1d1ef17-95ce-4f9f-bd81-f9958cdf8ee5'
@@ -304,12 +305,14 @@ class CanonicalEventWriter:
         *,
         client: ClickHouseClient,
         database: str,
-        table: str = 'canonical_event_log',
+        table: str = CANONICAL_EVENT_LOG_WRITE_TABLE,
+        read_table: str = CANONICAL_EVENT_LOG_READ_TABLE,
         quarantine_registry: StreamQuarantineRegistryProtocol | None = None,
     ) -> None:
         self._client = client
         self._database = database
         self._table = table
+        self._read_table = read_table
         self._quarantine_registry = (
             quarantine_registry
             if quarantine_registry is not None
@@ -421,7 +424,7 @@ class CanonicalEventWriter:
                     source_offset_or_equivalent,
                     event_id,
                     payload_sha256_raw
-                FROM {self._database}.{self._table}
+                FROM {self._database}.{self._read_table}
                 WHERE (
                     source_id,
                     stream_id,

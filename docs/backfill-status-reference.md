@@ -2,8 +2,8 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-28
-- Slice/version reference: S34 prep (platform v0.1.28, control-plane v1.2.76 branch state)
+- Last updated: 2026-03-29
+- Slice/version reference: S34 prep (platform v0.1.28, control-plane v1.2.80 branch state)
 
 ## Purpose and scope
 - User-facing reference for what Origo means by historical availability while full canonical backfill is in progress.
@@ -32,11 +32,14 @@
   - canonical rows exist but the partition is not yet terminally proved
 - `quarantined partition`:
   - proof failed and the partition is blocked pending explicit reconcile
+- `logical reset boundary`:
+  - an audited partition-local cutover used during explicit ETF/FRED reconcile so stale canonical rows stop counting as live history without deleting append-only canonical evidence
 
 ## Source/provenance and freshness semantics
 - Origo serves only from projection ranges that are backed by terminally proved canonical partitions.
 - During Slice 34, backfill status is dataset-specific and may differ by source.
 - Source existence alone does not make data queryable; proof completion is the serving gate.
+- If ETF or FRED explicit `reconcile` logically resets a partition, that partition is treated as unavailable until fresh canonical rows are re-proved beyond the reset boundary.
 - No-selector requests resolve to `earliest -> latest proved boundary` for that dataset.
 - ETF history is issuer-specific:
   - iShares can claim official historical business-day coverage from `2024-01-11` forward once raw artifacts are archived and terminally proved
@@ -45,7 +48,9 @@
   - official iShares market-closure days only drop out of the required window when Origo has archived the first-party no-data response for that requested day
   - snapshot-only ETF issuers with zero valid archived artifacts have an explicit zero-history boundary; they are surfaced in proof output but do not count as missing history for issuers whose archive window is non-empty
   - ETF reruns are proof-driven: `backfill` skips terminal days, but any day with canonical rows and non-terminal proof must go through explicit `reconcile`
-  - explicit ETF `reconcile` may reset a poisoned day and rewrite it from archived source truth when legacy canonical rows no longer satisfy the deterministic payload contract for that day
+  - explicit ETF `reconcile` may logically reset a poisoned day and rewrite it from archived source truth when legacy canonical rows no longer satisfy the deterministic payload contract for that day
+- FRED reruns are also proof-driven:
+  - explicit FRED `reconcile` may logically reset a poisoned partition and rewrite it from deterministic revision-history source truth when stale request-time canonical rows or stale repair state no longer satisfy the current proof contract
 
 ## Failure modes, warnings, and error codes
 - `404`:

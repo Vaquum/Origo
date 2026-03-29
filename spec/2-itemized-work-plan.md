@@ -771,6 +771,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2i` Remove immutable runtime-audit append bottleneck from Binance fresh-write path without weakening audit immutability guarantees.
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [ ] `S34-C2k` Fix Slice-34 ambiguous-partition planning/reporting so reconcile resets cannot hide non-terminal partitions once canonical rows are intentionally cleared.
+- [x] `S34-C2l` Preserve append-only canonical-event truth during reconcile resets by recording partition reset boundaries and routing live canonical reads through the boundary-aware active view.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S34-C4a` Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
@@ -2127,6 +2128,10 @@ Constraints: no relaxed empty-partition requirements, no bypass of quarantine ch
 Action: Fix Slice-34 ambiguous-partition planning/reporting so reset partitions remain visible until terminal proof is recorded.
 Done looks like: ETF, exchange, Bitcoin, and closeout prep ambiguity queries treat source manifests and non-terminal proofs as authoritative candidate partitions, so a reconcile reset that clears canonical rows cannot cause planners or reports to skip unresolved partitions.
 Constraints: no fallback to canonical-event presence as ambiguity truth, no silent dropping of proof-only partitions, and no weakening of terminal-proof gating.
+12b. `S34-02l`
+Action: Preserve append-only canonical-event-log truth during ETF/FRED reconcile resets with explicit reset boundaries and boundary-aware canonical reads.
+Done looks like: explicit reconcile records `canonical_partition_reset_boundaries`, runtime proof/planner/projector/writer-identity reads flow through `canonical_event_log_active_v1`, and ETF/FRED reset-and-rewrite paths stop issuing destructive `ALTER TABLE ... DELETE` mutations against `canonical_event_log`.
+Constraints: no destructive canonical-event-log deletes, no hidden fallback to base-table reads in live proof/runtime paths, and no weakening of audited per-partition reset evidence.
 13. `S34-03`
 Action: Run Binance full-history backfill for `binance_spot_trades`.
 Done looks like: canonical events are complete from earliest available partition to current boundary with per-partition provenance fingerprints.

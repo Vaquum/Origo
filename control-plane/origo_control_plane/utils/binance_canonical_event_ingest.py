@@ -17,6 +17,7 @@ from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
 from origo.events.ingest_state import CanonicalStreamKey
 from origo.events.quarantine import NoopStreamQuarantineRegistry
 from origo.events.runtime_audit import get_canonical_runtime_audit_log
+from origo.events.storage import CANONICAL_EVENT_LOG_READ_TABLE
 from origo.events.writer import (
     CanonicalEventWriteInput,
     CanonicalEventWriter,
@@ -689,7 +690,7 @@ def _write_events_to_canonical(
         existing_rows = client.execute(
             f'''
             SELECT 1
-            FROM {database}.canonical_event_log
+            FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
             WHERE source_id = %(source_id)s
               AND stream_id = %(stream_id)s
               AND partition_id = %(partition_id)s
@@ -1098,7 +1099,7 @@ def write_staged_binance_spot_trade_csv_to_canonical(
     existing_rows = client.execute(
         f'''
         SELECT 1
-        FROM {database}.canonical_event_log
+        FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
         WHERE source_id = %(source_id)s
           AND stream_id = %(stream_id)s
           AND partition_id = %(partition_id)s
@@ -1328,7 +1329,7 @@ def write_binance_spot_trade_frame_to_canonical(
     existing_rows = client.execute(
         f'''
         SELECT 1
-        FROM {database}.canonical_event_log
+        FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
         WHERE source_id = %(source_id)s
           AND stream_id = %(stream_id)s
           AND partition_id = %(partition_id)s

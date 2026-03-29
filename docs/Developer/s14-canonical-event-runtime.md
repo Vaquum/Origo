@@ -2,9 +2,9 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-10
+- Last updated: 2026-03-29
 - Slice reference: S14 (`S14-C1`..`S14-C9`, `S14-P1`..`S14-P6`)
-- Version reference: `Origo API v0.1.7`, `origo-control-plane v1.2.57`
+- Version reference: `Origo API v0.1.28`, `origo-control-plane v1.2.80`
 
 ## Purpose and scope
 - Defines the event-sourcing runtime contracts introduced in Slice 14.
@@ -26,6 +26,8 @@
     - projector watermark tables
 - Outputs:
   - Canonical event rows in `canonical_event_log`
+  - Boundary-aware canonical runtime reads via `canonical_event_log_active_v1`
+  - Audited logical reset rows in `canonical_partition_reset_boundaries`
   - Projector checkpoint rows in `canonical_projector_checkpoints`
   - Projector watermark rows in `canonical_projector_watermarks`
   - Aligned aggregate rows in `canonical_aligned_1s_aggregates`
@@ -37,6 +39,12 @@
   - times: `source_event_time_utc` (nullable), `ingested_at_utc` (UTC)
   - raw payload: `payload_raw`, `payload_sha256_raw`
   - derivative payload: `payload_json`
+- Canonical runtime read surface (`canonical_event_log_active_v1`):
+  - hides any pre-reset rows that fall at or before the latest audited partition reset boundary
+  - required for live proof, planner, projector, and writer-identity lookups after reset-and-rewrite flows
+- Partition reset boundaries (`canonical_partition_reset_boundaries`):
+  - identity: `source_id`, `stream_id`, `partition_id`
+  - reset metadata: `reset_revision`, `reason`, `details_json`, `recorded_by_run_id`, `recorded_at_utc`
 - Completeness/reconciliation:
   - `canonical_ingest_cursor_state`
   - `canonical_ingest_cursor_ledger`
@@ -47,6 +55,7 @@
 
 ## Source/provenance and freshness semantics
 - Canonical truth is the append-only event log.
+- Reconcile reset-and-rewrite preserves that append-only truth by recording logical partition reset boundaries instead of deleting canonical events.
 - Serving rows are projection-derived artifacts from canonical events.
 - `payload_sha256_raw` is the immutable byte-level provenance anchor.
 - Freshness remains source-publish driven and warning-aware per API contract.
@@ -65,6 +74,7 @@
   - `RECONCILIATION_*`
   - `CURSOR_*`
 - Gap-detected checkpoints quarantine the stream and subsequent writes fail loudly.
+- Direct live runtime reads from `canonical_event_log` after a partition reset are a contract violation; boundary-aware truth must come from `canonical_event_log_active_v1`.
 
 ## Determinism/replay notes
 - Determinism proofs:

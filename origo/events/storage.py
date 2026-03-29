@@ -1,0 +1,5 @@
+from __future__ import annotations
+
+CANONICAL_EVENT_LOG_WRITE_TABLE = 'canonical_event_log'
+CANONICAL_EVENT_LOG_READ_TABLE = 'canonical_event_log_active_v1'
+CANONICAL_PARTITION_RESET_BOUNDARIES_TABLE = 'canonical_partition_reset_boundaries'

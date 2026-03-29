@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.80 on 29th of March, 2026
+
+- Preserved append-only canonical truth during Slice 34 ETF/FRED reconcile resets:
+  - added `canonical_partition_reset_boundaries` and the boundary-aware read surface `canonical_event_log_active_v1`
+  - switched live proof/planner/projector/writer-identity reads to the active view so stale pre-reset rows do not participate in reset-and-rewrite flows
+  - ETF and FRED explicit reconcile resets now clear only projection/checkpoint/watermark state and stop issuing destructive `canonical_event_log` delete mutations
+  - this removes the live FRED blocker exposed after `#104`, where the job reached reset-and-rewrite and then stalled on a huge synchronous `ALTER TABLE ... DELETE`
+
 ## v1.2.79 on 29th of March, 2026
 
 - Fixed Slice 34 FRED explicit reconcile so quarantining proof mismatches can still reach the audited reset-and-rewrite path:

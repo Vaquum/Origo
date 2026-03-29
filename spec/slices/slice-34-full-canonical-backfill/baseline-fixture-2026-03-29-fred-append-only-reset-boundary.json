@@ -1,0 +1,238 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local proof command bundle finished successfully",
+    "detail_code": "summary of ruff, pyright, and the focused append-only reset-boundary contract bundle with runtime-only noise normalized",
+    "row_count": "55 indicates the focused reset-boundary validation suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-fred-append-only-reset-boundary-proof",
+    "captured_at_utc": "2026-03-29T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the append-only ETF/FRED reset-boundary branch state after code, spec, docs, changelog, and version updates. Runtime-only noise in pytest duration output is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "19aeef2616df5aac0ee84b8fded35b62b42338ac233eebb4d683a3fab8bd07ee",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "99e48536dabb0f6c5a9f111dfba3b47427d629fade5d3e56ee5e540cd81620a9",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control_plane_migrations_sql_0045__create_canonical_partition_reset_boundaries_sql",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3354c99fe5788b80a6b791c75cf986293ae9cdf8e9eb20c4e3de9d7983db1634",
+      "path": "control-plane/migrations/sql/0045__create_canonical_partition_reset_boundaries.sql"
+    },
+    {
+      "name": "control_plane_migrations_sql_0046__create_canonical_event_log_active_v1_sql",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "43f20119312fa3f1e678efbaa8b7908edc6f7ddd8cefbed66f8953b7a556812a",
+      "path": "control-plane/migrations/sql/0046__create_canonical_event_log_active_v1.sql"
+    },
+    {
+      "name": "control_plane_origo_control_plane_jobs_etf_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f4f284fd0d29f5e17a9ebea73dc33a5ea204cbeffdf365fa4b930dbe538e581c",
+      "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_jobs_fred_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "54b81acb6d98d25ccc7eb5caf7e9a798232eb9e65327722811f3eb8631873cf9",
+      "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_s34_partition_authority_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0f02819b68a81773dd3ecd3763d8f50064b826e645f7152c493a592d2892bf92",
+      "path": "control-plane/origo_control_plane/s34_partition_authority.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_utils_binance_canonical_event_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "9b6d710780dddf4e15fc936b7c452dfd897b6dbfafa74189b9925a1f8e7eb765",
+      "path": "control-plane/origo_control_plane/utils/binance_canonical_event_ingest.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_utils_bybit_canonical_event_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "d43cf4ed9d0c4669ad3f3bea7391f049454912e11fd74a182f6957cf8ac346a8",
+      "path": "control-plane/origo_control_plane/utils/bybit_canonical_event_ingest.py"
+    },
+    {
+      "name": "control_plane_origo_control_plane_utils_okx_canonical_event_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "23e1248c65233077820df0a362a523c9e30d1faff48afd029dd8b2bc6a6cbf8e",
+      "path": "control-plane/origo_control_plane/utils/okx_canonical_event_ingest.py"
+    },
+    {
+      "name": "control_plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "03530bba08781392ae4ee0e5df39d4bc4ba60f7e1eaf324b233d4b0172ef27fb",
+      "path": "control-plane/pyproject.toml"
+    },
+    {
+      "name": "docs_Developer_s14_canonical_event_runtime_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "64ec074b6928677cd931af0b7ebd8d80fd790faa3bbf28319b04907722620886",
+      "path": "docs/Developer/s14-canonical-event-runtime.md"
+    },
+    {
+      "name": "docs_Developer_s34_canonical_backfill_runtime_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "0a199f7deccb8465c4a1e074a0d66c23166b13438ec0f13c8c137d13c23ee442",
+      "path": "docs/Developer/s34-canonical-backfill-runtime.md"
+    },
+    {
+      "name": "docs_backfill_status_reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "1afd64f07116394104569ec5614beaf30b0f5e05479b82eebc9b3c69fce12e4d",
+      "path": "docs/backfill-status-reference.md"
+    },
+    {
+      "name": "origo_events___init___py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "a2bd8e059afaba907186d59609425cf77411062e820a9e93a08ca416b53df295",
+      "path": "origo/events/__init__.py"
+    },
+    {
+      "name": "origo_events_backfill_state_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3bb61b168614e74a1fa330919be2dc08b923a9f742ff66429511161e48e97bc2",
+      "path": "origo/events/backfill_state.py"
+    },
+    {
+      "name": "origo_events_projector_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "10157efa01d1be21f3b0afacd8dd017a0950c7699584b33217e18f3057196982",
+      "path": "origo/events/projector.py"
+    },
+    {
+      "name": "origo_events_storage_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "7e7c5d0e62580aa1e54e262154a8f16bc4faf56afb39e1c217a375bb3fb623b6",
+      "path": "origo/events/storage.py"
+    },
+    {
+      "name": "origo_events_writer_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "fa8c4ab4b58c321579ec279158f7785357e60b2adcf46fde881811816c6a1d6e",
+      "path": "origo/events/writer.py"
+    },
+    {
+      "name": "spec_1_top_level_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "f8f1fa5764f3b325137133793300dba2bd1086dc688a111fa8e7cb6981d8471d",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2_itemized_work_plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "66cbefc23aba42d0cf2f104585c5e30cb1243b0694e34cd8f6f9b06d935da796",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live_performance_investigation_log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "fd0b85625ba57114761a78fe02af613125a15adbc6bfdf8ef23ce79117e637e5",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "a0a8765363bafbb5a1a991ea11d8bcad241e75a352866ba342e4e8b6b4de261a",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice_34_full_canonical_backfill_run_notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "46f40a5ef2bcede651114cb4eec13752575d666d40eb988e57f2d319680d5361",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "tests_contract_test_canonical_event_reset_boundary_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "3eb468ed9fa50e733efdebe8987fa07105978b731ea38836d356f05c25c4b0d4",
+      "path": "tests/contract/test_canonical_event_reset_boundary_contract.py"
+    },
+    {
+      "name": "tests_contract_test_canonical_event_writer_query_chunking_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "83f1307636ce6c34105d6f23c17ef4585583e148bd205fa6481aeff8a31dbe13",
+      "path": "tests/contract/test_canonical_event_writer_query_chunking_contract.py"
+    },
+    {
+      "name": "tests_contract_test_etf_daily_backfill_job_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4d7c2d32900d4b24162715f308732e7facb19885a34e55bdf2f244f2e75fb515",
+      "path": "tests/contract/test_etf_daily_backfill_job_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_fred_backfill_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4ce1e56622eed5b7807b5fca364aea085f19857cdc159582e0dc2d3406fd5b69",
+      "path": "tests/contract/test_s34_fred_backfill_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_partition_authority_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e00c8903cb854143f47f131e8e958d2e55187df4c30e45ccc8821808d2b47b43",
+      "path": "tests/contract/test_s34_partition_authority_contract.py"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_fred_append_only_reset_boundary_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ....................................................... [100%] ; 55 passed in <runtime>",
+      "row_count": 55,
+      "body_sha256": "5d5cd531d40a827e1dac30dd15cf85e12565c39c416161eab2b8c36d937e172c"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_fred_append_only_reset_boundary_proof",
+      "status_code": 0,
+      "detail_code": "All checks passed! ; 0 errors, 0 warnings, 0 informations ; ....................................................... [100%] ; 55 passed in <runtime>",
+      "row_count": 55,
+      "body_sha256": "5d5cd531d40a827e1dac30dd15cf85e12565c39c416161eab2b8c36d937e172c"
+    }
+  ]
+}

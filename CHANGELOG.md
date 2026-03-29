@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-29
+- Preserved append-only canonical truth during Slice 34 ETF/FRED reconcile resets:
+  - added `canonical_partition_reset_boundaries` plus the boundary-aware read surface `canonical_event_log_active_v1`
+  - switched live canonical proof/planner/projector/writer-identity reads to the active view instead of reading stale pre-reset rows from the base append-only table
+  - ETF and FRED explicit reconcile resets now delete only projection/checkpoint/watermark state and leave `canonical_event_log` append-only
+  - this closes the live blocker exposed after `#104`, where FRED reconcile reached the reset path but then hung on a huge synchronous `ALTER TABLE ... DELETE` mutation against `canonical_event_log`
+- Updated version to `origo-control-plane v1.2.80` (`Origo API` unchanged at `v0.1.28`).
+
 - Fixed Slice 34 FRED explicit reconcile so proof quarantine now reaches the intended reset-and-rewrite path:
   - the FRED Dagster job now treats `BACKFILL_PARTITION_PROOF_FAILED` during reconcile writer-repair as the trigger to load the just-recorded quarantined proof row and continue into the audited partition reset-and-rewrite flow
   - tightened the FRED reconcile regression test to match the real state-store contract, which raises immediately on quarantine instead of returning a quarantined proof object

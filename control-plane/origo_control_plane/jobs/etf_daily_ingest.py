@@ -18,6 +18,7 @@ from clickhouse_driver import Client as ClickhouseClient
 from dagster import OpExecutionContext
 
 from origo.events import (
+    CANONICAL_EVENT_LOG_READ_TABLE,
     CanonicalBackfillStateStore,
     CanonicalStreamKey,
     SourceIdentityMaterial,
@@ -1036,7 +1037,7 @@ def _count_partition_rows_or_raise(
         SELECT
             (
                 SELECT count()
-                FROM {database}.canonical_event_log
+                FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
                 WHERE source_id = %(source_id)s
                   AND stream_id = %(stream_id)s
                   AND partition_id = %(partition_id)s
@@ -1113,16 +1114,6 @@ def _delete_partition_rows_or_raise(
     }
     client.execute(
         f'''
-        ALTER TABLE {database}.canonical_event_log
-        DELETE WHERE source_id = %(source_id)s
-          AND stream_id = %(stream_id)s
-          AND partition_id = %(partition_id)s
-        ''',
-        params,
-        settings=delete_settings,
-    )
-    client.execute(
-        f'''
         ALTER TABLE {database}.canonical_etf_daily_metrics_native_v1
         DELETE WHERE toDate(observed_at_utc) = toDate(%(partition_id)s)
         ''',
@@ -1174,6 +1165,11 @@ def _reset_etf_partition_for_reconcile_or_raise(
     writer_error: EventWriterError,
 ) -> dict[str, int]:
     recorded_at_utc = datetime.now(UTC)
+    counts_before_reset = _count_partition_rows_or_raise(
+        client=client,
+        database=database,
+        partition_id=partition_id,
+    )
     state_store.record_partition_state(
         source_proof=source_proof,
         state='reconcile_required',
@@ -1185,10 +1181,15 @@ def _reset_etf_partition_for_reconcile_or_raise(
             'writer_error_message': writer_error.message,
         },
     )
-    counts_before_reset = _count_partition_rows_or_raise(
-        client=client,
-        database=database,
-        partition_id=partition_id,
+    state_store.record_partition_reset_boundary(
+        stream_key=source_proof.stream_key,
+        reason='legacy_canonical_payload_reset_required',
+        details={
+            'writer_error_code': writer_error.code,
+            'writer_error_message': writer_error.message,
+        },
+        run_id=context.run_id,
+        recorded_at_utc=recorded_at_utc,
     )
     _delete_partition_rows_or_raise(
         client=client,

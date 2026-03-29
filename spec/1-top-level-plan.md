@@ -252,6 +252,7 @@ Every slice must pass:
 1. Canonical raw truth is a single global append-only event log.
 2. Canonical event format is typed envelope fields plus canonical `payload_raw` and `payload_sha256_raw`.
 3. Canonical raw events are never rewritten or deleted.
+3a. Reconcile reset semantics are logical partition reset boundaries recorded outside the append-only log; live proof/planner/projector/runtime reads must use the boundary-aware active-view contract instead of destructive `canonical_event_log` deletes.
 4. Canonical writer enforces unique source-event identity and idempotent retries/replays.
 5. Canonical ingest runs continuous no-miss reconciliation and fails loudly on detected gaps.
 6. All serving paths (`native`, `aligned_1s`, and future MK views) are projection-driven from canonical events.

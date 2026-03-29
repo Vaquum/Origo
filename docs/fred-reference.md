@@ -3,7 +3,7 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-29
-- Slice/version reference: S6, S17, S28, S34-C6f, S34-C6l (API v0.1.28, control-plane v1.2.82)
+- Slice/version reference: S6, S17, S28, S34-C6f, S34-C6l, S34-C6m (API v0.1.28, control-plane v1.2.83)
 
 ## Purpose and scope
 - User-facing reference for FRED data in Origo.
@@ -77,6 +77,9 @@
 - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
 - `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
   - self-hosted live runtimes must sync this required key into `/opt/origo/deploy/.env`; if it is missing, FRED backfill/reconcile fails before source fetch
+- `ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN`
+- `ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS`
+  - direct Dagster/manual FRED `reconcile` launches without explicit partition ids still use these env-backed ceilings; the dashboard path does not widen back to the full ambiguity set
 - `ORIGO_FRED_SOURCE_PUBLISH_STALE_MAX_AGE_DAYS`
 - `ORIGO_FRED_QUERY_SERVING_STATE`
 - `ORIGO_SOURCE_RIGHTS_MATRIX_PATH`

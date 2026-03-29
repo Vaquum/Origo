@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-29
+- Closed the Slice 34 FRED direct-Dagster reconcile planning gap:
+  - extracted shared bounded reconcile planning into `origo_control_plane.s34_fred_reconcile_planning`
+  - direct Dagster `reconcile` launches without `origo.backfill.partition_ids` now use the same env-backed ambiguous-prefix and source-window ceilings as the repo-native runner
+  - the Dagster job no longer silently re-expands back to the full FRED ambiguity set when launched from the dashboard/manual path
+  - added focused contract coverage so runner/job planner drift fails loudly
+- Updated version to `origo-control-plane v1.2.83` (`Origo API` unchanged at `v0.1.28`).
+
 - Fixed the Slice 34 FRED deploy/runtime env contract so live Dagster actually receives the required revision-history window setting:
   - deploy-on-merge now reads, validates, transfers, rewrites, and logs `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
   - added focused deploy-workflow contract coverage so newly required FRED runtime env keys cannot be merged without reaching `/opt/origo/deploy/.env`

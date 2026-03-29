@@ -92,6 +92,10 @@
   - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
   - `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES_PER_REQUEST`
   - deploy-on-merge must synchronize required FRED env keys from root `.env.example` into `/opt/origo/deploy/.env`; a merged code contract that does not reach the live server env is a hard runtime failure
+- FRED reconcile planner:
+  - `ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN`
+  - `ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS`
+  - direct Dagster/manual `reconcile` launches without explicit `origo.backfill.partition_ids` must still honor these same bounded-planning env ceilings; missing or invalid values are hard runtime failures
 
 ## Minimal examples
 - Generate Slice 34 closeout-prep summary:

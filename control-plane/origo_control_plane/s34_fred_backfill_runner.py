@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 import time
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -30,6 +29,12 @@ from origo_control_plane.backfill import (
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.jobs.fred_daily_ingest import origo_fred_daily_backfill_job
+from origo_control_plane.s34_fred_reconcile_planning import (
+    load_fred_reconcile_max_partitions_per_run_or_raise,
+    load_fred_reconcile_max_source_window_days_or_raise,
+    parse_fred_partition_id_as_date_or_raise,
+    select_fred_reconcile_partition_ids_or_raise,
+)
 from origo_control_plane.s34_partition_authority import (
     load_nonterminal_partition_ids_for_stream_or_raise,
 )
@@ -38,12 +43,6 @@ _DATASET = 'fred_series_metrics'
 _FRED_JOB_NAME = 'origo_fred_daily_backfill_job'
 _RUN_POLL_INTERVAL_SECONDS = 2.0
 _DAGSTER_HOME_ENV = 'DAGSTER_HOME'
-_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV = (
-    'ORIGO_S34_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN'
-)
-_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV = (
-    'ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS'
-)
 _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 
 
@@ -75,103 +74,6 @@ class _PlannedFREDRun:
 
 def _default_run_id() -> str:
     return f's34-backfill-fred-{datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")}'
-
-
-def _load_fred_reconcile_max_partitions_per_run_or_raise() -> int:
-    raw = os.environ.get(_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV)
-    if raw is None or raw.strip() == '':
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be set and non-empty'
-        )
-    normalized = raw.strip()
-    try:
-        value = int(normalized)
-    except ValueError as exc:
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be an integer, '
-            f"got '{normalized}'"
-        ) from exc
-    if value <= 0:
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_PARTITIONS_PER_RUN_ENV} must be > 0, got {value}'
-        )
-    return value
-
-
-def _load_fred_reconcile_max_source_window_days_or_raise() -> int:
-    raw = os.environ.get(_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV)
-    if raw is None or raw.strip() == '':
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be set and non-empty'
-        )
-    normalized = raw.strip()
-    try:
-        value = int(normalized)
-    except ValueError as exc:
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be an integer, '
-            f"got '{normalized}'"
-        ) from exc
-    if value <= 0:
-        raise RuntimeError(
-            f'{_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS_ENV} must be > 0, got {value}'
-        )
-    return value
-
-
-def _parse_partition_id_as_date_or_raise(*, partition_id: str) -> date:
-    try:
-        return date.fromisoformat(partition_id)
-    except ValueError as exc:
-        raise RuntimeError(
-            'FRED partition ids must be ISO dates, '
-            f"got partition_id='{partition_id}'"
-        ) from exc
-
-
-def _select_reconcile_partition_ids_or_raise(
-    *,
-    ambiguous_partition_ids: tuple[str, ...],
-    max_partitions_per_run: int,
-    max_source_window_days: int,
-) -> tuple[str, ...]:
-    if ambiguous_partition_ids == ():
-        raise RuntimeError('ambiguous_partition_ids must be non-empty')
-    if max_partitions_per_run <= 0:
-        raise RuntimeError('max_partitions_per_run must be > 0')
-    if max_source_window_days <= 0:
-        raise RuntimeError('max_source_window_days must be > 0')
-
-    first_partition_date = _parse_partition_id_as_date_or_raise(
-        partition_id=ambiguous_partition_ids[0]
-    )
-    max_partition_date = first_partition_date + timedelta(
-        days=max_source_window_days - 1
-    )
-    selected_partition_ids: list[str] = []
-    previous_partition_date = first_partition_date
-    for partition_id in ambiguous_partition_ids:
-        partition_date = _parse_partition_id_as_date_or_raise(
-            partition_id=partition_id
-        )
-        if partition_date < previous_partition_date:
-            raise RuntimeError(
-                'FRED ambiguous partition ids must be sorted ascending, '
-                f"got previous='{previous_partition_date.isoformat()}' "
-                f"current='{partition_id}'"
-            )
-        if len(selected_partition_ids) >= max_partitions_per_run:
-            break
-        if partition_date > max_partition_date:
-            break
-        selected_partition_ids.append(partition_id)
-        previous_partition_date = partition_date
-
-    if selected_partition_ids == []:
-        raise RuntimeError(
-            'FRED reconcile tranche selection produced zero partition ids'
-        )
-    return tuple(selected_partition_ids)
 
 
 def _repo_root() -> Path:
@@ -472,20 +374,20 @@ def _plan_next_fred_run_or_raise(
     )
     if ambiguous_partition_ids != ():
         reconcile_partition_limit = (
-            _load_fred_reconcile_max_partitions_per_run_or_raise()
+            load_fred_reconcile_max_partitions_per_run_or_raise()
         )
         reconcile_source_window_days = (
-            _load_fred_reconcile_max_source_window_days_or_raise()
+            load_fred_reconcile_max_source_window_days_or_raise()
         )
-        partition_ids = _select_reconcile_partition_ids_or_raise(
+        partition_ids = select_fred_reconcile_partition_ids_or_raise(
             ambiguous_partition_ids=ambiguous_partition_ids,
             max_partitions_per_run=reconcile_partition_limit,
             max_source_window_days=reconcile_source_window_days,
         )
-        first_partition_date = _parse_partition_id_as_date_or_raise(
+        first_partition_date = parse_fred_partition_id_as_date_or_raise(
             partition_id=partition_ids[0]
         )
-        last_partition_date = _parse_partition_id_as_date_or_raise(
+        last_partition_date = parse_fred_partition_id_as_date_or_raise(
             partition_id=partition_ids[-1]
         )
         return _PlannedFREDRun(

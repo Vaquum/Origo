@@ -1,0 +1,161 @@
+{
+  "column_key": {
+    "name": "fingerprint entry label",
+    "status_code": "0 means the local validation bundle finished successfully",
+    "detail_code": "summary of focused FRED job/runner/deploy/object-store contracts, repo-wide ruff, and repo-wide pyright with runtime noise normalized",
+    "row_count": "18 indicates the focused validation suite passed",
+    "body_sha256": "SHA256 hash of the normalized validation bundle output"
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "type": "local-fred-job-bounded-reconcile-proof",
+    "captured_at_utc": "2026-03-29T00:00:00Z",
+    "notes": "Two consecutive local validation runs against the shared FRED runner/Dagster bounded reconcile planner contract after code, docs, specs, changelog, version, and slice artifacts were updated. Pytest runtime noise is normalized before hashing."
+  },
+  "source_checksums": [
+    {
+      "name": "_env_example",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "27dd7c40155d3f16ad3c15ebbd6931a8a054c5bae8f48872a83f6fa3d68a2040",
+      "path": ".env.example"
+    },
+    {
+      "name": "CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "7e0c5dcd067ad652a458159fd9bd3cce6e240fb02953fc91f16284a88105d014",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_CHANGELOG_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "af41502d0b8abde675d50449a3de7000c6bf79f86cfce3738c38249939081607",
+      "path": "control-plane/CHANGELOG.md"
+    },
+    {
+      "name": "control-plane_pyproject_toml",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "55f190545959977e0bea9acd38d5f968b5fd15867a786bf3b3f0547417d4e803",
+      "path": "control-plane/pyproject.toml"
+    },
+    {
+      "name": "control-plane_origo_control_plane_jobs_fred_daily_ingest_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "c977a9dcac0dadc11ef802a03b7a0fd0d8f998cfdb1dedf8ec88cc57efaf9bfa",
+      "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py"
+    },
+    {
+      "name": "control-plane_origo_control_plane_s34_fred_backfill_runner_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "6423f3e2b8f888d349a4ca0d2b22ae4f8e37d6f265ceef0fd86e59d69a93d2e4",
+      "path": "control-plane/origo_control_plane/s34_fred_backfill_runner.py"
+    },
+    {
+      "name": "control-plane_origo_control_plane_s34_fred_reconcile_planning_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "ca1bfc0859f7fd61619cc607fe7958f44e00980c9e22b0aabf2978e6219dce4e",
+      "path": "control-plane/origo_control_plane/s34_fred_reconcile_planning.py"
+    },
+    {
+      "name": "docs_Developer_s34-canonical-backfill-runtime_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "e875499fe666be185283d480f31be203e36125ed04950b2b5791ea3b18bba9c1",
+      "path": "docs/Developer/s34-canonical-backfill-runtime.md"
+    },
+    {
+      "name": "docs_Developer_s6-fred-connector-contracts_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "4b2f06ed38e06e225eaefa29d218ff75ba8e39dba5bf319f13616261953c1ca7",
+      "path": "docs/Developer/s6-fred-connector-contracts.md"
+    },
+    {
+      "name": "docs_fred-reference_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "cf81f17049cab4874872d3c2ffa7706cbfa8d4339de9c47537a9ee46c0a19770",
+      "path": "docs/fred-reference.md"
+    },
+    {
+      "name": "spec_1-top-level-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "8ad5e1a726fcbbe7d7a0d22e69df2d77a8e68d5ff55963de138e6e7e77da5dce",
+      "path": "spec/1-top-level-plan.md"
+    },
+    {
+      "name": "spec_2-itemized-work-plan_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "1aafabe84d9bbdb3380e5e40e909c2303fe6921d277ca8cd74f5a4f24274b260",
+      "path": "spec/2-itemized-work-plan.md"
+    },
+    {
+      "name": "spec_live-performance-investigation-log_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "575d59e0970128df13e6a028d5fc8442496d2aaf1c1fbe3293646a041fd6dacf",
+      "path": "spec/live-performance-investigation-log.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_manifest_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "690df4a919b640022c21e3da55300dffbf86ee8a565533d25711502207ebc3f7",
+      "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md"
+    },
+    {
+      "name": "spec_slices_slice-34-full-canonical-backfill_run-notes_md",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "6dc7c501bf9e7de81b1e2b928ecba2185adae831f7add07a9c48c6dc33d29f64",
+      "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md"
+    },
+    {
+      "name": "tests_contract_test_s34_fred_backfill_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "9d8b63fc1cff50774a6f055a447984de632737d6560328aeeb62c12d78ff0213",
+      "path": "tests/contract/test_s34_fred_backfill_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_fred_deploy_env_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "af529ae408f95d7c7b13a2e345ecead6f839c8884b2c9655f2777d9a8a9de377",
+      "path": "tests/contract/test_s34_fred_deploy_env_contract.py"
+    },
+    {
+      "name": "tests_contract_test_s34_object_store_runtime_contract_py",
+      "zip_sha256": null,
+      "csv_sha256": null,
+      "sha256": "961a9ba921f5931a8216f603e16a35c52495c7efc07fc95ea23f8b0d08d1a409",
+      "path": "tests/contract/test_s34_object_store_runtime_contract.py"
+    }
+  ],
+  "run_1_fingerprints": [
+    {
+      "name": "local_fred_job_bounded_reconcile_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 18 items ;  ; tests/contract/test_s34_fred_backfill_contract.py ..............         [ 77%] ; tests/contract/test_s34_fred_deploy_env_contract.py .                    [ 83%] ; tests/contract/test_s34_object_store_runtime_contract.py ...             [100%] ;  ; ============================== 18 passed in <runtime> ============================== ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 18,
+      "body_sha256": "930f5cef0236fdca3af567a11031ff5ec8285e63e0d95ea9fbf9b9adec27f1bf"
+    }
+  ],
+  "run_2_fingerprints": [
+    {
+      "name": "local_fred_job_bounded_reconcile_proof",
+      "status_code": 0,
+      "detail_code": "============================= test session starts ============================== ; platform darwin -- Python 3.13.2, pytest-9.0.2, pluggy-1.6.0 ; rootdir: /Users/mikkokotila/Library/Mobile Documents/com~apple~CloudDocs/WIP/projects/Origo ; configfile: pyproject.toml ; plugins: anyio-4.12.1 ; collected 18 items ;  ; tests/contract/test_s34_fred_backfill_contract.py ..............         [ 77%] ; tests/contract/test_s34_fred_deploy_env_contract.py .                    [ 83%] ; tests/contract/test_s34_object_store_runtime_contract.py ...             [100%] ;  ; ============================== 18 passed in <runtime> ============================== ; All checks passed! ; 0 errors, 0 warnings, 0 informations",
+      "row_count": 18,
+      "body_sha256": "930f5cef0236fdca3af567a11031ff5ec8285e63e0d95ea9fbf9b9adec27f1bf"
+    }
+  ]
+}

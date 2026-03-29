@@ -13,6 +13,10 @@ _HEADER = (
     'timestamp,symbol,side,size,price,tickDirection,trdMatchID,'
     'grossValue,homeNotional,foreignNotional\n'
 )
+_HEADER_WITH_RPI = (
+    'timestamp,symbol,side,size,price,tickDirection,trdMatchID,'
+    'grossValue,homeNotional,foreignNotional,RPI\n'
+)
 
 
 def _csv_payload(
@@ -26,11 +30,14 @@ def _csv_payload(
     foreign_notional: str = '42.0',
     side: str = 'buy',
     tick_direction: str = 'PlusTick',
+    rpi_text: str | None = None,
 ) -> bytes:
+    header = _HEADER_WITH_RPI if rpi_text is not None else _HEADER
+    rpi_suffix = f',{rpi_text}' if rpi_text is not None else ''
     return (
-        _HEADER
+        header
         + f'{timestamp_seconds},BTCUSDT,{side},{size},{price},{tick_direction},'
-        + f'{trd_match_id},{gross_value},{home_notional},{foreign_notional}\n'
+        + f'{trd_match_id},{gross_value},{home_notional},{foreign_notional}{rpi_suffix}\n'
     ).encode('utf-8')
 
 
@@ -103,6 +110,30 @@ def test_bybit_parser_accepts_zero_size_and_zero_home_notional_from_official_sou
     assert events[0].size_text == '0.0'
     assert events[0].home_notional_text == '0.0'
     assert events[0].quote_quantity_text == '0.0001'
+
+
+def test_bybit_parser_accepts_trailing_rpi_column_and_preserves_field() -> None:
+    events = parse_bybit_spot_trade_csv(
+        csv_content=_csv_payload(
+            trd_match_id='08ff9568-cb50-55d6-b497-13727eec09dc',
+            timestamp_seconds='1774656000.1446',
+            size='0.001',
+            price='66374.60',
+            gross_value='6.63746e+09',
+            home_notional='0.001',
+            foreign_notional='66.3746',
+            side='Sell',
+            tick_direction='ZeroMinusTick',
+            rpi_text='0',
+        ),
+        date_str='2026-03-28',
+        day_start_ts_utc_ms=1774656000000,
+        day_end_ts_utc_ms=1774742400000,
+    )
+
+    assert len(events) == 1
+    assert events[0].rpi_text == '0'
+    assert events[0].to_payload()['rpi'] == '0'
 
 
 class _RecordingClient:

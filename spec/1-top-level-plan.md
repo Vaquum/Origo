@@ -750,10 +750,6 @@ Every slice must pass:
    8. ETF historical availability is issuer-specific:
       1. issuers with a proven first-party historical endpoint may claim explicit pre-captured history from their contracted first-available day
       2. snapshot-only issuers may only claim history from the first valid archived artifact day forward
-9. FRED Slice-34 historical coverage is explicitly capped:
-   1. canonical backfill/reconcile coverage starts at `2009-01-01`
-   2. Dagster/manual/repo-native FRED runs must never fetch or reconcile partitions before that boundary
-   3. explicit FRED partition requests before `2009-01-01` must fail loudly
       3. snapshot-only issuers with zero valid archived artifacts have an explicit empty historical claim and must not block replay of issuers whose historical claim is non-empty
       4. zero-history snapshot-only issuers must still be surfaced explicitly in proof/audit output; they may not be silently treated as historically complete
       5. stale partial canonical ETF leftovers must never define the historical replay window
@@ -781,6 +777,10 @@ Every slice must pass:
    12. every required FRED runtime env added under Slice 34 must also be synchronized by deploy from root `.env.example` into `/opt/origo/deploy/.env`; a merged code/env contract that is absent from the live deploy env file is a hard deploy/runtime failure, not an operator follow-up
    13. if FRED `reconcile` is launched directly from Dagster without explicit partition tags, the Dagster job itself must still apply the same env-backed bounded-tranche selection contract as the repo-native runner; dashboard/manual launches may not silently expand back to the full ambiguity set
    14. latest-proof selection for FRED Slice-34 planning/execution must be deterministic even when duplicate `proof_revision` rows exist for a partition; authoritative selectors must order by `proof_revision`, `recorded_at_utc`, and `proof_id` together so successful reconcile runs cannot immediately re-plan already terminal-complete partitions
+8b. FRED Slice-34 historical coverage is explicitly capped:
+   1. canonical backfill/reconcile coverage starts at `2009-01-01`
+   2. Dagster/manual/repo-native FRED runs must never fetch or reconcile partitions before that boundary
+   3. explicit FRED partition requests before `2009-01-01` must fail loudly
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

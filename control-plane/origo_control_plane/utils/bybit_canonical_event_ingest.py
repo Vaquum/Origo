@@ -49,6 +49,7 @@ _EXPECTED_CSV_HEADER = (
     'homeNotional',
     'foreignNotional',
 )
+_EXPECTED_CSV_HEADER_WITH_RPI = (*_EXPECTED_CSV_HEADER, 'RPI')
 
 
 def parse_bybit_timestamp_ms_or_raise(*, raw_value: str, row_index: int) -> int:
@@ -146,13 +147,14 @@ class BybitSpotTradeEvent:
     gross_value_text: str
     home_notional_text: str
     foreign_notional_text: str
+    rpi_text: str | None = None
 
     @property
     def partition_id(self) -> str:
         return self.event_time_utc.strftime('%Y-%m-%d')
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             'symbol': self.symbol,
             'trade_id': self.trade_id,
             'trd_match_id': self.trd_match_id,
@@ -166,6 +168,9 @@ class BybitSpotTradeEvent:
             'home_notional': self.home_notional_text,
             'foreign_notional': self.foreign_notional_text,
         }
+        if self.rpi_text is not None:
+            payload['rpi'] = self.rpi_text
+        return payload
 
     def to_integrity_tuple(
         self,
@@ -200,18 +205,22 @@ def parse_bybit_spot_trade_csv(
     header = next(reader, None)
     if header is None:
         raise RuntimeError('Bybit CSV payload is empty')
-    if tuple(header) != _EXPECTED_CSV_HEADER:
+    header_tuple = tuple(header)
+    if header_tuple not in {_EXPECTED_CSV_HEADER, _EXPECTED_CSV_HEADER_WITH_RPI}:
         raise RuntimeError(
             'Bybit CSV header mismatch: '
-            f'expected={_EXPECTED_CSV_HEADER} got={tuple(header)}'
+            f'expected_one_of={(_EXPECTED_CSV_HEADER, _EXPECTED_CSV_HEADER_WITH_RPI)} '
+            f'got={header_tuple}'
         )
+    has_rpi_column = header_tuple == _EXPECTED_CSV_HEADER_WITH_RPI
 
     events: list[BybitSpotTradeEvent] = []
     for row_index, row in enumerate(reader, start=2):
-        if len(row) != 10:
+        expected_column_count = 11 if has_rpi_column else 10
+        if len(row) != expected_column_count:
             raise RuntimeError(
                 f'Bybit CSV row has unexpected column count at line={row_index}: '
-                f'expected=10 got={len(row)}'
+                f'expected={expected_column_count} got={len(row)}'
             )
         timestamp_ms = parse_bybit_timestamp_ms_or_raise(
             raw_value=row[0],
@@ -268,6 +277,15 @@ def parse_bybit_spot_trade_csv(
             row[9],
             label=f'Bybit row {row_index} foreignNotional',
         )
+        rpi_text: str | None = None
+        if has_rpi_column:
+            candidate_rpi = row[10].strip()
+            if candidate_rpi not in {'0', '1'}:
+                raise RuntimeError(
+                    'Bybit CSV RPI flag must be 0 or 1 '
+                    f'at line={row_index}, got={candidate_rpi!r}'
+                )
+            rpi_text = candidate_rpi
         event_time_utc = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=UTC)
         quote_quantity_text = foreign_notional_text
         events.append(
@@ -285,6 +303,7 @@ def parse_bybit_spot_trade_csv(
                 gross_value_text=gross_value_text,
                 home_notional_text=home_notional_text,
                 foreign_notional_text=foreign_notional_text,
+                rpi_text=rpi_text,
             )
         )
     if events == []:

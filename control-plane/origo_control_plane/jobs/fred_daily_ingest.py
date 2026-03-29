@@ -184,6 +184,26 @@ def _resolve_source_window_for_partition_ids(
     )
 
 
+def _resolve_source_partition_scope_ids_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    runtime_contract: BackfillRuntimeContract,
+    explicit_partition_ids: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    if explicit_partition_ids is not None:
+        return explicit_partition_ids
+    if runtime_contract.execution_mode != 'reconcile':
+        return None
+    ambiguous_partition_ids = _load_ambiguous_partition_ids_or_raise(
+        client=client,
+        database=database,
+    )
+    if ambiguous_partition_ids == ():
+        raise RuntimeError('FRED reconcile requested but no ambiguous partitions exist')
+    return ambiguous_partition_ids
+
+
 def _count_partition_rows_or_raise(
     *,
     client: ClickhouseClient,
@@ -372,10 +392,35 @@ def _reset_fred_partition_for_reconcile_or_raise(
     return counts_before_reset
 
 
-def _build_persisted_bundles_or_raise(*, context: OpExecutionContext) -> list[_PersistedFREDBundle]:
+def _build_persisted_bundles_or_raise(
+    *,
+    context: OpExecutionContext,
+    source_partition_ids: tuple[str, ...] | None,
+) -> list[_PersistedFREDBundle]:
     registry_version, registry_entries = load_fred_series_registry()
-    source_window = _resolve_source_window_for_partition_ids(
-        _load_required_partition_ids_from_tags_or_none(context.run.tags)
+    source_window = _resolve_source_window_for_partition_ids(source_partition_ids)
+    context.log.info(
+        'FRED raw bundle source window '
+        + json.dumps(
+            {
+                'execution_mode': context.run.tags.get('origo.backfill.execution_mode'),
+                'partition_scope_count': (
+                    0 if source_partition_ids is None else len(source_partition_ids)
+                ),
+                'observation_start': (
+                    None
+                    if source_window.observation_start is None
+                    else source_window.observation_start.isoformat()
+                ),
+                'observation_end': (
+                    None
+                    if source_window.observation_end is None
+                    else source_window.observation_end.isoformat()
+                ),
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
     )
     fred_client = build_fred_client_from_env()
     bundles = build_fred_raw_bundles(
@@ -903,7 +948,16 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
     )
     native_client, database = _build_clickhouse_client_or_raise()
     try:
-        persisted_bundles = _build_persisted_bundles_or_raise(context=context)
+        source_partition_scope_ids = _resolve_source_partition_scope_ids_or_raise(
+            client=native_client,
+            database=database,
+            runtime_contract=runtime_contract,
+            explicit_partition_ids=explicit_partition_ids,
+        )
+        persisted_bundles = _build_persisted_bundles_or_raise(
+            context=context,
+            source_partition_ids=source_partition_scope_ids,
+        )
         persisted_bundles_by_source_id = {
             item.bundle.source_id: item for item in persisted_bundles
         }

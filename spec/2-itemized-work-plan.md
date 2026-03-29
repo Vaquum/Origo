@@ -2259,6 +2259,10 @@ Constraints: no silent retries against the same oversized URI and no downgrade t
 Action: Freeze and enforce the live source-safe FRED revision-history window ceiling.
 Done looks like: the FRED client starts from a live-proved safe `vintage_dates` window size, and any remaining `series/observations` edge `400 Bad Request` or timeout still causes deterministic chunk splitting rather than a hard stop.
 Constraints: no deployment-specific hard-coding, no blind retry loops, and no hidden fallback to request-time snapshots.
+25g. `S34-06g`
+Action: Scope FRED reconcile source fetches to authoritative ambiguous partition windows before raw bundle build.
+Done looks like: when reconcile runs without explicit partition tags, the job resolves ambiguous partition ids from ClickHouse first, derives the bounded observation window from those ids, and logs that window before any raw revision-history fetch starts.
+Constraints: no full-history replay for narrow reconcile windows, no planner/tag fallback that hides the true ambiguity scope, and no raw bundle build ahead of reconcile window resolution.
 26. `S34-07`
 Action: Run Bitcoin full-history backfill for base streams (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`).
 Done looks like: chain and mempool base datasets are complete in canonical events with deterministic linkage and no-miss checks.

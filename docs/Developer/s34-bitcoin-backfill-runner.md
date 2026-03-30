@@ -5,8 +5,14 @@
 - Last updated: 2026-03-27
 - Slice reference: S34 (`S34-C7d`, `S34-07d`, `S34-G2`)
 
+## Status
+- Historical slice record only. Not a live runtime contract.
+- Any CLI example or helper entrypoint in this document is provenance only.
+- Canonical backfill/reconcile writes must follow [docs/Developer/dagster-authority-contract.md](./dagster-authority-contract.md).
+- The historical helper entrypoint named here now fails closed for write execution.
+
 ## Purpose and scope
-- Defines the repo-native Slice 34 Bitcoin backfill/controller path.
+- Records the historical repo-native Slice 34 Bitcoin backfill/controller path.
 - Scope is explicitly split:
   - height-range chain datasets:
     - `bitcoin_block_headers`

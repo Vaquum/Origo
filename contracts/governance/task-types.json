@@ -1,0 +1,71 @@
+{
+  "allowed_primary_task_types": [
+    "proof",
+    "governance",
+    "operator_surface",
+    "runtime_env",
+    "correctness",
+    "performance",
+    "capability"
+  ],
+  "classification_is_by_requested_outcome": true,
+  "unknown_root_cause_starts_as": "proof",
+  "task_types": {
+    "proof": {
+      "intent_code": "evidence_and_live_validation_only",
+      "forbidden_change_classes": [
+        "runtime_behavior_change",
+        "deploy_or_env_contract_change",
+        "source_or_canonical_semantics_change"
+      ]
+    },
+    "governance": {
+      "intent_code": "rules_routing_and_authority_only",
+      "forbidden_change_classes": [
+        "runtime_feature_change",
+        "deploy_or_env_bootstrap_change",
+        "performance_implementation_change"
+      ]
+    },
+    "operator_surface": {
+      "intent_code": "authoritative_operator_or_user_visible_surface",
+      "forbidden_change_classes": [
+        "runtime_dependency_bootstrap_change",
+        "source_parser_contract_change",
+        "throughput_only_tuning"
+      ]
+    },
+    "runtime_env": {
+      "intent_code": "execution_environment_delivery_ci_and_toolchain_contract",
+      "forbidden_change_classes": [
+        "authoritative_operator_or_user_surface_change",
+        "source_or_canonical_correctness_change",
+        "throughput_only_tuning_without_runtime_contract_change"
+      ]
+    },
+    "correctness": {
+      "intent_code": "make_existing_behavior_true_without_new_capability",
+      "forbidden_change_classes": [
+        "new_capability_introduction",
+        "operator_surface_only_change",
+        "performance_only_change"
+      ]
+    },
+    "performance": {
+      "intent_code": "improve_cost_latency_or_parallelism_without_semantic_change",
+      "forbidden_change_classes": [
+        "correctness_fix_disguised_as_speed_work",
+        "deploy_or_runtime_bootstrap_change",
+        "new_feature_introduction"
+      ]
+    },
+    "capability": {
+      "intent_code": "new_supported_system_ability_or_surface",
+      "forbidden_change_classes": [
+        "repair_only_of_existing_behavior",
+        "governance_only_change",
+        "proof_only_status_work"
+      ]
+    }
+  }
+}

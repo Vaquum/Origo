@@ -1,0 +1,21 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "freshness_policy_uniform_from_source_publish_time": true,
+  "runtime_overload_protection_uses_concurrency_and_queue_limits": true,
+  "rollout_pattern": "shadow_then_promote",
+  "required_pr_quality_gates": [
+    "style",
+    "type",
+    "contract",
+    "replay",
+    "integrity"
+  ],
+  "dr_targets": {
+    "rpo_minutes": 5,
+    "rto_minutes": 60
+  },
+  "dr_drills_quarterly": true,
+  "audit_logs_immutable_with_one_year_retention": true,
+  "alerting_baseline": "logs_plus_discord_bot",
+  "source_quarantine_policy": "manual_only_for_now"
+}

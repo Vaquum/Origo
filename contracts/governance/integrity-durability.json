@@ -1,0 +1,13 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "event_log_plus_materialized_view_architecture_required": true,
+  "wal_format": "parquet_with_manifest_and_checksums",
+  "schema_registry_and_versioning_required": true,
+  "historical_corrections_append_only": true,
+  "exchange_integrity_suite_required": [
+    "schema_type_checks",
+    "sequence_gap_checks",
+    "anomaly_checks"
+  ],
+  "exchange_canonical_historical_truth_source": "daily_files"
+}

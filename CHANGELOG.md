@@ -1,11 +1,45 @@
 # Changelog
 
 ## 2026-03-30
-- Tightened Slice 34 backfill runtime performance and Launchpad controls:
-  - moved OKX and Bybit daily canonical backfill onto the staged/vectorized fast path used by hardened Binance daily backfill
-  - made ETF and FRED Launchpad runs first-class manual control surfaces with explicit `start_date` / `end_date` / `partition_ids_csv`
-  - added env-backed ETF/FRED partition worker pools and env-backed exchange source HTTP timeout contracts
-  - added Dagster config surfaces for height-based Bitcoin backfills and Bitcoin mempool runtime execution
+- Froze governance scope as whole-system Origo law:
+  - governance routing and machine contracts now state explicitly that they apply to the whole Origo system and all future development, not only to the currently open slices
+  - Dagster authority no longer uses slice-era temporary write-entrypoint wording; it now encodes one permanent rule for manual writes and one permanent rule for automated Dagster-native writes
+  - request-task coverage and task admission now require governance extension before any genuinely new recurring work family can proceed
+  - the remaining spec-only runtime/data contract law now also lives as atomic routed machine contracts for storage SQL discipline, serving/error safety, integrity/durability, rights/secrets, runtime/recovery, ingestion guarantees, raw fidelity, event sourcing, historical surfaces, source onboarding, and source migration
+  - request-family coverage is now broad enough for whole-system Origo work instead of being locked to Slice-34-era failure classes, while still remaining fail-closed with no catch-all task type
+- Updated version to `origo-control-plane v1.2.90` (`Origo API` `v0.1.35`).
+
+- Completed the fail-closed governance admission layer:
+  - every request must now match a routed request family before primary task-type assignment
+  - standalone reference-sync, closeout-sync, and review-follow-up work may not proceed without an explicit governing primary scope
+  - added the machine-checkable request-family coverage contract `contracts/governance/request-task-coverage.json`
+  - routed the new contract through `AGENTS.md`, the top-level plan, developer reference docs, and focused governance tests so unroutable or under-contracted work now fails closed at task start
+- Updated version to `origo-control-plane v1.2.89` (`Origo API` `v0.1.34`).
+
+- Refactored the governance package into a strict `task_type -> routing -> contract` hierarchy:
+  - `AGENTS.md` is now the only governance routing surface
+  - the normative governance layer is now a set of atomic machine-readable contracts under `contracts/governance/`
+  - the monolithic task-type routing contract was split into `task-types.json` and `task-decomposition.json`
+  - static analysis, execution doctrine, work-plan discipline, documentation, and slice closeout rules now also live as standalone machine contracts
+  - `spec/1-top-level-plan.md` and the developer governance docs now point to machine contracts instead of carrying parallel governance authority
+- Updated version to `origo-control-plane v1.2.88` (`Origo API` `v0.1.33`).
+
+- Froze the canonical Origo task-type taxonomy and routing contract from observed commit/PR history:
+  - every requested work unit must now map to exactly one primary task type: `proof`, `governance`, `operator_surface`, `runtime_env`, `correctness`, `performance`, or `capability`
+  - unknown-root-cause work now starts as `proof` only, and any implementation after diagnosis must continue as a new task under the real implementation type
+  - mixed-type implementation branches/PRs are now explicitly invalid, and the repo carries a machine-checkable contract plus developer guidance for decomposition
+- Updated version to `origo-control-plane v1.2.87` (`Origo API` `v0.1.32`).
+
+- Closed the remaining Slice 34 governance loopholes and froze the live ingest-throughput contract:
+  - audited the unmerged governance/runtime tranche against the previous state and fixed the one real weakening risk, where scheduled exchange runs could silently inherit backfill `deferred` defaults
+  - split live and backfill runtime defaults so scheduled Dagster exchange runs stay explicitly `inline` while dashboard/backfill runs stay explicitly `deferred`
+  - hard-disabled surviving historical helper write entrypoints, rewrote historical runner/controller surfaces as provenance-only, and added machine-checkable ingest-throughput coverage for the Binance-daily staged/vectorized law across the covered daily-file channels
+- Updated version to `origo-control-plane v1.2.86` (`Origo API` `v0.1.31`).
+
+- Froze the Dagster dashboard authority contract for Slice 34:
+  - Dagster/Dagit is now explicitly the sole operator truth for partition state and the only allowed write entrypoint for backfill/reconcile into the canonical event log
+  - Dagster state and proof state must match per partition, `reconcile_required` must be explicit before launch, and complete partitions must never appear as failed or missing after normal dashboard actions
+  - added a machine-checkable governance contract, a live developer contract doc, runtime-doc updates, and focused contract coverage so older runner wording can no longer override dashboard authority by accident
 - Updated version to `origo-control-plane v1.2.85` (`Origo API` `v0.1.30`).
 
 - Froze the PR review-routing governance contract around `zero-bang`:

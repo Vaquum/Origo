@@ -1,0 +1,15 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "exactly_once_defined_at": "canonical_source_event_identity",
+  "canonical_source_event_identity_fields": [
+    "source_id",
+    "stream_id",
+    "partition_id_or_equivalent_shard_key",
+    "source_offset_or_deterministic_equivalent_event_key"
+  ],
+  "duplicate_source_events_must_be_idempotent": true,
+  "no_miss_defined_by_contiguous_offsets_or_deterministic_cadence_checks": true,
+  "detected_gap_is_hard_error": true,
+  "gap_handling_fail_closed_with_quarantine_until_explicit_replay_or_recovery": true,
+  "reconciliation_is_mandatory": true
+}

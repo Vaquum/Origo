@@ -1,0 +1,11 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "canonical_event_log_stores_payload_raw_and_payload_sha256_raw": true,
+  "payload_json_is_derivative_and_reproducible_from_payload_raw": true,
+  "canonical_ingest_preserves_source_field_values_as_delivered": true,
+  "canonical_payload_numeric_representation_forbids_float": true,
+  "legacy_projection_float_fields_are_explicit_migration_debt": true,
+  "time_fields_preserve_highest_available_source_precision": true,
+  "source_migration_requires_round_trip_fidelity_precision_proof": true,
+  "run_volatile_processing_metadata_must_not_change_canonical_payload_hash": true
+}

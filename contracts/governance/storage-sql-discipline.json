@@ -1,0 +1,11 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "clickhouse_schema_and_query_logic_sql_first": true,
+  "migrations_are_ordered_versioned_sql_files": true,
+  "migration_ledger_table_required": true,
+  "applied_migrations_are_immutable_and_forward_only": true,
+  "production_core_query_paths_use_explicit_sql": true,
+  "query_builder_abstractions_forbidden_in_phase1_core_paths": true,
+  "clickhouse_native_sql_features_preferred": true,
+  "downstream_handoff_must_preserve_arrow_polars_compatibility": true
+}

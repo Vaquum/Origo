@@ -1,0 +1,212 @@
+{
+  "column_key": {
+    "path": "Repo-relative governance surface path.",
+    "sha256": "SHA-256 of the exact file bytes.",
+    "bytes": "File size in bytes.",
+    "line_count": "Number of newline characters in the file.",
+    "file_count": "Number of governance surfaces included in the run fingerprint.",
+    "aggregate_sha256": "SHA-256 over the ordered per-file fingerprint rows."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2026-03-30T00:00:00Z",
+    "end_utc": "2026-03-30T23:59:59Z",
+    "scope": "Task-admission governance contract surfaces for fail-closed request admission and no-route-no-work enforcement."
+  },
+  "source_checksums": {
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/request-task-coverage.json",
+        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
+        "bytes": 5528,
+        "line_count": 157
+      },
+      {
+        "path": "contracts/governance/task-admission.json",
+        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
+        "bytes": 939,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/task-admission-contract.md",
+        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
+        "bytes": 877,
+        "line_count": 20
+      },
+      {
+        "path": "docs/Developer/request-task-coverage-contract.md",
+        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
+        "bytes": 1051,
+        "line_count": 21
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_task_admission_contract.py",
+        "sha256": "a3ab7abd3993a69a4f2f5792fed535dde165491b6aad65c35dfb15c169cebb92",
+        "bytes": 4163,
+        "line_count": 75
+      }
+    ]
+  },
+  "run_1_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/request-task-coverage.json",
+        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
+        "bytes": 5528,
+        "line_count": 157
+      },
+      {
+        "path": "contracts/governance/task-admission.json",
+        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
+        "bytes": 939,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/task-admission-contract.md",
+        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
+        "bytes": 877,
+        "line_count": 20
+      },
+      {
+        "path": "docs/Developer/request-task-coverage-contract.md",
+        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
+        "bytes": 1051,
+        "line_count": 21
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_task_admission_contract.py",
+        "sha256": "a3ab7abd3993a69a4f2f5792fed535dde165491b6aad65c35dfb15c169cebb92",
+        "bytes": 4163,
+        "line_count": 75
+      }
+    ],
+    "file_count": 10,
+    "aggregate_sha256": "cf33e49e1731d7099935510433022f7cc4085dc59d9648752572ad1352189a84"
+  },
+  "run_2_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/request-task-coverage.json",
+        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
+        "bytes": 5528,
+        "line_count": 157
+      },
+      {
+        "path": "contracts/governance/task-admission.json",
+        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
+        "bytes": 939,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/task-admission-contract.md",
+        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
+        "bytes": 877,
+        "line_count": 20
+      },
+      {
+        "path": "docs/Developer/request-task-coverage-contract.md",
+        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
+        "bytes": 1051,
+        "line_count": 21
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_task_admission_contract.py",
+        "sha256": "a3ab7abd3993a69a4f2f5792fed535dde165491b6aad65c35dfb15c169cebb92",
+        "bytes": 4163,
+        "line_count": 75
+      }
+    ],
+    "file_count": 10,
+    "aggregate_sha256": "cf33e49e1731d7099935510433022f7cc4085dc59d9648752572ad1352189a84"
+  }
+}

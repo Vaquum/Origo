@@ -1,0 +1,31 @@
+{
+  "required_closeout_steps": [
+    "check_off_completed_items_in_spec/2-itemized-work-plan.md",
+    "bump_version_in_appropriate_config_file",
+    "append_slice_summary_to_CHANGELOG.md",
+    "update_.env.example_for_every_env_change",
+    "leave_manifest_in_spec/slices/<slice-id>/manifest.md",
+    "leave_baseline_fixture_artifact_in_spec/slices/<slice-id>/baseline-fixture-<window>.json",
+    "leave_run_notes_in_spec/slices/<slice-id>/run-notes.md"
+  ],
+  "manifest_sections": [
+    "What was done",
+    "Current state",
+    "Watch out"
+  ],
+  "baseline_fixture_required_fields": [
+    "fixture_window_dates",
+    "source_checksums_zip_and_csv_sha256_per_day",
+    "run_1_output_fingerprints",
+    "run_2_output_fingerprints",
+    "deterministic_match",
+    "column_key"
+  ],
+  "run_notes_required_fields": [
+    "date_scope_fixture_window_runtime_environment",
+    "side_effect_system_changes",
+    "known_warnings_and_acceptability",
+    "deferred_guardrails_explicitly_named",
+    "confirmation_of_work_plan_version_changelog_and_env_updates"
+  ]
+}

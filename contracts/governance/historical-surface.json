@@ -1,0 +1,27 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "native_is_canonical_baseline_layer_across_all_datasets": true,
+  "native_behavior_must_be_uniform_to_maximum_feasible_degree": [
+    "window_semantics",
+    "filter_semantics",
+    "strict_warning_error_semantics",
+    "response_envelope_semantics"
+  ],
+  "historical_python_and_http_interfaces_use_shared_parameter_names_when_concepts_match": true,
+  "historical_parameter_contract": [
+    "mode",
+    "start_date",
+    "end_date",
+    "n_latest_rows",
+    "n_random_rows",
+    "fields",
+    "filters",
+    "strict"
+  ],
+  "all_dataset_surfaces_are_historical_surfaces": [
+    "native",
+    "aligned_1s"
+  ],
+  "no_window_selector_defaults_to_full_available_history": true,
+  "aligned_1s_mandatory_for_every_onboarded_dataset": true
+}

@@ -1,0 +1,18 @@
+{
+  "scope": "first_party_daily_file_ingestion",
+  "default_pattern": "binance_daily_staged_vectorized",
+  "required_properties": {
+    "frame_or_columnar_parse": true,
+    "frame_based_integrity_checks": true,
+    "set_based_source_proof_or_precomputed_digest": true,
+    "staged_fast_insert_or_set_based_canonical_write": true,
+    "env_backed_source_http_timeout": true,
+    "explicit_env_backed_partition_worker_or_partition_run_concurrency": true
+  },
+  "covered_modules": [
+    "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
+    "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
+    "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py"
+  ],
+  "explicit_live_exceptions": []
+}

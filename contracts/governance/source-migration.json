@@ -1,0 +1,11 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "every_migrated_source_ports_writes_to_canonical_event_log_and_reads_to_projection_driven_serving": true,
+  "every_migrated_source_closes_with_native_and_aligned_1s_in_same_slice": true,
+  "parity_and_replay_determinism_required_before_cutover_closeout": true,
+  "exactly_once_proof_under_duplicate_replay_and_crash_restart_required": true,
+  "no_miss_completeness_proof_with_source_appropriate_gap_detection_required": true,
+  "raw_fidelity_and_numeric_precision_proof_against_fixed_fixtures_required": true,
+  "aligned_outputs_must_prove_canonical_aligned_1s_aggregates_contract": true,
+  "explicit_derived_only_aligned_backlog_debt_must_be_tracked_until_closed": true
+}

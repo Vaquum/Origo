@@ -5,8 +5,14 @@
 - Last updated: 2026-03-26
 - Slice reference: S34 (`S34-04a`, `S34-G2`)
 
+## Status
+- Historical slice record only. Not a live runtime contract.
+- Any CLI example or helper entrypoint in this document is provenance only.
+- Canonical backfill/reconcile writes must follow [docs/Developer/dagster-authority-contract.md](./dagster-authority-contract.md).
+- The historical helper entrypoint named here now fails closed for write execution.
+
 ## Purpose and scope
-- Defines the repo-native daily tranche controller for S34 exchange backfills.
+- Records the historical repo-native daily tranche controller for S34 exchange backfills.
 - Scope covers daily dataset batch planning, reconcile-first behavior, and immediate batch chaining without idle gaps.
 - This controller is the execution unit composed by `docs/Developer/s34-exchange-sequence-controller.md` for post-Binance exchange order.
 

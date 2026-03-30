@@ -1,0 +1,21 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "canonical_raw_truth": "single_global_append_only_event_log",
+  "canonical_event_format_requires_typed_envelope_plus_payload_raw_and_payload_sha256_raw": true,
+  "canonical_raw_events_never_rewritten_or_deleted": true,
+  "reconcile_resets_use_logical_partition_reset_boundaries": true,
+  "live_reads_must_use_boundary_aware_active_view_contract": true,
+  "canonical_writer_enforces_unique_source_event_identity_and_idempotent_retries": true,
+  "canonical_ingest_runs_continuous_no_miss_reconciliation": true,
+  "all_serving_paths_are_projection_driven_from_canonical_events": true,
+  "projection_runtime_modes": [
+    "clickhouse_materialized_views",
+    "python_projectors"
+  ],
+  "projector_checkpoints_and_watermarks_stored_in_clickhouse": true,
+  "persistent_aligned_aggregates_are_mandatory": true,
+  "correction_semantics_v1": "latest_truth_only",
+  "freshness_sla_breach_default": "serve_with_warning",
+  "temporary_hosted_rights_must_be_exposed_as_provisional": true,
+  "canonical_aligned_1s_aggregates_is_mandatory_aligned_sink": true
+}

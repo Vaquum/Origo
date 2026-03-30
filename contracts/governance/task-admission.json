@@ -1,0 +1,15 @@
+{
+  "allowed_primary_task_types_exhaustive_for_origo_engineering_work": true,
+  "no_catch_all_task_type": true,
+  "request_family_match_required_before_primary_task_type_assignment": true,
+  "new_uncovered_recurring_work_family_requires_contract_addition_before_implementation": true,
+  "unroutable_request_requires_immediate_operator_report": true,
+  "mixed_type_request_without_safe_decomposition_requires_immediate_operator_report": true,
+  "reference_or_closeout_only_request_must_inherit_governing_primary_task_type_or_stop": true,
+  "review_follow_up_request_must_inherit_governing_primary_task_type_or_stop": true,
+  "implementation_forbidden_without_routed_task_type": true,
+  "implementation_forbidden_without_routed_contract_coverage": true,
+  "touched_system_surface_without_domain_contract_requires_immediate_operator_report": true,
+  "operator_report_must_precede_runtime_or_repo_mutation": true,
+  "no_route_no_work": true
+}

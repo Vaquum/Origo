@@ -1,0 +1,15 @@
+{
+  "required_stage_order": [
+    "capability",
+    "proof",
+    "guardrails"
+  ],
+  "strict_per_slice_loop": true,
+  "next_slice_requires_current_slice_guardrails_complete": true,
+  "hardening_before_same_slice_proof_is_forbidden": true,
+  "proof_bar": [
+    "acceptance_tests",
+    "replay_tests_on_fixed_fixtures",
+    "deterministic_output_checks_across_repeated_runs"
+  ]
+}

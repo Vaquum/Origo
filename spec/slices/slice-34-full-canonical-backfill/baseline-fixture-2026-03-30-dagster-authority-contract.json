@@ -11,7 +11,7 @@
   "fixture_window": {
     "start_utc": "2026-03-30T00:00:00Z",
     "end_utc": "2026-03-30T23:59:59Z",
-    "scope": "PR review-routing governance contract surfaces for zero-bang author/reviewer rules under whole-system governance routing."
+    "scope": "Dagster-authority governance contract surfaces for whole-system operator truth, write entrypoints, and proof-state parity."
   },
   "source_checksums": {
     "files": [
@@ -22,15 +22,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/dagster-authority-contract.md",
+        "sha256": "81a781cc31f94c2389b79be5f912d905159585fb3565399c5b94b59a8d9e0b50",
+        "bytes": 733,
         "line_count": 18
       },
       {
@@ -38,6 +38,12 @@
         "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
         "bytes": 3546,
         "line_count": 74
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "af01d73152a78f5e27439650505e51ba19e92aee08eeb3647c1a04bbc1ae87f9",
+        "bytes": 6336,
+        "line_count": 110
       },
       {
         "path": "spec/1-top-level-plan.md",
@@ -52,10 +58,10 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_dagster_authority_contract.py",
+        "sha256": "13d99481ea8034822a1380e9c33c5ecf7db96043cf2b6fa153963bc2a07bddad",
+        "bytes": 5155,
+        "line_count": 89
       }
     ]
   },
@@ -68,15 +74,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/dagster-authority-contract.md",
+        "sha256": "81a781cc31f94c2389b79be5f912d905159585fb3565399c5b94b59a8d9e0b50",
+        "bytes": 733,
         "line_count": 18
       },
       {
@@ -84,6 +90,12 @@
         "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
         "bytes": 3546,
         "line_count": 74
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "af01d73152a78f5e27439650505e51ba19e92aee08eeb3647c1a04bbc1ae87f9",
+        "bytes": 6336,
+        "line_count": 110
       },
       {
         "path": "spec/1-top-level-plan.md",
@@ -98,14 +110,14 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_dagster_authority_contract.py",
+        "sha256": "13d99481ea8034822a1380e9c33c5ecf7db96043cf2b6fa153963bc2a07bddad",
+        "bytes": 5155,
+        "line_count": 89
       }
     ],
-    "file_count": 7,
-    "aggregate_sha256": "c8c82d630fd22478ad43a594a9a034488ba0e4c147e1a45da835a530220c2fce"
+    "file_count": 8,
+    "aggregate_sha256": "f33b8e312d908cfe15a2c12a01b52cfff561d6df25d75ae0bf86e686714e81ea"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -116,15 +128,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/dagster-authority-contract.md",
+        "sha256": "81a781cc31f94c2389b79be5f912d905159585fb3565399c5b94b59a8d9e0b50",
+        "bytes": 733,
         "line_count": 18
       },
       {
@@ -132,6 +144,12 @@
         "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
         "bytes": 3546,
         "line_count": 74
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "af01d73152a78f5e27439650505e51ba19e92aee08eeb3647c1a04bbc1ae87f9",
+        "bytes": 6336,
+        "line_count": 110
       },
       {
         "path": "spec/1-top-level-plan.md",
@@ -146,13 +164,13 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_dagster_authority_contract.py",
+        "sha256": "13d99481ea8034822a1380e9c33c5ecf7db96043cf2b6fa153963bc2a07bddad",
+        "bytes": 5155,
+        "line_count": 89
       }
     ],
-    "file_count": 7,
-    "aggregate_sha256": "c8c82d630fd22478ad43a594a9a034488ba0e4c147e1a45da835a530220c2fce"
+    "file_count": 8,
+    "aggregate_sha256": "f33b8e312d908cfe15a2c12a01b52cfff561d6df25d75ae0bf86e686714e81ea"
   }
 }

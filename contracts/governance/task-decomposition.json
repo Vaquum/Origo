@@ -1,0 +1,9 @@
+{
+  "exactly_one_primary_task_type_per_work_unit": true,
+  "implementation_after_proof_requires_new_primary_task_type": true,
+  "mixed_type_requests_must_be_decomposed_before_implementation": true,
+  "mixed_type_implementation_branch_or_pr_is_invalid": true,
+  "branch_pr_commit_scope_must_match_primary_task_type": true,
+  "proof_must_not_be_used_as_cover_for_runtime_changes": true,
+  "slice_closeout_is_required_but_not_a_primary_task_type": true
+}

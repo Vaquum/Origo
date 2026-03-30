@@ -2,9 +2,7 @@ import json
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_CONTRACT = (
-    _REPO_ROOT / 'contracts' / 'governance' / 'pr-review-routing.json'
-)
+_CONTRACT = _REPO_ROOT / 'contracts' / 'governance' / 'pr-review-routing.json'
 _AGENTS = _REPO_ROOT / 'AGENTS.md'
 _TOP_LEVEL_PLAN = _REPO_ROOT / 'spec' / '1-top-level-plan.md'
 _WORK_PLAN = _REPO_ROOT / 'spec' / '2-itemized-work-plan.md'
@@ -35,11 +33,11 @@ def test_repo_governance_surfaces_reference_zero_bang_review_routing() -> None:
     dev_doc_text = _DEV_DOC.read_text(encoding='utf-8')
     dev_index_text = _DEV_INDEX.read_text(encoding='utf-8')
 
-    assert '## Pull Request Governance' in agents_text
-    assert 'never be used as the git user, PR author, or implementation identity' in agents_text
-    assert '## PR Governance Contract' in top_level_plan_text
+    assert 'contracts/governance/pr-review-routing.json' in agents_text
+    assert 'contracts/governance/pr-review-routing.json' in top_level_plan_text
     assert '`S34-G5`' in work_plan_text
     assert '`S34-11b`' in work_plan_text
-    assert 'zero-bang' in dev_doc_text
-    assert 'resolve every conversation' in dev_doc_text
-    assert 'pr-review-routing-contract.md' in dev_index_text
+    assert 'Canonical machine contract: `contracts/governance/pr-review-routing.json`' in dev_doc_text
+    assert 'This document is reference-only for governance.' in dev_doc_text
+    assert 'contracts/governance/pr-review-routing.json' in dev_index_text
+    assert 'docs/Developer/pr-review-routing-contract.md' in dev_index_text

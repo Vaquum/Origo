@@ -69,6 +69,7 @@ def test_daily_bybit_asset_uses_proof_only_reconcile_when_duplicate_offsets_are_
     monkeypatch.setenv('CLICKHOUSE_USER', 'default')
     monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
     monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('ORIGO_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS', '120')
     from origo_control_plane.assets import daily_bybit_spot_trades_to_origo as module
 
     from origo.events.ingest_state import CanonicalStreamKey
@@ -118,7 +119,7 @@ def test_daily_bybit_asset_uses_proof_only_reconcile_when_duplicate_offsets_are_
                 proof_digest_sha256='digest-bybit-2020-11-24',
             )
 
-    def _fake_build_bybit_partition_source_proof(**_kwargs: Any) -> SimpleNamespace:
+    def _fake_build_bybit_partition_source_proof_from_stage(**_kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             stream_key=CanonicalStreamKey(
                 source_id='bybit',
@@ -165,8 +166,18 @@ def test_daily_bybit_asset_uses_proof_only_reconcile_when_duplicate_offsets_are_
     monkeypatch.setattr(module, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         module,
-        'build_bybit_partition_source_proof',
-        _fake_build_bybit_partition_source_proof,
+        'create_staged_bybit_spot_trade_csv_or_raise',
+        lambda **_kwargs: 'stage_bybit_contract',
+    )
+    monkeypatch.setattr(
+        module,
+        'drop_staged_bybit_spot_trade_csv_or_raise',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        'build_bybit_partition_source_proof_from_stage_or_raise',
+        _fake_build_bybit_partition_source_proof_from_stage,
     )
     monkeypatch.setattr(
         module,
@@ -216,6 +227,7 @@ def test_daily_bybit_asset_recomputes_proof_after_writer_repair(
     monkeypatch.setenv('CLICKHOUSE_USER', 'default')
     monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
     monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('ORIGO_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS', '120')
     from origo_control_plane.assets import daily_bybit_spot_trades_to_origo as module
 
     from origo.events.ingest_state import CanonicalStreamKey
@@ -266,7 +278,7 @@ def test_daily_bybit_asset_recomputes_proof_after_writer_repair(
                 proof_digest_sha256='digest-bybit-2020-11-24',
             )
 
-    def _fake_build_bybit_partition_source_proof(**_kwargs: Any) -> SimpleNamespace:
+    def _fake_build_bybit_partition_source_proof_from_stage(**_kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             stream_key=CanonicalStreamKey(
                 source_id='bybit',
@@ -313,8 +325,18 @@ def test_daily_bybit_asset_recomputes_proof_after_writer_repair(
     monkeypatch.setattr(module, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         module,
-        'build_bybit_partition_source_proof',
-        _fake_build_bybit_partition_source_proof,
+        'create_staged_bybit_spot_trade_csv_or_raise',
+        lambda **_kwargs: 'stage_bybit_contract',
+    )
+    monkeypatch.setattr(
+        module,
+        'drop_staged_bybit_spot_trade_csv_or_raise',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        'build_bybit_partition_source_proof_from_stage_or_raise',
+        _fake_build_bybit_partition_source_proof_from_stage,
     )
     monkeypatch.setattr(
         module,

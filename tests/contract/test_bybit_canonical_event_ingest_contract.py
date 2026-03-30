@@ -6,16 +6,13 @@ from typing import Any
 from origo_control_plane.utils.bybit_canonical_event_ingest import (
     BybitSpotTradeEvent,
     parse_bybit_spot_trade_csv,
+    parse_bybit_spot_trade_csv_frame,
     write_bybit_spot_trades_to_canonical,
 )
 
 _HEADER = (
     'timestamp,symbol,side,size,price,tickDirection,trdMatchID,'
     'grossValue,homeNotional,foreignNotional\n'
-)
-_HEADER_WITH_RPI = (
-    'timestamp,symbol,side,size,price,tickDirection,trdMatchID,'
-    'grossValue,homeNotional,foreignNotional,RPI\n'
 )
 
 
@@ -30,14 +27,11 @@ def _csv_payload(
     foreign_notional: str = '42.0',
     side: str = 'buy',
     tick_direction: str = 'PlusTick',
-    rpi_text: str | None = None,
 ) -> bytes:
-    header = _HEADER_WITH_RPI if rpi_text is not None else _HEADER
-    rpi_suffix = f',{rpi_text}' if rpi_text is not None else ''
     return (
-        header
+        _HEADER
         + f'{timestamp_seconds},BTCUSDT,{side},{size},{price},{tick_direction},'
-        + f'{trd_match_id},{gross_value},{home_notional},{foreign_notional}{rpi_suffix}\n'
+        + f'{trd_match_id},{gross_value},{home_notional},{foreign_notional}\n'
     ).encode('utf-8')
 
 
@@ -112,28 +106,21 @@ def test_bybit_parser_accepts_zero_size_and_zero_home_notional_from_official_sou
     assert events[0].quote_quantity_text == '0.0001'
 
 
-def test_bybit_parser_accepts_trailing_rpi_column_and_preserves_field() -> None:
-    events = parse_bybit_spot_trade_csv(
-        csv_content=_csv_payload(
-            trd_match_id='08ff9568-cb50-55d6-b497-13727eec09dc',
-            timestamp_seconds='1774656000.1446',
-            size='0.001',
-            price='66374.60',
-            gross_value='6.63746e+09',
-            home_notional='0.001',
-            foreign_notional='66.3746',
-            side='Sell',
-            tick_direction='ZeroMinusTick',
-            rpi_text='0',
-        ),
-        date_str='2026-03-28',
-        day_start_ts_utc_ms=1774656000000,
-        day_end_ts_utc_ms=1774742400000,
+def test_bybit_frame_parser_accepts_optional_rpi_column() -> None:
+    frame = parse_bybit_spot_trade_csv_frame(
+        csv_content=(
+            _HEADER.rstrip('\n')
+            + ',RPI\n'
+            + '1704067200.100,BTCUSDT,buy,0.001,42000.0,PlusTick,m-998877,42000000.0,0.001,42.0,true\n'
+        ).encode('utf-8'),
+        date_str='2024-01-01',
+        day_start_ts_utc_ms=1704067200000,
+        day_end_ts_utc_ms=1704153600000,
     )
 
-    assert len(events) == 1
-    assert events[0].rpi_text == '0'
-    assert events[0].to_payload()['rpi'] == '0'
+    assert frame.height == 1
+    assert frame.get_column('trade_id').to_list() == [998877]
+    assert frame.get_column('trd_match_id').to_list() == ['m-998877']
 
 
 class _RecordingClient:

@@ -22,15 +22,26 @@ from origo.scraper.pipeline import PipelineRunResult, PipelineSourceResult
 
 
 class _FakeLog:
+    def info(self, _message: str) -> None:
+        return None
+
     def warning(self, _message: str) -> None:
         return None
 
 
 class _FakeContext:
-    def __init__(self, *, run_id: str, tags: dict[str, str]) -> None:
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        tags: dict[str, str],
+        op_config: dict[str, object] | None = None,
+    ) -> None:
         self.run_id = run_id
         self.run = SimpleNamespace(tags=tags)
         self.log = _FakeLog()
+        if op_config is not None:
+            self.op_config = op_config
 
 
 def _patch_single_source_history_contract(
@@ -198,6 +209,7 @@ def test_run_etf_backfill_uses_deferred_pipeline_and_skips_projection(
 
     monkeypatch.setattr(etf_job, 'project_etf_daily_metrics_native', _native)
     monkeypatch.setattr(etf_job, 'project_etf_daily_metrics_aligned', _aligned)
+    monkeypatch.setattr(etf_job, '_load_etf_partition_workers_or_raise', lambda: 10)
 
     summary = etf_job._run_etf_backfill_or_raise(
         context=_FakeContext(
@@ -251,6 +263,26 @@ def test_build_clickhouse_client_uses_native_timeout_contract(
     assert client is not None
     assert database == 'origo'
     assert captured['send_receive_timeout'] == 3600
+
+
+def test_load_required_partition_ids_from_context_reads_config_date_window() -> None:
+    context = _FakeContext(
+        run_id='run-1',
+        tags={},
+        op_config={
+            'projection_mode': 'deferred',
+            'execution_mode': 'backfill',
+            'runtime_audit_mode': 'summary',
+            'start_date': '2024-01-11',
+            'end_date': '2024-01-15',
+        },
+    )
+
+    partition_ids = etf_job._load_required_partition_ids_from_context_or_none(
+        context=context
+    )
+
+    assert partition_ids == ('2024-01-11', '2024-01-12', '2024-01-15')
 
 
 def test_run_etf_backfill_honors_required_partition_ids_tag(
@@ -326,6 +358,7 @@ def test_run_etf_backfill_honors_required_partition_ids_tag(
         'project_etf_daily_metrics_aligned',
         lambda **_: SimpleNamespace(to_dict=lambda: {'rows_written': 0}),
     )
+    monkeypatch.setattr(etf_job, '_load_etf_partition_workers_or_raise', lambda: 10)
 
     etf_job._run_etf_backfill_or_raise(
         context=_FakeContext(
@@ -385,7 +418,12 @@ def test_run_etf_backfill_skips_terminal_partitions_in_backfill_mode(
     monkeypatch.setattr(etf_job, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         etf_job,
-        '_execute_etf_partition_backfill_or_raise',
+        '_load_etf_partition_workers_or_raise',
+        lambda: 10,
+    )
+    monkeypatch.setattr(
+        etf_job,
+        '_execute_etf_partition_backfill_in_worker_or_raise',
         lambda **kwargs: (
             executed.append(kwargs['partition_id']),
             SimpleNamespace(
@@ -409,6 +447,17 @@ def test_run_etf_backfill_skips_terminal_partitions_in_backfill_mode(
 
     assert executed == ['2026-03-26']
     assert summary.total_inserted_rows == 1
+
+
+def test_load_etf_partition_workers_requires_integer_ge_10(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('ORIGO_S34_ETF_PARTITION_WORKERS', '9')
+    with pytest.raises(RuntimeError, match='must be >= 10'):
+        etf_job._load_etf_partition_workers_or_raise()
+
+    monkeypatch.setenv('ORIGO_S34_ETF_PARTITION_WORKERS', '10')
+    assert etf_job._load_etf_partition_workers_or_raise() == 10
 
 
 def test_execute_etf_partition_backfill_projects_only_after_proof(

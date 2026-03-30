@@ -2,24 +2,54 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-29
-- Slice reference: S34 (`S34-C1..C8`, `S34-C2l`, `S34-P1..P4`, `S34-G1..G2`)
+- Last updated: 2026-03-30
+- Slice reference: S34 (`S34-C1..C8`, `S34-C2l`, `S34-C2m`, `S34-C4n`, `S34-C4o`, `S34-C4p`, `S34-C5n`, `S34-C6q`, `S34-P1..P4`, `S34-G1..G2`)
 
 ## Purpose and scope
 - Defines the live Slice 34 canonical backfill runtime contract.
-- Scope covers authoritative backfill state, partition/range proof semantics, immutable manifest evidence, and closeout-prep reporting.
+- Scope covers authoritative backfill state, Dagster Launchpad control surfaces, partition/range proof semantics, source-transport runtime contracts, immutable manifest evidence, and closeout-prep reporting.
 
 ## Inputs and outputs with contract shape
 - Backfill runner:
   - `control-plane/origo_control_plane/s34_exchange_backfill_runner.py`
   - input: `dataset`, `end_date | partition_ids`, `execution_mode`, `projection_mode`, `runtime_audit_mode`, `concurrency`
   - output: processed partition list, range proof summary, manifest log path
+- Dagster Launchpad controls:
+  - Exchange daily assets: `projection_mode`, `execution_mode`, `runtime_audit_mode`
+  - ETF/FRED backfill jobs: `projection_mode`, `execution_mode`, `runtime_audit_mode`, `start_date`, `end_date`, `partition_ids_csv`
+  - Height-based Bitcoin assets: `projection_mode`, `execution_mode`, `runtime_audit_mode`, `height_start`, `height_end`
+  - Bitcoin mempool asset: `projection_mode`, `execution_mode`, `runtime_audit_mode`
 - Closeout-prep report:
   - `control-plane/origo_control_plane/s34_g1_g2_closeout_prep.py`
   - input: authoritative ClickHouse proof/manifests + immutable manifest log
   - output: per-dataset proof coverage, manifest evidence summary, remaining closeout gaps
 
 ## Data definitions (field names, types, units, timezone, nullability)
+- Launchpad runtime fields:
+  - `projection_mode`
+    - string
+    - allowed: `inline`, `deferred`
+    - default: `deferred` for exchange, ETF, FRED, and height-based Bitcoin backfill paths; `inline` for `bitcoin_mempool_state`
+  - `execution_mode`
+    - string
+    - allowed: `backfill`, `reconcile`
+    - default: `backfill`
+  - `runtime_audit_mode`
+    - string
+    - allowed: `event`, `summary`
+    - default: `summary`
+  - `start_date`, `end_date`
+    - string
+    - ISO `YYYY-MM-DD`
+    - optional pair on ETF/FRED Launchpad runs
+  - `partition_ids_csv`
+    - string
+    - comma-separated partition ids
+    - optional on ETF/FRED Launchpad runs
+  - `height_start`, `height_end`
+    - integer
+    - inclusive Bitcoin block-height window
+    - required on height-based Bitcoin Launchpad runs
 - Authoritative ClickHouse tables:
   - `canonical_backfill_source_manifests`
   - `canonical_backfill_partition_proofs`
@@ -87,6 +117,15 @@
   - `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
   - `ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH`
   - `ORIGO_S34_BACKFILL_CONCURRENCY`
+- Exchange source transport:
+  - `ORIGO_BINANCE_SOURCE_HTTP_TIMEOUT_SECONDS`
+  - `ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS`
+  - `ORIGO_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS`
+  - all three must be present and `> 0`
+- ETF/FRED worker pools:
+  - `ORIGO_S34_ETF_PARTITION_WORKERS`
+  - `ORIGO_S34_FRED_PARTITION_WORKERS`
+  - both must be present and `>= 10`
 - FRED revision-history transport:
   - `FRED_API_KEY`
   - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
@@ -102,3 +141,15 @@
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_g1_g2_closeout_prep`
 - Run one explicit exchange backfill tranche:
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_exchange_backfill_runner --dataset okx_spot_trades --end-date 2021-09-30 --concurrency 20 --projection-mode deferred --runtime-audit-mode summary`
+- Example ETF/FRED Dagit Launchpad config:
+  - `projection_mode: deferred`
+  - `execution_mode: backfill`
+  - `runtime_audit_mode: summary`
+  - `start_date: 2021-04-05`
+  - `end_date: 2021-04-13`
+- Example height-based Bitcoin Dagit Launchpad config:
+  - `projection_mode: deferred`
+  - `execution_mode: backfill`
+  - `runtime_audit_mode: summary`
+  - `height_start: 840000`
+  - `height_end: 840999`

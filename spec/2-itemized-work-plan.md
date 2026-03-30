@@ -772,7 +772,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [ ] `S34-C2k` Fix Slice-34 ambiguous-partition planning/reporting so reconcile resets cannot hide non-terminal partitions once canonical rows are intentionally cleared.
 - [x] `S34-C2l` Preserve append-only canonical-event truth during reconcile resets by recording partition reset boundaries and routing live canonical reads through the boundary-aware active view.
-- [ ] `S34-C2m` Make Dagster Launchpad a first-class Slice-34 control surface by exposing required runtime contract fields and manual window controls on all backfill-capable jobs instead of relying on hidden run tags.
+- [x] `S34-C2m` Make Dagster Launchpad a first-class Slice-34 control surface by exposing required runtime contract fields and manual window controls on all backfill-capable jobs instead of relying on hidden run tags.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S34-C4a` Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
@@ -788,8 +788,9 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
 - [ ] `S34-C4l` Fix OKX canonical precision contract so first-party high-scale `size` values survive reconcile/write without false scale-overflow failures.
 - [x] `S34-C4m` Fix exchange reconcile writer-repair flow so partition proof is recomputed from fresh canonical state instead of reusing stale pre-repair canonical proof snapshots.
-- [ ] `S34-C4n` Align manual exchange Dagster defaults with the repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
-- [ ] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
+- [x] `S34-C4n` Align manual exchange Dagster defaults with the repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
+- [x] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
+- [x] `S34-C4p` Remove OKX and Bybit canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution that matches the hardened Binance daily fast path.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
@@ -804,7 +805,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5k` Add ETF proof-driven resume/reconcile control so live reruns skip terminal partitions, explicitly reconcile ambiguous partitions, and continue full-history execution from authoritative proof state.
 - [ ] `S34-C5l` Add ETF audited partition reset-and-rewrite for legacy canonical payload drift so explicit reconcile can clear old non-deterministic rows and rewrite the partition from archived source truth.
 - [ ] `S34-C5m` Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile partition resets fail loudly by explicit config instead of client timeouts.
-- [ ] `S34-C5n` Add real worker concurrency to ETF Slice-34 partition execution so archived-history backfill stops processing partition batches strictly serially.
+- [x] `S34-C5n` Add real worker concurrency to ETF Slice-34 partition execution so archived-history backfill stops processing partition batches strictly serially.
 - [ ] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
 - [x] `S34-C6a` Build repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
 - [ ] `S34-C6b` Make FRED historical source replay deterministic by fetching and normalizing revision-history vintages instead of request-time latest snapshots.
@@ -821,7 +822,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6n` Bound FRED plain backfill raw-bundle fetches to the latest terminal proof boundary so live reruns do not re-fetch full-history revision bundles once authoritative proof coverage exists.
 - [x] `S34-C6o` Cap FRED Slice-34 history coverage at `2009-01-01` and make the boundary authoritative in planning/runtime so live Dagster runs never fetch, reconcile, or process pre-cap partitions.
 - [x] `S34-C6p` Make FRED latest-proof selection deterministic when duplicate proof revisions exist so freshly completed reconcile ranges are not immediately reselected.
-- [ ] `S34-C6q` Add real worker concurrency to FRED Slice-34 partition execution so reconcile/backfill runs stop processing post-source-window partitions strictly serially.
+- [x] `S34-C6q` Add real worker concurrency to FRED Slice-34 partition execution so reconcile/backfill runs stop processing post-source-window partitions strictly serially.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
@@ -2203,6 +2204,10 @@ Constraints: no hidden semantic mismatch between manual and repo-native backfill
 Action: Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts.
 Done looks like: Binance, OKX, and Bybit source fetch paths all read required positive timeout values from the runtime env contract, invalid or missing timeout values fail loudly, and no exchange source path keeps a hard-coded HTTP timeout.
 Constraints: no deployment-specific hard-coding, no per-source silent fallback defaults, and no timeout drift between daily and monthly Binance fetch paths.
+24c. `S34-04p`
+Action: Remove OKX and Bybit canonical backfill Python bottlenecks in source-proof and fresh-write preparation.
+Done looks like: OKX and Bybit daily backfill assets parse CSV payloads into frames, run integrity over frames, build source proofs from staged ClickHouse data, and use staged fresh-partition writes for the hardened fast path while preserving fail-loud writer fallback for reconcile and non-empty partitions.
+Constraints: no payload-contract drift, no silent downgrade of source/canonical proof precision, and no bypass of writer-based reconcile paths for non-empty partitions.
 25. `S34-04k`
 Action: Add exchange reconcile writer-repair path for poisoned partial canonical partitions.
 Done looks like: reconcile uses proof-only when existing canonical rows already match source proof, falls back to idempotent writer-repair when canonical rows are partial or mismatched, and then re-proves/quarantines deterministically.

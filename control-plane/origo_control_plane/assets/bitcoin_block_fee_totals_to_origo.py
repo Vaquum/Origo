@@ -12,6 +12,7 @@ from dagster import AssetExecutionContext, asset
 
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    build_backfill_height_window_config_schema,
     load_backfill_height_window_or_raise,
     load_backfill_runtime_contract_or_raise,
 )
@@ -281,6 +282,9 @@ def _canonical_rows_sha256(rows: list[_NormalizedBlockFeeTotal]) -> str:
 
 
 @asset(
+    config_schema=build_backfill_height_window_config_schema(
+        default_projection_mode='deferred'
+    ),
     group_name='bitcoin_core_data',
     description='Computes deterministic Bitcoin block fee totals from canonical block transaction payloads and loads to ClickHouse.',
 )
@@ -456,10 +460,10 @@ def insert_bitcoin_block_fee_totals_to_origo(
         return result_data
     finally:
         if client is not None:
+            active_exception = sys.exc_info()[1]
             try:
                 client.disconnect()
             except Exception as exc:
-                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'ClickHouse disconnect failed during cleanup: {exc}'

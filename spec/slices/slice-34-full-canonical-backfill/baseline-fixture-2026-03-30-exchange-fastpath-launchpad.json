@@ -1,0 +1,734 @@
+{
+  "column_key": {
+    "path": "Repo-relative exchange fast-path, Launchpad, and concurrency surface path.",
+    "sha256": "SHA-256 of the exact file bytes.",
+    "bytes": "File size in bytes.",
+    "line_count": "Number of newline characters in the file.",
+    "file_count": "Number of tracked tranche surfaces included in the run fingerprint.",
+    "aggregate_sha256": "SHA-256 over the ordered per-file fingerprint rows."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2026-03-30T00:00:00Z",
+    "end_utc": "2026-03-30T23:59:59Z",
+    "scope": "Slice 34 exchange fast-path parity, Dagit Launchpad controls, and ETF/FRED worker plus exchange timeout contracts."
+  },
+  "source_checksums": {
+    "files": [
+      {
+        "path": ".env.example",
+        "sha256": "7e35d1a8f89b15521d3da5d205d26efe9301f756076cf981accc06aa736a836b",
+        "bytes": 5443,
+        "line_count": 116
+      },
+      {
+        "path": "CHANGELOG.md",
+        "sha256": "338b4f301f198a6633d2630781a6c8aa421772763b8997b5d076d60040bd8723",
+        "bytes": 39486,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/CHANGELOG.md",
+        "sha256": "3a7125f83ac53ac880c00fceac3d332faf9a6c9d7e4f9218efe6b11c77414976",
+        "bytes": 66307,
+        "line_count": 1142
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
+        "line_count": 477
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
+        "line_count": 408
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
+        "line_count": 413
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
+        "line_count": 692
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
+        "line_count": 417
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
+        "line_count": 389
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
+        "line_count": 486
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
+        "line_count": 429
+      },
+      {
+        "path": "control-plane/origo_control_plane/backfill/s34_contract.py",
+        "sha256": "0741963dd5aeba22f0564684521d554fa91280eaa88f8e420e7a599422e325cf",
+        "bytes": 12855,
+        "line_count": 351
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
+        "line_count": 1818
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
+        "line_count": 1602
+      },
+      {
+        "path": "control-plane/origo_control_plane/s34_exchange_source_concurrency_probe.py",
+        "sha256": "b06b0026a2491dadf37e45c180d24215a618c5e5ac9f6475ef0fb653017db594",
+        "bytes": 23773,
+        "line_count": 676
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/bybit_canonical_event_ingest.py",
+        "sha256": "b043b0ed02073b75ddbbf1b25258c5ed297716522907da0f359f3b6c85b3ef9e",
+        "bytes": 46867,
+        "line_count": 1274
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_integrity.py",
+        "sha256": "2912100aafa407309bb576100f064069618d45c97da09ca50b775bf374e80df1",
+        "bytes": 32074,
+        "line_count": 825
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_source_contracts.py",
+        "sha256": "129b2873402552cfa96e39b749e67c1f288bbdaccae8c56b0882f5634534f987",
+        "bytes": 6376,
+        "line_count": 188
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/okx_canonical_event_ingest.py",
+        "sha256": "7fcd6fed761fe9ca87a1cb08dd8fb924cd0f13aa67cab5fee688311b80ab4587",
+        "bytes": 39448,
+        "line_count": 1103
+      },
+      {
+        "path": "control-plane/pyproject.toml",
+        "sha256": "91effea5f841607f5825985ef5ffa1a490fb1345b7b04a253a28eb4c4c06a719",
+        "bytes": 1021,
+        "line_count": 41
+      },
+      {
+        "path": "docs/Developer/s34-bitcoin-height-window-contract.md",
+        "sha256": "485f0b2d4c7b8eb8afd8a979b49e5fe4afcd9b6f9800c170027e3681f25c281f",
+        "bytes": 4466,
+        "line_count": 98
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "4fe044fa3002ede0ef1c05a80b8deebd03c221d1ecf383cee285379ead35ee9f",
+        "bytes": 7718,
+        "line_count": 155
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "988559e09a6ab0e8859f8676e80efbce53e90b5c218e6f3d8addecfad0f48e47",
+        "bytes": 1511,
+        "line_count": 77
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
+        "bytes": 183256,
+        "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
+        "sha256": "2a4aa8aa8791c569a1fa881057a9f2965fb3a8919cc7b7e9288021862908d8c2",
+        "bytes": 20161,
+        "line_count": 74
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
+        "sha256": "06f11f2c1f70e5908119df9d5ff1619e9598d7b31b7bb621a871fe6b788e22b8",
+        "bytes": 13572,
+        "line_count": 86
+      },
+      {
+        "path": "tests/contract/test_bybit_canonical_event_ingest_contract.py",
+        "sha256": "9a70e861ecaec11153c3fba9c8b909f51517c7bc00e9dafd6d0d648b05e1ed91",
+        "bytes": 6845,
+        "line_count": 206
+      },
+      {
+        "path": "tests/contract/test_daily_bybit_spot_trades_asset_contract.py",
+        "sha256": "87ac41a1c14a577d197bfc6714c4f688c6b1b5c947e48172597b138c9626fa52",
+        "bytes": 13098,
+        "line_count": 378
+      },
+      {
+        "path": "tests/contract/test_daily_okx_spot_trades_asset_contract.py",
+        "sha256": "6e761d4e6a5077c4742809b2332528f30fc121e98534531bfe7d9085ce767373",
+        "bytes": 19955,
+        "line_count": 575
+      },
+      {
+        "path": "tests/contract/test_etf_daily_backfill_job_contract.py",
+        "sha256": "db7d742ed82fe117d17d1832afbe892b6287539c0ab534e063266dd65418a0eb",
+        "bytes": 59444,
+        "line_count": 1743
+      },
+      {
+        "path": "tests/contract/test_exchange_source_contracts.py",
+        "sha256": "b8cb99b8f0836acd6a4dfc281f4329e21edf231bc8fef9ff207031188d3f75ea",
+        "bytes": 2285,
+        "line_count": 69
+      },
+      {
+        "path": "tests/contract/test_okx_canonical_event_ingest_contract.py",
+        "sha256": "58c09181b5337a5aaf75dfe8ac6c61e58b73238f18f03cda864804c80b434cb5",
+        "bytes": 3218,
+        "line_count": 96
+      },
+      {
+        "path": "tests/contract/test_s34_backfill_contract.py",
+        "sha256": "8d6d8bdacfb5d048085898f298962675daea77b14a7596fa6994f7db78c5234c",
+        "bytes": 3233,
+        "line_count": 87
+      },
+      {
+        "path": "tests/contract/test_s34_exchange_backfill_runner_contract.py",
+        "sha256": "55fa2a0ceead18e54370e76253dc155276d33675c698ac5b0431969671743fc4",
+        "bytes": 9032,
+        "line_count": 260
+      },
+      {
+        "path": "tests/contract/test_s34_fred_backfill_contract.py",
+        "sha256": "4157f3f0c7fb04f96539df8c92da389be10173e871aba3df603621a7932cba9b",
+        "bytes": 33761,
+        "line_count": 1023
+      },
+      {
+        "path": "tests/contract/test_s34_launchpad_config_contract.py",
+        "sha256": "a2460b55a506e144887d870f72dbba12af21c24e747f9c0ff0494e35ff681083",
+        "bytes": 3642,
+        "line_count": 122
+      }
+    ]
+  },
+  "run_1_fingerprints": {
+    "rows": [
+      {
+        "path": ".env.example",
+        "sha256": "7e35d1a8f89b15521d3da5d205d26efe9301f756076cf981accc06aa736a836b",
+        "bytes": 5443,
+        "line_count": 116
+      },
+      {
+        "path": "CHANGELOG.md",
+        "sha256": "338b4f301f198a6633d2630781a6c8aa421772763b8997b5d076d60040bd8723",
+        "bytes": 39486,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/CHANGELOG.md",
+        "sha256": "3a7125f83ac53ac880c00fceac3d332faf9a6c9d7e4f9218efe6b11c77414976",
+        "bytes": 66307,
+        "line_count": 1142
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
+        "line_count": 477
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
+        "line_count": 408
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
+        "line_count": 413
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
+        "line_count": 692
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
+        "line_count": 417
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
+        "line_count": 389
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
+        "line_count": 486
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
+        "line_count": 429
+      },
+      {
+        "path": "control-plane/origo_control_plane/backfill/s34_contract.py",
+        "sha256": "0741963dd5aeba22f0564684521d554fa91280eaa88f8e420e7a599422e325cf",
+        "bytes": 12855,
+        "line_count": 351
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
+        "line_count": 1818
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
+        "line_count": 1602
+      },
+      {
+        "path": "control-plane/origo_control_plane/s34_exchange_source_concurrency_probe.py",
+        "sha256": "b06b0026a2491dadf37e45c180d24215a618c5e5ac9f6475ef0fb653017db594",
+        "bytes": 23773,
+        "line_count": 676
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/bybit_canonical_event_ingest.py",
+        "sha256": "b043b0ed02073b75ddbbf1b25258c5ed297716522907da0f359f3b6c85b3ef9e",
+        "bytes": 46867,
+        "line_count": 1274
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_integrity.py",
+        "sha256": "2912100aafa407309bb576100f064069618d45c97da09ca50b775bf374e80df1",
+        "bytes": 32074,
+        "line_count": 825
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_source_contracts.py",
+        "sha256": "129b2873402552cfa96e39b749e67c1f288bbdaccae8c56b0882f5634534f987",
+        "bytes": 6376,
+        "line_count": 188
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/okx_canonical_event_ingest.py",
+        "sha256": "7fcd6fed761fe9ca87a1cb08dd8fb924cd0f13aa67cab5fee688311b80ab4587",
+        "bytes": 39448,
+        "line_count": 1103
+      },
+      {
+        "path": "control-plane/pyproject.toml",
+        "sha256": "91effea5f841607f5825985ef5ffa1a490fb1345b7b04a253a28eb4c4c06a719",
+        "bytes": 1021,
+        "line_count": 41
+      },
+      {
+        "path": "docs/Developer/s34-bitcoin-height-window-contract.md",
+        "sha256": "485f0b2d4c7b8eb8afd8a979b49e5fe4afcd9b6f9800c170027e3681f25c281f",
+        "bytes": 4466,
+        "line_count": 98
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "4fe044fa3002ede0ef1c05a80b8deebd03c221d1ecf383cee285379ead35ee9f",
+        "bytes": 7718,
+        "line_count": 155
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "988559e09a6ab0e8859f8676e80efbce53e90b5c218e6f3d8addecfad0f48e47",
+        "bytes": 1511,
+        "line_count": 77
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
+        "bytes": 183256,
+        "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
+        "sha256": "2a4aa8aa8791c569a1fa881057a9f2965fb3a8919cc7b7e9288021862908d8c2",
+        "bytes": 20161,
+        "line_count": 74
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
+        "sha256": "06f11f2c1f70e5908119df9d5ff1619e9598d7b31b7bb621a871fe6b788e22b8",
+        "bytes": 13572,
+        "line_count": 86
+      },
+      {
+        "path": "tests/contract/test_bybit_canonical_event_ingest_contract.py",
+        "sha256": "9a70e861ecaec11153c3fba9c8b909f51517c7bc00e9dafd6d0d648b05e1ed91",
+        "bytes": 6845,
+        "line_count": 206
+      },
+      {
+        "path": "tests/contract/test_daily_bybit_spot_trades_asset_contract.py",
+        "sha256": "87ac41a1c14a577d197bfc6714c4f688c6b1b5c947e48172597b138c9626fa52",
+        "bytes": 13098,
+        "line_count": 378
+      },
+      {
+        "path": "tests/contract/test_daily_okx_spot_trades_asset_contract.py",
+        "sha256": "6e761d4e6a5077c4742809b2332528f30fc121e98534531bfe7d9085ce767373",
+        "bytes": 19955,
+        "line_count": 575
+      },
+      {
+        "path": "tests/contract/test_etf_daily_backfill_job_contract.py",
+        "sha256": "db7d742ed82fe117d17d1832afbe892b6287539c0ab534e063266dd65418a0eb",
+        "bytes": 59444,
+        "line_count": 1743
+      },
+      {
+        "path": "tests/contract/test_exchange_source_contracts.py",
+        "sha256": "b8cb99b8f0836acd6a4dfc281f4329e21edf231bc8fef9ff207031188d3f75ea",
+        "bytes": 2285,
+        "line_count": 69
+      },
+      {
+        "path": "tests/contract/test_okx_canonical_event_ingest_contract.py",
+        "sha256": "58c09181b5337a5aaf75dfe8ac6c61e58b73238f18f03cda864804c80b434cb5",
+        "bytes": 3218,
+        "line_count": 96
+      },
+      {
+        "path": "tests/contract/test_s34_backfill_contract.py",
+        "sha256": "8d6d8bdacfb5d048085898f298962675daea77b14a7596fa6994f7db78c5234c",
+        "bytes": 3233,
+        "line_count": 87
+      },
+      {
+        "path": "tests/contract/test_s34_exchange_backfill_runner_contract.py",
+        "sha256": "55fa2a0ceead18e54370e76253dc155276d33675c698ac5b0431969671743fc4",
+        "bytes": 9032,
+        "line_count": 260
+      },
+      {
+        "path": "tests/contract/test_s34_fred_backfill_contract.py",
+        "sha256": "4157f3f0c7fb04f96539df8c92da389be10173e871aba3df603621a7932cba9b",
+        "bytes": 33761,
+        "line_count": 1023
+      },
+      {
+        "path": "tests/contract/test_s34_launchpad_config_contract.py",
+        "sha256": "a2460b55a506e144887d870f72dbba12af21c24e747f9c0ff0494e35ff681083",
+        "bytes": 3642,
+        "line_count": 122
+      }
+    ],
+    "file_count": 39,
+    "aggregate_sha256": "d4757d37b6df00d048a739f3eb2aba09c2b1a459bcbb5850b5358444b59bcf6d"
+  },
+  "run_2_fingerprints": {
+    "rows": [
+      {
+        "path": ".env.example",
+        "sha256": "7e35d1a8f89b15521d3da5d205d26efe9301f756076cf981accc06aa736a836b",
+        "bytes": 5443,
+        "line_count": 116
+      },
+      {
+        "path": "CHANGELOG.md",
+        "sha256": "338b4f301f198a6633d2630781a6c8aa421772763b8997b5d076d60040bd8723",
+        "bytes": 39486,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/CHANGELOG.md",
+        "sha256": "3a7125f83ac53ac880c00fceac3d332faf9a6c9d7e4f9218efe6b11c77414976",
+        "bytes": 66307,
+        "line_count": 1142
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
+        "line_count": 477
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
+        "line_count": 408
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
+        "line_count": 413
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
+        "line_count": 692
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
+        "line_count": 417
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
+        "line_count": 389
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
+        "line_count": 486
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
+        "line_count": 473
+      },
+      {
+        "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
+        "line_count": 429
+      },
+      {
+        "path": "control-plane/origo_control_plane/backfill/s34_contract.py",
+        "sha256": "0741963dd5aeba22f0564684521d554fa91280eaa88f8e420e7a599422e325cf",
+        "bytes": 12855,
+        "line_count": 351
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
+        "line_count": 1818
+      },
+      {
+        "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
+        "line_count": 1602
+      },
+      {
+        "path": "control-plane/origo_control_plane/s34_exchange_source_concurrency_probe.py",
+        "sha256": "b06b0026a2491dadf37e45c180d24215a618c5e5ac9f6475ef0fb653017db594",
+        "bytes": 23773,
+        "line_count": 676
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/bybit_canonical_event_ingest.py",
+        "sha256": "b043b0ed02073b75ddbbf1b25258c5ed297716522907da0f359f3b6c85b3ef9e",
+        "bytes": 46867,
+        "line_count": 1274
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_integrity.py",
+        "sha256": "2912100aafa407309bb576100f064069618d45c97da09ca50b775bf374e80df1",
+        "bytes": 32074,
+        "line_count": 825
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/exchange_source_contracts.py",
+        "sha256": "129b2873402552cfa96e39b749e67c1f288bbdaccae8c56b0882f5634534f987",
+        "bytes": 6376,
+        "line_count": 188
+      },
+      {
+        "path": "control-plane/origo_control_plane/utils/okx_canonical_event_ingest.py",
+        "sha256": "7fcd6fed761fe9ca87a1cb08dd8fb924cd0f13aa67cab5fee688311b80ab4587",
+        "bytes": 39448,
+        "line_count": 1103
+      },
+      {
+        "path": "control-plane/pyproject.toml",
+        "sha256": "91effea5f841607f5825985ef5ffa1a490fb1345b7b04a253a28eb4c4c06a719",
+        "bytes": 1021,
+        "line_count": 41
+      },
+      {
+        "path": "docs/Developer/s34-bitcoin-height-window-contract.md",
+        "sha256": "485f0b2d4c7b8eb8afd8a979b49e5fe4afcd9b6f9800c170027e3681f25c281f",
+        "bytes": 4466,
+        "line_count": 98
+      },
+      {
+        "path": "docs/Developer/s34-canonical-backfill-runtime.md",
+        "sha256": "4fe044fa3002ede0ef1c05a80b8deebd03c221d1ecf383cee285379ead35ee9f",
+        "bytes": 7718,
+        "line_count": 155
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "988559e09a6ab0e8859f8676e80efbce53e90b5c218e6f3d8addecfad0f48e47",
+        "bytes": 1511,
+        "line_count": 77
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
+        "bytes": 183256,
+        "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
+        "sha256": "2a4aa8aa8791c569a1fa881057a9f2965fb3a8919cc7b7e9288021862908d8c2",
+        "bytes": 20161,
+        "line_count": 74
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
+        "sha256": "06f11f2c1f70e5908119df9d5ff1619e9598d7b31b7bb621a871fe6b788e22b8",
+        "bytes": 13572,
+        "line_count": 86
+      },
+      {
+        "path": "tests/contract/test_bybit_canonical_event_ingest_contract.py",
+        "sha256": "9a70e861ecaec11153c3fba9c8b909f51517c7bc00e9dafd6d0d648b05e1ed91",
+        "bytes": 6845,
+        "line_count": 206
+      },
+      {
+        "path": "tests/contract/test_daily_bybit_spot_trades_asset_contract.py",
+        "sha256": "87ac41a1c14a577d197bfc6714c4f688c6b1b5c947e48172597b138c9626fa52",
+        "bytes": 13098,
+        "line_count": 378
+      },
+      {
+        "path": "tests/contract/test_daily_okx_spot_trades_asset_contract.py",
+        "sha256": "6e761d4e6a5077c4742809b2332528f30fc121e98534531bfe7d9085ce767373",
+        "bytes": 19955,
+        "line_count": 575
+      },
+      {
+        "path": "tests/contract/test_etf_daily_backfill_job_contract.py",
+        "sha256": "db7d742ed82fe117d17d1832afbe892b6287539c0ab534e063266dd65418a0eb",
+        "bytes": 59444,
+        "line_count": 1743
+      },
+      {
+        "path": "tests/contract/test_exchange_source_contracts.py",
+        "sha256": "b8cb99b8f0836acd6a4dfc281f4329e21edf231bc8fef9ff207031188d3f75ea",
+        "bytes": 2285,
+        "line_count": 69
+      },
+      {
+        "path": "tests/contract/test_okx_canonical_event_ingest_contract.py",
+        "sha256": "58c09181b5337a5aaf75dfe8ac6c61e58b73238f18f03cda864804c80b434cb5",
+        "bytes": 3218,
+        "line_count": 96
+      },
+      {
+        "path": "tests/contract/test_s34_backfill_contract.py",
+        "sha256": "8d6d8bdacfb5d048085898f298962675daea77b14a7596fa6994f7db78c5234c",
+        "bytes": 3233,
+        "line_count": 87
+      },
+      {
+        "path": "tests/contract/test_s34_exchange_backfill_runner_contract.py",
+        "sha256": "55fa2a0ceead18e54370e76253dc155276d33675c698ac5b0431969671743fc4",
+        "bytes": 9032,
+        "line_count": 260
+      },
+      {
+        "path": "tests/contract/test_s34_fred_backfill_contract.py",
+        "sha256": "4157f3f0c7fb04f96539df8c92da389be10173e871aba3df603621a7932cba9b",
+        "bytes": 33761,
+        "line_count": 1023
+      },
+      {
+        "path": "tests/contract/test_s34_launchpad_config_contract.py",
+        "sha256": "a2460b55a506e144887d870f72dbba12af21c24e747f9c0ff0494e35ff681083",
+        "bytes": 3642,
+        "line_count": 122
+      }
+    ],
+    "file_count": 39,
+    "aggregate_sha256": "d4757d37b6df00d048a739f3eb2aba09c2b1a459bcbb5850b5358444b59bcf6d"
+  }
+}

@@ -3,8 +3,10 @@ from __future__ import annotations
 # pyright: reportUnknownParameterType=false, reportMissingParameterType=false
 import hashlib
 import json
+import sys
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, cast
@@ -41,9 +43,13 @@ from origo_control_plane.backfill import apply_runtime_audit_mode_or_raise
 from origo_control_plane.backfill.runtime_contract import (
     BACKFILL_PARTITION_IDS_TAG,
     BackfillRuntimeContract,
-    load_backfill_runtime_contract_from_tags_or_raise,
+    build_backfill_runtime_config_schema,
+    load_backfill_runtime_contract_or_raise,
 )
-from origo_control_plane.config import resolve_clickhouse_native_settings
+from origo_control_plane.config import (
+    require_int_env,
+    resolve_clickhouse_native_settings,
+)
 from origo_control_plane.s34_fred_reconcile_planning import (
     select_fred_reconcile_partition_ids_from_env_or_raise,
 )
@@ -59,6 +65,7 @@ from origo_control_plane.utils.fred_native_projector import (
 
 job: Any = getattr(dg, 'job')
 op: Any = getattr(dg, 'op')
+Field: Any = getattr(dg, 'Field')
 
 _CANONICAL_SOURCE_ID = 'fred'
 _CANONICAL_STREAM_ID = 'fred_series_metrics'
@@ -67,12 +74,32 @@ _TERMINAL_PARTITION_STATES = ('proved_complete', 'empty_proved')
 _FRED_NATIVE_PROJECTOR_ID = 'fred_series_metrics_native_v1'
 _FRED_ALIGNED_PROJECTOR_ID = 'fred_series_metrics_aligned_1s_v1'
 _FRED_HISTORY_START_DATE = date(2009, 1, 1)
+_FRED_PARTITION_WORKERS_ENV = 'ORIGO_S34_FRED_PARTITION_WORKERS'
+_MIN_FRED_PARTITION_WORKERS = 10
 _WRITER_RESETTABLE_CONFLICT_CODES = frozenset(
     {
         'WRITER_IDENTITY_EVENT_ID_CONFLICT',
         'WRITER_IDENTITY_PAYLOAD_HASH_CONFLICT',
     }
 )
+_FRED_BACKFILL_OP_CONFIG_SCHEMA: dict[str, Any] = {
+    **build_backfill_runtime_config_schema(default_projection_mode='deferred'),
+    'start_date': Field(
+        str,
+        is_required=False,
+        description='Inclusive FRED source-window start date in YYYY-MM-DD format.',
+    ),
+    'end_date': Field(
+        str,
+        is_required=False,
+        description='Inclusive FRED source-window end date in YYYY-MM-DD format.',
+    ),
+    'partition_ids_csv': Field(
+        str,
+        is_required=False,
+        description='Optional comma-separated FRED partition ids in YYYY-MM-DD format.',
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -139,6 +166,57 @@ def _build_clickhouse_client_or_raise() -> tuple[ClickhouseClient, str]:
         ),
         native_settings.database,
     )
+
+
+def _disconnect_clickhouse_client_or_raise(
+    *,
+    client: ClickhouseClient,
+    warning_log_fn: Callable[[str], None],
+) -> None:
+    active_exception = sys.exc_info()[1]
+    try:
+        client.disconnect()
+    except Exception as exc:
+        if active_exception is not None:
+            active_exception.add_note(
+                f'ClickHouse disconnect failed during cleanup: {exc}'
+            )
+            warning_log_fn(f'Failed to disconnect ClickHouse client cleanly: {exc}')
+        else:
+            raise RuntimeError(
+                f'Failed to disconnect ClickHouse client cleanly: {exc}'
+            ) from exc
+
+
+def _load_fred_partition_workers_or_raise() -> int:
+    value = require_int_env(_FRED_PARTITION_WORKERS_ENV)
+    if value < _MIN_FRED_PARTITION_WORKERS:
+        raise RuntimeError(
+            f'{_FRED_PARTITION_WORKERS_ENV} must be >= {_MIN_FRED_PARTITION_WORKERS}, '
+            f'got {value}'
+        )
+    return value
+
+
+def _resolve_run_id_and_warning_log_fn_or_raise(
+    *,
+    context: OpExecutionContext | None = None,
+    run_id: str | None = None,
+    warning_log_fn: Callable[[str], None] | None = None,
+) -> tuple[str, Callable[[str], None]]:
+    if context is not None:
+        if run_id is not None or warning_log_fn is not None:
+            raise RuntimeError(
+                'FRED partition execution must use either Dagster context or '
+                'explicit run_id/warning_log_fn, not both'
+            )
+        return context.run_id, context.log.warning
+    if run_id is None or warning_log_fn is None:
+        raise RuntimeError(
+            'FRED partition execution requires explicit run_id and warning_log_fn '
+            'when Dagster context is not provided'
+        )
+    return run_id, warning_log_fn
 
 
 def _filter_partition_ids_to_supported_fred_history_or_raise(
@@ -239,6 +317,123 @@ def _load_required_partition_ids_from_tags_or_none(
     return explicit_partition_ids
 
 
+def _load_optional_config_text_or_none(
+    *,
+    op_config: Mapping[str, object],
+    key: str,
+) -> str | None:
+    raw_value = op_config.get(key)
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str):
+        raise RuntimeError(f'Launch config field {key!r} must be string')
+    normalized = raw_value.strip()
+    return None if normalized == '' else normalized
+
+
+def _load_explicit_partition_ids_from_context_or_none(
+    *,
+    context: OpExecutionContext,
+) -> tuple[str, ...] | None:
+    tagged_partition_ids = _load_required_partition_ids_from_tags_or_none(
+        context.run.tags
+    )
+    if tagged_partition_ids is not None:
+        return tagged_partition_ids
+    op_config = getattr(context, 'op_config', None)
+    if not isinstance(op_config, Mapping):
+        return None
+    resolved_op_config = cast(Mapping[str, object], op_config)
+    raw_partition_ids_csv = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='partition_ids_csv',
+    )
+    start_date = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='start_date',
+    )
+    end_date = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='end_date',
+    )
+    if raw_partition_ids_csv is not None and (
+        start_date is not None or end_date is not None
+    ):
+        raise RuntimeError(
+            'FRED backfill launch config cannot set partition_ids_csv together with '
+            'start_date/end_date'
+        )
+    if raw_partition_ids_csv is None:
+        return None
+    partition_ids = _load_required_partition_ids_from_tags_or_none(
+        {BACKFILL_PARTITION_IDS_TAG: raw_partition_ids_csv}
+    )
+    if partition_ids is None:
+        raise RuntimeError('FRED partition_ids_csv config did not resolve any ids')
+    return partition_ids
+
+
+def _load_manual_source_window_from_context_or_none(
+    *,
+    context: OpExecutionContext,
+) -> _SourceWindow | None:
+    tagged_partition_ids = _load_required_partition_ids_from_tags_or_none(
+        context.run.tags
+    )
+    if tagged_partition_ids is not None:
+        return None
+    op_config = getattr(context, 'op_config', None)
+    if not isinstance(op_config, Mapping):
+        return None
+    resolved_op_config = cast(Mapping[str, object], op_config)
+    raw_partition_ids_csv = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='partition_ids_csv',
+    )
+    start_date = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='start_date',
+    )
+    end_date = _load_optional_config_text_or_none(
+        op_config=resolved_op_config,
+        key='end_date',
+    )
+    if raw_partition_ids_csv is not None:
+        if start_date is not None or end_date is not None:
+            raise RuntimeError(
+                'FRED backfill launch config cannot set partition_ids_csv together '
+                'with start_date/end_date'
+            )
+        return None
+    if start_date is None and end_date is None:
+        return None
+    if start_date is None or end_date is None:
+        raise RuntimeError(
+            'FRED backfill launch config must set both start_date and end_date together'
+        )
+    try:
+        observation_start = date.fromisoformat(start_date)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'FRED start_date must be ISO date, got {start_date!r}'
+        ) from exc
+    try:
+        observation_end = date.fromisoformat(end_date)
+    except ValueError as exc:
+        raise RuntimeError(
+            f'FRED end_date must be ISO date, got {end_date!r}'
+        ) from exc
+    if observation_start > observation_end:
+        raise RuntimeError(
+            'FRED start_date must be <= end_date, '
+            f'got start_date={start_date} end_date={end_date}'
+        )
+    return _SourceWindow(
+        observation_start=observation_start,
+        observation_end=observation_end,
+    )
+
+
 def _resolve_source_window_for_partition_ids(
     partition_ids: tuple[str, ...] | None,
 ) -> _SourceWindow:
@@ -278,6 +473,7 @@ def _resolve_source_partition_scope_ids_or_raise(
     database: str,
     runtime_contract: BackfillRuntimeContract,
     explicit_partition_ids: tuple[str, ...] | None,
+    manual_source_window: _SourceWindow | None,
 ) -> tuple[str, ...] | None:
     if explicit_partition_ids is not None:
         return explicit_partition_ids
@@ -292,6 +488,30 @@ def _resolve_source_partition_scope_ids_or_raise(
             'FRED reconcile requested but no ambiguous partitions exist within '
             f'supported history start { _FRED_HISTORY_START_DATE.isoformat() }'
         )
+    if manual_source_window is not None:
+        if (
+            manual_source_window.observation_start is None
+            or manual_source_window.observation_end is None
+        ):
+            raise RuntimeError(
+                'FRED manual source window must provide both observation_start and '
+                'observation_end for reconcile launches'
+            )
+        bounded_partition_ids = tuple(
+            partition_id
+            for partition_id in ambiguous_partition_ids
+            if manual_source_window.observation_start
+            <= date.fromisoformat(partition_id)
+            <= manual_source_window.observation_end
+        )
+        if bounded_partition_ids == ():
+            raise RuntimeError(
+                'FRED reconcile requested but no ambiguous partitions exist within '
+                'the configured launch window '
+                f'start_date={manual_source_window.observation_start.isoformat()} '
+                f'end_date={manual_source_window.observation_end.isoformat()}'
+            )
+        return bounded_partition_ids
     return select_fred_reconcile_partition_ids_from_env_or_raise(
         ambiguous_partition_ids=ambiguous_partition_ids
     )
@@ -341,12 +561,20 @@ def _resolve_source_window_or_raise(
     database: str,
     runtime_contract: BackfillRuntimeContract,
     explicit_partition_ids: tuple[str, ...] | None,
+    manual_source_window: _SourceWindow | None,
     source_partition_scope_ids: tuple[str, ...] | None,
 ) -> tuple[_SourceWindow, str | None]:
     if explicit_partition_ids is not None:
         return (
             _clamp_source_window_to_supported_fred_history_or_raise(
                 _resolve_source_window_for_partition_ids(explicit_partition_ids)
+            ),
+            None,
+        )
+    if manual_source_window is not None:
+        return (
+            _clamp_source_window_to_supported_fred_history_or_raise(
+                manual_source_window
             ),
             None,
         )
@@ -512,7 +740,9 @@ def _delete_partition_rows_or_raise(
 
 def _reset_fred_partition_for_reconcile_or_raise(
     *,
-    context: OpExecutionContext,
+    context: OpExecutionContext | None = None,
+    run_id: str | None = None,
+    warning_log_fn: Callable[[str], None] | None = None,
     client: ClickhouseClient,
     database: str,
     partition_id: str,
@@ -525,6 +755,11 @@ def _reset_fred_partition_for_reconcile_or_raise(
         partition_id=partition_id,
         source_label='partition_id',
     )
+    resolved_run_id, _ = _resolve_run_id_and_warning_log_fn_or_raise(
+        context=context,
+        run_id=run_id,
+        warning_log_fn=warning_log_fn,
+    )
     recorded_at_utc = datetime.now(UTC)
     counts_before_reset = _count_partition_rows_or_raise(
         client=client,
@@ -535,7 +770,7 @@ def _reset_fred_partition_for_reconcile_or_raise(
         source_proof=source_proof,
         state='reconcile_required',
         reason=reset_reason,
-        run_id=context.run_id,
+        run_id=resolved_run_id,
         recorded_at_utc=recorded_at_utc,
         proof_details=reset_details,
     )
@@ -543,7 +778,7 @@ def _reset_fred_partition_for_reconcile_or_raise(
         stream_key=source_proof.stream_key,
         reason=reset_reason,
         details=reset_details,
-        run_id=context.run_id,
+        run_id=resolved_run_id,
         recorded_at_utc=recorded_at_utc,
     )
     _delete_partition_rows_or_raise(
@@ -864,7 +1099,9 @@ def _build_partition_source_proof_or_raise(
 
 def _execute_partition_backfill_or_raise(
     *,
-    context: OpExecutionContext,
+    context: OpExecutionContext | None = None,
+    run_id: str | None = None,
+    warning_log_fn: Callable[[str], None] | None = None,
     client: ClickhouseClient,
     database: str,
     partition_id: str,
@@ -872,6 +1109,11 @@ def _execute_partition_backfill_or_raise(
     persisted_bundles_by_source_id: dict[str, _PersistedFREDBundle],
     runtime_contract: BackfillRuntimeContract,
 ) -> _PartitionBackfillResult:
+    resolved_run_id, resolved_warning_log_fn = _resolve_run_id_and_warning_log_fn_or_raise(
+        context=context,
+        run_id=run_id,
+        warning_log_fn=warning_log_fn,
+    )
     source_proof = _build_partition_source_proof_or_raise(
         partition_id=partition_id,
         rows=rows,
@@ -895,7 +1137,7 @@ def _execute_partition_backfill_or_raise(
                 source_proof=source_proof,
                 state='reconcile_required',
                 reason='backfill_execution_requires_reconcile',
-                run_id=context.run_id,
+                run_id=resolved_run_id,
                 recorded_at_utc=datetime.now(UTC),
                 proof_details={'trigger_message': str(exc)},
             )
@@ -912,14 +1154,14 @@ def _execute_partition_backfill_or_raise(
     source_manifested_at_utc = datetime.now(UTC)
     state_store.record_source_manifest(
         source_proof=source_proof,
-        run_id=context.run_id,
+        run_id=resolved_run_id,
         manifested_at_utc=source_manifested_at_utc,
     )
     state_store.record_partition_state(
         source_proof=source_proof,
         state='source_manifested',
         reason='source_manifest_recorded',
-        run_id=context.run_id,
+        run_id=resolved_run_id,
         recorded_at_utc=source_manifested_at_utc,
     )
 
@@ -948,7 +1190,7 @@ def _execute_partition_backfill_or_raise(
                 client=client,
                 database=database,
                 rows=rows,
-                run_id=context.run_id,
+                run_id=resolved_run_id,
                 ingested_at_utc=datetime.now(UTC),
             ).to_dict()
             if reconcile_existing_canonical_rows:
@@ -965,7 +1207,8 @@ def _execute_partition_backfill_or_raise(
             ):
                 raise
             reset_summary = _reset_fred_partition_for_reconcile_or_raise(
-                context=context,
+                run_id=resolved_run_id,
+                warning_log_fn=resolved_warning_log_fn,
                 client=client,
                 database=database,
                 partition_id=partition_id,
@@ -977,7 +1220,7 @@ def _execute_partition_backfill_or_raise(
                     'writer_error_message': exc.message,
                 },
             )
-            context.log.warning(
+            resolved_warning_log_fn(
                 'FRED reconcile reset legacy canonical partition rows before rewrite: '
                 + json.dumps(
                     {
@@ -994,7 +1237,7 @@ def _execute_partition_backfill_or_raise(
                 client=client,
                 database=database,
                 rows=rows,
-                run_id=context.run_id,
+                run_id=resolved_run_id,
                 ingested_at_utc=datetime.now(UTC),
             ).to_dict()
             write_path = 'reconcile_partition_reset_rewrite'
@@ -1021,7 +1264,7 @@ def _execute_partition_backfill_or_raise(
         source_proof=source_proof,
         state='canonical_written_unproved',
         reason=proof_reason,
-        run_id=context.run_id,
+        run_id=resolved_run_id,
         recorded_at_utc=proof_recorded_at_utc,
     )
     proof_input = (
@@ -1030,7 +1273,7 @@ def _execute_partition_backfill_or_raise(
     try:
         partition_proof = state_store.prove_partition_or_quarantine(
             source_proof=source_proof,
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             recorded_at_utc=proof_recorded_at_utc,
             canonical_proof=proof_input,
         )
@@ -1063,7 +1306,8 @@ def _execute_partition_backfill_or_raise(
         and partition_proof.state != 'proved_complete'
     ):
         reset_summary = _reset_fred_partition_for_reconcile_or_raise(
-            context=context,
+            run_id=resolved_run_id,
+            warning_log_fn=resolved_warning_log_fn,
             client=client,
             database=database,
             partition_id=partition_id,
@@ -1076,7 +1320,7 @@ def _execute_partition_backfill_or_raise(
                 'quarantine_proof_digest_sha256': partition_proof.proof_digest_sha256,
             },
         )
-        context.log.warning(
+        resolved_warning_log_fn(
             'FRED reconcile reset stale canonical partition rows after proof mismatch: '
             + json.dumps(
                 {
@@ -1093,7 +1337,7 @@ def _execute_partition_backfill_or_raise(
             client=client,
             database=database,
             rows=rows,
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             ingested_at_utc=datetime.now(UTC),
         ).to_dict()
         write_path = 'reconcile_partition_reset_rewrite'
@@ -1118,12 +1362,12 @@ def _execute_partition_backfill_or_raise(
             source_proof=source_proof,
             state='canonical_written_unproved',
             reason=proof_reason,
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             recorded_at_utc=proof_recorded_at_utc,
         )
         partition_proof = state_store.prove_partition_or_quarantine(
             source_proof=source_proof,
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             recorded_at_utc=proof_recorded_at_utc,
         )
 
@@ -1133,14 +1377,14 @@ def _execute_partition_backfill_or_raise(
             client=client,
             database=database,
             partition_ids=[partition_id],
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             projected_at_utc=projected_at_utc,
         ).to_dict()
         aligned_projection_summary = project_fred_series_metrics_aligned(
             client=client,
             database=database,
             partition_ids=[partition_id],
-            run_id=context.run_id,
+            run_id=resolved_run_id,
             projected_at_utc=projected_at_utc,
         ).to_dict()
     else:
@@ -1172,12 +1416,41 @@ def _execute_partition_backfill_or_raise(
     )
 
 
+def _execute_partition_backfill_in_worker_or_raise(
+    *,
+    run_id: str,
+    warning_log_fn: Callable[[str], None],
+    partition_id: str,
+    rows: list[FREDLongMetricRow],
+    persisted_bundles_by_source_id: dict[str, _PersistedFREDBundle],
+    runtime_contract: BackfillRuntimeContract,
+) -> _PartitionBackfillResult:
+    client, database = _build_clickhouse_client_or_raise()
+    try:
+        return _execute_partition_backfill_or_raise(
+            run_id=run_id,
+            warning_log_fn=warning_log_fn,
+            client=client,
+            database=database,
+            partition_id=partition_id,
+            rows=rows,
+            persisted_bundles_by_source_id=persisted_bundles_by_source_id,
+            runtime_contract=runtime_contract,
+        )
+    finally:
+        _disconnect_clickhouse_client_or_raise(
+            client=client,
+            warning_log_fn=warning_log_fn,
+        )
+
+
 def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunSummary:
-    runtime_contract = load_backfill_runtime_contract_from_tags_or_raise(
-        context.run.tags,
+    runtime_contract = load_backfill_runtime_contract_or_raise(context)
+    explicit_partition_ids = _load_explicit_partition_ids_from_context_or_none(
+        context=context
     )
-    explicit_partition_ids = _load_required_partition_ids_from_tags_or_none(
-        context.run.tags
+    manual_source_window = _load_manual_source_window_from_context_or_none(
+        context=context
     )
     apply_runtime_audit_mode_or_raise(
         runtime_audit_mode=runtime_contract.runtime_audit_mode
@@ -1189,6 +1462,7 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
             database=database,
             runtime_contract=runtime_contract,
             explicit_partition_ids=explicit_partition_ids,
+            manual_source_window=manual_source_window,
         )
         source_window, resume_from_terminal_partition_id = (
             _resolve_source_window_or_raise(
@@ -1196,6 +1470,7 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
                 database=database,
                 runtime_contract=runtime_contract,
                 explicit_partition_ids=explicit_partition_ids,
+                manual_source_window=manual_source_window,
                 source_partition_scope_ids=source_partition_scope_ids,
             )
         )
@@ -1227,21 +1502,49 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
                 database=database,
                 partition_ids=partition_ids_to_process,
             )
-
-        partition_results = [
-            _execute_partition_backfill_or_raise(
-                context=context,
-                client=native_client,
-                database=database,
-                partition_id=partition_id,
-                rows=partition_rows[partition_id],
-                persisted_bundles_by_source_id=persisted_bundles_by_source_id,
-                runtime_contract=runtime_contract,
+        if partition_ids_to_process == ():
+            partition_results = []
+        else:
+            configured_workers = _load_fred_partition_workers_or_raise()
+            active_workers = min(configured_workers, len(partition_ids_to_process))
+            context.log.info(
+                'FRED partition worker pool '
+                + json.dumps(
+                    {
+                        'configured_workers': configured_workers,
+                        'active_workers': active_workers,
+                        'partition_count': len(partition_ids_to_process),
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                )
             )
-            for partition_id in partition_ids_to_process
-        ]
+            results_by_partition_id: dict[str, _PartitionBackfillResult] = {}
+            with ThreadPoolExecutor(max_workers=active_workers) as executor:
+                future_to_partition_id = {
+                    executor.submit(
+                        _execute_partition_backfill_in_worker_or_raise,
+                        run_id=context.run_id,
+                        warning_log_fn=context.log.warning,
+                        partition_id=partition_id,
+                        rows=partition_rows[partition_id],
+                        persisted_bundles_by_source_id=persisted_bundles_by_source_id,
+                        runtime_contract=runtime_contract,
+                    ): partition_id
+                    for partition_id in partition_ids_to_process
+                }
+                for future in as_completed(future_to_partition_id):
+                    partition_id = future_to_partition_id[future]
+                    results_by_partition_id[partition_id] = future.result()
+            partition_results = [
+                results_by_partition_id[partition_id]
+                for partition_id in partition_ids_to_process
+            ]
     finally:
-        native_client.disconnect()
+        _disconnect_clickhouse_client_or_raise(
+            client=native_client,
+            warning_log_fn=context.log.warning,
+        )
 
     return _BackfillRunSummary(
         total_series=len(persisted_bundles),
@@ -1262,7 +1565,10 @@ def _run_fred_backfill_or_raise(*, context: OpExecutionContext) -> _BackfillRunS
     )
 
 
-@op(name='origo_fred_daily_backfill_step')
+@op(
+    name='origo_fred_daily_backfill_step',
+    config_schema=_FRED_BACKFILL_OP_CONFIG_SCHEMA,
+)
 def origo_fred_daily_backfill_step(context) -> None:
     _run_fred_daily_backfill_step_or_raise(
         context=cast(OpExecutionContext, context)

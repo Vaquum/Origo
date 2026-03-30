@@ -12,6 +12,7 @@ from dagster import AssetExecutionContext, asset
 
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    build_backfill_runtime_config_schema,
     load_backfill_runtime_contract_or_raise,
 )
 from origo_control_plane.bitcoin_core import (
@@ -210,6 +211,9 @@ def _canonical_rows_sha256(rows: list[_NormalizedMempoolRow]) -> str:
 
 
 @asset(
+    config_schema=build_backfill_runtime_config_schema(
+        default_projection_mode='inline'
+    ),
     group_name='bitcoin_core_data',
     description='Fetches deterministic Bitcoin mempool snapshot rows from a self-hosted node and loads to ClickHouse.',
 )

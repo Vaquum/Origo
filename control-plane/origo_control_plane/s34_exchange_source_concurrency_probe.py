@@ -14,8 +14,9 @@ from typing import Literal, cast
 import requests
 
 from origo_control_plane.utils.exchange_source_contracts import (
-    EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
     ExchangeSourceHttpError,
+    load_bybit_source_request_timeout_seconds_or_raise,
+    load_okx_source_request_timeout_seconds_or_raise,
     resolve_bybit_daily_file_url,
     resolve_okx_daily_file_url_or_raise,
     verify_md5_base64_or_raise,
@@ -124,7 +125,7 @@ def _probe_okx_once(*, date_str: str) -> ProbeAttemptResult:
         _, file_url = resolve_okx_daily_file_url_or_raise(date_str=date_str)
         response = requests.get(
             file_url,
-            timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+            timeout=load_okx_source_request_timeout_seconds_or_raise(),
         )
         response.raise_for_status()
         zip_payload = response.content
@@ -175,7 +176,7 @@ def _probe_bybit_once(*, date_str: str) -> ProbeAttemptResult:
         _, file_url = resolve_bybit_daily_file_url(date_str=date_str)
         with requests.get(
             file_url,
-            timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+            timeout=load_bybit_source_request_timeout_seconds_or_raise(),
             stream=True,
         ) as response:
             response.raise_for_status()

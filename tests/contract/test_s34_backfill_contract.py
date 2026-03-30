@@ -37,10 +37,10 @@ def test_s34_okx_contract_uses_numeric_monotonic_ordering() -> None:
     assert contract.max_concurrent_partition_runs == 20
 
 
-def test_s34_bybit_contract_tracks_empirical_source_safe_ceiling() -> None:
+def test_s34_bybit_contract_uses_operator_safe_partition_run_ceiling() -> None:
     contract = get_s34_dataset_contract('bybit_spot_trades')
-    assert contract.source_safe_concurrency_ceiling == 1280
-    assert contract.max_concurrent_partition_runs == 1280
+    assert contract.source_safe_concurrency_ceiling == 20
+    assert contract.max_concurrent_partition_runs == 20
 
 
 def test_s34_bitcoin_partition_scheme_split_is_explicit() -> None:

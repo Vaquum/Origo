@@ -2,11 +2,11 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-27
+- Last updated: 2026-03-30
 - Slice reference: S34 (`S34-C7a`, `S34-07a`, `S34-C7b`, `S34-07b`, `S34-C7c`, `S34-07c`)
 
 ## Purpose and scope
-- Defines the explicit Dagster run-tag contract for height-based Bitcoin backfill runs in Slice 34.
+- Defines the explicit Dagster height-window contract for height-based Bitcoin backfill runs in Slice 34.
 - Scope covers height-based Bitcoin datasets only:
   - `bitcoin_block_headers`
   - `bitcoin_block_transactions`
@@ -17,7 +17,10 @@
 - `bitcoin_mempool_state` is intentionally out of scope for this contract because it remains time-native and daily snapshot-partitioned.
 
 ## Inputs and outputs with contract shape
-- Required Dagster run tags:
+- Launchpad config fields:
+  - `height_start`
+  - `height_end`
+- Dagster run tags:
   - `origo.backfill.height_start`
   - `origo.backfill.height_end`
 - Contract loader:
@@ -26,6 +29,14 @@
   - `origo_control_plane.bitcoin_core.resolve_bitcoin_core_node_settings_with_height_range_or_raise`
 
 ## Data definitions (field names, types, units, timezone, nullability)
+- `height_start`
+  - integer
+  - inclusive Bitcoin block height
+  - required on Dagit Launchpad runs
+- `height_end`
+  - integer
+  - inclusive Bitcoin block height
+  - required on Dagit Launchpad runs
 - `origo.backfill.height_start`
   - integer
   - inclusive Bitcoin block height
@@ -39,7 +50,7 @@
 
 ## Source/provenance and freshness semantics
 - Height-based Bitcoin assets no longer take per-run backfill boundaries from static env.
-- Dagster run tags are now the per-run range authority for height-based Bitcoin backfill execution.
+- Dagster Launchpad config is the first-class manual control surface for height-based Bitcoin backfill execution, with run-tag fallback kept for repo-native controllers.
 - Height-based Bitcoin canonical events now stamp one zero-padded `height_range` `partition_id` per Dagster run window:
   - format: `000000840000-000000840999`
   - ordering: lexicographically sortable in the same order as numeric height windows
@@ -52,9 +63,9 @@
 - RPC connection/auth/network still come from env contract.
 
 ## Failure modes, warnings, and error codes
-- Missing height tags: fail loudly.
-- Non-integer height tags: fail loudly.
-- Negative height tags: fail loudly.
+- Missing height window in both Launchpad config and run tags: fail loudly.
+- Non-integer height window values in config/tags: fail loudly.
+- Negative height window values: fail loudly.
 - `height_end < height_start`: fail loudly.
 
 ## Determinism/replay notes
@@ -79,6 +90,9 @@
   - `ORIGO_BITCOIN_CORE_HEADERS_END_HEIGHT`
 
 ## Minimal examples
-- Example Dagster tags for a Bitcoin height-window run:
+- Example Dagit Launchpad config for a Bitcoin height-window run:
+  - `height_start: 840000`
+  - `height_end: 840999`
+- Example repo-native Dagster tags for a Bitcoin height-window run:
   - `origo.backfill.height_start=840000`
   - `origo.backfill.height_end=840999`

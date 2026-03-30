@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-30
+- Tightened Slice 34 backfill runtime performance and Launchpad controls:
+  - moved OKX and Bybit daily canonical backfill onto the staged/vectorized fast path used by hardened Binance daily backfill
+  - made ETF and FRED Launchpad runs first-class manual control surfaces with explicit `start_date` / `end_date` / `partition_ids_csv`
+  - added env-backed ETF/FRED partition worker pools and env-backed exchange source HTTP timeout contracts
+  - added Dagster config surfaces for height-based Bitcoin backfills and Bitcoin mempool runtime execution
+- Updated version to `origo-control-plane v1.2.85` (`Origo API` `v0.1.30`).
+
 - Froze the PR review-routing governance contract around `zero-bang`:
   - `zero-bang` is now explicitly reviewer/approver only and must never be used as the git user or PR author for normal engineering work
   - every PR must request `zero-bang` review, resolve all review conversations, re-request review after fixes, and merge only after final `zero-bang` approval

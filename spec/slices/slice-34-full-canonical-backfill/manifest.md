@@ -1,4 +1,7 @@
 ## What was done
+- Moved [OKX](../../../control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py) and [Bybit](../../../control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py) Slice-34 daily backfill execution onto the same staged/vectorized fast path already used by hardened Binance daily backfill, including frame-native integrity, staged source-proof construction, and staged fresh-partition canonical writes.
+- Promoted Dagster Launchpad to the first-class manual control surface for Slice-34 backfill-capable jobs by exposing explicit runtime/manual-window config on ETF, FRED, and Bitcoin jobs while aligning exchange Launchpad defaults with the repo-native deferred-backfill contract.
+- Replaced the remaining hard-coded daily exchange HTTP timeouts with required env-backed transport contracts and added env-backed worker pools for ETF and FRED partition execution so those jobs stop running partition batches strictly serially.
 - Froze the PR review-routing governance contract for active Slice 34 work by updating [AGENTS.md](../../../AGENTS.md), [spec/1-top-level-plan.md](../../1-top-level-plan.md), and [spec/2-itemized-work-plan.md](../../2-itemized-work-plan.md) so `zero-bang` is reviewer/approver only, never the PR author, and every merge path must flow through resolved conversations plus final re-requested review.
 - Added the machine-checkable governance contract [contracts/governance/pr-review-routing.json](../../../contracts/governance/pr-review-routing.json), the live developer reference [docs/Developer/pr-review-routing-contract.md](../../../docs/Developer/pr-review-routing-contract.md), and focused contract coverage in [tests/contract/test_pr_review_routing_contract.py](../../../tests/contract/test_pr_review_routing_contract.py) so the routing rule cannot drift back into tribal knowledge.
 - Added the `playwright` Python runtime dependency to the control-plane package and refreshed `control-plane/uv.lock` at version `1.2.69`.
@@ -28,6 +31,10 @@
 - Extended [test_s34_fred_backfill_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_s34_fred_backfill_contract.py) so planner drift between the FRED runner and Dagster job fails loudly.
 
 ## Current state
+- Exchange daily backfill-capable Dagster assets now default to `projection_mode=deferred`, `execution_mode=backfill`, and `runtime_audit_mode=summary` in Launchpad, matching the repo-native Slice-34 controller contract instead of requiring hidden run-tag knowledge.
+- ETF and FRED Dagster backfill jobs now accept manual `start_date`, `end_date`, and `partition_ids_csv` Launchpad controls and use explicit env-backed worker pools (`ORIGO_S34_ETF_PARTITION_WORKERS`, `ORIGO_S34_FRED_PARTITION_WORKERS`) with a hard minimum of `10`.
+- Height-based Bitcoin Dagster assets now expose `height_start` / `height_end` directly in Launchpad, while `bitcoin_mempool_state` exposes the shared runtime contract without pretending it is height-windowed.
+- OKX and Bybit fresh-partition backfill now avoid the old Python row-by-row proof/write bottleneck, but Binance monthly remains a separate legacy path and is still not on the same staged/vectorized runtime.
 - PR routing is now an explicit repo contract instead of operator memory: `zero-bang` may review and approve but may not author normal engineering PRs, and merge readiness now requires the full request-review -> resolve-conversations -> re-request-review -> approve sequence.
 - Local proof shows the control-plane image now builds successfully with Playwright and Chromium installed.
 - Deterministic local replay passed twice with the same validation summaries and the same Docker image id `sha256:d5bcb93c91764e241f7e6d003d733cd561872e4915800086033c77582a1b45a8`.
@@ -48,6 +55,10 @@
 - The current server archive remains sparse. Historical ETF completeness cannot be claimed beyond the archived issuer artifacts already stored under `raw-artifacts/`.
 
 ## Watch out
+- These Launchpad and worker/runtime changes are still branch-local until merged and deployed. The live remote Dagit instance will not reflect them until the deploy completes and the deployed code location reloads cleanly.
+- ETF/FRED worker-pool correctness now depends on one ClickHouse client per worker. Future refactors must not share a mutable native client across those worker threads.
+- The staged OKX/Bybit fast path is intentionally limited to fresh-partition execution. Reconcile and non-empty partition repair still need the writer-based path so idempotent repair semantics remain authoritative.
+- Exchange source transport is now env-driven. Missing or non-positive timeout env values must fail loudly everywhere; reintroducing any per-source hard-coded timeout would drift away from the runtime contract immediately.
 - The repo now encodes the PR-routing rule, but GitHub-side reviewer/branch-protection settings still need to continue matching the contract. If the hosted repo ever allows a merge path that bypasses final `zero-bang` approval, hosted policy has drifted away from repo truth.
 - Slice 34 as a whole is still open; these artifacts only close the local proof legs for `S34-C2l`, `S34-C5g`, and `S34-C5j`.
 - The live ETF rerun for `S34-C5g` must happen on the deployed server Dagster runtime because the real proof depends on the actual archive inventory and current archived revision mix.

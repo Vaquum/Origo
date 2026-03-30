@@ -12,6 +12,7 @@ from dagster import AssetExecutionContext, asset
 
 from origo_control_plane.backfill import (
     apply_runtime_audit_mode_or_raise,
+    build_backfill_height_window_config_schema,
     load_backfill_height_window_or_raise,
     load_backfill_runtime_contract_or_raise,
 )
@@ -513,6 +514,9 @@ def _fetch_transaction_rows_or_raise(
 
 
 @asset(
+    config_schema=build_backfill_height_window_config_schema(
+        default_projection_mode='deferred'
+    ),
     group_name='bitcoin_core_data',
     description='Fetches deterministic Bitcoin block transaction rows from a self-hosted unpruned node and loads to ClickHouse.',
 )

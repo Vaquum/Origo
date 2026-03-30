@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.85 on 30th of March, 2026
+
+- Tightened Slice 34 backfill runtime performance and Launchpad controls:
+  - moved OKX and Bybit daily canonical backfill onto staged/vectorized source-proof and fresh-write paths that match hardened Binance daily backfill
+  - made ETF and FRED Dagster Launchpad runs first-class by exposing runtime contract fields plus explicit `start_date` / `end_date` / `partition_ids_csv`
+  - added env-backed ETF/FRED partition worker pools so those jobs no longer execute partition batches strictly serially
+  - replaced hard-coded Binance/OKX/Bybit HTTP timeouts with required env-backed source transport contracts
+  - exposed height-window and runtime controls directly on the Bitcoin Dagit assets so manual backfills do not depend on hidden run tags
+
 ## v1.2.84 on 30th of March, 2026
 
 - Froze the PR review-routing governance contract around `zero-bang`:

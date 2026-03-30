@@ -37,6 +37,9 @@ from origo_control_plane.utils.binance_native_projector import (
 from origo_control_plane.utils.exchange_integrity import (
     run_exchange_integrity_suite_frame,
 )
+from origo_control_plane.utils.exchange_source_contracts import (
+    load_binance_source_request_timeout_seconds_or_raise,
+)
 
 _CLICKHOUSE = resolve_clickhouse_native_settings()
 CLICKHOUSE_HOST = _CLICKHOUSE.host
@@ -111,14 +114,21 @@ def _process_day(
     checksum_url = file_url + '.CHECKSUM'
 
     context.log.info(f'Downloading checksum from {checksum_url}')
-    checksum_response = requests.get(checksum_url, timeout=60)
+    source_timeout_seconds = load_binance_source_request_timeout_seconds_or_raise()
+    checksum_response = requests.get(
+        checksum_url,
+        timeout=source_timeout_seconds,
+    )
     checksum_response.raise_for_status()
 
     expected_checksum = checksum_response.text.split()[0].strip()
     context.log.info(f'Expected checksum: {expected_checksum}')
 
     context.log.info(f'Downloading trade data from {file_url}')
-    response = requests.get(file_url, timeout=60)
+    response = requests.get(
+        file_url,
+        timeout=source_timeout_seconds,
+    )
     response.raise_for_status()
     zip_data = response.content
     context.log.info(f'Downloaded {len(zip_data) / 1024 / 1024:.2f} MB of data')

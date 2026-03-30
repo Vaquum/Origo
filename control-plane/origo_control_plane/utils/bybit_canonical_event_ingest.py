@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import polars as pl
 from clickhouse_driver import Client as ClickhouseClient
 
 from origo.events.backfill_state import (
     PartitionSourceProof,
     SourceIdentityMaterial,
     build_partition_source_proof,
+    build_partition_source_proof_from_precomputed,
 )
 from origo.events.envelope import CANONICAL_EVENT_ENVELOPE_VERSION
 from origo.events.ingest_state import CanonicalStreamKey
@@ -37,6 +40,7 @@ _WRITE_EVENTS_BATCH_SIZE = 10_000
 _FAST_INSERT_MODE_DEFAULT = 'writer'
 _FAST_INSERT_MODE_ASSUME_NEW_PARTITION = 'assume_new_partition'
 _INSERT_CHUNK_SIZE = 100_000
+_CANONICAL_EVENT_NAMESPACE_HEX = 'f1d1ef1795ce4f9fbd81f9958cdf8ee5'
 _EXPECTED_CSV_HEADER = (
     'timestamp',
     'symbol',
@@ -50,6 +54,27 @@ _EXPECTED_CSV_HEADER = (
     'foreignNotional',
 )
 _EXPECTED_CSV_HEADER_WITH_RPI = (*_EXPECTED_CSV_HEADER, 'RPI')
+
+
+def _read_bybit_csv_header_or_raise(csv_content: bytes) -> tuple[str, ...]:
+    first_line = io.BytesIO(csv_content).readline()
+    if first_line == b'':
+        raise RuntimeError('Bybit CSV payload is empty')
+    decoded_line = first_line.decode('utf-8-sig').rstrip('\r\n')
+    header = next(csv.reader([decoded_line]), None)
+    if header is None:
+        raise RuntimeError('Bybit CSV payload is empty')
+    normalized_header = tuple(cell.strip() for cell in header)
+    if normalized_header not in {
+        _EXPECTED_CSV_HEADER,
+        _EXPECTED_CSV_HEADER_WITH_RPI,
+    }:
+        raise RuntimeError(
+            'Bybit CSV header mismatch: '
+            f'expected one of [{_EXPECTED_CSV_HEADER}, {_EXPECTED_CSV_HEADER_WITH_RPI}] '
+            f'got={normalized_header}'
+        )
+    return normalized_header
 
 
 def parse_bybit_timestamp_ms_or_raise(*, raw_value: str, row_index: int) -> int:
@@ -147,14 +172,13 @@ class BybitSpotTradeEvent:
     gross_value_text: str
     home_notional_text: str
     foreign_notional_text: str
-    rpi_text: str | None = None
 
     @property
     def partition_id(self) -> str:
         return self.event_time_utc.strftime('%Y-%m-%d')
 
     def to_payload(self) -> dict[str, object]:
-        payload: dict[str, object] = {
+        return {
             'symbol': self.symbol,
             'trade_id': self.trade_id,
             'trd_match_id': self.trd_match_id,
@@ -168,9 +192,6 @@ class BybitSpotTradeEvent:
             'home_notional': self.home_notional_text,
             'foreign_notional': self.foreign_notional_text,
         }
-        if self.rpi_text is not None:
-            payload['rpi'] = self.rpi_text
-        return payload
 
     def to_integrity_tuple(
         self,
@@ -192,6 +213,650 @@ class BybitSpotTradeEvent:
         )
 
 
+def parse_bybit_spot_trade_csv_frame(
+    *,
+    csv_content: bytes,
+    date_str: str,
+    day_start_ts_utc_ms: int,
+    day_end_ts_utc_ms: int,
+) -> pl.DataFrame:
+    header = _read_bybit_csv_header_or_raise(csv_content)
+    has_rpi = header == _EXPECTED_CSV_HEADER_WITH_RPI
+    raw_frame = pl.read_csv(
+        io.BytesIO(csv_content),
+        has_header=True,
+        schema_overrides={
+            'timestamp': pl.Utf8,
+            'symbol': pl.Utf8,
+            'side': pl.Utf8,
+            'size': pl.Utf8,
+            'price': pl.Utf8,
+            'tickDirection': pl.Utf8,
+            'trdMatchID': pl.Utf8,
+            'grossValue': pl.Utf8,
+            'homeNotional': pl.Utf8,
+            'foreignNotional': pl.Utf8,
+            'RPI': pl.Utf8,
+        },
+        truncate_ragged_lines=False,
+    ).with_row_index(name='_line_number', offset=2)
+    if raw_frame.height == 0:
+        raise RuntimeError('Bybit CSV payload produced zero spot trade events')
+
+    normalized = raw_frame.with_columns(
+        pl.col('timestamp').cast(pl.Utf8).str.strip_chars().alias('_timestamp_text'),
+        pl.col('symbol').cast(pl.Utf8).str.strip_chars().alias('_symbol'),
+        pl.col('side').cast(pl.Utf8).str.strip_chars().str.to_lowercase().alias('_side'),
+        pl.col('size').cast(pl.Utf8).str.strip_chars().alias('_size_text'),
+        pl.col('price').cast(pl.Utf8).str.strip_chars().alias('_price_text'),
+        pl.col('tickDirection').cast(pl.Utf8).str.strip_chars().alias('_tick_direction'),
+        pl.col('trdMatchID').cast(pl.Utf8).str.strip_chars().alias('_trd_match_id'),
+        pl.col('grossValue').cast(pl.Utf8).str.strip_chars().alias('_gross_value_text'),
+        pl.col('homeNotional').cast(pl.Utf8).str.strip_chars().alias('_home_notional_text'),
+        pl.col('foreignNotional')
+        .cast(pl.Utf8)
+        .str.strip_chars()
+        .alias('_foreign_notional_text'),
+    )
+    if has_rpi:
+        normalized = normalized.with_columns(
+            pl.col('RPI').cast(pl.Utf8).str.strip_chars().alias('_rpi_text')
+        )
+
+    normalized = normalized.with_columns(
+        pl.col('_timestamp_text').str.split_exact('.', 1).alias('_timestamp_parts'),
+        pl.col('_trd_match_id')
+        .str.to_lowercase()
+        .alias('_trd_match_id_lower'),
+    ).with_columns(
+        pl.col('_timestamp_parts').struct.field('field_0').alias('_timestamp_seconds_text'),
+        pl.coalesce(
+            pl.col('_timestamp_parts').struct.field('field_1'),
+            pl.lit('', dtype=pl.Utf8),
+        ).alias('_timestamp_fraction_text'),
+    ).with_columns(
+        pl.col('_timestamp_seconds_text')
+        .cast(pl.Int64, strict=False)
+        .alias('_timestamp_seconds_int'),
+        pl.concat_str(
+            [pl.col('_timestamp_fraction_text'), pl.lit('0000', dtype=pl.Utf8)]
+        )
+        .str.slice(0, 4)
+        .alias('_timestamp_fraction_padded'),
+        (
+            pl.col('_trd_match_id').str.starts_with('m-')
+            & pl.col('_trd_match_id').str.slice(2).str.contains(r'^\d+$')
+        ).alias('_is_numeric_match_id'),
+        pl.col('_trd_match_id_lower')
+        .str.contains(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        )
+        .alias('_is_uuid_match_id'),
+    ).with_columns(
+        (
+            pl.col('_timestamp_seconds_int') * 1000
+            + pl.col('_timestamp_fraction_padded').str.slice(0, 3).cast(pl.Int64)
+            + pl.when(
+                pl.col('_timestamp_fraction_padded').str.slice(3, 1).cast(pl.Int64)
+                >= 5
+            )
+            .then(pl.lit(1))
+            .otherwise(pl.lit(0))
+        ).alias('_timestamp_ms'),
+        pl.when(pl.col('_is_numeric_match_id'))
+        .then(pl.col('_trd_match_id').str.slice(2).cast(pl.Int64, strict=False))
+        .when(pl.col('_is_uuid_match_id'))
+        .then(pl.col('_line_number') - 1)
+        .otherwise(pl.lit(None, dtype=pl.Int64))
+        .alias('_trade_id_int'),
+    )
+
+    invalid_timestamp = normalized.filter(
+        ~pl.col('_timestamp_text').str.contains(r'^\d+(\.\d+)?$')
+        | pl.col('_timestamp_seconds_int').is_null()
+        | (pl.col('_timestamp_ms') <= 0)
+    )
+    if invalid_timestamp.height > 0:
+        line_number = int(invalid_timestamp.get_column('_line_number').item(0))
+        raw_value = str(invalid_timestamp.get_column('_timestamp_text').item(0))
+        raise RuntimeError(
+            f'Bybit CSV timestamp is invalid at line={line_number}: {raw_value}'
+        )
+
+    outside_window = normalized.filter(
+        (pl.col('_timestamp_ms') < day_start_ts_utc_ms)
+        | (pl.col('_timestamp_ms') >= day_end_ts_utc_ms)
+    )
+    if outside_window.height > 0:
+        line_number = int(outside_window.get_column('_line_number').item(0))
+        timestamp_ms = int(outside_window.get_column('_timestamp_ms').item(0))
+        raise RuntimeError(
+            'Bybit CSV timestamp is outside requested UTC day window '
+            f'at line={line_number}, date={date_str}, '
+            f'day_start_ts_utc_ms={day_start_ts_utc_ms}, '
+            f'day_end_ts_utc_ms={day_end_ts_utc_ms}, '
+            f'timestamp_ms={timestamp_ms}'
+        )
+
+    invalid_symbol = normalized.filter(pl.col('_symbol') != _SYMBOL)
+    if invalid_symbol.height > 0:
+        line_number = int(invalid_symbol.get_column('_line_number').item(0))
+        symbol = str(invalid_symbol.get_column('_symbol').item(0))
+        raise RuntimeError(
+            f'Bybit CSV symbol mismatch at line={line_number}: '
+            f'expected={_SYMBOL} got={symbol}'
+        )
+
+    invalid_side = normalized.filter(~pl.col('_side').is_in(['buy', 'sell']))
+    if invalid_side.height > 0:
+        line_number = int(invalid_side.get_column('_line_number').item(0))
+        raw_value = str(invalid_side.get_column('_side').item(0))
+        raise RuntimeError(
+            f'Bybit CSV side must be Buy/Sell at line={line_number}, got={raw_value}'
+        )
+
+    for column_name, label, allow_zero in (
+        ('_size_text', 'size', True),
+        ('_price_text', 'price', False),
+        ('_gross_value_text', 'grossValue', False),
+        ('_home_notional_text', 'homeNotional', True),
+        ('_foreign_notional_text', 'foreignNotional', False),
+    ):
+        invalid_decimal = normalized.filter(
+            (pl.col(column_name) == '')
+            | ~pl.col(column_name).str.contains(r'^[+-]?\d+(\.\d+)?([eE][+-]?\d+)?$')
+            | pl.col(column_name).cast(pl.Float64, strict=False).is_null()
+            | (
+                pl.col(column_name).cast(pl.Float64, strict=False) < 0
+                if allow_zero
+                else pl.col(column_name).cast(pl.Float64, strict=False) <= 0
+            )
+        )
+        if invalid_decimal.height > 0:
+            line_number = int(invalid_decimal.get_column('_line_number').item(0))
+            raw_value = str(invalid_decimal.get_column(column_name).item(0))
+            requirement = 'non-negative' if allow_zero else 'positive'
+            raise RuntimeError(
+                f'Bybit row {line_number} {label} must be {requirement} decimal text, '
+                f'got {raw_value!r}'
+            )
+
+    invalid_tick_direction = normalized.filter(pl.col('_tick_direction') == '')
+    if invalid_tick_direction.height > 0:
+        line_number = int(invalid_tick_direction.get_column('_line_number').item(0))
+        raise RuntimeError(
+            f'Bybit CSV tickDirection must be non-empty at line={line_number}'
+        )
+
+    invalid_match_id = normalized.filter(
+        (pl.col('_trd_match_id') == '')
+        | (~pl.col('_is_numeric_match_id') & ~pl.col('_is_uuid_match_id'))
+        | (pl.col('_trade_id_int').is_null())
+        | (pl.col('_trade_id_int') <= 0)
+    )
+    if invalid_match_id.height > 0:
+        line_number = int(invalid_match_id.get_column('_line_number').item(0))
+        raw_value = str(invalid_match_id.get_column('_trd_match_id').item(0))
+        raise RuntimeError(
+            'Bybit CSV trdMatchID must be m-<digits> or canonical UUID '
+            f'at line={line_number}, got={raw_value!r}'
+        )
+
+    if has_rpi:
+        invalid_rpi = normalized.filter(
+            (pl.col('_rpi_text') != '') & ~pl.col('_rpi_text').is_in(['true', 'false', '0', '1'])
+        )
+        if invalid_rpi.height > 0:
+            line_number = int(invalid_rpi.get_column('_line_number').item(0))
+            raw_value = str(invalid_rpi.get_column('_rpi_text').item(0))
+            raise RuntimeError(
+                f'Bybit CSV RPI must be empty or boolean-like at line={line_number}, '
+                f'got={raw_value!r}'
+            )
+
+    return normalized.select(
+        pl.lit(date_str).alias('partition_id'),
+        pl.col('_symbol').alias('symbol'),
+        pl.col('_trade_id_int').alias('trade_id'),
+        pl.col('_trd_match_id').alias('trd_match_id'),
+        pl.col('_side').alias('side'),
+        pl.col('_price_text').alias('price'),
+        pl.col('_size_text').alias('size'),
+        pl.col('_foreign_notional_text').alias('quote_quantity'),
+        pl.col('_timestamp_ms').alias('timestamp'),
+        pl.from_epoch(pl.col('_timestamp_ms'), time_unit='ms')
+        .dt.replace_time_zone('UTC')
+        .alias('datetime'),
+        pl.col('_tick_direction').alias('tick_direction'),
+        pl.col('_gross_value_text').alias('gross_value'),
+        pl.col('_home_notional_text').alias('home_notional'),
+        pl.col('_foreign_notional_text').alias('foreign_notional'),
+    )
+
+
+def create_staged_bybit_spot_trade_csv_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    frame: pl.DataFrame,
+) -> str:
+    stage_table = f'__origo_bybit_stage_{uuid4().hex}'
+    client.execute(
+        f'''
+        CREATE TABLE {database}.{stage_table}
+        (
+            symbol String,
+            trade_id Int64,
+            trd_match_id String,
+            side String,
+            price_text String,
+            size_text String,
+            quote_quantity_text String,
+            timestamp_ms Int64,
+            tick_direction String,
+            gross_value_text String,
+            home_notional_text String,
+            foreign_notional_text String
+        )
+        ENGINE = Memory
+        '''
+    )
+    try:
+        insert_sql = (
+            f'INSERT INTO {database}.{stage_table} '
+            '('
+            'symbol,'
+            'trade_id,'
+            'trd_match_id,'
+            'side,'
+            'price_text,'
+            'size_text,'
+            'quote_quantity_text,'
+            'timestamp_ms,'
+            'tick_direction,'
+            'gross_value_text,'
+            'home_notional_text,'
+            'foreign_notional_text'
+            ') VALUES'
+        )
+        for chunk in frame.iter_slices(n_rows=_INSERT_CHUNK_SIZE):
+            client.execute(
+                insert_sql,
+                [
+                    chunk.get_column('symbol').cast(pl.Utf8).to_list(),
+                    chunk.get_column('trade_id').cast(pl.Int64).to_list(),
+                    chunk.get_column('trd_match_id').cast(pl.Utf8).to_list(),
+                    chunk.get_column('side').cast(pl.Utf8).to_list(),
+                    chunk.get_column('price').cast(pl.Utf8).to_list(),
+                    chunk.get_column('size').cast(pl.Utf8).to_list(),
+                    chunk.get_column('quote_quantity').cast(pl.Utf8).to_list(),
+                    chunk.get_column('timestamp').cast(pl.Int64).to_list(),
+                    chunk.get_column('tick_direction').cast(pl.Utf8).to_list(),
+                    chunk.get_column('gross_value').cast(pl.Utf8).to_list(),
+                    chunk.get_column('home_notional').cast(pl.Utf8).to_list(),
+                    chunk.get_column('foreign_notional').cast(pl.Utf8).to_list(),
+                ],
+                columnar=True,
+            )
+    except Exception:
+        client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
+        raise
+    return stage_table
+
+
+def drop_staged_bybit_spot_trade_csv_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+) -> None:
+    client.execute(f'DROP TABLE IF EXISTS {database}.{stage_table}')
+
+
+def _bybit_stage_event_projection_sql(*, database: str, stage_table: str) -> str:
+    return f'''
+        SELECT
+            trd_match_id_normalized AS source_offset,
+            timestamp_ms,
+            payload_json,
+            lower(hex(SHA256(payload_json))) AS payload_sha256_raw,
+            toString(toUUID(concat(
+                substring(event_id_hex, 1, 8), '-',
+                substring(event_id_hex, 9, 4), '-',
+                substring(event_id_hex, 13, 4), '-',
+                substring(event_id_hex, 17, 4), '-',
+                substring(event_id_hex, 21, 12)
+            ))) AS event_id_text,
+            toUUID(concat(
+                substring(event_id_hex, 1, 8), '-',
+                substring(event_id_hex, 9, 4), '-',
+                substring(event_id_hex, 13, 4), '-',
+                substring(event_id_hex, 17, 4), '-',
+                substring(event_id_hex, 21, 12)
+            )) AS event_id_uuid
+        FROM
+        (
+            SELECT
+                trd_match_id_normalized,
+                timestamp_ms,
+                concat(
+                    '{{"foreign_notional":"', foreign_notional_text_normalized,
+                    '","gross_value":"', gross_value_text_normalized,
+                    '","home_notional":"', home_notional_text_normalized,
+                    '","price":"', price_text_normalized,
+                    '","quote_quantity":"', quote_quantity_text_normalized,
+                    '","side":"', side_normalized,
+                    '","size":"', size_text_normalized,
+                    '","symbol":"', symbol_normalized,
+                    '","tick_direction":"', tick_direction_normalized,
+                    '","timestamp":', toString(timestamp_ms),
+                    ',"trd_match_id":"', trd_match_id_normalized,
+                    '","trade_id":', toString(trade_id_int),
+                    '}}'
+                ) AS payload_json,
+                lower(hex(uuid_bytes)) AS event_id_hex
+            FROM
+            (
+                SELECT
+                    symbol_normalized,
+                    trade_id_int,
+                    trd_match_id_normalized,
+                    side_normalized,
+                    price_text_normalized,
+                    size_text_normalized,
+                    quote_quantity_text_normalized,
+                    timestamp_ms,
+                    tick_direction_normalized,
+                    gross_value_text_normalized,
+                    home_notional_text_normalized,
+                    foreign_notional_text_normalized,
+                    concat(
+                        substring(sha1_digest, 1, 6),
+                        reinterpretAsString(reinterpretAsUInt8(
+                            bitOr(bitAnd(reinterpretAsUInt8(substring(sha1_digest, 7, 1)), 15), 80)
+                        )),
+                        substring(sha1_digest, 8, 1),
+                        reinterpretAsString(reinterpretAsUInt8(
+                            bitOr(bitAnd(reinterpretAsUInt8(substring(sha1_digest, 9, 1)), 63), 128)
+                        )),
+                        substring(sha1_digest, 10, 7)
+                    ) AS uuid_bytes
+                FROM
+                (
+                    SELECT
+                        trimBoth(symbol) AS symbol_normalized,
+                        trade_id AS trade_id_int,
+                        trimBoth(trd_match_id) AS trd_match_id_normalized,
+                        lower(trimBoth(side)) AS side_normalized,
+                        trimBoth(price_text) AS price_text_normalized,
+                        trimBoth(size_text) AS size_text_normalized,
+                        trimBoth(quote_quantity_text) AS quote_quantity_text_normalized,
+                        timestamp_ms,
+                        trimBoth(tick_direction) AS tick_direction_normalized,
+                        trimBoth(gross_value_text) AS gross_value_text_normalized,
+                        trimBoth(home_notional_text) AS home_notional_text_normalized,
+                        trimBoth(foreign_notional_text) AS foreign_notional_text_normalized,
+                        SHA1(concat(
+                            unhex(%(canonical_event_namespace_hex)s),
+                            concat(%(idempotency_prefix)s, trimBoth(trd_match_id))
+                        )) AS sha1_digest
+                    FROM {database}.{stage_table}
+                )
+            )
+        )
+    '''
+
+
+def build_bybit_partition_source_proof_from_stage_or_raise(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+    partition_id: str,
+    source_file_url: str,
+    source_filename: str,
+    gzip_sha256: str,
+    csv_sha256: str,
+    source_etag: str,
+) -> PartitionSourceProof:
+    rows = client.execute(
+        f'''
+        SELECT
+            source_row_count,
+            first_offset_or_equivalent,
+            last_offset_or_equivalent,
+            source_offset_digest_sha256,
+            source_identity_digest_sha256
+        FROM
+        (
+            SELECT
+                row_count AS source_row_count,
+                tupleElement(materials[1], 1) AS first_offset_or_equivalent,
+                tupleElement(materials[length(materials)], 1) AS last_offset_or_equivalent,
+                lower(hex(SHA256(concat(
+                    arrayStringConcat(
+                        arrayMap(item -> tupleElement(item, 1), materials),
+                        '\\n'
+                    ),
+                    '\\n'
+                )))) AS source_offset_digest_sha256,
+                lower(hex(SHA256(concat(
+                    arrayStringConcat(
+                        arrayMap(
+                            item -> concat(
+                                tupleElement(item, 1),
+                                '|',
+                                tupleElement(item, 2),
+                                '|',
+                                tupleElement(item, 3)
+                            ),
+                            materials
+                        ),
+                        '\\n'
+                    ),
+                    '\\n'
+                )))) AS source_identity_digest_sha256
+            FROM
+            (
+                SELECT
+                    count() AS row_count,
+                    arraySort(
+                        groupArray(
+                            (
+                                source_offset,
+                                event_id_text,
+                                payload_sha256_raw
+                            )
+                        )
+                    ) AS materials
+                FROM
+                (
+                    {_bybit_stage_event_projection_sql(database=database, stage_table=stage_table)}
+                )
+            )
+        )
+        ''',
+        {
+            'canonical_event_namespace_hex': _CANONICAL_EVENT_NAMESPACE_HEX,
+            'idempotency_prefix': (
+                f'{CANONICAL_EVENT_ENVELOPE_VERSION}|'
+                f'{_SOURCE_ID}|{_STREAM_ID}|{partition_id}|'
+            ),
+        },
+    )
+    if rows == []:
+        raise RuntimeError(
+            'Bybit staged source proof query returned no rows '
+            f'for partition_id={partition_id}'
+        )
+    row = rows[0]
+    return build_partition_source_proof_from_precomputed(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=_STREAM_ID,
+            partition_id=partition_id,
+        ),
+        offset_ordering='lexicographic',
+        source_artifact_identity={
+            'source_file_url': source_file_url,
+            'source_filename': source_filename,
+            'gzip_sha256': gzip_sha256,
+            'csv_sha256': csv_sha256,
+            'source_etag': source_etag,
+        },
+        source_row_count=int(row[0]),
+        first_offset_or_equivalent=str(row[1]),
+        last_offset_or_equivalent=str(row[2]),
+        source_offset_digest_sha256=str(row[3]),
+        source_identity_digest_sha256=str(row[4]),
+        allow_empty_partition=False,
+        allow_duplicate_offsets=True,
+    )
+
+
+def write_staged_bybit_spot_trade_csv_to_canonical(
+    *,
+    client: ClickhouseClient,
+    database: str,
+    stage_table: str,
+    partition_id: str,
+    row_count: int,
+    run_id: str | None,
+    ingested_at_utc: datetime,
+) -> dict[str, int]:
+    if partition_id.strip() == '':
+        raise RuntimeError('partition_id must be non-empty')
+    if row_count <= 0:
+        raise RuntimeError(
+            'Bybit staged canonical insert requires row_count > 0, '
+            f'got={row_count}'
+        )
+    existing_rows = client.execute(
+        f'''
+        SELECT 1
+        FROM {database}.{CANONICAL_EVENT_LOG_READ_TABLE}
+        WHERE source_id = %(source_id)s
+          AND stream_id = %(stream_id)s
+          AND partition_id = %(partition_id)s
+        LIMIT 1
+        ''',
+        {
+            'source_id': _SOURCE_ID,
+            'stream_id': _STREAM_ID,
+            'partition_id': partition_id,
+        },
+    )
+    if existing_rows != []:
+        raise RuntimeError(
+            'Bybit staged canonical insert requires empty target partition; '
+            f'partition already has data source={_SOURCE_ID} stream={_STREAM_ID} '
+            f'partition_id={partition_id}'
+        )
+    client.execute(
+        f'''
+        INSERT INTO {database}.canonical_event_log
+        (
+            envelope_version,
+            event_id,
+            source_id,
+            stream_id,
+            partition_id,
+            source_offset_or_equivalent,
+            source_event_time_utc,
+            ingested_at_utc,
+            payload_content_type,
+            payload_encoding,
+            payload_raw,
+            payload_sha256_raw,
+            payload_json
+        )
+        SELECT
+            toUInt16({CANONICAL_EVENT_ENVELOPE_VERSION}) AS envelope_version,
+            event_id_uuid AS event_id,
+            %(source_id)s AS source_id,
+            %(stream_id)s AS stream_id,
+            %(partition_id)s AS partition_id,
+            source_offset,
+            fromUnixTimestamp64Milli(timestamp_ms, 'UTC') AS source_event_time_utc,
+            %(ingested_at_utc)s AS ingested_at_utc,
+            %(payload_content_type)s AS payload_content_type,
+            %(payload_encoding)s AS payload_encoding,
+            payload_json AS payload_raw,
+            payload_sha256_raw,
+            payload_json
+        FROM
+        (
+            {_bybit_stage_event_projection_sql(database=database, stage_table=stage_table)}
+        )
+        ''',
+        {
+            'source_id': _SOURCE_ID,
+            'stream_id': _STREAM_ID,
+            'partition_id': partition_id,
+            'ingested_at_utc': ingested_at_utc,
+            'payload_content_type': _PAYLOAD_CONTENT_TYPE,
+            'payload_encoding': _PAYLOAD_ENCODING,
+            'canonical_event_namespace_hex': _CANONICAL_EVENT_NAMESPACE_HEX,
+            'idempotency_prefix': (
+                f'{CANONICAL_EVENT_ENVELOPE_VERSION}|'
+                f'{_SOURCE_ID}|{_STREAM_ID}|{partition_id}|'
+            ),
+        },
+    )
+    bounds = client.execute(
+        f'''
+        SELECT min(trimBoth(trd_match_id)), max(trimBoth(trd_match_id))
+        FROM {database}.{stage_table}
+        '''
+    )
+    if bounds == []:
+        raise RuntimeError(
+            'Bybit staged canonical insert could not load stage bounds '
+            f'for partition_id={partition_id}'
+        )
+    min_offset = str(bounds[0][0])
+    max_offset = str(bounds[0][1])
+    get_canonical_runtime_audit_log().append_ingest_batch_event(
+        stream_key=CanonicalStreamKey(
+            source_id=_SOURCE_ID,
+            stream_id=_STREAM_ID,
+            partition_id=partition_id,
+        ),
+        event_type='canonical_ingest_batch',
+        run_id=run_id,
+        batch_event_count=row_count,
+        inserted_count=row_count,
+        duplicate_count=0,
+        first_source_offset_or_equivalent=min_offset,
+        last_source_offset_or_equivalent=max_offset,
+        first_event_id=str(
+            canonical_event_id_from_key(
+                canonical_event_idempotency_key(
+                    source_id=_SOURCE_ID,
+                    stream_id=_STREAM_ID,
+                    partition_id=partition_id,
+                    source_offset_or_equivalent=min_offset,
+                )
+            )
+        ),
+        last_event_id=str(
+            canonical_event_id_from_key(
+                canonical_event_idempotency_key(
+                    source_id=_SOURCE_ID,
+                    stream_id=_STREAM_ID,
+                    partition_id=partition_id,
+                    source_offset_or_equivalent=max_offset,
+                )
+            )
+        ),
+    )
+    return {
+        'rows_processed': row_count,
+        'rows_inserted': row_count,
+        'rows_duplicate': 0,
+    }
+
+
 def parse_bybit_spot_trade_csv(
     *,
     csv_content: bytes,
@@ -202,21 +867,12 @@ def parse_bybit_spot_trade_csv(
     csv_text = csv_content.decode('utf-8')
     reader = csv.reader(csv_text.splitlines())
 
-    header = next(reader, None)
-    if header is None:
-        raise RuntimeError('Bybit CSV payload is empty')
-    header_tuple = tuple(header)
-    if header_tuple not in {_EXPECTED_CSV_HEADER, _EXPECTED_CSV_HEADER_WITH_RPI}:
-        raise RuntimeError(
-            'Bybit CSV header mismatch: '
-            f'expected_one_of={(_EXPECTED_CSV_HEADER, _EXPECTED_CSV_HEADER_WITH_RPI)} '
-            f'got={header_tuple}'
-        )
-    has_rpi_column = header_tuple == _EXPECTED_CSV_HEADER_WITH_RPI
+    header = _read_bybit_csv_header_or_raise(csv_content)
+    next(reader, None)
+    expected_column_count = len(header)
 
     events: list[BybitSpotTradeEvent] = []
     for row_index, row in enumerate(reader, start=2):
-        expected_column_count = 11 if has_rpi_column else 10
         if len(row) != expected_column_count:
             raise RuntimeError(
                 f'Bybit CSV row has unexpected column count at line={row_index}: '
@@ -277,15 +933,13 @@ def parse_bybit_spot_trade_csv(
             row[9],
             label=f'Bybit row {row_index} foreignNotional',
         )
-        rpi_text: str | None = None
-        if has_rpi_column:
-            candidate_rpi = row[10].strip()
-            if candidate_rpi not in {'0', '1'}:
+        if expected_column_count == len(_EXPECTED_CSV_HEADER_WITH_RPI):
+            rpi_text = row[10].strip()
+            if rpi_text != '' and rpi_text.lower() not in {'true', 'false', '0', '1'}:
                 raise RuntimeError(
-                    'Bybit CSV RPI flag must be 0 or 1 '
-                    f'at line={row_index}, got={candidate_rpi!r}'
+                    f'Bybit CSV RPI must be empty or boolean-like at line={row_index}, '
+                    f'got={rpi_text!r}'
                 )
-            rpi_text = candidate_rpi
         event_time_utc = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=UTC)
         quote_quantity_text = foreign_notional_text
         events.append(
@@ -303,7 +957,6 @@ def parse_bybit_spot_trade_csv(
                 gross_value_text=gross_value_text,
                 home_notional_text=home_notional_text,
                 foreign_notional_text=foreign_notional_text,
-                rpi_text=rpi_text,
             )
         )
     if events == []:

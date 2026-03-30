@@ -229,7 +229,7 @@ def test_s34_exchange_backfill_runner_rejects_exchange_concurrency_above_source_
     )
     backfill_runner._assert_requested_concurrency_allowed_or_raise(
         dataset='bybit_spot_trades',
-        concurrency=1280,
+        concurrency=20,
     )
 
 

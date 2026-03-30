@@ -7,7 +7,11 @@ from typing import Any, cast
 
 import requests
 
-EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS = 120
+from origo_control_plane.config import require_int_env
+
+_BINANCE_SOURCE_HTTP_TIMEOUT_SECONDS_ENV = 'ORIGO_BINANCE_SOURCE_HTTP_TIMEOUT_SECONDS'
+_OKX_SOURCE_HTTP_TIMEOUT_SECONDS_ENV = 'ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS'
+_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS_ENV = 'ORIGO_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS'
 
 OKX_TRADE_DATA_DOWNLOAD_LINK_ENDPOINT = (
     'https://www.okx.com/priapi/v5/broker/public/trade-data/download-link'
@@ -31,6 +35,29 @@ class ExchangeSourceHttpError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.error_kind = error_kind
+
+
+def _load_positive_timeout_seconds_or_raise(name: str) -> int:
+    value = require_int_env(name)
+    if value <= 0:
+        raise RuntimeError(f'{name} must be > 0, got {value}')
+    return value
+
+
+def load_binance_source_request_timeout_seconds_or_raise() -> int:
+    return _load_positive_timeout_seconds_or_raise(
+        _BINANCE_SOURCE_HTTP_TIMEOUT_SECONDS_ENV
+    )
+
+
+def load_okx_source_request_timeout_seconds_or_raise() -> int:
+    return _load_positive_timeout_seconds_or_raise(_OKX_SOURCE_HTTP_TIMEOUT_SECONDS_ENV)
+
+
+def load_bybit_source_request_timeout_seconds_or_raise() -> int:
+    return _load_positive_timeout_seconds_or_raise(
+        _BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS_ENV
+    )
 
 
 def _expect_dict(value: Any, label: str) -> dict[str, Any]:
@@ -97,7 +124,7 @@ def resolve_okx_daily_file_url_or_raise(
     response = requester.post(
         OKX_TRADE_DATA_DOWNLOAD_LINK_ENDPOINT,
         json=payload,
-        timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+        timeout=load_okx_source_request_timeout_seconds_or_raise(),
     )
     if response.status_code == 429:
         retry_after = response.headers.get('Retry-After')

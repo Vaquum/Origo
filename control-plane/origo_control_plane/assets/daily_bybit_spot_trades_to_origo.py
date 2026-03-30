@@ -23,18 +23,22 @@ from origo_control_plane.utils.bybit_aligned_projector import (
     project_bybit_spot_trades_aligned,
 )
 from origo_control_plane.utils.bybit_canonical_event_ingest import (
-    build_bybit_partition_source_proof,
+    build_bybit_partition_source_proof_from_stage_or_raise,
+    create_staged_bybit_spot_trade_csv_or_raise,
+    drop_staged_bybit_spot_trade_csv_or_raise,
     parse_bybit_spot_trade_csv,
+    parse_bybit_spot_trade_csv_frame,
     write_bybit_spot_trades_to_canonical,
+    write_staged_bybit_spot_trade_csv_to_canonical,
 )
 from origo_control_plane.utils.bybit_native_projector import (
     project_bybit_spot_trades_native,
 )
 from origo_control_plane.utils.exchange_integrity import (
-    run_exchange_integrity_suite_rows,
+    run_exchange_integrity_suite_frame,
 )
 from origo_control_plane.utils.exchange_source_contracts import (
-    EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    load_bybit_source_request_timeout_seconds_or_raise,
     resolve_bybit_daily_file_url,
 )
 
@@ -112,10 +116,11 @@ def insert_daily_bybit_spot_trades_to_origo(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'
     )
     context.log.info(f'Downloading Bybit trade data from {file_url}')
+    source_timeout_seconds = load_bybit_source_request_timeout_seconds_or_raise()
 
     file_response = requests.get(
         file_url,
-        timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+        timeout=source_timeout_seconds,
     )
     file_response.raise_for_status()
     gzip_payload = file_response.content
@@ -133,24 +138,22 @@ def insert_daily_bybit_spot_trades_to_origo(
         raise RuntimeError(f'Bybit gzip decompression failed for {filename}') from exc
     csv_sha256 = hashlib.sha256(csv_payload).hexdigest()
 
-    events = parse_bybit_spot_trade_csv(
+    events_frame = parse_bybit_spot_trade_csv_frame(
         csv_content=csv_payload,
         date_str=date_str,
         day_start_ts_utc_ms=day_start_ts_utc_ms,
         day_end_ts_utc_ms=day_end_ts_utc_ms,
     )
-    integrity_report = run_exchange_integrity_suite_rows(
+    integrity_report = run_exchange_integrity_suite_frame(
         dataset='bybit_spot_trades',
-        rows=[event.to_integrity_tuple() for event in events],
+        frame=events_frame,
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
 
-    del csv_payload
-    del gzip_payload
-
     client: ClickhouseClient | None = None
+    stage_table: str | None = None
     try:
         context.log.info(
             f'Connecting to ClickHouse at {CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}'
@@ -168,9 +171,16 @@ def insert_daily_bybit_spot_trades_to_origo(
             client=client,
             database=CLICKHOUSE_DATABASE,
         )
-        source_proof = build_bybit_partition_source_proof(
+        stage_table = create_staged_bybit_spot_trade_csv_or_raise(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            frame=events_frame,
+        )
+        source_proof = build_bybit_partition_source_proof_from_stage_or_raise(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            stage_table=stage_table,
             partition_id=partition_date_str,
-            events=events,
             source_file_url=file_url,
             source_filename=filename,
             gzip_sha256=gzip_sha256,
@@ -248,14 +258,31 @@ def insert_daily_bybit_spot_trades_to_origo(
                 projection_mode=runtime_contract.projection_mode,
                 execution_mode=runtime_contract.execution_mode,
             )
-            write_summary = write_bybit_spot_trades_to_canonical(
-                client=client,
-                database=CLICKHOUSE_DATABASE,
-                events=events,
-                run_id=context.run_id,
-                ingested_at_utc=datetime.now(UTC),
-                fast_insert_mode=fast_insert_mode,
-            )
+            if fast_insert_mode == 'assume_new_partition':
+                write_summary = write_staged_bybit_spot_trade_csv_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                    partition_id=partition_date_str,
+                    row_count=source_proof.source_row_count,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                )
+            else:
+                events = parse_bybit_spot_trade_csv(
+                    csv_content=csv_payload,
+                    date_str=date_str,
+                    day_start_ts_utc_ms=day_start_ts_utc_ms,
+                    day_end_ts_utc_ms=day_end_ts_utc_ms,
+                )
+                write_summary = write_bybit_spot_trades_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    events=events,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                    fast_insert_mode=fast_insert_mode,
+                )
             if reconcile_existing_canonical_rows:
                 context.log.info(
                     'Reconcile detected mismatched existing canonical rows; '
@@ -269,10 +296,10 @@ def insert_daily_bybit_spot_trades_to_origo(
         rows_processed = int(write_summary['rows_processed'])
         rows_inserted = int(write_summary['rows_inserted'])
         rows_duplicate = int(write_summary['rows_duplicate'])
-        if rows_processed != len(events):
+        if rows_processed != source_proof.source_row_count:
             raise RuntimeError(
                 'Canonical writer summary mismatch: '
-                f'rows_processed={rows_processed} expected={len(events)}'
+                f'rows_processed={rows_processed} expected={source_proof.source_row_count}'
             )
         if rows_inserted + rows_duplicate != rows_processed:
             raise RuntimeError(
@@ -299,7 +326,7 @@ def insert_daily_bybit_spot_trades_to_origo(
         )
 
         projected_at_utc = datetime.now(UTC)
-        partition_ids = {event.partition_id for event in events}
+        partition_ids = {partition_date_str}
         if projection_mode == 'inline':
             native_projection_summary_dict = project_bybit_spot_trades_native(
                 client=client,
@@ -341,8 +368,8 @@ def insert_daily_bybit_spot_trades_to_origo(
             'rows_inserted': rows_inserted,
             'rows_duplicate': rows_duplicate,
             'source_partition_span': {
-                'first_day': min(partition_ids),
-                'last_day': max(partition_ids),
+                'first_day': partition_date_str,
+                'last_day': partition_date_str,
             },
             'gzip_sha256': gzip_sha256,
             'csv_sha256': csv_sha256,
@@ -358,6 +385,26 @@ def insert_daily_bybit_spot_trades_to_origo(
         )
         return result_data
     finally:
+        if client is not None and stage_table is not None:
+            try:
+                drop_staged_bybit_spot_trade_csv_or_raise(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                )
+            except Exception as exc:
+                active_exception = sys.exc_info()[1]
+                if active_exception is not None:
+                    active_exception.add_note(
+                        f'Bybit stage table cleanup failed during cleanup: {exc}'
+                    )
+                    context.log.warning(
+                        f'Failed to drop Bybit stage table cleanly: {exc}'
+                    )
+                else:
+                    raise RuntimeError(
+                        f'Failed to drop Bybit stage table cleanly: {exc}'
+                    ) from exc
         if client is not None:
             try:
                 client.disconnect()

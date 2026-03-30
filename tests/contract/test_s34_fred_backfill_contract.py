@@ -29,13 +29,15 @@ class _ProofQueryClickHouseClient:
 
 
 class _FakeDagsterContext:
-    def __init__(self) -> None:
+    def __init__(self, *, op_config: dict[str, object] | None = None) -> None:
         self.run = SimpleNamespace(tags={}, run_id='dagster-run-id')
         self.run_id = 'dagster-run-id'
         self.log = SimpleNamespace(
             info=lambda *_args, **_kwargs: None,
             warning=lambda *_args, **_kwargs: None,
         )
+        if op_config is not None:
+            self.op_config = op_config
 
 
 def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambiguity(
@@ -59,6 +61,7 @@ def test_fred_job_reconcile_without_explicit_partitions_uses_authoritative_ambig
         database='origo',
         runtime_contract=runtime_contract,
         explicit_partition_ids=None,
+        manual_source_window=None,
     )
 
     assert result == ('2026-02-01', '2026-02-15')
@@ -86,6 +89,54 @@ def test_fred_job_reconcile_processes_bounded_scope_ids_without_requerying_ambig
     )
 
     assert result == ('2026-02-01', '2026-02-15')
+
+
+def test_fred_job_loads_manual_source_window_from_config() -> None:
+    context = _FakeDagsterContext(
+        op_config={
+            'projection_mode': 'deferred',
+            'execution_mode': 'backfill',
+            'runtime_audit_mode': 'summary',
+            'start_date': '2021-04-05',
+            'end_date': '2021-04-13',
+        }
+    )
+
+    source_window = fred_job._load_manual_source_window_from_context_or_none(
+        context=context
+    )
+
+    assert source_window is not None
+    assert source_window.observation_start == date(2021, 4, 5)
+    assert source_window.observation_end == date(2021, 4, 13)
+
+
+def test_fred_job_reconcile_manual_window_filters_ambiguity(
+    monkeypatch: Any,
+) -> None:
+    runtime_contract = BackfillRuntimeContract(
+        projection_mode='deferred',
+        execution_mode='reconcile',
+        runtime_audit_mode='summary',
+    )
+    monkeypatch.setattr(
+        fred_job,
+        '_load_ambiguous_partition_ids_or_raise',
+        lambda **_: ('2021-04-01', '2021-04-05', '2021-04-13', '2021-05-01'),
+    )
+
+    result = fred_job._resolve_source_partition_scope_ids_or_raise(
+        client=_FakeClickHouseClient(),
+        database='origo',
+        runtime_contract=runtime_contract,
+        explicit_partition_ids=None,
+        manual_source_window=fred_job._SourceWindow(
+            observation_start=date(2021, 4, 5),
+            observation_end=date(2021, 4, 13),
+        ),
+    )
+
+    assert result == ('2021-04-05', '2021-04-13')
 
 
 def test_fred_job_explicit_partition_ids_must_exist_in_source_history() -> None:
@@ -178,8 +229,19 @@ def test_s34_fred_backfill_runner_requires_reconcile_source_window_env(
     with pytest.raises(
         RuntimeError,
         match='ORIGO_S34_FRED_RECONCILE_MAX_SOURCE_WINDOW_DAYS must be set and non-empty',
-    ):
+        ):
         fred_runner.load_fred_reconcile_max_source_window_days_or_raise()
+
+
+def test_load_fred_partition_workers_requires_integer_ge_10(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv('ORIGO_S34_FRED_PARTITION_WORKERS', '9')
+    with pytest.raises(RuntimeError, match='must be >= 10'):
+        fred_job._load_fred_partition_workers_or_raise()
+
+    monkeypatch.setenv('ORIGO_S34_FRED_PARTITION_WORKERS', '10')
+    assert fred_job._load_fred_partition_workers_or_raise() == 10
 
 
 def test_s34_fred_backfill_runner_selects_prefix_by_source_window_and_count() -> None:
@@ -457,6 +519,7 @@ def test_fred_job_backfill_source_window_resumes_from_latest_terminal_partition(
             database='origo',
             runtime_contract=runtime_contract,
             explicit_partition_ids=None,
+            manual_source_window=None,
             source_partition_scope_ids=None,
         )
     )
@@ -505,6 +568,7 @@ def test_fred_job_backfill_source_window_starts_at_supported_history_when_only_p
             database='origo',
             runtime_contract=runtime_contract,
             explicit_partition_ids=None,
+            manual_source_window=None,
             source_partition_scope_ids=None,
         )
     )
@@ -540,6 +604,7 @@ def test_fred_job_backfill_source_window_requires_reconcile_when_nonterminal_par
             database='origo',
             runtime_contract=runtime_contract,
             explicit_partition_ids=None,
+            manual_source_window=None,
             source_partition_scope_ids=None,
         )
 
@@ -581,6 +646,7 @@ def test_fred_job_backfill_source_window_ignores_precap_nonterminal_partitions(
             database='origo',
             runtime_contract=runtime_contract,
             explicit_partition_ids=None,
+            manual_source_window=None,
             source_partition_scope_ids=None,
         )
     )
@@ -613,6 +679,7 @@ def test_fred_job_reconcile_source_scope_uses_authoritative_ambiguity(
         database='origo',
         runtime_contract=runtime_contract,
         explicit_partition_ids=None,
+        manual_source_window=None,
     )
 
     assert result == ('2009-01-01', '2009-01-02')

@@ -106,8 +106,8 @@ _S34_CONTRACTS: Final[tuple[S34DatasetBackfillContract, ...]] = (
         earliest_height=None,
         offset_ordering='lexicographic',
         aligned_capable=True,
-        max_concurrent_partition_runs=1280,
-        source_safe_concurrency_ceiling=1280,
+        max_concurrent_partition_runs=20,
+        source_safe_concurrency_ceiling=20,
         source_safe_min_request_interval_seconds=None,
     ),
     S34DatasetBackfillContract(

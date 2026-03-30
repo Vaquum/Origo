@@ -92,14 +92,14 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
     monkeypatch.setenv('CLICKHOUSE_USER', 'default')
     monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
     monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS', '120')
     from origo_control_plane.assets import daily_okx_spot_trades_to_origo as module
 
     from origo.events.ingest_state import CanonicalStreamKey
 
     zip_payload, content_md5_b64 = _build_okx_zip_payload()
     context = _FakeContext(partition_id='2021-10-08')
-    proof_seen_event_count: list[int] = []
-    writer_seen_event_count: list[int] = []
+    staged_write_row_counts: list[int] = []
 
     class _FakeStateStore:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
@@ -128,9 +128,9 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
                 proof_digest_sha256='digest-okx-2021-10-08',
             )
 
-    def _fake_build_okx_partition_source_proof(**kwargs: Any) -> SimpleNamespace:
-        events = kwargs['events']
-        proof_seen_event_count.append(len(events))
+    def _fake_build_okx_partition_source_proof_from_stage(**kwargs: Any) -> SimpleNamespace:
+        assert kwargs['raw_row_count'] == 3
+        assert kwargs['deduplicated_exact_duplicate_rows'] == 1
         return SimpleNamespace(
             stream_key=CanonicalStreamKey(
                 source_id='okx',
@@ -144,12 +144,9 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
             },
         )
 
-    def _fake_write_okx_spot_trades_to_canonical(**kwargs: Any) -> dict[str, int]:
-        events = kwargs['events']
-        writer_seen_event_count.append(len(events))
+    def _fake_write_staged_okx_spot_trade_csv_to_canonical(**kwargs: Any) -> dict[str, int]:
+        staged_write_row_counts.append(int(kwargs['row_count']))
         return {
-            'raw_row_count': 3,
-            'deduplicated_exact_duplicate_rows': 1,
             'rows_processed': 2,
             'rows_inserted': 2,
             'rows_duplicate': 0,
@@ -183,13 +180,23 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
     monkeypatch.setattr(module, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         module,
-        'build_okx_partition_source_proof',
-        _fake_build_okx_partition_source_proof,
+        'create_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: 'stage_okx_contract',
     )
     monkeypatch.setattr(
         module,
-        'write_okx_spot_trades_to_canonical',
-        _fake_write_okx_spot_trades_to_canonical,
+        'drop_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        'build_okx_partition_source_proof_from_stage_or_raise',
+        _fake_build_okx_partition_source_proof_from_stage,
+    )
+    monkeypatch.setattr(
+        module,
+        'write_staged_okx_spot_trade_csv_to_canonical',
+        _fake_write_staged_okx_spot_trade_csv_to_canonical,
     )
     monkeypatch.setattr(
         module,
@@ -222,8 +229,7 @@ def test_daily_okx_asset_passes_raw_duplicate_rows_to_proof_and_writer(
         context
     )
 
-    assert proof_seen_event_count == [3]
-    assert writer_seen_event_count == [3]
+    assert staged_write_row_counts == [2]
     assert result['raw_row_count'] == 3
     assert result['deduplicated_exact_duplicate_rows'] == 1
     assert result['rows_processed'] == 2
@@ -239,6 +245,7 @@ def test_daily_okx_asset_uses_writer_repair_when_reconcile_detects_partial_canon
     monkeypatch.setenv('CLICKHOUSE_USER', 'default')
     monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
     monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS', '120')
     from origo_control_plane.assets import daily_okx_spot_trades_to_origo as module
 
     from origo.events.ingest_state import CanonicalStreamKey
@@ -288,7 +295,7 @@ def test_daily_okx_asset_uses_writer_repair_when_reconcile_detects_partial_canon
                 proof_digest_sha256='digest-okx-2021-10-08',
             )
 
-    def _fake_build_okx_partition_source_proof(**_kwargs: Any) -> SimpleNamespace:
+    def _fake_build_okx_partition_source_proof_from_stage(**_kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             stream_key=CanonicalStreamKey(
                 source_id='okx',
@@ -342,8 +349,18 @@ def test_daily_okx_asset_uses_writer_repair_when_reconcile_detects_partial_canon
     monkeypatch.setattr(module, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         module,
-        'build_okx_partition_source_proof',
-        _fake_build_okx_partition_source_proof,
+        'create_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: 'stage_okx_contract',
+    )
+    monkeypatch.setattr(
+        module,
+        'drop_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        'build_okx_partition_source_proof_from_stage_or_raise',
+        _fake_build_okx_partition_source_proof_from_stage,
     )
     monkeypatch.setattr(
         module,
@@ -393,6 +410,7 @@ def test_daily_okx_asset_uses_proof_only_reconcile_when_canonical_matches_source
     monkeypatch.setenv('CLICKHOUSE_USER', 'default')
     monkeypatch.setenv('CLICKHOUSE_PASSWORD', 'password')
     monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+    monkeypatch.setenv('ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS', '120')
     from origo_control_plane.assets import daily_okx_spot_trades_to_origo as module
 
     from origo.events.ingest_state import CanonicalStreamKey
@@ -445,7 +463,7 @@ def test_daily_okx_asset_uses_proof_only_reconcile_when_canonical_matches_source
                 proof_digest_sha256='digest-okx-2021-10-08',
             )
 
-    def _fake_build_okx_partition_source_proof(**_kwargs: Any) -> SimpleNamespace:
+    def _fake_build_okx_partition_source_proof_from_stage(**_kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             stream_key=CanonicalStreamKey(
                 source_id='okx',
@@ -499,8 +517,18 @@ def test_daily_okx_asset_uses_proof_only_reconcile_when_canonical_matches_source
     monkeypatch.setattr(module, 'CanonicalBackfillStateStore', _FakeStateStore)
     monkeypatch.setattr(
         module,
-        'build_okx_partition_source_proof',
-        _fake_build_okx_partition_source_proof,
+        'create_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: 'stage_okx_contract',
+    )
+    monkeypatch.setattr(
+        module,
+        'drop_staged_okx_spot_trade_csv_or_raise',
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        'build_okx_partition_source_proof_from_stage_or_raise',
+        _fake_build_okx_partition_source_proof_from_stage,
     )
     monkeypatch.setattr(
         module,

@@ -6,7 +6,9 @@ import pytest
 from origo_control_plane.utils.okx_canonical_event_ingest import (
     OKXSpotTradeEvent,
     deduplicate_okx_exact_duplicate_events_or_raise,
+    deduplicate_okx_exact_duplicate_frame_or_raise,
     parse_okx_spot_trade_csv,
+    parse_okx_spot_trade_csv_frame,
 )
 
 
@@ -77,3 +79,18 @@ def test_parse_okx_spot_trade_csv_preserves_scientific_notation_size_text() -> N
     assert len(events) == 1
     assert events[0].price_text == '104933.5'
     assert events[0].size_text == '1e-05'
+
+
+def test_parse_okx_spot_trade_csv_frame_and_dedup_preserve_raw_count() -> None:
+    frame = parse_okx_spot_trade_csv_frame(
+        b'instrument_name,trade_id,side,price,size,created_time\n'
+        b'BTC-USDT,465953984,buy,104933.5,0.001,1737331200000\n'
+        b'BTC-USDT,465953984,buy,104933.5,0.001,1737331200000\n'
+        b'BTC-USDT,465953985,sell,104934.0,0.002,1737331201000\n'
+    )
+
+    deduplicated = deduplicate_okx_exact_duplicate_frame_or_raise(frame)
+
+    assert deduplicated.raw_row_count == 3
+    assert deduplicated.exact_duplicate_row_count == 1
+    assert deduplicated.frame.get_column('trade_id').to_list() == [465953984, 465953985]

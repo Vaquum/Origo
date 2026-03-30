@@ -23,10 +23,10 @@ from origo_control_plane.backfill import (
 from origo_control_plane.backfill.runtime_contract import FastInsertMode
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.utils.exchange_integrity import (
-    run_exchange_integrity_suite_rows,
+    run_exchange_integrity_suite_frame,
 )
 from origo_control_plane.utils.exchange_source_contracts import (
-    EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+    load_okx_source_request_timeout_seconds_or_raise,
     resolve_okx_daily_file_url_or_raise,
     verify_md5_base64_or_raise,
 )
@@ -34,9 +34,14 @@ from origo_control_plane.utils.okx_aligned_projector import (
     project_okx_spot_trades_aligned,
 )
 from origo_control_plane.utils.okx_canonical_event_ingest import (
-    build_okx_partition_source_proof,
+    build_okx_partition_source_proof_from_stage_or_raise,
+    create_staged_okx_spot_trade_csv_or_raise,
+    deduplicate_okx_exact_duplicate_frame_or_raise,
+    drop_staged_okx_spot_trade_csv_or_raise,
     parse_okx_spot_trade_csv,
+    parse_okx_spot_trade_csv_frame,
     write_okx_spot_trades_to_canonical,
+    write_staged_okx_spot_trade_csv_to_canonical,
 )
 from origo_control_plane.utils.okx_native_projector import (
     project_okx_spot_trades_native,
@@ -130,10 +135,11 @@ def insert_daily_okx_spot_trades_to_origo(
         f'Processing selected partition: {partition_date_str}, resolved file: {filename}'
     )
     context.log.info(f'Downloading OKX trade data from {file_url}')
+    source_timeout_seconds = load_okx_source_request_timeout_seconds_or_raise()
 
     file_response = requests.get(
         file_url,
-        timeout=EXCHANGE_SOURCE_REQUEST_TIMEOUT_SECONDS,
+        timeout=source_timeout_seconds,
     )
     file_response.raise_for_status()
     zip_data = file_response.content
@@ -159,16 +165,18 @@ def insert_daily_okx_spot_trades_to_origo(
             csv_payload = csv_file.read()
     csv_sha256 = hashlib.sha256(csv_payload).hexdigest()
 
-    events = parse_okx_spot_trade_csv(csv_payload)
-    integrity_report = run_exchange_integrity_suite_rows(
+    events_frame = parse_okx_spot_trade_csv_frame(csv_payload)
+    integrity_report = run_exchange_integrity_suite_frame(
         dataset='okx_spot_trades',
-        rows=[event.to_integrity_tuple() for event in events],
+        frame=events_frame,
     )
     context.log.info(
         f'Exchange integrity suite passed: {integrity_report.to_dict()}'
     )
+    deduplicated_events_frame = deduplicate_okx_exact_duplicate_frame_or_raise(events_frame)
 
     client: ClickhouseClient | None = None
+    stage_table: str | None = None
     try:
         context.log.info(
             f'Connecting to ClickHouse at {CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}'
@@ -186,14 +194,23 @@ def insert_daily_okx_spot_trades_to_origo(
             client=client,
             database=CLICKHOUSE_DATABASE,
         )
-        source_proof = build_okx_partition_source_proof(
+        stage_table = create_staged_okx_spot_trade_csv_or_raise(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            frame=deduplicated_events_frame.frame,
+        )
+        source_proof = build_okx_partition_source_proof_from_stage_or_raise(
+            client=client,
+            database=CLICKHOUSE_DATABASE,
+            stage_table=stage_table,
             canonical_partition_id=partition_date_str,
-            events=events,
             source_file_url=file_url,
             source_filename=filename,
             zip_sha256=zip_sha256,
             csv_sha256=csv_sha256,
             content_md5_b64=source_content_md5,
+            raw_row_count=deduplicated_events_frame.raw_row_count,
+            deduplicated_exact_duplicate_rows=deduplicated_events_frame.exact_duplicate_row_count,
         )
         try:
             state_store.assert_partition_can_execute_or_raise(
@@ -274,15 +291,32 @@ def insert_daily_okx_spot_trades_to_origo(
                 projection_mode=runtime_contract.projection_mode,
                 execution_mode=runtime_contract.execution_mode,
             )
-            write_summary = write_okx_spot_trades_to_canonical(
-                client=client,
-                database=CLICKHOUSE_DATABASE,
-                events=events,
-                run_id=context.run_id,
-                ingested_at_utc=datetime.now(UTC),
-                canonical_partition_id=partition_date_str,
-                fast_insert_mode=fast_insert_mode,
-            )
+            if fast_insert_mode == 'assume_new_partition':
+                write_summary = write_staged_okx_spot_trade_csv_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                    partition_id=partition_date_str,
+                    row_count=source_proof.source_row_count,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                ) | {
+                    'raw_row_count': deduplicated_events_frame.raw_row_count,
+                    'deduplicated_exact_duplicate_rows': (
+                        deduplicated_events_frame.exact_duplicate_row_count
+                    ),
+                }
+            else:
+                events = parse_okx_spot_trade_csv(csv_payload)
+                write_summary = write_okx_spot_trades_to_canonical(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    events=events,
+                    run_id=context.run_id,
+                    ingested_at_utc=datetime.now(UTC),
+                    canonical_partition_id=partition_date_str,
+                    fast_insert_mode=fast_insert_mode,
+                )
             if reconcile_existing_canonical_rows:
                 context.log.info(
                     'Reconcile detected mismatched existing canonical rows; '
@@ -300,10 +334,11 @@ def insert_daily_okx_spot_trades_to_origo(
         deduplicated_exact_duplicate_rows = int(
             write_summary.get('deduplicated_exact_duplicate_rows', 0)
         )
-        if raw_row_count != len(events):
+        if raw_row_count != deduplicated_events_frame.raw_row_count:
             raise RuntimeError(
                 'Canonical writer raw row count mismatch: '
-                f'raw_row_count={raw_row_count} expected={len(events)}'
+                'raw_row_count='
+                f'{raw_row_count} expected={deduplicated_events_frame.raw_row_count}'
             )
         if rows_processed + deduplicated_exact_duplicate_rows != raw_row_count:
             raise RuntimeError(
@@ -337,7 +372,10 @@ def insert_daily_okx_spot_trades_to_origo(
         )
 
         projected_at_utc = datetime.now(UTC)
-        source_partition_ids = {event.partition_id for event in events}
+        source_partition_ids = {
+            str(value)
+            for value in events_frame.get_column('partition_id').unique().to_list()
+        }
         partition_ids = {partition_date_str}
         if projection_mode == 'inline':
             native_projection_summary_dict = project_okx_spot_trades_native(
@@ -397,6 +435,26 @@ def insert_daily_okx_spot_trades_to_origo(
         context.log.info('Successfully processed OKX daily file: ' + json.dumps(result_data))
         return result_data
     finally:
+        if client is not None and stage_table is not None:
+            try:
+                drop_staged_okx_spot_trade_csv_or_raise(
+                    client=client,
+                    database=CLICKHOUSE_DATABASE,
+                    stage_table=stage_table,
+                )
+            except Exception as exc:
+                active_exception = sys.exc_info()[1]
+                if active_exception is not None:
+                    active_exception.add_note(
+                        f'OKX stage table cleanup failed during cleanup: {exc}'
+                    )
+                    context.log.warning(
+                        f'Failed to drop OKX stage table cleanly: {exc}'
+                    )
+                else:
+                    raise RuntimeError(
+                        f'Failed to drop OKX stage table cleanly: {exc}'
+                    ) from exc
         if client is not None:
             try:
                 client.disconnect()

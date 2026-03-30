@@ -772,11 +772,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C2j` Fix exchange fast-insert guard semantics so pre-manifest empty-partition assessment cannot self-poison fresh backfill runs.
 - [ ] `S34-C2k` Fix Slice-34 ambiguous-partition planning/reporting so reconcile resets cannot hide non-terminal partitions once canonical rows are intentionally cleared.
 - [x] `S34-C2l` Preserve append-only canonical-event truth during reconcile resets by recording partition reset boundaries and routing live canonical reads through the boundary-aware active view.
-- [x] `S34-C2m` Make Dagster Launchpad a first-class Slice-34 control surface by exposing required runtime contract fields and manual window controls on all backfill-capable jobs instead of relying on hidden run tags.
+- [ ] `S34-C2m` Make Dagster Launchpad a first-class Slice-34 control surface by exposing required runtime contract fields and manual window controls on all backfill-capable jobs instead of relying on hidden run tags.
 - [x] `S34-C3` Execute Binance backfill from first available source partitions for `binance_spot_trades`.
 - [ ] `S34-C4` Execute OKX and Bybit backfill from first available source partitions (`okx_spot_trades`, `bybit_spot_trades`).
 - [x] `S34-C4a` Build generic daily-dataset tranche controller for exchange backfills (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`).
-- [x] `S34-C4b` Build repo-native exchange sequence controller for post-Binance `okx_spot_trades -> bybit_spot_trades` execution.
+- [x] `S34-C4b` Build historical repo-native exchange sequence controller for post-Binance `okx_spot_trades -> bybit_spot_trades` execution.
 - [x] `S34-C4c` Fix OKX source-duplicate contract so raw-row counts remain truthful while exact duplicate trade rows are accepted and conflicting duplicate payloads fail loudly.
 - [x] `S34-C4d` Fix OKX offset-order contract so proof/integrity treat `trade_id` as numeric monotonic but non-contiguous.
 - [x] `S34-C4e` Enforce source-aware OKX backfill concurrency so Dagster run waves cannot violate the OKX download-link rate contract and leave non-contiguous holes after 429 failures.
@@ -788,12 +788,11 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
 - [ ] `S34-C4l` Fix OKX canonical precision contract so first-party high-scale `size` values survive reconcile/write without false scale-overflow failures.
 - [x] `S34-C4m` Fix exchange reconcile writer-repair flow so partition proof is recomputed from fresh canonical state instead of reusing stale pre-repair canonical proof snapshots.
-- [x] `S34-C4n` Align manual exchange Dagster defaults with the repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
-- [x] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
-- [x] `S34-C4p` Remove OKX and Bybit canonical backfill Python bottlenecks in source-proof and fresh-write preparation using staged/vectorized execution that matches the hardened Binance daily fast path.
+- [ ] `S34-C4n` Align manual exchange Dagster defaults with the historical repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
+- [ ] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
-- [x] `S34-C5a` Build repo-native ETF Dagster backfill runner with proof-boundary summary.
-- [x] `S34-C5b` Fix repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
+- [x] `S34-C5a` Build historical repo-native ETF Dagster backfill runner with proof-boundary summary.
+- [x] `S34-C5b` Fix historical repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
 - [x] `S34-C5c` Provision the live S3-compatible object-store runtime (service, bucket bootstrap, and deploy env sync) so ETF/FRED raw-artifact persistence works on the hardened backfill path.
 - [ ] `S34-C5d` Fix ETF Dagster backfill execution so ETF source manifests and terminal partition proofs are recorded before any projection and Slice-34 runtime tags control deferred backfill versus explicit reconcile behavior.
 - [x] `S34-C5e` Replay ETF history only from archived issuer-source artifacts and fail loudly on missing historical artifact coverage instead of pretending the live daily snapshot job is a historical backfill.
@@ -805,15 +804,15 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C5k` Add ETF proof-driven resume/reconcile control so live reruns skip terminal partitions, explicitly reconcile ambiguous partitions, and continue full-history execution from authoritative proof state.
 - [ ] `S34-C5l` Add ETF audited partition reset-and-rewrite for legacy canonical payload drift so explicit reconcile can clear old non-deterministic rows and rewrite the partition from archived source truth.
 - [ ] `S34-C5m` Add env-backed native ClickHouse receive-timeout contract so long-running ETF reconcile partition resets fail loudly by explicit config instead of client timeouts.
-- [x] `S34-C5n` Add real worker concurrency to ETF Slice-34 partition execution so archived-history backfill stops processing partition batches strictly serially.
+- [ ] `S34-C5n` Add real worker concurrency to ETF Slice-34 partition execution so archived-history backfill stops processing partition batches strictly serially.
 - [ ] `S34-C6` Execute FRED full-history backfill (`fred_series_metrics`) from source series history.
-- [x] `S34-C6a` Build repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
+- [x] `S34-C6a` Build historical repo-native FRED Dagster backfill runner/job so Slice-34 manifests and proofs can be closed over existing canonical history and any missing source partitions.
 - [ ] `S34-C6b` Make FRED historical source replay deterministic by fetching and normalizing revision-history vintages instead of request-time latest snapshots.
 - [ ] `S34-C6c` Add FRED audited partition reset-and-rewrite so explicit reconcile can clear stale request-time canonical rows and rewrite from deterministic source truth.
 - [ ] `S34-C6d` Batch FRED revision-history fetches against official vintage-date count limits so deterministic history replay remains valid for long-revision series such as `CPIAUCSL`.
 - [ ] `S34-C6e` Split FRED explicit `vintage_dates` observation requests under live HTTP URI limits so revision-history replay survives long vintage lists without reverting to non-deterministic snapshots.
 - [x] `S34-C6f` Freeze and enforce the live source-safe FRED revision-history window ceiling so `series/observations` requests stay inside real response-size and timeout limits.
-- [x] `S34-C6h` Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
+- [x] `S34-C6h` Batch historical repo-native FRED reconcile execution over authoritative ambiguous partition ids so live runs submit bounded proofable tranches instead of one dataset-wide reconcile wave.
 - [x] `S34-C6i` Bound FRED reconcile tranche planning by explicit source-window span so sparse partition prefixes cannot expand into oversized multi-year revision-history fetch windows.
 - [x] `S34-C6j` Skip non-overlapping FRED series during bounded raw-bundle construction so early historical and reconcile windows do not fail on legitimate empty-observation payloads such as `FEDFUNDS`.
 - [x] `S34-C6k` Fix FRED reconcile proof-mismatch reset flow so a quarantining proof can still trigger the audited partition reset-and-rewrite path instead of aborting immediately on `prove_partition_or_quarantine(...)`.
@@ -822,14 +821,14 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [ ] `S34-C6n` Bound FRED plain backfill raw-bundle fetches to the latest terminal proof boundary so live reruns do not re-fetch full-history revision bundles once authoritative proof coverage exists.
 - [x] `S34-C6o` Cap FRED Slice-34 history coverage at `2009-01-01` and make the boundary authoritative in planning/runtime so live Dagster runs never fetch, reconcile, or process pre-cap partitions.
 - [x] `S34-C6p` Make FRED latest-proof selection deterministic when duplicate proof revisions exist so freshly completed reconcile ranges are not immediately reselected.
-- [x] `S34-C6q` Add real worker concurrency to FRED Slice-34 partition execution so reconcile/backfill runs stop processing post-source-window partitions strictly serially.
+- [ ] `S34-C6q` Add real worker concurrency to FRED Slice-34 partition execution so reconcile/backfill runs stop processing post-source-window partitions strictly serially.
 - [ ] `S34-C7` Execute Bitcoin full-history backfill for base and derived datasets (`bitcoin_block_headers`, `bitcoin_block_transactions`, `bitcoin_mempool_state`, `bitcoin_block_fee_totals`, `bitcoin_block_subsidy_schedule`, `bitcoin_network_hashrate_estimate`, `bitcoin_circulating_supply`).
 - [x] `S34-C7a` Replace static-env Bitcoin height selection with explicit Dagster run-tag height-window contract for height-based datasets.
 - [x] `S34-C7b` Convert Bitcoin chain datasets to true `height_range` canonical partition ids and make `bitcoin_mempool_state` explicitly daily snapshot-partitioned in the Slice-34 contract.
 - [x] `S34-C7c` Integrate all Bitcoin assets into the Slice-34 proof state machine (source manifest, partition states, terminal proof/quarantine) with no direct canonical-write bypass.
-- [x] `S34-C7d` Build repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
+- [x] `S34-C7d` Build historical repo-native Bitcoin backfill/controller path that splits height-range chain execution from daily mempool execution and fails loudly on planner misuse.
 - [x] `S34-C7e` Formalize mempool capture-boundary contract and fail-loud pre-capture serving semantics across historical/native/aligned surfaces.
-- [x] `S34-C7f` Fix repo-native Bitcoin Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
+- [x] `S34-C7f` Fix historical repo-native Bitcoin Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
 - [ ] `S34-C8` Rebuild native and canonical aligned projections from canonical events after backfill completion.
 
 ### Proof
@@ -844,15 +843,23 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 
 ### Guardrails
 - [ ] `S34-G1` Enforce immutable backfill audit trail and per-partition manifest evidence (source checksums, cursor windows, fingerprints, proof digests).
-- [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip), with ClickHouse as the only live authority.
+- [ ] `S34-G2` Enforce fail-loud resume/quarantine behavior for incomplete or corrupted backfill partitions (no fallback/no silent skip), with ClickHouse storing the live proof facts that Dagster operator truth must reflect.
 - [ ] `S34-G3` Developer docs closeout for slice (`docs/Developer/`, short topic files, complete backfill contracts/operations notes).
 - [ ] `S34-G4` User docs closeout for slice (`docs/`, full dataset-history coverage/taxonomy and backfill status reference).
 - [x] `S34-G5` Freeze PR review-routing governance so `zero-bang` is reviewer/approver only and the final merge path always flows through explicit review, resolved conversations, and final re-approval.
+- [x] `S34-G6` Freeze Dagster dashboard authority so Dagster state, proof state, and the only allowed write entrypoint all stay aligned through the dashboard/Dagit contract.
+- [x] `S34-G7` Freeze the live ingest-throughput contract so the Binance daily staged/vectorized pattern is the default law for daily-file ingestion and hidden serial Python hot paths require explicit exception handling.
+- [x] `S34-G8` Eliminate remaining governance loopholes and helper-write bypasses so Dagster authority and ingest-throughput contracts are scope-wide, behaviorally enforced, and historical runner/controller surfaces are explicitly non-authoritative.
+- [x] `S34-G9` Freeze the canonical task-type taxonomy and routing contract so every requested work unit maps to exactly one primary task type and mixed-type implementation work is decomposed before code changes.
+- [x] `S34-G10` Refactor the full governance package into one routing surface (`AGENTS.md`) plus atomic machine-readable contracts under `contracts/governance`, with spec/docs downgraded to descriptive references rather than parallel governance authority.
+- [x] `S34-G11` Freeze fail-closed task admission, exhaustive request-family coverage, and exhaustive contract coverage so no unroutable or under-contracted work can proceed without immediate operator escalation.
+- [x] `S34-G12` Freeze governance scope as whole-system Origo law so governance routing/contracts cannot be interpreted as Slice-34-only or temporary for future development.
+- [x] `S34-G13` Promote the remaining whole-system runtime/data contract law into routed machine governance contracts so future Origo work cannot bypass spec-era rules that were never converted into authoritative contracts.
 
 ## Slice 35: Automated Daily Backfill Scheduling (Configured Daily Runtime)
 
 ### Capability
-- [ ] `S35-C1` Add Dagster orchestration to run daily backfill automatically for all daily datasets in fixed contract order (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`, `etf_daily_metrics`, `fred_series_metrics`).
+- [ ] `S35-C1` Add Dagster-native schedule orchestration to run daily backfill automatically for all daily datasets in fixed contract order (`binance_spot_trades`, `okx_spot_trades`, `bybit_spot_trades`, `etf_daily_metrics`, `fred_series_metrics`) while keeping every scheduled write run visible in Dagit.
 - [ ] `S35-C2` Add schedule env contract and fail-loud validation for daily runtime configuration (`ORIGO_BACKFILL_DAILY_SCHEDULE_CRON`, `ORIGO_BACKFILL_DAILY_SCHEDULE_TIMEZONE`, `ORIGO_BACKFILL_DAILY_LAG_DAYS`).
 - [ ] `S35-C3` Compute `target_end_date` from UTC date and lag days and pass it consistently to each dataset backfill dispatch.
 - [ ] `S35-C4` Enforce per-dataset non-overlap (single active scheduled run per dataset) and fail loudly on overlap attempts.
@@ -2088,6 +2095,8 @@ Done looks like: docs/spec/artifacts fully match cleaned contract and provide no
 Constraints: closeout only; no new capability expansion.
 
 ## Slice 34 Sub-Slices
+Historical note: completed Slice-34 items below may reference historical repo-native runners/controllers as provenance of how the slice evolved. Those references are historical only and cannot override the live Dagster authority contract or permit helper-created write paths.
+
 1. `S34-01`
 Action: Freeze full backfill contract and ordered inventory for all onboarded datasets.
 Done looks like: one canonical ordered dataset list and per-dataset earliest-source boundary are documented and locked for execution.
@@ -2161,7 +2170,7 @@ Action: Build generic daily-dataset tranche controller for exchange backfills (`
 Done looks like: one controller can plan immediate next batches from authoritative proof state, choose reconcile vs backfill fail-loud, and chain batches without idle gaps.
 Constraints: daily partition datasets only; no hidden fallback planning rules.
 16. `S34-04b`
-Action: Build repo-native exchange sequence controller for `okx_spot_trades -> bybit_spot_trades`.
+Action: Build historical repo-native exchange sequence controller for `okx_spot_trades -> bybit_spot_trades`.
 Done looks like: one controller can execute the post-Binance exchange order deterministically, refuse out-of-order or non-exchange datasets, and stop loudly on the first dataset that does not fully complete.
 Constraints: exchange datasets only; no schedule automation and no manual shell chaining contract.
 17. `S34-04c`
@@ -2197,17 +2206,13 @@ Action: Fix Bybit repeated-`trdMatchID` proof contract for Slice 34 backfill.
 Done looks like: historical Bybit daily files can repeat raw `trdMatchID` values without forcing false quarantine, proof completion relies on source-vs-canonical identity digest equality for the repeated-offset dataset contract, and true source/canonical mismatches still fail loudly.
 Constraints: no silent row dropping, no weakening of source-vs-canonical identity proof, and no hiding of real payload drift under repeated raw offsets.
 24a. `S34-04n`
-Action: Align manual exchange Dagster defaults with the repo-native Slice-34 backfill contract.
-Done looks like: dashboard-triggered exchange backfills default to deferred projection and backfill execution semantics just like the repo-native controller, while scheduled live exchange runs continue to set explicit inline projection tags instead of relying on implicit defaults.
-Constraints: no hidden semantic mismatch between manual and repo-native backfill execution, and no schedule path may inherit backfill defaults accidentally.
+Action: Align manual exchange Dagster defaults with the Dagster-visible Slice-34 backfill contract.
+Done looks like: dashboard-triggered exchange backfills default to deferred projection and backfill execution semantics just like the live Dagster backfill contract, while scheduled live exchange runs continue to set explicit inline projection tags instead of relying on implicit defaults.
+Constraints: no hidden semantic mismatch between manual and scheduled Dagster execution, and no schedule path may inherit backfill defaults accidentally.
 24b. `S34-04o`
 Action: Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts.
 Done looks like: Binance, OKX, and Bybit source fetch paths all read required positive timeout values from the runtime env contract, invalid or missing timeout values fail loudly, and no exchange source path keeps a hard-coded HTTP timeout.
 Constraints: no deployment-specific hard-coding, no per-source silent fallback defaults, and no timeout drift between daily and monthly Binance fetch paths.
-24c. `S34-04p`
-Action: Remove OKX and Bybit canonical backfill Python bottlenecks in source-proof and fresh-write preparation.
-Done looks like: OKX and Bybit daily backfill assets parse CSV payloads into frames, run integrity over frames, build source proofs from staged ClickHouse data, and use staged fresh-partition writes for the hardened fast path while preserving fail-loud writer fallback for reconcile and non-empty partitions.
-Constraints: no payload-contract drift, no silent downgrade of source/canonical proof precision, and no bypass of writer-based reconcile paths for non-empty partitions.
 25. `S34-04k`
 Action: Add exchange reconcile writer-repair path for poisoned partial canonical partitions.
 Done looks like: reconcile uses proof-only when existing canonical rows already match source proof, falls back to idempotent writer-repair when canonical rows are partial or mismatched, and then re-proves/quarantines deterministically.
@@ -2217,11 +2222,11 @@ Action: Run ETF full-history backfill (`etf_daily_metrics`) across all configure
 Done looks like: issuer history is complete in canonical events with deterministic provenance and UTC-day normalization.
 Constraints: issuer official-source hierarchy only.
 27. `S34-05a`
-Action: Build repo-native ETF Dagster backfill runner with proof-boundary summary.
+Action: Build historical repo-native ETF Dagster backfill runner with proof-boundary summary.
 Done looks like: one runner can launch the real ETF Dagster job, wait fail-loud for completion, and summarize ETF terminal-proof boundary plus unresolved proof gaps from ClickHouse.
 Constraints: use Dagster job execution only; no direct op invocation and no fake proof closure.
 27b. `S34-05b`
-Action: Fix the repo-native ETF runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
+Action: Fix the historical repo-native ETF runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
 Done looks like: ETF backfill can be launched with readable control ids, Dagster accepts the run submission, and returned summaries preserve both the control run id and the Dagster UUID run id.
 Constraints: no loss of operator traceability and no fallback to opaque auto-generated control ids.
 27c. `S34-05c`
@@ -2254,7 +2259,7 @@ Done looks like: archive-capture-forward issuers with zero valid archived artifa
 Constraints: no synthetic history for snapshot-only issuers, no silent treatment of zero-history sources as complete, and no weakening of fail-loud behavior once a snapshot-only issuer has a non-empty claimed range.
 27j. `S34-05k`
 Action: Add ETF proof-driven resume/reconcile control for live Slice-34 backfill.
-Done looks like: ETF backfill reruns skip terminal-complete partitions, explicit reconcile can be scoped to required partition ids via runtime tags, and the repo-native ETF runner plans `reconcile` before `backfill` from authoritative proof state instead of forcing operators to restart from day zero.
+Done looks like: ETF backfill reruns skip terminal-complete partitions, explicit reconcile can be scoped to required partition ids via runtime tags, and the historical repo-native ETF runner plans `reconcile` before `backfill` from authoritative proof state instead of forcing operators to restart from day zero.
 Constraints: no silent reconcile in backfill mode, no direct canonical writes outside Dagster/state-machine execution, and no synthetic partition planning outside archived-source evidence.
 27k. `S34-05l`
 Action: Add ETF audited partition reset-and-rewrite for legacy canonical payload drift.
@@ -2277,8 +2282,8 @@ Action: Run FRED full-history backfill (`fred_series_metrics`) across configured
 Done looks like: configured series history is complete in canonical events with deterministic publish/revision provenance.
 Constraints: official FRED source only.
 25a. `S34-06a`
-Action: Build repo-native FRED Dagster backfill runner/job with proof-driven reconcile and missing-partition closure.
-Done looks like: one repo-native runner can launch the real FRED Dagster backfill job, FRED backfill records Slice-34 manifests/proofs from source history while using proof-only for already-matching canonical partitions, and the returned summary exposes the terminal proof boundary plus any remaining ambiguous partitions from ClickHouse.
+Action: Build historical repo-native FRED Dagster backfill runner/job with proof-driven reconcile and missing-partition closure.
+Done looks like: one historical repo-native runner can launch the real FRED Dagster backfill job, FRED backfill records Slice-34 manifests/proofs from source history while using proof-only for already-matching canonical partitions, and the returned summary exposes the terminal proof boundary plus any remaining ambiguous partitions from ClickHouse.
 Constraints: Dagster execution only, no direct source-to-canonical shell path, and no synthetic dense-calendar planning outside real FRED observation dates.
 25b. `S34-06b`
 Action: Make FRED historical replay deterministic by fetching and normalizing official revision-history vintages instead of request-time latest snapshots.
@@ -2305,7 +2310,7 @@ Action: Scope FRED reconcile source fetches to authoritative ambiguous partition
 Done looks like: when reconcile runs without explicit partition tags, the job resolves ambiguous partition ids from ClickHouse first, derives the bounded observation window from those ids, and logs that window before any raw revision-history fetch starts.
 Constraints: no full-history replay for narrow reconcile windows, no planner/tag fallback that hides the true ambiguity scope, and no raw bundle build ahead of reconcile window resolution.
 25h. `S34-06h`
-Action: Batch repo-native FRED reconcile execution over authoritative ambiguous partition ids.
+Action: Batch historical repo-native FRED reconcile execution over authoritative ambiguous partition ids.
 Done looks like: the FRED runner reads an explicit env-backed max tranche size, submits only the first deterministic slice of ambiguous partition ids per reconcile run, and verifies that every targeted partition reaches terminal proof before advancing to the next tranche.
 Constraints: no dataset-wide reconcile submissions when ambiguity is large, no silent batch-size defaults outside the env contract, and no successful Dagster run may advance the runner if targeted partitions remain non-terminal.
 25i. `S34-06i`
@@ -2326,7 +2331,7 @@ Done looks like: deploy reads `ORIGO_FRED_REVISION_HISTORY_INITIAL_VINTAGE_DATES
 Constraints: no deploy-side hard-coded default, no manual server env edit as the contract path, and no silent omission of newly required runtime env keys.
 25m. `S34-06m`
 Action: Apply bounded FRED reconcile planning inside the Dagster job when explicit partition ids are omitted.
-Done looks like: direct Dagster `reconcile` launches without `origo.backfill.partition_ids` use the same env-backed ambiguous-prefix and source-window ceilings as the repo-native runner, the logged `partition_scope_count` reflects the bounded subset rather than the full ambiguity set, and dashboard/manual launches cannot silently bypass the runner safety contract.
+Done looks like: direct Dagster `reconcile` launches without `origo.backfill.partition_ids` use the same env-backed ambiguous-prefix and source-window ceilings as the historical repo-native runner, the logged `partition_scope_count` reflects the bounded subset rather than the full ambiguity set, and dashboard/manual launches cannot silently bypass the runner safety contract.
 Constraints: no duplicated planning logic that can drift from the runner contract, no fallback to dataset-wide ambiguity on missing explicit tags, and no weakening of fail-loud behavior when reconcile env limits are missing or invalid.
 25n. `S34-06n`
 Action: Bound FRED plain backfill source fetches to the latest authoritative terminal proof boundary before raw revision-history bundle construction.
@@ -2361,15 +2366,15 @@ Action: Integrate all Bitcoin assets into the Slice-34 proof state machine.
 Done looks like: every Bitcoin asset records source manifest and partition-state transitions in ClickHouse, uses explicit source proof before canonical write, supports reconcile proof-only fast path where applicable, and returns terminal proof metadata in its result contract.
 Constraints: no direct canonical-write bypass; no silent divergence between chain and mempool proof semantics.
 30. `S34-07d`
-Action: Build repo-native Bitcoin backfill/controller path for split partition models.
-Done looks like: one repo-native controller/runner launches Bitcoin chain jobs by explicit height-range batches, treats `bitcoin_mempool_state` as a separate daily snapshot path, fails loudly for unsupported historical mempool replay, derives resume truth from ClickHouse proof state, and fails loudly if any dataset is sent through the wrong planner or if a batch does not end in clean proof state.
+Action: Build historical repo-native Bitcoin backfill/controller path for split partition models.
+Done looks like: one historical repo-native controller/runner launches Bitcoin chain jobs by explicit height-range batches, treats `bitcoin_mempool_state` as a separate daily snapshot path, fails loudly for unsupported historical mempool replay, derives resume truth from ClickHouse proof state, and fails loudly if any dataset is sent through the wrong planner or if a batch does not end in clean proof state.
 Constraints: Dagster execution only; no direct asset invocation, no mixed planner fallback, and no hidden env-driven batch boundary selection.
 31. `S34-07e`
 Action: Formalize mempool capture-boundary contract and fail-loud serving behavior.
 Done looks like: the system records and exposes the first captured mempool snapshot boundary from the Origo-controlled node runtime, historical/native/aligned requests before that boundary fail loudly, and docs/specs state explicitly that blockchain history does not reconstruct historical mempool state.
 Constraints: no synthetic mempool reconstruction, no silent truncation to available range, and no fallback to block-confirmed transaction history.
 31a. `S34-07f`
-Action: Fix the repo-native Bitcoin runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
+Action: Fix the historical repo-native Bitcoin runner so human control run ids remain operator-facing tags while Dagster submissions use valid UUID run ids.
 Done looks like: Bitcoin chain and mempool runs can be launched with readable control ids, every Dagster submission uses a UUID run id, and returned results preserve both identifiers for proof and operations.
 Constraints: no planner behavior changes and no silent rewriting of the operator-facing control run id.
 32. `S34-08`
@@ -2400,12 +2405,40 @@ Constraints: prep/reporting only; do not mark Slice 34 closed and do not create 
 Action: Freeze PR review-routing governance so `zero-bang` is reviewer/approver only and never the PR author.
 Done looks like: repo instructions, live plan, developer docs, and machine-checkable contract coverage all encode the same flow: never author as `zero-bang`, always request `zero-bang` review, resolve every conversation, re-request review, and merge only after final `zero-bang` approval.
 Constraints: governance contract only; no hidden operator exceptions and no merge path that depends on `zero-bang` self-authorship.
+39. `S34-11c`
+Action: Freeze Dagster dashboard authority and split-brain prohibition for Slice 34 partition truth.
+Done looks like: repo instructions, live plan, live developer docs, and machine-checkable governance coverage all encode that Dagster/Dagit is the only authoritative partition truth and the only allowed write entrypoint, proof state must match Dagster state per partition, `reconcile_required` is explicit before launch, complete partitions cannot show as failed or missing after normal dashboard actions, and helper tools may observe only.
+Constraints: governance contract only; no alternate write-entrypoint exceptions, no green/red split-brain allowance, and no helper path that can launch or mutate canonical state.
+40. `S34-11d`
+Action: Close remaining governance loopholes, hard-disable helper write entrypoints, and freeze the live ingest-throughput contract as a scope-wide law.
+Done looks like: top-level and developer-doc language no longer leaves runner/controller loopholes, historical helper launch surfaces are explicitly non-authoritative, helper write entrypoints fail closed, and the live throughput contract names covered daily-file channels plus explicit exceptions with machine-checkable coverage.
+Constraints: no side-launch fallback, no helper-created Dagster runs, no row-by-row Python hot-path exception without explicit live contract coverage, and no Slice 35 automation wording that bypasses Dagster-native visibility in Dagit.
+41. `S34-11e`
+Action: Freeze the canonical task-type taxonomy and routing contract from observed Origo work history.
+Done looks like: repo instructions, live plan, developer docs, and machine-checkable governance coverage require exactly one primary task type per work unit (`proof`, `governance`, `operator_surface`, `runtime_env`, `correctness`, `performance`, `capability`), unknown-root-cause work starts as `proof`, mixed-type requests are decomposed before implementation, and branch/PR scope matches the primary task type.
+Constraints: no catch-all task type, no using `proof` as cover for runtime changes, no mixed-type implementation branch/PR, and no skipping decomposition when a request obviously spans multiple primary task types.
+42. `S34-11f`
+Action: Refactor governance into the canonical `task_type -> routing -> contract` structure with `AGENTS.md` as the only routing layer and atomic machine contracts as the only normative governance source outside AGENTS.
+Done looks like: `AGENTS.md` routes every task type to explicit atomic contract files, `contracts/governance/` contains one-clear-aspect machine contracts only, spec remains descriptive, developer docs are reference-only for governance, and tests prove there is no duplicate normative governance text outside the routed machine contracts.
+Constraints: no parallel prose authority, no monolithic task-type contract, no hidden routing outside `AGENTS.md`, and no spec/doc wording that can be cited to sidestep a machine contract.
+43. `S34-11g`
+Action: Freeze fail-closed task admission, exhaustive request-family coverage, and exhaustive contract coverage for the entire governance system.
+Done looks like: the allowed task-type set is explicitly exhaustive for Origo engineering work, every request must match a routed request family before task-type assignment, `AGENTS.md` says the agent must stop immediately and report to the operator if a request has no safe route, every task type is covered by explicit routed contracts, shared contracts declare how they apply across multiple task types, and tests fail loudly if any task type or contract loses coverage.
+Constraints: no catch-all task type, no “best effort” unroutable work, no proceeding without routed contract coverage, and no hidden domain where the agent can improvise behavior outside the governed task system.
+44. `S34-11h`
+Action: Freeze governance scope as whole-system Origo law for manual writes, automated writes, and future development.
+Done looks like: governance authority explicitly says it applies repo-wide to the whole Origo system and all future development, Dagster authority encodes one permanent rule for manual writes and one permanent rule for automated writes, no machine contract uses slice-era temporary wording to describe governance authority, and tests fail loudly if governance scope drifts back to slice-specific language.
+Constraints: no temporary slice-only governance wording in machine contracts, no future automation loophole outside Dagster-native visibility, and no narrowing of governance scope to only the currently open slices.
+45. `S34-11i`
+Action: Convert the remaining whole-system runtime/data law from spec-only contract prose into routed atomic machine contracts and shared-domain overlays.
+Done looks like: ClickHouse SQL discipline, serving/error safety, integrity/durability, rights/secrets, runtime/recovery, ingestion guarantees, raw fidelity, event-sourcing, historical-surface, source-onboarding, and source-migration rules all exist as atomic machine contracts under `contracts/governance/`, `AGENTS.md` routes those overlays explicitly, request-family coverage is broad enough for whole-system Origo work rather than just Slice-34-era cases, and tests fail loudly if any touched system surface loses routed contract coverage.
+Constraints: no spec-only contract law left without a machine counterpart, no new catch-all request family, no domain overlay implied by intuition instead of routing, and no weakening of existing Dagster or ingest-throughput governance while broadening to the whole system.
 
 ## Slice 35 Sub-Slices
 1. `S35-01`
-Action: Freeze the automated daily backfill schedule contract (scope, dataset order, boundary semantics).
-Done looks like: contract states exact dataset order, exact schedule env keys, and exact boundary formula (`target_end_date = utc_today - lag_days`).
-Constraints: planning contract only; no runtime wiring yet.
+Action: Freeze the automated daily backfill schedule contract (scope, dataset order, boundary semantics, and Dagster-native visibility).
+Done looks like: contract states exact dataset order, exact schedule env keys, exact boundary formula (`target_end_date = utc_today - lag_days`), and that every automated write run is created by Dagster itself and remains visible in Dagit.
+Constraints: planning contract only; no runtime wiring yet and no helper-created runs.
 2. `S35-02`
 Action: Wire schedule configuration env validation and Dagster schedule definition.
 Done looks like: invalid/missing schedule env values fail loudly and the schedule object resolves with explicit cron/timezone from env.

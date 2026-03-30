@@ -1,4 +1,4 @@
-# PR Review Routing Reference
+# Dagster Authority Reference
 
 ## Metadata
 - Owner: Origo Engineering
@@ -7,11 +7,11 @@
 
 ## Canonical source
 - Routing surface: `AGENTS.md`
-- Canonical machine contract: `contracts/governance/pr-review-routing.json`
+- Canonical machine contract: `contracts/governance/dagster-authority.json`
 
 ## Purpose
-- Reference note for the PR review path.
-- Use the machine contract for exact review, conversation-resolution, and approval requirements across all future Origo development.
+- Reference note for Dagster/Dagit operator truth, write-entrypoint authority, and proof-state parity.
+- Use the machine contract for exact split-brain, manual-write, automated-write, rerun, reconcile, and live-validation rules across the whole system.
 
 ## Authority note
 - This document is reference-only for governance.

@@ -1,0 +1,20 @@
+{
+  "developer_docs_update_required": true,
+  "user_docs_update_required": true,
+  "documentation_update_order": [
+    "docs/Developer",
+    "docs"
+  ],
+  "one_topic_per_file": true,
+  "required_entry_fields": [
+    "purpose_and_scope",
+    "inputs_and_outputs_with_contract_shape",
+    "data_definitions",
+    "source_provenance_and_freshness_semantics",
+    "failure_modes_warnings_and_error_codes",
+    "determinism_and_replay_notes",
+    "environment_variables_and_required_config",
+    "minimal_examples",
+    "owner_last_updated_and_slice_version_reference"
+  ]
+}

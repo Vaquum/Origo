@@ -9,37 +9,72 @@ Origo is built with one strict execution doctrine:
 
 No slice can advance to the next slice until all three stages are complete for the current slice.
 
+## Governance Scope
+- The governance routing in `AGENTS.md` and the machine contracts in `contracts/governance/` apply repo-wide to the whole Origo system and all future development.
+- Open slice boundaries do not narrow governance authority.
+- This section is descriptive only for governance.
+
 ## Guardrail #1: Execution Doctrine
-
-### Stage Definitions
-1. **Capability**: implement only the minimum functional path for the slice objective.
-2. **Proof**: prove the capability is rock-solid.
-3. **Guardrails**: add safety, ops, security, and compliance around the proven capability.
-
-### Hard Rule
-1. Strict per-slice loop: `Capability -> Proof -> Guardrails`.
-2. The next slice cannot start before current-slice guardrails are complete.
-3. No hardening is allowed before capability proof for that same slice.
-
-### Proof Bar
-Every slice must pass:
-1. Acceptance tests.
-2. Replay tests on fixed fixtures.
-3. Deterministic output checks across repeated runs.
+- Canonical machine contract: `contracts/governance/execution-doctrine.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 
 ## Static Analysis Contract
-1. `ruff` and `pyright` are hard gates.
-2. Gate scope is repo-wide (existing and new files), not only changed files.
-3. `pyright` runs in strict mode.
-4. A slice cannot close with outstanding lint/type debt.
-5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
+- Canonical machine contract: `contracts/governance/static-analysis.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 
 ## PR Governance Contract
-1. `zero-bang` is review authority only and must never be used as the git user, PR author, or implementation identity for normal engineering changes.
-2. Every pull request must request `zero-bang` review before merge.
-3. If `zero-bang` leaves review comments or requested changes, the author must resolve every conversation and then re-request `zero-bang` review.
-4. Merge is allowed only after `zero-bang` approves the final PR revision.
-5. Any workflow that depends on `zero-bang` self-authoring a PR is invalid by contract.
+- Canonical machine contract: `contracts/governance/pr-review-routing.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Dagster Authority Contract
+- Canonical machine contract: `contracts/governance/dagster-authority.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Ingest Throughput Contract
+- Canonical machine contract: `contracts/governance/ingest-throughput.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Task-Type Contract
+- Canonical machine contracts:
+  - `contracts/governance/task-types.json`
+  - `contracts/governance/task-decomposition.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Task Admission Contract
+- Canonical machine contract: `contracts/governance/task-admission.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Request-Task Coverage Contract
+- Canonical machine contract: `contracts/governance/request-task-coverage.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Contract Applicability Contract
+- Canonical machine contract: `contracts/governance/contract-applicability.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Documentation Contract (Definition of a Perfect Entry)
+- Canonical machine contract: `contracts/governance/documentation-contract.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Slice Artifact Contract
+- Canonical machine contract: `contracts/governance/slice-closeout.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Itemized Work Plan Contract (`spec/2-itemized-work-plan.md`)
+- Canonical machine contract: `contracts/governance/work-plan-discipline.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 
 ## Program Status (As of 2026-03-12)
 1. Slices `0-11` and `13-32` are merged to `main`.
@@ -52,66 +87,6 @@ Every slice must pass:
    3. `contract-gate`
    4. `replay-gate`
    5. `integrity-gate`
-
-## Documentation Contract (Definition of a Perfect Entry)
-1. Every slice ends with two mandatory guardrail outputs, in this order:
-   1. Developer docs update in `docs/Developer/`.
-   2. User docs update in `docs/`.
-2. Documentation is split into many short files (one topic per file), not long omnibus documents.
-3. Every documentation entry must include:
-   1. Purpose and scope.
-   2. Inputs and outputs with contract shape.
-   3. Data definitions (field names, types, units, timezone, nullability).
-   4. Source/provenance and freshness semantics.
-   5. Failure modes, warnings, and error codes.
-   6. Determinism/replay notes (what must stay stable).
-   7. Environment variables and required config.
-   8. Minimal examples (valid request/query and expected output shape).
-   9. Owner, last-updated date, and slice/version reference.
-4. A documentation entry is complete only if a new engineer can implement and debug the topic without tribal knowledge.
-5. User docs must maintain a complete current reference taxonomy of all exposed datasets, fields, modes, and meanings.
-
-## Slice Artifact Contract
-1. Every slice must leave three closeout artifacts in `spec/slices/<slice-id>/`:
-   1. `manifest.md` with exactly three sections:
-      1. `## What was done`
-      2. `## Current state`
-      3. `## Watch out`
-   2. `run-notes.md` with standardized sections:
-      1. `## Run metadata`
-      2. `## System changes made as proof side effects`
-      3. `## Known warnings and disposition`
-      4. `## Deferred guardrails`
-      5. `## Closeout confirmation`
-   3. `baseline-fixture-<window>.json` using canonical fixture schema.
-2. Canonical baseline fixture schema is:
-   1. `column_key`
-   2. `deterministic_match`
-   3. `fixture_window`
-   4. `source_checksums`
-   5. `run_1_fingerprints`
-   6. `run_2_fingerprints`
-3. Baseline fingerprint content requirements:
-   1. Fixture window dates/timestamps must be explicit UTC values.
-   2. Source checksums must include `zip_sha256` and `csv_sha256` slots when applicable to the source contract.
-   3. Run fingerprints must include row count and deterministic hash fields.
-   4. `deterministic_match` must reflect run-1/run-2 replay equality for the canonical fingerprint payload.
-4. Historical artifact drift policy:
-   1. Canonical reference format is the Slice 7+ baseline-fixture family.
-   2. Historical pre-standard artifacts may be retained for provenance but must carry an explicit warning note and must not be used as structure templates.
-
-## Itemized Work Plan Contract (`spec/2-itemized-work-plan.md`)
-1. No work is executed out-of-slice.
-2. Every implementation/proof/guardrail task must map to an explicit checkbox in the currently active slice before execution starts.
-3. If new work is discovered mid-slice, it must be added to the active slice checklist first (or explicitly deferred to a future slice) before implementation.
-4. `spec/2-itemized-work-plan.md` has exactly two structural parts, in this order:
-   1. Top section: all slice checkbox sections (`## Slice N: ...`) with `Capability`, `Proof`, and `Guardrails`.
-   2. Bottom section: all slice detail sections (`## Slice N Sub-Slices`) with one-day breakdowns.
-5. Every slice must exist in both parts:
-   1. one checkbox section in the top part
-   2. one matching sub-slice section in the bottom part
-6. Slice sections must not be interleaved or mixed across parts.
-7. No duplicate slice sections are allowed.
 
 ## Pinned Stack
 
@@ -162,6 +137,9 @@ Every slice must pass:
    3. Root `.env.example` remains the canonical env contract source.
 
 ## ClickHouse Query and Migration Policy
+- Canonical machine contract: `contracts/governance/storage-sql-discipline.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. ClickHouse schema and query logic is SQL-first and versioned.
 2. Migrations are authored as ordered SQL files and tracked in a migration ledger table.
 3. Applied migrations are immutable and forward-only.
@@ -182,6 +160,13 @@ Every slice must pass:
    4. every sub-slice closeout asks: "was any deployment-specific value hard-coded?"
 
 ## Safety Properties
+- Canonical machine contracts:
+  - `contracts/governance/serving-error-safety.json`
+  - `contracts/governance/integrity-durability.json`
+  - `contracts/governance/rights-secrets.json`
+  - `contracts/governance/runtime-recovery.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 
 ### Serving and Error Safety
 1. Raw API default mode is `native` (source-native events).
@@ -233,6 +218,9 @@ Every slice must pass:
 9. Source quarantine policy is manual-only for now.
 
 ## Ingestion Guarantee Contract
+- Canonical machine contract: `contracts/governance/ingestion-guarantees.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. Exactly-once is defined at canonical source-event identity, not at batch/job level.
 2. Canonical source-event identity must include:
    1. `source_id`
@@ -246,6 +234,9 @@ Every slice must pass:
 7. Reconciliation is mandatory: canonical ingest must continuously compare expected vs observed source coverage.
 
 ## Raw Fidelity and Precision Contract
+- Canonical machine contract: `contracts/governance/raw-fidelity.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. Canonical event log stores raw source payload bytes as first-class truth (`payload_raw`) with `payload_sha256_raw`.
 2. Parsed payload (`payload_json`) is derivative and must be reproducible from `payload_raw`.
 3. Canonical ingest must preserve source field values as delivered; normalization happens in projection layers.
@@ -256,6 +247,9 @@ Every slice must pass:
 8. Canonical payload fields that are run-volatile processing metadata (for example parse/normalize runtime timestamps) must not participate in canonical payload identity semantics; replay of unchanged source events must keep payload hash stable.
 
 ## Event-Sourcing and Continuous Aggregate Contract
+- Canonical machine contract: `contracts/governance/event-sourcing.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. Canonical raw truth is a single global append-only event log.
 2. Canonical event format is typed envelope fields plus canonical `payload_raw` and `payload_sha256_raw`.
 3. Canonical raw events are never rewritten or deleted.
@@ -274,6 +268,9 @@ Every slice must pass:
 13. `canonical_aligned_1s_aggregates` is the mandatory aligned projection sink contract; aligned serving paths must not use alternate storage tables.
 
 ## Historical Uniformity Contract
+- Canonical machine contract: `contracts/governance/historical-surface.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. `native` is the canonical baseline layer across all datasets.
 2. `native` behavior must be uniform across datasets to the maximum feasible degree:
    1. same window semantics
@@ -333,6 +330,9 @@ Every slice must pass:
 4. Historical response shape follows query-envelope parity (`mode`, `source`, `sources`, `row_count`, `schema`, `warnings`, `rows`, rights metadata).
 
 ## Source Onboarding Completion Rule
+- Canonical machine contract: `contracts/governance/source-onboarding.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. Every new source slice must deliver both `native` and `aligned_1s` integration before slice closeout.
 2. Source onboarding proof must include acceptance and replay determinism for both modes.
 3. Source onboarding is incomplete if either mode is missing from any of:
@@ -341,6 +341,9 @@ Every slice must pass:
    3. historical Python interface
 
 ## Source Migration Completion Rule
+- Canonical machine contract: `contracts/governance/source-migration.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
 1. Every migrated source slice must port writes to canonical event log and reads to projection-driven serving paths.
 2. Every migrated source slice must close with both `native` and `aligned_1s` integration in the same slice.
 3. Every migrated source slice must pass parity and replay determinism proofs before cutover closeout.
@@ -757,6 +760,10 @@ Every slice must pass:
    8. ETF historical availability is issuer-specific:
       1. issuers with a proven first-party historical endpoint may claim explicit pre-captured history from their contracted first-available day
       2. snapshot-only issuers may only claim history from the first valid archived artifact day forward
+9. FRED Slice-34 historical coverage is explicitly capped:
+   1. canonical backfill/reconcile coverage starts at `2009-01-01`
+   2. Dagster/manual/repo-native FRED runs must never fetch or reconcile partitions before that boundary
+   3. explicit FRED partition requests before `2009-01-01` must fail loudly
       3. snapshot-only issuers with zero valid archived artifacts have an explicit empty historical claim and must not block replay of issuers whose historical claim is non-empty
       4. zero-history snapshot-only issuers must still be surfaced explicitly in proof/audit output; they may not be silently treated as historically complete
       5. stale partial canonical ETF leftovers must never define the historical replay window
@@ -784,10 +791,6 @@ Every slice must pass:
    12. every required FRED runtime env added under Slice 34 must also be synchronized by deploy from root `.env.example` into `/opt/origo/deploy/.env`; a merged code/env contract that is absent from the live deploy env file is a hard deploy/runtime failure, not an operator follow-up
    13. if FRED `reconcile` is launched directly from Dagster without explicit partition tags, the Dagster job itself must still apply the same env-backed bounded-tranche selection contract as the repo-native runner; dashboard/manual launches may not silently expand back to the full ambiguity set
    14. latest-proof selection for FRED Slice-34 planning/execution must be deterministic even when duplicate `proof_revision` rows exist for a partition; authoritative selectors must order by `proof_revision`, `recorded_at_utc`, and `proof_id` together so successful reconcile runs cannot immediately re-plan already terminal-complete partitions
-8b. FRED Slice-34 historical coverage is explicitly capped:
-   1. canonical backfill/reconcile coverage starts at `2009-01-01`
-   2. Dagster/manual/repo-native FRED runs must never fetch or reconcile partitions before that boundary
-   3. explicit FRED partition requests before `2009-01-01` must fail loudly
 9. Canonical write path is mandatory: backfill writes canonical events first, then all native/aligned projections are rebuilt from canonical events.
 10. Exchange backfill canonical ingest high-throughput contract is tag-driven and proof-gated:
    1. Dagster partition runs must carry explicit projection, execution, and runtime-audit tags.

@@ -5,8 +5,14 @@
 - Last updated: 2026-03-26
 - Slice reference: S34 (`S34-C4a`, `S34-04b`, `S34-G2`)
 
+## Status
+- Historical slice record only. Not a live runtime contract.
+- Any CLI example or helper entrypoint in this document is provenance only.
+- Canonical backfill/reconcile writes must follow [docs/Developer/dagster-authority-contract.md](./dagster-authority-contract.md).
+- The historical helper entrypoint named here now fails closed for write execution.
+
 ## Purpose and scope
-- Defines the repo-native post-Binance exchange controller for S34.
+- Records the historical repo-native post-Binance exchange controller for S34.
 - Scope covers deterministic execution order for `okx_spot_trades -> bybit_spot_trades` using the daily tranche controller as the execution unit.
 
 ## Inputs and outputs with contract shape

@@ -11,7 +11,7 @@
   "fixture_window": {
     "start_utc": "2026-03-30T00:00:00Z",
     "end_utc": "2026-03-30T23:59:59Z",
-    "scope": "PR review-routing governance contract surfaces for zero-bang author/reviewer rules under whole-system governance routing."
+    "scope": "Ingest-throughput governance contract surfaces for first-party daily-file ingestion under whole-system governance routing."
   },
   "source_checksums": {
     "files": [
@@ -22,15 +22,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/ingest-throughput-contract.md",
+        "sha256": "568c949c940828938039317cd9537a30371502489351657c7814cc8d077107c3",
+        "bytes": 740,
         "line_count": 18
       },
       {
@@ -52,10 +52,10 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_ingest_throughput_contract.py",
+        "sha256": "8d7fdeb0d3d19eebdefc1221cf4312c488a9912b2eed436a4f2388b9b2f0ce33",
+        "bytes": 4553,
+        "line_count": 92
       }
     ]
   },
@@ -68,15 +68,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/ingest-throughput-contract.md",
+        "sha256": "568c949c940828938039317cd9537a30371502489351657c7814cc8d077107c3",
+        "bytes": 740,
         "line_count": 18
       },
       {
@@ -98,14 +98,14 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_ingest_throughput_contract.py",
+        "sha256": "8d7fdeb0d3d19eebdefc1221cf4312c488a9912b2eed436a4f2388b9b2f0ce33",
+        "bytes": 4553,
+        "line_count": 92
       }
     ],
     "file_count": 7,
-    "aggregate_sha256": "c8c82d630fd22478ad43a594a9a034488ba0e4c147e1a45da835a530220c2fce"
+    "aggregate_sha256": "c190da392dc9f701f6e5ea8112f98f119e14233f042e953c3777aceb48568d55"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -116,15 +116,15 @@
         "line_count": 135
       },
       {
-        "path": "contracts/governance/pr-review-routing.json",
-        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
-        "bytes": 404,
-        "line_count": 13
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
-        "path": "docs/Developer/pr-review-routing-contract.md",
-        "sha256": "7c2a245e9c0c42a479c39fa72b174a3a0db4e5801dd48958a78e2e33ae6409f6",
-        "bytes": 654,
+        "path": "docs/Developer/ingest-throughput-contract.md",
+        "sha256": "568c949c940828938039317cd9537a30371502489351657c7814cc8d077107c3",
+        "bytes": 740,
         "line_count": 18
       },
       {
@@ -146,13 +146,13 @@
         "line_count": 2511
       },
       {
-        "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "a2f684ec2b9142b4b46580b8d55262ff276c074435d19f1ba219329fb24ea65a",
-        "bytes": 2019,
-        "line_count": 43
+        "path": "tests/contract/test_ingest_throughput_contract.py",
+        "sha256": "8d7fdeb0d3d19eebdefc1221cf4312c488a9912b2eed436a4f2388b9b2f0ce33",
+        "bytes": 4553,
+        "line_count": 92
       }
     ],
     "file_count": 7,
-    "aggregate_sha256": "c8c82d630fd22478ad43a594a9a034488ba0e4c147e1a45da835a530220c2fce"
+    "aggregate_sha256": "c190da392dc9f701f6e5ea8112f98f119e14233f042e953c3777aceb48568d55"
   }
 }

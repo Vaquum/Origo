@@ -1,4 +1,4 @@
-# PR Review Routing Reference
+# Ingest Throughput Reference
 
 ## Metadata
 - Owner: Origo Engineering
@@ -7,11 +7,11 @@
 
 ## Canonical source
 - Routing surface: `AGENTS.md`
-- Canonical machine contract: `contracts/governance/pr-review-routing.json`
+- Canonical machine contract: `contracts/governance/ingest-throughput.json`
 
 ## Purpose
-- Reference note for the PR review path.
-- Use the machine contract for exact review, conversation-resolution, and approval requirements across all future Origo development.
+- Reference note for the daily-file ingest throughput law, covered modules, and explicit exception handling.
+- Use the machine contract for exact hot-path and concurrency requirements wherever the covered daily-file ingest classes appear in future Origo work.
 
 ## Authority note
 - This document is reference-only for governance.

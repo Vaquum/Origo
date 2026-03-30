@@ -5,8 +5,14 @@
 - Last updated: 2026-03-28
 - Slice reference: S34 (`S34-C5a`, `S34-C5d`, `S34-C5e`, `S34-C5f`, `S34-C5g`, `S34-C5h`, `S34-C5k`, `S34-C5l`, `S34-C5m`, `S34-05a`, `S34-05d`, `S34-05e`, `S34-05g`, `S34-05h`, `S34-05k`, `S34-05l`, `S34-05m`, `S34-G2`)
 
+## Status
+- Historical slice record only. Not a live runtime contract.
+- Any CLI example or helper entrypoint in this document is provenance only.
+- Canonical backfill/reconcile writes must follow [docs/Developer/dagster-authority-contract.md](./dagster-authority-contract.md).
+- The historical helper entrypoint named here now fails closed for write execution.
+
 ## Purpose and scope
-- Defines the repo-native Slice 34 ETF backfill runner.
+- Records the historical repo-native Slice 34 ETF backfill runner.
 - Scope covers launching the hardened Dagster ETF backfill job, waiting fail-loud for completion, and validating ETF terminal-proof state from ClickHouse before reporting success.
 - Historical Slice-34 ETF backfill is proof-first and artifact-aware.
 - The legacy ETF daily ingest job remains the live scrape path, not the historical backfill path.
@@ -62,7 +68,7 @@
   - terminal proof or quarantine
 - Projectors run only after terminal proof and only when the runtime contract explicitly requests inline projection.
 - The Slice-34 runner submits ETF backfill with deferred projection so projector promotion never outruns proof.
-- The repo-native ETF runner is proof-driven:
+- The historical repo-native ETF runner recorded here was proof-driven:
   - if any ETF partition has canonical rows without terminal proof, the runner submits an explicit `reconcile` Dagster run scoped to that partition via `origo.backfill.partition_ids`
   - only after the ambiguous partition proves terminal again does the runner submit the normal full-history `backfill` run
   - `backfill` mode skips terminal-complete partitions and still fails loudly if it encounters any non-terminal ambiguous/quarantined partition

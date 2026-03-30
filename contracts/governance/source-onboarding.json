@@ -1,0 +1,10 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "every_new_source_must_deliver_native_and_aligned_1s_before_slice_closeout": true,
+  "source_onboarding_proof_requires_acceptance_and_replay_determinism_for_both_modes": true,
+  "source_onboarding_incomplete_if_either_mode_missing_from": [
+    "query_export_paths",
+    "historical_http_path",
+    "historical_python_interface"
+  ]
+}

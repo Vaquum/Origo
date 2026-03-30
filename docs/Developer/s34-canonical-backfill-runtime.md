@@ -3,53 +3,22 @@
 ## Metadata
 - Owner: Origo Engineering
 - Last updated: 2026-03-30
-- Slice reference: S34 (`S34-C1..C8`, `S34-C2l`, `S34-C2m`, `S34-C4n`, `S34-C4o`, `S34-C4p`, `S34-C5n`, `S34-C6q`, `S34-P1..P4`, `S34-G1..G2`)
+- Slice reference: S34 (`S34-C1..C8`, `S34-C2l`, `S34-P1..P4`, `S34-G1..G2`)
 
 ## Purpose and scope
 - Defines the live Slice 34 canonical backfill runtime contract.
-- Scope covers authoritative backfill state, Dagster Launchpad control surfaces, partition/range proof semantics, source-transport runtime contracts, immutable manifest evidence, and closeout-prep reporting.
+- Scope covers authoritative backfill state, Dagster/Dagit operator truth, partition/range proof semantics, immutable manifest evidence, and closeout-prep reporting.
 
 ## Inputs and outputs with contract shape
-- Backfill runner:
-  - `control-plane/origo_control_plane/s34_exchange_backfill_runner.py`
-  - input: `dataset`, `end_date | partition_ids`, `execution_mode`, `projection_mode`, `runtime_audit_mode`, `concurrency`
-  - output: processed partition list, range proof summary, manifest log path
-- Dagster Launchpad controls:
-  - Exchange daily assets: `projection_mode`, `execution_mode`, `runtime_audit_mode`
-  - ETF/FRED backfill jobs: `projection_mode`, `execution_mode`, `runtime_audit_mode`, `start_date`, `end_date`, `partition_ids_csv`
-  - Height-based Bitcoin assets: `projection_mode`, `execution_mode`, `runtime_audit_mode`, `height_start`, `height_end`
-  - Bitcoin mempool asset: `projection_mode`, `execution_mode`, `runtime_audit_mode`
+- Dagster/Dagit launch surface:
+  - input: explicit dashboard partition selection plus explicit runtime config shown in Launchpad
+  - output: one Dagster run whose partition state must agree with the terminal or non-terminal proof state for the same partition
 - Closeout-prep report:
   - `control-plane/origo_control_plane/s34_g1_g2_closeout_prep.py`
   - input: authoritative ClickHouse proof/manifests + immutable manifest log
   - output: per-dataset proof coverage, manifest evidence summary, remaining closeout gaps
 
 ## Data definitions (field names, types, units, timezone, nullability)
-- Launchpad runtime fields:
-  - `projection_mode`
-    - string
-    - allowed: `inline`, `deferred`
-    - default: `deferred` for exchange, ETF, FRED, and height-based Bitcoin backfill paths; `inline` for `bitcoin_mempool_state`
-  - `execution_mode`
-    - string
-    - allowed: `backfill`, `reconcile`
-    - default: `backfill`
-  - `runtime_audit_mode`
-    - string
-    - allowed: `event`, `summary`
-    - default: `summary`
-  - `start_date`, `end_date`
-    - string
-    - ISO `YYYY-MM-DD`
-    - optional pair on ETF/FRED Launchpad runs
-  - `partition_ids_csv`
-    - string
-    - comma-separated partition ids
-    - optional on ETF/FRED Launchpad runs
-  - `height_start`, `height_end`
-    - integer
-    - inclusive Bitcoin block-height window
-    - required on height-based Bitcoin Launchpad runs
 - Authoritative ClickHouse tables:
   - `canonical_backfill_source_manifests`
   - `canonical_backfill_partition_proofs`
@@ -80,7 +49,9 @@
   - range digest and range proof details
 
 ## Source/provenance and freshness semantics
-- ClickHouse is the only live authority for backfill progress, proof, and quarantine state.
+- Dagster/Dagit is the sole authoritative operator truth for partition status.
+- Dagster/Dagit dashboard launch is the only allowed write entrypoint for Slice-34 backfill and reconcile.
+- ClickHouse stores the live proof/progress/quarantine facts that Dagster operator truth must reflect without contradiction; it is not a competing operator authority surface.
 - Canonical reset-and-rewrite keeps `canonical_event_log` append-only; logical partition clears are expressed by `canonical_partition_reset_boundaries` and enforced through `canonical_event_log_active_v1`.
 - Manifest JSONL is immutable evidence, not resume truth.
 - Projection rebuild and serving promotion are gated strictly on terminal proof coverage.
@@ -92,8 +63,13 @@
   - non-terminal proof state on the targeted partition
   - missing source manifest after a completed Dagster partition run
   - missing terminal proof after a completed Dagster partition run
+- Dagster green with missing or non-terminal proof for the same partition is a hard failure.
+- Dagster red with terminal proof for the same partition is a hard failure.
+- A partition shown in Dagster as `failed` or `missing` while the proof store says `proved_complete` or `empty_proved` is a contract violation, not an acceptable operational nuance.
+- `reconcile_required` must be explicit before launch; it may not be surfaced as ordinary failed/missing/runnable partition status.
 - Reconcile is the only valid path for ambiguous or quarantined partitions.
 - Any live Slice-34 runtime path that reads the base `canonical_event_log` instead of `canonical_event_log_active_v1` after a reconcile reset is a contract violation because it can resurrect stale pre-reset rows or reintroduce destructive delete pressure.
+- Any helper utility outside Dagster/Dagit that launches runs or mutates canonical state is a contract violation.
 - Any malformed proof/manifold JSON payload in authoritative tables or manifest log is a hard runtime error.
 
 ## Determinism/replay notes
@@ -117,15 +93,6 @@
   - `ORIGO_BACKFILL_MANIFEST_LOG_PATH`
   - `ORIGO_CANONICAL_RUNTIME_AUDIT_LOG_PATH`
   - `ORIGO_S34_BACKFILL_CONCURRENCY`
-- Exchange source transport:
-  - `ORIGO_BINANCE_SOURCE_HTTP_TIMEOUT_SECONDS`
-  - `ORIGO_OKX_SOURCE_HTTP_TIMEOUT_SECONDS`
-  - `ORIGO_BYBIT_SOURCE_HTTP_TIMEOUT_SECONDS`
-  - all three must be present and `> 0`
-- ETF/FRED worker pools:
-  - `ORIGO_S34_ETF_PARTITION_WORKERS`
-  - `ORIGO_S34_FRED_PARTITION_WORKERS`
-  - both must be present and `>= 10`
 - FRED revision-history transport:
   - `FRED_API_KEY`
   - `ORIGO_FRED_HTTP_TIMEOUT_SECONDS`
@@ -139,17 +106,5 @@
 ## Minimal examples
 - Generate Slice 34 closeout-prep summary:
   - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_g1_g2_closeout_prep`
-- Run one explicit exchange backfill tranche:
-  - `PYTHONPATH=.:control-plane control-plane/.venv/bin/python -m origo_control_plane.s34_exchange_backfill_runner --dataset okx_spot_trades --end-date 2021-09-30 --concurrency 20 --projection-mode deferred --runtime-audit-mode summary`
-- Example ETF/FRED Dagit Launchpad config:
-  - `projection_mode: deferred`
-  - `execution_mode: backfill`
-  - `runtime_audit_mode: summary`
-  - `start_date: 2021-04-05`
-  - `end_date: 2021-04-13`
-- Example height-based Bitcoin Dagit Launchpad config:
-  - `projection_mode: deferred`
-  - `execution_mode: backfill`
-  - `runtime_audit_mode: summary`
-  - `height_start: 840000`
-  - `height_end: 840999`
+- Valid live operator path:
+  - open Dagit, select the target partition(s), confirm the explicit runtime config shown in Launchpad, and launch the run from the dashboard

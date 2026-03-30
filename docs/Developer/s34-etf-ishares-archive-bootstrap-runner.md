@@ -5,8 +5,13 @@
 - Last updated: 2026-03-28
 - Slice reference: S34 (`S34-C5h`, `S34-05h`, `S34-G2`)
 
+## Status
+- Historical slice record only. Not a live canonical backfill/reconcile runtime contract.
+- This bootstrap path is provenance and archive-preparation guidance only.
+- It must not be interpreted as authority for canonical write-entrypoint semantics.
+
 ## Purpose and scope
-- Defines the repo-native Slice 34 iShares historical archive bootstrap runner.
+- Records the historical repo-native Slice 34 iShares historical archive bootstrap runner.
 - Scope is limited to `etf_ishares_ibit_daily`.
 - The runner fetches official iShares historical CSV artifacts via the `asOfDate` parameter, validates that each artifact normalizes to the requested UTC partition day, and persists only valid raw artifacts into object storage.
 - This runner builds archive coverage. It does not write canonical ETF events or project ETF serving tables.

@@ -1,0 +1,338 @@
+{
+  "column_key": {
+    "path": "Repo-relative governance surface path.",
+    "sha256": "SHA-256 of the exact file bytes.",
+    "bytes": "File size in bytes.",
+    "line_count": "Number of newline characters in the file.",
+    "file_count": "Number of governance surfaces included in the run fingerprint.",
+    "aggregate_sha256": "SHA-256 over the ordered per-file fingerprint rows."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2026-03-30T00:00:00Z",
+    "end_utc": "2026-03-30T23:59:59Z",
+    "scope": "Whole-system domain-governance contract surfaces for storage, serving, integrity, rights, recovery, ingest guarantees, fidelity, event sourcing, historical surfaces, onboarding, and migration."
+  },
+  "source_checksums": {
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/storage-sql-discipline.json",
+        "sha256": "a06c0eadaaf9035670aeda82ba89c9dd087153b463bf599a7b7bfa5c84247930",
+        "bytes": 518,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/serving-error-safety.json",
+        "sha256": "575513e0bbd8304bc01eeec3f9b672f8b6708956212633b33ceb43aec7648d02",
+        "bytes": 372,
+        "line_count": 18
+      },
+      {
+        "path": "contracts/governance/integrity-durability.json",
+        "sha256": "503d9e55a3ca28e4c7acc8f868313923b9b845e058ebd5d1b36bca978fd040d2",
+        "bytes": 458,
+        "line_count": 13
+      },
+      {
+        "path": "contracts/governance/rights-secrets.json",
+        "sha256": "e52c3946ccc2c3e769be698d3e6fead5eba894279360b8c0eead0fd01bcd33fd",
+        "bytes": 605,
+        "line_count": 16
+      },
+      {
+        "path": "contracts/governance/runtime-recovery.json",
+        "sha256": "1cffd483470b6675a339b3f6159d636159463010066aa44fd781d4af846dcf3a",
+        "bytes": 599,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingestion-guarantees.json",
+        "sha256": "9c800154989f05e2292c7a499e0d02420c16092bc7d6e8b3e12904df07df2f7a",
+        "bytes": 606,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/raw-fidelity.json",
+        "sha256": "6c67afb5033d966a780bed06344e6da32d490e7ec34290fba046a9438814a09b",
+        "bytes": 632,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/event-sourcing.json",
+        "sha256": "a8aa7426b07cbd64fe100692f2bff081845f2a683544092ed976ccfae61fb2cd",
+        "bytes": 1104,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/historical-surface.json",
+        "sha256": "28928524c8e07e28130b8336467ed04a613f498dc7628256f8e9770f806d39c3",
+        "bytes": 795,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/source-onboarding.json",
+        "sha256": "daa5e7a446f075b64eab4bf5084c12be47509252f0879b62e19e24353db8a55a",
+        "bytes": 392,
+        "line_count": 10
+      },
+      {
+        "path": "contracts/governance/source-migration.json",
+        "sha256": "35d0d9a842f1b8549ffb1421e08dbd63d661f0e0e7a036193466aa4c40d47700",
+        "bytes": 731,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_system_domain_contracts.py",
+        "sha256": "4b030bf85ce45493575ce9cb6d8e54a98a35cb8a5d0ef6721fd93ecc081d035c",
+        "bytes": 8738,
+        "line_count": 172
+      }
+    ]
+  },
+  "run_1_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/storage-sql-discipline.json",
+        "sha256": "a06c0eadaaf9035670aeda82ba89c9dd087153b463bf599a7b7bfa5c84247930",
+        "bytes": 518,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/serving-error-safety.json",
+        "sha256": "575513e0bbd8304bc01eeec3f9b672f8b6708956212633b33ceb43aec7648d02",
+        "bytes": 372,
+        "line_count": 18
+      },
+      {
+        "path": "contracts/governance/integrity-durability.json",
+        "sha256": "503d9e55a3ca28e4c7acc8f868313923b9b845e058ebd5d1b36bca978fd040d2",
+        "bytes": 458,
+        "line_count": 13
+      },
+      {
+        "path": "contracts/governance/rights-secrets.json",
+        "sha256": "e52c3946ccc2c3e769be698d3e6fead5eba894279360b8c0eead0fd01bcd33fd",
+        "bytes": 605,
+        "line_count": 16
+      },
+      {
+        "path": "contracts/governance/runtime-recovery.json",
+        "sha256": "1cffd483470b6675a339b3f6159d636159463010066aa44fd781d4af846dcf3a",
+        "bytes": 599,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingestion-guarantees.json",
+        "sha256": "9c800154989f05e2292c7a499e0d02420c16092bc7d6e8b3e12904df07df2f7a",
+        "bytes": 606,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/raw-fidelity.json",
+        "sha256": "6c67afb5033d966a780bed06344e6da32d490e7ec34290fba046a9438814a09b",
+        "bytes": 632,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/event-sourcing.json",
+        "sha256": "a8aa7426b07cbd64fe100692f2bff081845f2a683544092ed976ccfae61fb2cd",
+        "bytes": 1104,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/historical-surface.json",
+        "sha256": "28928524c8e07e28130b8336467ed04a613f498dc7628256f8e9770f806d39c3",
+        "bytes": 795,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/source-onboarding.json",
+        "sha256": "daa5e7a446f075b64eab4bf5084c12be47509252f0879b62e19e24353db8a55a",
+        "bytes": 392,
+        "line_count": 10
+      },
+      {
+        "path": "contracts/governance/source-migration.json",
+        "sha256": "35d0d9a842f1b8549ffb1421e08dbd63d661f0e0e7a036193466aa4c40d47700",
+        "bytes": 731,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_system_domain_contracts.py",
+        "sha256": "4b030bf85ce45493575ce9cb6d8e54a98a35cb8a5d0ef6721fd93ecc081d035c",
+        "bytes": 8738,
+        "line_count": 172
+      }
+    ],
+    "file_count": 17,
+    "aggregate_sha256": "b0d8659d4399afd166e784ee4676377d63fafae6b7ba988e60c68e81e7aa6c2a"
+  },
+  "run_2_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
+        "bytes": 8114,
+        "line_count": 135
+      },
+      {
+        "path": "contracts/governance/storage-sql-discipline.json",
+        "sha256": "a06c0eadaaf9035670aeda82ba89c9dd087153b463bf599a7b7bfa5c84247930",
+        "bytes": 518,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/serving-error-safety.json",
+        "sha256": "575513e0bbd8304bc01eeec3f9b672f8b6708956212633b33ceb43aec7648d02",
+        "bytes": 372,
+        "line_count": 18
+      },
+      {
+        "path": "contracts/governance/integrity-durability.json",
+        "sha256": "503d9e55a3ca28e4c7acc8f868313923b9b845e058ebd5d1b36bca978fd040d2",
+        "bytes": 458,
+        "line_count": 13
+      },
+      {
+        "path": "contracts/governance/rights-secrets.json",
+        "sha256": "e52c3946ccc2c3e769be698d3e6fead5eba894279360b8c0eead0fd01bcd33fd",
+        "bytes": 605,
+        "line_count": 16
+      },
+      {
+        "path": "contracts/governance/runtime-recovery.json",
+        "sha256": "1cffd483470b6675a339b3f6159d636159463010066aa44fd781d4af846dcf3a",
+        "bytes": 599,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingestion-guarantees.json",
+        "sha256": "9c800154989f05e2292c7a499e0d02420c16092bc7d6e8b3e12904df07df2f7a",
+        "bytes": 606,
+        "line_count": 15
+      },
+      {
+        "path": "contracts/governance/raw-fidelity.json",
+        "sha256": "6c67afb5033d966a780bed06344e6da32d490e7ec34290fba046a9438814a09b",
+        "bytes": 632,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/event-sourcing.json",
+        "sha256": "a8aa7426b07cbd64fe100692f2bff081845f2a683544092ed976ccfae61fb2cd",
+        "bytes": 1104,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/historical-surface.json",
+        "sha256": "28928524c8e07e28130b8336467ed04a613f498dc7628256f8e9770f806d39c3",
+        "bytes": 795,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/source-onboarding.json",
+        "sha256": "daa5e7a446f075b64eab4bf5084c12be47509252f0879b62e19e24353db8a55a",
+        "bytes": 392,
+        "line_count": 10
+      },
+      {
+        "path": "contracts/governance/source-migration.json",
+        "sha256": "35d0d9a842f1b8549ffb1421e08dbd63d661f0e0e7a036193466aa4c40d47700",
+        "bytes": 731,
+        "line_count": 11
+      },
+      {
+        "path": "contracts/governance/contract-applicability.json",
+        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
+        "bytes": 6506,
+        "line_count": 258
+      },
+      {
+        "path": "docs/Developer/README.md",
+        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
+        "bytes": 3546,
+        "line_count": 74
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
+        "bytes": 62980,
+        "line_count": 931
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
+        "bytes": 190498,
+        "line_count": 2511
+      },
+      {
+        "path": "tests/contract/test_system_domain_contracts.py",
+        "sha256": "4b030bf85ce45493575ce9cb6d8e54a98a35cb8a5d0ef6721fd93ecc081d035c",
+        "bytes": 8738,
+        "line_count": 172
+      }
+    ],
+    "file_count": 17,
+    "aggregate_sha256": "b0d8659d4399afd166e784ee4676377d63fafae6b7ba988e60c68e81e7aa6c2a"
+  }
+}

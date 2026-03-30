@@ -1,0 +1,263 @@
+{
+  "universal_contracts": [
+    "governance-authority.json",
+    "execution-doctrine.json",
+    "static-analysis.json",
+    "work-plan-discipline.json",
+    "documentation-contract.json",
+    "slice-closeout.json",
+    "pr-review-routing.json",
+    "contract-applicability.json"
+  ],
+  "task_admission_contracts": [
+    "request-task-coverage.json",
+    "task-types.json",
+    "task-decomposition.json",
+    "task-admission.json"
+  ],
+  "shared_domain_contracts_must_be_loaded_when_activation_domain_matches": true,
+  "touched_system_surface_without_shared_domain_contract_requires_immediate_operator_report": true,
+  "shared_domain_contracts": {
+    "dagster-authority.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "dagster_dagit",
+        "partition_truth",
+        "backfill",
+        "reconcile",
+        "reruns",
+        "write_entrypoints",
+        "schedules_sensors",
+        "operator_partition_visibility"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "ingest-throughput.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "first_party_daily_file_ingestion",
+        "daily_file_hot_path",
+        "worker_concurrency",
+        "source_timeouts",
+        "staged_vectorized_ingest"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "storage-sql-discipline.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "clickhouse_schema",
+        "sql_query_paths",
+        "migration_ledger",
+        "arrow_polars_handoff"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "serving-error-safety.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "raw_query_export_serving",
+        "historical_http_python_surfaces",
+        "status_warning_error_behavior",
+        "strict_mode_semantics"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "integrity-durability.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "wal_manifests_checksums",
+        "schema_registry",
+        "integrity_suite",
+        "append_only_corrections",
+        "daily_file_truth_source"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "rights-secrets.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "rights_matrix",
+        "legal_rights_state",
+        "credentials",
+        "tls_external_boundary",
+        "serving_rights_metadata"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "capability"
+      ]
+    },
+    "runtime-recovery.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "freshness_policy",
+        "queue_and_concurrency_limits",
+        "shadow_promote_rollout",
+        "quality_gates",
+        "dr_targets",
+        "audit_retention",
+        "alerting",
+        "manual_quarantine_policy"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "ingestion-guarantees.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "exactly_once",
+        "no_miss",
+        "gap_detection",
+        "quarantine",
+        "reconciliation"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "raw-fidelity.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "payload_raw",
+        "payload_sha256",
+        "payload_json_reproducibility",
+        "numeric_precision",
+        "canonical_payload_identity"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "event-sourcing.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "canonical_event_log",
+        "logical_reset_boundaries",
+        "projection_driven_serving",
+        "projector_checkpoints",
+        "aligned_aggregate_sink"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "historical-surface.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "native_mode",
+        "aligned_1s_mode",
+        "historical_parameter_contract",
+        "unbounded_default_window",
+        "query_export_response_envelope"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    },
+    "source-onboarding.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "new_source_slice_completion",
+        "native_and_aligned_delivery",
+        "source_onboarding_proof"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "runtime_env",
+        "correctness",
+        "capability"
+      ]
+    },
+    "source-migration.json": {
+      "role": "shared_domain_contract",
+      "activation_domains": [
+        "source_migration_cutover",
+        "canonical_write_port",
+        "projection_serving_port",
+        "migration_parity_and_replay_proof"
+      ],
+      "applicable_task_types": [
+        "proof",
+        "governance",
+        "operator_surface",
+        "runtime_env",
+        "correctness",
+        "performance",
+        "capability"
+      ]
+    }
+  }
+}

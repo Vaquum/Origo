@@ -1,0 +1,14 @@
+{
+  "hard_gates": [
+    "ruff",
+    "pyright"
+  ],
+  "gate_scope": "repo_wide",
+  "pyright_mode": "strict",
+  "slice_close_requires_zero_lint_or_type_debt": true,
+  "temporary_ignore_requires": [
+    "explicit_rationale",
+    "owner",
+    "expiry_slice"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "must_read_full_files_before_every_slice": [
+    "spec/1-top-level-plan.md",
+    "spec/2-itemized-work-plan.md"
+  ],
+  "work_plan_path": "spec/2-itemized-work-plan.md",
+  "completed_items_must_be_checked_off": true,
+  "new_governance_or_closeout_work_must_be_recorded_before_implementation": true
+}

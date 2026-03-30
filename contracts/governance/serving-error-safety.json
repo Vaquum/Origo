@@ -1,0 +1,18 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "raw_api_default_mode": "native",
+  "raw_api_supported_modes": [
+    "native",
+    "aligned_1s"
+  ],
+  "fixed_status_error_map": [
+    200,
+    202,
+    404,
+    409,
+    503
+  ],
+  "unavailable_data_must_error": true,
+  "strict_false_serves_with_warnings": true,
+  "strict_true_fails_when_warnings_exist": true
+}

@@ -1,0 +1,21 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "operator_truth_surface": "dagster_dagit",
+  "manual_write_entrypoint": "dagster_dagit_dashboard_launch",
+  "automated_write_entrypoint": "dagster_native_schedule_or_sensor_visible_in_dagit",
+  "all_current_and_future_event_log_writes_must_be_dagster_native_and_dagit_visible": true,
+  "all_current_and_future_canonical_backfill_and_reconcile_writes_in_scope": true,
+  "dagster_green_requires_proof": true,
+  "dagster_red_requires_nonterminal_or_absent_proof": true,
+  "dagster_and_proof_state_must_match_per_partition": true,
+  "split_brain_is_hard_failure": true,
+  "complete_partition_must_not_show_failed_or_missing_after_normal_dashboard_action": true,
+  "reconcile_required_must_be_explicit_before_launch": true,
+  "runnable_partition_must_be_launchable_from_dagster_without_hidden_tags": true,
+  "dagster_native_automation_must_remain_visible_in_dagit": true,
+  "helper_paths_may_observe_only": true,
+  "helper_paths_must_not_launch_or_write": true,
+  "historical_helper_entrypoints_must_fail_closed_for_write_execution": true,
+  "post_merge_validation_must_be_live_in_dagit": true,
+  "overrides_older_runner_controller_wording": true
+}

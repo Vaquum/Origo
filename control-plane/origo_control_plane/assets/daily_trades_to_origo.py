@@ -392,6 +392,7 @@ def _process_day(
         return result_data
     finally:
         if client is not None and stage_table is not None:
+            active_exception = sys.exc_info()[1]
             try:
                 drop_staged_binance_spot_trade_csv_or_raise(
                     client=client,
@@ -399,7 +400,6 @@ def _process_day(
                     stage_table=stage_table,
                 )
             except Exception as exc:
-                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'ClickHouse stage cleanup failed during cleanup: {exc}'
@@ -412,10 +412,10 @@ def _process_day(
                         f'Failed to drop Binance stage table cleanly: {exc}'
                     ) from exc
         if client is not None:
+            active_exception = sys.exc_info()[1]
             try:
                 client.disconnect()
             except Exception as exc:
-                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'ClickHouse disconnect failed during cleanup: {exc}'

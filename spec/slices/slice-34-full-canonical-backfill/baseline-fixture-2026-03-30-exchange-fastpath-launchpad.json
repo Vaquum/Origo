@@ -35,62 +35,62 @@
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
-        "sha256": "55fabc4f12c1c2a118e3e8456963f185be131d9a1fe113cac929cbff09bcdcba",
-        "bytes": 17855,
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
         "line_count": 477
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
-        "sha256": "ad7f9e0ecfaf504ac5f5b2617da390a6cad26f9da2a22fe3a39b9212bd01a52e",
-        "bytes": 15325,
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
         "line_count": 408
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
-        "sha256": "03a864062b6ed86968316f65859154c729176039fac7c5e4aeeac1ec8528bc56",
-        "bytes": 15482,
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
         "line_count": 413
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
-        "sha256": "f1c8b113dece10e7040cd0a144dfbc3003cb86cacd1bfb7e87141cf3336a250c",
-        "bytes": 24859,
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
         "line_count": 692
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
-        "sha256": "37f84a7555644aa8c8f1b0a5954db0cdcb522aaeae6150e3f952ecb24465290b",
-        "bytes": 15876,
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
         "line_count": 417
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
-        "sha256": "f5bf0480ff4605ed1301cabf4bc1aedd73f8276e3719638cbf954e4d1ab93ab4",
-        "bytes": 14507,
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
         "line_count": 389
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
-        "sha256": "5f5864baff904ab234fe9bbe1ed22592fb84700476fc9d56b463f2063965a95a",
-        "bytes": 17988,
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
         "line_count": 486
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
-        "sha256": "f26f3c32433711b1c042cb8c9ca0db3999c12a5d6aa1ecc87fcf2cd8a9e35497",
-        "bytes": 17238,
-        "line_count": 423
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
-        "sha256": "cec9114c3e4b728f3144fc9c1247e47b57a379c07c19937e6487108b0a70ccb7",
-        "bytes": 19763,
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
         "line_count": 473
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
-        "sha256": "6669bb50649f3bfa81a694597635a0e4f8512edc61fcca535f689e878c369713",
-        "bytes": 17476,
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
         "line_count": 429
       },
       {
@@ -101,14 +101,14 @@
       },
       {
         "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
-        "sha256": "5f3262971e3ea55649ad4d67f408e78f8732fa248c4d4094d83b9cc90e6fbd8c",
-        "bytes": 70162,
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
         "line_count": 1818
       },
       {
         "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
-        "sha256": "55a2f01436f6d3ef5f2159a5da4c661b3fd960538e55840c861bf5cb7d2a2b40",
-        "bytes": 58714,
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
         "line_count": 1602
       },
       {
@@ -170,6 +170,12 @@
         "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
         "bytes": 183256,
         "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
@@ -267,62 +273,62 @@
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
-        "sha256": "55fabc4f12c1c2a118e3e8456963f185be131d9a1fe113cac929cbff09bcdcba",
-        "bytes": 17855,
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
         "line_count": 477
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
-        "sha256": "ad7f9e0ecfaf504ac5f5b2617da390a6cad26f9da2a22fe3a39b9212bd01a52e",
-        "bytes": 15325,
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
         "line_count": 408
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
-        "sha256": "03a864062b6ed86968316f65859154c729176039fac7c5e4aeeac1ec8528bc56",
-        "bytes": 15482,
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
         "line_count": 413
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
-        "sha256": "f1c8b113dece10e7040cd0a144dfbc3003cb86cacd1bfb7e87141cf3336a250c",
-        "bytes": 24859,
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
         "line_count": 692
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
-        "sha256": "37f84a7555644aa8c8f1b0a5954db0cdcb522aaeae6150e3f952ecb24465290b",
-        "bytes": 15876,
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
         "line_count": 417
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
-        "sha256": "f5bf0480ff4605ed1301cabf4bc1aedd73f8276e3719638cbf954e4d1ab93ab4",
-        "bytes": 14507,
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
         "line_count": 389
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
-        "sha256": "5f5864baff904ab234fe9bbe1ed22592fb84700476fc9d56b463f2063965a95a",
-        "bytes": 17988,
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
         "line_count": 486
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
-        "sha256": "f26f3c32433711b1c042cb8c9ca0db3999c12a5d6aa1ecc87fcf2cd8a9e35497",
-        "bytes": 17238,
-        "line_count": 423
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
-        "sha256": "cec9114c3e4b728f3144fc9c1247e47b57a379c07c19937e6487108b0a70ccb7",
-        "bytes": 19763,
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
         "line_count": 473
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
-        "sha256": "6669bb50649f3bfa81a694597635a0e4f8512edc61fcca535f689e878c369713",
-        "bytes": 17476,
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
         "line_count": 429
       },
       {
@@ -333,14 +339,14 @@
       },
       {
         "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
-        "sha256": "5f3262971e3ea55649ad4d67f408e78f8732fa248c4d4094d83b9cc90e6fbd8c",
-        "bytes": 70162,
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
         "line_count": 1818
       },
       {
         "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
-        "sha256": "55a2f01436f6d3ef5f2159a5da4c661b3fd960538e55840c861bf5cb7d2a2b40",
-        "bytes": 58714,
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
         "line_count": 1602
       },
       {
@@ -402,6 +408,12 @@
         "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
         "bytes": 183256,
         "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
@@ -476,8 +488,8 @@
         "line_count": 122
       }
     ],
-    "file_count": 38,
-    "aggregate_sha256": "14da07ca7d55e8076cd6e12b71367b8a63b32cf87d4e2c8e10eb15aa7a9faa9b"
+    "file_count": 39,
+    "aggregate_sha256": "d4757d37b6df00d048a739f3eb2aba09c2b1a459bcbb5850b5358444b59bcf6d"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -501,62 +513,62 @@
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_fee_totals_to_origo.py",
-        "sha256": "55fabc4f12c1c2a118e3e8456963f185be131d9a1fe113cac929cbff09bcdcba",
-        "bytes": 17855,
+        "sha256": "d47ef43eba9327209617f02f3223c59b06ba3892cd685e3c3ef82c7bc0bfa1e8",
+        "bytes": 17851,
         "line_count": 477
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_headers_to_origo.py",
-        "sha256": "ad7f9e0ecfaf504ac5f5b2617da390a6cad26f9da2a22fe3a39b9212bd01a52e",
-        "bytes": 15325,
+        "sha256": "69e1e6e61b85aa34bffaa88867dce00eb95dd6b96660835648ac4ecd7578b226",
+        "bytes": 15321,
         "line_count": 408
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_subsidy_schedule_to_origo.py",
-        "sha256": "03a864062b6ed86968316f65859154c729176039fac7c5e4aeeac1ec8528bc56",
-        "bytes": 15482,
+        "sha256": "58e5d9a5d1b71eef54ab91513b8c32721b897c1b3c60fef822580389137e82ad",
+        "bytes": 15478,
         "line_count": 413
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_block_transactions_to_origo.py",
-        "sha256": "f1c8b113dece10e7040cd0a144dfbc3003cb86cacd1bfb7e87141cf3336a250c",
-        "bytes": 24859,
+        "sha256": "776ca8e6e0785ec61b27731ea74b479f7df0bbd09a52023f3aadc76793846442",
+        "bytes": 24855,
         "line_count": 692
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_circulating_supply_to_origo.py",
-        "sha256": "37f84a7555644aa8c8f1b0a5954db0cdcb522aaeae6150e3f952ecb24465290b",
-        "bytes": 15876,
+        "sha256": "af0d936d2dc092fc0b8dc96bcb6eff7b2afd840bf19eaee613e6372329d38296",
+        "bytes": 15872,
         "line_count": 417
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_mempool_state_to_origo.py",
-        "sha256": "f5bf0480ff4605ed1301cabf4bc1aedd73f8276e3719638cbf954e4d1ab93ab4",
-        "bytes": 14507,
+        "sha256": "4befdc140919a55a4e7633e29e47da0578d89235b80d338c12bee5ad2fca021d",
+        "bytes": 14503,
         "line_count": 389
       },
       {
         "path": "control-plane/origo_control_plane/assets/bitcoin_network_hashrate_estimate_to_origo.py",
-        "sha256": "5f5864baff904ab234fe9bbe1ed22592fb84700476fc9d56b463f2063965a95a",
-        "bytes": 17988,
+        "sha256": "dac38f3fdf7a0850fa6c5ea3e6d52bec6508c0bebe32f37a6c1d36c29e3c1957",
+        "bytes": 17984,
         "line_count": 486
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_bybit_spot_trades_to_origo.py",
-        "sha256": "f26f3c32433711b1c042cb8c9ca0db3999c12a5d6aa1ecc87fcf2cd8a9e35497",
-        "bytes": 17238,
-        "line_count": 423
+        "sha256": "9aee8c9995fe98c34433dc511f6aad7cb0d6e7269bef92b87b7dd407cf681833",
+        "bytes": 17251,
+        "line_count": 424
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_okx_spot_trades_to_origo.py",
-        "sha256": "cec9114c3e4b728f3144fc9c1247e47b57a379c07c19937e6487108b0a70ccb7",
-        "bytes": 19763,
+        "sha256": "4a608f35c695e1c2f454ba2601d7092a3583a3e132610b3c80bf568f767450af",
+        "bytes": 19755,
         "line_count": 473
       },
       {
         "path": "control-plane/origo_control_plane/assets/daily_trades_to_origo.py",
-        "sha256": "6669bb50649f3bfa81a694597635a0e4f8512edc61fcca535f689e878c369713",
-        "bytes": 17476,
+        "sha256": "b56636a48e024f19470ddd4e5a62901ab64e50ade90d0e2c1a7b8833a132aeb4",
+        "bytes": 17468,
         "line_count": 429
       },
       {
@@ -567,14 +579,14 @@
       },
       {
         "path": "control-plane/origo_control_plane/jobs/etf_daily_ingest.py",
-        "sha256": "5f3262971e3ea55649ad4d67f408e78f8732fa248c4d4094d83b9cc90e6fbd8c",
-        "bytes": 70162,
+        "sha256": "d6bc1b5a6c1ccfc97305353e715a1bb96526cdcd6942c9bb1c62ad7d047929bb",
+        "bytes": 70158,
         "line_count": 1818
       },
       {
         "path": "control-plane/origo_control_plane/jobs/fred_daily_ingest.py",
-        "sha256": "55a2f01436f6d3ef5f2159a5da4c661b3fd960538e55840c861bf5cb7d2a2b40",
-        "bytes": 58714,
+        "sha256": "ea0fcbb2bad7e8ca7b4a960e67bbe128175ac6c45143fcba6e43f95829cee4b8",
+        "bytes": 58710,
         "line_count": 1602
       },
       {
@@ -636,6 +648,12 @@
         "sha256": "1d8dea716fde709f3f3a8eed333f7d9c1912e7696ea69b8d9e129bf0fb4e378e",
         "bytes": 183256,
         "line_count": 2478
+      },
+      {
+        "path": "spec/slices/slice-34-full-canonical-backfill/baseline-fixture-2026-03-30-exchange-fastpath-launchpad.json",
+        "sha256": "a1a47db0e06fb750d1038b3bd16361f79f0ebc82f879fa4d7f27e9147ecac84a",
+        "bytes": 9963,
+        "line_count": 248
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
@@ -710,7 +728,7 @@
         "line_count": 122
       }
     ],
-    "file_count": 38,
-    "aggregate_sha256": "14da07ca7d55e8076cd6e12b71367b8a63b32cf87d4e2c8e10eb15aa7a9faa9b"
+    "file_count": 39,
+    "aggregate_sha256": "d4757d37b6df00d048a739f3eb2aba09c2b1a459bcbb5850b5358444b59bcf6d"
   }
 }

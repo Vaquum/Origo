@@ -47,9 +47,9 @@
       },
       {
         "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
-        "bytes": 1661,
-        "line_count": 39
+        "sha256": "2ef38701a73f65b16ae8ce3b27e2709035760070845e64d16cde5f870aea65d3",
+        "bytes": 1914,
+        "line_count": 45
       }
     ]
   },
@@ -87,13 +87,13 @@
       },
       {
         "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
-        "bytes": 1661,
-        "line_count": 39
+        "sha256": "2ef38701a73f65b16ae8ce3b27e2709035760070845e64d16cde5f870aea65d3",
+        "bytes": 1914,
+        "line_count": 45
       }
     ],
     "file_count": 6,
-    "aggregate_sha256": "a88c16b9fc5e49c0bd3db99e77d62f6ce0f19290ab3d2c73fcaca22ac1cc8ec7"
+    "aggregate_sha256": "431b148899e66a5f4f1ad49fbae04b6a0b7af8950ab65b28a408429f1ce2b3ce"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -129,12 +129,12 @@
       },
       {
         "path": "tests/contract/test_pr_review_routing_contract.py",
-        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
-        "bytes": 1661,
-        "line_count": 39
+        "sha256": "2ef38701a73f65b16ae8ce3b27e2709035760070845e64d16cde5f870aea65d3",
+        "bytes": 1914,
+        "line_count": 45
       }
     ],
     "file_count": 6,
-    "aggregate_sha256": "a88c16b9fc5e49c0bd3db99e77d62f6ce0f19290ab3d2c73fcaca22ac1cc8ec7"
+    "aggregate_sha256": "431b148899e66a5f4f1ad49fbae04b6a0b7af8950ab65b28a408429f1ce2b3ce"
   }
 }

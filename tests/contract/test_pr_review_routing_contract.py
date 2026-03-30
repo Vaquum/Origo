@@ -13,7 +13,7 @@ _DEV_INDEX = _REPO_ROOT / 'docs' / 'Developer' / 'README.md'
 
 
 def test_pr_review_routing_contract_payload_is_exact() -> None:
-    payload = json.loads(_CONTRACT.read_text())
+    payload = json.loads(_CONTRACT.read_text(encoding='utf-8'))
 
     assert payload == {
         'review_authority': 'zero-bang',
@@ -29,11 +29,17 @@ def test_pr_review_routing_contract_payload_is_exact() -> None:
 
 
 def test_repo_governance_surfaces_reference_zero_bang_review_routing() -> None:
-    assert '## Pull Request Governance' in _AGENTS.read_text()
-    assert 'never be used as the git user, PR author, or implementation identity' in _AGENTS.read_text()
-    assert '## PR Governance Contract' in _TOP_LEVEL_PLAN.read_text()
-    assert '`S34-G5`' in _WORK_PLAN.read_text()
-    assert '`S34-11b`' in _WORK_PLAN.read_text()
-    assert 'zero-bang' in _DEV_DOC.read_text()
-    assert 'resolve every conversation' in _DEV_DOC.read_text()
-    assert 'pr-review-routing-contract.md' in _DEV_INDEX.read_text()
+    agents_text = _AGENTS.read_text(encoding='utf-8')
+    top_level_plan_text = _TOP_LEVEL_PLAN.read_text(encoding='utf-8')
+    work_plan_text = _WORK_PLAN.read_text(encoding='utf-8')
+    dev_doc_text = _DEV_DOC.read_text(encoding='utf-8')
+    dev_index_text = _DEV_INDEX.read_text(encoding='utf-8')
+
+    assert '## Pull Request Governance' in agents_text
+    assert 'never be used as the git user, PR author, or implementation identity' in agents_text
+    assert '## PR Governance Contract' in top_level_plan_text
+    assert '`S34-G5`' in work_plan_text
+    assert '`S34-11b`' in work_plan_text
+    assert 'zero-bang' in dev_doc_text
+    assert 'resolve every conversation' in dev_doc_text
+    assert 'pr-review-routing-contract.md' in dev_index_text

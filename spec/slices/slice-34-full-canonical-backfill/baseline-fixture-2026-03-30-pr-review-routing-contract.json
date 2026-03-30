@@ -1,0 +1,140 @@
+{
+  "column_key": {
+    "path": "Repo-relative governance surface path.",
+    "sha256": "SHA-256 of the exact file bytes.",
+    "bytes": "File size in bytes.",
+    "line_count": "Number of newline characters in the file.",
+    "file_count": "Number of governance surfaces included in the run fingerprint.",
+    "aggregate_sha256": "SHA-256 over the ordered per-file fingerprint rows."
+  },
+  "deterministic_match": true,
+  "fixture_window": {
+    "start_utc": "2026-03-30T00:00:00Z",
+    "end_utc": "2026-03-30T23:59:59Z",
+    "scope": "PR review-routing governance contract surfaces for zero-bang author/reviewer rules."
+  },
+  "source_checksums": {
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "092d6cb6912c6496faedbb54fe4b0e67ef39750a404c871e93a67b47a173bd75",
+        "bytes": 2759,
+        "line_count": 53
+      },
+      {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
+        "path": "docs/Developer/pr-review-routing-contract.md",
+        "sha256": "53187ed97fce6f387c8c0629bb2be3e0ebf5a4956766c6cba19e92d6673d13b6",
+        "bytes": 2814,
+        "line_count": 78
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "047a605967f224d3ea1255472981b3b30bc61f3ae34fcbdbf4e89281fd688e4d",
+        "bytes": 63850,
+        "line_count": 928
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "8406659b27ed19fee4ce499e92b8597fc33f33c053d7008d9cd1454adb328692",
+        "bytes": 182447,
+        "line_count": 2473
+      },
+      {
+        "path": "tests/contract/test_pr_review_routing_contract.py",
+        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
+        "bytes": 1661,
+        "line_count": 39
+      }
+    ]
+  },
+  "run_1_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "092d6cb6912c6496faedbb54fe4b0e67ef39750a404c871e93a67b47a173bd75",
+        "bytes": 2759,
+        "line_count": 53
+      },
+      {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
+        "path": "docs/Developer/pr-review-routing-contract.md",
+        "sha256": "53187ed97fce6f387c8c0629bb2be3e0ebf5a4956766c6cba19e92d6673d13b6",
+        "bytes": 2814,
+        "line_count": 78
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "047a605967f224d3ea1255472981b3b30bc61f3ae34fcbdbf4e89281fd688e4d",
+        "bytes": 63850,
+        "line_count": 928
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "8406659b27ed19fee4ce499e92b8597fc33f33c053d7008d9cd1454adb328692",
+        "bytes": 182447,
+        "line_count": 2473
+      },
+      {
+        "path": "tests/contract/test_pr_review_routing_contract.py",
+        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
+        "bytes": 1661,
+        "line_count": 39
+      }
+    ],
+    "file_count": 6,
+    "aggregate_sha256": "a88c16b9fc5e49c0bd3db99e77d62f6ce0f19290ab3d2c73fcaca22ac1cc8ec7"
+  },
+  "run_2_fingerprints": {
+    "rows": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "092d6cb6912c6496faedbb54fe4b0e67ef39750a404c871e93a67b47a173bd75",
+        "bytes": 2759,
+        "line_count": 53
+      },
+      {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
+        "path": "docs/Developer/pr-review-routing-contract.md",
+        "sha256": "53187ed97fce6f387c8c0629bb2be3e0ebf5a4956766c6cba19e92d6673d13b6",
+        "bytes": 2814,
+        "line_count": 78
+      },
+      {
+        "path": "spec/1-top-level-plan.md",
+        "sha256": "047a605967f224d3ea1255472981b3b30bc61f3ae34fcbdbf4e89281fd688e4d",
+        "bytes": 63850,
+        "line_count": 928
+      },
+      {
+        "path": "spec/2-itemized-work-plan.md",
+        "sha256": "8406659b27ed19fee4ce499e92b8597fc33f33c053d7008d9cd1454adb328692",
+        "bytes": 182447,
+        "line_count": 2473
+      },
+      {
+        "path": "tests/contract/test_pr_review_routing_contract.py",
+        "sha256": "07417dd8c85506c4208a50caf018b80e6afb77fe4e3c923f702cfe2c93780a1d",
+        "bytes": 1661,
+        "line_count": 39
+      }
+    ],
+    "file_count": 6,
+    "aggregate_sha256": "a88c16b9fc5e49c0bd3db99e77d62f6ce0f19290ab3d2c73fcaca22ac1cc8ec7"
+  }
+}

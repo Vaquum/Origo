@@ -2,7 +2,7 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-28
+- Last updated: 2026-03-30
 
 ## Purpose
 - This folder is the engineering reference for Origo implementation slices.
@@ -27,6 +27,8 @@
   - `docs/Developer/s34-etf-ishares-archive-bootstrap-runner.md`
   - `docs/Developer/s34-bitcoin-height-window-contract.md`
   - `docs/Developer/s34-bitcoin-backfill-runner.md`
+- Engineering workflow contract:
+  - `docs/Developer/pr-review-routing-contract.md`
 
 ## Historical slice docs
 - All `s*.md` files capture what was true at slice closeout time.

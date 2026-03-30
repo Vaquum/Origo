@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-30
+- Froze the PR review-routing governance contract around `zero-bang`:
+  - `zero-bang` is now explicitly reviewer/approver only and must never be used as the git user or PR author for normal engineering work
+  - every PR must request `zero-bang` review, resolve all review conversations, re-request review after fixes, and merge only after final `zero-bang` approval
+  - added a machine-checkable governance contract file plus focused contract coverage so the rule cannot drift back into tribal knowledge
+- Updated version to `origo-control-plane v1.2.84` (`Origo API` `v0.1.29`).
+
 ## 2026-03-29
 - Closed the Slice 34 FRED direct-Dagster reconcile planning gap:
   - extracted shared bounded reconcile planning into `origo_control_plane.s34_fred_reconcile_planning`

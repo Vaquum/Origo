@@ -2,11 +2,11 @@
 
 ## Metadata
 - Owner: Origo Engineering
-- Last updated: 2026-03-27
+- Last updated: 2026-03-30
 - Slice reference: S34 (`S34-C7a`, `S34-07a`, `S34-C7b`, `S34-07b`, `S34-C7c`, `S34-07c`)
 
 ## Purpose and scope
-- Defines the explicit Dagster run-tag contract for height-based Bitcoin backfill runs in Slice 34.
+- Defines the operator-visible Dagster Launchpad input contract and the derived internal run-tag contract for height-based Bitcoin backfill runs in Slice 34.
 - Scope covers height-based Bitcoin datasets only:
   - `bitcoin_block_headers`
   - `bitcoin_block_transactions`
@@ -17,7 +17,7 @@
 - `bitcoin_mempool_state` is intentionally out of scope for this contract because it remains time-native and daily snapshot-partitioned.
 
 ## Inputs and outputs with contract shape
-- Required operator-visible Dagster inputs:
+- Required operator-visible Dagster Launchpad inputs:
   - `height_start`
   - `height_end`
 - Internal Dagster run tags derived from the operator-visible launch surface:
@@ -29,16 +29,27 @@
   - `origo_control_plane.bitcoin_core.resolve_bitcoin_core_node_settings_with_height_range_or_raise`
 
 ## Data definitions (field names, types, units, timezone, nullability)
-- `origo.backfill.height_start`
+### Operator-visible inputs
+- `height_start`
   - integer
   - inclusive Bitcoin block height
   - required
-- `origo.backfill.height_end`
+- `height_end`
   - integer
   - inclusive Bitcoin block height
   - required
 - Range rule:
   - `height_end >= height_start`
+
+### Internal derived run tags
+- `origo.backfill.height_start`
+  - derived from Launchpad `height_start`
+  - integer
+  - inclusive Bitcoin block height
+- `origo.backfill.height_end`
+  - derived from Launchpad `height_end`
+  - integer
+  - inclusive Bitcoin block height
 
 ## Source/provenance and freshness semantics
 - Height-based Bitcoin assets no longer take per-run backfill boundaries from static env.
@@ -55,13 +66,14 @@
 - RPC connection/auth/network still come from env contract.
 
 ## Failure modes, warnings, and error codes
-- Missing height tags: fail loudly.
-- Non-integer height tags: fail loudly.
-- Negative height tags: fail loudly.
+- Missing Launchpad `height_start` / `height_end`: fail loudly.
+- Non-integer Launchpad `height_start` / `height_end`: fail loudly.
+- Negative Launchpad `height_start` / `height_end`: fail loudly.
 - `height_end < height_start`: fail loudly.
 
 ## Determinism/replay notes
-- The same run tags must produce the same requested node height window.
+- The same Launchpad `height_start` / `height_end` values must produce the same requested node height window.
+- The derived run tags must match the Launchpad values exactly for the run.
 - The same height window must produce the same canonical `partition_id` for all six chain-derived Bitcoin datasets.
 - Bitcoin assets must not write canonical rows without recording `source_manifested`, `canonical_written_unproved`, and terminal proof/quarantine state.
 - Contract coverage lives in:

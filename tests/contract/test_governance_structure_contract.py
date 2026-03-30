@@ -70,6 +70,10 @@ def test_repo_governance_surfaces_reference_machine_contract_structure() -> None
     agents_text = _AGENTS.read_text(encoding='utf-8')
     top_level_plan_text = _TOP_LEVEL_PLAN.read_text(encoding='utf-8')
     dev_index_text = _DEV_INDEX.read_text(encoding='utf-8')
+    applicability_contract = _load_contract('contract-applicability.json')
+    shared_domain_contracts = applicability_contract.get('shared_domain_contracts', {})
+    universal_contracts = applicability_contract.get('universal_contracts', [])
+    task_admission_contracts = applicability_contract.get('task_admission_contracts', [])
 
     assert 'AGENTS.md is the only routing surface for governance.' in agents_text or '`AGENTS.md` is the only routing surface for governance.' in agents_text
     assert 'These governance routes and contracts apply repo-wide to the whole Origo system and all future development' in agents_text
@@ -78,7 +82,12 @@ def test_repo_governance_surfaces_reference_machine_contract_structure() -> None
 
     for contract_name in sorted(_EXPECTED_CONTRACT_FILES):
         contract_path = f'contracts/governance/{contract_name}'
-        assert contract_path in agents_text or contract_name in _load_contract('contract-applicability.json').get('shared_domain_contracts', {}) or contract_name in _load_contract('contract-applicability.json').get('universal_contracts', []) or contract_name in _load_contract('contract-applicability.json').get('task_admission_contracts', [])
+        assert (
+            contract_path in agents_text
+            or contract_name in shared_domain_contracts
+            or contract_name in universal_contracts
+            or contract_name in task_admission_contracts
+        )
         assert contract_path in dev_index_text
 
     for contract_path in (

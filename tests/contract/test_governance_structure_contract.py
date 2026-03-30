@@ -20,6 +20,7 @@ _EXPECTED_CONTRACT_FILES = {
     'ingest-throughput.json',
     'ingestion-guarantees.json',
     'integrity-durability.json',
+    'master-doctrine.json',
     'pr-review-routing.json',
     'raw-fidelity.json',
     'request-task-coverage.json',
@@ -33,6 +34,8 @@ _EXPECTED_CONTRACT_FILES = {
     'storage-sql-discipline.json',
     'task-admission.json',
     'task-decomposition.json',
+    'task-end-gate.json',
+    'task-start-gate.json',
     'task-types.json',
     'work-plan-discipline.json',
 }
@@ -53,6 +56,11 @@ def test_governance_authority_contract_payload_is_exact() -> None:
         'routing_surface': 'AGENTS.md',
         'canonical_governance_contract_directory': 'contracts/governance',
         'task_type_route_shape': ['task_type', 'routing', 'contract'],
+        'universal_contracts_required_for_every_task': [
+            'master-doctrine.json',
+            'task-start-gate.json',
+            'task-end-gate.json',
+        ],
         'task_specific_routing_must_live_only_in_agents': True,
         'shared_domain_overlay_routing_must_live_only_in_agents': True,
         'governance_contracts_must_be_atomic': True,
@@ -61,6 +69,8 @@ def test_governance_authority_contract_payload_is_exact() -> None:
         'historical_slice_docs_role_for_governance': 'non_authoritative',
         'machine_contracts_override_prose': True,
         'task_start_must_begin_from_agents_routing': True,
+        'task_end_must_begin_from_agents_routing': True,
+        'completion_claim_without_end_gate_is_invalid': True,
         'open_slice_scope_must_not_limit_governance_scope': True,
         'every_touched_system_surface_must_have_routed_contract_coverage': True,
     }
@@ -77,6 +87,9 @@ def test_repo_governance_surfaces_reference_machine_contract_structure() -> None
 
     assert 'AGENTS.md is the only routing surface for governance.' in agents_text or '`AGENTS.md` is the only routing surface for governance.' in agents_text
     assert 'These governance routes and contracts apply repo-wide to the whole Origo system and all future development' in agents_text
+    assert '## Master Doctrine' in agents_text
+    assert '## Universal Start Gate' in agents_text
+    assert '## Universal End Gate' in agents_text
     assert '## Shared-Domain Overlay Routing' in agents_text
     assert 'The governance routing in `AGENTS.md` and the machine contracts in `contracts/governance/` apply repo-wide to the whole Origo system and all future development.' in top_level_plan_text
 

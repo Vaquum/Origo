@@ -14,6 +14,21 @@ No slice can advance to the next slice until all three stages are complete for t
 - Open slice boundaries do not narrow governance authority.
 - This section is descriptive only for governance.
 
+## Master Doctrine
+- Canonical machine contract: `contracts/governance/master-doctrine.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Universal Task Start Gate
+- Canonical machine contract: `contracts/governance/task-start-gate.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
+## Universal Task End Gate
+- Canonical machine contract: `contracts/governance/task-end-gate.json`
+- Routing surface: `AGENTS.md`
+- This section is descriptive only for governance.
+
 ## Guardrail #1: Execution Doctrine
 - Canonical machine contract: `contracts/governance/execution-doctrine.json`
 - Routing surface: `AGENTS.md`

@@ -1,0 +1,42 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "applies_to_every_task_type": true,
+  "must_be_loaded_after_task_routing_and_before_any_repo_runtime_browser_deploy_or_data_mutation": true,
+  "fail_closed_on_no_or_unknown": true,
+  "failed_gate_requires_immediate_operator_report_before_work": true,
+  "questions_order_is_mandatory": true,
+  "questions": [
+    {
+      "id": "least_mechanism",
+      "prompt": "Am I choosing the implementation with less mechanism among the options that satisfy the same contract?"
+    },
+    {
+      "id": "correct_path_is_easiest",
+      "prompt": "Will the correct path be easier than any shortcut on the authoritative surfaces touched by this task?"
+    },
+    {
+      "id": "no_routine_babysitting",
+      "prompt": "Can this ship without routine babysitting operator tending or hidden upkeep burden?"
+    },
+    {
+      "id": "mechanical_enforcement_present",
+      "prompt": "Will the governing behavior be enforced mechanically on authoritative surfaces rather than merely documented?"
+    },
+    {
+      "id": "foundation_scope_honest",
+      "prompt": "If I am treating any part of this work as foundational is it actually inside the closed foundation set and if not is the work deferred until forced?"
+    },
+    {
+      "id": "single_path_or_dated_migration",
+      "prompt": "Will this leave exactly one valid path for the concern or a migration path with explicit end state and deadline?"
+    },
+    {
+      "id": "surface_area_minimized",
+      "prompt": "Have I avoided unnecessary knobs options and abstractions while keeping legitimate environment variance in env vars only?"
+    },
+    {
+      "id": "technology_is_boring",
+      "prompt": "Am I using the most proven operable and well understood technology that satisfies the contract?"
+    }
+  ]
+}

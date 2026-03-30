@@ -191,11 +191,13 @@ def test_repo_governance_surfaces_reference_task_type_contracts() -> None:
     assert '`S34-G11`' in work_plan_text
     assert '`S34-G12`' in work_plan_text
     assert '`S34-G13`' in work_plan_text
+    assert '`S34-G14`' in work_plan_text
     assert '`S34-11e`' in work_plan_text
     assert '`S34-11f`' in work_plan_text
     assert '`S34-11g`' in work_plan_text
     assert '`S34-11h`' in work_plan_text
     assert '`S34-11i`' in work_plan_text
+    assert '`S34-11j`' in work_plan_text
     assert 'Canonical machine contracts:' in dev_doc_text
     assert 'whole-system Origo governance' in dev_doc_text
     assert 'This document is reference-only for governance.' in dev_doc_text

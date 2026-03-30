@@ -1,6 +1,9 @@
 {
   "universal_contracts": [
     "governance-authority.json",
+    "master-doctrine.json",
+    "task-start-gate.json",
+    "task-end-gate.json",
     "execution-doctrine.json",
     "static-analysis.json",
     "work-plan-discipline.json",

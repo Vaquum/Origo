@@ -855,6 +855,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-G11` Freeze fail-closed task admission, exhaustive request-family coverage, and exhaustive contract coverage so no unroutable or under-contracted work can proceed without immediate operator escalation.
 - [x] `S34-G12` Freeze governance scope as whole-system Origo law so governance routing/contracts cannot be interpreted as Slice-34-only or temporary for future development.
 - [x] `S34-G13` Promote the remaining whole-system runtime/data contract law into routed machine governance contracts so future Origo work cannot bypass spec-era rules that were never converted into authoritative contracts.
+- [x] `S34-G14` Freeze the master doctrine and universal task start/end gates so every Origo task is fail-closed against the same eight principles before work starts and before any completion claim.
 
 ## Slice 35: Automated Daily Backfill Scheduling (Configured Daily Runtime)
 
@@ -2433,6 +2434,10 @@ Constraints: no temporary slice-only governance wording in machine contracts, no
 Action: Convert the remaining whole-system runtime/data law from spec-only contract prose into routed atomic machine contracts and shared-domain overlays.
 Done looks like: ClickHouse SQL discipline, serving/error safety, integrity/durability, rights/secrets, runtime/recovery, ingestion guarantees, raw fidelity, event-sourcing, historical-surface, source-onboarding, and source-migration rules all exist as atomic machine contracts under `contracts/governance/`, `AGENTS.md` routes those overlays explicitly, request-family coverage is broad enough for whole-system Origo work rather than just Slice-34-era cases, and tests fail loudly if any touched system surface loses routed contract coverage.
 Constraints: no spec-only contract law left without a machine counterpart, no new catch-all request family, no domain overlay implied by intuition instead of routing, and no weakening of existing Dagster or ingest-throughput governance while broadening to the whole system.
+46. `S34-11j`
+Action: Freeze the master doctrine and universal task start/end gates as whole-system Origo law.
+Done looks like: `AGENTS.md` routes every task through `master-doctrine.json`, `task-start-gate.json`, and `task-end-gate.json`; the master doctrine carries the closed foundation set (`store_correctness`, `current_truth_read_contract`, `single_write_entrypoint`, `operator_truth_unification`, `envelope_finalization`, `concurrency_control`, `adapter_boundary_enforcement`, `rebuild_proof`, `critical_path_viability`); every task must stop if any start/end-gate answer is `no` or `unknown`; and tests fail loudly if the doctrine or gates stop being universal.
+Constraints: no second doctrine surface, no open-ended foundation expansion, no completion claim before end-gate pass, and no work start before start-gate pass.
 
 ## Slice 35 Sub-Slices
 1. `S35-01`

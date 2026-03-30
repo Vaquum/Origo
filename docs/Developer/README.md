@@ -16,6 +16,9 @@
   - `AGENTS.md`
 - Canonical machine governance contracts:
   - `contracts/governance/governance-authority.json`
+  - `contracts/governance/master-doctrine.json`
+  - `contracts/governance/task-start-gate.json`
+  - `contracts/governance/task-end-gate.json`
   - `contracts/governance/execution-doctrine.json`
   - `contracts/governance/static-analysis.json`
   - `contracts/governance/work-plan-discipline.json`

@@ -11,7 +11,7 @@
   "fixture_window": {
     "start_utc": "2026-03-30T00:00:00Z",
     "end_utc": "2026-03-30T23:59:59Z",
-    "scope": "Slice 34 helper-write correctness residue: live-vs-backfill exchange runtime defaults, helper write hard-disables, env-backed monthly Binance timeout wiring, and cleanup exception-note fidelity on merged-main rescue branch."
+    "scope": "Slice 34 helper-write correctness residue: live-vs-backfill exchange runtime defaults, helper write hard-disables, env-backed monthly Binance timeout wiring, cleanup exception-note fidelity, and archived-helper type-gate alignment on merged-main rescue branch."
   },
   "source_checksums": {
     "files": [
@@ -47,15 +47,15 @@
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
-        "sha256": "2f54f352a49883891ec52b4a5cad2db14e7a0d971336b0574fb486e3a04ab2a3",
-        "bytes": 36433,
+        "sha256": "636aae8b7134055cf46abbf5839b8f0b2ccf6e0b44f99d1d69d9414e722ffa80",
+        "bytes": 36509,
         "line_count": 125
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
-        "sha256": "7c7dc2cf3a0aeb794916edfb4b45494cc59d1941e48d50de231fcda603060129",
-        "bytes": 22461,
-        "line_count": 115
+        "sha256": "69b91243674e666ddfb66144c2841d98a96ac754494a95e64775f5ce3a8b62e5",
+        "bytes": 22556,
+        "line_count": 116
       },
       {
         "path": "control-plane/origo_control_plane/backfill/__init__.py",
@@ -155,39 +155,39 @@
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_backfill_runner.py",
-        "sha256": "3ea1743773307fce9c24732f748082eac318f3deb03ddc689edab313a013a897",
-        "bytes": 34009,
-        "line_count": 867
+        "sha256": "9b0ef2a458f589e41b7a676da170f4dffed3f0c061b0c6c67fe8228d989cdb27",
+        "bytes": 34047,
+        "line_count": 868
       },
       {
         "path": "control-plane/origo_control_plane/s34_daily_dataset_tranche_controller.py",
-        "sha256": "f5bcd92aca5da4c695817242024215031c97c1abb1eb635e0ac4ebccf5ed7af4",
-        "bytes": 9361,
-        "line_count": 268
+        "sha256": "99687618de9144fa82da7cf9ce06f66c06aede902667746d777288519d986ea6",
+        "bytes": 9399,
+        "line_count": 269
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_sequence_controller.py",
-        "sha256": "ab85675dfc8ac59ecb293d69fa4d325135c79e669f21076ea4fdc2805b2d69ec",
-        "bytes": 5098,
-        "line_count": 142
+        "sha256": "896e97cc6fe26d3262bf055b9e5cbd05964f4f9469b7b7052a19bbc0a4ece8f7",
+        "bytes": 5136,
+        "line_count": 143
       },
       {
         "path": "control-plane/origo_control_plane/s34_fred_backfill_runner.py",
-        "sha256": "b9b0fa1bc571d53be2871c995cbd15eef2350ee27b600b64ef40900b758a3210",
-        "bytes": 16703,
-        "line_count": 488
+        "sha256": "9ae01c8595749f704f4420665141cf3aad41eeaa4e9dd3e7cb6cc4d4c20cb8ed",
+        "bytes": 16741,
+        "line_count": 489
       },
       {
         "path": "control-plane/origo_control_plane/s34_etf_backfill_runner.py",
-        "sha256": "175eb84af8d3e3d131773c2f7d5a5cdb4a54698e963a521902b377db5d12bf7b",
-        "bytes": 13324,
-        "line_count": 408
+        "sha256": "ea4057f4491410300e91ab5df1fa5160a0b814ed9033019fce8920c013399634",
+        "bytes": 13362,
+        "line_count": 409
       },
       {
         "path": "control-plane/origo_control_plane/s34_bitcoin_backfill_runner.py",
-        "sha256": "791dc46b11762791f3f7754c6795b14432aaefc784c24aa91c759cc15cbd50b9",
-        "bytes": 22883,
-        "line_count": 651
+        "sha256": "1605dbb4cc7008c03f6dd7e3233876f1f1f4b29bf9a83489a0b828bc3f505462",
+        "bytes": 22921,
+        "line_count": 652
       },
       {
         "path": "tests/contract/test_backfill_runtime_contract.py",
@@ -267,15 +267,15 @@
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
-        "sha256": "2f54f352a49883891ec52b4a5cad2db14e7a0d971336b0574fb486e3a04ab2a3",
-        "bytes": 36433,
+        "sha256": "636aae8b7134055cf46abbf5839b8f0b2ccf6e0b44f99d1d69d9414e722ffa80",
+        "bytes": 36509,
         "line_count": 125
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
-        "sha256": "7c7dc2cf3a0aeb794916edfb4b45494cc59d1941e48d50de231fcda603060129",
-        "bytes": 22461,
-        "line_count": 115
+        "sha256": "69b91243674e666ddfb66144c2841d98a96ac754494a95e64775f5ce3a8b62e5",
+        "bytes": 22556,
+        "line_count": 116
       },
       {
         "path": "control-plane/origo_control_plane/backfill/__init__.py",
@@ -375,39 +375,39 @@
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_backfill_runner.py",
-        "sha256": "3ea1743773307fce9c24732f748082eac318f3deb03ddc689edab313a013a897",
-        "bytes": 34009,
-        "line_count": 867
+        "sha256": "9b0ef2a458f589e41b7a676da170f4dffed3f0c061b0c6c67fe8228d989cdb27",
+        "bytes": 34047,
+        "line_count": 868
       },
       {
         "path": "control-plane/origo_control_plane/s34_daily_dataset_tranche_controller.py",
-        "sha256": "f5bcd92aca5da4c695817242024215031c97c1abb1eb635e0ac4ebccf5ed7af4",
-        "bytes": 9361,
-        "line_count": 268
+        "sha256": "99687618de9144fa82da7cf9ce06f66c06aede902667746d777288519d986ea6",
+        "bytes": 9399,
+        "line_count": 269
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_sequence_controller.py",
-        "sha256": "ab85675dfc8ac59ecb293d69fa4d325135c79e669f21076ea4fdc2805b2d69ec",
-        "bytes": 5098,
-        "line_count": 142
+        "sha256": "896e97cc6fe26d3262bf055b9e5cbd05964f4f9469b7b7052a19bbc0a4ece8f7",
+        "bytes": 5136,
+        "line_count": 143
       },
       {
         "path": "control-plane/origo_control_plane/s34_fred_backfill_runner.py",
-        "sha256": "b9b0fa1bc571d53be2871c995cbd15eef2350ee27b600b64ef40900b758a3210",
-        "bytes": 16703,
-        "line_count": 488
+        "sha256": "9ae01c8595749f704f4420665141cf3aad41eeaa4e9dd3e7cb6cc4d4c20cb8ed",
+        "bytes": 16741,
+        "line_count": 489
       },
       {
         "path": "control-plane/origo_control_plane/s34_etf_backfill_runner.py",
-        "sha256": "175eb84af8d3e3d131773c2f7d5a5cdb4a54698e963a521902b377db5d12bf7b",
-        "bytes": 13324,
-        "line_count": 408
+        "sha256": "ea4057f4491410300e91ab5df1fa5160a0b814ed9033019fce8920c013399634",
+        "bytes": 13362,
+        "line_count": 409
       },
       {
         "path": "control-plane/origo_control_plane/s34_bitcoin_backfill_runner.py",
-        "sha256": "791dc46b11762791f3f7754c6795b14432aaefc784c24aa91c759cc15cbd50b9",
-        "bytes": 22883,
-        "line_count": 651
+        "sha256": "1605dbb4cc7008c03f6dd7e3233876f1f1f4b29bf9a83489a0b828bc3f505462",
+        "bytes": 22921,
+        "line_count": 652
       },
       {
         "path": "tests/contract/test_backfill_runtime_contract.py",
@@ -453,7 +453,7 @@
       }
     ],
     "file_count": 36,
-    "aggregate_sha256": "46defac501dbe917069f9c7446672934db7b0cdc9bc39994cbb287457a705b8f"
+    "aggregate_sha256": "e13c0636ba87f689388f72007f6e730dcaec9f435106a5fc38ac86ae8776f655"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -489,15 +489,15 @@
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/manifest.md",
-        "sha256": "2f54f352a49883891ec52b4a5cad2db14e7a0d971336b0574fb486e3a04ab2a3",
-        "bytes": 36433,
+        "sha256": "636aae8b7134055cf46abbf5839b8f0b2ccf6e0b44f99d1d69d9414e722ffa80",
+        "bytes": 36509,
         "line_count": 125
       },
       {
         "path": "spec/slices/slice-34-full-canonical-backfill/run-notes.md",
-        "sha256": "7c7dc2cf3a0aeb794916edfb4b45494cc59d1941e48d50de231fcda603060129",
-        "bytes": 22461,
-        "line_count": 115
+        "sha256": "69b91243674e666ddfb66144c2841d98a96ac754494a95e64775f5ce3a8b62e5",
+        "bytes": 22556,
+        "line_count": 116
       },
       {
         "path": "control-plane/origo_control_plane/backfill/__init__.py",
@@ -597,39 +597,39 @@
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_backfill_runner.py",
-        "sha256": "3ea1743773307fce9c24732f748082eac318f3deb03ddc689edab313a013a897",
-        "bytes": 34009,
-        "line_count": 867
+        "sha256": "9b0ef2a458f589e41b7a676da170f4dffed3f0c061b0c6c67fe8228d989cdb27",
+        "bytes": 34047,
+        "line_count": 868
       },
       {
         "path": "control-plane/origo_control_plane/s34_daily_dataset_tranche_controller.py",
-        "sha256": "f5bcd92aca5da4c695817242024215031c97c1abb1eb635e0ac4ebccf5ed7af4",
-        "bytes": 9361,
-        "line_count": 268
+        "sha256": "99687618de9144fa82da7cf9ce06f66c06aede902667746d777288519d986ea6",
+        "bytes": 9399,
+        "line_count": 269
       },
       {
         "path": "control-plane/origo_control_plane/s34_exchange_sequence_controller.py",
-        "sha256": "ab85675dfc8ac59ecb293d69fa4d325135c79e669f21076ea4fdc2805b2d69ec",
-        "bytes": 5098,
-        "line_count": 142
+        "sha256": "896e97cc6fe26d3262bf055b9e5cbd05964f4f9469b7b7052a19bbc0a4ece8f7",
+        "bytes": 5136,
+        "line_count": 143
       },
       {
         "path": "control-plane/origo_control_plane/s34_fred_backfill_runner.py",
-        "sha256": "b9b0fa1bc571d53be2871c995cbd15eef2350ee27b600b64ef40900b758a3210",
-        "bytes": 16703,
-        "line_count": 488
+        "sha256": "9ae01c8595749f704f4420665141cf3aad41eeaa4e9dd3e7cb6cc4d4c20cb8ed",
+        "bytes": 16741,
+        "line_count": 489
       },
       {
         "path": "control-plane/origo_control_plane/s34_etf_backfill_runner.py",
-        "sha256": "175eb84af8d3e3d131773c2f7d5a5cdb4a54698e963a521902b377db5d12bf7b",
-        "bytes": 13324,
-        "line_count": 408
+        "sha256": "ea4057f4491410300e91ab5df1fa5160a0b814ed9033019fce8920c013399634",
+        "bytes": 13362,
+        "line_count": 409
       },
       {
         "path": "control-plane/origo_control_plane/s34_bitcoin_backfill_runner.py",
-        "sha256": "791dc46b11762791f3f7754c6795b14432aaefc784c24aa91c759cc15cbd50b9",
-        "bytes": 22883,
-        "line_count": 651
+        "sha256": "1605dbb4cc7008c03f6dd7e3233876f1f1f4b29bf9a83489a0b828bc3f505462",
+        "bytes": 22921,
+        "line_count": 652
       },
       {
         "path": "tests/contract/test_backfill_runtime_contract.py",
@@ -675,6 +675,6 @@
       }
     ],
     "file_count": 36,
-    "aggregate_sha256": "46defac501dbe917069f9c7446672934db7b0cdc9bc39994cbb287457a705b8f"
+    "aggregate_sha256": "e13c0636ba87f689388f72007f6e730dcaec9f435106a5fc38ac86ae8776f655"
   }
 }

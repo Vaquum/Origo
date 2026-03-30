@@ -96,7 +96,7 @@
 - The current server archive remains sparse. Historical ETF completeness cannot be claimed beyond the archived issuer artifacts already stored under `raw-artifacts/`.
 
 ## Watch out
-- Repository-wide strict `pyright` still reports unused-private-helper noise if the intentionally inert historical runner/controller modules are included directly. The active Dagster/runtime modules in this rescue tranche type-check clean; the remaining noise is in historical helper surfaces that are now fail-closed and non-executing by design.
+- The archived Slice-34 helper modules now carry explicit module-level `pyright` unused-function suppression because their write entrypoints are fail-closed while their historical planning helpers remain preserved for provenance and test coverage. Any future attempt to reactivate those surfaces should remove the suppression only after the module is either deleted or made live again under a real Dagster-native contract.
 - The master doctrine is now the topmost governance law. If a future contract, helper, or runtime path conflicts with it, the doctrine wins and the lower surface must be changed or removed rather than explained away.
 - The start/end gates only work if future governance additions keep routing through `AGENTS.md`. Adding a new machine contract without adding the route in `AGENTS.md` is now a direct contract violation.
 - The shared-domain overlay list is now part of the governance law. If a future change adds a new durable system surface and does not add a matching routed machine contract, that omission is a hard stop, not something an agent may paper over with judgment.

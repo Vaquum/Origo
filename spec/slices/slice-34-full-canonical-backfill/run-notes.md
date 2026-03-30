@@ -66,6 +66,7 @@
 - Promoted the remaining spec-only runtime/data contract law into atomic machine contracts under `contracts/governance/`, expanded `AGENTS.md` with shared-domain overlay routing, broadened request-family coverage to whole-system Origo work, and regenerated the governance fixtures so the repo now fails loudly if future work touches an unrouted system surface.
 - Added the topmost whole-system master doctrine contract plus the universal task start/end gates, rewired `AGENTS.md` and the universal governance contract set to load them on every task, and regenerated the deterministic governance fixtures against the expanded universal-contract topology.
 - Rebased the stale local correctness residue onto a fresh clean worktree from merged `main`, dropped unrelated lockfile churn, and carried forward only the real remaining correctness diffs: explicit live-vs-backfill exchange runtime tag defaults, hard-disabled historical helper write entrypoints, env-backed monthly Binance timeout wiring, and cleanup exception-note fidelity in the touched assets/jobs.
+- Added explicit module-level `pyright` unused-function suppression to the archived helper runner/controller modules so the live `type-gate` matches their fail-closed historical role instead of treating preserved private planning helpers as an active-code regression.
 
 ## Known warnings and disposition
 - Local Docker proof required one cache cleanup because the builder’s apt archive area was exhausted. Acceptable for the proof run; this was a local builder-state issue, not a repo/runtime contract issue.
@@ -88,7 +89,7 @@
 - `S34-G12` is locally proven as whole-system repo governance. The routing/contracts now encode one permanent scope for current and future Origo work instead of temporary slice-era authority language.
 - `S34-G13` is locally proven as whole-system repo governance. The remaining runtime/data law is now machine-routed, but live runtime proofs still need to keep Dagster-authoritative behavior aligned with those contracts.
 - `S34-G14` is locally proven as whole-system repo governance. The doctrine and task gates are universal in-repo, but their real value still depends on future tasks honestly stopping when a gate answer is `no` or `unknown`.
-- `S34-G15` / `S34-11k` are locally proven on a clean `main` base. The rescue tranche is validated by focused `ruff`, focused control-plane `pytest` (`79 passed`), focused active-runtime `pyright` (`0 errors`), and `git diff --check`; repository-wide strict `pyright` on the intentionally inert historical helper modules remains noisy because those modules still contain unused private helpers even though write entrypoints are now fail-closed.
+- `S34-G15` / `S34-11k` are locally proven on a clean `main` base. The rescue tranche is validated by focused `ruff`, focused control-plane `pytest` (`79 passed`), focused control-plane `pyright` including the archived helper modules (`0 errors`), and `git diff --check`.
 
 ## Deferred guardrails
 - None inside `S34-C5f` / `S34-C5e` / `S34-C5g` scope. Remaining ETF historical completeness work is now about acquiring or validating enough first-party archive coverage, not about replay/runtime fallbacks.

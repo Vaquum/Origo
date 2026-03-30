@@ -36,6 +36,9 @@ from origo_control_plane.backfill import (
     get_s34_dataset_contract,
     list_s34_dataset_contracts,
 )
+from origo_control_plane.backfill.runtime_contract import (
+    raise_forbidden_helper_write_path_or_raise,
+)
 from origo_control_plane.bitcoin_core import (
     format_bitcoin_height_range_partition_id_or_raise,
     parse_bitcoin_height_range_partition_id_or_raise,
@@ -582,94 +585,9 @@ def run_bitcoin_chain_backfill_or_raise(
     run_id_prefix: str = 's34-bitcoin-chain',
     max_batches: int | None = None,
 ) -> dict[str, Any]:
-    if max_batches is not None and max_batches <= 0:
-        raise RuntimeError(f'max_batches must be > 0 when provided, got {max_batches}')
-
-    job_name = _require_chain_job_name_or_raise(dataset)
-    job_def = _load_chain_job_def_or_raise(dataset)
-    instance: DagsterInstance | None = None
-    handle: _DagsterJobHandle | None = None
-    client: ClickHouseClient | None = None
-    database: str | None = None
-    completed_batches: list[dict[str, Any]] = []
-    executed_batches = 0
-    controller_stopped_reason = 'no_remaining_work'
-    try:
-        instance = DagsterInstance.get()
-        handle = _load_dagster_job_handle_or_raise(
-            instance=instance,
-            job_name=job_name,
-        )
-        client, database = _build_clickhouse_client_or_raise()
-        while True:
-            if max_batches is not None and executed_batches >= max_batches:
-                controller_stopped_reason = 'max_batches_reached'
-                break
-            batch = plan_next_bitcoin_chain_batch_or_raise(
-                dataset=dataset,
-                plan_end_height=plan_end_height,
-                batch_size_blocks=batch_size_blocks,
-                run_id_prefix=run_id_prefix,
-                client=client,
-                database=database,
-            )
-            if batch is None:
-                controller_stopped_reason = 'no_remaining_work'
-                break
-            dagster_run_id = _create_and_submit_job_run_or_raise(
-                instance=instance,
-                handle=handle,
-                job_def=job_def,
-                control_run_id=batch.run_id,
-                tags=_build_chain_run_tags_or_raise(
-                    dataset=batch.dataset,
-                    execution_mode=batch.execution_mode,
-                    projection_mode=projection_mode,
-                    runtime_audit_mode=runtime_audit_mode,
-                    start_height=batch.start_height,
-                    end_height=batch.end_height,
-                    run_id=batch.run_id,
-                ),
-            )
-            completed_run = _wait_for_run_success_or_raise(
-                instance=instance,
-                run_id=dagster_run_id,
-            )
-            proof_summary = _load_partition_proof_summary_or_raise(
-                client=client,
-                database=database,
-                dataset=dataset,
-                partition_id=batch.partition_id,
-            )
-            completed_batches.append(
-                {
-                    'dataset': dataset,
-                    'execution_mode': batch.execution_mode,
-                    'partition_id': batch.partition_id,
-                    'start_height': batch.start_height,
-                    'end_height': batch.end_height,
-                    'run_id': batch.run_id,
-                    'dagster_run_id': dagster_run_id,
-                    'started_at_utc': completed_run.started_at_utc.isoformat(),
-                    'finished_at_utc': completed_run.finished_at_utc.isoformat(),
-                    'proof_summary': proof_summary,
-                }
-            )
-            executed_batches += 1
-        return {
-            'dataset': dataset,
-            'job_name': job_name,
-            'plan_end_height': plan_end_height,
-            'batch_size_blocks': batch_size_blocks,
-            'completed_batch_count': len(completed_batches),
-            'completed_batches': completed_batches,
-            'controller_stopped_reason': controller_stopped_reason,
-        }
-    finally:
-        if client is not None:
-            client.disconnect()
-        if handle is not None:
-            handle.workspace_process_context.__exit__(None, None, None)
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_bitcoin_backfill_runner.run_bitcoin_chain_backfill_or_raise'
+    )
 
 
 def run_bitcoin_chain_sequence_controller_or_raise(
@@ -682,41 +600,9 @@ def run_bitcoin_chain_sequence_controller_or_raise(
     datasets: tuple[S34BackfillDataset, ...] | None = None,
     max_batches_per_dataset: int | None = None,
 ) -> dict[str, Any]:
-    if max_batches_per_dataset is not None:
-        raise RuntimeError(
-            'Bitcoin chain sequence controller requires full dataset completion; '
-            'max_batches_per_dataset is unsupported. Use --mode chain for bounded runs.'
-        )
-    sequence_datasets = (
-        list_bitcoin_chain_datasets_or_raise() if datasets is None else datasets
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_bitcoin_backfill_runner.run_bitcoin_chain_sequence_controller_or_raise'
     )
-    completed_datasets: list[dict[str, Any]] = []
-    for dataset in sequence_datasets:
-        _require_chain_job_name_or_raise(dataset)
-        result = run_bitcoin_chain_backfill_or_raise(
-            dataset=dataset,
-            plan_end_height=plan_end_height,
-            batch_size_blocks=batch_size_blocks,
-            projection_mode=projection_mode,
-            runtime_audit_mode=runtime_audit_mode,
-            run_id_prefix=run_id_prefix,
-            max_batches=max_batches_per_dataset,
-        )
-        if result['controller_stopped_reason'] != 'no_remaining_work':
-            raise RuntimeError(
-                'Bitcoin chain sequence controller requires full dataset completion '
-                f'before advancing, got dataset={dataset} '
-                f"controller_stopped_reason={result['controller_stopped_reason']}"
-            )
-        completed_datasets.append(result)
-    return {
-        'datasets': sequence_datasets,
-        'plan_end_height': plan_end_height,
-        'batch_size_blocks': batch_size_blocks,
-        'completed_dataset_count': len(completed_datasets),
-        'completed_datasets': completed_datasets,
-        'controller_stopped_reason': 'no_remaining_work',
-    }
 
 
 def run_bitcoin_mempool_daily_path_or_raise(
@@ -726,89 +612,16 @@ def run_bitcoin_mempool_daily_path_or_raise(
     requested_partition_id: str | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    contract = get_s34_dataset_contract(_MEMPOOL_DATASET)
-    if contract.partition_scheme != 'daily':
-        raise RuntimeError(
-            'Bitcoin mempool daily path requires daily partition scheme, '
-            f'got partition_scheme={contract.partition_scheme}'
-        )
-    current_partition_id = datetime.now(UTC).date().isoformat()
-    if requested_partition_id is not None:
-        normalized_requested_partition_id = _parse_iso_date_or_raise(
-            requested_partition_id
-        )
-        if normalized_requested_partition_id != current_partition_id:
-            raise RuntimeError(
-                'Historical mempool replay is unsupported from first-party Bitcoin '
-                'Core RPC; requested_partition_id='
-                f'{normalized_requested_partition_id} current_utc_partition_id='
-                f'{current_partition_id}'
-            )
-
-    normalized_run_id = (
-        run_id.strip()
-        if run_id is not None and run_id.strip() != ''
-        else f's34-bitcoin-mempool-{current_partition_id}'
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_bitcoin_backfill_runner.run_bitcoin_mempool_daily_path_or_raise'
     )
-
-    instance: DagsterInstance | None = None
-    handle: _DagsterJobHandle | None = None
-    client: ClickHouseClient | None = None
-    database: str | None = None
-    try:
-        instance = DagsterInstance.get()
-        mempool_job_def = _load_mempool_job_def_or_raise()
-        handle = _load_dagster_job_handle_or_raise(
-            instance=instance,
-            job_name=_MEMPOOL_JOB_NAME,
-        )
-        client, database = _build_clickhouse_client_or_raise()
-        dagster_run_id = _create_and_submit_job_run_or_raise(
-            instance=instance,
-            handle=handle,
-            job_def=mempool_job_def,
-            control_run_id=normalized_run_id,
-            tags={
-                'origo.backfill.dataset': _MEMPOOL_DATASET,
-                'origo.backfill.control_run_id': normalized_run_id,
-                BACKFILL_PROJECTION_MODE_TAG: projection_mode,
-                BACKFILL_EXECUTION_MODE_TAG: 'backfill',
-                BACKFILL_RUNTIME_AUDIT_MODE_TAG: runtime_audit_mode,
-            },
-        )
-        completed_run = _wait_for_run_success_or_raise(
-            instance=instance,
-            run_id=dagster_run_id,
-        )
-        proof_summary = _load_partition_proof_summary_or_raise(
-            client=client,
-            database=database,
-            dataset=_MEMPOOL_DATASET,
-            partition_id=current_partition_id,
-        )
-        return {
-            'dataset': _MEMPOOL_DATASET,
-            'job_name': _MEMPOOL_JOB_NAME,
-            'requested_partition_id': requested_partition_id,
-            'executed_partition_id': current_partition_id,
-            'run_id': normalized_run_id,
-            'dagster_run_id': dagster_run_id,
-            'started_at_utc': completed_run.started_at_utc.isoformat(),
-            'finished_at_utc': completed_run.finished_at_utc.isoformat(),
-            'proof_summary': proof_summary,
-        }
-    finally:
-        if client is not None:
-            client.disconnect()
-        if handle is not None:
-            handle.workspace_process_context.__exit__(None, None, None)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            'Run repo-native Slice 34 Bitcoin backfill controllers: '
-            'height-range chain batches or the explicit mempool daily path.'
+            'Historical Slice 34 Bitcoin helper surface only; '
+            'write execution is disabled.'
         )
     )
     parser.add_argument(
@@ -829,54 +642,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
-    projection_mode = _parse_projection_mode_or_raise(args.projection_mode)
-    runtime_audit_mode = _parse_runtime_audit_mode_or_raise(args.runtime_audit_mode)
-
-    if args.mode == 'chain':
-        if args.dataset is None:
-            raise RuntimeError('--dataset is required for --mode chain')
-        if args.plan_end_height is None:
-            raise RuntimeError('--plan-end-height is required for --mode chain')
-        if args.batch_size_blocks is None:
-            raise RuntimeError('--batch-size-blocks is required for --mode chain')
-        print(
-            run_bitcoin_chain_backfill_or_raise(
-                dataset=_resolve_bitcoin_chain_dataset_or_raise(args.dataset),
-                plan_end_height=args.plan_end_height,
-                batch_size_blocks=args.batch_size_blocks,
-                projection_mode=projection_mode,
-                runtime_audit_mode=runtime_audit_mode,
-                run_id_prefix=args.run_id_prefix,
-                max_batches=args.max_batches,
-            )
-        )
-        return
-
-    if args.mode == 'chain-sequence':
-        if args.plan_end_height is None:
-            raise RuntimeError('--plan-end-height is required for --mode chain-sequence')
-        if args.batch_size_blocks is None:
-            raise RuntimeError('--batch-size-blocks is required for --mode chain-sequence')
-        print(
-            run_bitcoin_chain_sequence_controller_or_raise(
-                plan_end_height=args.plan_end_height,
-                batch_size_blocks=args.batch_size_blocks,
-                projection_mode=projection_mode,
-                runtime_audit_mode=runtime_audit_mode,
-                run_id_prefix=args.run_id_prefix,
-                max_batches_per_dataset=args.max_batches,
-            )
-        )
-        return
-
-    print(
-        run_bitcoin_mempool_daily_path_or_raise(
-            projection_mode=projection_mode,
-            runtime_audit_mode=runtime_audit_mode,
-            requested_partition_id=args.requested_partition_id,
-            run_id=args.run_id,
-        )
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_bitcoin_backfill_runner.main'
     )
 
 

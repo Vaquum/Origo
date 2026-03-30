@@ -7,7 +7,8 @@ from origo_control_plane.backfill.runtime_contract import (
     BACKFILL_HEIGHT_END_TAG,
     BACKFILL_HEIGHT_START_TAG,
     apply_runtime_audit_mode_or_raise,
-    default_exchange_runtime_tags,
+    default_exchange_backfill_runtime_tags,
+    default_exchange_live_runtime_tags,
     load_backfill_height_window_or_raise,
     load_backfill_runtime_contract_or_raise,
 )
@@ -93,9 +94,17 @@ def test_load_backfill_runtime_contract_prefers_tags_over_op_config() -> None:
     assert runtime_contract.runtime_audit_mode == 'event'
 
 
-def test_default_exchange_runtime_tags_are_explicit() -> None:
-    assert default_exchange_runtime_tags() == {
+def test_default_exchange_backfill_runtime_tags_are_explicit() -> None:
+    assert default_exchange_backfill_runtime_tags() == {
         'origo.backfill.projection_mode': 'deferred',
+        'origo.backfill.execution_mode': 'backfill',
+        'origo.backfill.runtime_audit_mode': 'summary',
+    }
+
+
+def test_default_exchange_live_runtime_tags_are_explicit() -> None:
+    assert default_exchange_live_runtime_tags() == {
+        'origo.backfill.projection_mode': 'inline',
         'origo.backfill.execution_mode': 'backfill',
         'origo.backfill.runtime_audit_mode': 'summary',
     }

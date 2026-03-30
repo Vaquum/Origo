@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.92 on 30th of March, 2026
+
+- Landed the remaining Slice 34 correctness residue from stale local work on top of merged `main`:
+  - split exchange runtime defaults into explicit live (`inline`) and backfill (`deferred`) Dagster tag helpers so scheduled runs cannot silently inherit backfill semantics
+  - hard-disabled the surviving historical Slice-34 helper write entrypoints so repo-native helper runners/controllers remain provenance-only and cannot mutate canonical state
+  - replaced the remaining hard-coded monthly Binance source timeout with the existing env-backed Binance timeout contract
+  - fixed cleanup exception-note fidelity in the touched assets/jobs so cleanup notes attach to the actual active exception instead of stale state
+
 ## v1.2.91 on 30th of March, 2026
 
 - Froze the master doctrine and universal task gates as whole-system Origo law:

@@ -351,6 +351,14 @@ def test_s34_fred_backfill_runner_rejects_precap_partition_ids_in_run_tags() -> 
         )
 
 
+def test_run_s34_fred_backfill_helper_write_execution_is_disabled() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='historical helper surface only',
+    ):
+        fred_runner.run_s34_fred_backfill_or_raise(run_id='s34-fred-test')
+
+
 def test_fred_job_builds_revision_history_source_bundles(
     monkeypatch: Any,
 ) -> None:

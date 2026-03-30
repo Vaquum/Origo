@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -9,8 +8,6 @@ import pytest
 from origo_control_plane.s34_bitcoin_backfill_runner import (
     list_bitcoin_chain_datasets_or_raise,
     plan_next_bitcoin_chain_batch_or_raise,
-    run_bitcoin_chain_sequence_controller_or_raise,
-    run_bitcoin_mempool_daily_path_or_raise,
 )
 
 
@@ -146,69 +143,41 @@ def test_plan_next_bitcoin_chain_batch_requires_client_and_database_together() -
         )
 
 
-def test_run_bitcoin_chain_sequence_controller_uses_chain_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: list[str] = []
-
-    def _fake_run_bitcoin_chain_backfill_or_raise(**kwargs: Any) -> dict[str, Any]:
-        dataset = cast(str, kwargs['dataset'])
-        observed.append(dataset)
-        return {
-            'dataset': dataset,
-            'controller_stopped_reason': 'no_remaining_work',
-        }
-
-    monkeypatch.setattr(
-        'origo_control_plane.s34_bitcoin_backfill_runner.run_bitcoin_chain_backfill_or_raise',
-        _fake_run_bitcoin_chain_backfill_or_raise,
-    )
-
-    result = run_bitcoin_chain_sequence_controller_or_raise(
-        plan_end_height=840999,
-        batch_size_blocks=144,
-        projection_mode='deferred',
-        runtime_audit_mode='summary',
-    )
-
-    assert observed == [
-        'bitcoin_block_headers',
-        'bitcoin_block_transactions',
-        'bitcoin_block_fee_totals',
-        'bitcoin_block_subsidy_schedule',
-        'bitcoin_network_hashrate_estimate',
-        'bitcoin_circulating_supply',
-    ]
-    assert result['controller_stopped_reason'] == 'no_remaining_work'
-
-
-def test_run_bitcoin_chain_sequence_controller_rejects_partial_batch_limit() -> None:
+def test_run_bitcoin_chain_sequence_controller_helper_write_execution_is_disabled() -> None:
     with pytest.raises(
         RuntimeError,
-        match='max_batches_per_dataset is unsupported',
+        match='historical helper surface only',
     ):
-        run_bitcoin_chain_sequence_controller_or_raise(
+        runner.run_bitcoin_chain_sequence_controller_or_raise(
             plan_end_height=840999,
             batch_size_blocks=144,
             projection_mode='deferred',
             runtime_audit_mode='summary',
-            max_batches_per_dataset=1,
         )
 
 
-def test_run_bitcoin_mempool_daily_path_rejects_historical_partition() -> None:
-    historical_partition_id = (
-        datetime.now(UTC).date() - timedelta(days=1)
-    ).isoformat()
-
+def test_run_bitcoin_chain_backfill_helper_write_execution_is_disabled() -> None:
     with pytest.raises(
         RuntimeError,
-        match='Historical mempool replay is unsupported from first-party Bitcoin Core RPC',
+        match='historical helper surface only',
     ):
-        run_bitcoin_mempool_daily_path_or_raise(
+        runner.run_bitcoin_chain_backfill_or_raise(
+            dataset='bitcoin_block_headers',
+            plan_end_height=840999,
+            batch_size_blocks=144,
             projection_mode='deferred',
             runtime_audit_mode='summary',
-            requested_partition_id=historical_partition_id,
+        )
+
+
+def test_run_bitcoin_mempool_daily_path_helper_write_execution_is_disabled() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='historical helper surface only',
+    ):
+        runner.run_bitcoin_mempool_daily_path_or_raise(
+            projection_mode='deferred',
+            runtime_audit_mode='summary',
         )
 
 

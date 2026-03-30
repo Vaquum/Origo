@@ -43,6 +43,9 @@ from origo_control_plane.backfill import (
     load_missing_daily_partitions_from_canonical_or_raise,
     write_backfill_manifest_event,
 )
+from origo_control_plane.backfill.runtime_contract import (
+    raise_forbidden_helper_write_path_or_raise,
+)
 from origo_control_plane.config import resolve_clickhouse_native_settings
 
 _DAILY_JOB_NAMES: dict[S34BackfillDataset, str] = {
@@ -481,6 +484,10 @@ def run_exchange_backfill(
     execution_mode: ExecutionMode = 'backfill',
     partition_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    if not dry_run:
+        raise_forbidden_helper_write_path_or_raise(
+            helper_name='s34_exchange_backfill_runner.run_exchange_backfill'
+        )
     _normalize_path_envs_or_raise()
     assert_s34_backfill_contract_consistency_or_raise()
     contract = get_s34_dataset_contract(dataset)
@@ -851,26 +858,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-    resolved_concurrency = (
-        int(args.concurrency)
-        if args.concurrency is not None
-        else _load_env_backfill_concurrency_or_raise()
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_exchange_backfill_runner.main'
     )
-    result = run_exchange_backfill(
-        dataset=cast(S34BackfillDataset, args.dataset),
-        end_date=None if args.end_date is None else _parse_iso_date(args.end_date),
-        max_partitions=args.max_partitions,
-        run_id=args.run_id,
-        dry_run=bool(args.dry_run),
-        projection_mode=cast(ProjectionMode, args.projection_mode),
-        runtime_audit_mode=cast(RuntimeAuditMode, args.runtime_audit_mode),
-        concurrency=resolved_concurrency,
-        execution_mode=cast(ExecutionMode, args.execution_mode),
-        partition_ids=cast(list[str] | None, args.partition_id),
-    )
-    print(json.dumps(result, sort_keys=True, indent=2))
 
 
 if __name__ == '__main__':

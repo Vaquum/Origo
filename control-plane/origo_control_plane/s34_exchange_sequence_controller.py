@@ -12,8 +12,8 @@ from origo_control_plane.backfill import (
     get_s34_dataset_contract,
     list_s34_dataset_contracts,
 )
-from origo_control_plane.s34_daily_dataset_tranche_controller import (
-    run_daily_dataset_tranche_controller_or_raise,
+from origo_control_plane.backfill.runtime_contract import (
+    raise_forbidden_helper_write_path_or_raise,
 )
 
 
@@ -110,42 +110,9 @@ def run_exchange_sequence_controller_or_raise(
     run_id_prefix: str = 's34-exchange-sequence',
     datasets: tuple[S34BackfillDataset, ...] | None = None,
 ) -> dict[str, Any]:
-    if batch_size_days <= 0:
-        raise RuntimeError(f'batch_size_days must be > 0, got {batch_size_days}')
-    if concurrency <= 0:
-        raise RuntimeError(f'concurrency must be > 0, got {concurrency}')
-
-    sequence_datasets = (
-        list_exchange_parallel_datasets_or_raise() if datasets is None else datasets
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_exchange_sequence_controller.run_exchange_sequence_controller_or_raise'
     )
-    completed_datasets: list[dict[str, Any]] = []
-    for dataset in sequence_datasets:
-        result = run_daily_dataset_tranche_controller_or_raise(
-            dataset=dataset,
-            plan_end_date=plan_end_date,
-            batch_size_days=batch_size_days,
-            concurrency=concurrency,
-            projection_mode=projection_mode,
-            runtime_audit_mode=runtime_audit_mode,
-            run_id_prefix=run_id_prefix,
-        )
-        if result['controller_stopped_reason'] != 'no_remaining_work':
-            raise RuntimeError(
-                'S34 exchange sequence controller requires full dataset completion '
-                f'before advancing, got dataset={dataset} '
-                f"controller_stopped_reason={result['controller_stopped_reason']}"
-            )
-        completed_datasets.append(result)
-
-    return {
-        'datasets': sequence_datasets,
-        'plan_end_date': plan_end_date.isoformat(),
-        'batch_size_days': batch_size_days,
-        'concurrency': concurrency,
-        'completed_dataset_count': len(completed_datasets),
-        'completed_datasets': completed_datasets,
-        'controller_stopped_reason': 'no_remaining_work',
-    }
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -166,17 +133,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
-    result = run_exchange_sequence_controller_or_raise(
-        plan_end_date=_parse_iso_date_or_raise(args.plan_end_date),
-        batch_size_days=args.batch_size_days,
-        concurrency=args.concurrency,
-        projection_mode=_parse_projection_mode_or_raise(args.projection_mode),
-        runtime_audit_mode=_parse_runtime_audit_mode_or_raise(args.runtime_audit_mode),
-        run_id_prefix=args.run_id_prefix,
-        datasets=_resolve_exchange_sequence_datasets_or_raise(tuple(args.dataset)),
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_exchange_sequence_controller.main'
     )
-    print(result)
 
 
 if __name__ == '__main__':

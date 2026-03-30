@@ -788,8 +788,8 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-C4k` Add exchange reconcile writer-repair path so partitions with poisoned partial canonical subsets repair by idempotent replay instead of failing forever behind proof-only reconcile.
 - [ ] `S34-C4l` Fix OKX canonical precision contract so first-party high-scale `size` values survive reconcile/write without false scale-overflow failures.
 - [x] `S34-C4m` Fix exchange reconcile writer-repair flow so partition proof is recomputed from fresh canonical state instead of reusing stale pre-repair canonical proof snapshots.
-- [ ] `S34-C4n` Align manual exchange Dagster defaults with the historical repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
-- [ ] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
+- [x] `S34-C4n` Align manual exchange Dagster defaults with the historical repo-native Slice-34 backfill contract so dashboard-triggered backfills default to deferred projection while scheduled live runs remain explicit about inline projection.
+- [x] `S34-C4o` Replace hard-coded exchange source HTTP timeouts with explicit env-backed runtime contracts for Binance, OKX, and Bybit source fetch paths.
 - [ ] `S34-C5` Execute ETF full-history backfill (`etf_daily_metrics`) from issuer-source artifacts.
 - [x] `S34-C5a` Build historical repo-native ETF Dagster backfill runner with proof-boundary summary.
 - [x] `S34-C5b` Fix historical repo-native ETF Dagster submission so control run ids remain human-readable tags while Dagster run ids are valid UUIDs.
@@ -856,6 +856,7 @@ Static-analysis hard gate applies throughout: `ruff` + `pyright` strict, repo-wi
 - [x] `S34-G12` Freeze governance scope as whole-system Origo law so governance routing/contracts cannot be interpreted as Slice-34-only or temporary for future development.
 - [x] `S34-G13` Promote the remaining whole-system runtime/data contract law into routed machine governance contracts so future Origo work cannot bypass spec-era rules that were never converted into authoritative contracts.
 - [x] `S34-G14` Freeze the master doctrine and universal task start/end gates so every Origo task is fail-closed against the same eight principles before work starts and before any completion claim.
+- [x] `S34-G15` Land the remaining Slice-34 correctness residue from stale local work so helper write hard-disables, explicit live-vs-backfill Dagster defaults, env-backed exchange timeout wiring, and cleanup exception-note fidelity are actually true on `main`.
 
 ## Slice 35: Automated Daily Backfill Scheduling (Configured Daily Runtime)
 
@@ -2438,6 +2439,10 @@ Constraints: no spec-only contract law left without a machine counterpart, no ne
 Action: Freeze the master doctrine and universal task start/end gates as whole-system Origo law.
 Done looks like: `AGENTS.md` routes every task through `master-doctrine.json`, `task-start-gate.json`, and `task-end-gate.json`; the master doctrine carries the closed foundation set (`store_correctness`, `current_truth_read_contract`, `single_write_entrypoint`, `operator_truth_unification`, `envelope_finalization`, `concurrency_control`, `adapter_boundary_enforcement`, `rebuild_proof`, `critical_path_viability`); every task must stop if any start/end-gate answer is `no` or `unknown`; and tests fail loudly if the doctrine or gates stop being universal.
 Constraints: no second doctrine surface, no open-ended foundation expansion, no completion claim before end-gate pass, and no work start before start-gate pass.
+47. `S34-11k`
+Action: Rescue the remaining Slice-34 correctness residue from stale local work so merged `main` matches the already-frozen Dagster/write-path/runtime contracts.
+Done looks like: historical helper write entrypoints fail closed in runtime code, scheduled exchange runs use explicit live runtime tags instead of inheriting deferred backfill defaults, exchange source timeout wiring is env-backed end to end including monthly Binance, cleanup error notes attach to the actual active exception, and the focused contract suite proves the rescued runtime behavior.
+Constraints: no new helper write path, no schedule path inheriting backfill defaults, no new timeout hard-codes, and no stale-branch residue left only in a dirty local worktree.
 
 ## Slice 35 Sub-Slices
 1. `S35-01`

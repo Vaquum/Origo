@@ -49,7 +49,7 @@ from .assets.daily_okx_spot_trades_to_origo import (
 )
 from .assets.daily_trades_to_origo import insert_daily_binance_trades_to_origo
 from .assets.monthly_trades_to_origo import insert_monthly_binance_trades_to_origo
-from .backfill.runtime_contract import default_exchange_runtime_tags
+from .backfill.runtime_contract import default_exchange_live_runtime_tags
 from .jobs.etf_daily_ingest import (
     origo_etf_daily_backfill_job,
     origo_etf_daily_ingest_job,
@@ -177,7 +177,7 @@ _ORIGO_ETF_INGEST_ANOMALY_CODE = 'ETF_DAILY_INGEST_RUN_FAILURE'
     execution_timezone='UTC',
 )
 def daily_pipeline_schedule() -> Any:
-    return RunRequest(tags=default_exchange_runtime_tags())
+    return RunRequest(tags=default_exchange_live_runtime_tags())
 
 
 @schedule(

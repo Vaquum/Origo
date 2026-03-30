@@ -198,6 +198,23 @@ def test_s34_exchange_backfill_runner_reconcile_requires_partition_ids(
         )
 
 
+def test_s34_exchange_backfill_runner_disables_helper_write_execution() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='historical helper surface only',
+    ):
+        backfill_runner.run_exchange_backfill(
+            dataset='binance_spot_trades',
+            end_date=date(2017, 8, 19),
+            max_partitions=None,
+            run_id='s34-test-write-path',
+            dry_run=False,
+            projection_mode='deferred',
+            runtime_audit_mode='summary',
+            concurrency=10,
+        )
+
+
 def test_s34_exchange_backfill_concurrency_env_requires_integer_ge_10(
     monkeypatch: Any,
 ) -> None:

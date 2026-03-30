@@ -675,10 +675,10 @@ def insert_bitcoin_block_transactions_to_origo(
         return result_data
     finally:
         if client is not None:
-            active_exception = sys.exc_info()[1]
             try:
                 client.disconnect()
             except Exception as exc:
+                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'ClickHouse disconnect failed during cleanup: {exc}'

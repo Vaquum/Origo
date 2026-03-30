@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, Literal, NoReturn, cast
 
 import dagster as dg
 from dagster import AssetExecutionContext, OpExecutionContext
@@ -20,6 +20,11 @@ BACKFILL_HEIGHT_START_TAG: Final[str] = 'origo.backfill.height_start'
 BACKFILL_HEIGHT_END_TAG: Final[str] = 'origo.backfill.height_end'
 BACKFILL_PARTITION_IDS_TAG: Final[str] = 'origo.backfill.partition_ids'
 _RUNTIME_AUDIT_MODE_ENV: Final[str] = 'ORIGO_CANONICAL_RUNTIME_AUDIT_MODE'
+_HELPER_WRITE_PATH_FAILURE_SUFFIX: Final[str] = (
+    'Dagster/Dagit is the sole allowed creator of canonical backfill/reconcile '
+    'write runs. Use Dagit before Slice 35, or a Dagster-native schedule/sensor '
+    'after Slice 35.'
+)
 Field: Any = getattr(dg, 'Field')
 DagsterExecutionContext = AssetExecutionContext | OpExecutionContext
 
@@ -35,6 +40,13 @@ class BackfillRuntimeContract:
 class BackfillHeightWindow:
     start_height: int
     end_height: int
+
+
+def raise_forbidden_helper_write_path_or_raise(*, helper_name: str) -> NoReturn:
+    raise RuntimeError(
+        f'{helper_name} is a historical helper surface only. '
+        f'{_HELPER_WRITE_PATH_FAILURE_SUFFIX}'
+    )
 
 
 def _require_run_tag_or_raise(
@@ -279,9 +291,17 @@ def load_backfill_height_window_or_raise(
     )
 
 
-def default_exchange_runtime_tags() -> dict[str, str]:
+def default_exchange_backfill_runtime_tags() -> dict[str, str]:
     return {
         BACKFILL_PROJECTION_MODE_TAG: 'deferred',
+        BACKFILL_EXECUTION_MODE_TAG: 'backfill',
+        BACKFILL_RUNTIME_AUDIT_MODE_TAG: 'summary',
+    }
+
+
+def default_exchange_live_runtime_tags() -> dict[str, str]:
+    return {
+        BACKFILL_PROJECTION_MODE_TAG: 'inline',
         BACKFILL_EXECUTION_MODE_TAG: 'backfill',
         BACKFILL_RUNTIME_AUDIT_MODE_TAG: 'summary',
     }

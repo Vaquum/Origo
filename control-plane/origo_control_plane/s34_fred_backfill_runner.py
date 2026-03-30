@@ -27,8 +27,10 @@ from origo_control_plane.backfill import (
     BACKFILL_PROJECTION_MODE_TAG,
     BACKFILL_RUNTIME_AUDIT_MODE_TAG,
     ExecutionMode,
-    assert_s34_backfill_contract_consistency_or_raise,
     get_s34_dataset_contract,
+)
+from origo_control_plane.backfill.runtime_contract import (
+    raise_forbidden_helper_write_path_or_raise,
 )
 from origo_control_plane.config import resolve_clickhouse_native_settings
 from origo_control_plane.jobs.fred_daily_ingest import origo_fred_daily_backfill_job
@@ -460,88 +462,9 @@ def _plan_next_fred_run_or_raise(
 
 
 def run_s34_fred_backfill_or_raise(*, run_id: str | None = None) -> dict[str, Any]:
-    assert_s34_backfill_contract_consistency_or_raise()
-    normalized_run_id = (run_id or _default_run_id()).strip()
-    if normalized_run_id == '':
-        raise RuntimeError('run_id must be non-empty')
-
-    instance: DagsterInstance | None = None
-    handle: _DagsterJobHandle | None = None
-    planning_client: ClickHouseClient | None = None
-    planning_database: str | None = None
-    try:
-        instance = DagsterInstance.get()
-        handle = _load_dagster_job_handle_or_raise(
-            instance=instance,
-            job_name=_FRED_JOB_NAME,
-        )
-        planning_client, planning_database = _build_clickhouse_client_or_raise()
-        completed_runs: list[dict[str, Any]] = []
-        while True:
-            plan = _plan_next_fred_run_or_raise(
-                client=planning_client,
-                database=planning_database,
-            )
-            dagster_run_id = _create_and_submit_fred_run_or_raise(
-                instance=instance,
-                handle=handle,
-                control_run_id=normalized_run_id,
-                execution_mode=plan.execution_mode,
-                partition_ids=plan.partition_ids,
-            )
-            completed_run = _wait_for_run_success_or_raise(
-                instance=instance,
-                run_id=dagster_run_id,
-            )
-            reconcile_batch_summary: dict[str, Any] | None = None
-            if plan.execution_mode == 'reconcile':
-                if plan.partition_ids == ():
-                    raise RuntimeError(
-                        'FRED reconcile plan must include at least one partition id'
-                    )
-                reconcile_batch_summary = (
-                    _load_reconcile_partition_batch_summary_or_raise(
-                        client=planning_client,
-                        database=planning_database,
-                        partition_ids=plan.partition_ids,
-                    )
-                )
-            completed_runs.append(
-                {
-                    'execution_mode': plan.execution_mode,
-                    'partition_ids': list(plan.partition_ids),
-                    'ambiguous_partition_count': plan.ambiguous_partition_count,
-                    'source_window_start': plan.source_window_start,
-                    'source_window_end': plan.source_window_end,
-                    'source_window_days': plan.source_window_days,
-                    'dagster_run_id': dagster_run_id,
-                    'started_at_utc': completed_run.started_at_utc.isoformat(),
-                    'finished_at_utc': completed_run.finished_at_utc.isoformat(),
-                    'reconcile_batch_summary': reconcile_batch_summary,
-                }
-            )
-            if plan.execution_mode == 'reconcile':
-                continue
-            break
-        summary = _load_fred_backfill_summary_or_raise(
-            client=planning_client,
-            database=planning_database,
-        )
-        return {
-            'dataset': _DATASET,
-            'job_name': _FRED_JOB_NAME,
-            'run_id': normalized_run_id,
-            'dagster_run_id': completed_runs[-1]['dagster_run_id'],
-            'started_at_utc': completed_runs[0]['started_at_utc'],
-            'finished_at_utc': completed_runs[-1]['finished_at_utc'],
-            'completed_runs': completed_runs,
-            'proof_summary': summary,
-        }
-    finally:
-        if planning_client is not None:
-            planning_client.disconnect()
-        if handle is not None:
-            handle.workspace_process_context.__exit__(None, None, None)
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_fred_backfill_runner.run_s34_fred_backfill_or_raise'
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -556,8 +479,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
-    print(run_s34_fred_backfill_or_raise(run_id=args.run_id))
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_fred_backfill_runner.main'
+    )
 
 
 if __name__ == '__main__':

@@ -1,6 +1,14 @@
 # Changelog
 
 ## 2026-03-30
+- Froze the master doctrine and universal task gates as whole-system Origo law:
+  - added the atomic master doctrine contract `contracts/governance/master-doctrine.json` with the closed foundation set for whole-system Origo work
+  - added fail-closed universal start and end gates in `contracts/governance/task-start-gate.json` and `contracts/governance/task-end-gate.json`
+  - rewired `AGENTS.md` so every task now loads the master doctrine and must pass the start gate before work and the end gate before any `done` / `ready` / `mergeable` claim
+  - updated governance authority and contract applicability so the doctrine and gates are universal machine-routed contracts rather than optional reference material
+  - added focused governance tests and refreshed the deterministic governance fixtures so drift in doctrine universality or task-gate routing fails loudly
+- Updated version to `origo-control-plane v1.2.91` (`Origo API` `v0.1.36`).
+
 - Froze governance scope as whole-system Origo law:
   - governance routing and machine contracts now state explicitly that they apply to the whole Origo system and all future development, not only to the currently open slices
   - Dagster authority no longer uses slice-era temporary write-entrypoint wording; it now encodes one permanent rule for manual writes and one permanent rule for automated Dagster-native writes

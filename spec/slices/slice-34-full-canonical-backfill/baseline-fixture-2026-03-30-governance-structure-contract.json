@@ -11,21 +11,39 @@
   "fixture_window": {
     "start_utc": "2026-03-30T00:00:00Z",
     "end_utc": "2026-03-30T23:59:59Z",
-    "scope": "Governance-structure contract surfaces for AGENTS-only routing, shared-domain overlay routing, and the atomic whole-system machine-contract hierarchy."
+    "scope": "Governance-structure contract surfaces for AGENTS-only routing, the universal master doctrine and task gates, shared-domain overlay routing, and the atomic whole-system machine-contract hierarchy."
   },
   "source_checksums": {
     "files": [
       {
         "path": "AGENTS.md",
-        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
-        "bytes": 8114,
-        "line_count": 135
+        "sha256": "32670e63ba00040fe1d49288ac7fd4ff67d4e0282ab510da821d4de30cda93ac",
+        "bytes": 10039,
+        "line_count": 167
       },
       {
         "path": "contracts/governance/governance-authority.json",
-        "sha256": "f1162ed56c11977a2a4fb608fa39f610f25ade3a488a1f994e0a826f47d8d2fb",
-        "bytes": 820,
-        "line_count": 20
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/master-doctrine.json",
+        "sha256": "8774965a2ebb96841f17e2a0357a9ea036ef789bc80fe8728a72b7529176d8b5",
+        "bytes": 2470,
+        "line_count": 52
+      },
+      {
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
+      },
+      {
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
       },
       {
         "path": "contracts/governance/execution-doctrine.json",
@@ -82,10 +100,28 @@
         "line_count": 15
       },
       {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
         "path": "contracts/governance/contract-applicability.json",
-        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
-        "bytes": 6506,
-        "line_count": 258
+        "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
+        "bytes": 6708,
+        "line_count": 266
+      },
+      {
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
         "path": "contracts/governance/storage-sql-discipline.json",
@@ -154,28 +190,34 @@
         "line_count": 11
       },
       {
-        "path": "docs/Developer/README.md",
-        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
-        "bytes": 3546,
-        "line_count": 74
-      },
-      {
         "path": "spec/1-top-level-plan.md",
-        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
-        "bytes": 62980,
-        "line_count": 931
+        "sha256": "01cdfa624d1fca62a33592e3a5babacf09c230e697577c1eb28ae3694764d0cc",
+        "bytes": 63524,
+        "line_count": 946
       },
       {
-        "path": "spec/2-itemized-work-plan.md",
-        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
-        "bytes": 190498,
-        "line_count": 2511
+        "path": "docs/Developer/README.md",
+        "sha256": "c7308bf41368ecedcceaddfcd54a93a7ee6978c122213a8d5f11656f99eb43dd",
+        "bytes": 3688,
+        "line_count": 77
       },
       {
         "path": "tests/contract/test_governance_structure_contract.py",
-        "sha256": "674a80de1f53fd0fc8328116928a6248a74b28e5be7db4c682eaf45ff4a8cecf",
-        "bytes": 4585,
-        "line_count": 97
+        "sha256": "aed8cabe50a4ec6e18659a70cb70e2c2a68b74ca2ca9ff803caa71cb5a9fa714",
+        "bytes": 5331,
+        "line_count": 119
+      },
+      {
+        "path": "tests/contract/test_master_doctrine_contract.py",
+        "sha256": "3761be457491e71e375630baf01a2d2ac170a7437aae76ac4c6e7e94834a2bd5",
+        "bytes": 4299,
+        "line_count": 82
+      },
+      {
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ]
   },
@@ -183,15 +225,33 @@
     "rows": [
       {
         "path": "AGENTS.md",
-        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
-        "bytes": 8114,
-        "line_count": 135
+        "sha256": "32670e63ba00040fe1d49288ac7fd4ff67d4e0282ab510da821d4de30cda93ac",
+        "bytes": 10039,
+        "line_count": 167
       },
       {
         "path": "contracts/governance/governance-authority.json",
-        "sha256": "f1162ed56c11977a2a4fb608fa39f610f25ade3a488a1f994e0a826f47d8d2fb",
-        "bytes": 820,
-        "line_count": 20
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/master-doctrine.json",
+        "sha256": "8774965a2ebb96841f17e2a0357a9ea036ef789bc80fe8728a72b7529176d8b5",
+        "bytes": 2470,
+        "line_count": 52
+      },
+      {
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
+      },
+      {
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
       },
       {
         "path": "contracts/governance/execution-doctrine.json",
@@ -248,10 +308,28 @@
         "line_count": 15
       },
       {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
         "path": "contracts/governance/contract-applicability.json",
-        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
-        "bytes": 6506,
-        "line_count": 258
+        "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
+        "bytes": 6708,
+        "line_count": 266
+      },
+      {
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
         "path": "contracts/governance/storage-sql-discipline.json",
@@ -320,46 +398,70 @@
         "line_count": 11
       },
       {
-        "path": "docs/Developer/README.md",
-        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
-        "bytes": 3546,
-        "line_count": 74
-      },
-      {
         "path": "spec/1-top-level-plan.md",
-        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
-        "bytes": 62980,
-        "line_count": 931
+        "sha256": "01cdfa624d1fca62a33592e3a5babacf09c230e697577c1eb28ae3694764d0cc",
+        "bytes": 63524,
+        "line_count": 946
       },
       {
-        "path": "spec/2-itemized-work-plan.md",
-        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
-        "bytes": 190498,
-        "line_count": 2511
+        "path": "docs/Developer/README.md",
+        "sha256": "c7308bf41368ecedcceaddfcd54a93a7ee6978c122213a8d5f11656f99eb43dd",
+        "bytes": 3688,
+        "line_count": 77
       },
       {
         "path": "tests/contract/test_governance_structure_contract.py",
-        "sha256": "674a80de1f53fd0fc8328116928a6248a74b28e5be7db4c682eaf45ff4a8cecf",
-        "bytes": 4585,
-        "line_count": 97
+        "sha256": "aed8cabe50a4ec6e18659a70cb70e2c2a68b74ca2ca9ff803caa71cb5a9fa714",
+        "bytes": 5331,
+        "line_count": 119
+      },
+      {
+        "path": "tests/contract/test_master_doctrine_contract.py",
+        "sha256": "3761be457491e71e375630baf01a2d2ac170a7437aae76ac4c6e7e94834a2bd5",
+        "bytes": 4299,
+        "line_count": 82
+      },
+      {
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ],
-    "file_count": 27,
-    "aggregate_sha256": "504b1b205a6af4b26823350b4ac6be1ff7d0bedfca69d1619a27bf843ea76a8d"
+    "file_count": 34,
+    "aggregate_sha256": "a6962827c32d998ce58d743485c2007c6a1f6a545cfd39632832e34f69f29dd3"
   },
   "run_2_fingerprints": {
     "rows": [
       {
         "path": "AGENTS.md",
-        "sha256": "4e2b4f0277910fb06e0b433383f05b9d5388474c7cd01a8816b59ecdf5d7e157",
-        "bytes": 8114,
-        "line_count": 135
+        "sha256": "32670e63ba00040fe1d49288ac7fd4ff67d4e0282ab510da821d4de30cda93ac",
+        "bytes": 10039,
+        "line_count": 167
       },
       {
         "path": "contracts/governance/governance-authority.json",
-        "sha256": "f1162ed56c11977a2a4fb608fa39f610f25ade3a488a1f994e0a826f47d8d2fb",
-        "bytes": 820,
-        "line_count": 20
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
+      },
+      {
+        "path": "contracts/governance/master-doctrine.json",
+        "sha256": "8774965a2ebb96841f17e2a0357a9ea036ef789bc80fe8728a72b7529176d8b5",
+        "bytes": 2470,
+        "line_count": 52
+      },
+      {
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
+      },
+      {
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
       },
       {
         "path": "contracts/governance/execution-doctrine.json",
@@ -416,10 +518,28 @@
         "line_count": 15
       },
       {
+        "path": "contracts/governance/pr-review-routing.json",
+        "sha256": "ff2c86875c09230276b115ca033941d1db90e5c885b7df94587ac6f5095a0334",
+        "bytes": 404,
+        "line_count": 13
+      },
+      {
         "path": "contracts/governance/contract-applicability.json",
-        "sha256": "202d739195fc82d37ccdce68058e4a507fa5d2c0f4e8818b95a01642737d2086",
-        "bytes": 6506,
-        "line_count": 258
+        "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
+        "bytes": 6708,
+        "line_count": 266
+      },
+      {
+        "path": "contracts/governance/dagster-authority.json",
+        "sha256": "5fea65ba03db62d991609db74616c7a542fd0cd06771b31b6acd5366bab58490",
+        "bytes": 1202,
+        "line_count": 21
+      },
+      {
+        "path": "contracts/governance/ingest-throughput.json",
+        "sha256": "deac728b0764056b8295a1d7d4e9986917973194f6d237cfc7cf90529e046f50",
+        "bytes": 758,
+        "line_count": 18
       },
       {
         "path": "contracts/governance/storage-sql-discipline.json",
@@ -488,31 +608,37 @@
         "line_count": 11
       },
       {
-        "path": "docs/Developer/README.md",
-        "sha256": "862f8a65f73e91234ea8757aa6ece125124483274c3ed97837ce41b4ae6ca34b",
-        "bytes": 3546,
-        "line_count": 74
-      },
-      {
         "path": "spec/1-top-level-plan.md",
-        "sha256": "26e12d77739648e54d380b484e72d3f03a1015eab18bbe72abff4fb1c6f4007a",
-        "bytes": 62980,
-        "line_count": 931
+        "sha256": "01cdfa624d1fca62a33592e3a5babacf09c230e697577c1eb28ae3694764d0cc",
+        "bytes": 63524,
+        "line_count": 946
       },
       {
-        "path": "spec/2-itemized-work-plan.md",
-        "sha256": "4b191597b7d7c023176111a8e34c60ad58c95fd5743dcbd185d39643359080fd",
-        "bytes": 190498,
-        "line_count": 2511
+        "path": "docs/Developer/README.md",
+        "sha256": "c7308bf41368ecedcceaddfcd54a93a7ee6978c122213a8d5f11656f99eb43dd",
+        "bytes": 3688,
+        "line_count": 77
       },
       {
         "path": "tests/contract/test_governance_structure_contract.py",
-        "sha256": "674a80de1f53fd0fc8328116928a6248a74b28e5be7db4c682eaf45ff4a8cecf",
-        "bytes": 4585,
-        "line_count": 97
+        "sha256": "aed8cabe50a4ec6e18659a70cb70e2c2a68b74ca2ca9ff803caa71cb5a9fa714",
+        "bytes": 5331,
+        "line_count": 119
+      },
+      {
+        "path": "tests/contract/test_master_doctrine_contract.py",
+        "sha256": "3761be457491e71e375630baf01a2d2ac170a7437aae76ac4c6e7e94834a2bd5",
+        "bytes": 4299,
+        "line_count": 82
+      },
+      {
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ],
-    "file_count": 27,
-    "aggregate_sha256": "504b1b205a6af4b26823350b4ac6be1ff7d0bedfca69d1619a27bf843ea76a8d"
+    "file_count": 34,
+    "aggregate_sha256": "a6962827c32d998ce58d743485c2007c6a1f6a545cfd39632832e34f69f29dd3"
   }
 }

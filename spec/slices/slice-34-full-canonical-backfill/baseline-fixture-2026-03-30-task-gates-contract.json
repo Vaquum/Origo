@@ -11,7 +11,7 @@
   "fixture_window": {
     "start_utc": "2026-03-30T00:00:00Z",
     "end_utc": "2026-03-30T23:59:59Z",
-    "scope": "Task-admission governance contract surfaces for fail-closed request admission and no-route-no-work enforcement."
+    "scope": "Universal task-gate governance contract surfaces for fail-closed task start and completion claims."
   },
   "source_checksums": {
     "files": [
@@ -22,34 +22,28 @@
         "line_count": 167
       },
       {
-        "path": "contracts/governance/request-task-coverage.json",
-        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
-        "bytes": 5528,
-        "line_count": 157
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
       },
       {
-        "path": "contracts/governance/task-admission.json",
-        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
-        "bytes": 939,
-        "line_count": 15
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
+      },
+      {
+        "path": "contracts/governance/governance-authority.json",
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
       },
       {
         "path": "contracts/governance/contract-applicability.json",
         "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
         "bytes": 6708,
         "line_count": 266
-      },
-      {
-        "path": "docs/Developer/task-admission-contract.md",
-        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
-        "bytes": 877,
-        "line_count": 20
-      },
-      {
-        "path": "docs/Developer/request-task-coverage-contract.md",
-        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
-        "bytes": 1051,
-        "line_count": 21
       },
       {
         "path": "docs/Developer/README.md",
@@ -70,10 +64,10 @@
         "line_count": 2516
       },
       {
-        "path": "tests/contract/test_task_admission_contract.py",
-        "sha256": "2a31930091ea3b58417dae27f05eef45a6e9be3d6cf7124fc2f77d36a5633dfe",
-        "bytes": 4245,
-        "line_count": 77
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ]
   },
@@ -86,34 +80,28 @@
         "line_count": 167
       },
       {
-        "path": "contracts/governance/request-task-coverage.json",
-        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
-        "bytes": 5528,
-        "line_count": 157
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
       },
       {
-        "path": "contracts/governance/task-admission.json",
-        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
-        "bytes": 939,
-        "line_count": 15
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
+      },
+      {
+        "path": "contracts/governance/governance-authority.json",
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
       },
       {
         "path": "contracts/governance/contract-applicability.json",
         "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
         "bytes": 6708,
         "line_count": 266
-      },
-      {
-        "path": "docs/Developer/task-admission-contract.md",
-        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
-        "bytes": 877,
-        "line_count": 20
-      },
-      {
-        "path": "docs/Developer/request-task-coverage-contract.md",
-        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
-        "bytes": 1051,
-        "line_count": 21
       },
       {
         "path": "docs/Developer/README.md",
@@ -134,14 +122,14 @@
         "line_count": 2516
       },
       {
-        "path": "tests/contract/test_task_admission_contract.py",
-        "sha256": "2a31930091ea3b58417dae27f05eef45a6e9be3d6cf7124fc2f77d36a5633dfe",
-        "bytes": 4245,
-        "line_count": 77
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ],
-    "file_count": 10,
-    "aggregate_sha256": "8d96df9ef3e19a3934687155438d3f3028dfe3d97febc054f337acf72ca87222"
+    "file_count": 9,
+    "aggregate_sha256": "8967d36f323abebf126489be8a78e5794f9a809b29958ccb79209200c7aea475"
   },
   "run_2_fingerprints": {
     "rows": [
@@ -152,34 +140,28 @@
         "line_count": 167
       },
       {
-        "path": "contracts/governance/request-task-coverage.json",
-        "sha256": "5c6835ccc516b6ed3912b9712855dd1c33077d3c83f298ac9ba9cccdb33e78cb",
-        "bytes": 5528,
-        "line_count": 157
+        "path": "contracts/governance/task-start-gate.json",
+        "sha256": "e0bc6828eb5f63dd35a1375940a4f3c52cf0a056ccf25af00da79bf13798fbc3",
+        "bytes": 1811,
+        "line_count": 42
       },
       {
-        "path": "contracts/governance/task-admission.json",
-        "sha256": "e180aab8cb7a5700bb94703fa2adc75fba619d039fa38edc5ad8423f28d9b1a3",
-        "bytes": 939,
-        "line_count": 15
+        "path": "contracts/governance/task-end-gate.json",
+        "sha256": "ec1dd582844e5ecf1b61db2532ee92be00463b1163b2cb2edd2a86a58bcb65bb",
+        "bytes": 2153,
+        "line_count": 50
+      },
+      {
+        "path": "contracts/governance/governance-authority.json",
+        "sha256": "5337f7da29e03998111cc65b51ab070c02bc77955d3c6cf0ed7c1ec1c6ee3d41",
+        "bytes": 1064,
+        "line_count": 27
       },
       {
         "path": "contracts/governance/contract-applicability.json",
         "sha256": "dde5422253416a5e17a84af8fa4ed40d61fded6e655ffa0468df5e436ee305e6",
         "bytes": 6708,
         "line_count": 266
-      },
-      {
-        "path": "docs/Developer/task-admission-contract.md",
-        "sha256": "c635ed09697783a741fd9baf7dc1efa0c7a2130cad3d32304447b572d995c059",
-        "bytes": 877,
-        "line_count": 20
-      },
-      {
-        "path": "docs/Developer/request-task-coverage-contract.md",
-        "sha256": "a5c86f3ace99f974972d53d653593e050832b66d5822f111db81b42d058dc75b",
-        "bytes": 1051,
-        "line_count": 21
       },
       {
         "path": "docs/Developer/README.md",
@@ -200,13 +182,13 @@
         "line_count": 2516
       },
       {
-        "path": "tests/contract/test_task_admission_contract.py",
-        "sha256": "2a31930091ea3b58417dae27f05eef45a6e9be3d6cf7124fc2f77d36a5633dfe",
-        "bytes": 4245,
-        "line_count": 77
+        "path": "tests/contract/test_task_gates_contract.py",
+        "sha256": "01f9687db49019bd513b20c155e577303db92a45f75ed79805e695f2a1aadf96",
+        "bytes": 6876,
+        "line_count": 130
       }
     ],
-    "file_count": 10,
-    "aggregate_sha256": "8d96df9ef3e19a3934687155438d3f3028dfe3d97febc054f337acf72ca87222"
+    "file_count": 9,
+    "aggregate_sha256": "8967d36f323abebf126489be8a78e5794f9a809b29958ccb79209200c7aea475"
   }
 }

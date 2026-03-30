@@ -1,0 +1,50 @@
+{
+  "scope": "whole_system_and_all_future_development",
+  "applies_to_every_task_type": true,
+  "must_be_loaded_before_any_done_ready_complete_or_mergeable_claim": true,
+  "fail_closed_on_no_or_unknown": true,
+  "failed_gate_requires_operator_report_instead_of_completion_claim": true,
+  "questions_order_is_mandatory": true,
+  "questions": [
+    {
+      "id": "mechanism_reduced_or_not_added",
+      "prompt": "Did I reduce or avoid mechanism rather than add clever machinery?"
+    },
+    {
+      "id": "correct_path_now_easiest",
+      "prompt": "Is the correct path now easier than the shortcut on the authoritative surfaces?"
+    },
+    {
+      "id": "no_new_babysitting_burden",
+      "prompt": "Did I avoid introducing routine babysitting operator tending or hidden upkeep burden?"
+    },
+    {
+      "id": "mechanically_enforced_on_authoritative_surfaces",
+      "prompt": "Is the governing behavior now enforced mechanically on authoritative surfaces rather than merely explained?"
+    },
+    {
+      "id": "no_speculative_non_foundation_scope",
+      "prompt": "Did I avoid speculative non-foundation work and keep the implementation inside the forced scope of the task?"
+    },
+    {
+      "id": "one_path_only",
+      "prompt": "Is there now exactly one valid path for this concern or an explicit migration path with end state and deadline?"
+    },
+    {
+      "id": "surface_area_actually_small",
+      "prompt": "Did I minimize knobs options and abstractions while keeping legitimate environment variance in env vars only?"
+    },
+    {
+      "id": "technology_still_boring",
+      "prompt": "Did I keep the implementation on the most proven operable and well understood technology that satisfies the contract?"
+    },
+    {
+      "id": "claimed_terminal_state_is_real",
+      "prompt": "If I am claiming done ready complete or mergeable is the claimed terminal state actually reached rather than merely prepared?"
+    },
+    {
+      "id": "no_authoritative_loophole_remaining",
+      "prompt": "Have I closed every remaining authoritative loophole that would let another agent violate this concern without tripping machinery?"
+    }
+  ]
+}

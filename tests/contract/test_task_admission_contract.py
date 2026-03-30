@@ -62,9 +62,11 @@ def test_repo_governance_surfaces_reference_task_admission_contract() -> None:
     assert '`S34-G11`' in work_plan_text
     assert '`S34-G12`' in work_plan_text
     assert '`S34-G13`' in work_plan_text
+    assert '`S34-G14`' in work_plan_text
     assert '`S34-11g`' in work_plan_text
     assert '`S34-11h`' in work_plan_text
     assert '`S34-11i`' in work_plan_text
+    assert '`S34-11j`' in work_plan_text
     assert 'Canonical machine contract: `contracts/governance/task-admission.json`' in dev_doc_text
     assert 'contracts/governance/request-task-coverage.json' in dev_doc_text
     assert 'contracts/governance/contract-applicability.json' in dev_doc_text

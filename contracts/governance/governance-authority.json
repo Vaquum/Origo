@@ -7,6 +7,11 @@
     "routing",
     "contract"
   ],
+  "universal_contracts_required_for_every_task": [
+    "master-doctrine.json",
+    "task-start-gate.json",
+    "task-end-gate.json"
+  ],
   "task_specific_routing_must_live_only_in_agents": true,
   "shared_domain_overlay_routing_must_live_only_in_agents": true,
   "governance_contracts_must_be_atomic": true,
@@ -15,6 +20,8 @@
   "historical_slice_docs_role_for_governance": "non_authoritative",
   "machine_contracts_override_prose": true,
   "task_start_must_begin_from_agents_routing": true,
+  "task_end_must_begin_from_agents_routing": true,
+  "completion_claim_without_end_gate_is_invalid": true,
   "open_slice_scope_must_not_limit_governance_scope": true,
   "every_touched_system_surface_must_have_routed_contract_coverage": true
 }

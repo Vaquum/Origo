@@ -25,6 +25,9 @@ def test_contract_applicability_payload_is_exact() -> None:
     assert payload == {
         'universal_contracts': [
             'governance-authority.json',
+            'master-doctrine.json',
+            'task-start-gate.json',
+            'task-end-gate.json',
             'execution-doctrine.json',
             'static-analysis.json',
             'work-plan-discipline.json',
@@ -274,6 +277,9 @@ def test_contract_applicability_is_routed_and_referenced() -> None:
     assert 'contracts/governance/contract-applicability.json' in dev_doc_text
     assert 'contracts/governance/contract-applicability.json' in dev_index_text
     assert 'shared-domain contract' in dev_doc_text or 'shared-domain' in agents_text
+    assert 'contracts/governance/master-doctrine.json' in agents_text
+    assert 'contracts/governance/task-start-gate.json' in agents_text
+    assert 'contracts/governance/task-end-gate.json' in agents_text
     assert 'After primary task-type assignment, load every activated shared-domain contract' in agents_text
     assert 'If the request touches any system surface without routed shared-domain contract coverage' in agents_text
 

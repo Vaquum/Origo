@@ -23,8 +23,11 @@ alwaysApply: true
 
 ## Universal Contract Routing
 
-Load these contracts for every task before work starts:
+Load these contracts for every task as soon as the request is routed:
 - `contracts/governance/governance-authority.json`
+- `contracts/governance/master-doctrine.json`
+- `contracts/governance/task-start-gate.json`
+- `contracts/governance/task-end-gate.json`
 - `contracts/governance/execution-doctrine.json`
 - `contracts/governance/static-analysis.json`
 - `contracts/governance/work-plan-discipline.json`
@@ -32,6 +35,35 @@ Load these contracts for every task before work starts:
 - `contracts/governance/slice-closeout.json`
 - `contracts/governance/pr-review-routing.json`
 - `contracts/governance/contract-applicability.json`
+
+## Master Doctrine
+
+Load `contracts/governance/master-doctrine.json` for every task.
+
+Fail-closed rules:
+- The eight master principles in `contracts/governance/master-doctrine.json` govern every slice, step, move, task, and completion claim in Origo.
+- `mechanical_enforcement_over_documentation` is the prime doctrine.
+- The closed foundation set lives only in `contracts/governance/master-doctrine.json`.
+- Anything outside the closed foundation set is deferrable until forced.
+- Foundation expansion requires explicit operator approval before implementation starts.
+- If any planned work contradicts the master doctrine, stop immediately and report back to the operator before doing any work.
+
+## Universal Start Gate
+
+Before any repo mutation, runtime action, browser action, deploy action, PR action, or data mutation, load `contracts/governance/task-start-gate.json` and answer every start-gate question in order.
+
+Fail-closed rules:
+- If any start-gate answer is `no` or `unknown`, stop immediately and report back to the operator before doing any work.
+- No implementation, runtime mutation, repo mutation, PR work, deploy work, browser work, or data write may proceed before the start gate passes.
+
+## Universal End Gate
+
+Before any `done`, `ready`, `complete`, `mergeable`, `ready for review`, or similar terminal claim, load `contracts/governance/task-end-gate.json` and answer every end-gate question in order.
+
+Fail-closed rules:
+- If any end-gate answer is `no` or `unknown`, stop immediately and report back to the operator instead of making the claim.
+- A task is not done if the claimed terminal state is only prepared rather than actually reached.
+- A PR is not ready, complete, or mergeable until the required review contract has actually been satisfied.
 
 ## Before every slice
 

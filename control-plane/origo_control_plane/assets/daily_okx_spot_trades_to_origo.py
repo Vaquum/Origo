@@ -436,6 +436,7 @@ def insert_daily_okx_spot_trades_to_origo(
         return result_data
     finally:
         if client is not None and stage_table is not None:
+            active_exception = sys.exc_info()[1]
             try:
                 drop_staged_okx_spot_trade_csv_or_raise(
                     client=client,
@@ -443,7 +444,6 @@ def insert_daily_okx_spot_trades_to_origo(
                     stage_table=stage_table,
                 )
             except Exception as exc:
-                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'OKX stage table cleanup failed during cleanup: {exc}'
@@ -456,10 +456,10 @@ def insert_daily_okx_spot_trades_to_origo(
                         f'Failed to drop OKX stage table cleanly: {exc}'
                     ) from exc
         if client is not None:
+            active_exception = sys.exc_info()[1]
             try:
                 client.disconnect()
             except Exception as exc:
-                active_exception = sys.exc_info()[1]
                 if active_exception is not None:
                     active_exception.add_note(
                         f'ClickHouse disconnect failed during cleanup: {exc}'

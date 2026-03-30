@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-03-30
+- Landed the remaining Slice 34 correctness residue from stale local work on top of merged `main`:
+  - split exchange runtime defaults into explicit live (`inline`) and backfill (`deferred`) Dagster tag helpers so scheduled runs cannot silently inherit backfill semantics
+  - hard-disabled the surviving historical Slice-34 helper write entrypoints so repo-native helper runners/controllers remain provenance-only and cannot mutate canonical state
+  - replaced the remaining hard-coded monthly Binance source timeout with the existing env-backed Binance timeout contract
+  - added focused contract coverage for the helper write disablement and the live-vs-backfill runtime-tag split
+- Updated version to `origo-control-plane v1.2.92` (`Origo API` `v0.1.37`).
+
 - Froze the master doctrine and universal task gates as whole-system Origo law:
   - added the atomic master doctrine contract `contracts/governance/master-doctrine.json` with the closed foundation set for whole-system Origo work
   - added fail-closed universal start and end gates in `contracts/governance/task-start-gate.json` and `contracts/governance/task-end-gate.json`

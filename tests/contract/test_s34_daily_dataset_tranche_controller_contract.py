@@ -86,59 +86,16 @@ def test_plan_next_daily_batch_rejects_non_exchange_daily_dataset() -> None:
         )
 
 
-def test_daily_dataset_tranche_controller_chains_batches_until_no_remaining_work(
-    monkeypatch: Any,
-) -> None:
-    planned_batches = iter(
-        (
-            controller.DailyBatchPlan(
-                dataset='okx_spot_trades',
-                execution_mode='reconcile',
-                partition_ids=('2021-09-01', '2021-09-02'),
-                batch_start_partition_id='2021-09-01',
-                batch_end_partition_id='2021-09-02',
-                end_date=None,
-                run_id='run-1',
-            ),
-            controller.DailyBatchPlan(
-                dataset='okx_spot_trades',
-                execution_mode='backfill',
-                partition_ids=('2021-09-03', '2021-09-04'),
-                batch_start_partition_id='2021-09-03',
-                batch_end_partition_id='2021-09-04',
-                end_date=date(2021, 9, 4),
-                run_id='run-2',
-            ),
-            None,
-        )
-    )
-    backfill_calls: list[dict[str, Any]] = []
-
-    monkeypatch.setattr(
-        controller,
-        'plan_next_daily_batch_or_raise',
-        lambda **_: next(planned_batches),
-    )
-    monkeypatch.setattr(
-        controller,
-        'run_exchange_backfill',
-        lambda **kwargs: backfill_calls.append(kwargs)
-        or {'run_id': kwargs['run_id'], 'dataset': kwargs['dataset']},
-    )
-
-    result = controller.run_daily_dataset_tranche_controller_or_raise(
+def test_daily_dataset_tranche_controller_helper_write_execution_is_disabled() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match='historical helper surface only',
+    ):
+        controller.run_daily_dataset_tranche_controller_or_raise(
         dataset='okx_spot_trades',
         plan_end_date=date(2021, 9, 10),
         batch_size_days=2,
         concurrency=20,
         projection_mode='deferred',
         runtime_audit_mode='summary',
-    )
-
-    assert result['completed_batch_count'] == 2
-    assert result['controller_stopped_reason'] == 'no_remaining_work'
-    assert [call['run_id'] for call in backfill_calls] == ['run-1', 'run-2']
-    assert backfill_calls[0]['execution_mode'] == 'reconcile'
-    assert backfill_calls[0]['partition_ids'] == ['2021-09-01', '2021-09-02']
-    assert backfill_calls[1]['execution_mode'] == 'backfill'
-    assert backfill_calls[1]['end_date'] == date(2021, 9, 4)
+        )

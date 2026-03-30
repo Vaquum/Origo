@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 from __future__ import annotations
 
 import argparse
@@ -19,8 +20,10 @@ from origo_control_plane.backfill import (
     load_last_completed_daily_partition_from_canonical_or_raise,
     remaining_daily_partitions_or_raise,
 )
+from origo_control_plane.backfill.runtime_contract import (
+    raise_forbidden_helper_write_path_or_raise,
+)
 from origo_control_plane.config import resolve_clickhouse_native_settings
-from origo_control_plane.s34_exchange_backfill_runner import run_exchange_backfill
 from origo_control_plane.s34_partition_authority import (
     load_nonterminal_partition_ids_for_stream_or_raise,
 )
@@ -233,58 +236,9 @@ def run_daily_dataset_tranche_controller_or_raise(
     run_id_prefix: str = 's34-tranche',
     max_batches: int | None = None,
 ) -> dict[str, Any]:
-    if max_batches is not None and max_batches <= 0:
-        raise RuntimeError(f'max_batches must be > 0 when provided, got {max_batches}')
-
-    completed_batches: list[dict[str, Any]] = []
-    executed_batches = 0
-    while True:
-        if max_batches is not None and executed_batches >= max_batches:
-            break
-        batch = plan_next_daily_batch_or_raise(
-            dataset=dataset,
-            plan_end_date=plan_end_date,
-            batch_size_days=batch_size_days,
-            run_id_prefix=run_id_prefix,
-        )
-        if batch is None:
-            break
-        result = run_exchange_backfill(
-            dataset=batch.dataset,
-            end_date=batch.end_date,
-            max_partitions=None,
-            run_id=batch.run_id,
-            dry_run=False,
-            projection_mode=projection_mode,
-            runtime_audit_mode=runtime_audit_mode,
-            concurrency=concurrency,
-            execution_mode=batch.execution_mode,
-            partition_ids=(None if batch.execution_mode == 'backfill' else list(batch.partition_ids)),
-        )
-        completed_batches.append(
-            {
-                'dataset': batch.dataset,
-                'execution_mode': batch.execution_mode,
-                'batch_start_partition_id': batch.batch_start_partition_id,
-                'batch_end_partition_id': batch.batch_end_partition_id,
-                'run_id': batch.run_id,
-                'result': result,
-            }
-        )
-        executed_batches += 1
-
-    return {
-        'dataset': dataset,
-        'plan_end_date': plan_end_date.isoformat(),
-        'batch_size_days': batch_size_days,
-        'completed_batch_count': len(completed_batches),
-        'completed_batches': completed_batches,
-        'controller_stopped_reason': (
-            'max_batches_reached'
-            if max_batches is not None and executed_batches >= max_batches
-            else 'no_remaining_work'
-        ),
-    }
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_daily_dataset_tranche_controller.run_daily_dataset_tranche_controller_or_raise'
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -306,18 +260,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
-    result = run_daily_dataset_tranche_controller_or_raise(
-        dataset=_parse_dataset_or_raise(args.dataset),
-        plan_end_date=_parse_iso_date_or_raise(args.plan_end_date),
-        batch_size_days=args.batch_size_days,
-        concurrency=args.concurrency,
-        projection_mode=_parse_projection_mode_or_raise(args.projection_mode),
-        runtime_audit_mode=_parse_runtime_audit_mode_or_raise(args.runtime_audit_mode),
-        run_id_prefix=args.run_id_prefix,
-        max_batches=args.max_batches,
+    raise_forbidden_helper_write_path_or_raise(
+        helper_name='s34_daily_dataset_tranche_controller.main'
     )
-    print(result)
 
 
 if __name__ == '__main__':

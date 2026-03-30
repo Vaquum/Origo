@@ -1,0 +1,13 @@
+{
+  "review_authority": "zero-bang",
+  "forbidden_pr_authors": [
+    "zero-bang"
+  ],
+  "required_review_request": true,
+  "must_wait_for_review_outcome": true,
+  "must_resolve_all_conversations_before_rerequest": true,
+  "must_rerequest_review_after_conversation_resolution": true,
+  "required_approvals": 1,
+  "approval_must_come_from": "zero-bang",
+  "merge_requires_final_zero_bang_approval": true
+}

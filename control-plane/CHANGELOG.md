@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.84 on 30th of March, 2026
+
+- Froze the PR review-routing governance contract around `zero-bang`:
+  - `zero-bang` is reviewer/approver only and must never be used as the git user or PR author for normal engineering work
+  - every PR must request `zero-bang` review, resolve all review conversations, re-request review after fixes, and merge only after final `zero-bang` approval
+  - added a machine-checkable governance contract plus focused contract coverage so the routing rule cannot drift back into operator habit
+
 ## v1.2.83 on 29th of March, 2026
 
 - Closed the Slice 34 FRED direct-Dagster reconcile planning gap:

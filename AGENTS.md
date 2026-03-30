@@ -19,6 +19,13 @@ Read `spec/1-top-level-plan.md` and `spec/2-itemized-work-plan.md` in full. No e
 
 Every slice is `Capability → Proof → Guardrails`. In that order. No skipping ahead.
 
+## Pull Request Governance
+
+- `zero-bang` must never be used as the git user, PR author, or implementation identity.
+- Every PR must request review from `zero-bang` and wait for the review outcome before merge.
+- If `zero-bang` leaves review comments or requested changes, resolve every conversation and then re-request `zero-bang` review.
+- Merge only after `zero-bang` approves the final PR state.
+
 ## After every slice
 
 A slice is not done until all of the following are complete. Do not report done before then.

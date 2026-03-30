@@ -1,4 +1,6 @@
 ## What was done
+- Froze the PR review-routing governance contract for active Slice 34 work by updating [AGENTS.md](../../../AGENTS.md), [spec/1-top-level-plan.md](../../1-top-level-plan.md), and [spec/2-itemized-work-plan.md](../../2-itemized-work-plan.md) so `zero-bang` is reviewer/approver only, never the PR author, and every merge path must flow through resolved conversations plus final re-requested review.
+- Added the machine-checkable governance contract [contracts/governance/pr-review-routing.json](../../../contracts/governance/pr-review-routing.json), the live developer reference [docs/Developer/pr-review-routing-contract.md](../../../docs/Developer/pr-review-routing-contract.md), and focused contract coverage in [tests/contract/test_pr_review_routing_contract.py](../../../tests/contract/test_pr_review_routing_contract.py) so the routing rule cannot drift back into tribal knowledge.
 - Added the `playwright` Python runtime dependency to the control-plane package and refreshed `control-plane/uv.lock` at version `1.2.69`.
 - Patched [docker/Dockerfile.control-plane](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/docker/Dockerfile.control-plane) to install the Debian/Chromium runtime libraries required by Playwright on the deployed control-plane image and to run `python -m playwright install chromium` during image build.
 - Added [tests/contract/test_s34_etf_browser_runtime_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_s34_etf_browser_runtime_contract.py) so Slice 34 fails loudly if the control-plane dependency set, Docker runtime, or deploy workflow drops browser support again.
@@ -26,6 +28,7 @@
 - Extended [test_s34_fred_backfill_contract.py](/Users/mikkokotila/Library/Mobile%20Documents/com~apple~CloudDocs/WIP/projects/Origo/tests/contract/test_s34_fred_backfill_contract.py) so planner drift between the FRED runner and Dagster job fails loudly.
 
 ## Current state
+- PR routing is now an explicit repo contract instead of operator memory: `zero-bang` may review and approve but may not author normal engineering PRs, and merge readiness now requires the full request-review -> resolve-conversations -> re-request-review -> approve sequence.
 - Local proof shows the control-plane image now builds successfully with Playwright and Chromium installed.
 - Deterministic local replay passed twice with the same validation summaries and the same Docker image id `sha256:d5bcb93c91764e241f7e6d003d733cd561872e4915800086033c77582a1b45a8`.
 - `S34-C5f` is live-proven on `main`: the deployed ETF Dagster path now gets past the missing-Playwright failure and reaches real issuer payload parsing.
@@ -45,6 +48,7 @@
 - The current server archive remains sparse. Historical ETF completeness cannot be claimed beyond the archived issuer artifacts already stored under `raw-artifacts/`.
 
 ## Watch out
+- The repo now encodes the PR-routing rule, but GitHub-side reviewer/branch-protection settings still need to continue matching the contract. If the hosted repo ever allows a merge path that bypasses final `zero-bang` approval, hosted policy has drifted away from repo truth.
 - Slice 34 as a whole is still open; these artifacts only close the local proof legs for `S34-C2l`, `S34-C5g`, and `S34-C5j`.
 - The live ETF rerun for `S34-C5g` must happen on the deployed server Dagster runtime because the real proof depends on the actual archive inventory and current archived revision mix.
 - The live ETF proof for `S34-C5j` must verify that zero-history snapshot-only issuers are surfaced as such without blocking ETF replay progress for the issuers whose historical claim is non-empty.

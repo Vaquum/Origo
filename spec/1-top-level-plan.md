@@ -34,6 +34,13 @@ Every slice must pass:
 4. A slice cannot close with outstanding lint/type debt.
 5. Any temporary ignore requires explicit rationale, owner, and expiry slice.
 
+## PR Governance Contract
+1. `zero-bang` is review authority only and must never be used as the git user, PR author, or implementation identity for normal engineering changes.
+2. Every pull request must request `zero-bang` review before merge.
+3. If `zero-bang` leaves review comments or requested changes, the author must resolve every conversation and then re-request `zero-bang` review.
+4. Merge is allowed only after `zero-bang` approves the final PR revision.
+5. Any workflow that depends on `zero-bang` self-authoring a PR is invalid by contract.
+
 ## Program Status (As of 2026-03-12)
 1. Slices `0-11` and `13-32` are merged to `main`.
 2. Slice `12` is crossed over for this phase:

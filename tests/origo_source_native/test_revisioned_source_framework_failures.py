@@ -155,5 +155,32 @@ def test_every_failure_is_visible_in_one_log_without_blocking_unrelated_work(
         assert any('2020-01-01' in url for url in attempted)
         assert any('2017-08-17' in url for url in attempted)
         assert store.generation(record.partition) == 1
+        # Corrupt a retained copy by removing one genuine row, then require a fresh complete build.
+        client.execute(
+            'ALTER TABLE origo.binance_spot_trades_raw_revisions DELETE '
+            'WHERE build_id=%(build)s AND trade_id=0',
+            {'build': record.build_id},
+            settings={'mutations_sync': 2},
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(daily, 'get_response', unavailable)
+            with pytest.raises(OSError):
+                runtime.repair('2017-08-17')
+        assert store.generation(record.partition) == 1
+        repaired = runtime.repair('2017-08-17')
+        assert repaired.generation == 2 and repaired.build_id != record.build_id
+        assert repaired.revision == record.revision
+        assert client.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [
+            (3427,)
+        ]
+        assert client.execute(
+            'SELECT error_code, arraySort(groupArray(event_type)), argMax(event_type, event_time) '
+            'FROM origo.source_failure_log '
+            "WHERE operation='repair' AND partition_key='2017-08-17' "
+            'GROUP BY error_code ORDER BY error_code'
+        ) == [
+            ('OSError', ['FAILED', 'RECOVERED'], 'RECOVERED'),
+            ('RETAINED_CONTENT_INVALID', ['FAILED', 'RECOVERED'], 'RECOVERED'),
+        ]
     finally:
         client.disconnect()

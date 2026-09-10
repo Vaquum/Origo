@@ -139,21 +139,26 @@ class SourceRuntime:
                     self.failures.recover(operation='quarantine', partition=key)
                 return record
         except Exception as error:
-            recorded = self.store.execute(
-                f'SELECT count() FROM {self.store.table("source_failure_log")} '
-                "WHERE build_id=%(build)s AND event_type='FAILED' AND blocking_scope='PARTITION'",
-                {'build': build_id},
-            )
-            if not recorded[0][0]:
-                self.failures.record(
-                    operation=operation,
-                    error_code=failure_code(error),
-                    message=failure_message(error),
-                    scope='PARTITION',
-                    partition=key,
-                    build_id=build_id,
-                )
+            self._record_attempt_failure(operation, key, build_id, error)
             raise
+
+    def _record_attempt_failure(
+        self, operation: str, key: str, build_id: UUID, error: Exception
+    ) -> None:
+        recorded = self.store.execute(
+            f'SELECT count() FROM {self.store.table("source_failure_log")} '
+            "WHERE build_id=%(build)s AND event_type='FAILED' AND blocking_scope='PARTITION'",
+            {'build': build_id},
+        )
+        if not recorded[0][0]:
+            self.failures.record(
+                operation=operation,
+                error_code=failure_code(error),
+                message=failure_message(error),
+                scope='PARTITION',
+                partition=key,
+                build_id=build_id,
+            )
 
     def _build_components(
         self, partition: Partition, revision: Revision, build_id: UUID, expected: int
@@ -397,21 +402,39 @@ class SourceRuntime:
             ),
             None,
         )
-        if record is not None:
-            try:
-                self._validate_retained(record)
-            except RuntimeError:
-                with source_lock(self.lock_root, self.spec.key, 'heavy'):
-                    partition = self.spec.canonical.partition(key)
-                    expected = self.store.generation(partition)
-                    revision = self.spec.canonical.fetch(partition)
-                    rebuilt = self._build_components(partition, revision, uuid4(), expected)
-                    with source_lock(self.lock_root, self.spec.key, _partition_lock(partition)):
-                        self.spec.canonical.revalidate(partition, revision)
-                        self._activate(rebuilt, expected)
-                    self.failures.recover(operation='repair', partition=key)
-                    return rebuilt
-        return self.build(key)
+        if record is None:
+            return self.build(key)
+        try:
+            self._validate_retained(record)
+        except RuntimeError as error:
+            self.failures.record(
+                operation='repair',
+                error_code='RETAINED_CONTENT_INVALID',
+                message=failure_message(error),
+                scope='PARTITION',
+                partition=key,
+                revision=record.revision,
+                build_id=record.build_id,
+            )
+        else:
+            self.failures.recover(operation='repair', partition=key)
+            return record
+        build_id = uuid4()
+        try:
+            with source_lock(self.lock_root, self.spec.key, 'heavy'):
+                partition = self.spec.canonical.partition(key)
+                expected = self.store.generation(partition)
+                revision = self.spec.canonical.fetch(partition)
+                rebuilt = self._build_components(partition, revision, build_id, expected)
+                with source_lock(self.lock_root, self.spec.key, _partition_lock(partition)):
+                    self.spec.canonical.revalidate(partition, revision)
+                    self._activate(rebuilt, expected)
+                self.failures.recover(operation='repair', partition=key)
+                self.failures.recover(operation='component', partition=key)
+                return rebuilt
+        except Exception as error:
+            self._record_attempt_failure('repair', key, build_id, error)
+            raise
 
     def cleanup(self, *, dry_run: bool = True) -> tuple[str, ...]:
         self.spec.require_enabled('cleanup')

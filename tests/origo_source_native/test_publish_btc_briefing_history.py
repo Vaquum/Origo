@@ -13,8 +13,10 @@ import pytest
 from dagster import (
     AssetMaterialization,
     DagsterInstance,
+    MaterializeResult,
     RunRequest,
     SkipReason,
+    asset,
     build_sensor_context,
     materialize,
 )
@@ -368,14 +370,24 @@ def test_history_sensor_requests_the_partition_the_feed_just_published() -> None
     # The run request has to carry the feed materialization's own partition:
     # that is the whole point of hanging the history off the feed instead of
     # off a clock.
+    @asset(name='publish_btc_briefing_feed', partitions_def=daily_partitions)
+    def source_feed() -> MaterializeResult:
+        return MaterializeResult()
+
     with DagsterInstance.ephemeral() as instance:
-        instance.report_runless_asset_event(
-            AssetMaterialization(asset_key='publish_btc_briefing_feed', partition='2024-03-05')
+        source_result = materialize(
+            [source_feed],
+            partition_key='2024-03-05',
+            instance=instance,
         )
+        assert source_result.success
         run_requests, _ = _history_sensor_tick(instance)
 
     assert [(request.partition_key, request.run_key) for request in run_requests] == [
-        ('2024-03-05', 'publish_btc_briefing_history::2024-03-05')
+        (
+            '2024-03-05',
+            f'publish_btc_briefing_history::2024-03-05::{source_result.run_id}',
+        )
     ]
 
 

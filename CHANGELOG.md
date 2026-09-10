@@ -1,3 +1,6 @@
+# v3.6.2 on September 10, 2026
+- Run source-native tests against the deployed ClickHouse image and configuration; freeze existing Binance spot and futures source, Dagster, and consumer contracts before revisioned-source implementation.
+
 # v3.6.1 on August 23, 2026
 - Key every HuggingFace publish sensor run on both the materialized partition and its triggering run, so re-materializing a partition requests a fresh publish while repeated sensor evaluation of one materialization remains idempotent.
 

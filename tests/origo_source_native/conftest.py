@@ -21,7 +21,7 @@ from dagster import materialize
 from .helpers import BINANCE_FIXTURE_ROOT, ORIGO_DATABASE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLICKHOUSE_IMAGE = 'clickhouse/clickhouse-server:24.3'
+CLICKHOUSE_DOCKERFILE = REPO_ROOT / 'Dockerfile.clickhouse'
 
 
 def _free_port() -> int:
@@ -118,6 +118,12 @@ def clickhouse_settings() -> dict[str, str]:
     if shutil.which('docker') is None:
         pytest.fail('docker CLI is required for tests/origo_source_native')
 
+    image = subprocess.run(
+        ['docker', 'build', '--quiet', '--file', str(CLICKHOUSE_DOCKERFILE), str(REPO_ROOT)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     container_name = f'origo-tests-{uuid4().hex[:12]}'
     native_port = _free_port()
     http_port = _free_port()
@@ -144,7 +150,7 @@ def clickhouse_settings() -> dict[str, str]:
             'CLICKHOUSE_USER=default',
             '--env',
             f'CLICKHOUSE_PASSWORD={password}',
-            CLICKHOUSE_IMAGE,
+            image,
         ],
         check=True,
         capture_output=True,

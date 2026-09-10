@@ -236,6 +236,7 @@ class _DagsterEventLike(Protocol):
 
 class _AssetEventLike(Protocol):
     dagster_event: _DagsterEventLike | None
+    run_id: str
 
 
 @dataclass(frozen=True)
@@ -1031,7 +1032,7 @@ def _publish_binance_spot_klines_to_hf_run_request(
 
     return RunRequest(
         partition_key=partition_key,
-        run_key=f"{run_key_prefix}::{partition_key}",
+        run_key=f"{run_key_prefix}::{partition_key}::{asset_event.run_id}",
     )
 
 
@@ -1051,7 +1052,7 @@ def _publish_binance_spot_dollar_klines_to_hf_run_request(
 
     return RunRequest(
         partition_key=partition_key,
-        run_key=f"{run_key_prefix}::{partition_key}",
+        run_key=f"{run_key_prefix}::{partition_key}::{asset_event.run_id}",
     )
 
 
@@ -1270,7 +1271,7 @@ def _publish_btc_briefing_history_run_request(
 
     return RunRequest(
         partition_key=partition_key,
-        run_key=f"publish_btc_briefing_history::{partition_key}",
+        run_key=f"publish_btc_briefing_history::{partition_key}::{asset_event.run_id}",
     )
 
 

@@ -1,0 +1,46 @@
+{
+  "minute_start": "2017-08-17T00:00:00+00:00",
+  "requests": [
+    {
+      "file": "empty-first.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1502928000000,
+        "limit": 1,
+        "endTime": 1502928059999
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:17:06.651559+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "file": "empty-second.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1502928000000,
+        "limit": 1,
+        "endTime": 1502928059999
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:18:07.946282+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "file": "empty-later.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1502928060000,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:18:08.223739+00:00",
+      "sha256": "0db131d3325b28f1bbebfde6e622a362acaeb82f53787dc74e11af39ba102183"
+    }
+  ]
+}

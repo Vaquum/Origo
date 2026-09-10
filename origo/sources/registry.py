@@ -1,0 +1,6 @@
+from typing import Final
+
+from .binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from .contracts import RevisionedSourceSpec
+
+SOURCE_REGISTRY: Final[tuple[RevisionedSourceSpec, ...]] = (BINANCE_SPOT_TRADES_SPEC,)

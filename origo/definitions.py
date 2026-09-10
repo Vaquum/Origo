@@ -1471,3 +1471,23 @@ defs = Definitions(
           build_depth_snapshot_store_arrow_job])
 
 # TODO: Put everything in to same order in all segments of the code
+
+from .sources.bundle import build_source_bundle
+from .sources.registry import SOURCE_REGISTRY
+
+_registered_source_bundles = tuple(
+    build_source_bundle(spec) for spec in SOURCE_REGISTRY
+)
+
+defs = Definitions.merge(
+    defs,
+    *(
+        Definitions(
+            assets=bundle.assets,
+            jobs=bundle.jobs,
+            schedules=bundle.schedules,
+            sensors=bundle.sensors,
+        )
+        for bundle in _registered_source_bundles
+    ),
+)

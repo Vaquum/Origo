@@ -82,13 +82,29 @@ def test_one_materialization_keys_one_run() -> None:
 
 def test_a_partitionless_materialization_is_skipped() -> None:
     missing_event = _publish_requests(_AssetEvent(None, 'source-run-1'))
-    missing_partition = _publish_requests(
-        _AssetEvent(_DagsterEvent(None), 'source-run-1')
-    )
+    missing_partition = _publish_requests(_AssetEvent(_DagsterEvent(None), 'source-run-1'))
 
     assert all(isinstance(result, SkipReason) for result in missing_event)
     assert all(isinstance(result, SkipReason) for result in missing_partition)
 
 
-def test_sensor_count_is_unchanged() -> None:
-    assert len(defs.sensors) == 16
+def test_existing_publish_sensors_are_unchanged() -> None:
+    existing = {
+        'publish_binance_spot_klines_to_huggingface_sensor',
+        'publish_binance_spot_15m_klines_to_huggingface_sensor',
+        'publish_binance_spot_30m_klines_to_huggingface_sensor',
+        'publish_binance_spot_1h_klines_to_huggingface_sensor',
+        'publish_binance_spot_2h_klines_to_huggingface_sensor',
+        'publish_binance_spot_4h_klines_to_huggingface_sensor',
+        'publish_binance_spot_1M_dollar_klines_to_huggingface_sensor',
+        'publish_binance_spot_15M_dollar_klines_to_huggingface_sensor',
+        'publish_binance_spot_30M_dollar_klines_to_huggingface_sensor',
+        'publish_binance_spot_60M_dollar_klines_to_huggingface_sensor',
+        'publish_binance_spot_120M_dollar_klines_to_huggingface_sensor',
+        'publish_binance_spot_240M_dollar_klines_to_huggingface_sensor',
+        'publish_btc_briefing_feed_sensor',
+        'publish_btc_briefing_history_sensor',
+        'bar_store_source_sensor',
+        'depth_snapshot_store_source_sensor',
+    }
+    assert existing <= {sensor.name for sensor in defs.sensors}

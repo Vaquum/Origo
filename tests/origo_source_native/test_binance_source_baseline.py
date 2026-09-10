@@ -313,6 +313,8 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
         assert version == '25.3.2.39'
         metadata = json.loads(_docker('inspect', str(container)))[0]
         assert metadata['Name'].startswith('/origo-tests-')
+        # BuildKit's cache need not expose the base image to docker image inspect.
+        _docker('pull', '--quiet', pinned)
         deployed_layers = json.loads(_docker('image', 'inspect', pinned))[0]['RootFS']['Layers']
         tested_layers = json.loads(_docker('image', 'inspect', metadata['Image']))[0]['RootFS'][
             'Layers'

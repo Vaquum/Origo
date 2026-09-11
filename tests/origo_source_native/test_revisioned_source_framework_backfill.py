@@ -238,8 +238,18 @@ def test_reconciliation_restores_committed_state_after_worker_loss(
     assert runtime.store.execute(
         "SELECT operation, partition_key, dagster_run_id FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
     ) == [('canonical', DAY, failed.run_id)]
+    # An interrupted comparison can leave its temporary database after the worker exits.
+    reference = 'origo_source_parity_binance_spot_trades'
+    runtime.store.execute(f'CREATE DATABASE {reference}')
+    assert runtime.cleanup_verification(dry_run=True) == (reference,)
     result = _run(backfill_env, reconcile=True)
     assert result.success and _status(backfill_env) == 'MATERIALIZED'
+    assert (
+        runtime.store.execute(
+            'SELECT name FROM system.databases WHERE name=%(name)s', {'name': reference}
+        )
+        == []
+    )
     assert runtime.store.records(canonical_only=True) == (record,)
     assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
     assert runtime.store.execute(
@@ -466,7 +476,14 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     job = next(job for job in source.jobs if job.name == request.job_name)
     from dagster import DagsterRunStatus
 
-    queued = instance.create_run_for_job(job, status=DagsterRunStatus.QUEUED, tags=request.tags)
+    from dagster._core.remote_origin import RemoteJobOrigin
+
+    queued = instance.create_run_for_job(
+        job,
+        status=DagsterRunStatus.QUEUED,
+        tags=request.tags,
+        remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
+    )
     with build_sensor_context(
         instance=instance,
         definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),

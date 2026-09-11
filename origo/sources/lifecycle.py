@@ -564,6 +564,39 @@ class SourceRuntime:
             self._record_attempt_failure('repair', key, build_id, error)
             raise
 
+    def cleanup_verification(self, *, dry_run: bool = True) -> tuple[str, ...]:
+        """Reclaim an interrupted comparison workspace under the source heavy lock."""
+        self.spec.require_enabled('cleanup')
+        self.require_shared_mount()
+        database = f'{self.store.database}_source_parity_{self.spec.key}'
+        try:
+            with source_lock(self.lock_root, self.spec.key, 'heavy'):
+                found = self.store.execute(
+                    'SELECT name FROM system.databases WHERE name=%(database)s',
+                    {'database': database},
+                )
+                if found:
+                    get_dagster_logger('origo.sources').info(
+                        'source=%s phase=interrupted_comparison_cleanup database=%s dry_run=%s run=%s',
+                        self.spec.key,
+                        database,
+                        dry_run,
+                        self.run_id,
+                    )
+                    if not dry_run:
+                        self.store.execute(f'DROP DATABASE {database} SYNC')
+                if not dry_run:
+                    self.failures.recover(operation='parity_cleanup')
+                return tuple(str(row[0]) for row in found)
+        except Exception as error:
+            self.failures.record(
+                operation='parity_cleanup',
+                scope='SOURCE',
+                error_code=failure_code(error),
+                message=failure_message(error),
+            )
+            raise
+
     def cleanup(self, *, dry_run: bool = True) -> tuple[str, ...]:
         self.spec.require_enabled('cleanup')
         self.require_shared_mount()

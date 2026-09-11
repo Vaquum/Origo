@@ -180,6 +180,7 @@ def _execute_operation(
     if operation == 'canonical':
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
+        runtime.cleanup_verification(dry_run=False)
         proof = runtime.store.execute(
             f"""SELECT count() FROM {runtime.store.table('source_active_partitions')} a
             INNER JOIN {runtime.store.table('source_parity_log')} p
@@ -260,6 +261,7 @@ def _execute_operation(
         }
     if operation == 'cleanup':
         return {
+            'verification_databases': list(runtime.cleanup_verification(dry_run=config.dry_run)),
             'build_ids': list(runtime.cleanup(dry_run=config.dry_run)),
             'dry_run': config.dry_run,
         }

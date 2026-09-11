@@ -6,7 +6,6 @@ import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import cast
-from uuid import uuid4
 
 from dagster import get_dagster_logger
 
@@ -92,7 +91,7 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     extract = cast(Callable[[bytes], tuple[str, bytes]], raw._extract_csv)
     parse = cast(Callable[[bytes], list[Row]], raw._parse_trade_rows)
     _, csv_body = extract(archive)
-    reference = 'source_parity_' + uuid4().hex
+    reference = identifier(f'{database}_source_parity_binance_spot_trades')
     settings = replace(get_clickhouse_settings(), database=reference)
     checks: dict[str, object] = {}
     client.execute(f'CREATE DATABASE {reference}')

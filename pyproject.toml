@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo"
-version = "3.6.2"
+version = "3.7.0"
 description = "Event-sourced market data platform for deterministic, replayable financial data access"
 readme = "README.md"
 license = "MIT"
@@ -35,6 +35,7 @@ include = ["origo*"]
 
 [tool.setuptools.package-data]
 "origo.assets" = ["sql/*.sql"]
+"origo.sources" = ["README.md"]
 
 [tool.dagster]
 module_name = "origo.definitions"

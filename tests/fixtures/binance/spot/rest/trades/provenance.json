@@ -1,0 +1,75 @@
+{
+  "minute_start": "2025-01-01T00:00:00+00:00",
+  "minute_end": "2025-01-01T00:01:00+00:00",
+  "requests": [
+    {
+      "file": "locator.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1735689600000,
+        "endTime": 1735689659999,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:01:30.599558+00:00",
+      "sha256": "a086ae468d3366b050bc9e94040f5670601e9fe5862bc1650350ee50a90f4e26",
+      "response_headers": {
+        "x-mbx-used-weight": "4",
+        "x-mbx-used-weight-1m": "4"
+      }
+    },
+    {
+      "file": "page-00.json",
+      "url": "https://api.binance.com/api/v3/historicalTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4359935386,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:01:32.189967+00:00",
+      "sha256": "a3bc7332c3e97ecb91d57d1e454812878df9eac394c2e16948b73d5498b67279",
+      "response_headers": {
+        "x-mbx-used-weight": "29",
+        "x-mbx-used-weight-1m": "29"
+      }
+    },
+    {
+      "file": "page-01.json",
+      "url": "https://api.binance.com/api/v3/historicalTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4359936386,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:01:33.790022+00:00",
+      "sha256": "c19b26db953c47d2a4a0ad13d63aa3dad4baba8f78ee9e3f183e0c16032d2454",
+      "response_headers": {
+        "x-mbx-used-weight": "54",
+        "x-mbx-used-weight-1m": "54"
+      }
+    },
+    {
+      "file": "page-02.json",
+      "url": "https://api.binance.com/api/v3/historicalTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4359937386,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-10T14:01:35.383934+00:00",
+      "sha256": "45d94adaf63f713236fe2b9c61943a080dd7feb0478c8e42303c74025e3f6417",
+      "response_headers": {
+        "x-mbx-used-weight": "79",
+        "x-mbx-used-weight-1m": "79"
+      }
+    }
+  ]
+}

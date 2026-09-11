@@ -153,21 +153,27 @@ def test_failed_source_run_gets_a_new_persistent_attempt(
         )
         (tmp_path / 'dagster').mkdir()
         with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
-            context = build_schedule_context(
+            with build_schedule_context(
                 instance=instance, scheduled_execution_time=datetime(2017, 8, 18, 4, tzinfo=UTC)
-            )
-            first = scheduled.evaluate_tick(context).run_requests[0]
-            repeated = scheduled.evaluate_tick(context).run_requests[0]
-            assert first.run_key == repeated.run_key
-            instance.create_run_for_job(
-                job, run_config=first.run_config, tags=first.tags, status=DagsterRunStatus.FAILURE
-            )
-            second = scheduled.evaluate_tick(context).run_requests[0]
-            assert first.run_key.endswith(':0') and second.run_key.endswith(':1')
-            instance.create_run_for_job(
-                job, run_config=second.run_config, tags=second.tags, status=DagsterRunStatus.SUCCESS
-            )
-            assert scheduled.evaluate_tick(context).run_requests == []
+            ) as context:
+                first = scheduled.evaluate_tick(context).run_requests[0]
+                repeated = scheduled.evaluate_tick(context).run_requests[0]
+                assert first.run_key == repeated.run_key
+                instance.create_run_for_job(
+                    job,
+                    run_config=first.run_config,
+                    tags=first.tags,
+                    status=DagsterRunStatus.FAILURE,
+                )
+                second = scheduled.evaluate_tick(context).run_requests[0]
+                assert first.run_key.endswith(':0') and second.run_key.endswith(':1')
+                instance.create_run_for_job(
+                    job,
+                    run_config=second.run_config,
+                    tags=second.tags,
+                    status=DagsterRunStatus.SUCCESS,
+                )
+                assert scheduled.evaluate_tick(context).run_requests == []
         assert store.execute(
             'SELECT DISTINCT attempt, status FROM origo.source_run_log ORDER BY attempt, status'
         ) == [(0, 'FAILURE'), (0, 'REQUESTED'), (1, 'REQUESTED'), (1, 'SUCCESS')]

@@ -50,13 +50,12 @@ def test_hourly_audit_recovers_a_day_whose_discovery_failed(
                     raise SourceError(code, 'Injected unavailable checksum response')
 
                 patch.setattr(daily, 'get_response', unavailable)
-                with pytest.raises(ScheduleExecutionError, match='evaluation of schedule'):
-                    scheduled.evaluate_tick(
-                        build_schedule_context(
-                            instance=instance,
-                            scheduled_execution_time=datetime(2017, 8, 18, 4, tzinfo=UTC),
-                        )
-                    )
+                with build_schedule_context(
+                    instance=instance,
+                    scheduled_execution_time=datetime(2017, 8, 18, 4, tzinfo=UTC),
+                ) as context:
+                    with pytest.raises(ScheduleExecutionError, match='evaluation of schedule'):
+                        scheduled.evaluate_tick(context)
                 assert runtime.audit() == ()
             assert client.execute('SELECT partition_key FROM origo.source_discovery_log') == [
                 ('2017-08-17',)
@@ -212,7 +211,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
                 run = instance.get_run_by_id(result.run_id)
                 assert run is not None
                 # Older/manual runs may have no source tags, even with a valid stored config.
-                context = build_run_status_sensor_context(
+                with build_run_status_sensor_context(
                     sensor_name=observer.name,
                     dagster_event=next(
                         event
@@ -221,9 +220,9 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
                     ),
                     dagster_instance=instance,
                     dagster_run=run._replace(tags={}),
-                )
-                observer(context)
-                observer(context)
+                ) as context:
+                    observer(context)
+                    observer(context)
                 assert client.execute(
                     'SELECT operation, blocking_scope, partition_key, consumer FROM origo.source_failure_log '
                     "WHERE error_code='RUN_FAILED' AND dagster_run_id=%(run)s",

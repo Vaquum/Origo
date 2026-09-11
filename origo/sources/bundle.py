@@ -717,10 +717,14 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             for key in ('ops', names[operation], 'config'):
                 value = _config_mapping(value).get(key, {})
             tags = context.dagster_run.tags
+            selected_key = tags.get('dagster/partition') or tags.get(
+                'dagster/asset_partition_range_start', ''
+            )
+            configured_key = _config_mapping(value).get('partition_key') or ''
             partition_key = (
-                _config_mapping(value).get('partition_key')
-                or tags.get('dagster/partition')
-                or tags.get('dagster/asset_partition_range_start', '')
+                selected_key or configured_key
+                if operation == 'canonical'
+                else configured_key or selected_key
             )
             if tags.get('dagster/asset_partition_range_end', partition_key) != partition_key:
                 raise ValueError('Source backfill worker must contain exactly one day.')

@@ -229,6 +229,11 @@ def test_actual_retry_policy_only_retries_explicit_transient_errors(
     )
     assert not result.success and not calls
     assert not any(e.event_type_value == 'STEP_UP_FOR_RETRY' for e in result.all_events)
+    _observe_failure((runtime, instance, source), result)
+    assert runtime.store.execute(
+        "SELECT partition_key FROM origo.source_failure_log WHERE dagster_run_id=%(run)s",
+        {'run': result.run_id},
+    ) == [(DAY,)]
 
 
 def test_repair_preserves_storage_failure_without_rebuilding(

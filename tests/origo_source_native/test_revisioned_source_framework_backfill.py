@@ -596,3 +596,20 @@ def test_system_logging_survives_database_failure(
     assert f'partition={DAY}' in messages and 'operation=cleanup' in messages
     assert 'OSError' in messages
     assert health.execute_in_process(instance=instance, raise_on_error=False).success
+
+
+def test_reconciliation_failures_do_not_starve_other_partitions() -> None:
+    from datetime import timedelta
+
+    from origo.sources.dagit import _reconciliation_selection
+
+    # Partition scheduling state only: no market rows are generated.
+    keys = [
+        (datetime.fromisoformat(DAY) + timedelta(days=index)).date().isoformat()
+        for index in range(12)
+    ]
+    urgent = keys[:8]
+    selected = [_reconciliation_selection(keys, urgent, tick) for tick in range(len(keys))]
+    assert all(len(batch) <= 5 for batch in selected)
+    assert set().union(*(set(batch) for batch in selected)) == set(keys)
+    assert set().union(*(set(batch) for batch in selected[:2])) >= set(urgent)

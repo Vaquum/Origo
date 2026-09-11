@@ -18,6 +18,9 @@ def test_legacy_sensors_run_and_revisioned_source_sensors_stop(
         f'{source.key}_{consumer.key}_sensor'
         for source in SOURCE_REGISTRY
         for consumer in source.consumers
-    } | {f'{source.key}_{role}_sensor' for source in SOURCE_REGISTRY
-         for role in ('failure', 'reconciliation')}
+    } | {
+        f'{source.key}_{role}_sensor'
+        for source in SOURCE_REGISTRY
+        for role in ('failure', 'reconciliation')
+    }
     assert not_running == expected_stopped

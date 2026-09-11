@@ -121,6 +121,13 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
     return {'observed_at': observed, 'active_days': len(records), 'bridged_events': len(events)}
 
 
+def _reconciliation_selection(keys: list[str], urgent: list[str], offset: int) -> list[str]:
+    start = offset * 4 % max(1, len(urgent))
+    prioritized = (urgent[start:] + urgent[:start])[:4]
+    rotating = keys[offset % len(keys) : offset % len(keys) + 1] if keys else []
+    return list(dict.fromkeys(prioritized + rotating))
+
+
 def build_reconciliation_sensor(
     spec: RevisionedSourceSpec,
     canonical_job: JobDefinition,
@@ -191,8 +198,9 @@ def build_reconciliation_sensor(
                 for key, status in statuses.items()
                 if status is not None and status.value == 'FAILED'
             ]
-            rotating = keys[offset % len(keys) : offset % len(keys) + 1] if keys else []
-            selected = list(dict.fromkeys(changed + failed_keys + rotating))[:5]
+            selected = _reconciliation_selection(
+                keys, list(dict.fromkeys(changed + failed_keys)), offset
+            )
             requests = [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
             for key in selected:
                 active = context.instance.get_runs(

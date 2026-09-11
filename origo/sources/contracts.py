@@ -217,6 +217,7 @@ class RevisionedSourceSpec:
     components: tuple[ComponentSpec, ...]
     consumers: tuple[ConsumerSpec, ...]
     orchestration: OrchestrationSpec
+    verify: Callable[[Client, str, StateRecord], dict[str, object]] | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
@@ -248,3 +249,20 @@ class SourceBundle:
     jobs: tuple[JobDefinition, ...]
     schedules: tuple[ScheduleDefinition, ...]
     sensors: tuple[SensorDefinition, ...]
+
+
+def retryable_source_error(error: Exception) -> bool:
+    """Only explicitly transient provider/republication failures use hourly op retries."""
+    if not isinstance(error, SourceError):
+        return False
+    return error.code in {
+        'PROVIDER_TRANSPORT_FAILED',
+        'PROVIDER_RATE_CIRCUIT',
+        'PROVIDER_HTTP_404',
+        'PROVIDER_HTTP_408',
+        'PROVIDER_HTTP_418',
+        'PROVIDER_HTTP_429',
+        'OFFICIAL_REVISION_CHANGED',
+        'PARITY_REVISION_CHANGED',
+        'GENERATION_CHANGED',
+    } or error.code.startswith('PROVIDER_HTTP_5')

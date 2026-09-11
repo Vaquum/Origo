@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -12,6 +13,7 @@ from .contracts import (
     RevisionedSourceSpec,
     Row,
     Snapshot,
+    SourceError,
     StateRecord,
     identifier,
 )
@@ -46,6 +48,52 @@ def _int(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError('State counter must be an integer.')
     return value
+
+
+def ordered_component_rows(
+    execute: Callable[[str, object | None], list[Row]],
+    component: ComponentSpec,
+    table: str,
+    *,
+    predicate: str = '1',
+    params: object | None = None,
+) -> Iterator[Row]:
+    """Seek through unique component keys, checking the page boundary before advancing."""
+    if params is not None and not isinstance(params, dict):
+        raise TypeError('Component query parameters must be a mapping.')
+    bindings = dict(cast(dict[str, object], params)) if params is not None else {}
+    names = ', '.join(column.name for column in component.columns)
+    ordering = ', '.join(component.primary_key)
+    indexes = [
+        next(i for i, column in enumerate(component.columns) if column.name == key)
+        for key in component.primary_key
+    ]
+    seek = '1'
+    while True:
+        rows = execute(
+            f'SELECT {names} FROM {table} WHERE ({predicate}) AND ({seek}) '
+            f'ORDER BY {ordering} LIMIT 50001',
+            bindings,
+        )
+        yield from rows[:50000]
+        if len(rows) <= 50000:
+            break
+        last = tuple(rows[49999][index] for index in indexes)
+        if last == tuple(rows[50000][index] for index in indexes):
+            raise SourceError(
+                'COMPONENT_CONTENT_INVALID', f'Component {component.key} contains duplicate keys.'
+            )
+        casts: list[str] = []
+        for position, index in enumerate(indexes):
+            name = f'source_page_{position}'
+            value = last[position]
+            # Driver datetime parameters lose fractional seconds; explicit typed
+            # casts retain the DateTime64 key at the page boundary.
+            bindings[name] = (
+                value.strftime('%Y-%m-%d %H:%M:%S.%f') if isinstance(value, datetime) else value
+            )
+            casts.append(f'CAST(%({name})s AS {component.columns[index].sql_type})')
+        seek = f'tuple({ordering}) > tuple({", ".join(casts)})'
 
 
 class StorageError(RuntimeError):
@@ -171,6 +219,15 @@ class SourceStore:
             )
             SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
             WHERE NOT e.provisional OR e.partition_end<=f.frontier""")
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_parity_log')} (
+            source_key String, partition_key String, revision String, build_id UUID,
+            generation UInt64, checks_json String, dagster_run_id String,
+            recorded_at DateTime64(6, 'UTC')
+        ) ENGINE = MergeTree ORDER BY (source_key, partition_key, build_id, generation)""")
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_capacity_log')} (
+            source_key String, volume_id String, working_set_bytes UInt64,
+            dagster_run_id String, successful UInt8, measured_at DateTime64(6, 'UTC')
+        ) ENGINE = MergeTree ORDER BY (source_key, volume_id, measured_at)""")
         for component in self.spec.components:
             columns = ', '.join(f'{column.name} {column.sql_type}' for column in component.columns)
             key = ', '.join(component.primary_key)
@@ -225,25 +282,38 @@ class SourceStore:
         predicate: str = '1',
         params: object | None = None,
     ) -> tuple[int, str]:
-        names = ', '.join(column.name for column in component.columns)
-        key = ', '.join(component.primary_key)
-        values = self.execute(
-            f'SELECT {names} FROM {table} WHERE {predicate} ORDER BY {key}', params
-        )
         indexes = tuple(
             next(i for i, column in enumerate(component.columns) if column.name == key)
             for key in component.primary_key
         )
-        keys = [tuple(row[index] for index in indexes) for row in values]
-        if len(keys) != len(set(keys)):
-            raise RuntimeError(f'Component {component.key} contains duplicate keys.')
         time_index = next(
             i for i, column in enumerate(component.columns) if column.name == component.time_column
         )
-        for row in values:
-            if not partition.start <= _utc(row[time_index]) < partition.end:
-                raise RuntimeError(f'Component {component.key} contains an out-of-bounds row.')
-        return len(values), content_hash(values, schema_version=self.spec.schema_version)
+        count = 0
+
+        def checked_rows() -> Iterator[Row]:
+            nonlocal count
+            previous: Row | None = None
+            for row in ordered_component_rows(
+                self.execute, component, table, predicate=predicate, params=params
+            ):
+                current = tuple(row[index] for index in indexes)
+                if previous == current:
+                    raise SourceError(
+                        'COMPONENT_CONTENT_INVALID',
+                        f'Component {component.key} contains duplicate keys.',
+                    )
+                if not partition.start <= _utc(row[time_index]) < partition.end:
+                    raise SourceError(
+                        'COMPONENT_CONTENT_INVALID',
+                        f'Component {component.key} contains an out-of-bounds row.',
+                    )
+                previous = current
+                count += 1
+                yield row
+
+        digest = content_hash(checked_rows(), schema_version=self.spec.schema_version)
+        return count, digest
 
     def anchor(self) -> datetime:
         rows = self.execute(

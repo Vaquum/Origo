@@ -6,7 +6,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from dagster import DagsterInstance, build_run_status_sensor_context, build_schedule_context
+from dagster import (
+    DagsterInstance,
+    build_run_status_sensor_context,
+    build_schedule_context,
+)
 from dagster._core.errors import ScheduleExecutionError
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -18,6 +22,7 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
 from .test_binance_daily_source_adapter import archive_response
+from .test_revisioned_source_framework_backfill import _start_monitors
 
 
 @pytest.mark.parametrize('code', ['PROVIDER_HTTP_404', 'PROVIDER_TRANSPORT_FAILED'])
@@ -44,6 +49,7 @@ def test_hourly_audit_recovers_a_day_whose_discovery_failed(
         )
         (tmp_path / 'dagster').mkdir()
         with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
+            _start_monitors(instance)
             with monkeypatch.context() as patch:
 
                 def unavailable(url: str) -> daily.Response:
@@ -181,6 +187,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
         observer = next(value for value in source.sensors if value.name.endswith('_failure_sensor'))
         (tmp_path / 'dagster').mkdir()
         with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
+            _start_monitors(instance)
             for operation, failure_operation, scope, partition, consumer in (
                 ('setup', 'setup', 'SOURCE', None, None),
                 ('audit', 'audit', 'NONE', None, None),

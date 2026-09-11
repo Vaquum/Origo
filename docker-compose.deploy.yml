@@ -33,6 +33,8 @@ services:
       - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
     volumes:
       - dagster-instance:/opt/dagster-instance
+      - source-locks:/opt/origo/locks
+      - clickhouse-data:/opt/origo/clickhouse-data:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -53,6 +55,8 @@ services:
       - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
     volumes:
       - dagster-instance:/opt/dagster-instance
+      - source-locks:/opt/origo/locks
+      - clickhouse-data:/opt/origo/clickhouse-data:ro
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
     depends_on:
@@ -81,3 +85,5 @@ volumes:
     # build_bar_store_arrow asset). Dagster is the sole writer; consumers mount this
     # volume read-only by the pinned name.
     name: tdw-control-plane_arrow
+
+  source-locks:

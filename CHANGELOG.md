@@ -1,3 +1,7 @@
+# v3.8.0
+
+- Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit. Deterministic verification failures wait for a state change or operator retry; transient failures and cancellations retry with bounded backoff. Native completion suppresses redundant verification, while source health checks expose unresolved failures without recursive failed runs. Reuse run-local archive bytes and seek through component rows without OFFSET scans.
+
 # v3.7.0
 
 - Add a dormant revisioned individual Binance spot-trade source with isolated components, fenced activation, shared failure history, and local shadow consumers.

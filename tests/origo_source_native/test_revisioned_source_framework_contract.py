@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from dagster import (
     DefaultScheduleStatus,
     DefaultSensorStatus,
+    Definitions,
     build_schedule_context,
     build_sensor_context,
 )
@@ -20,11 +22,11 @@ from origo.sources.registry import SOURCE_REGISTRY
 ROOT = Path(__file__).resolve().parents[2] / 'origo/sources'
 
 
-def test_spot_trades_is_registered_dormant_without_changing_existing_definitions(
+def test_spot_trades_is_registered_canary_without_changing_existing_definitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert SOURCE_REGISTRY == (BINANCE_SPOT_TRADES_SPEC,)
-    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.DORMANT
+    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
     source = bundle.build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
     assert all(value.default_status == DefaultScheduleStatus.STOPPED for value in source.schedules)
@@ -38,6 +40,9 @@ def test_spot_trades_is_registered_dormant_without_changing_existing_definitions
         .default_status
         == DefaultScheduleStatus.RUNNING
     )
+
+    dormant = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.DORMANT)
+    source = bundle.build_source_bundle(dormant)
 
     def forbidden() -> None:
         raise AssertionError('A dormant entry point constructed an external client.')
@@ -57,7 +62,7 @@ def test_spot_trades_is_registered_dormant_without_changing_existing_definitions
     ):
         with pytest.raises(RuntimeError, match='DORMANT'):
             bundle.execute_source(
-                BINANCE_SPOT_TRADES_SPEC,
+                dormant,
                 operation,
                 bundle.SourceRunConfig(),
                 run_id='dormant-proof',
@@ -154,7 +159,11 @@ def test_failed_source_run_gets_a_new_persistent_attempt(
         (tmp_path / 'dagster').mkdir()
         with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
             with build_schedule_context(
-                instance=instance, scheduled_execution_time=datetime(2017, 8, 18, 4, tzinfo=UTC)
+                instance=instance,
+                scheduled_execution_time=datetime(2017, 8, 18, 4, tzinfo=UTC),
+                repository_def=Definitions(
+                    assets=source.assets, jobs=source.jobs
+                ).get_repository_def(),
             ) as context:
                 first = scheduled.evaluate_tick(context).run_requests[0]
                 repeated = scheduled.evaluate_tick(context).run_requests[0]

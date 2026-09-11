@@ -1,5 +1,10 @@
-# v3.7.0 on August 29, 2026
+# v3.8.0 on August 29, 2026
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.7.0
+
+- Add a dormant revisioned individual Binance spot-trade source with isolated components, fenced activation, shared failure history, and local shadow consumers.
+- Prove legacy spot output parity on checksum-verified official data using the deployed ClickHouse image; preserve existing source identities and running schedules.
 
 # v3.6.2 on September 10, 2026
 - Run source-native tests against the deployed ClickHouse image and configuration; freeze existing Binance spot and futures source, Dagster, and consumer contracts before revisioned-source implementation.

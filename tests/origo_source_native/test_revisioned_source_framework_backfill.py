@@ -475,7 +475,6 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     assert request.run_config['ops'][ASSET]['config']['reconcile_only'] is True
     job = next(job for job in source.jobs if job.name == request.job_name)
     from dagster import DagsterRunStatus
-
     from dagster._core.remote_origin import RemoteJobOrigin
 
     queued = instance.create_run_for_job(

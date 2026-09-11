@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 from dagster import get_dagster_logger
 
+from ..archive import verified_archive
 from ..contracts import Partition, Revision, Row, SourceError
 from ..hashing import content_hash
 
@@ -207,9 +208,12 @@ class BinanceSpotDaily:
         url = self._url(partition)
         name = f'BTCUSDT-trades-{partition.key}'
         expected = _checksum(get_response(url + '.CHECKSUM').body, name + '.zip')
-        body = get_response(url).body
-        if hashlib.sha256(body).hexdigest() != expected:
-            raise SourceError('ARCHIVE_CHECKSUM_MISMATCH', 'Binance ZIP checksum mismatch.')
+        body = verified_archive(
+            url,
+            expected,
+            lambda address: get_response(address).body,
+            code='ARCHIVE_CHECKSUM_MISMATCH',
+        )
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             if archive.namelist() != [name + '.csv']:
                 raise SourceError(

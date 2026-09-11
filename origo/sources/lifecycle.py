@@ -266,10 +266,14 @@ class SourceRuntime:
                         component, context.table(component.key), partition
                     )
                     if index == 0 and count != revision.row_count:
-                        raise RuntimeError('Source rows do not match the validated adapter count.')
+                        raise SourceError(
+                            'COMPONENT_CONTENT_INVALID',
+                            'Source rows do not match the validated adapter count.',
+                        )
                     if revision.row_count and count == 0:
-                        raise RuntimeError(
-                            'A required component is empty for a non-empty revision.'
+                        raise SourceError(
+                            'COMPONENT_CONTENT_INVALID',
+                            'A required component is empty for a non-empty revision.',
                         )
                     params = {
                         'date': partition.start.date(),
@@ -291,7 +295,10 @@ class SourceRuntime:
                         params=params,
                     )
                     if actual != (count, digest):
-                        raise RuntimeError('Stored component differs from its validated build.')
+                        raise SourceError(
+                            'COMPONENT_CONTENT_INVALID',
+                            'Stored component differs from its validated build.',
+                        )
                     self.store.execute(
                         f'INSERT INTO {self.store.table("source_component_log")} VALUES',
                         [
@@ -370,13 +377,18 @@ class SourceRuntime:
                   AND revision=%(revision)s AND build_id=%(build)s AND component=%(component)s""",
                 {**params, 'component': component.key},
             )
-            actual = self.store.validate_component(
-                component,
-                self.store.component_table(component.key),
-                record.partition,
-                predicate='partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
-                params=params,
-            )
+            try:
+                actual = self.store.validate_component(
+                    component,
+                    self.store.component_table(component.key),
+                    record.partition,
+                    predicate='partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
+                    params=params,
+                )
+            except SourceError as error:
+                if error.code != 'COMPONENT_CONTENT_INVALID':
+                    raise
+                raise SourceError('RETAINED_CONTENT_INVALID', error.safe_message) from error
             if len(rows) != 1 or rows[0] != actual or actual[1] != expected[component.key]:
                 raise SourceError(
                     'RETAINED_CONTENT_INVALID',
@@ -534,10 +546,12 @@ class SourceRuntime:
                 raise SourceError(
                     'RETAINED_PARITY_FAILED', 'Retained output failed its legacy comparison.'
                 )
-        except RuntimeError as error:
+        except SourceError as error:
+            if error.code not in ('RETAINED_CONTENT_INVALID', 'RETAINED_PARITY_FAILED'):
+                raise
             self.failures.record(
                 operation='repair',
-                error_code='RETAINED_CONTENT_INVALID',
+                error_code=error.code,
                 message=failure_message(error),
                 scope='PARTITION',
                 partition=key,
@@ -744,7 +758,6 @@ class SourceRuntime:
                     raise SourceError(
                         'ACTIVE_PARTITION_MISSING', 'No canonical generation is active.'
                     )
-                self._validate_retained(record)
                 rows = self.store.execute(
                     f"""SELECT checks_json FROM {self.store.table('source_parity_log')}
                     WHERE source_key=%(source)s AND partition_key=%(partition)s
@@ -773,7 +786,7 @@ class SourceRuntime:
                             'PARITY_VERIFIER_MISSING', 'No legacy verifier is registered.'
                         )
                     result = self.spec.verify(self.store.client, self.store.database, record)
-                    self._validate_retained(record)
+                self._validate_retained(record)
                 if set(result) != dict(record.component_hashes).keys():
                     raise SourceError(
                         'PARITY_EVIDENCE_INVALID', 'Parity proof has an incomplete component set.'

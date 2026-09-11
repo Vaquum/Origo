@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from .contracts import identifier
+from .contracts import SourceError, identifier
 
 
 @contextmanager
@@ -20,7 +20,9 @@ def source_lock(root: Path, source: str, name: str) -> Iterator[None]:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise RuntimeError(f'Source lock is already held: {source}/{name}') from error
+            raise SourceError(
+                'SOURCE_LOCK_BUSY', f'Source lock is already held: {source}/{name}'
+            ) from error
         try:
             yield
         finally:

@@ -130,3 +130,11 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
             assert 'source-locks:/opt/origo/locks' in mounts
             assert 'clickhouse-data:/opt/origo/clickhouse-data:ro' in mounts
             assert 'dagster-instance:/opt/dagster-instance' in mounts
+
+
+def test_sensor_tick_history_has_bounded_retention() -> None:
+    assert _validated_instance_config()['retention']['sensor']['purge_after_days'] == {
+        'skipped': 7,
+        'success': 7,
+        'failure': 30,
+    }

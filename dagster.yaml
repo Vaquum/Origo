@@ -44,3 +44,10 @@ compute_logs:
   class: LocalComputeLogManager
   config:
     base_dir: /opt/dagster-instance/compute_logs
+
+retention:
+  sensor:
+    purge_after_days:
+      skipped: 7
+      success: 7
+      failure: 30

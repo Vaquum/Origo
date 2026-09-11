@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
 
@@ -12,8 +11,11 @@ from dagster import get_dagster_logger
 from origo.assets.create_origo_database import ClickHouseSettings, get_clickhouse_settings
 
 from ..adapters import binance_daily
+from ..archive import verified_archive
+from ..cleanup import preserve_primary_failure
 from ..contracts import Client, Row, SourceError, StateRecord, identifier
 from ..hashing import content_hash
+from ..storage import ordered_component_rows
 from .spot import SPOT_COMPONENTS
 
 _LEGACY = {
@@ -51,16 +53,6 @@ _LEGACY = {
 }
 
 
-def _ordered_rows(client: Client, query: str, params: object | None = None) -> Iterator[Row]:
-    offset = 0
-    while True:
-        rows = client.execute(f'{query} LIMIT 100000 OFFSET {offset}', params)
-        yield from rows
-        if len(rows) < 100000:
-            break
-        offset += len(rows)
-
-
 def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> dict[str, object]:
     """Compare one retained spot generation with independent legacy archive execution."""
     database = identifier(database)
@@ -82,11 +74,12 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     if not isinstance(url, str):
         raise SourceError('PARITY_INPUT_INVALID', 'Archive evidence has no object URL.')
     # Independently run the frozen parser on exactly the retained official ZIP revision.
-    archive = binance_daily.get_response(url).body
-    if hashlib.sha256(archive).hexdigest() != record.revision:
-        raise SourceError(
-            'PARITY_REVISION_CHANGED', 'Legacy comparison archive differs from the active revision.'
-        )
+    archive = verified_archive(
+        url,
+        record.revision,
+        lambda address: binance_daily.get_response(address).body,
+        code='PARITY_REVISION_CHANGED',
+    )
     raw = importlib.import_module('origo.assets.daily_trades_to_origo')
     extract = cast(Callable[[bytes], tuple[str, bytes]], raw._extract_csv)
     parse = cast(Callable[[bytes], list[Row]], raw._parse_trade_rows)
@@ -95,7 +88,9 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     settings = replace(get_clickhouse_settings(), database=reference)
     checks: dict[str, object] = {}
     client.execute(f'CREATE DATABASE {reference}')
-    try:
+    with preserve_primary_failure(
+        'legacy comparison database', lambda: client.execute(f'DROP DATABASE {reference} SYNC')
+    ):
         for _table, module_name, function in _LEGACY.values():
             module = importlib.import_module('origo.assets.' + module_name)
             create = cast(Callable[[Client, ClickHouseSettings], None], getattr(module, function))
@@ -120,8 +115,6 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 calculate(client, reference, day)
         for component in (item for item in SPOT_COMPONENTS if not item.provisional):
             table = _LEGACY[component.key][0]
-            names = ', '.join(column.name for column in component.columns)
-            ordering = ', '.join(component.primary_key)
             legacy_schema = client.execute(f'DESCRIBE TABLE {reference}.{table}')
             expected_schema = [(column.name, column.sql_type) for column in component.columns]
             if [(row[0], row[1]) for row in legacy_schema] != expected_schema:
@@ -130,25 +123,26 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 )
             legacy_count = client.execute(f'SELECT count() FROM {reference}.{table}')[0][0]
             legacy_hash = content_hash(
-                _ordered_rows(
-                    client, f'SELECT {names} FROM {reference}.{table} ORDER BY {ordering}'
-                ),
+                ordered_component_rows(client.execute, component, f'{reference}.{table}'),
                 schema_version=1,
             )
-            predicate = 'partition_key=%(day)s AND build_id=%(build)s AND revision=%(revision)s'
-            params = {'day': day, 'build': record.build_id, 'revision': record.revision}
-            target = f'{database}.binance_spot_trades_{component.key}_revisions'
-            actual_count = client.execute(
-                f'SELECT count() FROM {target} WHERE {predicate}', params
-            )[0][0]
-            actual_hash = content_hash(
-                _ordered_rows(
-                    client,
-                    f'SELECT {names} FROM {target} WHERE {predicate} ORDER BY {ordering}',
-                    params,
-                ),
-                schema_version=1,
+            # The runtime validates the retained rows against these immutable hashes
+            # after the independent legacy computation, under the source heavy lock.
+            actual_hash = dict(record.component_hashes)[component.key]
+            evidence = client.execute(
+                f"""SELECT row_count FROM {database}.source_component_log
+                WHERE source_key='binance_spot_trades' AND partition_key=%(day)s
+                AND build_id=%(build)s AND revision=%(revision)s AND component=%(component)s""",
+                {
+                    'day': day,
+                    'build': record.build_id,
+                    'revision': record.revision,
+                    'component': component.key,
+                },
             )
+            if len(evidence) != 1:
+                raise SourceError('PARITY_INPUT_MISSING', 'Component evidence must be unique.')
+            actual_count = evidence[0][0]
             get_dagster_logger('origo.sources').info(
                 'source=binance_spot_trades partition=%s component=%s phase=legacy_comparison '
                 'legacy_rows=%s current_rows=%s legacy_hash=%s current_hash=%s',
@@ -165,5 +159,3 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 )
             checks[component.key] = {'row_count': actual_count, 'sha256': actual_hash}
         return checks
-    finally:
-        client.execute(f'DROP DATABASE {reference} SYNC')

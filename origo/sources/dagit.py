@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Callable
@@ -10,7 +11,8 @@ from typing import Protocol, cast
 import dagster
 from dagster import (
     AssetKey,
-    DagsterRun,
+    AssetRecordsFilter,
+    DagsterEventType,
     DagsterRunStatus,
     DailyPartitionsDefinition,
     DefaultSensorStatus,
@@ -22,10 +24,11 @@ from dagster import (
     SkipReason,
     get_dagster_logger,
 )
+from dagster._core.storage.dagster_run import RunRecord
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
-from .contracts import RevisionedSourceSpec, RolloutStage, SourceError
+from .contracts import RevisionedSourceSpec, RolloutStage
 from .lifecycle import SourceRuntime
 from .storage import SourceStore
 
@@ -86,6 +89,7 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
             row[11],
             row[12],
         )
+    if events:
         runtime.store.execute(
             f'INSERT INTO {runtime.store.table("source_run_log")} VALUES',
             [
@@ -98,6 +102,7 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
                     runtime.run_id,
                     datetime.now(UTC),
                 )
+                for row in events
             ],
         )
     failures = runtime.store.execute(
@@ -114,12 +119,13 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
         len(failures),
         observed,
     )
-    if failures:
-        raise SourceError(
-            'SOURCE_RECONCILIATION_UNHEALTHY',
-            f'Source has {len(failures)} unresolved failure(s); see preceding Dagit logs.',
-        )
-    return {'observed_at': observed, 'active_days': len(records), 'bridged_events': len(events)}
+    return {
+        'observed_at': observed,
+        'active_days': len(records),
+        'bridged_events': len(events),
+        'healthy': not failures,
+        'unresolved_failures': len(failures),
+    }
 
 
 def _reconciliation_selection(keys: list[str], urgent: list[str], offset: int) -> list[str]:
@@ -135,25 +141,63 @@ def _partition_runs(
     canonical_job: JobDefinition,
     asset_name: str,
     key: str,
-) -> list[DagsterRun]:
+) -> list[RunRecord]:
     jobs = {canonical_job.name, f'backfill_{spec.key}_source_job'}
     asset_key = AssetKey(asset_name)
-    records = {
-        record.storage_id: record
-        for tag in ('dagster/partition', 'dagster/asset_partition_range_start')
-        for record in context.instance.get_run_records(RunsFilter(tags={tag: key}))
-        if record.dagster_run.job_name in jobs
-        or asset_key in (record.dagster_run.asset_selection or set())
-    }
-    completed = sorted(
-        records,
-        key=lambda index: (
-            records[index].end_time or records[index].update_timestamp.timestamp(),
-            index,
+    found: dict[int, RunRecord] = {}
+    for tag in ('dagster/partition', 'dagster/asset_partition_range_start'):
+        for statuses in (_ACTIVE, None):
+            cursor = None
+            while True:
+                page = context.instance.get_run_records(
+                    RunsFilter(tags={tag: key}, statuses=statuses),
+                    limit=25,
+                    cursor=cursor,
+                )
+                match = next(
+                    (
+                        record
+                        for record in page
+                        if record.dagster_run.job_name in jobs
+                        or asset_key in (record.dagster_run.asset_selection or set())
+                    ),
+                    None,
+                )
+                if match is not None:
+                    found[match.storage_id] = match
+                if match is not None or len(page) < 25:
+                    break
+                cursor = page[-1].dagster_run.run_id
+    return sorted(
+        found.values(),
+        key=lambda record: (
+            record.end_time or record.update_timestamp.timestamp(),
+            record.storage_id,
         ),
         reverse=True,
     )
-    return [records[index].dagster_run for index in completed]
+
+
+def _health_due(
+    context: SensorEvaluationContext, runtime: SourceRuntime, job: JobDefinition, now: float
+) -> bool:
+    if context.instance.get_runs(RunsFilter(job_name=job.name, statuses=_ACTIVE), limit=1):
+        return False
+    last = context.instance.get_run_records(RunsFilter(job_name=job.name), limit=1)
+    age = now - (last[0].end_time or last[0].update_timestamp.timestamp()) if last else 3600
+    if age < 300:
+        return False
+    if age >= 3600:
+        return True
+    return bool(
+        runtime.store.execute(
+            f"""SELECT event_id FROM {runtime.store.table('source_failure_log')}
+        WHERE source_key=%(source)s AND event_id NOT IN (
+            SELECT event_id FROM {runtime.store.table('source_run_log')} WHERE status='LOGGED'
+        ) LIMIT 1""",
+            {'source': runtime.spec.key},
+        )
+    )
 
 
 def build_reconciliation_sensor(
@@ -185,31 +229,35 @@ def build_reconciliation_sensor(
             )
             runtime.require_shared_mount()
             records = runtime.store.records(canonical_only=True)
-            known: dict[str, str] = {}
             offset = 0
             if context.cursor:
                 loaded: object = json.loads(context.cursor)
                 if not isinstance(loaded, dict):
                     raise ValueError('Reconciliation cursor must be an object.')
-                state = cast(dict[str, object], loaded)
-                saved = state.get('known')
-                if not isinstance(saved, dict):
-                    raise ValueError('Reconciliation cursor must contain generation identities.')
-                for name, value in cast(dict[str, object], saved).items():
-                    if not isinstance(value, str):
-                        raise ValueError('Reconciliation generation identity must be a string.')
-                    known[name] = value
-                offset = int(str(state.get('offset', 0)))
+                # Old cursors may contain `known`; identity now comes from Dagster itself.
+                offset = int(str(cast(dict[str, object], loaded).get('offset', 0)))
             current = {
                 record.partition.key: f'{record.revision}:{record.build_id}:{record.generation}'
                 for record in records
             }
+            versions = {
+                record.partition.key: hashlib.sha256(
+                    str((record.revision, str(record.build_id), record.generation)).encode()
+                ).hexdigest()
+                for record in records
+            }
             materialized = context.instance.get_materialized_partitions(AssetKey(asset_name))
+            tags_by_partition = context.instance.event_log_storage.get_latest_tags_by_partition(
+                AssetKey(asset_name),
+                DagsterEventType.ASSET_MATERIALIZATION,
+                ['dagster/data_version'],
+            )
             keys = sorted(set(current) | materialized)
             changed = [
                 key
                 for key in keys
-                if known.get(key) != current.get(key, 'MISSING') or key not in materialized
+                if key not in current
+                or tags_by_partition.get(key, {}).get('dagster/data_version') != versions[key]
             ]
             statuses = (
                 context.instance.get_status_by_partition(
@@ -229,7 +277,14 @@ def build_reconciliation_sensor(
             selected = _reconciliation_selection(
                 keys, list(dict.fromkeys(changed + failed_keys)), offset
             )
-            requests = [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
+            now = datetime.now(UTC).timestamp()
+            requests = (
+                [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
+                if _health_due(context, runtime, health_job, now)
+                else []
+            )
+            health_count = len(requests)
+            context.update_cursor(json.dumps({'offset': offset + 1}))
             inflight = context.instance.get_runs(
                 filters=RunsFilter(
                     tags={'origo_source_key': spec.key, 'origo_source_reconciliation': 'true'},
@@ -244,25 +299,44 @@ def build_reconciliation_sensor(
                 return requests
             for key in selected:
                 runs = _partition_runs(context, spec, canonical_job, asset_name, key)
-                if any(run.status in _ACTIVE for run in runs):
+                if any(record.dagster_run.status in _ACTIVE for record in runs):
                     continue
                 authority = current.get(key, 'MISSING')
-                latest = runs[0] if runs else None
+                latest_record = runs[0] if runs else None
+                latest = latest_record.dagster_run if latest_record else None
+                attempt = 0
                 if (
                     latest is not None
+                    and latest_record is not None
                     and latest.status in (DagsterRunStatus.FAILURE, DagsterRunStatus.CANCELED)
                     and latest.tags.get('origo_source_reconciliation') == 'true'
                     and latest.tags.get('origo_source_authority') == authority
                 ):
-                    context.log.info(
-                        'source=%s partition=%s phase=reconciliation_held failed_run=%s '
-                        'authority=%s action=operator_retry_or_state_change',
-                        spec.key,
-                        key,
-                        latest.run_id,
-                        authority,
-                    )
-                    continue
+                    if latest.status == DagsterRunStatus.FAILURE and latest.tags.get(
+                        'origo_source_verdict'
+                    ):
+                        context.log.info(
+                            'source=%s partition=%s phase=reconciliation_held failed_run=%s '
+                            'code=%s authority=%s action=operator_retry_or_state_change',
+                            spec.key,
+                            key,
+                            latest.run_id,
+                            latest.tags['origo_source_verdict'],
+                            authority,
+                        )
+                        continue
+                    attempt = min(int(latest.tags.get('origo_source_retry_attempt', '1')), 4)
+                    delay = (60, 300, 1800, 3600)[attempt - 1]
+                    ended = latest_record.end_time or latest_record.update_timestamp.timestamp()
+                    if now - ended < delay:
+                        continue
+                elif key not in changed and key not in failed_keys:
+                    materializations = context.instance.fetch_materializations(
+                        AssetRecordsFilter(asset_key=AssetKey(asset_name), asset_partitions=[key]),
+                        limit=1,
+                    ).records
+                    if materializations and now - materializations[0].timestamp < 86400:
+                        continue
                 requests.append(
                     RunRequest(
                         job_name=canonical_job.name,
@@ -275,19 +349,16 @@ def build_reconciliation_sensor(
                             'origo_source_partition': key,
                             'origo_source_reconciliation': 'true',
                             'origo_source_authority': authority,
+                            'origo_source_retry_attempt': str(min(attempt + 1, 4)),
                             'dagster/priority': '10',
                         },
                     )
                 )
-                known[key] = current.get(key, 'MISSING')
-            context.update_cursor(
-                json.dumps({'known': known, 'offset': offset + 1}, sort_keys=True)
-            )
             context.log.info(
                 'source=%s active_days=%s reconciliation_requests=%s',
                 spec.key,
                 len(records),
-                len(requests) - 1,
+                len(requests) - health_count,
             )
             return requests
         finally:

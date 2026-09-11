@@ -3,11 +3,13 @@ import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import NAMESPACE_URL, uuid5
 
 import dagster
 from dagster import (
+    AssetCheckResult,
+    AssetCheckSpec,
     AssetExecutionContext,
     AssetsDefinition,
     BackfillPolicy,
@@ -38,7 +40,9 @@ from dagster._core.definitions.unresolved_asset_job_definition import Unresolved
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
+from .archive import archive_session
 from .capacity import CapacityMonitor
+from .cleanup import preserve_primary_failure
 from .contracts import (
     RevisionedSourceSpec,
     RolloutStage,
@@ -46,10 +50,17 @@ from .contracts import (
     SourceError,
     failure_code,
     failure_message,
+    retryable_source_error,
 )
 from .lifecycle import SourceRuntime
 from .locking import source_lock
 from .storage import SourceStore
+
+# Dagster's multiple-output inference recognizes the unspecialized result class.
+if TYPE_CHECKING:
+    _SourceResult = MaterializeResult[None]
+else:
+    _SourceResult = MaterializeResult
 
 
 class _JobFactory(Protocol):
@@ -122,36 +133,36 @@ def execute_source(
         Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
         run_id,
     )
-    try:
-        result = _execute_operation(runtime, operation, config)
-        failure_operation, _scope, partition, consumer = _failure_context(
-            operation, config.partition_key
-        )
-        if not (operation == 'canonical' and config.reconcile_only):
-            runtime.failures.recover(
-                operation=failure_operation, partition=partition, consumer=consumer
+    with preserve_primary_failure('disconnect', client.disconnect):
+        try:
+            with archive_session():
+                result = _execute_operation(runtime, operation, config)
+            failure_operation, _scope, partition, consumer = _failure_context(
+                operation, config.partition_key
             )
-        logger.info(
-            'source=%s partition=%s operation=%s phase=completed run=%s',
-            spec.key,
-            config.partition_key,
-            operation,
-            run_id,
-        )
-        return result
-    except Exception as error:
-        logger.error(
-            'source=%s partition=%s operation=%s code=%s message=%s run=%s',
-            spec.key,
-            config.partition_key,
-            operation,
-            failure_code(error),
-            failure_message(error),
-            run_id,
-        )
-        raise
-    finally:
-        client.disconnect()
+            if not (operation == 'canonical' and config.reconcile_only):
+                runtime.failures.recover(
+                    operation=failure_operation, partition=partition, consumer=consumer
+                )
+            logger.info(
+                'source=%s partition=%s operation=%s phase=completed run=%s',
+                spec.key,
+                config.partition_key,
+                operation,
+                run_id,
+            )
+            return result
+        except Exception as error:
+            logger.error(
+                'source=%s partition=%s operation=%s code=%s message=%s run=%s',
+                spec.key,
+                config.partition_key,
+                operation,
+                failure_code(error),
+                failure_message(error),
+                run_id,
+            )
+            raise
 
 
 def _config_mapping(value: object) -> dict[str, object]:
@@ -213,19 +224,8 @@ def _execute_operation(
         successful = False
         if capacity is not None:
             capacity.start_sampling()
-        try:
-            if not config.reconcile_only:
-                try:
-                    runtime.build(config.partition_key)
-                except SourceError as error:
-                    if error.code != 'RETAINED_CONTENT_INVALID':
-                        raise
-                    runtime.repair(config.partition_key)
-                if runtime.parity_failed(config.partition_key):
-                    runtime.repair(config.partition_key)
-            record, checks = runtime.verify(config.partition_key)
-            successful = True
-        finally:
+
+        def finish_capacity() -> None:
             if capacity is not None:
                 try:
                     capacity.finish(successful=successful)
@@ -237,6 +237,19 @@ def _execute_operation(
                         message=failure_message(error),
                     )
                     raise
+
+        with preserve_primary_failure('capacity measurement', finish_capacity):
+            if not config.reconcile_only:
+                try:
+                    runtime.build(config.partition_key)
+                except SourceError as error:
+                    if error.code != 'RETAINED_CONTENT_INVALID':
+                        raise
+                    runtime.repair(config.partition_key)
+                if runtime.parity_failed(config.partition_key):
+                    runtime.repair(config.partition_key)
+            record, checks = runtime.verify(config.partition_key)
+            successful = True
         return {
             'partition_key': record.partition.key,
             'revision': record.revision,
@@ -293,6 +306,9 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
     @asset(
         name=name,
         group_name=spec.key,
+        check_specs=[AssetCheckSpec(name='source_health', asset=name)]
+        if operation == 'reconcile'
+        else None,
         partitions_def=DailyPartitionsDefinition(
             start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
         )
@@ -310,21 +326,21 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation == 'canonical'
         else None,
     )
-    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> MaterializeResult[None]:
-        if operation == 'canonical':
-            key = context.partition_key
-            if config.partition_key and config.partition_key != key:
-                raise ValueError('Run config date must match the selected Dagit partition.')
-            if config.capacity_probe and context.run.tags.get('dagster/backfill'):
-                raise ValueError(
-                    'A capacity probe must be one explicitly launched day, not a range backfill.'
-                )
-            config = SourceRunConfig(
-                partition_key=key,
-                reconcile_only=config.reconcile_only,
-                capacity_probe=config.capacity_probe,
-            )
+    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> _SourceResult:
         try:
+            if operation == 'canonical':
+                key = context.partition_key
+                if config.partition_key and config.partition_key != key:
+                    raise ValueError('Run config date must match the selected Dagit partition.')
+                if config.capacity_probe and context.run.tags.get('dagster/backfill'):
+                    raise ValueError(
+                        'A capacity probe must be one explicitly launched day, not a range backfill.'
+                    )
+                config = SourceRunConfig(
+                    partition_key=key,
+                    reconcile_only=config.reconcile_only,
+                    capacity_probe=config.capacity_probe,
+                )
             if operation in ('canonical', 'repair', 'audit'):
                 required = {f'{spec.key}_reconciliation_sensor', f'{spec.key}_failure_sensor'}
                 running = {
@@ -347,26 +363,57 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 failure_code(error),
                 failure_message(error),
             )
+            if operation == 'canonical':
+                # A data/configuration verdict holds automatic verification; worker and
+                # transport failures are retried by the sensor after releasing the pool.
+                verdict = (
+                    isinstance(error, SourceError)
+                    and not retryable_source_error(error)
+                    and error.code not in ('SOURCE_LOCK_BUSY', 'CAPACITY_SAMPLER_STUCK')
+                ) or isinstance(error, (ValueError, TypeError))
+                context.instance.add_run_tags(
+                    context.run.run_id,
+                    {
+                        'origo_source_verdict': failure_code(error) if verdict else '',
+                    },
+                )
             if operation == 'canonical' and (
-                config.reconcile_only
-                or (isinstance(error, SourceError) and not error.code.startswith('PROVIDER_'))
+                config.reconcile_only or not retryable_source_error(error)
             ):
                 raise Failure(
                     description=f'{failure_code(error)}: {failure_message(error)}',
                     allow_retries=False,
                 ) from error
             raise
-        context.add_output_metadata({'source_result': MetadataValue.json(result)})
         if operation == 'canonical':
             version = hashlib.sha256(
                 str((result['revision'], result['build_id'], result['generation'])).encode()
             ).hexdigest()
             return MaterializeResult(
                 value=None,
-                metadata={'source_state': MetadataValue.json(result)},
+                metadata={
+                    'source_state': MetadataValue.json(result),
+                    'source_result': MetadataValue.json(result),
+                },
                 data_version=DataVersion(version),
             )
-        return MaterializeResult(value=None, metadata={'source_result': MetadataValue.json(result)})
+        return MaterializeResult(
+            value=None,
+            metadata={'source_result': MetadataValue.json(result)},
+            check_results=[
+                AssetCheckResult(
+                    passed=result['healthy'] is True,
+                    check_name='source_health',
+                    metadata={
+                        'unresolved_failures': MetadataValue.int(
+                            int(str(result['unresolved_failures']))
+                        )
+                    },
+                )
+            ]
+            if operation == 'reconcile'
+            else [],
+        )
 
     return execute
 
@@ -678,8 +725,17 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 raise ValueError('Source backfill worker must contain exactly one day.')
             if not isinstance(partition_key, str):
                 raise TypeError('Source partition key must be a string.')
+            observed_operation = (
+                'verification'
+                if operation == 'canonical'
+                and (
+                    _config_mapping(value).get('reconcile_only') is True
+                    or tags.get('origo_source_reconciliation') == 'true'
+                )
+                else operation
+            )
             failure_operation, scope, partition, consumer = _failure_context(
-                operation, partition_key
+                observed_operation, partition_key
             )
             runtime.failures.record(
                 operation=failure_operation,

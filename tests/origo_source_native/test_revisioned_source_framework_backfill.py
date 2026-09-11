@@ -142,9 +142,43 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> No
 
 def test_backfill_compares_real_archive_with_legacy_and_records_proof(
     backfill_env: BackfillEnv,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from collections import Counter
+
+    from origo.sources.contracts import ComponentSpec, Partition, SourceError
+
     runtime, instance, _source = backfill_env
-    result = _run(backfill_env, day='2020-01-01', probe=True)
+    archives = []
+    retained_reads = Counter()
+    validate = SourceStore.validate_component
+
+    def counted_archive(url: str) -> binance_daily.Response:
+        if url.endswith('.zip'):
+            archives.append(url)
+        return archive_response(url)
+
+    def counted_validation(
+        self: SourceStore,
+        component: ComponentSpec,
+        table: str,
+        partition: Partition,
+        *,
+        predicate: str = '1',
+        params: object | None = None,
+    ) -> tuple[int, str]:
+        if table.endswith('_revisions'):
+            retained_reads[component.key] += 1
+        return validate(self, component, table, partition, predicate=predicate, params=params)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(binance_daily, 'get_response', counted_archive)
+        patch.setattr(SourceStore, 'validate_component', counted_validation)
+        result = _run(backfill_env, day='2020-01-01', probe=True)
+    assert len(archives) == 1
+    assert dict(retained_reads) == {
+        key: 3 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+    }
     assert result.success
     rows = runtime.store.execute(
         'SELECT partition_key, checks_json, dagster_run_id FROM origo.source_parity_log'
@@ -182,6 +216,26 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
 
     messages = '\n'.join(entry.user_message for entry in instance.all_logs(result.run_id))
     assert 'phase=legacy_comparison' in messages and 'phase=verified' in messages
+
+    # Duplicate an actual archive row exactly at the seek-page boundary.
+    record = next(
+        r for r in runtime.store.records(canonical_only=True) if r.partition.key == '2020-01-01'
+    )
+    runtime.store.execute(
+        'INSERT INTO origo.binance_spot_trades_raw_revisions SELECT * FROM '
+        'origo.binance_spot_trades_raw_revisions WHERE build_id=%(build)s '
+        'ORDER BY datetime, trade_id LIMIT 1 OFFSET 49999',
+        {'build': record.build_id},
+    )
+    raw = next(c for c in runtime.spec.components if c.key == 'raw')
+    with pytest.raises(SourceError, match='duplicate keys'):
+        runtime.store.validate_component(
+            raw,
+            runtime.store.component_table('raw'),
+            record.partition,
+            predicate='build_id=%(build)s',
+            params={'build': record.build_id},
+        )
 
 
 def test_reconciliation_restores_committed_state_after_worker_loss(
@@ -391,7 +445,8 @@ def test_source_failures_and_recoveries_flow_into_dagit_logs(backfill_env: Backf
         job for job in source.jobs if job.name == 'reconcile_binance_spot_trades_source_origo_job'
     )
     failed = health.execute_in_process(instance=instance, raise_on_error=False)
-    assert not failed.success
+    assert failed.success
+    assert not failed.get_asset_check_evaluations()[0].passed
     messages = '\n'.join(entry.user_message for entry in instance.all_logs(failed.run_id))
     assert f'origin_run={origin}' in messages
     assert 'PROVIDER_HTTP_503' in messages and 'event=FAILED' in messages
@@ -466,6 +521,22 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     sensor = next(
         sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
     )
+    with build_sensor_context(
+        instance=instance,
+        definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
+    ) as context:
+        requests = sensor.evaluate_tick(context).run_requests
+    assert all(request.partition_key is None for request in requests)
+    from datetime import timedelta, tzinfo
+
+    from origo.sources import dagit
+
+    class TickClock:
+        @staticmethod
+        def now(zone: tzinfo) -> datetime:
+            return datetime.now(zone) + timedelta(days=1)
+
+    monkeypatch.setattr(dagit, 'datetime', TickClock)
     with build_sensor_context(
         instance=instance,
         definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
@@ -680,7 +751,7 @@ def test_failed_automatic_verification_waits_for_operator_or_state_change(
     sensor = next(
         sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
     )
-    now = datetime.now(UTC)
+    now = datetime.now(UTC) + timedelta(days=1)
 
     class TickClock:
         @staticmethod
@@ -798,6 +869,6 @@ def test_reconciliation_waits_for_native_partition_runs(
             remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
         )
         followup = requests()
-        assert len(followup) == 1 and followup[0].partition_key is None
+        assert all(request.partition_key is None for request in followup)
         instance.report_run_failed(run)
         assert any(request.partition_key == DAY for request in requests())

@@ -10,6 +10,7 @@ from typing import Protocol, cast
 import dagster
 from dagster import (
     AssetKey,
+    DagsterRun,
     DagsterRunStatus,
     DailyPartitionsDefinition,
     DefaultSensorStatus,
@@ -128,6 +129,33 @@ def _reconciliation_selection(keys: list[str], urgent: list[str], offset: int) -
     return list(dict.fromkeys(prioritized + rotating))
 
 
+def _partition_runs(
+    context: SensorEvaluationContext,
+    spec: RevisionedSourceSpec,
+    canonical_job: JobDefinition,
+    asset_name: str,
+    key: str,
+) -> list[DagsterRun]:
+    jobs = {canonical_job.name, f'backfill_{spec.key}_source_job'}
+    asset_key = AssetKey(asset_name)
+    records = {
+        record.storage_id: record
+        for tag in ('dagster/partition', 'dagster/asset_partition_range_start')
+        for record in context.instance.get_run_records(RunsFilter(tags={tag: key}))
+        if record.dagster_run.job_name in jobs
+        or asset_key in (record.dagster_run.asset_selection or set())
+    }
+    completed = sorted(
+        records,
+        key=lambda index: (
+            records[index].end_time or records[index].update_timestamp.timestamp(),
+            index,
+        ),
+        reverse=True,
+    )
+    return [records[index].dagster_run for index in completed]
+
+
 def build_reconciliation_sensor(
     spec: RevisionedSourceSpec,
     canonical_job: JobDefinition,
@@ -215,15 +243,25 @@ def build_reconciliation_sensor(
                 )
                 return requests
             for key in selected:
-                active = context.instance.get_runs(
-                    filters=RunsFilter(
-                        job_name=canonical_job.name,
-                        tags={'dagster/partition': key},
-                        statuses=_ACTIVE,
-                    ),
-                    limit=1,
-                )
-                if active:
+                runs = _partition_runs(context, spec, canonical_job, asset_name, key)
+                if any(run.status in _ACTIVE for run in runs):
+                    continue
+                authority = current.get(key, 'MISSING')
+                latest = runs[0] if runs else None
+                if (
+                    latest is not None
+                    and latest.status in (DagsterRunStatus.FAILURE, DagsterRunStatus.CANCELED)
+                    and latest.tags.get('origo_source_reconciliation') == 'true'
+                    and latest.tags.get('origo_source_authority') == authority
+                ):
+                    context.log.info(
+                        'source=%s partition=%s phase=reconciliation_held failed_run=%s '
+                        'authority=%s action=operator_retry_or_state_change',
+                        spec.key,
+                        key,
+                        latest.run_id,
+                        authority,
+                    )
                     continue
                 requests.append(
                     RunRequest(
@@ -236,6 +274,7 @@ def build_reconciliation_sensor(
                             'origo_source_operation': 'canonical',
                             'origo_source_partition': key,
                             'origo_source_reconciliation': 'true',
+                            'origo_source_authority': authority,
                             'dagster/priority': '10',
                         },
                     )

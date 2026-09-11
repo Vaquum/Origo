@@ -16,6 +16,7 @@ from dagster import (
     DefaultSensorStatus,
     Definitions,
     ExecuteInProcessResult,
+    RunRequest,
 )
 from dagster._core.remote_origin import RemoteRepositoryOrigin
 
@@ -639,3 +640,164 @@ def test_reconciliation_failures_do_not_starve_other_partitions() -> None:
     assert all(len(batch) <= 5 for batch in selected)
     assert set().union(*(set(batch) for batch in selected)) == set(keys)
     assert set().union(*(set(batch) for batch in selected[:2])) >= set(urgent)
+
+
+@pytest.mark.parametrize(
+    'error_code',
+    [
+        'LEGACY_PARITY_MISMATCH',
+        'RETAINED_CONTENT_INVALID',
+        'ACTIVE_PARTITION_MISSING',
+        'INGESTION_FAILURE_UNRESOLVED',
+        'CAPACITY_MEASUREMENT_REQUIRED',
+    ],
+)
+def test_failed_automatic_verification_waits_for_operator_or_state_change(
+    backfill_env: BackfillEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+) -> None:
+    from datetime import timedelta, tzinfo
+
+    from dagster import build_sensor_context
+
+    from origo.sources import dagit
+    from origo.sources.contracts import Client, SourceError, StateRecord
+
+    runtime, instance, original_source = backfill_env
+    assert _run(backfill_env, probe=True).success
+    record = runtime.store.records(canonical_only=True)[0]
+    runtime.store.execute(
+        'ALTER TABLE origo.source_parity_log DELETE WHERE 1 SETTINGS mutations_sync=2'
+    )
+    attempts = []
+
+    def fail_verification(client: Client, database: str, record: StateRecord) -> dict[str, object]:
+        attempts.append(record)
+        raise SourceError(error_code, 'Injected verification failure on retained real market data')
+
+    source = build_source_bundle(replace(runtime.spec, verify=fail_verification))
+    sensor = next(
+        sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
+    )
+    now = datetime.now(UTC)
+
+    class TickClock:
+        @staticmethod
+        def now(zone: tzinfo) -> datetime:
+            return now.astimezone(zone)
+
+    monkeypatch.setattr(dagit, 'datetime', TickClock)
+    cursor = None
+
+    def requests() -> list[RunRequest]:
+        nonlocal cursor
+        with build_sensor_context(
+            instance=instance,
+            cursor=cursor,
+            definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
+        ) as context:
+            result = sensor.evaluate_tick(context)
+            cursor = result.cursor
+            return result.run_requests
+
+    request = next(request for request in requests() if request.partition_key == DAY)
+    job = next(job for job in source.jobs if job.name == request.job_name)
+    failed = job.execute_in_process(
+        instance=instance,
+        partition_key=DAY,
+        run_config=request.run_config,
+        tags=request.tags,
+        raise_on_error=False,
+    )
+    assert not failed.success and _status(backfill_env) == 'FAILED'
+    assert len(attempts) == 1
+    failure_count = runtime.store.execute('SELECT count() FROM origo.source_failure_log')
+    run_count = len(instance.get_runs())
+    for _ in range(10):
+        now += timedelta(minutes=1)
+        followup = requests()
+        assert len(followup) == 1 and followup[0].partition_key is None
+    assert len(attempts) == 1
+    assert runtime.store.execute('SELECT count() FROM origo.source_failure_log') == failure_count
+    assert len(instance.get_runs()) == run_count
+    assert _status(backfill_env) == 'FAILED'
+
+    advanced = runtime.rollback(record, operator='test', reason='Test state-change admission')
+    now += timedelta(minutes=1)
+    request = next(request for request in requests() if request.partition_key == DAY)
+    assert request.tags['origo_source_authority'].endswith(f':{advanced.generation}')
+    assert not job.execute_in_process(
+        instance=instance,
+        partition_key=DAY,
+        run_config=request.run_config,
+        tags=request.tags,
+        raise_on_error=False,
+    ).success
+    assert len(attempts) == 2
+    now += timedelta(minutes=1)
+    assert all(request.partition_key is None for request in requests())
+
+    # An explicit successful operator verification resumes checks without changing generation.
+    assert _run((runtime, instance, original_source), reconcile=True).success
+    assert runtime.store.records(canonical_only=True)[0] == advanced
+    now += timedelta(minutes=1)
+    assert any(request.partition_key == DAY for request in requests())
+    assert instance.get_run_by_id(failed.run_id).status.value == 'FAILURE'
+
+
+@pytest.mark.parametrize('kind', ['implicit', 'backfill_alias', 'canonical'])
+def test_reconciliation_waits_for_native_partition_runs(
+    backfill_env: BackfillEnv,
+    kind: str,
+) -> None:
+    from dagster import DagsterRunStatus, build_sensor_context
+    from dagster._core.remote_origin import RemoteJobOrigin
+
+    runtime, instance, source = backfill_env
+    runtime.build(DAY)
+    assert instance.get_materialized_partitions(AssetKey(ASSET)) == set()
+    asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
+    if kind == 'implicit':
+        job = Definitions(assets=[asset]).get_implicit_global_asset_job_def()
+    else:
+        name = (
+            'backfill_binance_spot_trades_source_job'
+            if kind == 'backfill_alias'
+            else 'refresh_binance_spot_trades_canonical_source_job'
+        )
+        job = next(job for job in source.jobs if job.name == name)
+    tags = (
+        {'dagster/partition': DAY}
+        if kind == 'canonical'
+        else {'dagster/asset_partition_range_start': DAY, 'dagster/asset_partition_range_end': DAY}
+    )
+    sensor = next(
+        sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
+    )
+
+    def requests() -> list[RunRequest]:
+        with build_sensor_context(
+            instance=instance,
+            definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
+        ) as context:
+            return sensor.evaluate_tick(context).run_requests
+
+    # Other source jobs with the same date tag do not own this canonical partition.
+    health = next(
+        job for job in source.jobs if job.name == 'reconcile_binance_spot_trades_source_origo_job'
+    )
+    instance.create_run_for_job(health, status=DagsterRunStatus.STARTED, tags=tags)
+    assert any(request.partition_key == DAY for request in requests())
+    for status in (DagsterRunStatus.QUEUED, DagsterRunStatus.STARTED):
+        run = instance.create_run_for_job(
+            job,
+            status=status,
+            tags=tags,
+            asset_selection={asset.key} if kind == 'implicit' else None,
+            remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
+        )
+        followup = requests()
+        assert len(followup) == 1 and followup[0].partition_key is None
+        instance.report_run_failed(run)
+        assert any(request.partition_key == DAY for request in requests())

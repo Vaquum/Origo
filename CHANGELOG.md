@@ -1,6 +1,6 @@
 # v3.8.0
 
-- Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit.
+- Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit. Failed automatic verification waits for a state change or operator retry; native backfill runs suppress duplicate verification.
 
 # v3.7.0
 

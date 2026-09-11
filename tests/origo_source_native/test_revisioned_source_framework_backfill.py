@@ -464,6 +464,16 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     request = next(request for request in requests if request.partition_key == DAY)
     assert request.run_config['ops'][ASSET]['config']['reconcile_only'] is True
     job = next(job for job in source.jobs if job.name == request.job_name)
+    from dagster import DagsterRunStatus
+
+    queued = instance.create_run_for_job(job, status=DagsterRunStatus.QUEUED, tags=request.tags)
+    with build_sensor_context(
+        instance=instance,
+        definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
+    ) as context:
+        followup = sensor.evaluate_tick(context).run_requests
+    assert len(followup) == 1 and followup[0].partition_key is None
+    instance.report_run_canceled(queued)
     assert job.execute_in_process(
         instance=instance, partition_key=request.partition_key, run_config=request.run_config
     ).success

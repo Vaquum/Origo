@@ -32,9 +32,7 @@ PER_ATTEMPT_EXECUTION_BUDGET_SECONDS: Final[int] = 450
 
 
 def _validated_instance_config() -> dict[str, object]:
-    config, _custom_instance_class = dagster_instance_config(
-        str(REPO_ROOT), 'dagster.yaml'
-    )
+    config, _custom_instance_class = dagster_instance_config(str(REPO_ROOT), 'dagster.yaml')
     return dict(config)
 
 
@@ -122,6 +120,9 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
     assert config['concurrency']['pools'] == {'default_limit': 1, 'granularity': 'run'}
     assert config['python_logs'] == {'managed_python_loggers': [''], 'python_log_level': 'INFO'}
     assert config['compute_logs']['config']['base_dir'] == '/opt/dagster-instance/compute_logs'
+    dependencies = (REPO_ROOT / 'docker-requirements.txt').read_text().splitlines()
+    assert 'dagster[redis,postgres]==1.13.21' in dependencies
+    assert 'dagit==1.13.21' in dependencies
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = yaml.safe_load((REPO_ROOT / name).read_text())
         for worker in ('dagit', 'dagster'):

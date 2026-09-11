@@ -202,6 +202,18 @@ def build_reconciliation_sensor(
                 keys, list(dict.fromkeys(changed + failed_keys)), offset
             )
             requests = [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
+            inflight = context.instance.get_runs(
+                filters=RunsFilter(
+                    tags={'origo_source_key': spec.key, 'origo_source_reconciliation': 'true'},
+                    statuses=_ACTIVE,
+                ),
+                limit=1,
+            )
+            if inflight:
+                context.log.info(
+                    'source=%s reconciliation batch is still queued or running', spec.key
+                )
+                return requests
             for key in selected:
                 active = context.instance.get_runs(
                     filters=RunsFilter(

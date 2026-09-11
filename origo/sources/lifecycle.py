@@ -6,7 +6,10 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
+
+from dagster import get_dagster_logger
 
 from .contracts import (
     BuildContext,
@@ -107,6 +110,13 @@ class SourceRuntime:
             raise
 
     def build(self, key: str, *, provisional: bool = False) -> StateRecord:
+        get_dagster_logger('origo.sources').info(
+            'source=%s partition=%s phase=build_started provisional=%s run=%s',
+            self.spec.key,
+            key,
+            provisional,
+            self.run_id,
+        )
         self.spec.require_enabled('build')
         self.require_shared_mount()
         adapter = self.spec.provisional if provisional else self.spec.canonical
@@ -148,6 +158,25 @@ class SourceRuntime:
                             'Provisional interval is awaiting independent completeness evidence.'
                         )
                 else:
+                    current = next(
+                        (
+                            item
+                            for item in self.store.records(canonical_only=True)
+                            if item.partition.key == key
+                        ),
+                        None,
+                    )
+                    if (
+                        current is not None
+                        and self.spec.canonical.discover(partition) == current.revision
+                    ):
+                        self._validate_retained(current)
+                        self.spec.canonical.revalidate(
+                            partition, Revision(current.revision, '', '{}', 0, lambda: iter(()))
+                        )
+                        self.failures.recover(operation=operation, partition=key)
+                        self.failures.recover(operation='component', partition=key)
+                        return current
                     revision = adapter.fetch(partition)
                 current = [
                     record
@@ -225,6 +254,13 @@ class SourceRuntime:
                     ENGINE = MergeTree ORDER BY ({', '.join(component.primary_key)})""")
             for index, component in enumerate(components):
                 try:
+                    get_dagster_logger('origo.sources').info(
+                        'source=%s partition=%s build=%s component=%s phase=started',
+                        self.spec.key,
+                        partition.key,
+                        build_id,
+                        component.key,
+                    )
                     component.build(context)
                     count, digest = self.store.validate_component(
                         component, context.table(component.key), partition
@@ -277,6 +313,15 @@ class SourceRuntime:
                         ],
                     )
                     hashes.append((component.key, digest))
+                    get_dagster_logger('origo.sources').info(
+                        'source=%s partition=%s build=%s component=%s phase=validated rows=%s hash=%s',
+                        self.spec.key,
+                        partition.key,
+                        build_id,
+                        component.key,
+                        count,
+                        digest,
+                    )
                 except Exception as error:
                     self.failures.record(
                         operation='component',
@@ -308,7 +353,10 @@ class SourceRuntime:
         components = self.store.components(record.partition)
         expected = dict(record.component_hashes)
         if set(expected) != {component.key for component in components}:
-            raise RuntimeError('Activation does not contain the complete component set.')
+            raise SourceError(
+                'RETAINED_CONTENT_INVALID',
+                'Activation does not contain the complete component set.',
+            )
         params = {
             'source': self.spec.key,
             'partition': record.partition.key,
@@ -330,8 +378,9 @@ class SourceRuntime:
                 params=params,
             )
             if len(rows) != 1 or rows[0] != actual or actual[1] != expected[component.key]:
-                raise RuntimeError(
-                    'Retained build content or successful component evidence is incomplete.'
+                raise SourceError(
+                    'RETAINED_CONTENT_INVALID',
+                    f'Retained {component.key} content or successful component evidence is incomplete.',
                 )
 
     def _activate(self, record: StateRecord, expected: int) -> None:
@@ -455,6 +504,17 @@ class SourceRuntime:
                 )
         return tuple(changed)
 
+    def parity_failed(self, key: str) -> bool:
+        """Return whether the day still has a failed legacy comparison."""
+        rows = self.store.execute(
+            f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
+            WHERE source_key=%(source)s AND partition_key=%(partition)s AND operation='verification'
+              AND error_code IN ('LEGACY_PARITY_MISMATCH', 'LEGACY_SCHEMA_MISMATCH')
+            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+            {'source': self.spec.key, 'partition': key},
+        )
+        return bool(rows)
+
     def repair(self, key: str) -> StateRecord:
         self.spec.require_enabled('repair')
         self.require_shared_mount()
@@ -470,6 +530,10 @@ class SourceRuntime:
             return self.build(key)
         try:
             self._validate_retained(record)
+            if self.parity_failed(key):
+                raise SourceError(
+                    'RETAINED_PARITY_FAILED', 'Retained output failed its legacy comparison.'
+                )
         except RuntimeError as error:
             self.failures.record(
                 operation='repair',
@@ -594,6 +658,153 @@ class SourceRuntime:
                 error_code=failure_code(error),
                 message=failure_message(error),
                 scope='NONE',
+            )
+            raise
+
+    def _recover_committed_failure(self, record: StateRecord) -> None:
+        rows = self.store.execute(
+            f"""SELECT failure_key, argMax(error_code, event_time), argMax(event_id, event_time),
+            argMax(dagster_run_id, event_time) FROM {self.store.table('source_failure_log')}
+            WHERE source_key=%(source)s AND partition_key=%(partition)s AND operation='canonical'
+            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+            {'source': self.spec.key, 'partition': record.partition.key},
+        )
+        committed = self.store.execute(
+            f"""SELECT dagster_run_id FROM {self.store.table('source_activation_log')}
+            WHERE source_key=%(source)s AND partition_key=%(partition)s
+              AND build_id=%(build)s AND generation=%(generation)s""",
+            {
+                'source': self.spec.key,
+                'partition': record.partition.key,
+                'build': record.build_id,
+                'generation': record.generation,
+            },
+        )
+        for row in rows:
+            if (row[3],) in committed:
+                if not isinstance(row[2], UUID):
+                    raise TypeError('Committed recovery must reference a concrete failure event.')
+                self.failures.record(
+                    operation='canonical',
+                    partition=record.partition.key,
+                    scope='PARTITION',
+                    error_code=str(row[1]),
+                    event_type='RECOVERED',
+                    related_event=row[2],
+                )
+
+    def verify(self, key: str) -> tuple[StateRecord, dict[str, object]]:
+        """Verify current retained contents and parity for the exact active generation."""
+        self.spec.require_enabled('verify')
+        self.require_shared_mount()
+        try:
+            with source_lock(self.lock_root, self.spec.key, 'heavy'):
+                record = next(
+                    (
+                        item
+                        for item in self.store.records(canonical_only=True)
+                        if item.partition.key == key
+                    ),
+                    None,
+                )
+                if record is None:
+                    raise SourceError(
+                        'ACTIVE_PARTITION_MISSING', 'No canonical generation is active.'
+                    )
+                self._validate_retained(record)
+                rows = self.store.execute(
+                    f"""SELECT checks_json FROM {self.store.table('source_parity_log')}
+                    WHERE source_key=%(source)s AND partition_key=%(partition)s
+                      AND revision=%(revision)s AND build_id=%(build)s AND generation=%(generation)s
+                    ORDER BY recorded_at DESC LIMIT 1""",
+                    {
+                        'source': self.spec.key,
+                        'partition': key,
+                        'revision': record.revision,
+                        'build': record.build_id,
+                        'generation': record.generation,
+                    },
+                )
+                if rows:
+                    checks: object = json.loads(str(rows[0][0]))
+                    if not isinstance(checks, dict):
+                        raise SourceError(
+                            'PARITY_EVIDENCE_INVALID', 'Parity evidence must be an object.'
+                        )
+                    result = {
+                        str(name): value for name, value in cast(dict[str, object], checks).items()
+                    }
+                else:
+                    if self.spec.verify is None:
+                        raise SourceError(
+                            'PARITY_VERIFIER_MISSING', 'No legacy verifier is registered.'
+                        )
+                    result = self.spec.verify(self.store.client, self.store.database, record)
+                    self._validate_retained(record)
+                if set(result) != dict(record.component_hashes).keys():
+                    raise SourceError(
+                        'PARITY_EVIDENCE_INVALID', 'Parity proof has an incomplete component set.'
+                    )
+                for component, digest in record.component_hashes:
+                    check = result[component]
+                    if (
+                        not isinstance(check, dict)
+                        or cast(dict[str, object], check).get('sha256') != digest
+                    ):
+                        raise SourceError(
+                            'PARITY_EVIDENCE_INVALID',
+                            'Parity proof does not match retained component hashes.',
+                        )
+                if not rows:
+                    self.store.execute(
+                        f'INSERT INTO {self.store.table("source_parity_log")} VALUES',
+                        [
+                            (
+                                self.spec.key,
+                                key,
+                                record.revision,
+                                record.build_id,
+                                record.generation,
+                                json.dumps(result, sort_keys=True),
+                                self.run_id,
+                                datetime.now(UTC),
+                            )
+                        ],
+                    )
+                if self.store.generation(record.partition) != record.generation:
+                    raise SourceError(
+                        'GENERATION_CHANGED', 'Activation advanced during verification.'
+                    )
+                self.failures.recover(operation='verification', partition=key)
+                self._recover_committed_failure(record)
+                pending = self.store.execute(
+                    f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
+                    WHERE source_key=%(source)s AND partition_key=%(partition)s
+                      AND operation IN ('canonical', 'component')
+                    GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+                    {'source': self.spec.key, 'partition': key},
+                )
+                if pending:
+                    raise SourceError(
+                        'INGESTION_FAILURE_UNRESOLVED',
+                        'A failed ingestion attempt still requires a successful retry.',
+                    )
+                get_dagster_logger('origo.sources').info(
+                    'source=%s partition=%s revision=%s build=%s generation=%s phase=verified',
+                    self.spec.key,
+                    key,
+                    record.revision,
+                    record.build_id,
+                    record.generation,
+                )
+                return record, result
+        except Exception as error:
+            self.failures.record(
+                operation='verification',
+                scope='PARTITION',
+                partition=key,
+                error_code=failure_code(error),
+                message=failure_message(error),
             )
             raise
 

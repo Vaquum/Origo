@@ -17,6 +17,7 @@ from math import isfinite
 from pathlib import Path
 
 import requests
+from dagster import get_dagster_logger
 
 from ..contracts import Partition, Revision, Row, SourceError
 from ..hashing import content_hash
@@ -200,6 +201,9 @@ class BinanceSpotDaily:
         return f'{base.rstrip("/")}/BTCUSDT-trades-{partition.key}.zip'
 
     def fetch(self, partition: Partition) -> Revision:
+        get_dagster_logger('origo.sources').info(
+            'source=binance_spot_trades partition=%s phase=archive_download', partition.key
+        )
         url = self._url(partition)
         name = f'BTCUSDT-trades-{partition.key}'
         expected = _checksum(get_response(url + '.CHECKSUM').body, name + '.zip')
@@ -226,6 +230,12 @@ class BinanceSpotDaily:
                 'member': name + '.csv',
             },
             sort_keys=True,
+        )
+        get_dagster_logger('origo.sources').info(
+            'source=binance_spot_trades partition=%s phase=archive_validated rows=%s revision=%s',
+            partition.key,
+            count,
+            expected,
         )
         return Revision(
             expected, normalized, evidence, count, lambda: spot_csv_rows(csv_body, partition)

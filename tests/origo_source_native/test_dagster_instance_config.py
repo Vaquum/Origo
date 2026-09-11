@@ -113,3 +113,19 @@ def test_active_partition_days_covers_in_progress_and_recent_terminal() -> None:
         excluded = _active_partition_days(instance, job_name)
 
     assert excluded == {date(2024, 1, 1), date(2024, 1, 2)}
+
+
+def test_source_backfill_pool_and_system_logs_are_configured() -> None:
+    import yaml
+
+    config = _validated_instance_config()
+    assert config['concurrency']['pools'] == {'default_limit': 1, 'granularity': 'run'}
+    assert config['python_logs'] == {'managed_python_loggers': [''], 'python_log_level': 'INFO'}
+    assert config['compute_logs']['config']['base_dir'] == '/opt/dagster-instance/compute_logs'
+    for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        compose = yaml.safe_load((REPO_ROOT / name).read_text())
+        for worker in ('dagit', 'dagster'):
+            mounts = compose['services'][worker]['volumes']
+            assert 'source-locks:/opt/origo/locks' in mounts
+            assert 'clickhouse-data:/opt/origo/clickhouse-data:ro' in mounts
+            assert 'dagster-instance:/opt/dagster-instance' in mounts

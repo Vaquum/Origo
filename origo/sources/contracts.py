@@ -217,6 +217,7 @@ class RevisionedSourceSpec:
     components: tuple[ComponentSpec, ...]
     consumers: tuple[ConsumerSpec, ...]
     orchestration: OrchestrationSpec
+    verify: Callable[[Client, str, StateRecord], dict[str, object]] | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)

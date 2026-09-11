@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -171,6 +172,15 @@ class SourceStore:
             )
             SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
             WHERE NOT e.provisional OR e.partition_end<=f.frontier""")
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_parity_log')} (
+            source_key String, partition_key String, revision String, build_id UUID,
+            generation UInt64, checks_json String, dagster_run_id String,
+            recorded_at DateTime64(6, 'UTC')
+        ) ENGINE = MergeTree ORDER BY (source_key, partition_key, build_id, generation)""")
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_capacity_log')} (
+            source_key String, volume_id String, working_set_bytes UInt64,
+            dagster_run_id String, successful UInt8, measured_at DateTime64(6, 'UTC')
+        ) ENGINE = MergeTree ORDER BY (source_key, volume_id, measured_at)""")
         for component in self.spec.components:
             columns = ', '.join(f'{column.name} {column.sql_type}' for column in component.columns)
             key = ', '.join(component.primary_key)
@@ -227,23 +237,41 @@ class SourceStore:
     ) -> tuple[int, str]:
         names = ', '.join(column.name for column in component.columns)
         key = ', '.join(component.primary_key)
-        values = self.execute(
-            f'SELECT {names} FROM {table} WHERE {predicate} ORDER BY {key}', params
-        )
         indexes = tuple(
             next(i for i, column in enumerate(component.columns) if column.name == key)
             for key in component.primary_key
         )
-        keys = [tuple(row[index] for index in indexes) for row in values]
-        if len(keys) != len(set(keys)):
-            raise RuntimeError(f'Component {component.key} contains duplicate keys.')
         time_index = next(
             i for i, column in enumerate(component.columns) if column.name == component.time_column
         )
-        for row in values:
-            if not partition.start <= _utc(row[time_index]) < partition.end:
-                raise RuntimeError(f'Component {component.key} contains an out-of-bounds row.')
-        return len(values), content_hash(values, schema_version=self.spec.schema_version)
+        count = 0
+
+        def checked_rows() -> Iterator[Row]:
+            nonlocal count
+            offset = 0
+            previous: Row | None = None
+            while True:
+                values = self.execute(
+                    f'SELECT {names} FROM {table} WHERE {predicate} ORDER BY {key} LIMIT 50000 OFFSET {offset}',
+                    params,
+                )
+                for row in values:
+                    current = tuple(row[index] for index in indexes)
+                    if previous == current:
+                        raise RuntimeError(f'Component {component.key} contains duplicate keys.')
+                    if not partition.start <= _utc(row[time_index]) < partition.end:
+                        raise RuntimeError(
+                            f'Component {component.key} contains an out-of-bounds row.'
+                        )
+                    previous = current
+                    count += 1
+                    yield row
+                if len(values) < 50000:
+                    break
+                offset += len(values)
+
+        digest = content_hash(checked_rows(), schema_version=self.spec.schema_version)
+        return count, digest
 
     def anchor(self) -> datetime:
         rows = self.execute(

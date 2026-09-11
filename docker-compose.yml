@@ -31,6 +31,8 @@ services:
     volumes:
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
+      - source-locks:/opt/origo/locks
+      - clickhouse-data:/opt/origo/clickhouse-data:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -48,6 +50,8 @@ services:
     volumes:
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
+      - source-locks:/opt/origo/locks
+      - clickhouse-data:/opt/origo/clickhouse-data:ro
       - ./parquet_data:/opt/parquet
       - ./arrow_data:/opt/arrow
     depends_on:
@@ -59,3 +63,5 @@ services:
 volumes:
   clickhouse-data:
   dagster-instance:
+
+  source-locks:

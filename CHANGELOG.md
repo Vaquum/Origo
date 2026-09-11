@@ -1,3 +1,7 @@
+# v3.8.0
+
+- Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit.
+
 # v3.7.0
 
 - Add a dormant revisioned individual Binance spot-trade source with isolated components, fenced activation, shared failure history, and local shadow consumers.

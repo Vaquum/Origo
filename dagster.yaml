@@ -28,3 +28,19 @@ run_monitoring:
   cancel_timeout_seconds: 180
   max_runtime_seconds: 93600
   poll_interval_seconds: 120
+
+concurrency:
+  pools:
+    default_limit: 1
+    granularity: run
+
+python_logs:
+  managed_python_loggers:
+    - ""
+  python_log_level: INFO
+
+compute_logs:
+  module: dagster._core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /opt/dagster-instance/compute_logs

@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from dagster import get_dagster_logger
+
 from .locking import source_lock
 from .storage import SourceStore
 
@@ -65,6 +67,23 @@ class FailureLog:
                 safe_details,
             )
         ]
+        logger = get_dagster_logger('origo.sources')
+        logger.log(
+            40 if event_type == 'FAILED' else 20,
+            'source=%s partition=%s operation=%s component=%s consumer=%s build=%s '
+            'origin_run=%s event=%s code=%s failure_key=%s message=%s',
+            self.store.spec.key,
+            partition,
+            operation,
+            component,
+            consumer,
+            build_id,
+            self.run_id,
+            event_type,
+            error_code,
+            failure_key,
+            message or f'{operation}: {error_code}',
+        )
         with source_lock(self.lock_root, self.store.spec.key, 'failure_' + failure_key):
             found = self.store.execute(
                 f'SELECT event_id FROM {self.store.table("source_failure_log")} WHERE event_id=%(event)s',

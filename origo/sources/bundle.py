@@ -3,19 +3,27 @@ import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import NAMESPACE_URL, uuid5
 
 import dagster
 from dagster import (
+    AssetCheckResult,
+    AssetCheckSpec,
     AssetExecutionContext,
     AssetsDefinition,
+    BackfillPolicy,
     Config,
     DagsterRunStatus,
+    DailyPartitionsDefinition,
+    DataVersion,
     DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
+    Failure,
     JobDefinition,
+    MaterializeResult,
+    MetadataValue,
     RetryPolicy,
     RunRequest,
     RunsFilter,
@@ -26,15 +34,33 @@ from dagster import (
     SensorEvaluationContext,
     SkipReason,
     asset,
+    get_dagster_logger,
 )
 from dagster._core.definitions.unresolved_asset_job_definition import UnresolvedAssetJobDefinition
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
-from .contracts import RevisionedSourceSpec, RolloutStage, SourceBundle
+from .archive import archive_session
+from .capacity import CapacityMonitor
+from .cleanup import preserve_primary_failure
+from .contracts import (
+    RevisionedSourceSpec,
+    RolloutStage,
+    SourceBundle,
+    SourceError,
+    failure_code,
+    failure_message,
+    retryable_source_error,
+)
 from .lifecycle import SourceRuntime
 from .locking import source_lock
 from .storage import SourceStore
+
+# Dagster's multiple-output inference recognizes the unspecialized result class.
+if TYPE_CHECKING:
+    _SourceResult = MaterializeResult[None]
+else:
+    _SourceResult = MaterializeResult
 
 
 class _JobFactory(Protocol):
@@ -68,7 +94,7 @@ class _SensorFactory(Protocol):
 
 class _FailureSensorFactory(Protocol):
     def __call__(
-        self, *, name: str, monitored_jobs: list[JobDefinition], default_status: DefaultSensorStatus
+        self, *, name: str, default_status: DefaultSensorStatus
     ) -> Callable[[Callable[[RunStatusSensorContext], None]], SensorDefinition]: ...
 
 
@@ -83,11 +109,21 @@ class SourceRunConfig(Config):
     destination: str = ''
     anchor: str = ''
     dry_run: bool = True
+    reconcile_only: bool = False
+    capacity_probe: bool = False
 
 
 def execute_source(
     spec: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
 ) -> dict[str, object]:
+    logger = get_dagster_logger('origo.sources')
+    logger.info(
+        'source=%s partition=%s operation=%s phase=started run=%s',
+        spec.key,
+        config.partition_key,
+        operation,
+        run_id,
+    )
     spec.require_enabled(operation)
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
@@ -97,17 +133,36 @@ def execute_source(
         Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
         run_id,
     )
-    try:
-        result = _execute_operation(runtime, operation, config)
-        failure_operation, _scope, partition, consumer = _failure_context(
-            operation, config.partition_key
-        )
-        runtime.failures.recover(
-            operation=failure_operation, partition=partition, consumer=consumer
-        )
-        return result
-    finally:
-        client.disconnect()
+    with preserve_primary_failure('disconnect', client.disconnect):
+        try:
+            with archive_session():
+                result = _execute_operation(runtime, operation, config)
+            failure_operation, _scope, partition, consumer = _failure_context(
+                operation, config.partition_key
+            )
+            if not (operation == 'canonical' and config.reconcile_only):
+                runtime.failures.recover(
+                    operation=failure_operation, partition=partition, consumer=consumer
+                )
+            logger.info(
+                'source=%s partition=%s operation=%s phase=completed run=%s',
+                spec.key,
+                config.partition_key,
+                operation,
+                run_id,
+            )
+            return result
+        except Exception as error:
+            logger.error(
+                'source=%s partition=%s operation=%s code=%s message=%s run=%s',
+                spec.key,
+                config.partition_key,
+                operation,
+                failure_code(error),
+                failure_message(error),
+                run_id,
+            )
+            raise
 
 
 def _config_mapping(value: object) -> dict[str, object]:
@@ -119,7 +174,7 @@ def _config_mapping(value: object) -> dict[str, object]:
 def _failure_context(operation: str, key: str) -> tuple[str, str, str | None, str | None]:
     if operation.startswith('consumer_'):
         return 'consumer', 'CONSUMER', None, operation.removeprefix('consumer_')
-    if operation in ('audit', 'cleanup'):
+    if operation in ('audit', 'cleanup', 'reconcile'):
         return operation, 'NONE', None, None
     if operation == 'setup':
         return operation, 'SOURCE', None, None
@@ -133,7 +188,77 @@ def _execute_operation(
     if operation == 'setup':
         runtime.setup(anchor=datetime.fromisoformat(config.anchor) if config.anchor else None)
         return {'source_key': spec.key, 'status': 'ready'}
-    if operation in ('canonical', 'provisional', 'repair'):
+    if operation == 'canonical':
+        if not config.partition_key:
+            raise ValueError('Source execution requires an explicit partition key.')
+        runtime.cleanup_verification(dry_run=False)
+        proof = runtime.store.execute(
+            f"""SELECT count() FROM {runtime.store.table('source_active_partitions')} a
+            INNER JOIN {runtime.store.table('source_parity_log')} p
+            USING (source_key, partition_key, revision, build_id, generation)
+            WHERE source_key=%(source)s AND partition_key=%(partition)s AND NOT provisional""",
+            {'source': spec.key, 'partition': config.partition_key},
+        )[0][0]
+        if config.capacity_probe and proof:
+            raise SourceError(
+                'CAPACITY_PROBE_ALREADY_VERIFIED',
+                'Select an unverified day for measurement; use normal backfill configuration to retry a verified day.',
+            )
+        capacity: CapacityMonitor | None = None
+        active = any(
+            record.partition.key == config.partition_key
+            for record in runtime.store.records(canonical_only=True)
+        )
+        if not config.reconcile_only or (active and not proof):
+            try:
+                capacity = CapacityMonitor(runtime, probe=config.capacity_probe)
+                capacity.check()
+            except Exception as error:
+                runtime.failures.record(
+                    operation='capacity',
+                    scope='SOURCE',
+                    error_code=failure_code(error),
+                    message=failure_message(error),
+                )
+                raise
+        successful = False
+        if capacity is not None:
+            capacity.start_sampling()
+
+        def finish_capacity() -> None:
+            if capacity is not None:
+                try:
+                    capacity.finish(successful=successful)
+                except Exception as error:
+                    runtime.failures.record(
+                        operation='capacity',
+                        scope='SOURCE',
+                        error_code=failure_code(error),
+                        message=failure_message(error),
+                    )
+                    raise
+
+        with preserve_primary_failure('capacity measurement', finish_capacity):
+            if not config.reconcile_only:
+                try:
+                    runtime.build(config.partition_key)
+                except SourceError as error:
+                    if error.code != 'RETAINED_CONTENT_INVALID':
+                        raise
+                    runtime.repair(config.partition_key)
+                if runtime.parity_failed(config.partition_key):
+                    runtime.repair(config.partition_key)
+            record, checks = runtime.verify(config.partition_key)
+            successful = True
+        return {
+            'partition_key': record.partition.key,
+            'revision': record.revision,
+            'build_id': str(record.build_id),
+            'generation': record.generation,
+            'verified_at': datetime.now(UTC).isoformat(),
+            'legacy_parity': checks,
+        }
+    if operation in ('provisional', 'repair'):
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
         record = (
@@ -149,6 +274,7 @@ def _execute_operation(
         }
     if operation == 'cleanup':
         return {
+            'verification_databases': list(runtime.cleanup_verification(dry_run=config.dry_run)),
             'build_ids': list(runtime.cleanup(dry_run=config.dry_run)),
             'dry_run': config.dry_run,
         }
@@ -163,6 +289,10 @@ def _execute_operation(
         if failures:
             raise ExceptionGroup('Some audited partitions could not be corrected.', failures)
         return {'corrected_partitions': list(changed)}
+    if operation == 'reconcile':
+        from .dagit import observe_source
+
+        return observe_source(runtime)
     if operation == 'certify':
         return {'state_token': runtime.certify(config.partition_key, review_state='PENDING').token}
     if operation.startswith('consumer_'):
@@ -176,14 +306,115 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
     @asset(
         name=name,
         group_name=spec.key,
+        check_specs=[AssetCheckSpec(name='source_health', asset=name)]
+        if operation == 'reconcile'
+        else None,
+        partitions_def=DailyPartitionsDefinition(
+            start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
+        )
+        if operation == 'canonical'
+        else None,
+        backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=1)
+        if operation == 'canonical'
+        else None,
+        pool=f'{spec.key}_heavy'
+        if operation in ('canonical', 'repair', 'cleanup', 'audit', 'certify')
+        else None,
         retry_policy=RetryPolicy(
             max_retries=spec.orchestration.retry_count, delay=spec.orchestration.retry_delay
         )
         if operation == 'canonical'
         else None,
     )
-    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> dict[str, object]:
-        return execute_source(spec, operation, config, run_id=context.run_id)
+    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> _SourceResult:
+        try:
+            if operation == 'canonical':
+                key = context.partition_key
+                if config.partition_key and config.partition_key != key:
+                    raise ValueError('Run config date must match the selected Dagit partition.')
+                if config.capacity_probe and context.run.tags.get('dagster/backfill'):
+                    raise ValueError(
+                        'A capacity probe must be one explicitly launched day, not a range backfill.'
+                    )
+                config = SourceRunConfig(
+                    partition_key=key,
+                    reconcile_only=config.reconcile_only,
+                    capacity_probe=config.capacity_probe,
+                )
+            if operation in ('canonical', 'repair', 'audit'):
+                required = {f'{spec.key}_reconciliation_sensor', f'{spec.key}_failure_sensor'}
+                running = {
+                    state.instigator_name
+                    for state in context.instance.all_instigator_state()
+                    if state.status.value == 'RUNNING'
+                }
+                if not required <= running:
+                    raise SourceError(
+                        'DAGIT_MONITORING_REQUIRED',
+                        'Start the source reconciliation and failure sensors in Dagit before backfilling.',
+                    )
+            result = execute_source(spec, operation, config, run_id=context.run.run_id)
+        except Exception as error:
+            context.log.error(
+                'source=%s partition=%s operation=%s code=%s message=%s',
+                spec.key,
+                config.partition_key,
+                operation,
+                failure_code(error),
+                failure_message(error),
+            )
+            if operation == 'canonical':
+                # A data/configuration verdict holds automatic verification; worker and
+                # transport failures are retried by the sensor after releasing the pool.
+                verdict = (
+                    isinstance(error, SourceError)
+                    and not retryable_source_error(error)
+                    and error.code not in ('SOURCE_LOCK_BUSY', 'CAPACITY_SAMPLER_STUCK')
+                ) or isinstance(error, (ValueError, TypeError))
+                context.instance.add_run_tags(
+                    context.run.run_id,
+                    {
+                        'origo_source_verdict': failure_code(error) if verdict else '',
+                        'origo_source_verdict_run': context.run.run_id,
+                    },
+                )
+            if operation == 'canonical' and (
+                config.reconcile_only or not retryable_source_error(error)
+            ):
+                raise Failure(
+                    description=f'{failure_code(error)}: {failure_message(error)}',
+                    allow_retries=False,
+                ) from error
+            raise
+        if operation == 'canonical':
+            version = hashlib.sha256(
+                str((result['revision'], result['build_id'], result['generation'])).encode()
+            ).hexdigest()
+            return MaterializeResult(
+                value=None,
+                metadata={
+                    'source_state': MetadataValue.json(result),
+                    'source_result': MetadataValue.json(result),
+                },
+                data_version=DataVersion(version),
+            )
+        return MaterializeResult(
+            value=None,
+            metadata={'source_result': MetadataValue.json(result)},
+            check_results=[
+                AssetCheckResult(
+                    passed=result['healthy'] is True,
+                    check_name='source_health',
+                    metadata={
+                        'unresolved_failures': MetadataValue.int(
+                            int(str(result['unresolved_failures']))
+                        )
+                    },
+                )
+            ]
+            if operation == 'reconcile'
+            else [],
+        )
 
     return execute
 
@@ -197,6 +428,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         'cleanup': f'cleanup_{spec.key}_revisions_origo',
         'audit': f'audit_{spec.key}_revisions_origo',
         'certify': f'certify_{spec.key}_source_origo',
+        'reconcile': f'reconcile_{spec.key}_source_origo',
     }
     if spec.provisional is None:
         del names['provisional']
@@ -222,6 +454,13 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             },
         )
         for operation, name in names.items()
+    )
+    unresolved += (
+        _define_job(
+            f'backfill_{spec.key}_source_job',
+            selection=[names['canonical']],
+            tags={'origo_source_key': spec.key, 'origo_source_operation': 'canonical'},
+        ),
     )
     definitions = Definitions(assets=assets, jobs=unresolved)
     jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved)
@@ -313,6 +552,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 run_key = identity if consumer_key and attempt == 0 else f'{identity}:{attempt}'
                 return RunRequest(
                     run_key=run_key,
+                    partition_key=key if operation == 'canonical' else None,
                     run_config={
                         'ops': {
                             names[operation]: {
@@ -440,10 +680,22 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
 
     @_failure_sensor(
         name=f'{spec.key}_failure_sensor',
-        monitored_jobs=list(jobs),
         default_status=DefaultSensorStatus.STOPPED,
     )
     def failure(context: RunStatusSensorContext) -> None:
+        operation = next(
+            (op for op, job_name in job_names.items() if job_name == context.dagster_run.job_name),
+            None,
+        )
+        if context.dagster_run.job_name == f'backfill_{spec.key}_source_job':
+            operation = 'canonical'
+        if operation is None:
+            selected = context.dagster_run.asset_selection or set()
+            operation = next(
+                (op for op, name in names.items() if dagster.AssetKey(name) in selected), None
+            )
+        if operation is None:
+            return
         spec.require_enabled('observe_failure')
         settings = get_clickhouse_settings()
         client = make_clickhouse_client(settings)
@@ -461,19 +713,34 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             )
             if recorded[0][0]:
                 return
-            operation = next(
-                operation
-                for operation, job_name in job_names.items()
-                if job_name == context.dagster_run.job_name
-            )
             value: object = context.dagster_run.run_config
             for key in ('ops', names[operation], 'config'):
                 value = _config_mapping(value).get(key, {})
-            partition_key = _config_mapping(value).get('partition_key', '')
+            tags = context.dagster_run.tags
+            selected_key = tags.get('dagster/partition') or tags.get(
+                'dagster/asset_partition_range_start', ''
+            )
+            configured_key = _config_mapping(value).get('partition_key') or ''
+            partition_key = (
+                selected_key or configured_key
+                if operation == 'canonical'
+                else configured_key or selected_key
+            )
+            if tags.get('dagster/asset_partition_range_end', partition_key) != partition_key:
+                raise ValueError('Source backfill worker must contain exactly one day.')
             if not isinstance(partition_key, str):
                 raise TypeError('Source partition key must be a string.')
+            observed_operation = (
+                'verification'
+                if operation == 'canonical'
+                and (
+                    _config_mapping(value).get('reconcile_only') is True
+                    or tags.get('origo_source_reconciliation') == 'true'
+                )
+                else operation
+            )
             failure_operation, scope, partition, consumer = _failure_context(
-                operation, partition_key
+                observed_operation, partition_key
             )
             runtime.failures.record(
                 operation=failure_operation,
@@ -485,5 +752,15 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         finally:
             client.disconnect()
 
+    from .dagit import build_reconciliation_sensor
+
+    sensors.append(
+        build_reconciliation_sensor(
+            spec,
+            definitions.resolve_job_def(job_names['canonical']),
+            definitions.resolve_job_def(job_names['reconcile']),
+            names['canonical'],
+        )
+    )
     sensors.append(failure)
     return SourceBundle(assets, jobs, tuple(schedules), tuple(sensors))

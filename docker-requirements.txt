@@ -1,5 +1,5 @@
-dagster[redis,postgres]
-dagit
+dagster[redis,postgres]==1.13.21
+dagit==1.13.21
 clickhouse-driver
 clickhouse-cityhash
 clickhouse_connect

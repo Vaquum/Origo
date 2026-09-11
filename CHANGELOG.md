@@ -1,5 +1,10 @@
-# v3.8.0 on August 29, 2026
+# v3.9.0 on September 11, 2026
+
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.8.0
+
+- Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit. Deterministic verification failures wait for a state change or operator retry; transient failures and cancellations retry with bounded backoff. Native completion suppresses redundant verification, while source health checks expose unresolved failures without recursive failed runs. Reuse run-local archive bytes and seek through component rows without OFFSET scans.
 
 # v3.7.0
 

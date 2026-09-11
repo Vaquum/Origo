@@ -102,8 +102,10 @@ def test_every_failure_is_visible_in_one_log_without_blocking_unrelated_work(
 
         def checksum_mismatch(url: str) -> daily.Response:
             response = archive_response(url)
+            # A changed sidecar requires a fresh fetch; an unchanged verified revision
+            # deliberately reuses its retained content without downloading the ZIP.
             return (
-                response
+                daily.Response(b'0' * 64 + response.body[64:], {}, 200)
                 if url.endswith('CHECKSUM')
                 else daily.Response(response.body + b'corrupt wrapper', {}, 200)
             )

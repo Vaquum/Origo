@@ -17,7 +17,9 @@ from math import isfinite
 from pathlib import Path
 
 import requests
+from dagster import get_dagster_logger
 
+from ..archive import verified_archive
 from ..contracts import Partition, Revision, Row, SourceError
 from ..hashing import content_hash
 
@@ -200,12 +202,18 @@ class BinanceSpotDaily:
         return f'{base.rstrip("/")}/BTCUSDT-trades-{partition.key}.zip'
 
     def fetch(self, partition: Partition) -> Revision:
+        get_dagster_logger('origo.sources').info(
+            'source=binance_spot_trades partition=%s phase=archive_download', partition.key
+        )
         url = self._url(partition)
         name = f'BTCUSDT-trades-{partition.key}'
         expected = _checksum(get_response(url + '.CHECKSUM').body, name + '.zip')
-        body = get_response(url).body
-        if hashlib.sha256(body).hexdigest() != expected:
-            raise SourceError('ARCHIVE_CHECKSUM_MISMATCH', 'Binance ZIP checksum mismatch.')
+        body = verified_archive(
+            url,
+            expected,
+            lambda address: get_response(address).body,
+            code='ARCHIVE_CHECKSUM_MISMATCH',
+        )
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             if archive.namelist() != [name + '.csv']:
                 raise SourceError(
@@ -226,6 +234,12 @@ class BinanceSpotDaily:
                 'member': name + '.csv',
             },
             sort_keys=True,
+        )
+        get_dagster_logger('origo.sources').info(
+            'source=binance_spot_trades partition=%s phase=archive_validated rows=%s revision=%s',
+            partition.key,
+            count,
+            expected,
         )
         return Revision(
             expected, normalized, evidence, count, lambda: spot_csv_rows(csv_body, partition)

@@ -14,6 +14,7 @@ from .contracts import (
     Revision,
     RevisionedSourceSpec,
     Snapshot,
+    SourceError,
     StateRecord,
     failure_code,
     failure_message,
@@ -72,6 +73,38 @@ class SourceRuntime:
         )
         if existing != [(domain_id,)]:
             raise RuntimeError('Workers do not share the registered source lock mount.')
+
+    def discover(self, partition: Partition) -> str:
+        self.spec.require_enabled('discover')
+        self.require_shared_mount()
+        with source_lock(
+            self.lock_root,
+            self.spec.key,
+            'discovery_' + hashlib.sha256(partition.key.encode()).hexdigest(),
+        ):
+            found = self.store.execute(
+                f'SELECT count() FROM {self.store.table("source_discovery_log")} '
+                'WHERE source_key=%(source)s AND partition_key=%(partition)s',
+                {'source': self.spec.key, 'partition': partition.key},
+            )
+            if not found[0][0]:
+                self.store.execute(
+                    f'INSERT INTO {self.store.table("source_discovery_log")} VALUES',
+                    [(self.spec.key, partition.key, datetime.now(UTC))],
+                )
+        try:
+            revision = self.spec.canonical.discover(partition)
+            self.failures.recover(operation='discovery', partition=partition.key)
+            return revision
+        except Exception as error:
+            self.failures.record(
+                operation='discovery',
+                error_code=failure_code(error),
+                message=failure_message(error),
+                scope='PARTITION',
+                partition=partition.key,
+            )
+            raise
 
     def build(self, key: str, *, provisional: bool = False) -> StateRecord:
         self.spec.require_enabled('build')
@@ -340,8 +373,16 @@ class SourceRuntime:
                 revision = Revision(record.revision, '', '{}', 0, lambda: iter(()))
                 try:
                     self.spec.canonical.revalidate(record.partition, revision)
-                except RuntimeError:
-                    if not quarantine:
+                except SourceError as error:
+                    if error.code != 'OFFICIAL_REVISION_CHANGED' or not quarantine:
+                        self.failures.record(
+                            operation='rollback',
+                            error_code=error.code,
+                            message=error.safe_message,
+                            scope='PARTITION',
+                            partition=record.partition.key,
+                            revision=record.revision,
+                        )
                         raise
                     self.failures.record(
                         operation='quarantine',
@@ -361,6 +402,7 @@ class SourceRuntime:
                     record.component_hashes,
                 )
                 self._activate(restored, expected)
+                self.failures.recover(operation='rollback', partition=record.partition.key)
                 return restored
 
     def audit(self) -> tuple[str, ...]:
@@ -375,6 +417,28 @@ class SourceRuntime:
         candidates = (
             recent + (older[offset : offset + 50] + older[: max(0, offset + 50 - len(older))])[:50]
         )
+        pending = self.store.execute(
+            f"""SELECT partition_key FROM {self.store.table('source_discovery_log')}
+            WHERE source_key=%(source)s AND partition_key NOT IN (
+                SELECT partition_key FROM {self.store.table('source_active_partitions')}
+                WHERE source_key=%(source)s AND NOT provisional
+            ) GROUP BY partition_key ORDER BY min(requested_at) LIMIT 5""",
+            {'source': self.spec.key},
+        )
+        for row in pending:
+            partition = self.spec.canonical.partition(str(row[0]))
+            try:
+                self.discover(partition)
+                self.failures.recover(operation='audit', partition=partition.key)
+                changed.append(partition.key)
+            except (OSError, ValueError, RuntimeError) as error:
+                self.failures.record(
+                    operation='audit',
+                    error_code=failure_code(error),
+                    message=failure_message(error),
+                    scope='NONE',
+                    partition=partition.key,
+                )
         for record in candidates:
             try:
                 revision = self.spec.canonical.discover(record.partition)

@@ -38,7 +38,9 @@ from .storage import SourceStore
 
 
 class _JobFactory(Protocol):
-    def __call__(self, name: str, *, selection: list[str]) -> UnresolvedAssetJobDefinition: ...
+    def __call__(
+        self, name: str, *, selection: list[str], tags: dict[str, str]
+    ) -> UnresolvedAssetJobDefinition: ...
 
 
 class _ScheduleFactory(Protocol):
@@ -96,50 +98,78 @@ def execute_source(
         run_id,
     )
     try:
-        if operation == 'setup':
-            runtime.setup(anchor=datetime.fromisoformat(config.anchor) if config.anchor else None)
-            return {'source_key': spec.key, 'status': 'ready'}
-        if operation in ('canonical', 'provisional', 'repair'):
-            if not config.partition_key:
-                raise ValueError('Source execution requires an explicit partition key.')
-            record = (
-                runtime.repair(config.partition_key)
-                if operation == 'repair'
-                else runtime.build(config.partition_key, provisional=operation == 'provisional')
-            )
-            return {
-                'partition_key': record.partition.key,
-                'revision': record.revision,
-                'build_id': str(record.build_id),
-                'generation': record.generation,
-            }
-        if operation == 'cleanup':
-            return {
-                'build_ids': list(runtime.cleanup(dry_run=config.dry_run)),
-                'dry_run': config.dry_run,
-            }
-        if operation == 'audit':
-            changed = runtime.audit()
-            failures: list[Exception] = []
-            for key in changed:
-                try:
-                    runtime.build(key)
-                except (OSError, ValueError, RuntimeError) as error:
-                    failures.append(error)
-            if failures:
-                raise ExceptionGroup('Some audited partitions could not be corrected.', failures)
-            return {'corrected_partitions': list(changed)}
-        if operation == 'certify':
-            return {
-                'state_token': runtime.certify(config.partition_key, review_state='PENDING').token
-            }
-        if operation.startswith('consumer_'):
-            consumer = operation.removeprefix('consumer_')
-            destination = config.destination or f'/opt/origo/shadow/{spec.key}/{consumer}'
-            return {'state_token': runtime.publish(consumer, destination).token}
-        raise ValueError(f'Unknown source operation: {operation}')
+        result = _execute_operation(runtime, operation, config)
+        failure_operation, _scope, partition, consumer = _failure_context(
+            operation, config.partition_key
+        )
+        runtime.failures.recover(
+            operation=failure_operation, partition=partition, consumer=consumer
+        )
+        return result
     finally:
         client.disconnect()
+
+
+def _config_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError('Source job config must contain mapping objects.')
+    return cast(dict[str, object], value)
+
+
+def _failure_context(operation: str, key: str) -> tuple[str, str, str | None, str | None]:
+    if operation.startswith('consumer_'):
+        return 'consumer', 'CONSUMER', None, operation.removeprefix('consumer_')
+    if operation in ('audit', 'cleanup'):
+        return operation, 'NONE', None, None
+    if operation == 'setup':
+        return operation, 'SOURCE', None, None
+    return 'certification' if operation == 'certify' else operation, 'PARTITION', key or None, None
+
+
+def _execute_operation(
+    runtime: SourceRuntime, operation: str, config: SourceRunConfig
+) -> dict[str, object]:
+    spec = runtime.spec
+    if operation == 'setup':
+        runtime.setup(anchor=datetime.fromisoformat(config.anchor) if config.anchor else None)
+        return {'source_key': spec.key, 'status': 'ready'}
+    if operation in ('canonical', 'provisional', 'repair'):
+        if not config.partition_key:
+            raise ValueError('Source execution requires an explicit partition key.')
+        record = (
+            runtime.repair(config.partition_key)
+            if operation == 'repair'
+            else runtime.build(config.partition_key, provisional=operation == 'provisional')
+        )
+        return {
+            'partition_key': record.partition.key,
+            'revision': record.revision,
+            'build_id': str(record.build_id),
+            'generation': record.generation,
+        }
+    if operation == 'cleanup':
+        return {
+            'build_ids': list(runtime.cleanup(dry_run=config.dry_run)),
+            'dry_run': config.dry_run,
+        }
+    if operation == 'audit':
+        changed = runtime.audit()
+        failures: list[Exception] = []
+        for key in changed:
+            try:
+                runtime.build(key)
+            except (OSError, ValueError, RuntimeError) as error:
+                failures.append(error)
+        if failures:
+            raise ExceptionGroup('Some audited partitions could not be corrected.', failures)
+        return {'corrected_partitions': list(changed)}
+    if operation == 'certify':
+        return {'state_token': runtime.certify(config.partition_key, review_state='PENDING').token}
+    if operation.startswith('consumer_'):
+        consumer = operation.removeprefix('consumer_')
+        destination = config.destination or f'/opt/origo/shadow/{spec.key}/{consumer}'
+        return {'state_token': runtime.publish(consumer, destination).token}
+    raise ValueError(f'Unknown source operation: {operation}')
 
 
 def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> AssetsDefinition:
@@ -183,7 +213,15 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         job_names['provisional'] = f'refresh_{spec.key}_provisional_source_job'
     job_names['audit'] = f'audit_{spec.key}_source_job'
     unresolved = tuple(
-        _define_job(job_names[operation], selection=[name]) for operation, name in names.items()
+        _define_job(
+            job_names[operation],
+            selection=[name],
+            tags={
+                'origo_source_key': spec.key,
+                'origo_source_operation': operation,
+            },
+        )
+        for operation, name in names.items()
     )
     definitions = Definitions(assets=assets, jobs=unresolved)
     jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved)
@@ -275,11 +313,21 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 run_key = identity if consumer_key and attempt == 0 else f'{identity}:{attempt}'
                 return RunRequest(
                     run_key=run_key,
-                    run_config={'ops': {names[operation]: {'config': {'partition_key': key}}}},
+                    run_config={
+                        'ops': {
+                            names[operation]: {
+                                'config': {'partition_key': '' if consumer_key else key}
+                            }
+                        }
+                    },
                     tags={
                         'origo_source_key': spec.key,
                         'origo_source_operation': operation,
-                        'origo_source_partition': key,
+                        **(
+                            {'origo_source_state_token': key}
+                            if consumer_key
+                            else {'origo_source_partition': key}
+                        ),
                         'origo_source_event': identity,
                         'origo_source_attempt': str(attempt),
                         **({'origo_source_consumer': consumer_key} if consumer_key else {}),
@@ -300,7 +348,19 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             return SkipReason(f'{spec.key} is DORMANT.')
         now = context.scheduled_execution_time or datetime.now(UTC)
         partition = spec.canonical.candidate(now)
-        return request('canonical', partition.key, context, spec.canonical.discover(partition))
+        settings = get_clickhouse_settings()
+        client = make_clickhouse_client(settings)
+        try:
+            runtime = SourceRuntime(
+                spec,
+                SourceStore(client, settings.database, spec),
+                Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
+                f'discovery:{now.isoformat()}',
+            )
+            revision = runtime.discover(partition)
+        finally:
+            client.disconnect()
+        return request('canonical', partition.key, context, revision)
 
     @_schedule(
         name=f'{spec.key}_audit_schedule',
@@ -394,7 +454,6 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
                 context.dagster_run.run_id,
             )
-            tags = context.dagster_run.tags
             recorded = runtime.store.execute(
                 f'SELECT count() FROM {runtime.store.table("source_failure_log")} '
                 "WHERE source_key=%(source)s AND dagster_run_id=%(run)s AND event_type='FAILED'",
@@ -402,16 +461,26 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             )
             if recorded[0][0]:
                 return
-            operation = tags.get('origo_source_operation', 'worker')
-            consumer_key = tags.get('origo_source_consumer')
-            if consumer_key:
-                operation = 'consumer'
+            operation = next(
+                operation
+                for operation, job_name in job_names.items()
+                if job_name == context.dagster_run.job_name
+            )
+            value: object = context.dagster_run.run_config
+            for key in ('ops', names[operation], 'config'):
+                value = _config_mapping(value).get(key, {})
+            partition_key = _config_mapping(value).get('partition_key', '')
+            if not isinstance(partition_key, str):
+                raise TypeError('Source partition key must be a string.')
+            failure_operation, scope, partition, consumer = _failure_context(
+                operation, partition_key
+            )
             runtime.failures.record(
-                operation=operation,
+                operation=failure_operation,
                 error_code='RUN_FAILED',
-                scope='CONSUMER' if consumer_key else 'PARTITION',
-                partition=tags.get('origo_source_partition'),
-                consumer=consumer_key,
+                scope=scope,
+                partition=partition,
+                consumer=consumer,
             )
         finally:
             client.disconnect()

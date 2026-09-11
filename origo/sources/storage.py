@@ -69,6 +69,7 @@ class SourceStore:
             raise StorageError(f'Storage operation failed: {type(error).__name__}') from error
 
     def setup(self, *, anchor: datetime) -> None:
+        anchor = _utc(anchor)
         self.execute(f'CREATE DATABASE IF NOT EXISTS {self.database}')
         self.execute(
             f'CREATE TABLE IF NOT EXISTS {self.table("source_failure_log")} {_FAILURE_DDL}'
@@ -78,6 +79,10 @@ class SourceStore:
             status LowCardinality(String), dagster_run_id String, recorded_at DateTime64(6, 'UTC')
         ) ENGINE=MergeTree PARTITION BY toYYYYMM(recorded_at)
         ORDER BY (source_key, event_key, attempt, recorded_at)""")
+
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_discovery_log')} (
+            source_key String, partition_key String, requested_at DateTime64(6, 'UTC')
+        ) ENGINE=MergeTree ORDER BY (source_key, partition_key)""")
 
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_lock_domain')} (
             source_key String, domain_id UUID

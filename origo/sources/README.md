@@ -45,7 +45,7 @@ Use one code location and an absolute shared `ORIGO_SOURCE_LOCK_DIR` (default `/
 dagster job execute -m origo.definitions -j create_binance_spot_trades_source_origo_job
 ```
 
-A canary deployment changes only the checked-in specification to `RolloutStage.CANARY` after the dormant tests pass. Set the immutable coverage anchor explicitly in setup configuration for the isolated canary. Launch one bounded partition explicitly:
+A canary deployment changes only the checked-in specification to `RolloutStage.CANARY` after the dormant tests pass. Set the immutable coverage anchor explicitly in setup configuration for the isolated canary; offset-less dates/times are UTC, and explicit offsets are normalized to UTC. Repeating setup with the same instant is safe. Launch one bounded partition explicitly:
 
 ```sh
 dagster job execute -m origo.definitions -j refresh_binance_spot_trades_canonical_source_job -c canary.yaml
@@ -72,7 +72,7 @@ For rollback, stop the source schedules and call `SourceRuntime.rollback(record,
 | `SOURCE` | An explicitly source-wide prerequisite only. |
 | `ROUTE` | The named future route change only; the current route stays active. |
 
-Handled failures record before re-raising. The stopped run-failure observer records uncaught job/worker failures when enabled. Recovery and acknowledgement append to the same failure key; deterministic event IDs make logger retries idempotent. Successful component and activation tables are correctness evidence, not alternate failure histories.
+Handled failures record before re-raising. The stopped run-failure observer records uncaught job/worker failures when enabled. Recovery and acknowledgement append to the same failure key; deterministic event IDs make logger retries idempotent. Successful component and activation tables are correctness evidence, not alternate failure histories. Canonical discovery records its partition before provider I/O; the hourly audit retries up to five oldest requested partitions that have never activated, so a missing sidecar cannot drop a day. Canonical run keys still include the validated revision.
 
 ```sql
 SELECT source_key, failure_key,

@@ -93,26 +93,35 @@ def test_native_completion_does_not_enqueue_another_verification(
     assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
 
 
-@pytest.mark.parametrize('canceled', [False, True])
+@pytest.mark.parametrize('failure_mode', ['connection_reset', 'canceled', 'worker_loss'])
 def test_transient_verification_and_cancellation_retry_without_poisoning_ingestion(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
-    canceled: bool,
+    failure_mode: str,
 ) -> None:
     runtime, instance, source = backfill_env
-    assert backfill._run(backfill_env, probe=True).success
+    seed = backfill._run(backfill_env, probe=True)
+    assert seed.success
     record = runtime.store.records(canonical_only=True)[0]
     runtime.rollback(record, operator='test', reason='Test reconciliation recovery')
     request = next(r for r in _requests(backfill_env)[0] if r.partition_key == DAY)
     job = next(j for j in source.jobs if j.name == request.job_name)
-    if canceled:
+    if failure_mode != 'connection_reset':
         run = instance.create_run_for_job(
             job,
             status=DagsterRunStatus.STARTED,
-            tags={**request.tags, 'dagster/partition': DAY},
+            tags={
+                **request.tags,
+                'dagster/partition': DAY,
+                'origo_source_verdict': 'RETAINED_CONTENT_INVALID',
+                'origo_source_verdict_run': seed.run_id,
+            },
             run_config=request.run_config,
         )
-        instance.report_run_canceled(run)
+        if failure_mode == 'canceled':
+            instance.report_run_canceled(run)
+        else:
+            instance.report_run_failed(run)
         run_id = run.run_id
     else:
 
@@ -137,7 +146,8 @@ def test_transient_verification_and_cancellation_retry_without_poisoning_ingesti
             'SELECT operation FROM origo.source_failure_log WHERE dagster_run_id=%(run)s',
             {'run': run_id},
         ) == [('verification',)]
-    assert not instance.get_run_by_id(run_id).tags.get('origo_source_verdict')
+    if failure_mode == 'connection_reset':
+        assert not instance.get_run_by_id(run_id).tags.get('origo_source_verdict')
     assert all(r.partition_key is None for r in _requests(backfill_env)[0])
     now = datetime.now(UTC) + timedelta(seconds=61)
 

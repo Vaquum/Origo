@@ -375,6 +375,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     context.run.run_id,
                     {
                         'origo_source_verdict': failure_code(error) if verdict else '',
+                        'origo_source_verdict_run': context.run.run_id,
                     },
                 )
             if operation == 'canonical' and (

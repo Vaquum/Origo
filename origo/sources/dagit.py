@@ -312,8 +312,10 @@ def build_reconciliation_sensor(
                     and latest.tags.get('origo_source_reconciliation') == 'true'
                     and latest.tags.get('origo_source_authority') == authority
                 ):
-                    if latest.status == DagsterRunStatus.FAILURE and latest.tags.get(
-                        'origo_source_verdict'
+                    if (
+                        latest.status == DagsterRunStatus.FAILURE
+                        and latest.tags.get('origo_source_verdict')
+                        and latest.tags.get('origo_source_verdict_run') == latest.run_id
                     ):
                         context.log.info(
                             'source=%s partition=%s phase=reconciliation_held failed_run=%s '

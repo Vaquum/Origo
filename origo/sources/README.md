@@ -135,10 +135,13 @@ materialization metadata retains the successful input identity after history exp
 
 1. In Dagit, launch `maintain_operational_metadata_job` with the configuration below.
    The deployment default permits at most one hour, in batches of at most 500 runs.
-   The worker reserves 10% of its runtime (15–300 seconds) for reporting after
-   the last admitted batch. Disk measurement counts allocated blocks without
-   following symlinks, counts hard links once, and logs paths that disappear during
-   traversal; permission, I/O and deadline failures still fail the run.
+   Scan, reclamation and compaction use a separate work deadline. Reporting gets
+   10% of runtime, bounded to 15–300 seconds and at most half the usable runtime
+   for short invocations. Exhausting the work window reports the last durable
+   checkpoint and resumes on the next invocation. Disk measurement counts allocated
+   blocks without following symlinks, counts hard links once, and logs paths that disappear during
+   traversal. Missing configured roots, permission and I/O errors still fail the run,
+   as does exhausting the absolute reporting deadline.
    Each completed batch checkpoints its cursor. Repeat until the result says
    `inventory_complete: true`; an incomplete inventory is not a deletion approval.
    Once an eligible first manifest has a complete inventory, scheduled and deploy

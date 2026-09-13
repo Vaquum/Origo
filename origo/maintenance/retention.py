@@ -30,7 +30,7 @@ from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
 from .run_locks import run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
-from .sqlite import Layout, allocated, artifacts, connection
+from .sqlite import Layout, MaintenanceDeadlineReached, allocated, artifacts, connection
 
 
 @lru_cache(maxsize=1)
@@ -40,12 +40,14 @@ def _sensor_definitions() -> dict[str, SensorDefinition]:
 
 
 def artifact_inventory(layout: Layout, run_id: str, deadline: float) -> dict[str, int]:
+    if time.monotonic() >= deadline:
+        raise MaintenanceDeadlineReached('Artifact inventory exceeded maintenance deadline.')
     inventory = {str(path): allocated(path) for path in artifacts(layout, run_id)}
     directory = layout.compute / run_id
     inventory[str(directory)] = allocated(directory)
     for root, directories, files in os.walk(directory, followlinks=False):
         if time.monotonic() >= deadline:
-            raise TimeoutError('Compute-log inventory exceeded maintenance deadline.')
+            raise MaintenanceDeadlineReached('Compute-log inventory exceeded maintenance deadline.')
         for name in directories + files:
             path = Path(root) / name
             inventory[str(path)] = allocated(path)
@@ -247,7 +249,7 @@ def scan_batch(
     candidates: list[Candidate] = []
     for row in ids:
         if time.monotonic() >= deadline:
-            raise TimeoutError('Candidate scan exceeded maintenance deadline.')
+            raise MaintenanceDeadlineReached('Candidate scan exceeded maintenance deadline.')
         records = instance.get_run_records(RunsFilter(run_ids=[str(row['run_id'])]), limit=1)
         if records:
             record = records[0]
@@ -324,7 +326,7 @@ def reclaim(
     logs.delete_logs(prefix=[run_id])
     for path in artifacts(layout, run_id):
         if time.monotonic() >= deadline:
-            raise TimeoutError('Artifact reclamation exceeded maintenance deadline.')
+            raise MaintenanceDeadlineReached('Artifact reclamation exceeded maintenance deadline.')
         if path.exists():
             metadata = path.lstat()
             if (
@@ -334,6 +336,7 @@ def reclaim(
             ):
                 raise ValueError(f'Unsafe retired artifact: {path}')
             path.unlink()
+    reclaimed = max(0, before - artifact_bytes(layout, run_id, deadline))
     candidate.phase = 'reclaimed'
     save_journal(journal_path, journal)
-    return max(0, before - artifact_bytes(layout, run_id, deadline))
+    return reclaimed

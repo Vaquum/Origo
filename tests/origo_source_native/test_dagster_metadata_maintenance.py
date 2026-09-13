@@ -14,6 +14,7 @@ from dagster import (
     DagsterRunStatus,
     DataVersion,
     MaterializeResult,
+    RunRecord,
     RunsFilter,
     StaticPartitionsDefinition,
     asset,
@@ -1119,11 +1120,13 @@ except TimeoutError:
     assert metadata_instance.event_log_storage.writer_lock_path().stat().st_size == 0
 
 
+@pytest.mark.parametrize('interrupt_at', ['', 'logs', 'compaction'])
 def test_first_apply_resumes_after_live_revalidation(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    interrupt_at: str,
 ) -> None:
     from origo.maintenance import worker
 
@@ -1176,7 +1179,46 @@ def test_first_apply_resumes_after_live_revalidation(
     assert resumed.manifest[0].reason == ''
     assert resumed.manifest[0].revalidation_reason == 'live_revalidation:operator_preserved'
     assert resumed.manifest_sha256 == manifest_sha256(resumed) == approved
+    from origo.maintenance import sqlite as maintenance_sqlite
+
+    elapsed = 0.0
+    inventory = retention.artifact_inventory
+    compact = metadata_instance.event_log_storage.compact_retired_state
+
+    def timed_inventory(layout: Layout, run_id: str, deadline: float) -> dict[str, int]:
+        nonlocal elapsed
+        result = inventory(layout, run_id, deadline)
+        if interrupt_at == 'logs' and run_id == eligible and not elapsed:
+            elapsed += 45
+        return result
+
+    def timed_compaction(
+        runs_path: Path, after_id: int, limit: int, deadline: float, lock_wait: float
+    ) -> tuple[int, int, int]:
+        nonlocal elapsed
+        if interrupt_at == 'compaction':
+            elapsed += 45
+        return compact(runs_path, after_id, limit, deadline, lock_wait)
+
+    clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
+    for module in (worker, retention, maintenance_sqlite):
+        monkeypatch.setattr(module, 'time', clock)
+    monkeypatch.setattr(retention, 'artifact_inventory', timed_inventory)
+    monkeypatch.setattr(
+        metadata_instance.event_log_storage, 'compact_retired_state', timed_compaction
+    )
     outcome = worker.maintain(metadata_instance, config)
+    if interrupt_at == 'logs':
+        checkpoint = Journal.model_validate_json(path.read_bytes())
+        assert checkpoint.manifest[1].phase == 'logs'
+        assert not checkpoint.first_apply_completed
+        assert outcome.report.deleted == 0 and not outcome.violations
+        assert metadata_instance.get_run_by_id(eligible) is None
+        elapsed = 0
+        interrupt_at = ''
+        outcome = worker.maintain(metadata_instance, config)
+        assert outcome.report.eligible_ingress_runs == 0
+    assert outcome.report.duration_seconds < config.max_runtime_seconds
     assert outcome.report.deleted == 1 and outcome.report.protected == 1
     assert not outcome.violations
     assert metadata_instance.get_run_by_id(preserved) is not None
@@ -1248,13 +1290,35 @@ def test_completed_inventory_survives_scheduled_dry_runs(
     _diagnostic_environment(diagnostic_server, monkeypatch)
     run_ids = [execute_archive(metadata_instance) for _ in range(3)]
     future = time.time() + 31 * 86400
-    clock = SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    elapsed = 0.0
+    scan = worker.scan_batch
+
+    def timed_scan(
+        instance: DagsterInstance,
+        layout: Layout,
+        journal: Journal,
+        config: OperationalMetadataMaintenanceConfig,
+        now: float,
+        deadline: float,
+    ) -> list[Candidate]:
+        nonlocal elapsed
+        result = scan(instance, layout, journal, config, now, deadline)
+        elapsed += 4
+        return result
+
+    def run_maintenance(config: OperationalMetadataMaintenanceConfig) -> worker.Outcome:
+        nonlocal elapsed
+        elapsed = 0
+        return worker.maintain(metadata_instance, config)
+
+    monkeypatch.setattr(worker, 'scan_batch', timed_scan)
+    clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
     monkeypatch.setattr(worker, 'time', clock)
     monkeypatch.setattr(retention, 'time', clock)
-    # The runtime reserve limits each invocation to one real scan batch.
+    # Each real scan batch consumes the short invocation's work window.
     config = POLICY.model_copy(update={'max_runs_per_batch': 1, 'max_runtime_seconds': 10})
     for index in range(3):
-        outcome = worker.maintain(metadata_instance, config)
+        outcome = run_maintenance(config)
         assert outcome.inventory_complete is (index == 2)
         assert outcome.report.scanned == 1 and outcome.report.deleted == 0
     path = Path(outcome.journal_path)
@@ -1283,7 +1347,7 @@ def test_completed_inventory_survives_scheduled_dry_runs(
     )
     require_backup(completed, apply, future)
     for _ in range(2):
-        outcome = worker.maintain(metadata_instance, config)
+        outcome = run_maintenance(config)
         repeated = Journal.model_validate_json(path.read_bytes())
         assert outcome.inventory_complete
         assert outcome.report.scanned == outcome.report.deleted == 0
@@ -1296,12 +1360,12 @@ def test_completed_inventory_survives_scheduled_dry_runs(
         assert not outcome.violations
         assert outcome.query_p95_seconds and outcome.diagnostic_allocated_bytes > 0
         require_backup(repeated, apply, future)
-    applied = worker.maintain(metadata_instance, apply)
+    applied = run_maintenance(apply)
     assert applied.report.deleted == 1 and not applied.violations
     assert metadata_instance.get_run_by_id(run_ids[0]) is None
     assert Journal.model_validate_json(path.read_bytes()).first_apply_completed
     # Once first apply commits, subsequent dry runs may inventory the next cycle.
-    next_cycle = worker.maintain(metadata_instance, config)
+    next_cycle = run_maintenance(config)
     assert next_cycle.report.scanned == 1 and not next_cycle.inventory_complete
     assert metadata_instance.get_run_by_id(run_ids[1]) is not None
 
@@ -1405,58 +1469,100 @@ def test_reporting_reserve_preserves_progress(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    from origo.maintenance import sqlite as maintenance_sqlite
     from origo.maintenance import worker
 
     _diagnostic_environment(diagnostic_server, monkeypatch)
     run_ids = [execute_archive(metadata_instance) for _ in range(4)]
     future = time.time() + 31 * 86400
     elapsed = 0.0
-    scan = worker.scan_batch
+    visited = 0
+    protect = retention.protection
     measure = worker.directory_bytes
 
-    def slow_scan(
+    def slow_protection(
         instance: DagsterInstance,
         layout: Layout,
-        journal: Journal,
+        record: RunRecord,
         config: OperationalMetadataMaintenanceConfig,
         now: float,
         deadline: float,
-    ) -> list[Candidate]:
-        nonlocal elapsed
-        result = scan(instance, layout, journal, config, now, deadline)
-        elapsed += 1120
+    ) -> str:
+        nonlocal elapsed, visited
+        result = protect(instance, layout, record, config, now, deadline)
+        visited += 1
+        elapsed += 1100
         return result
 
     def slow_measure(layout: Layout, deadline: float) -> int:
         nonlocal elapsed
-        if elapsed and deadline - (time.monotonic() + elapsed) < 180:
-            raise TimeoutError('The remaining reporting budget cannot cover the disk walk.')
-        result = measure(layout, deadline)
         if elapsed:
             elapsed += 180
-        return result
+        return measure(layout, deadline)
 
-    monkeypatch.setattr(worker, 'scan_batch', slow_scan)
+    clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
+    monkeypatch.setattr(retention, 'protection', slow_protection)
     monkeypatch.setattr(worker, 'directory_bytes', slow_measure)
-    monkeypatch.setattr(
-        worker,
-        'time',
-        SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed),
-    )
-    monkeypatch.setattr(
-        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
-    )
-    config = POLICY.model_copy(update={'max_runs_per_batch': 1, 'max_runtime_seconds': 3600})
+    for module in (worker, retention, maintenance_sqlite):
+        monkeypatch.setattr(module, 'time', clock)
+    config = POLICY.model_copy(update={'max_runs_per_batch': 2, 'max_runtime_seconds': 3600})
     outcome = worker.maintain(metadata_instance, config)
-    assert not outcome.inventory_complete and outcome.report.scanned == 3
+    assert visited == 3  # The second admitted batch runs out of its work window.
+    assert not outcome.inventory_complete and outcome.report.scanned == 2
     assert outcome.report.duration_seconds < 3600 and not outcome.violations
     assert outcome.report.deleted == 0
+    journal = Journal.model_validate_json(Path(outcome.journal_path).read_bytes())
+    assert journal.inventory_scanned == 2
+    assert journal.scan_cursor == journal.manifest[-1].storage_id
+    assert 'work window exhausted; reporting checkpoint' in capsys.readouterr().out
     elapsed = 0
     resumed = worker.maintain(metadata_instance, config)
-    assert resumed.inventory_complete and resumed.report.scanned == 1
+    assert resumed.inventory_complete and resumed.report.scanned == 2
+    journal = Journal.model_validate_json(Path(resumed.journal_path).read_bytes())
+    assert journal.inventory_scanned == 4
     assert not resumed.violations
     assert all(metadata_instance.get_run_by_id(run_id) is not None for run_id in run_ids)
+
+
+def test_allocated_measurement_rejects_missing_roots(
+    metadata_instance: DagsterInstance, tmp_path: Path
+) -> None:
+    from dataclasses import replace
+
+    from origo.maintenance.worker import directory_bytes
+
+    execute_archive(metadata_instance)
+    layout = Layout.from_instance(metadata_instance)
+    # Check an independent configured root and a missing root nested under a
+    # deduplicated parent. Both are layout errors, not live-file races.
+    for missing in (tmp_path / 'missing-compute', layout.runs.parent / 'missing-compute'):
+        with pytest.raises(FileNotFoundError):
+            directory_bytes(replace(layout, compute=missing), time.monotonic() + 15)
+
+
+def test_sqlite_deadline_preserves_unrelated_errors(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from origo.maintenance import sqlite as maintenance_sqlite
+
+    execute_archive(metadata_instance)
+    layout = Layout.from_instance(metadata_instance)
+    deadline = time.monotonic() + 15
+    with pytest.raises(maintenance_sqlite.MaintenanceDeadlineReached, match='SQLite exhausted'):
+        with connection(layout.runs, deadline, 1) as database:
+            monkeypatch.setattr(
+                maintenance_sqlite, 'time', SimpleNamespace(monotonic=lambda: deadline + 1)
+            )
+            # Repeat the actual run IDs to exercise SQLite's progress handler.
+            database.execute(
+                'WITH RECURSIVE records(id,n) AS (SELECT id,0 FROM runs UNION ALL SELECT id,n+1 FROM records WHERE n<1000) SELECT count(*) FROM records'
+            ).fetchone()
+    monkeypatch.undo()
+    with pytest.raises(sqlite3.OperationalError, match='no such table'):
+        with connection(layout.runs, time.monotonic() + 15, 1) as database:
+            database.execute('SELECT * FROM absent_maintenance_table')
 
 
 def test_deploy_launch_uses_configured_location(

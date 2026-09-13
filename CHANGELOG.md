@@ -1,6 +1,6 @@
 # v3.8.2
 
-- Reserve time for operational-metadata reporting, tolerate disappearing transient files during disk measurement, and launch deployment maintenance in the configured Dagster workspace.
+- Enforce a separate work deadline for operational-metadata reporting, tolerate disappearing transient files while rejecting missing storage roots, and launch deployment maintenance in the configured Dagster workspace.
 
 # v3.8.1
 

@@ -31,6 +31,7 @@ from .retention import reclaim, scan_batch
 from .run_storage import OrigoSqliteRunStorage
 from .sqlite import (
     Layout,
+    MaintenanceDeadlineReached,
     connection,
     maintenance_lock,
     query_latencies,
@@ -65,6 +66,9 @@ def directory_bytes(layout: Layout, deadline: float) -> int:
         for path in paths
         if not any(path != other and path.is_relative_to(other) for other in paths)
     )
+    for path in paths:
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            raise NotADirectoryError(f'Configured storage root is not a directory: {path}')
     seen: set[tuple[int, int]] = set()
     disappeared = 0
 
@@ -86,6 +90,8 @@ def directory_bytes(layout: Layout, deadline: float) -> int:
                     for entry in entries:
                         result += measure(Path(entry.path))
         except FileNotFoundError:
+            if path in paths:
+                raise
             disappeared += 1
         return result
 
@@ -101,7 +107,10 @@ def directory_bytes(layout: Layout, deadline: float) -> int:
 def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceConfig) -> Outcome:
     started = time.monotonic()
     deadline = started + config.max_runtime_seconds - 3
-    reporting_reserve = min(300.0, max(15.0, config.max_runtime_seconds / 10))
+    reporting_reserve = min(
+        300.0, max(15.0, config.max_runtime_seconds / 10), (deadline - started) / 2
+    )
+    work_deadline = deadline - reporting_reserve
     layout = Layout.from_instance(instance)
     if not isinstance(instance.run_storage, OrigoSqliteRunStorage) or not isinstance(
         instance.event_log_storage, OrigoSqliteEventLogStorage
@@ -142,6 +151,8 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         before_bytes = directory_bytes(layout, deadline)
         print(f'Dagster allocated bytes before maintenance: {before_bytes}', flush=True)
         counts: Counter[str] = Counter()
+        resumed_candidates = 0
+        resumed_completions = 0
         inventory_held = (
             config.dry_run
             and journal.inventory_complete
@@ -153,64 +164,85 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                 f'Completed inventory retained for first apply: manifest={journal.manifest_sha256}',
                 flush=True,
             )
-        first = True
-        while not inventory_held and (first or time.monotonic() < deadline - reporting_reserve):
-            first = False
-            if (
-                config.dry_run
-                or not journal.manifest
-                or all(row.exclusion or row.phase == 'reclaimed' for row in journal.manifest)
-            ):
-                batch = scan_batch(instance, layout, journal, config, report.observed_at, deadline)
+        save_journal(journal_path, journal)
+        try:
+            while not inventory_held and time.monotonic() < work_deadline:
                 if (
-                    not config.dry_run
+                    config.dry_run
                     or not journal.manifest
-                    or not any(not row.exclusion for row in journal.manifest)
+                    or all(row.exclusion or row.phase == 'reclaimed' for row in journal.manifest)
                 ):
-                    journal.manifest = batch
-                    journal.manifest_created_at = time.time()
-                    journal.manifest_sha256 = manifest_sha256(journal)
-                save_journal(journal_path, journal)
-            else:
-                batch = journal.manifest
-            report.scanned += len(batch)
-            report.candidates += sum(not row.exclusion for row in batch)
-            report.protected += sum(bool(row.exclusion) for row in batch)
-            counts.update(row.exclusion for row in batch if row.exclusion)
-            print(
-                f'Manifest {journal.manifest_sha256}: scanned={len(journal.manifest)} eligible={sum(not row.exclusion for row in journal.manifest)} cursor={journal.scan_cursor}',
-                flush=True,
-            )
-            if not config.dry_run:
-                require_backup(journal, config, time.time())
-                for candidate in journal.manifest:
-                    if candidate.exclusion or candidate.phase == 'reclaimed':
-                        continue
-                    report.reclaimed_bytes += reclaim(
-                        instance, layout, candidate, journal, journal_path, config, deadline
+                    batch = scan_batch(
+                        instance, layout, journal, config, report.observed_at, work_deadline
                     )
-                    if not candidate.exclusion:
-                        report.deleted += 1
-                    else:
-                        report.protected += 1
-                        report.candidates -= 1
-                        counts[candidate.exclusion] += 1
-                journal.first_apply_completed = journal.first_apply_completed or report.deleted > 0
-                journal.state_cursor, scanned, compacted = (
-                    instance.event_log_storage.compact_retired_state(
-                        layout.runs,
-                        journal.state_cursor,
-                        config.max_runs_per_batch,
-                        deadline,
-                        config.lock_wait_seconds,
-                    )
-                )
+                    if (
+                        not config.dry_run
+                        or not journal.manifest
+                        or not any(not row.exclusion for row in journal.manifest)
+                    ):
+                        journal.manifest = batch
+                        journal.manifest_created_at = time.time()
+                        journal.manifest_sha256 = manifest_sha256(journal)
+                    save_journal(journal_path, journal)
+                else:
+                    batch = journal.manifest
+                report.scanned += len(batch)
+                report.candidates += sum(not row.exclusion for row in batch)
+                report.protected += sum(bool(row.exclusion) for row in batch)
+                counts.update(row.exclusion for row in batch if row.exclusion)
                 print(
-                    f'Retained-state compaction: scanned={scanned} removed={compacted}', flush=True
+                    f'Manifest {journal.manifest_sha256}: scanned={len(journal.manifest)} eligible={sum(not row.exclusion for row in journal.manifest)} cursor={journal.scan_cursor}',
+                    flush=True,
                 )
-                save_journal(journal_path, journal)
-            if journal.scan_cursor == 0:
-                break
+                if not config.dry_run:
+                    require_backup(journal, config, time.time())
+                    for candidate in journal.manifest:
+                        if candidate.exclusion or candidate.phase == 'reclaimed':
+                            continue
+                        already_retired = (
+                            candidate.phase != 'planned'
+                            and instance.get_run_by_id(candidate.run_id) is None
+                        )
+                        resumed_candidates += int(already_retired)
+                        report.reclaimed_bytes += reclaim(
+                            instance,
+                            layout,
+                            candidate,
+                            journal,
+                            journal_path,
+                            config,
+                            work_deadline,
+                        )
+                        if not candidate.exclusion:
+                            report.deleted += 1
+                            resumed_completions += int(already_retired)
+                        else:
+                            report.protected += 1
+                            report.candidates -= 1
+                            counts[candidate.exclusion] += 1
+                    journal.first_apply_completed = (
+                        journal.first_apply_completed or report.deleted > 0
+                    )
+                    journal.state_cursor, scanned, compacted = (
+                        instance.event_log_storage.compact_retired_state(
+                            layout.runs,
+                            journal.state_cursor,
+                            config.max_runs_per_batch,
+                            work_deadline,
+                            config.lock_wait_seconds,
+                        )
+                    )
+                    print(
+                        f'Retained-state compaction: scanned={scanned} removed={compacted}',
+                        flush=True,
+                    )
+                    save_journal(journal_path, journal)
+                if journal.scan_cursor == 0:
+                    break
+        except MaintenanceDeadlineReached as error:
+            journal = Journal.model_validate_json(journal_path.read_bytes())
+            journal.first_apply_completed = journal.first_apply_completed or report.deleted > 0
+            print(f'Maintenance work window exhausted; reporting checkpoint: {error}', flush=True)
         report.exclusions = dict(counts)
         with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
             report.backlog_runs = int(
@@ -267,13 +299,14 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         if previous:
             interval = max(report.observed_at - previous.observed_at, 0.001)
             report.eligible_ingress_runs = max(
-                0, report.backlog_runs - previous.backlog_runs + report.deleted
+                0,
+                report.backlog_runs - previous.backlog_runs + report.deleted - resumed_completions,
             )
             report.ingress_runs_per_second = report.eligible_ingress_runs / interval
             report.cleanup_runs_per_second = report.deleted / interval
             if (
                 not config.dry_run
-                and report.candidates > 0
+                and report.candidates > resumed_candidates
                 and report.backlog_runs >= previous.backlog_runs > 0
             ):
                 violations.append('retention_backlog_not_decreasing')

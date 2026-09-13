@@ -71,12 +71,16 @@ class Layout:
         return path
 
 
+class MaintenanceDeadlineReached(TimeoutError):
+    """A bounded maintenance operation exhausted its assigned work window."""
+
+
 @contextmanager
 def connection(
     path: Path, deadline: float, lock_wait: float, *, write: bool = False
 ) -> Iterator[sqlite3.Connection]:
     if time.monotonic() >= deadline:
-        raise TimeoutError('Maintenance deadline reached before opening SQLite.')
+        raise MaintenanceDeadlineReached('Maintenance deadline reached before opening SQLite.')
     mode = 'rw' if write else 'ro'
     database = sqlite3.connect(
         f'{path.as_uri()}?mode={mode}',
@@ -87,6 +91,12 @@ def connection(
     database.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
     try:
         yield database
+    except sqlite3.OperationalError as error:
+        if error.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT and time.monotonic() >= deadline:
+            raise MaintenanceDeadlineReached(
+                'SQLite exhausted its maintenance work window.'
+            ) from error
+        raise
     finally:
         database.close()
 

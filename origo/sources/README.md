@@ -137,6 +137,11 @@ materialization metadata retains the successful input identity after history exp
    The deployment default permits at most one hour, in batches of at most 500 runs.
    Each completed batch checkpoints its cursor. Repeat until the result says
    `inventory_complete: true`; an incomplete inventory is not a deletion approval.
+   Once an eligible first manifest has a complete inventory, scheduled and deploy
+   dry runs preserve its inventory totals, retained floor and manifest through
+   backup preparation and review. Health, current disk usage and diagnostic checks
+   continue. Inventories without eligible runs continue scanning; first apply or a
+   retention-policy change permits a new inventory cycle.
 2. Read `maintenance` in the health check metadata and its `journal_path`. The one
    journal contains the exact first manifest, artifact paths/allocated bytes,
    exclusions and SHA-256. Set the intended byte budget above the measured retained

@@ -1237,3 +1237,102 @@ def test_retired_storage_id_can_be_reused_during_event_cleanup(
         assert cleanup.result(timeout=5) > 0
     assert metadata_instance.get_run_by_id(live.run_id) is not None
     assert metadata_instance.get_run_by_id(retired) is None
+
+
+def test_completed_inventory_survives_scheduled_dry_runs(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.maintenance import worker
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    run_ids = [execute_archive(metadata_instance) for _ in range(3)]
+    future = time.time() + 31 * 86400
+    clock = SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    monkeypatch.setattr(worker, 'time', clock)
+    monkeypatch.setattr(retention, 'time', clock)
+    # The runtime reserve limits each invocation to one real scan batch.
+    config = POLICY.model_copy(update={'max_runs_per_batch': 1, 'max_runtime_seconds': 10})
+    for index in range(3):
+        outcome = worker.maintain(metadata_instance, config)
+        assert outcome.inventory_complete is (index == 2)
+        assert outcome.report.scanned == 1 and outcome.report.deleted == 0
+    path = Path(outcome.journal_path)
+    completed = Journal.model_validate_json(path.read_bytes())
+    assert completed.inventory_scanned == 3 and completed.inventory_eligible_bytes > 0
+    assert completed.retained_floor_bytes > 0
+    assert completed.manifest[0].run_id == run_ids[0]
+    approved = completed.manifest_sha256
+    receipt = BackupReceipt(
+        instance_id=completed.instance_id,
+        manifest_sha256=approved,
+        snapshot_id='completed-inventory-test',
+        restored_home=str(tmp_path),
+        verified_at=future,
+        expires_at=future + 86400,
+        verified_runs=1,
+    )
+    receipt_path = tmp_path / 'completed-inventory-receipt.json'
+    receipt_path.write_text(receipt.model_dump_json())
+    apply = config.model_copy(
+        update={
+            'dry_run': False,
+            'backup_receipt': str(receipt_path),
+            'approved_manifest_sha256': approved,
+        }
+    )
+    require_backup(completed, apply, future)
+    for _ in range(2):
+        outcome = worker.maintain(metadata_instance, config)
+        repeated = Journal.model_validate_json(path.read_bytes())
+        assert outcome.inventory_complete
+        assert outcome.report.scanned == outcome.report.deleted == 0
+        assert repeated.inventory_started_at == completed.inventory_started_at
+        assert repeated.inventory_scanned == completed.inventory_scanned
+        assert repeated.inventory_eligible_bytes == completed.inventory_eligible_bytes
+        assert repeated.retained_floor_bytes == completed.retained_floor_bytes
+        assert repeated.manifest == completed.manifest
+        assert repeated.manifest_sha256 == manifest_sha256(repeated) == approved
+        assert not outcome.violations
+        assert outcome.query_p95_seconds and outcome.diagnostic_allocated_bytes > 0
+        require_backup(repeated, apply, future)
+    applied = worker.maintain(metadata_instance, apply)
+    assert applied.report.deleted == 1 and not applied.violations
+    assert metadata_instance.get_run_by_id(run_ids[0]) is None
+    assert Journal.model_validate_json(path.read_bytes()).first_apply_completed
+    # Once first apply commits, subsequent dry runs may inventory the next cycle.
+    next_cycle = worker.maintain(metadata_instance, config)
+    assert next_cycle.report.scanned == 1 and not next_cycle.inventory_complete
+    assert metadata_instance.get_run_by_id(run_ids[1]) is not None
+
+
+def test_empty_inventory_keeps_discovering_eligible_runs(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.maintenance import worker
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    run_id = execute_archive(metadata_instance)
+    recent = worker.maintain(metadata_instance, POLICY)
+    assert recent.inventory_complete and recent.report.candidates == 0
+    future = time.time() + 31 * 86400
+    clock = SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    monkeypatch.setattr(worker, 'time', clock)
+    monkeypatch.setattr(retention, 'time', clock)
+    aged = worker.maintain(metadata_instance, POLICY)
+    journal = Journal.model_validate_json(Path(aged.journal_path).read_bytes())
+    assert aged.inventory_complete and aged.report.candidates == 1
+    assert journal.manifest[0].run_id == run_id
+    assert journal.inventory_started_at == future
+    # A changed retention policy invalidates the old inventory and its approval.
+    changed_policy = POLICY.model_copy(update={'success_retention_days': 60})
+    changed = worker.maintain(metadata_instance, changed_policy)
+    journal = Journal.model_validate_json(Path(changed.journal_path).read_bytes())
+    assert changed.inventory_complete and changed.report.candidates == 0
+    assert journal.policy_sha256 == policy_sha256(changed_policy)
+    assert not journal.manifest and changed.manifest_sha256 != aged.manifest_sha256
+    assert metadata_instance.get_run_by_id(run_id) is not None

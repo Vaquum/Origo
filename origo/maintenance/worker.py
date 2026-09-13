@@ -118,8 +118,19 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         before_bytes = directory_bytes(layout, deadline)
         print(f'Dagster allocated bytes before maintenance: {before_bytes}', flush=True)
         counts: Counter[str] = Counter()
+        inventory_held = (
+            config.dry_run
+            and journal.inventory_complete
+            and not journal.first_apply_completed
+            and any(not row.reason for row in journal.manifest)
+        )
+        if inventory_held:
+            print(
+                f'Completed inventory retained for first apply: manifest={journal.manifest_sha256}',
+                flush=True,
+            )
         first = True
-        while first or time.monotonic() < deadline - 15:
+        while not inventory_held and (first or time.monotonic() < deadline - 15):
             first = False
             if (
                 config.dry_run
@@ -206,7 +217,11 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         # server-reported active/inactive part bytes. TTL work is never called reclaimed.
         after_bytes = directory_bytes(layout, deadline)
         report.allocated_bytes = after_bytes + diagnostic_after
-        if config.dry_run and journal.inventory_complete:
+        if (
+            config.dry_run
+            and journal.inventory_complete
+            and (not inventory_held or journal.retained_floor_bytes == 0)
+        ):
             journal.retained_floor_bytes = max(
                 0, after_bytes - journal.inventory_eligible_bytes
             ) + max(0, diagnostic_after - diagnostics.entirely_expired_bytes)

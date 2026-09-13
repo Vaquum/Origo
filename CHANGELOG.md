@@ -5,6 +5,7 @@
 - Configure 14-day ClickHouse diagnostic retention and bounded backlog maintenance, with first-cleanup manifest and restore verification.
 
 - Isolate retention locks per run, initialize unused diagnostic logs before TTL checks, and preserve approved manifests across live revalidation.
+- Preserve completed first-cleanup inventories across scheduled inspection runs so backup preparation and approval remain valid.
 
 # v3.8.0
 

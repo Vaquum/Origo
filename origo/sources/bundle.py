@@ -529,6 +529,15 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                             'Source event already succeeded or has a nonterminal run.'
                         )
                     attempt += 1
+                else:
+                    receipt = runtime.store.run_receipt(identity)
+                    if receipt is not None:
+                        previous_attempt, status, _ = receipt
+                        if status == 'SUCCESS':
+                            return SkipReason('Source event has a durable successful-run receipt.')
+                        if status not in ('FAILURE', 'CANCELED'):
+                            raise RuntimeError(f'Retired source event has nonterminal receipt: {status}')
+                        attempt = previous_attempt + 1
                 event_id = uuid5(NAMESPACE_URL, f'{identity}:{attempt}:REQUESTED')
                 exists = runtime.store.execute(
                     f'SELECT event_id FROM {runtime.store.table("source_run_log")} WHERE event_id=%(event)s',

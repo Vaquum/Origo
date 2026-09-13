@@ -215,7 +215,6 @@ from .assets.publish_binance_spot_klines_to_mount import (
 )
 from .assets.build_bar_store_arrow import (
     build_bar_store_arrow,
-    bar_store_partition_run_requests,
     series_store_dir,
 )
 from .assets.build_depth_snapshot_store_arrow import (
@@ -1288,14 +1287,9 @@ def publish_btc_briefing_history_sensor(
 
 
 def _bar_store_on_mirror_success(context: RunStatusSensorContext) -> list[RunRequest]:
-    """When the Parquet mirror job succeeds, rebuild every Arrow series.
+    from .maintenance.arrow_inputs import changed_arrow_requests
 
-    Event-driven off the mirror job's completion (not a clock or a file poll):
-    each successful mirror tick fans out one Arrow run per series, run-keyed to
-    the mirror run so the same success is never acted on twice. The asset's
-    content-hash versioning still suppresses a republish when bytes are unchanged.
-    """
-    return bar_store_partition_run_requests(context.dagster_run.run_id)
+    return changed_arrow_requests(context)
 
 
 def _depth_snapshot_store_on_source_success(context: RunStatusSensorContext) -> RunRequest:
@@ -1472,6 +1466,12 @@ defs = Definitions(
 
 # TODO: Put everything in to same order in all segments of the code
 
+from .maintenance.dagster_metadata import (
+    maintain_operational_metadata,
+    maintain_operational_metadata_job,
+    operational_metadata_maintenance_schedule,
+)
+
 from .sources.bundle import build_source_bundle
 from .sources.registry import SOURCE_REGISTRY
 
@@ -1481,6 +1481,11 @@ _registered_source_bundles = tuple(
 
 defs = Definitions.merge(
     defs,
+    Definitions(
+        assets=[maintain_operational_metadata],
+        jobs=[maintain_operational_metadata_job],
+        schedules=[operational_metadata_maintenance_schedule],
+    ),
     *(
         Definitions(
             assets=bundle.assets,

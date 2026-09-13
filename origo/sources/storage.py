@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import cast
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .contracts import (
     Client,
@@ -115,6 +115,26 @@ class SourceStore:
             return self.client.execute(query, params)
         except Exception as error:
             raise StorageError(f'Storage operation failed: {type(error).__name__}') from error
+
+    def run_receipt(self, identity: str) -> tuple[int, str, str] | None:
+        rows = self.execute(
+            f"SELECT attempt,status,dagster_run_id FROM {self.table('source_run_log')} "
+            "WHERE source_key=%(source)s AND event_key=%(identity)s AND dagster_run_id!='' "
+            "ORDER BY attempt DESC,recorded_at DESC LIMIT 1",
+            {'source': self.spec.key, 'identity': identity},
+        )
+        return (_int(rows[0][0]), str(rows[0][1]), str(rows[0][2])) if rows else None
+
+    def record_run_receipt(self, identity: str, attempt: int, status: str, run_id: str) -> None:
+        event_id = uuid5(NAMESPACE_URL, f'{identity}:{attempt}:{run_id}:{status}')
+        if not self.execute(
+            f"SELECT event_id FROM {self.table('source_run_log')} WHERE event_id=%(event)s LIMIT 1",
+            {'event': event_id},
+        ):
+            self.execute(
+                f"INSERT INTO {self.table('source_run_log')} VALUES",
+                [(event_id, self.spec.key, identity, attempt, status, run_id, datetime.now(UTC))],
+            )
 
     def setup(self, *, anchor: datetime) -> None:
         anchor = _utc(anchor)

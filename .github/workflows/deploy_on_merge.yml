@@ -25,6 +25,9 @@ jobs:
       PROJECT_NAME: ${{ vars.ORIGO_PROJECT_NAME }}
       HUGGINGFACE_DATASET_REPO_ID: ${{ vars.HUGGINGFACE_DATASET_REPO_ID }}
       ORIGO_KNOWN_HOSTS: ${{ vars.ORIGO_KNOWN_HOSTS }}
+      ORIGO_METADATA_DRY_RUN: ${{ vars.ORIGO_METADATA_DRY_RUN || 'true' }}
+      ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES: ${{ vars.ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES || '644245094400' }}
+      ORIGO_METADATA_MAX_RUNTIME_SECONDS: ${{ vars.ORIGO_METADATA_MAX_RUNTIME_SECONDS || '3600' }}
 
     steps:
       - name: Checkout repository
@@ -137,6 +140,9 @@ jobs:
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
+              "ORIGO_METADATA_DRY_RUN": os.environ["ORIGO_METADATA_DRY_RUN"],
+              "ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES": os.environ["ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES"],
+              "ORIGO_METADATA_MAX_RUNTIME_SECONDS": os.environ["ORIGO_METADATA_MAX_RUNTIME_SECONDS"],
           }
 
           for key, value in values.items():
@@ -176,6 +182,8 @@ jobs:
               raise SystemExit(f"Unexpected ClickHouse smoke-test result: {rows}")
           print(rows)
           PY
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
+            dagster job launch -m origo.definitions -j maintain_operational_metadata_job
           REMOTE
 
           rm -f "$DEPLOY_ENV_FILE"

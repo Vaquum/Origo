@@ -153,7 +153,8 @@ def test_statistics_restore_actual_job_query_plan(metadata_instance: DagsterInst
         plan = '\n'.join(str(row) for row in database.execute('EXPLAIN QUERY PLAN ' + query))
         assert 'idx_runs_by_job' in plan
         assert 'idx_run_tags_run_idx' in plan
-        assert 'CORRELATED SCALAR SUBQUERY' in plan
+        assert 'run_id=?' in plan
+        assert 'EXISTS' in query
         assert 'SCAN run_tags' not in plan
         assert database.execute('SELECT count(*) FROM sqlite_stat1').fetchone()[0] > 0
 

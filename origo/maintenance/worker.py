@@ -3,7 +3,7 @@
 import argparse
 import json
 import os
-import subprocess
+import stat
 import time
 from collections import Counter
 from dataclasses import asdict
@@ -65,19 +65,43 @@ def directory_bytes(layout: Layout, deadline: float) -> int:
         for path in paths
         if not any(path != other and path.is_relative_to(other) for other in paths)
     )
-    result = subprocess.run(
-        ['du', '-sk', *(str(root) for root in roots)],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=max(0.01, deadline - time.monotonic()),
-    )
-    return sum(int(line.split()[0]) * 1024 for line in result.stdout.splitlines())
+    seen: set[tuple[int, int]] = set()
+    disappeared = 0
+
+    def measure(path: Path) -> int:
+        nonlocal disappeared
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Allocated-byte measurement exceeded maintenance deadline.')
+        result = 0
+        try:
+            metadata = path.lstat()
+            if metadata.st_nlink > 1:
+                identity = (metadata.st_dev, metadata.st_ino)
+                if identity in seen:
+                    return 0
+                seen.add(identity)
+            result = metadata.st_blocks * 512
+            if stat.S_ISDIR(metadata.st_mode):
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        result += measure(Path(entry.path))
+        except FileNotFoundError:
+            disappeared += 1
+        return result
+
+    total = sum(measure(root) for root in roots)
+    if disappeared:
+        print(
+            f'Allocated-byte measurement: {disappeared} paths disappeared during the walk.',
+            flush=True,
+        )
+    return total
 
 
 def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceConfig) -> Outcome:
     started = time.monotonic()
     deadline = started + config.max_runtime_seconds - 3
+    reporting_reserve = min(300.0, max(15.0, config.max_runtime_seconds / 10))
     layout = Layout.from_instance(instance)
     if not isinstance(instance.run_storage, OrigoSqliteRunStorage) or not isinstance(
         instance.event_log_storage, OrigoSqliteEventLogStorage
@@ -130,7 +154,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                 flush=True,
             )
         first = True
-        while not inventory_held and (first or time.monotonic() < deadline - 15):
+        while not inventory_held and (first or time.monotonic() < deadline - reporting_reserve):
             first = False
             if (
                 config.dry_run

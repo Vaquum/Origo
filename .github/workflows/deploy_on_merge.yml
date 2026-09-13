@@ -183,7 +183,7 @@ jobs:
           print(rows)
           PY
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
-            dagster job launch -m origo.definitions -j maintain_operational_metadata_job
+            dagster job launch -j maintain_operational_metadata_job
           REMOTE
 
           rm -f "$DEPLOY_ENV_FILE"

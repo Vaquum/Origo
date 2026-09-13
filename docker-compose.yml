@@ -1,6 +1,6 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:25.3.2.39@sha256:8745843b17f92db1765025009772ec1d87dfdcaa95deabca6b802a66cb669d30
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -26,6 +26,9 @@ services:
     environment:
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
+      - ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=${ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES:-644245094400}
+      - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-3600}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
     volumes:
@@ -33,6 +36,8 @@ services:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
       - clickhouse-data:/opt/origo/clickhouse-data:ro
+      - ./parquet_data:/opt/parquet
+      - ./arrow_data:/opt/arrow
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -45,6 +50,9 @@ services:
     environment:
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
+      - ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=${ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES:-644245094400}
+      - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-3600}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
     volumes:

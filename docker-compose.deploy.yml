@@ -24,6 +24,9 @@ services:
     environment:
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
+      - ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=${ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES:-644245094400}
+      - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-3600}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
@@ -35,6 +38,8 @@ services:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
       - clickhouse-data:/opt/origo/clickhouse-data:ro
+      - tdw-parquet:/opt/parquet
+      - tdw-arrow:/opt/arrow
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -46,6 +51,9 @@ services:
     environment:
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
+      - ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=${ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES:-644245094400}
+      - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-3600}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}

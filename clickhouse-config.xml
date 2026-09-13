@@ -51,4 +51,80 @@
     </default>
   </users>
 
+  <!-- Diagnostic history expires independently of Dagster scheduling. -->
+  <text_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </text_log>
+  <query_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </query_log>
+  <trace_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </trace_log>
+  <part_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </part_log>
+  <metric_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </metric_log>
+  <asynchronous_metric_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </asynchronous_metric_log>
+  <processors_profile_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </processors_profile_log>
+  <latency_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </latency_log>
+  <query_metric_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </query_metric_log>
+  <error_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </error_log>
+  <query_thread_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </query_thread_log>
+  <query_views_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </query_views_log>
+  <asynchronous_insert_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </asynchronous_insert_log>
+  <opentelemetry_span_log>
+    <engine remove="1"/>
+    <partition_by>toYYYYMM(finish_date)</partition_by>
+    <order_by>finish_date, finish_time_us</order_by>
+    <ttl>toDateTime(intDiv(finish_time_us, 1000000)) + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </opentelemetry_span_log>
+  <crash_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </crash_log>
+  <blob_storage_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </blob_storage_log>
+  <s3queue_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </s3queue_log>
+  <backup_log>
+    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
+    <settings>merge_with_ttl_timeout=3600</settings>
+  </backup_log>
 </clickhouse>

@@ -320,7 +320,7 @@ def test_live_revalidation_and_backup_gate(
         )
         == 0
     )
-    assert candidate.reason == 'live_revalidation:operator_preserved'
+    assert candidate.revalidation_reason == 'live_revalidation:operator_preserved'
     assert instance.get_run_by_id(run_id) is not None
 
 
@@ -478,6 +478,12 @@ def diagnostic_server(
 
     data = tmp_path_factory.mktemp('diagnostic-server') / 'data'
     data.mkdir()
+    import os
+
+    logs = data.parent / 'logs'
+    users = data.parent / 'users'
+    logs.mkdir()
+    users.mkdir()
     name = 'origo-metadata-tests-' + uuid4().hex[:12]
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
@@ -495,6 +501,12 @@ def diagnostic_server(
             '--detach',
             '--name',
             name,
+            '--user',
+            f'{os.getuid()}:{os.getgid()}',
+            '--volume',
+            f'{logs}:/var/log/clickhouse-server',
+            '--volume',
+            f'{users}:/etc/clickhouse-server/users.d',
             '--publish',
             f'127.0.0.1:{port}:9000',
             '--volume',
@@ -537,7 +549,6 @@ def diagnostic_server(
                         logs.stderr[-2000:] + error_path.read_text()[-6000:]
                     ) from error
                 time.sleep(0.2)
-        client.execute('SYSTEM FLUSH LOGS')
         yield name, settings, data
     finally:
         client.disconnect()
@@ -564,7 +575,14 @@ def test_clickhouse_diagnostic_ttl_survives_restart(
     root = ET.parse(ROOT / 'clickhouse-config.xml').getroot()
     for name in DIAGNOSTIC_LOGS:
         assert 'INTERVAL 14 DAY' in root.findtext(f'{name}/ttl', '')
+    initial_tables = {
+        row[0] for row in client.execute("SELECT name FROM system.tables WHERE database='system'")
+    }
+    assert 'crash_log' not in initial_tables
     before = maintain_diagnostics(client, POLICY, time.monotonic() + 30)
+    assert 'crash_log' in before.tables and not before.errors
+    assert client.execute('SELECT count() FROM system.crash_log') == [(0,)]
+
     assert not before.drift, [
         client.execute(f'SHOW CREATE TABLE system.{name}') for name in before.drift
     ]
@@ -1007,3 +1025,215 @@ def test_restore_verifies_real_instance_and_rejects_missing_evidence(
             restored, layout, journal, 'damaged-test-copy', time.monotonic() + 15
         )
     assert metadata_instance.get_records_for_run(run_id).records
+
+
+def test_slow_retirement_does_not_block_an_unrelated_writer(
+    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    import sys
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dagster import DagsterRun
+
+    from origo.maintenance.dagster_metadata import maintain_operational_metadata_job
+
+    # Real Dagster allocations necessarily repeat one of the old 256 stripes.
+    seen: dict[str, DagsterRun] = {}
+    for _ in range(257):
+        live = metadata_instance.create_run_for_job(maintain_operational_metadata_job)
+        stripe = hashlib.sha256(live.run_id.encode()).hexdigest()[:2]
+        if stripe in seen:
+            retired = seen[stripe]
+            break
+        seen[stripe] = live
+    else:
+        pytest.fail('257 allocated runs did not collide in 256 stripes.')
+    metadata_instance.report_run_canceled(retired)
+    layout, journal, candidate = planned(metadata_instance, retired.run_id)
+    future = time.time() + 91 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_receipt(run: DagsterRun) -> None:
+        assert run.run_id == retired.run_id
+        entered.set()
+        if not release.wait(15):
+            raise TimeoutError('Test did not release the slow receipt operation.')
+
+    monkeypatch.setattr(retention, 'preserve_source_receipt', slow_receipt)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cleanup = executor.submit(
+            reclaim,
+            metadata_instance,
+            layout,
+            candidate,
+            journal,
+            tmp_path / 'slow-journal.json',
+            POLICY,
+            time.monotonic() + 30,
+        )
+        try:
+            assert entered.wait(5), cleanup.exception(timeout=1)
+            writer = executor.submit(
+                metadata_instance.report_engine_event,
+                'Unrelated run remains writable during retirement.',
+                live,
+            )
+            writer.result(timeout=2)
+            # The unrelated writer's release must not unlock the retired run for
+            # another process (POSIX locks are process-owned, not descriptor-owned).
+            script = """import sys
+from pathlib import Path
+from origo.maintenance.run_locks import run_lock
+try:
+    with run_lock(Path(sys.argv[1]), int(sys.argv[2]), 0):
+        raise AssertionError('Retiring run was unlocked')
+except TimeoutError:
+    print('retirement still locked')
+"""
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    script,
+                    str(metadata_instance.event_log_storage.writer_lock_path()),
+                    str(candidate.storage_id),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            )
+            assert 'retirement still locked' in result.stdout
+        finally:
+            release.set()
+        assert cleanup.result(timeout=10) > 0
+    assert metadata_instance.get_run_by_id(retired.run_id) is None
+    assert metadata_instance.get_run_by_id(live.run_id) is not None
+    assert any(
+        'Unrelated run remains writable' in row.event_log_entry.message
+        for row in metadata_instance.get_records_for_run(live.run_id).records
+    )
+    assert metadata_instance.event_log_storage.writer_lock_path().stat().st_size == 0
+
+
+def test_first_apply_resumes_after_live_revalidation(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.maintenance import worker
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    preserved = execute_archive(metadata_instance)
+    eligible = execute_archive(metadata_instance)
+    layout, journal, candidate = planned(metadata_instance, preserved)
+    journal.manifest.append(planned(metadata_instance, eligible)[2])
+    future = time.time() + 31 * 86400
+    scan_batch(metadata_instance, layout, journal, POLICY, future, time.monotonic() + 15)
+    journal.retained_floor_bytes = (
+        worker.directory_bytes(layout, time.monotonic() + 15) - journal.inventory_eligible_bytes
+    )
+    journal.manifest_sha256 = manifest_sha256(journal)
+    approved = journal.manifest_sha256
+    receipt = BackupReceipt(
+        instance_id=journal.instance_id,
+        manifest_sha256=approved,
+        snapshot_id='verified-first-apply-test',
+        restored_home=str(tmp_path),
+        verified_at=future,
+        expires_at=future + 86400,
+        verified_runs=2,
+    )
+    receipt_path = tmp_path / 'first-apply-receipt.json'
+    receipt_path.write_text(receipt.model_dump_json())
+    config = POLICY.model_copy(
+        update={
+            'dry_run': False,
+            'backup_receipt': str(receipt_path),
+            'approved_manifest_sha256': approved,
+        }
+    )
+    require_backup(journal, config, future)
+    metadata_instance.add_run_tags(preserved, {'origo_metadata_preserve': 'true'})
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    monkeypatch.setattr(
+        worker, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    path = layout.runs.parent / 'operational-maintenance' / 'journal.json'
+    # Stop at the reported crash boundary: only the revalidation result was saved.
+    assert (
+        reclaim(metadata_instance, layout, candidate, journal, path, config, time.monotonic() + 15)
+        == 0
+    )
+    resumed = Journal.model_validate_json(path.read_bytes())
+    assert all(row.phase == 'planned' for row in resumed.manifest)
+    assert resumed.manifest[0].reason == ''
+    assert resumed.manifest[0].revalidation_reason == 'live_revalidation:operator_preserved'
+    assert resumed.manifest_sha256 == manifest_sha256(resumed) == approved
+    outcome = worker.maintain(metadata_instance, config)
+    assert outcome.report.deleted == 1 and outcome.report.protected == 1
+    assert not outcome.violations
+    assert metadata_instance.get_run_by_id(preserved) is not None
+    assert metadata_instance.get_run_by_id(eligible) is None
+    assert Journal.model_validate_json(path.read_bytes()).first_apply_completed
+
+
+def test_retired_storage_id_can_be_reused_during_event_cleanup(
+    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from origo.maintenance.dagster_metadata import maintain_operational_metadata_job
+
+    retired = execute_archive(metadata_instance)
+    layout, journal, candidate = planned(metadata_instance, retired)
+    future = time.time() + 31 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    entered, release = threading.Event(), threading.Event()
+    storage = metadata_instance.event_log_storage
+    original = storage.delete_events
+
+    def slow_events(run_id: str) -> None:
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError('Test did not release event cleanup.')
+        original(run_id)
+
+    monkeypatch.setattr(storage, 'delete_events', slow_events)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cleanup = executor.submit(
+            reclaim,
+            metadata_instance,
+            layout,
+            candidate,
+            journal,
+            tmp_path / 'reused-id.json',
+            POLICY,
+            time.monotonic() + 20,
+        )
+        try:
+            assert entered.wait(5)
+            live = metadata_instance.create_run_for_job(maintain_operational_metadata_job)
+            record = metadata_instance.get_run_records(RunsFilter(run_ids=[live.run_id]), limit=1)[
+                0
+            ]
+            assert record.storage_id == candidate.storage_id
+            executor.submit(
+                metadata_instance.report_engine_event, 'Reused row ID remains writable.', live
+            ).result(timeout=2)
+        finally:
+            release.set()
+        assert cleanup.result(timeout=5) > 0
+    assert metadata_instance.get_run_by_id(live.run_id) is not None
+    assert metadata_instance.get_run_by_id(retired) is None

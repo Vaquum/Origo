@@ -5,19 +5,20 @@ and the asset cache stay intact. Retired run details expire; their current asset
 facts remain available through the same Dagster APIs until superseded.
 """
 
-import hashlib
 import sqlite3
 import time
 from pathlib import Path
 from typing import Self
 
+from dagster import RunsFilter
 from dagster._core.events.log import EventLogEntry
 from dagster._core.instance import RUNLESS_RUN_ID
 from dagster._core.storage.event_log.sqlite.sqlite_event_log import SqliteEventLogStorage
 from dagster._core.storage.sqlite_storage import SqliteStorageConfig
 from dagster._serdes import ConfigurableClassData, deserialize_value
 
-from .sqlite import connection, maintenance_lock
+from .run_locks import run_lock
+from .sqlite import connection
 
 _CURRENT_TYPES = ('ASSET_MATERIALIZATION', 'ASSET_OBSERVATION')
 
@@ -63,18 +64,17 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
     ) -> Self:
         return cls(inst_data=inst_data, **config_value)
 
-    def writer_lock_path(self, run_id: str) -> Path:
-        # Fixed 256 stripes, never one additional file per historical run.
-        stripe = hashlib.sha256(run_id.encode()).hexdigest()[:2]
-        return (
-            Path(self.path_for_shard('index')).parent
-            / 'operational-maintenance'
-            / 'writers'
-            / stripe
-        )
+    def writer_lock_path(self) -> Path:
+        return Path(self.path_for_shard('index')).parent / 'operational-maintenance' / 'run-locks'
 
     def store_event(self, event: EventLogEntry) -> None:
-        with maintenance_lock(self.writer_lock_path(event.run_id), 5):
+        storage_id = 0
+        if event.run_id != RUNLESS_RUN_ID:
+            records = self._instance.get_run_records(RunsFilter(run_ids=[event.run_id]), limit=1)
+            if not records:
+                raise RuntimeError(f'Refusing an event for an absent run: {event.run_id}')
+            storage_id = records[0].storage_id
+        with run_lock(self.writer_lock_path(), storage_id, 5):
             if (
                 event.run_id != RUNLESS_RUN_ID
                 and self._instance.get_run_by_id(event.run_id) is None

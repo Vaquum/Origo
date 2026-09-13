@@ -28,8 +28,9 @@ from dagster._core.storage.local_compute_log_manager import LocalComputeLogManag
 
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
+from .run_locks import run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
-from .sqlite import Layout, allocated, artifacts, connection, maintenance_lock
+from .sqlite import Layout, allocated, artifacts, connection
 
 
 @lru_cache(maxsize=1)
@@ -277,7 +278,7 @@ def scan_batch(
     return candidates
 
 
-def _reclaim_locked(
+def reclaim(
     instance: DagsterInstance,
     layout: Layout,
     candidate: Candidate,
@@ -286,27 +287,32 @@ def _reclaim_locked(
     config: OperationalMetadataMaintenanceConfig,
     deadline: float,
 ) -> int:
-    if not isinstance(instance.event_log_storage, OrigoSqliteEventLogStorage):
+    storage = instance.event_log_storage
+    if not isinstance(storage, OrigoSqliteEventLogStorage):
         raise TypeError('Retention requires current-state-preserving event storage.')
-    run_id = candidate.run_id
-    records = instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)
-    if records:
-        reason = protection(instance, layout, records[0], config, time.time(), deadline)
-        if reason:
-            candidate.reason = 'live_revalidation:' + reason
+    with run_lock(storage.writer_lock_path(), candidate.storage_id, config.lock_wait_seconds):
+        run_id = candidate.run_id
+        records = instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)
+        if records:
+            reason = protection(instance, layout, records[0], config, time.time(), deadline)
+            if reason:
+                candidate.revalidation_reason = 'live_revalidation:' + reason
+                save_journal(journal_path, journal)
+                return 0
+            preserve_source_receipt(records[0].dagster_run)
+            candidate.phase = 'deleting'
+            save_journal(journal_path, journal)
+            instance.run_storage.delete_run(run_id)
+        elif candidate.phase == 'planned':
+            candidate.revalidation_reason = 'run_disappeared_before_owned_deletion'
             save_journal(journal_path, journal)
             return 0
-        preserve_source_receipt(records[0].dagster_run)
-        candidate.phase = 'deleting'
-        save_journal(journal_path, journal)
-        instance.delete_run(run_id)
-    elif candidate.phase == 'planned':
-        candidate.reason = 'run_disappeared_before_owned_deletion'
-        save_journal(journal_path, journal)
-        return 0
-    elif candidate.phase == 'deleting':
-        # Dagster retires runs before deleting events; replay this half after a crash.
-        instance.event_log_storage.delete_events(run_id)
+    # Once the run row is absent, every late writer rejects its UUID. Release
+    # the range before event/log cleanup so SQLite can safely reuse a deleted
+    # maximum row ID for a new run without inheriting the old run's lock wait.
+    run_id = candidate.run_id
+    if candidate.phase == 'deleting':
+        storage.delete_events(run_id)
     candidate.phase = 'logs'
     save_journal(journal_path, journal)
     if instance.get_run_by_id(run_id) is not None:
@@ -331,19 +337,3 @@ def _reclaim_locked(
     candidate.phase = 'reclaimed'
     save_journal(journal_path, journal)
     return max(0, before - artifact_bytes(layout, run_id, deadline))
-
-
-def reclaim(
-    instance: DagsterInstance,
-    layout: Layout,
-    candidate: Candidate,
-    journal: Journal,
-    journal_path: Path,
-    config: OperationalMetadataMaintenanceConfig,
-    deadline: float,
-) -> int:
-    storage = instance.event_log_storage
-    if not isinstance(storage, OrigoSqliteEventLogStorage):
-        raise TypeError('Retention requires current-state-preserving event storage.')
-    with maintenance_lock(storage.writer_lock_path(candidate.run_id), config.lock_wait_seconds):
-        return _reclaim_locked(instance, layout, candidate, journal, journal_path, config, deadline)

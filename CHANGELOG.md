@@ -4,6 +4,8 @@
 - Correct SQLite job/repository history queries, maintain planner statistics, and skip Arrow rebuilds for unchanged Parquet input generations.
 - Configure 14-day ClickHouse diagnostic retention and bounded backlog maintenance, with first-cleanup manifest and restore verification.
 
+- Isolate retention locks per run, initialize unused diagnostic logs before TTL checks, and preserve approved manifests across live revalidation.
+
 # v3.8.0
 
 - Add native Dagit spot-history backfills with exact legacy parity, database state reconciliation, storage admission checks, and system logs in Dagit. Deterministic verification failures wait for a state change or operator retry; transient failures and cancellations retry with bounded backoff. Native completion suppresses redundant verification, while source health checks expose unresolved failures without recursive failed runs. Reuse run-local archive bytes and seek through component rows without OFFSET scans.

@@ -124,13 +124,13 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             if (
                 config.dry_run
                 or not journal.manifest
-                or all(row.reason or row.phase == 'reclaimed' for row in journal.manifest)
+                or all(row.exclusion or row.phase == 'reclaimed' for row in journal.manifest)
             ):
                 batch = scan_batch(instance, layout, journal, config, report.observed_at, deadline)
                 if (
                     not config.dry_run
                     or not journal.manifest
-                    or not any(not row.reason for row in journal.manifest)
+                    or not any(not row.exclusion for row in journal.manifest)
                 ):
                     journal.manifest = batch
                     journal.manifest_created_at = time.time()
@@ -139,27 +139,27 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             else:
                 batch = journal.manifest
             report.scanned += len(batch)
-            report.candidates += sum(not row.reason for row in batch)
-            report.protected += sum(bool(row.reason) for row in batch)
-            counts.update(row.reason for row in batch if row.reason)
+            report.candidates += sum(not row.exclusion for row in batch)
+            report.protected += sum(bool(row.exclusion) for row in batch)
+            counts.update(row.exclusion for row in batch if row.exclusion)
             print(
-                f'Manifest {journal.manifest_sha256}: scanned={len(journal.manifest)} eligible={sum(not row.reason for row in journal.manifest)} cursor={journal.scan_cursor}',
+                f'Manifest {journal.manifest_sha256}: scanned={len(journal.manifest)} eligible={sum(not row.exclusion for row in journal.manifest)} cursor={journal.scan_cursor}',
                 flush=True,
             )
             if not config.dry_run:
                 require_backup(journal, config, time.time())
                 for candidate in journal.manifest:
-                    if candidate.reason or candidate.phase == 'reclaimed':
+                    if candidate.exclusion or candidate.phase == 'reclaimed':
                         continue
                     report.reclaimed_bytes += reclaim(
                         instance, layout, candidate, journal, journal_path, config, deadline
                     )
-                    if not candidate.reason:
+                    if not candidate.exclusion:
                         report.deleted += 1
                     else:
                         report.protected += 1
                         report.candidates -= 1
-                        counts[candidate.reason] += 1
+                        counts[candidate.exclusion] += 1
                 journal.first_apply_completed = journal.first_apply_completed or report.deleted > 0
                 journal.state_cursor, scanned, compacted = (
                     instance.event_log_storage.compact_retired_state(

@@ -124,8 +124,11 @@ this retention policy.
 Successful execution history is eligible after 30 days; failed/canceled history after
 90 days. Active runs, active/unknown backfills, retry references, unresolved source
 failures, current checks, latest failed partitions and unconsumed sensor events are
-excluded. A fixed set of writer locks prevents late events from recreating deleted
-shards. Unchanged Parquet inputs no longer launch another Arrow build; current
+excluded. Per-run byte-range locks in one file prevent late events from recreating deleted
+shards. SQLite run storage IDs select independent lock ranges, so slow retirement
+does not block unrelated runs. The lock ends immediately after the run record is
+retired; subsequent event/log cleanup cannot block a new run that reuses that
+SQLite ID. Unchanged Parquet inputs no longer launch another Arrow build; current
 materialization metadata retains the successful input identity after history expires.
 
 ### First inspection and cleanup
@@ -177,7 +180,9 @@ ops:
       metadata_budget_bytes: 644245094400
 ```
 
-The first manifest stays available across inspection batches. Policy changes reset
+The first manifest stays available across inspection batches. Its initial eligibility
+reason is immutable; live revalidation exclusions are separate progress fields and
+do not invalidate the approved hash or backup receipt. Policy changes reset
 inspection; finish an interrupted deletion before changing policy. The journal holds
 at most 500 candidates and 32 aggregate reports from the last 30 days. The backup
 receipt expires after 30 days. Configure the external backup service to expire these
@@ -200,8 +205,9 @@ there is no automatic full-volume VACUUM. ClickHouse reports active, inactive an
 expired part bytes separately from actual allocated blocks and net physical release.
 A scheduled TTL operation is not claimed as reclaimed space.
 
-ClickHouse catch-up validates the explicit diagnostic table allowlist and archived
-numeric schema incarnations. It drops only parts whose actual maximum event time is
+ClickHouse catch-up first flushes configured system logs, creating empty tables for
+unused logs such as crash/backup logs before auditing their TTLs. It then validates
+the explicit diagnostic table allowlist and archived numeric schema incarnations. It drops only parts whose actual maximum event time is
 older than 14 days. Mixed-age partitions use at most one asynchronous TTL mutation,
 with a 4 GiB partition limit and at least 20 GiB plus twice the partition's bytes free.
 Concurrent merges/mutations exclude their tables. Inventory limits (500 system

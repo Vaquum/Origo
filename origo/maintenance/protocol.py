@@ -32,8 +32,13 @@ class Candidate(BaseModel):
     ended_at: float
     allocated_bytes: int
     artifacts: dict[str, int] = Field(default_factory=dict)
-    reason: str = ''
+    reason: str = Field(default='', frozen=True)
+    revalidation_reason: str = ''
     phase: Literal['planned', 'deleting', 'logs', 'reclaimed'] = 'planned'
+
+    @property
+    def exclusion(self) -> str:
+        return self.revalidation_reason or self.reason
 
 
 class Report(BaseModel):

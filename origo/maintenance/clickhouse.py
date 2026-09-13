@@ -94,6 +94,8 @@ def maintain_diagnostics(
     version = _execute(client, 'SELECT version()', deadline)
     if version != [('25.3.2.39',)]:
         raise RuntimeError(f'Diagnostic retention has not been validated on {version}.')
+    # Materialize configured but unused logs before checking policy coverage.
+    _execute(client, 'SYSTEM FLUSH LOGS', deadline)
     rows = _execute(
         client,
         "SELECT name,engine,create_table_query FROM system.tables WHERE database='system' AND engine LIKE '%MergeTree' ORDER BY name LIMIT 501",

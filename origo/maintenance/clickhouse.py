@@ -279,9 +279,12 @@ def maintain_diagnostics(
             observed.oldest_date,
             observed.tables,
             observed.drift,
-            tuple(dict.fromkeys(errors + list(observed.errors)))
-            if action.startswith('materialize')
-            else observed.errors,
+            tuple(
+                dict.fromkeys(
+                    [error for error in errors if not error.startswith('expiry_lag:')]
+                    + list(observed.errors)
+                )
+            ),
             observed.pending,
             action,
         )

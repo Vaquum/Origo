@@ -153,7 +153,8 @@ def test_statistics_restore_actual_job_query_plan(metadata_instance: DagsterInst
         plan = '\n'.join(str(row) for row in database.execute('EXPLAIN QUERY PLAN ' + query))
         assert 'idx_runs_by_job' in plan
         assert 'idx_run_tags_run_idx' in plan
-        assert 'TEMP B-TREE' not in plan
+        assert 'CORRELATED SCALAR SUBQUERY' in plan
+        assert 'SCAN run_tags' not in plan
         assert database.execute('SELECT count(*) FROM sqlite_stat1').fetchone()[0] > 0
 
 
@@ -621,6 +622,18 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
     client.execute(
         'INSERT INTO origo.retention_business VALUES', [(int(first[0]), float(first[1]))]
     )
+    client.execute(
+        'ALTER TABLE system.metric_log_286 MODIFY SETTING old_parts_lifetime=0, cleanup_delay_period=1, cleanup_delay_period_random_add=0'
+    )
+    part_path = client.execute(
+        "SELECT path FROM system.parts WHERE database='system' AND table='metric_log_286' AND active AND max_date<today()-14"
+    )[0][0]
+    expired_directory = diagnostic_server[2] / Path(part_path).relative_to('/var/lib/clickhouse')
+    assert expired_directory.exists()
+    assert (
+        sum(path.stat().st_blocks * 512 for path in expired_directory.rglob('*') if path.is_file())
+        > 0
+    )
     recent = client.execute(
         'SELECT event_time,CurrentMetric_Query FROM system.metric_log_286 WHERE event_time>=now()-INTERVAL 14 DAY'
     )
@@ -637,6 +650,11 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
         (int(first[0]), float(first[1]))
     ]
     assert 'toIntervalDay(14)' in client.execute('SHOW CREATE TABLE system.metric_log_286')[0][0]
+    deadline = time.monotonic() + 20
+    while expired_directory.exists():
+        if time.monotonic() >= deadline:
+            pytest.fail('Expired ClickHouse part blocks were not physically removed.')
+        time.sleep(0.1)
     client.execute('DROP TABLE system.metric_log_286 SYNC')
     client.disconnect()
 
@@ -761,6 +779,19 @@ def test_maintenance_logs_and_latency_checks(
     logs = metadata_instance.get_records_for_run(result.run_id).records
     assert any('Statistics:' in row.event_log_entry.message for row in logs)
     assert any('ClickHouse diagnostics:' in row.event_log_entry.message for row in logs)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[result.run_id]), limit=1)[0]
+    assert (
+        protection(
+            metadata_instance,
+            Layout.from_instance(metadata_instance),
+            record,
+            POLICY,
+            time.time() + 31 * 86400,
+            time.monotonic() + 15,
+        )
+        == 'current_asset_check'
+    )
+
     failed = maintain_operational_metadata_job.execute_in_process(
         instance=metadata_instance,
         run_config={
@@ -781,3 +812,197 @@ def test_maintenance_logs_and_latency_checks(
     assert len(checks) == 1 and not checks[0].passed
     logs = metadata_instance.get_records_for_run(failed.run_id).records
     assert any('metadata_budget:' in row.event_log_entry.message for row in logs)
+    from dagster import AssetCheckKey
+
+    key = AssetCheckKey(AssetKey('maintain_operational_metadata'), 'operational_metadata_health')
+    before_checks = metadata_instance.event_log_storage.get_asset_check_summary_records([key])
+    layout, journal, candidate = planned(metadata_instance, result.run_id)
+    future = time.time() + 31 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    assert (
+        reclaim(
+            metadata_instance,
+            layout,
+            candidate,
+            journal,
+            layout.runs.parent / 'check-proof.json',
+            POLICY,
+            time.monotonic() + 15,
+        )
+        > 0
+    ), candidate.reason
+    assert (
+        metadata_instance.event_log_storage.get_asset_check_summary_records([key]) == before_checks
+    )
+    with sqlite3.connect(layout.events) as database:
+        assert database.execute(
+            'SELECT count(*) FROM asset_check_executions WHERE run_id=?', (result.run_id,)
+        ).fetchone() == (0,)
+
+
+def test_source_receipt_survives_history_retirement(
+    metadata_instance: DagsterInstance,
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from dagster import Definitions, build_schedule_context
+    from dagster._core.definitions.schedule_definition import ScheduleExecutionData
+
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.sources import capacity
+    from origo.sources.adapters import binance_daily
+    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+    from origo.sources.bundle import build_source_bundle
+    from origo.sources.lifecycle import SourceRuntime
+    from origo.sources.storage import SourceStore
+
+    from .test_binance_daily_source_adapter import archive_response
+    from .test_revisioned_source_framework_backfill import _run, _start_monitors
+
+    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    monkeypatch.setattr(
+        capacity, '_volumes', lambda runtime: (capacity._Volume('test-volume', tmp_path),)
+    )
+    monkeypatch.setattr(
+        capacity._Volume, 'sample', lambda self: (10**12, 9 * 10**11, 10**8, 9 * 10**7)
+    )
+    spec = BINANCE_SPOT_TRADES_SPEC
+    client = make_clickhouse_client(get_clickhouse_settings())
+    store = SourceStore(client, origo_test_env['CLICKHOUSE_DATABASE'], spec)
+    runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+    source = build_source_bundle(spec)
+    runtime.setup()
+    _start_monitors(metadata_instance)
+    environment = (runtime, metadata_instance, source)
+    try:
+        assert _run(environment, probe=True).success
+        schedule = next(
+            item for item in source.schedules if item.name.endswith('_canonical_schedule')
+        )
+        definitions = Definitions(
+            assets=source.assets,
+            jobs=source.jobs,
+            sensors=source.sensors,
+            schedules=source.schedules,
+        )
+
+        def tick() -> ScheduleExecutionData:
+            with build_schedule_context(
+                instance=metadata_instance,
+                scheduled_execution_time=datetime(2017, 8, 18, tzinfo=UTC),
+                repository_def=definitions.get_repository_def(),
+            ) as context:
+                return schedule.evaluate_tick(context)
+
+        request = tick().run_requests[0]
+        job = next(item for item in source.jobs if item.name == schedule.job_name)
+        result = job.execute_in_process(
+            instance=metadata_instance,
+            partition_key=request.partition_key,
+            run_config=request.run_config,
+            tags=request.tags,
+        )
+        assert result.success
+        # Supersede its current check dependency with another real verification.
+        assert _run(environment, reconcile=True).success
+        before = store.records(canonical_only=True)
+        key = AssetKey('build_binance_spot_trades_canonical_revision_origo')
+        materialization = metadata_instance.get_latest_materialization_event(key)
+        layout, journal, candidate = planned(metadata_instance, result.run_id)
+        future = time.time() + 31 * 86400
+        monkeypatch.setattr(
+            retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+        )
+        reclaimed = reclaim(
+            metadata_instance,
+            layout,
+            candidate,
+            journal,
+            tmp_path / 'receipt-journal.json',
+            POLICY,
+            time.monotonic() + 30,
+        )
+        assert reclaimed > 0, candidate.reason
+        assert metadata_instance.get_run_by_id(result.run_id) is None
+        receipt = store.run_receipt(request.tags['origo_source_event'])
+        assert receipt == (0, 'SUCCESS', result.run_id)
+        assert tick().run_requests == []
+        assert store.records(canonical_only=True) == before
+        assert metadata_instance.get_latest_materialization_event(key) == materialization
+    finally:
+        client.disconnect()
+
+
+def test_restore_verifies_real_instance_and_rejects_missing_evidence(
+    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    import yaml
+
+    from origo.maintenance import backup
+
+    run_id = execute_archive(metadata_instance)
+    layout, journal, _ = planned(metadata_instance, run_id)
+    original = tmp_path / 'instance'
+    restored = tmp_path / 'restored'
+    # All work is complete and this test has no concurrent instance writers.
+    shutil.copytree(original, restored)
+
+    def relocated(path: Path) -> str:
+        return str(restored / path.relative_to(original.resolve()))
+
+    configuration = {
+        'local_artifact_storage': {
+            'module': 'dagster._core.storage.root',
+            'class': 'LocalArtifactStorage',
+            'config': {'base_dir': str(restored)},
+        },
+        'run_storage': {
+            'module': 'origo.maintenance.run_storage',
+            'class': 'OrigoSqliteRunStorage',
+            'config': {'base_dir': relocated(layout.runs.parent)},
+        },
+        'event_log_storage': {
+            'module': 'origo.maintenance.event_storage',
+            'class': 'OrigoSqliteEventLogStorage',
+            'config': {'base_dir': relocated(layout.events.parent)},
+        },
+        'schedule_storage': {
+            'module': 'dagster._core.storage.schedules',
+            'class': 'SqliteScheduleStorage',
+            'config': {'base_dir': relocated(layout.schedules.parent)},
+        },
+        'compute_logs': {
+            'module': 'dagster._core.storage.local_compute_log_manager',
+            'class': 'LocalComputeLogManager',
+            'config': {'base_dir': relocated(layout.compute)},
+        },
+    }
+    (restored / 'dagster.yaml').write_text(yaml.safe_dump(configuration))
+    with pytest.raises(ValueError, match='production filesystem reserve'):
+        backup.verify_restored_backup(
+            restored, layout, journal, 'quiesced-test-copy', time.monotonic() + 15
+        )
+    # Only the volume boundary is simulated; every restored database and API is real.
+    monkeypatch.setattr(backup, '_separate_filesystems', lambda restored_home, production: True)
+    receipt = backup.verify_restored_backup(
+        restored, layout, journal, 'quiesced-test-copy', time.monotonic() + 15
+    )
+    assert receipt.verified_runs == 1 and receipt.manifest_sha256 == journal.manifest_sha256
+    assert receipt.instance_id == metadata_instance.run_storage.get_run_storage_id()
+    shard = Path(relocated(layout.shard(run_id)))
+    with sqlite3.connect(shard) as database:
+        database.execute('DELETE FROM event_logs')
+    with pytest.raises(RuntimeError, match='no execution evidence'):
+        backup.verify_restored_backup(
+            restored, layout, journal, 'damaged-test-copy', time.monotonic() + 15
+        )
+    assert metadata_instance.get_records_for_run(run_id).records

@@ -37,20 +37,20 @@ def _delete_index_events(database: sqlite3.Connection, ids: list[int]) -> None:
     if ids:
         placeholders = ','.join('?' for _ in ids)
         for row in database.execute(
-            f"SELECT event,asset_key,run_id,partition FROM event_logs WHERE id IN ({placeholders}) AND dagster_event_type='ASSET_CHECK_EVALUATION'",
+            f"SELECT event,run_id,dagster_event_type FROM event_logs WHERE id IN ({placeholders}) AND dagster_event_type IN ('ASSET_CHECK_EVALUATION','ASSET_CHECK_EVALUATION_PLANNED')",
             ids,
         ).fetchall():
             event = deserialize_value(str(row['event']), EventLogEntry).dagster_event
             if event is None:
                 raise ValueError('Asset check evaluation has no payload.')
+            payload = (
+                event.asset_check_evaluation_data
+                if row['dagster_event_type'] == 'ASSET_CHECK_EVALUATION'
+                else event.asset_check_planned_data
+            )
             database.execute(
-                'DELETE FROM asset_check_executions WHERE asset_key=? AND check_name=? AND run_id=? AND partition IS ?',
-                (
-                    row['asset_key'],
-                    event.asset_check_evaluation_data.check_name,
-                    row['run_id'],
-                    row['partition'],
-                ),
+                'DELETE FROM asset_check_executions WHERE asset_key=? AND check_name=? AND run_id=?',
+                (payload.asset_key.to_string(), payload.check_name, row['run_id']),
             )
         database.execute(f'DELETE FROM asset_event_tags WHERE event_id IN ({placeholders})', ids)
         database.execute(f'DELETE FROM event_logs WHERE id IN ({placeholders})', ids)

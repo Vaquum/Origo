@@ -24,6 +24,10 @@ class BackupReceipt(BaseModel):
     verified_runs: int
 
 
+def _separate_filesystems(restored_home: Path, production: Layout) -> bool:
+    return restored_home.stat().st_dev != production.runs.stat().st_dev
+
+
 def verify_restored_backup(
     restored_home: Path,
     production: Layout,
@@ -34,7 +38,7 @@ def verify_restored_backup(
     if not snapshot_id.strip():
         raise ValueError('A consistent filesystem/storage snapshot identity is required.')
     restored_home = restored_home.resolve(strict=True)
-    if restored_home.stat().st_dev == production.runs.stat().st_dev:
+    if not _separate_filesystems(restored_home, production):
         raise ValueError('The restored backup must not consume the production filesystem reserve.')
     with DagsterInstance.from_config(str(restored_home)) as restored:
         layout = Layout.from_instance(restored)

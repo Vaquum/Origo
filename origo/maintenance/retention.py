@@ -140,21 +140,32 @@ def protection(
                 event = deserialize_value(str(row['event']), EventLogEntry).dagster_event
                 if event is None:
                     raise ValueError('Asset check event has no Dagster payload.')
-                check_name = (
-                    event.asset_check_evaluation_data.check_name
+                payload = (
+                    event.asset_check_evaluation_data
                     if row['dagster_event_type'] == 'ASSET_CHECK_EVALUATION'
-                    else event.asset_check_planned_data.check_name
+                    else event.asset_check_planned_data
                 )
-                for completed in (False, True):
-                    condition = ' AND evaluation_event IS NOT NULL' if completed else ''
-                    latest = database.execute(
-                        'SELECT run_id FROM asset_check_executions WHERE asset_key=? AND check_name=? AND partition IS ?'
-                        + condition
-                        + ' ORDER BY id DESC LIMIT 1',
-                        (row['asset_key'], check_name, row['partition']),
-                    ).fetchone()
-                    if latest is not None and latest['run_id'] == run.run_id:
-                        return 'current_asset_check'
+                asset_key = payload.asset_key.to_string()
+                check_name = payload.check_name
+                executions = database.execute(
+                    'SELECT partition FROM asset_check_executions WHERE asset_key=? AND check_name=? AND run_id=? LIMIT 1001',
+                    (asset_key, check_name, run.run_id),
+                ).fetchall()
+                if len(executions) > 1000:
+                    return 'oversized_check_reference_set'
+                for execution in executions:
+                    for completed in (False, True):
+                        condition = (
+                            " AND execution_status IN ('SUCCEEDED','FAILED')" if completed else ''
+                        )
+                        latest = database.execute(
+                            'SELECT run_id FROM asset_check_executions WHERE asset_key=? AND check_name=? AND partition IS ?'
+                            + condition
+                            + ' ORDER BY id DESC LIMIT 1',
+                            (asset_key, check_name, execution['partition']),
+                        ).fetchone()
+                        if latest is not None and latest['run_id'] == run.run_id:
+                            return 'current_asset_check'
     for state in instance.all_instigator_state():
         data = state.instigator_data
         if not isinstance(data, SensorInstigatorData):

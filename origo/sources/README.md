@@ -109,3 +109,110 @@ gh issue edit 309 --repo Vaquum/Origo --body-file approved-slice.md
 ```
 
 CI success, silence, or a workaround is not approval to change the contract.
+
+## Operational metadata maintenance
+
+`maintain_operational_metadata_job` is the Dagit entry point. The daily
+`operational_metadata_maintenance_schedule` runs at 02:17 UTC; deployment launches
+this same job. Deployments start in inspection mode. The configured SQLite adapters
+fix the Jobs-page repository query and preserve current materialization/observation
+IDs, tags, data versions and partition facts after their old run details expire.
+ClickHouse's native 14-day diagnostic TTL operates independently of this schedule.
+Source tables, reconciliation state, accepted revisions and published data are outside
+this retention policy.
+
+Successful execution history is eligible after 30 days; failed/canceled history after
+90 days. Active runs, active/unknown backfills, retry references, unresolved source
+failures, current checks, latest failed partitions and unconsumed sensor events are
+excluded. A fixed set of writer locks prevents late events from recreating deleted
+shards. Unchanged Parquet inputs no longer launch another Arrow build; current
+materialization metadata retains the successful input identity after history expires.
+
+### First inspection and cleanup
+
+1. In Dagit, launch `maintain_operational_metadata_job` with the configuration below.
+   The deployment default permits at most one hour, in batches of at most 500 runs.
+   Each completed batch checkpoints its cursor. Repeat until the result says
+   `inventory_complete: true`; an incomplete inventory is not a deletion approval.
+2. Read `maintenance` in the health check metadata and its `journal_path`. The one
+   journal contains the exact first manifest, artifact paths/allocated bytes,
+   exclusions and SHA-256. Set the intended byte budget above the measured retained
+   floor, leaving the separate source-backfill capacity reserve. The initial 600 GiB
+   deployment value is an inspection ceiling, not a measured steady-state target.
+3. Before first apply, take a consistent snapshot of **the entire Dagster instance**
+   and compute logs using the storage platform's atomic snapshot facility, or a
+   controlled writer-quiesced copy. Copying separate live SQLite files is not a
+   consistent instance backup. Restore it on a separate filesystem outside the
+   production reserve; rewrite its `dagster.yaml` paths to that restored directory.
+   Keep the original run-storage instance ID and both configured Origo adapters.
+4. From the deployed application environment, verify that restored instance using
+   `python -m origo.maintenance.worker --config '<inspection JSON>'
+   --verify-restored-home /mnt/off-volume/origo-restore --snapshot-id '<snapshot ID>'`.
+   Save the returned JSON as the backup receipt. Verification checks database
+   integrity, instance identity and the manifest's run/shard evidence. The operator
+   supplies the snapshot's consistency guarantee; this command does not create a
+   backup or turn a live file copy into one.
+5. Review the exact manifest. In Dagit set `dry_run: false`, the measured budget,
+   `backup_receipt` to the readable receipt path and `approved_manifest_sha256` to
+   that exact manifest hash. The first batch requires a matching, unexpired receipt;
+   later batches use the durable first-apply checkpoint and revalidate each run.
+   Failure/timeout is a failed run and check, with progress retained for another run.
+6. After the first batch's state and physical release have been reconciled, enable
+   recurring apply with repository variables `ORIGO_METADATA_DRY_RUN=false`,
+   `ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=<measured bytes>` and
+   `ORIGO_METADATA_MAX_RUNTIME_SECONDS=3600`, then deploy. Repeat bounded Dagit
+   invocations during catch-up until eligible backlog declines faster than ingress.
+
+```yaml
+ops:
+  maintain_operational_metadata:
+    config:
+      dry_run: true
+      success_retention_days: 30
+      failure_retention_days: 90
+      diagnostic_retention_days: 14
+      max_runs_per_batch: 500
+      max_runtime_seconds: 3600
+      lock_wait_seconds: 1
+      metadata_budget_bytes: 644245094400
+```
+
+The first manifest stays available across inspection batches. Policy changes reset
+inspection; finish an interrupted deletion before changing policy. The journal holds
+at most 500 candidates and 32 aggregate reports from the last 30 days. The backup
+receipt expires after 30 days. Configure the external backup service to expire these
+maintenance snapshots after 30 days; Origo does not delete external backups.
+
+### Reading the result
+
+All worker output and exceptions flow into Dagit logs. The blocking
+`operational_metadata_health` check reports candidate/protected/deleted counts,
+exclusion reasons, age-eligible backlog (including protected runs), inferred eligible
+arrival rate, cleanup rate, query p95, byte budget, last healthy invocation and free
+filesystem bytes. Arrival rate uses the observed backlog change plus deletions;
+concurrent manual deletion can understate arrivals. Active cleanup throughput and
+between-invocation cleanup rate are separate measurements. Required state is never
+deleted to force a budget to pass.
+
+`reclaimed_bytes` measures removed run-shard/compute-log allocated blocks.
+`shared_sqlite.*.reusable_bytes` remains on disk and is available for later inserts;
+there is no automatic full-volume VACUUM. ClickHouse reports active, inactive and
+expired part bytes separately from actual allocated blocks and net physical release.
+A scheduled TTL operation is not claimed as reclaimed space.
+
+ClickHouse catch-up validates the explicit diagnostic table allowlist and archived
+numeric schema incarnations. It drops only parts whose actual maximum event time is
+older than 14 days. Mixed-age partitions use at most one asynchronous TTL mutation,
+with a 4 GiB partition limit and at least 20 GiB plus twice the partition's bytes free.
+Concurrent merges/mutations exclude their tables. Inventory limits (500 system
+MergeTree tables, 5,000 diagnostic parts) fail visibly instead of applying an
+incomplete inventory. TTL drift, lag over the configured allowance, failed mutations,
+unknown growing system tables and insufficient catch-up capacity fail the health
+check. Native TTL may release inactive parts later; repeated measurement establishes
+physical recovery. The OpenTelemetry timestamp is microseconds and is converted to
+seconds before applying the same retention window.
+
+Production acceptance remains a deployment step: run the unchanged setup/Arrow
+GraphQL job-history queries 20 times, require p95 ≤250 ms after restart and under
+normal ingestion, inspect the Jobs page, then reconcile the reviewed cleanup batch.
+Only measured recovered space counts toward the backfill reserve.

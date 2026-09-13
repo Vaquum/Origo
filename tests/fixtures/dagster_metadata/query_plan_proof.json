@@ -1,0 +1,22 @@
+{
+  "captured_on": "2026-09-13",
+  "sqlite_version": "3.40.1",
+  "snapshot": "consistent read transaction backed up into disposable container RAM; removed afterwards",
+  "runs": 2851712,
+  "run_tags": 23054549,
+  "runs_database_bytes": 17540829184,
+  "snapshot_seconds": 13.053,
+  "original_setup_query_seconds": 9.0139,
+  "original_arrow_query_seconds": 9.2117,
+  "sampled_and_full_analyze_fixed_original_query": false,
+  "full_analyze_seconds": 6.099,
+  "correlated_repository_with_run_id_lookup": {
+    "serialized_calls_per_job": 20,
+    "setup_p95_seconds": 0.0000049695,
+    "arrow_p95_seconds": 0.0000199974,
+    "rows": [0, 5],
+    "plan": ["idx_runs_by_job", "correlated EXISTS", "idx_run_tags_run_idx"],
+    "temporary_sort": false
+  },
+  "live_graphql_acceptance": "pending deployment; these timings are SQL proof only"
+}

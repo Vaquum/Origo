@@ -343,6 +343,9 @@ def build_bar_store_arrow(
     spec = spec_for_series(series)
     parquet_root = parquet_source_root()
 
+    from origo.maintenance.arrow_inputs import source_identity
+
+    input_identity = source_identity(spec, parquet_root)
     build = build_series_frame(spec, parquet_root)
     if build.df.height == 0:
         context.log.warning(
@@ -365,6 +368,8 @@ def build_bar_store_arrow(
         }
 
     outcome = publish_series(series, build)
+    if input_identity is not None:
+        context.add_output_metadata({'source_identity': input_identity})
     context.log.info(
         f"{series}: {outcome.status} version={outcome.version} rows={build.df.height} "
         f"reaped={len(outcome.reaped)}"

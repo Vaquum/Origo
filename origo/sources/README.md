@@ -312,3 +312,11 @@ A cursor left by a renamed code location cannot pin a different repository's new
 projection runs. Current repository cursors still protect unconsumed events. Failure
 protection tests for a newer matching run directly, without sorting all historical
 runs to find the latest one.
+
+A source shard that cannot be compacted does not stop unrelated projection
+retirement. Its original history remains available; the full exception reaches
+Dagit logs and a per-run error stays in the archive database. The health check
+continues to fail with the unresolved count and a bounded sample of errors across
+later invocations. Successful compaction clears that run's error. A failure after
+archive commit still retries its unfinished shared-JSON compaction. Work deadlines
+remain resumable checkpoints; a broken shared storage backend still fails the job.

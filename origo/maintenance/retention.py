@@ -2,7 +2,9 @@
 
 import os
 import sqlite3
+import sys
 import time
+import traceback
 from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -28,8 +30,15 @@ from dagster._core.events import PIPELINE_RUN_STATUS_TO_EVENT_TYPE
 from dagster._core.execution.backfill import BULK_ACTION_TERMINAL_STATUSES
 from dagster._core.scheduler.instigation import InstigatorState, SensorInstigatorData
 from dagster._core.storage.local_compute_log_manager import LocalComputeLogManager
+from sqlalchemy.exc import SQLAlchemyError
 
-from .archive import MAX_DATABASE_BYTES, archive_path
+from .archive import (
+    MAX_DATABASE_BYTES,
+    archive_path,
+    clear_compaction_error,
+    failed_compactions,
+    record_compaction_error,
+)
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
 from .roles import run_role
@@ -259,7 +268,7 @@ def protection(
                 for job in monitored
                 if isinstance(job, (JobDefinition, UnresolvedAssetJobDefinition))
             ]
-            repository = run.tags.get('.dagster/repository')
+            repository = run.tags_for_storage().get('.dagster/repository')
             if (
                 names
                 and len(names) == len(monitored)
@@ -345,6 +354,7 @@ def scan_batch(
                     f'SELECT run_id FROM source_runs WHERE run_id IN ({placeholders})', run_ids
                 )
             }
+    failures = failed_compactions(layout.events.parent, deadline, run_ids)
     with connection(layout.events, deadline, config.lock_wait_seconds) as event_database:
         references = (
             _scan_references(instance, layout, run_ids, config, deadline, event_database)
@@ -371,13 +381,19 @@ def scan_batch(
                 if archive_candidate:
                     if (
                         record.dagster_run.run_id in packed
+                        and record.dagster_run.run_id not in failures
                         and not layout.shard(record.dagster_run.run_id).exists()
                     ):
                         reason = 'source_already_compacted'
-                    elif not layout.shard(record.dagster_run.run_id).exists():
+                    elif (
+                        not layout.shard(record.dagster_run.run_id).exists()
+                        and record.dagster_run.run_id not in packed
+                    ):
                         reason = 'source_no_event_shard'
                     elif (
-                        layout.shard(record.dagster_run.run_id).stat().st_size > MAX_DATABASE_BYTES
+                        layout.shard(record.dagster_run.run_id).exists()
+                        and layout.shard(record.dagster_run.run_id).stat().st_size
+                        > MAX_DATABASE_BYTES
                     ):
                         reason = 'source_archive_size_limit'
                     elif any(
@@ -430,9 +446,22 @@ def reclaim(
         records = instance.get_run_records(RunsFilter(run_ids=[candidate.run_id]), limit=1)
         if not records or run_role(records[0].dagster_run) == 'projection':
             raise RuntimeError('The retained source identity changed before compaction.')
+        candidate.revalidation_reason = ''
         candidate.phase = 'deleting'
         save_journal(journal_path, journal)
-        released = storage.archive_run(candidate.run_id, deadline)
+        try:
+            released = storage.archive_run(candidate.run_id, deadline)
+        except MaintenanceDeadlineReached:
+            raise
+        except (OSError, sqlite3.DatabaseError, SQLAlchemyError, RuntimeError, ValueError) as error:
+            record_compaction_error(layout.events.parent, candidate.run_id, error, deadline)
+            candidate.revalidation_reason = 'source_archive_error'
+            candidate.phase = 'planned'
+            save_journal(journal_path, journal)
+            print(f'Source compaction failed for {candidate.run_id}; history retained.', flush=True)
+            traceback.print_exc(file=sys.stdout)
+            return 0
+        clear_compaction_error(layout.events.parent, candidate.run_id, deadline)
         candidate.phase = 'reclaimed'
         save_journal(journal_path, journal)
         return released

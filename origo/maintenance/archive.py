@@ -9,7 +9,7 @@ import os
 import sqlite3
 import time
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,6 +47,9 @@ def initialize_archive(base: Path) -> Path:
         database.execute('PRAGMA journal_mode=WAL')
         database.execute('PRAGMA synchronous=FULL')
         database.execute(_SCHEMA)
+        database.execute(
+            'CREATE TABLE IF NOT EXISTS compaction_errors (run_id TEXT PRIMARY KEY, error TEXT NOT NULL)'
+        )
         database.commit()
     finally:
         database.close()
@@ -163,3 +166,68 @@ def restore_for_write(base: Path, shard: Path, run_id: str, deadline: float) -> 
     temporary.replace(shard)
     sync_directory(base)
     remove_image(base, run_id, deadline)
+
+
+def record_compaction_error(base: Path, run_id: str, error: Exception, deadline: float) -> None:
+    path = initialize_archive(base)
+    with connection(path, deadline, 1, write=True) as database:
+        database.execute(
+            'INSERT INTO compaction_errors VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET error=excluded.error',
+            (run_id, f'{type(error).__name__}: {error}'[:1024]),
+        )
+        database.commit()
+
+
+def failed_compactions(
+    base: Path, deadline: float, run_ids: Sequence[str] | None = None
+) -> dict[str, str]:
+    path = archive_path(base)
+    if not path.exists():
+        return {}
+    with connection(path, deadline, 1) as database:
+        if (
+            database.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='compaction_errors' AND type='table'"
+            ).fetchone()
+            is None
+        ):
+            return {}
+        if run_ids is not None:
+            placeholders = ','.join('?' for _ in run_ids)
+            rows = database.execute(
+                f'SELECT run_id,error FROM compaction_errors WHERE run_id IN ({placeholders})',
+                tuple(run_ids),
+            )
+        else:
+            rows = database.execute('SELECT run_id,error FROM compaction_errors LIMIT 25')
+        return {str(row[0]): str(row[1]) for row in rows}
+
+
+def failed_compaction_count(base: Path, deadline: float) -> int:
+    path = archive_path(base)
+    if not path.exists():
+        return 0
+    with connection(path, deadline, 1) as database:
+        if (
+            database.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='compaction_errors' AND type='table'"
+            ).fetchone()
+            is None
+        ):
+            return 0
+        return int(database.execute('SELECT count(*) FROM compaction_errors').fetchone()[0])
+
+
+def clear_compaction_error(base: Path, run_id: str, deadline: float) -> None:
+    path = archive_path(base)
+    if not path.exists():
+        return
+    with connection(path, deadline, 1, write=True) as database:
+        if (
+            database.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='compaction_errors' AND type='table'"
+            ).fetchone()
+            is not None
+        ):
+            database.execute('DELETE FROM compaction_errors WHERE run_id=?', (run_id,))
+            database.commit()

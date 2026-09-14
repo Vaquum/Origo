@@ -574,3 +574,85 @@ def test_capacity_does_not_count_the_application_tree(tmp_path: Path) -> None:
         assert directory_bytes(layout, time.monotonic() + 10) == before
         (storage / fixture.name).write_bytes(fixture.read_bytes())
         assert directory_bytes(layout, time.monotonic() + 10) > before
+
+
+@pytest.mark.parametrize('stage', ['snapshot', 'shared_json'])
+def test_bad_source_compaction_does_not_stop_projection_retirement(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    from origo.maintenance import event_storage
+    from origo.maintenance.protocol import Journal, policy_sha256
+
+    from .test_dagster_metadata_maintenance import POLICY
+
+    instance = metadata_instance
+    source_id = _source(instance)
+    projection_id = execute_archive(instance)
+    layout, journal, source = planned(instance, source_id)
+    projection = planned(instance, projection_id)[2]
+    source.action = 'archive'
+    journal.manifest.append(projection)
+    future = time.time() + 91 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    before = instance.get_records_for_run(source_id)
+
+    def broken_snapshot(path: Path, deadline: float) -> bytes:
+        raise RuntimeError('Controlled source integrity-check failure.')
+
+    def broken_json(run_id: str) -> None:
+        raise RuntimeError('Controlled shared JSON failure after archive commit.')
+
+    with monkeypatch.context() as patch:
+        if stage == 'snapshot':
+            patch.setattr(event_storage, 'snapshot_image', broken_snapshot)
+        else:
+            patch.setattr(instance.run_storage, 'compress_run', broken_json)
+        assert (
+            retention.reclaim(
+                instance,
+                layout,
+                source,
+                journal,
+                layout.runs.parent / 'error.json',
+                POLICY,
+                time.monotonic() + 15,
+            )
+            == 0
+        )
+    assert source.exclusion == 'source_archive_error' and source.phase == 'planned'
+    assert instance.get_records_for_run(source_id) == before
+    assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 1
+    assert source_id in archive.failed_compactions(layout.events.parent, time.monotonic() + 10)
+    assert (
+        retention.reclaim(
+            instance,
+            layout,
+            projection,
+            journal,
+            layout.runs.parent / 'error.json',
+            POLICY,
+            time.monotonic() + 15,
+        )
+        > 0
+    )
+    assert instance.get_run_by_id(projection_id) is None
+    assert instance.get_run_by_id(source_id) is not None
+    retry_journal = Journal(instance_id=journal.instance_id, policy_sha256=policy_sha256(POLICY))
+    retry = retention.scan_batch(
+        instance, layout, retry_journal, POLICY, future, time.monotonic() + 15
+    )
+    assert len(retry) == 1 and retry[0].action == 'archive' and not retry[0].exclusion
+    retry_journal.manifest = retry
+    retention.reclaim(
+        instance,
+        layout,
+        retry[0],
+        retry_journal,
+        layout.runs.parent / 'retry.json',
+        POLICY,
+        time.monotonic() + 15,
+    )
+    assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
+    assert instance.get_records_for_run(source_id) == before

@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
 from . import roles
-from .archive import archive_path
+from .archive import archive_path, failed_compaction_count, failed_compactions
 from .backup import require_backup, verify_restored_backup
 from .clickhouse import diagnostic_allocated_bytes, maintain_diagnostics
 from .compaction import incremental_compaction
@@ -62,6 +62,8 @@ class Outcome(BaseModel):
     diagnostic_allocated_bytes: int = 0
     diagnostic_net_reclaimed_bytes: int = 0
     filesystem_free_bytes: int = 0
+    source_archive_error_count: int = 0
+    source_archive_errors: dict[str, str] = Field(default_factory=dict)
     violations: list[str] = Field(default_factory=lambda: list[str]())
 
 
@@ -265,6 +267,10 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             )
             print(f'Maintenance work window exhausted; reporting checkpoint: {error}', flush=True)
         report.exclusions = dict(counts)
+        archive_errors = failed_compactions(layout.events.parent, deadline)
+        archive_error_count = failed_compaction_count(layout.events.parent, deadline)
+        if archive_error_count:
+            violations.append(f'source_archive_failures:{archive_error_count}')
         with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
             projection_names = sorted(roles.PROJECTION_JOBS - roles.SOURCE_JOBS)
             job_placeholders = ','.join('?' for _ in projection_names)
@@ -385,6 +391,8 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             diagnostic_net_reclaimed_bytes=max(0, diagnostic_before - diagnostic_after),
             filesystem_free_bytes=os.statvfs(layout.runs).f_bavail
             * os.statvfs(layout.runs).f_frsize,
+            source_archive_error_count=archive_error_count,
+            source_archive_errors=archive_errors,
             violations=violations,
         )
 

@@ -1832,8 +1832,9 @@ def test_backlog_and_ingress_count_real_projection_runs(
     assert after.report.ingress_runs_per_second == pytest.approx(1 / 60)
 
 
+@pytest.mark.parametrize('repository_storage', ['explicit_tag', 'remote_origin'])
 def test_obsolete_repository_cursor_does_not_pin_current_projection(
-    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch, repository_storage: str
 ) -> None:
     from dagster import DagsterRunStatus, RunStatusSensorDefinition, define_asset_job
     from dagster._core.definitions.run_request import InstigatorType
@@ -1841,6 +1842,7 @@ def test_obsolete_repository_cursor_does_not_pin_current_projection(
     from dagster._core.remote_origin import (
         RegisteredCodeLocationOrigin,
         RemoteInstigatorOrigin,
+        RemoteJobOrigin,
         RemoteRepositoryOrigin,
     )
     from dagster._core.scheduler.instigation import (
@@ -1858,6 +1860,20 @@ def test_obsolete_repository_cursor_does_not_pin_current_projection(
     monkeypatch.setattr(retention, '_sensor_definitions', lambda: {sensor.name: sensor})
     run_id = execute_archive(metadata_instance)
     record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
+    if repository_storage == 'remote_origin':
+        from dagster._record import copy
+
+        original = record.dagster_run
+        run = original.with_tags(
+            {key: value for key, value in original.tags.items() if key != '.dagster/repository'}
+        ).with_job_origin(
+            RemoteJobOrigin(
+                RemoteRepositoryOrigin(RegisteredCodeLocationOrigin('origo'), '__repository__'),
+                original.job_name,
+            )
+        )
+        record = copy(record, dagster_run=run)
+        assert '.dagster/repository' not in record.dagster_run.tags
     layout = Layout.from_instance(metadata_instance)
     for location, expected in (
         ('tdw_control_plane', ''),
@@ -1887,3 +1903,54 @@ def test_obsolete_repository_cursor_does_not_pin_current_projection(
             )
             == expected
         )
+
+
+def test_archive_failure_stays_unhealthy_until_successful_retry(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from origo.maintenance import event_storage, worker
+    from origo.sources.registry import SOURCE_REGISTRY
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    instance = metadata_instance
+    run_id = execute_archive(instance, tags={'origo_source_key': SOURCE_REGISTRY[0].key})
+    layout, journal, candidate = planned(instance, run_id)
+    candidate.action = 'archive'
+
+    def bad_source(path: Path, deadline: float) -> bytes:
+        raise RuntimeError('Controlled unarchivable source.')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(event_storage, 'snapshot_image', bad_source)
+        reclaim(
+            instance,
+            layout,
+            candidate,
+            journal,
+            layout.runs.parent / 'failed-source.json',
+            POLICY,
+            time.monotonic() + 10,
+        )
+    assert 'Controlled unarchivable source.' in capsys.readouterr().out
+    for _ in range(2):
+        failed = worker.maintain(instance, POLICY)
+        assert failed.source_archive_error_count == 1
+        assert run_id in failed.source_archive_errors
+        assert 'source_archive_failures:1' in failed.violations
+        assert failed.last_success_at == 0
+    reclaim(
+        instance,
+        layout,
+        candidate,
+        journal,
+        layout.runs.parent / 'failed-source.json',
+        POLICY,
+        time.monotonic() + 10,
+    )
+    recovered = worker.maintain(instance, POLICY)
+    assert recovered.source_archive_error_count == 0 and not recovered.source_archive_errors
+    assert len(recovered.violations) == 1
+    assert recovered.violations[0].startswith('metadata_business_fraction:')

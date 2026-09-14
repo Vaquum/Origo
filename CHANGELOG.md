@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.8.2
+
+- Enforce a separate work deadline for operational-metadata reporting, tolerate disappearing transient files while rejecting missing storage roots, and launch deployment maintenance in the configured Dagster workspace.
+
 # v3.8.1
 
 - Bound Dagster execution history while preserving current partition facts, retry holds and source receipts; expose inspection, catch-up and health through one Dagit maintenance job.

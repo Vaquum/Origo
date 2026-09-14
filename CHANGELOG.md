@@ -1,3 +1,9 @@
+# v3.8.4
+
+- Preserve source, mixed and unclassified run provenance; losslessly compact terminal source event databases and shared JSON payloads while keeping their Dagit history readable and late writes recoverable.
+- Retire settled projection histories after one hour (24 hours for resolved failures), preserving current asset/partition/check state and fresh execution dependencies.
+- Check Dagster physical storage against 10% of ClickHouse business data and a 13 GiB ceiling; schedule maintenance every 15 minutes, enable incremental SQLite reclamation after an explicit backed-up migration, and retain terminal scheduler ticks for one/seven days. ClickHouse diagnostics retain their separate 14-day policy.
+
 # v3.8.3
 
 - Scan metadata history in run-ID order and batch run, retry-reference and sensor-state reads with one read-only event connection per batch; preserve per-run live revalidation before reclamation.

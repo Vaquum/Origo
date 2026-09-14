@@ -29,8 +29,10 @@ from dagster._core.execution.backfill import BULK_ACTION_TERMINAL_STATUSES
 from dagster._core.scheduler.instigation import InstigatorState, SensorInstigatorData
 from dagster._core.storage.local_compute_log_manager import LocalComputeLogManager
 
+from .archive import MAX_DATABASE_BYTES, archive_path
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
+from .roles import run_role
 from .run_locks import run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
 from .sqlite import Layout, MaintenanceDeadlineReached, allocated, artifacts, connection
@@ -112,12 +114,15 @@ def protection(
         DagsterRunStatus.CANCELED,
     ):
         return 'nonterminal'
-    days = (
-        config.success_retention_days
+    role = run_role(run)
+    if role != 'projection':
+        return 'source_provenance' if role == 'source' else 'unclassified_provenance'
+    hours = (
+        config.projection_success_hours
         if run.status == DagsterRunStatus.SUCCESS
-        else config.failure_retention_days
+        else config.projection_failure_hours
     )
-    if (record.end_time or record.update_timestamp.timestamp()) >= now - days * 86400:
+    if (record.end_time or record.update_timestamp.timestamp()) >= now - hours * 3600:
         return 'retention_window'
     if any(
         path.exists() and path.stat().st_mtime > now - 3600
@@ -294,8 +299,10 @@ def scan_batch(
             (
                 journal.scan_cursor,
                 journal.inventory_upper_id,
-                journal.inventory_started_at - config.success_retention_days * 86400,
-                journal.inventory_started_at - config.failure_retention_days * 86400,
+                journal.inventory_started_at
+                - min(config.projection_success_hours, config.source_archive_after_hours) * 3600,
+                journal.inventory_started_at
+                - min(config.projection_failure_hours, config.source_archive_after_hours) * 3600,
                 config.max_runs_per_batch,
             ),
         ).fetchall()
@@ -310,6 +317,17 @@ def scan_batch(
         if run_ids
         else {}
     )
+    packed: set[str] = set()
+    archives = archive_path(layout.events.parent)
+    if run_ids and archives.exists():
+        with connection(archives, deadline, config.lock_wait_seconds) as database:
+            placeholders = ','.join('?' for _ in run_ids)
+            packed = {
+                str(row[0])
+                for row in database.execute(
+                    f'SELECT run_id FROM source_runs WHERE run_id IN ({placeholders})', run_ids
+                )
+            }
     with connection(layout.events, deadline, config.lock_wait_seconds) as event_database:
         references = (
             _scan_references(instance, layout, run_ids, config, deadline, event_database)
@@ -332,6 +350,29 @@ def scan_batch(
                     scan_references=references,
                 )
                 inventory = artifact_inventory(layout, record.dagster_run.run_id, deadline)
+                archive_candidate = reason in ('source_provenance', 'unclassified_provenance')
+                if archive_candidate:
+                    if (
+                        record.dagster_run.run_id in packed
+                        and not layout.shard(record.dagster_run.run_id).exists()
+                    ):
+                        reason = 'source_already_compacted'
+                    elif not layout.shard(record.dagster_run.run_id).exists():
+                        reason = 'source_no_event_shard'
+                    elif (
+                        layout.shard(record.dagster_run.run_id).stat().st_size > MAX_DATABASE_BYTES
+                    ):
+                        reason = 'source_archive_size_limit'
+                    elif any(
+                        path.exists()
+                        and path.stat().st_mtime > now - config.source_archive_after_hours * 3600
+                        for path in artifacts(layout, record.dagster_run.run_id)
+                    ):
+                        reason = 'recent_artifact_activity'
+                    elif record.dagster_run.tags.get('origo_metadata_preserve') == 'true':
+                        reason = 'operator_preserved'
+                    else:
+                        reason = ''
                 candidates.append(
                     Candidate(
                         run_id=record.dagster_run.run_id,
@@ -341,6 +382,7 @@ def scan_batch(
                         allocated_bytes=sum(inventory.values()),
                         artifacts=inventory,
                         reason=reason,
+                        action='archive' if archive_candidate else 'retire',
                     )
                 )
             journal.scan_cursor = int(row['id'])
@@ -367,6 +409,16 @@ def reclaim(
     storage = instance.event_log_storage
     if not isinstance(storage, OrigoSqliteEventLogStorage):
         raise TypeError('Retention requires current-state-preserving event storage.')
+    if candidate.action == 'archive':
+        records = instance.get_run_records(RunsFilter(run_ids=[candidate.run_id]), limit=1)
+        if not records or run_role(records[0].dagster_run) == 'projection':
+            raise RuntimeError('The retained source identity changed before compaction.')
+        candidate.phase = 'deleting'
+        save_journal(journal_path, journal)
+        released = storage.archive_run(candidate.run_id, deadline)
+        candidate.phase = 'reclaimed'
+        save_journal(journal_path, journal)
+        return released
     with run_lock(storage.writer_lock_path(), candidate.storage_id, config.lock_wait_seconds):
         run_id = candidate.run_id
         records = instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)

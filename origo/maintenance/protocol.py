@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field
 
 class OperationalMetadataMaintenanceConfig(Config):
     dry_run: bool = True
-    success_retention_days: int = Field(default=30, ge=1)
-    failure_retention_days: int = Field(default=90, ge=1)
+    projection_success_hours: int = Field(default=1, ge=1)
+    projection_failure_hours: int = Field(default=24, ge=1)
+    source_archive_after_hours: int = Field(default=1, ge=1)
     diagnostic_retention_days: int = Field(default=14, ge=14, le=14)
     max_runs_per_batch: int = Field(default=500, ge=1, le=500)
     max_runtime_seconds: int = Field(default=60, ge=10, le=3600)
@@ -34,6 +35,7 @@ class Candidate(BaseModel):
     artifacts: dict[str, int] = Field(default_factory=dict)
     reason: str = Field(default='', frozen=True)
     revalidation_reason: str = ''
+    action: Literal['retire', 'archive'] = 'retire'
     phase: Literal['planned', 'deleting', 'logs', 'reclaimed'] = 'planned'
 
     @property
@@ -52,6 +54,7 @@ class Report(BaseModel):
     candidates: int = 0
     protected: int = 0
     deleted: int = 0
+    archived: int = 0
     reclaimed_bytes: int = 0
     allocated_bytes: int = 0
     backlog_runs: int = 0
@@ -82,7 +85,7 @@ class Journal(BaseModel):
 
 
 def policy_sha256(config: OperationalMetadataMaintenanceConfig) -> str:
-    value = f'1:{config.success_retention_days}:{config.failure_retention_days}:{config.diagnostic_retention_days}'
+    value = f'2:{config.projection_success_hours}:{config.projection_failure_hours}:{config.source_archive_after_hours}:{config.diagnostic_retention_days}'
     return hashlib.sha256(value.encode()).hexdigest()
 
 
@@ -90,7 +93,7 @@ def manifest_sha256(journal: Journal) -> str:
     value = '\n'.join(
         [journal.instance_id, journal.policy_sha256, str(journal.manifest_created_at)]
         + [
-            f'{row.run_id}:{row.storage_id}:{row.status}:{row.ended_at}:{row.allocated_bytes}:{row.reason}:{sorted(row.artifacts.items())}'
+            f'{row.action}:{row.run_id}:{row.storage_id}:{row.status}:{row.ended_at}:{row.allocated_bytes}:{row.reason}:{sorted(row.artifacts.items())}'
             for row in journal.manifest
         ]
     )

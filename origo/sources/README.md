@@ -112,8 +112,8 @@ CI success, silence, or a workaround is not approval to change the contract.
 
 ## Operational metadata maintenance
 
-`maintain_operational_metadata_job` is the Dagit entry point. The daily
-`operational_metadata_maintenance_schedule` runs at 02:17 UTC; deployment launches
+`maintain_operational_metadata_job` is the Dagit entry point. The
+`operational_metadata_maintenance_schedule` runs every 15 minutes; deployment launches
 this same job through the configured project workspace. Deployments start in inspection mode. The configured SQLite adapters
 fix the Jobs-page repository query and preserve current materialization/observation
 IDs, tags, data versions and partition facts after their old run details expire.
@@ -121,20 +121,40 @@ ClickHouse's native 14-day diagnostic TTL operates independently of this schedul
 Source tables, reconciliation state, accepted revisions and published data are outside
 this retention policy.
 
-Successful execution history is eligible after 30 days; failed/canceled history after
-90 days. Active runs, active/unknown backfills, retry references, unresolved source
-failures, current checks, latest failed partitions and unconsumed sensor events are
-excluded. Per-run byte-range locks in one file prevent late events from recreating deleted
-shards. SQLite run storage IDs select independent lock ranges, so slow retirement
-does not block unrelated runs. The lock ends immediately after the run record is
-retired; subsequent event/log cleanup cannot block a new run that reuses that
-SQLite ID. Unchanged Parquet inputs no longer launch another Arrow build; current
-materialization metadata retains the successful input identity after history expires.
+Source ingestion, mixed ingestion/projection jobs and unknown jobs retain their run
+records indefinitely. The explicit policy is `origo/maintenance/roles.py`;
+`origo_source_key` also marks source work. Run deletion itself checks this policy
+atomically, so a source tag added after inventory still prevents retirement.
+Source provenance includes the full event history, acceptance/failure evidence,
+source generation and validation references. After one hour without shard activity,
+terminal source event databases are losslessly compressed into
+`operational-maintenance/source-archive.sqlite`. Dagit reads the original database
+schema from memory, preserving event IDs, timestamps, payloads and pagination.
+The shared run/event indexes also compress source JSON payloads losslessly;
+query keys, statuses, timestamps, tags and every historical entry remain intact.
+Both Origo adapters decode these versioned, checksummed payloads transparently.
+Direct SQLite inspection must use `origo.maintenance.sqlite.connection` to obtain
+decoded rows. Keep the compatible adapters when rolling back application code;
+an older adapter cannot read the packed format. Captured logs are retained.
+A late event restores the shard durably under its writer lock before appending; interrupted transitions prefer the committed,
+checksum-verified archive. Corrupt images fail visibly rather than creating empty
+history. Images above 64 MiB remain unmodified and appear as an inventory exclusion.
+Dagster schema upgrades migrate one packed database at a time during an outage.
+
+Explicit projection jobs include bars, derived depth tables, Arrow and published
+files. Successful histories are eligible after one hour; resolved failed/canceled
+histories after 24 hours. Current asset facts keep their original IDs, tags, input
+versions and partitions after a projection run expires. Active runs, active/unknown
+backfills, retries, current checks, unresolved failures and unconsumed sensor events
+remain protected. Fresh checks precede each deletion. Unchanged Parquet inputs do
+not launch another Arrow build. Terminal successful/skipped sensor and schedule
+ticks expire after one day; failed ticks after seven days. Instigator cursors and
+source run evidence are independent of those operational tick logs.
 
 ### First inspection and cleanup
 
 1. In Dagit, launch `maintain_operational_metadata_job` with the configuration below.
-   The deployment default permits at most one hour, in batches of at most 500 runs.
+   The deployment default permits at most ten minutes, in batches of at most 500 runs.
    Scan, reclamation and compaction use a separate work deadline. Reporting gets
    10% of runtime, bounded to 15–300 seconds and at most half the usable runtime
    for short invocations. Exhausting the work window reports the last durable
@@ -155,9 +175,13 @@ materialization metadata retains the successful input identity after history exp
    retention-policy change permits a new inventory cycle.
 2. Read `maintenance` in the health check metadata and its `journal_path`. The one
    journal contains the exact first manifest, artifact paths/allocated bytes,
-   exclusions and SHA-256. Set the intended byte budget above the measured retained
-   floor, leaving the separate source-backfill capacity reserve. The initial 600 GiB
-   deployment value is an inspection ceiling, not a measured steady-state target.
+   exclusions, `archive`/`retire` actions and SHA-256. The physical ceiling defaults
+   to 13 GiB; health also requires strictly less than 10% of ClickHouse active
+   business-data bytes. Shared databases, source archives, live shards, logs and
+   maintenance state all count. Diagnostic tables never inflate the denominator.
+   An over-budget instance may perform approved cleanup, but its check remains
+   failed until actual physical usage meets both limits. The old retained-floor
+   estimate includes reusable SQLite pages and is not an admission barrier.
 3. Before first apply, take a consistent snapshot of **the entire Dagster instance**
    and compute logs using the storage platform's atomic snapshot facility, or a
    controlled writer-quiesced copy. Copying separate live SQLite files is not a
@@ -179,7 +203,7 @@ materialization metadata retains the successful input identity after history exp
 6. After the first batch's state and physical release have been reconciled, enable
    recurring apply with repository variables `ORIGO_METADATA_DRY_RUN=false`,
    `ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=<measured bytes>` and
-   `ORIGO_METADATA_MAX_RUNTIME_SECONDS=3600`, then deploy. Repeat bounded Dagit
+   `ORIGO_METADATA_MAX_RUNTIME_SECONDS=600`, then deploy. Repeat bounded Dagit
    invocations during catch-up until eligible backlog declines faster than ingress.
 
 ```yaml
@@ -187,13 +211,14 @@ ops:
   maintain_operational_metadata:
     config:
       dry_run: true
-      success_retention_days: 30
-      failure_retention_days: 90
+      projection_success_hours: 1
+      projection_failure_hours: 24
+      source_archive_after_hours: 1
       diagnostic_retention_days: 14
       max_runs_per_batch: 500
-      max_runtime_seconds: 3600
+      max_runtime_seconds: 600
       lock_wait_seconds: 1
-      metadata_budget_bytes: 644245094400
+      metadata_budget_bytes: 13958643712
 ```
 
 The first manifest stays available across inspection batches. Its initial eligibility
@@ -207,17 +232,28 @@ maintenance snapshots after 30 days; Origo does not delete external backups.
 ### Reading the result
 
 All worker output and exceptions flow into Dagit logs. The blocking
-`operational_metadata_health` check reports candidate/protected/deleted counts,
-exclusion reasons, age-eligible backlog (including protected runs), inferred eligible
+`operational_metadata_health` check reports candidate/protected/deleted/archived counts,
+exclusion reasons, age-eligible projection backlog (including protected projections), inferred eligible
 arrival rate, cleanup rate, query p95, byte budget, last healthy invocation and free
 filesystem bytes. Arrival rate uses the observed backlog change plus deletions;
 concurrent manual deletion can understate arrivals. Active cleanup throughput and
 between-invocation cleanup rate are separate measurements. Required state is never
 deleted to force a budget to pass.
 
-`reclaimed_bytes` measures removed run-shard/compute-log allocated blocks.
-`shared_sqlite.*.reusable_bytes` remains on disk and is available for later inserts;
-there is no automatic full-volume VACUUM. ClickHouse reports active, inactive and
+`reclaimed_bytes` includes removed projection artifacts, net source-archive savings
+and measured shared-database release. `shared_sqlite.*.reusable_bytes` is still
+allocated until page reclamation returns it to the filesystem. Initial conversion
+requires a controlled outage with all Dagster/Dagit writers quiesced and a verified
+backup. Run `python tools/metadata_compact_sqlite.py --instance-home <home>
+--backup-receipt <receipt.json> --writers-quiesced --max-runtime-seconds 900` under
+an independent timeout that always resumes both services. It copies no rows between
+logical histories: SQLite VACUUM preserves records and enables incremental vacuum.
+A failed conversion leaves the original committed database recoverable. Subsequent
+maintenance reclaims free pages in bounded transactions and checkpoints the WAL;
+`sqlite_compaction_not_initialized` identifies databases still needing conversion.
+Do not run initial VACUUM against active production writers. Preserve the full
+maintenance output and attach it to the Dagit maintenance run after services resume.
+ ClickHouse reports active, inactive and
 expired part bytes separately from actual allocated blocks and net physical release.
 A scheduled TTL operation is not claimed as reclaimed space.
 
@@ -238,3 +274,12 @@ Production acceptance remains a deployment step: run the unchanged setup/Arrow
 GraphQL job-history queries 20 times, require p95 ≤250 ms after restart and under
 normal ingestion, inspect the Jobs page, then reconcile the reviewed cleanup batch.
 Only measured recovered space counts toward the backfill reserve.
+
+Migration acceptance additionally requires `python tools/metadata_capacity_report.py
+--evidence <measured-evidence.json>`. Its schema is `CapacityEvidence`: every source
+identity and history must match, all retained captured logs must be verified, current
+Dagit state must match, and an actual replay at ten times observed ingress must leave
+no growing projection backlog. Missing proof or a failed storage/latency condition
+exits nonzero. Compression samples and lower-bound capacity estimates do not certify
+production. Source retention grows with authoritative coverage; if required evidence
+cannot fit the capacity limits, the check fails instead of discarding it.

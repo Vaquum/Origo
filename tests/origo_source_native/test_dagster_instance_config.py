@@ -134,7 +134,15 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
 
 def test_sensor_tick_history_has_bounded_retention() -> None:
     assert _validated_instance_config()['retention']['sensor']['purge_after_days'] == {
-        'skipped': 7,
-        'success': 7,
-        'failure': 30,
+        'skipped': 1,
+        'success': 1,
+        'failure': 7,
+    }
+
+
+def test_schedule_tick_history_has_bounded_retention() -> None:
+    assert _validated_instance_config()['retention']['schedule']['purge_after_days'] == {
+        'skipped': 1,
+        'success': 1,
+        'failure': 7,
     }

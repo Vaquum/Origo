@@ -297,12 +297,18 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             for path in shared_paths:
                 with connection(path, deadline, config.lock_wait_seconds) as database:
                     initialized = database.execute('PRAGMA auto_vacuum').fetchone()[0] == 2
-                if initialized:
-                    report.reclaimed_bytes += incremental_compaction(
-                        path, deadline, config.lock_wait_seconds
-                    )
-                else:
+                if not initialized:
                     violations.append(f'sqlite_compaction_not_initialized:{path.name}')
+                elif time.monotonic() < work_deadline:
+                    try:
+                        report.reclaimed_bytes += incremental_compaction(
+                            path, work_deadline, config.lock_wait_seconds
+                        )
+                    except MaintenanceDeadlineReached as error:
+                        print(
+                            f'SQLite page reclamation paused; reporting checkpoint: {error}',
+                            flush=True,
+                        )
         shared = {
             path.name: shared_bytes(path, deadline, config.lock_wait_seconds)
             for path in shared_paths

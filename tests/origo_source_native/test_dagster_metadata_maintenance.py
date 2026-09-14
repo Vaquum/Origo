@@ -1167,13 +1167,14 @@ except TimeoutError:
     assert metadata_instance.event_log_storage.writer_lock_path().stat().st_size == 0
 
 
-@pytest.mark.parametrize('interrupt_at', ['', 'logs', 'compaction'])
+@pytest.mark.parametrize('interrupt_at', ['', 'logs', 'compaction', 'pages'])
 def test_first_apply_resumes_after_live_revalidation(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     interrupt_at: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from origo.maintenance import worker
 
@@ -1247,6 +1248,19 @@ def test_first_apply_resumes_after_live_revalidation(
             elapsed += 45
         return compact(runs_path, after_id, limit, deadline, lock_wait)
 
+    page_compaction = worker.incremental_compaction
+    page_calls = 0
+
+    def timed_pages(path: Path, deadline: float, lock_wait: float) -> int:
+        nonlocal elapsed, page_calls
+        page_calls += 1
+        if interrupt_at == 'pages':
+            # Commit a real bounded vacuum pass, then exhaust the supplied window.
+            page_compaction(path, deadline, lock_wait, pages=128)
+            elapsed = deadline - time.monotonic() + .1
+        return page_compaction(path, deadline, lock_wait)
+
+    monkeypatch.setattr(worker, 'incremental_compaction', timed_pages)
     clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
     for module in (worker, retention, maintenance_sqlite):
         monkeypatch.setattr(module, 'time', clock)
@@ -1255,6 +1269,13 @@ def test_first_apply_resumes_after_live_revalidation(
         metadata_instance.event_log_storage, 'compact_retired_state', timed_compaction
     )
     outcome = worker.maintain(metadata_instance, config)
+    if interrupt_at == 'pages':
+        assert page_calls == 1, 'Later databases must not start reclamation in the reporting reserve.'
+        checkpoint = Journal.model_validate_json(path.read_bytes())
+        assert checkpoint.first_apply_completed and checkpoint.reports[-1] == outcome.report
+        assert outcome.shared_sqlite and outcome.query_p95_seconds
+        assert outcome.clickhouse_business_bytes > 0 and outcome.diagnostic_allocated_bytes > 0
+        assert 'SQLite page reclamation paused; reporting checkpoint' in capsys.readouterr().out
     if interrupt_at == 'logs':
         checkpoint = Journal.model_validate_json(path.read_bytes())
         assert checkpoint.manifest[1].phase == 'logs'

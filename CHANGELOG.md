@@ -1,4 +1,5 @@
 # v3.8.4
+- Bound SQLite page reclamation by the maintenance work deadline so an interrupted pass still reports its checkpoint, capacity and health.
 - Allow parallel native run-history reads and event writes; source compaction retries while an active reader still needs the native shard.
 
 - Preserve source, mixed and unclassified run provenance; losslessly compact terminal source event databases and shared JSON payloads while keeping their Dagit history readable and late writes recoverable.

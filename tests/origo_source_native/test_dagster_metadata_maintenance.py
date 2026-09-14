@@ -1257,7 +1257,7 @@ def test_first_apply_resumes_after_live_revalidation(
         if interrupt_at == 'pages':
             # Commit a real bounded vacuum pass, then exhaust the supplied window.
             page_compaction(path, deadline, lock_wait, pages=128)
-            elapsed = deadline - time.monotonic() + .1
+            elapsed = deadline - time.monotonic() + 0.1
         return page_compaction(path, deadline, lock_wait)
 
     monkeypatch.setattr(worker, 'incremental_compaction', timed_pages)
@@ -1270,7 +1270,9 @@ def test_first_apply_resumes_after_live_revalidation(
     )
     outcome = worker.maintain(metadata_instance, config)
     if interrupt_at == 'pages':
-        assert page_calls == 1, 'Later databases must not start reclamation in the reporting reserve.'
+        assert page_calls == 1, (
+            'Later databases must not start reclamation in the reporting reserve.'
+        )
         checkpoint = Journal.model_validate_json(path.read_bytes())
         assert checkpoint.first_apply_completed and checkpoint.reports[-1] == outcome.report
         assert outcome.shared_sqlite and outcome.query_p95_seconds
@@ -1313,11 +1315,11 @@ def test_retired_storage_id_can_be_reused_during_event_cleanup(
     storage = metadata_instance.event_log_storage
     original = storage.delete_events
 
-    def slow_events(run_id: str) -> None:
+    def slow_events(run_id: str, *, retire_shard: bool = False) -> None:
         entered.set()
         if not release.wait(10):
             raise TimeoutError('Test did not release event cleanup.')
-        original(run_id)
+        original(run_id, retire_shard=retire_shard)
 
     monkeypatch.setattr(storage, 'delete_events', slow_events)
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -1999,7 +2001,9 @@ def test_source_lock_contention_defers_without_poisoning_health(
     projection = planned(instance, projection_id)[2]
     journal.manifest.append(projection)
     future = time.time() + 91 * 86400
-    monkeypatch.setattr(retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic))
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
     before = instance.get_records_for_run(source_id)
     storage = instance.event_log_storage
     assert isinstance(storage, OrigoSqliteEventLogStorage)
@@ -2010,12 +2014,20 @@ def test_source_lock_contention_defers_without_poisoning_health(
     )
     journal_path = layout.runs.parent / 'busy-source.json'
     with held:
-        assert reclaim(instance, layout, source, journal, journal_path, POLICY, time.monotonic() + 15) == 0
+        assert (
+            reclaim(instance, layout, source, journal, journal_path, POLICY, time.monotonic() + 15)
+            == 0
+        )
         assert source.exclusion == 'source_in_use' and source.phase == 'planned'
         assert layout.shard(source_id).exists()
         assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
         assert instance.get_records_for_run(source_id) == before
-        assert reclaim(instance, layout, projection, journal, journal_path, POLICY, time.monotonic() + 15) > 0
+        assert (
+            reclaim(
+                instance, layout, projection, journal, journal_path, POLICY, time.monotonic() + 15
+            )
+            > 0
+        )
         assert instance.get_run_by_id(projection_id) is None
         assert 'Source compaction deferred' in capsys.readouterr().out
         outcome = worker.maintain(instance, POLICY)
@@ -2027,7 +2039,157 @@ def test_source_lock_contention_defers_without_poisoning_health(
     retry = scan_batch(instance, layout, retry_journal, POLICY, future, time.monotonic() + 15)
     assert len(retry) == 1 and retry[0].action == 'archive' and not retry[0].exclusion
     retry_journal.manifest = retry
-    assert reclaim(instance, layout, retry[0], retry_journal, journal_path, POLICY, time.monotonic() + 15) > 0
+    assert (
+        reclaim(
+            instance, layout, retry[0], retry_journal, journal_path, POLICY, time.monotonic() + 15
+        )
+        > 0
+    )
     assert not layout.shard(source_id).exists()
     assert instance.get_records_for_run(source_id) == before
     assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
+
+
+def test_retirement_does_not_initialize_expiring_event_shards(
+    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import Engine
+
+    instance = metadata_instance
+    run_id = execute_archive(instance)
+    layout, journal, candidate = planned(instance, run_id)
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    key = AssetKey('metadata_proof_archive')
+    current = instance.fetch_materializations(key, limit=1).records[0]
+    storage._initialized_dbs.discard(run_id)
+
+    def forbidden_initialization(engine: Engine, for_index_shard: bool = False) -> None:
+        raise AssertionError('Retired history must be unlinked without initializing its schema.')
+
+    monkeypatch.setattr(storage, '_initdb', forbidden_initialization)
+    future = time.time() + 31 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    released = reclaim(
+        instance,
+        layout,
+        candidate,
+        journal,
+        tmp_path / 'no-schema-init.json',
+        POLICY,
+        time.monotonic() + 15,
+    )
+    assert released > 0 and not layout.shard(run_id).exists()
+    assert instance.get_run_by_id(run_id) is None
+    assert instance.fetch_materializations(key, limit=1).records[0] == current
+    assert candidate.phase == 'reclaimed'
+
+
+def test_repeated_run_and_asset_queries_reuse_engines_with_fresh_results(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import Engine, create_engine
+    from dagster._core.storage.runs.sqlite import sqlite_run_storage
+    from dagster._core.storage.event_log.sqlite import sqlite_event_log
+    from origo.maintenance import event_storage, run_storage
+
+    instance = metadata_instance
+    first = execute_archive(instance)
+    key = AssetKey('metadata_proof_archive')
+    previous = instance.fetch_materializations(key, limit=1).records[0]
+    assert instance.get_run_by_id(first) is not None
+    engines = 0
+
+    def counted_engine(*args: object, **kwargs: object) -> Engine:
+        nonlocal engines
+        engines += 1
+        return create_engine(*args, **kwargs)
+
+    for module in (run_storage, event_storage, sqlite_run_storage, sqlite_event_log):
+        monkeypatch.setattr(module, 'create_engine', counted_engine)
+    second = execute_archive(instance)
+    engines = 0
+    for _ in range(10):
+        assert instance.get_runs(limit=1)[0].run_id == second
+        latest = instance.fetch_materializations(key, limit=1).records[0]
+        assert latest.run_id == second and latest.storage_id > previous.storage_id
+    assert engines == 0
+
+
+@pytest.mark.parametrize('new_reference', ['retry', 'sensor'])
+def test_cached_live_checks_observe_new_committed_dependencies(
+    metadata_instance: DagsterInstance,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    new_reference: str,
+) -> None:
+    instance = metadata_instance
+    run_id = execute_archive(instance, tags={'dagster/run_key': 'archive_key'})
+    layout, journal, candidate = planned(instance, run_id)
+    future = time.time() + 31 * 86400
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    with retention.live_sensor_states(instance, layout, POLICY, time.monotonic() + 15) as states:
+        assert not states()
+        assert not states()
+        if new_reference == 'retry':
+            execute_archive(instance, tags={'dagster/parent_run_id': run_id})
+            expected = 'retry_lineage_reference'
+        else:
+            _save_sensor_run_key(instance, 'archive_key')
+            expected = 'sensor_last_run_key'
+        assert (
+            reclaim(
+                instance,
+                layout,
+                candidate,
+                journal,
+                tmp_path / 'fresh-reference.json',
+                POLICY,
+                time.monotonic() + 15,
+                sensor_states=states,
+            )
+            == 0
+        )
+    assert candidate.exclusion == 'live_revalidation:' + expected
+    assert instance.get_run_by_id(run_id) is not None and layout.shard(run_id).is_file()
+
+
+def test_live_sensor_cache_repeats_reads_changed_by_a_concurrent_commit(
+    metadata_instance: DagsterInstance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import Sequence
+    from dagster._core.scheduler.instigation import InstigatorState
+    from origo.maintenance.sqlite import MaintenanceDeadlineReached
+
+    instance = metadata_instance
+    layout = Layout.from_instance(instance)
+    original = instance.all_instigator_state
+    calls = 0
+
+    def load_then_commit() -> Sequence[InstigatorState]:
+        nonlocal calls
+        calls += 1
+        observed = original()
+        if calls == 1:
+            _save_sensor_run_key(instance, 'committed_during_read')
+        return observed
+
+    monkeypatch.setattr(instance, 'all_instigator_state', load_then_commit)
+    deadline = time.monotonic() + 15
+    with retention.live_sensor_states(instance, layout, POLICY, deadline) as states:
+        fresh = states()
+        assert calls == 2 and len(fresh) == 1
+        assert fresh[0].instigator_data.last_run_key == 'committed_during_read'
+        for _ in range(10):
+            assert states() == fresh
+        assert calls == 2
+        monkeypatch.setattr(
+            retention, 'time', SimpleNamespace(time=time.time, monotonic=lambda: deadline)
+        )
+        with pytest.raises(MaintenanceDeadlineReached, match='Live sensor check'):
+            states()

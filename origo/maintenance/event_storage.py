@@ -9,6 +9,7 @@ import sqlite3
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack, contextmanager
+from functools import cached_property
 from pathlib import Path
 from typing import Self
 from uuid import UUID
@@ -22,7 +23,7 @@ from dagster._core.storage.sql import get_alembic_config, run_alembic_upgrade
 from dagster._core.storage.sqlite import SQLITE_BUSY_TIMEOUT_SECONDS
 from dagster._core.storage.sqlite_storage import SqliteStorageConfig
 from dagster._serdes import ConfigurableClassData, deserialize_value
-from sqlalchemy import Connection, create_engine
+from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.pool import NullPool
 
 from .archive import (
@@ -86,10 +87,28 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
     ) -> Self:
         return cls(inst_data=inst_data, **config_value)
 
+    @cached_property
+    def _origo_index_engine(self) -> Engine:
+        return create_engine(
+            self.conn_string_for_shard('index'),
+            poolclass=NullPool,
+            connect_args={'timeout': SQLITE_BUSY_TIMEOUT_SECONDS},
+        )
+
     @contextmanager
     def index_connection(self) -> Iterator[Connection]:
-        with super().index_connection() as database, json_rows(database):
-            yield database
+        with self._db_lock:
+            engine = self._origo_index_engine
+            if 'index' not in self._initialized_dbs:
+                self._initdb(engine)
+                self._initialized_dbs.add('index')
+            with engine.connect() as database, database.begin(), json_rows(database):
+                yield database
+
+    def dispose(self) -> None:
+        if '_origo_index_engine' in self.__dict__:
+            self._origo_index_engine.dispose()
+        super().dispose()
 
     @contextmanager
     def run_connection(self, run_id: str | None = None) -> Iterator[Connection]:
@@ -273,7 +292,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
                 )
             super().update_event_log_record(record_id, event)
 
-    def delete_events(self, run_id: str) -> None:
+    def delete_events(self, run_id: str, *, retire_shard: bool = False) -> None:
         if self._instance.get_run_by_id(run_id) is not None:
             raise RuntimeError('Retire the run before deleting its execution history.')
         base = Path(self.path_for_shard('index')).parent
@@ -281,7 +300,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
         with transition_lock(base, run_id, deadline=deadline):
             if read_image(base, run_id, deadline) is not None:
                 remove_image(base, run_id, deadline)
-            elif Path(self.path_for_shard(run_id)).exists():
+            elif not retire_shard and Path(self.path_for_shard(run_id)).exists():
                 with super().run_connection(run_id) as database:
                     self.delete_events_for_run(database, run_id)
         path = Path(self.path_for_shard('index'))

@@ -30,7 +30,7 @@ from .protocol import (
     policy_sha256,
     save_journal,
 )
-from .retention import reclaim, scan_batch
+from .retention import live_sensor_states, reclaim, scan_batch
 from .run_storage import OrigoSqliteRunStorage
 from .sqlite import (
     Layout,
@@ -131,7 +131,10 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         raise TypeError('Configure both Origo SQLite adapters before operational maintenance.')
     directory = layout.runs.parent / 'operational-maintenance'
     journal_path = directory / 'journal.json'
-    with maintenance_lock(directory / 'maintenance.lock', config.lock_wait_seconds):
+    with (
+        maintenance_lock(directory / 'maintenance.lock', config.lock_wait_seconds),
+        live_sensor_states(instance, layout, config, work_deadline) as sensor_states,
+    ):
         instance_id = instance.run_storage.get_run_storage_id()
         policy = policy_sha256(config)
         journal = (
@@ -229,6 +232,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                             journal_path,
                             config,
                             work_deadline,
+                            sensor_states=sensor_states,
                         )
                         if not candidate.exclusion:
                             if candidate.action == 'archive':

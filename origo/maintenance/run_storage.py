@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from functools import cached_property
 from typing import Self, cast
 
 from dagster import RunsFilter
@@ -10,7 +11,8 @@ from dagster._core.storage.runs.schema import RunsTable, RunTagsTable
 from dagster._core.storage.runs.sqlite.sqlite_run_storage import SqliteRunStorage
 from dagster._core.storage.sqlite_storage import SqliteStorageConfig
 from dagster._serdes import ConfigurableClassData
-from sqlalchemy import Connection, Select, delete, literal_column, select
+from sqlalchemy import Connection, Engine, Select, create_engine, delete, literal_column, select
+from sqlalchemy.pool import NullPool
 
 from . import roles
 from .codec import compress_run_json, json_rows
@@ -23,10 +25,19 @@ class OrigoSqliteRunStorage(SqliteRunStorage):
     ) -> Self:
         return cls.from_local(inst_data=inst_data, **config_value)
 
+    @cached_property
+    def _origo_engine(self) -> Engine:
+        return create_engine(self._conn_string, poolclass=NullPool)
+
     @contextmanager
     def connect(self) -> Iterator[Connection]:
-        with super().connect() as database, json_rows(database):
+        with self._origo_engine.connect() as database, database.begin(), json_rows(database):
             yield database
+
+    def dispose(self) -> None:
+        if '_origo_engine' in self.__dict__:
+            self._origo_engine.dispose()
+        super().dispose()
 
     def compress_run(self, run_id: str) -> None:
         with self.connect() as database:

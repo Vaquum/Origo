@@ -5,8 +5,8 @@ import sqlite3
 import sys
 import time
 import traceback
-from collections.abc import Sequence
-from contextlib import nullcontext
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -59,6 +59,44 @@ class ScanReferences:
     retry_run_ids: frozenset[str]
     sensor_states: Sequence[InstigatorState]
     event_database: sqlite3.Connection
+
+
+@contextmanager
+def live_sensor_states(
+    instance: DagsterInstance,
+    layout: Layout,
+    config: OperationalMetadataMaintenanceConfig,
+    deadline: float,
+) -> Iterator[Callable[[], Sequence[InstigatorState]]]:
+    # data_version is compared on the same autocommit connection. Every committed
+    # scheduler change invalidates the cache before the next retirement check.
+    with closing(
+        sqlite3.connect(
+            f'{layout.schedules.as_uri()}?mode=ro',
+            uri=True,
+            isolation_level=None,
+            timeout=config.lock_wait_seconds,
+        )
+    ) as database:
+        version = -1
+        cached: Sequence[InstigatorState] = ()
+
+        def read() -> Sequence[InstigatorState]:
+            nonlocal version, cached
+            while True:
+                if time.monotonic() >= deadline:
+                    raise MaintenanceDeadlineReached('Live sensor check reached its deadline.')
+                current = int(database.execute('PRAGMA data_version').fetchone()[0])
+                if current == version:
+                    return cached
+                observed = tuple(instance.all_instigator_state())
+                after = int(database.execute('PRAGMA data_version').fetchone()[0])
+                if current == after:
+                    version, cached = current, observed
+                    return cached
+                # A scheduler commit during the read requires a new observation.
+
+        yield read
 
 
 def _scan_references(
@@ -118,6 +156,7 @@ def protection(
     deadline: float,
     *,
     scan_references: ScanReferences | None = None,
+    sensor_states: Callable[[], Sequence[InstigatorState]] | None = None,
 ) -> str:
     run = record.dagster_run
     if run.status not in (
@@ -150,8 +189,14 @@ def protection(
         if backfill is None or backfill.status not in BULK_ACTION_TERMINAL_STATUSES:
             return 'active_or_unknown_backfill'
     if scan_references is None:
-        for tag in ('dagster/parent_run_id', 'dagster/root_run_id'):
-            if instance.get_runs(RunsFilter(tags={tag: run.run_id}), limit=1):
+        with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+            referenced = database.execute(
+                'SELECT 1 FROM run_tags t JOIN runs r ON r.run_id=t.run_id '
+                "WHERE t.key IN ('dagster/parent_run_id','dagster/root_run_id') "
+                'AND t.value=? LIMIT 1',
+                (run.run_id,),
+            ).fetchone()
+            if referenced is not None:
                 return 'retry_lineage_reference'
     elif run.run_id in scan_references.retry_run_ids:
         return 'retry_lineage_reference'
@@ -289,7 +334,7 @@ def protection(
                         if latest is not None and latest['run_id'] == run.run_id:
                             return 'current_asset_check'
     states = (
-        instance.all_instigator_state()
+        (sensor_states() if sensor_states is not None else instance.all_instigator_state())
         if scan_references is None
         else scan_references.sensor_states
     )
@@ -487,6 +532,8 @@ def reclaim(
     journal_path: Path,
     config: OperationalMetadataMaintenanceConfig,
     deadline: float,
+    *,
+    sensor_states: Callable[[], Sequence[InstigatorState]] | None = None,
 ) -> int:
     storage = instance.event_log_storage
     if not isinstance(storage, OrigoSqliteEventLogStorage):
@@ -527,7 +574,15 @@ def reclaim(
         run_id = candidate.run_id
         records = instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)
         if records:
-            reason = protection(instance, layout, records[0], config, time.time(), deadline)
+            reason = protection(
+                instance,
+                layout,
+                records[0],
+                config,
+                time.time(),
+                deadline,
+                sensor_states=sensor_states,
+            )
             if reason:
                 candidate.revalidation_reason = 'live_revalidation:' + reason
                 save_journal(journal_path, journal)
@@ -545,7 +600,7 @@ def reclaim(
     # maximum row ID for a new run without inheriting the old run's lock wait.
     run_id = candidate.run_id
     if candidate.phase == 'deleting':
-        storage.delete_events(run_id)
+        storage.delete_events(run_id, retire_shard=True)
     candidate.phase = 'logs'
     save_journal(journal_path, journal)
     if instance.get_run_by_id(run_id) is not None:

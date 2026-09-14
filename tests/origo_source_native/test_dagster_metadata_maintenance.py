@@ -754,6 +754,56 @@ def test_clickhouse_stale_partition_dates_do_not_repeat_catch_up(
         client.disconnect()
 
 
+def test_clickhouse_expiry_read_limit_does_not_block_other_parts(
+    diagnostic_server: tuple[str, object, Path],
+) -> None:
+    from datetime import date, datetime
+
+    from origo.maintenance.clickhouse import maintain_diagnostics
+
+    client = _diagnostic_client(diagnostic_server)
+    historical = json.loads(
+        (ROOT / 'tests/fixtures/dagster_metadata/metric_log_sample.json').read_text()
+    )
+    record = (
+        date.fromisoformat(historical['event_date']),
+        datetime.fromisoformat(historical['event_time']),
+        historical['CurrentMetric_Query'],
+    )
+    tables = ('metric_log_291', 'metric_log_292')
+    for table in tables:
+        client.execute(
+            f'CREATE TABLE system.{table} (hostname String DEFAULT hostName(),event_date Date,'
+            'event_time DateTime,CurrentMetric_Query Int64) ENGINE=MergeTree '
+            'PARTITION BY toYYYYMM(event_date) ORDER BY (event_date,event_time)'
+        )
+    try:
+        for table, records in zip(tables, ([record, record], [record]), strict=True):
+            client.execute(
+                f'INSERT INTO system.{table} (event_date,event_time,CurrentMetric_Query) VALUES',
+                records,
+            )
+        limited = POLICY.model_copy(update={'diagnostic_max_partition_bytes': 4})
+        dry = maintain_diagnostics(client, limited, time.monotonic() + 30)
+        assert any(
+            error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in dry.errors
+        )
+        assert any(error.startswith('expiry_lag:metric_log_292:') for error in dry.errors)
+        applied = maintain_diagnostics(
+            client, limited.model_copy(update={'dry_run': False}), time.monotonic() + 30
+        )
+        assert any(
+            error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in applied.errors
+        )
+        assert applied.scheduled_action.startswith('drop_expired_part:metric_log_292:')
+        assert client.execute('SELECT count() FROM system.metric_log_291') == [(2,)]
+        assert client.execute('SELECT count() FROM system.metric_log_292') == [(0,)]
+    finally:
+        for table in tables:
+            client.execute(f'DROP TABLE system.{table} SYNC')
+        client.disconnect()
+
+
 def test_clickhouse_expiry_lag_and_failure_visibility(
     diagnostic_server: tuple[str, object, Path],
 ) -> None:

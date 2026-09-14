@@ -1,5 +1,6 @@
 # v3.8.6
 
+- Report diagnostic timestamp-read byte limits per part and continue checking and reclaiming other parts.
 - Verify diagnostic expiry against actual event timestamps so stale ClickHouse partition dates cannot report false retention failures or repeatedly schedule completed catch-up work.
 
 # v3.8.5

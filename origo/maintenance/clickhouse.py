@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from clickhouse_driver.errors import ErrorCodes, ServerException
+
 from origo.sources.contracts import Client, Row
 
 from .protocol import OperationalMetadataMaintenanceConfig
@@ -226,16 +228,25 @@ def maintain_diagnostics(
                 raise ValueError('Invalid diagnostic table identity.')
             timestamp = timestamp_expression(root)
             # Date-key bounds can remain stale after TTL removes rows from a part.
-            bounds = _execute(
-                client,
-                f'SELECT count(),toString(toDate(min({timestamp}))),'
-                f'max({timestamp})<now()-INTERVAL 14 DAY,'
-                f'min({timestamp})<now()-INTERVAL 14 DAY-'
-                f'toIntervalSecond(%(lag_seconds)s) FROM system.{table} '
-                f'WHERE _part=%(part)s SETTINGS max_bytes_to_read={config.diagnostic_max_partition_bytes}',
-                deadline,
-                {'part': name, 'lag_seconds': config.diagnostic_max_lag_seconds},
-            )
+            try:
+                bounds = _execute(
+                    client,
+                    f'SELECT count(),toString(toDate(min({timestamp}))),'
+                    f'max({timestamp})<now()-INTERVAL 14 DAY,'
+                    f'min({timestamp})<now()-INTERVAL 14 DAY-'
+                    f'toIntervalSecond(%(lag_seconds)s) FROM system.{table} '
+                    f'WHERE _part=%(part)s SETTINGS max_bytes_to_read={config.diagnostic_max_partition_bytes}',
+                    deadline,
+                    {'part': name, 'lag_seconds': config.diagnostic_max_lag_seconds},
+                )
+            except ServerException as error:
+                if error.code != ErrorCodes.TOO_MANY_BYTES:
+                    raise
+                errors.append(
+                    f'expiry_bounds_read_limit:{table}:{name}:{config.diagnostic_max_partition_bytes}'
+                )
+                oldest_dates.append(oldest_date)
+                continue
             count, actual_oldest, expired, overdue = bounds[0]
             if not count:
                 continue

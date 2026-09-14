@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.8.5
+
+- Reduce metadata-retirement overhead by reusing SQLAlchemy engines, unlinking retired event shards without schema initialization, and refreshing cached sensor state on committed changes. Source provenance, current asset facts, and fresh retry checks remain protected.
+
 # v3.8.4
 - Defer source compaction when readers or writers hold its locks, without recording a false archive failure or blocking unrelated projection retirement.
 - Bound SQLite page reclamation by the maintenance work deadline so an interrupted pass still reports its checkpoint, capacity and health.

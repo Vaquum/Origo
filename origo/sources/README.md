@@ -326,3 +326,11 @@ continues to fail with the unresolved count and a bounded sample of errors acros
 later invocations. Successful compaction clears that run's error. A failure after
 archive commit still retries its unfinished shared-JSON compaction. Work deadlines
 remain resumable checkpoints; a broken shared storage backend still fails the job.
+
+Metadata cleanup reuses database engines while opening a fresh connection and
+transaction for each storage operation. Retired native event shards are unlinked
+through the existing guarded artifact phase without initializing or migrating
+their discarded schema. Live retry references are queried at each retirement;
+sensor state is reused only while the scheduler database's `data_version` is
+unchanged on one autocommit connection. A commit during a sensor-state read causes
+a fresh read before the candidate can be retired. The work deadline still applies.

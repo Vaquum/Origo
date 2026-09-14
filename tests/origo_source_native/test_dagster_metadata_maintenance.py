@@ -1660,6 +1660,7 @@ def test_inventory_batches_reads_with_identical_protections(
     metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from collections.abc import Sequence
+    from contextlib import contextmanager
 
     from dagster._core.scheduler.instigation import InstigatorState
 
@@ -1681,6 +1682,8 @@ def test_inventory_batches_reads_with_identical_protections(
     load_states = instance.all_instigator_state
     load_records = instance.get_run_records
     loads = {'sensors': 0, 'records': 0}
+    open_connection = retention.connection
+    event_connections: list[sqlite3.Connection] = []
 
     def counted_states() -> Sequence[InstigatorState]:
         loads['sensors'] += 1
@@ -1690,6 +1693,16 @@ def test_inventory_batches_reads_with_identical_protections(
         loads['records'] += 1
         return load_records(filters, limit=limit)
 
+    @contextmanager
+    def counted_connection(
+        path: Path, deadline: float, lock_wait: float, *, write: bool = False
+    ) -> Iterator[sqlite3.Connection]:
+        with open_connection(path, deadline, lock_wait, write=write) as database:
+            if path == layout.events:
+                event_connections.append(database)
+            yield database
+
+    monkeypatch.setattr(retention, 'connection', counted_connection)
     monkeypatch.setattr(instance, 'all_instigator_state', counted_states)
     monkeypatch.setattr(instance, 'get_run_records', counted_records)
     rows = scan_batch(instance, layout, journal, POLICY, now, time.monotonic() + 15)
@@ -1697,6 +1710,9 @@ def test_inventory_batches_reads_with_identical_protections(
     assert expected[parent] == 'retry_lineage_reference'
     assert expected[sensor_run] == 'sensor_last_run_key'
     assert loads == {'sensors': 1, 'records': 1}
+    assert len(event_connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match='closed database'):
+        event_connections[0].execute('SELECT 1')
     assert [row.storage_id for row in rows] == sorted(row.storage_id for row in rows)
     assert journal.inventory_scanned == len(expected)
     assert journal.inventory_eligible_bytes == sum(

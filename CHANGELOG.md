@@ -1,6 +1,6 @@
 # v3.8.3
 
-- Scan metadata history in run-ID order and batch run, retry-reference and sensor-state reads; preserve per-run live revalidation before reclamation.
+- Scan metadata history in run-ID order and batch run, retry-reference and sensor-state reads with one read-only event connection per batch; preserve per-run live revalidation before reclamation.
 
 # v3.8.2
 

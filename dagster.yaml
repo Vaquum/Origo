@@ -48,6 +48,11 @@ compute_logs:
 retention:
   sensor:
     purge_after_days:
-      skipped: 7
-      success: 7
-      failure: 30
+      skipped: 1
+      success: 1
+      failure: 7
+  schedule:
+    purge_after_days:
+      skipped: 1
+      success: 1
+      failure: 7

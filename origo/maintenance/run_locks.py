@@ -5,15 +5,26 @@ import fcntl
 import os
 import threading
 import time
-from _thread import LockType
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from weakref import WeakValueDictionary
 
+
+class RunLockBusy(TimeoutError):
+    """A live reader, writer or retirement still owns the requested run lock."""
+
+
+class _LocalLock:
+    def __init__(self) -> None:
+        self.condition = threading.Condition()
+        self.holders = 0
+        self.shared = False
+
+
 _registry_lock = threading.Lock()
 _files: dict[tuple[int, Path], int] = {}
-_threads: WeakValueDictionary[tuple[int, Path, int], LockType] = WeakValueDictionary()
+_threads: WeakValueDictionary[tuple[int, Path, int], _LocalLock] = WeakValueDictionary()
 
 
 def _after_fork() -> None:
@@ -33,7 +44,9 @@ atexit.register(_close_files)
 
 
 @contextmanager
-def run_lock(path: Path, storage_id: int, wait_seconds: float) -> Iterator[None]:
+def run_lock(
+    path: Path, storage_id: int, wait_seconds: float, *, shared: bool = False
+) -> Iterator[None]:
     if not 0 <= storage_id < 2**63:
         raise ValueError('A run lock requires its nonnegative SQLite storage ID.')
     path = path.resolve()
@@ -50,24 +63,35 @@ def run_lock(path: Path, storage_id: int, wait_seconds: float) -> Iterator[None]
         thread_key = (pid, path, storage_id)
         local = _threads.get(thread_key)
         if local is None:
-            local = threading.Lock()
+            local = _LocalLock()
             _threads[thread_key] = local
-    if not local.acquire(timeout=max(0, deadline - time.monotonic())):
-        raise TimeoutError(f'Run {storage_id} has an active writer or retirement.')
-    acquired = False
+    error_message = f'Run {storage_id} has an active reader, writer or retirement.'
+    if not local.condition.acquire(timeout=max(0, deadline - time.monotonic())):
+        raise RunLockBusy(error_message)
     try:
-        while not acquired:
-            try:
-                fcntl.lockf(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB, 1, storage_id, os.SEEK_SET)
-                acquired = True
-            except BlockingIOError as error:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        f'Run {storage_id} has an active writer or retirement.'
-                    ) from error
-                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+        while local.holders and not (shared and local.shared):
+            if not local.condition.wait(timeout=max(0, deadline - time.monotonic())):
+                raise RunLockBusy(error_message)
+        if not local.holders:
+            acquired = False
+            while not acquired:
+                try:
+                    mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+                    fcntl.lockf(descriptor, mode | fcntl.LOCK_NB, 1, storage_id, os.SEEK_SET)
+                    acquired = True
+                except BlockingIOError as error:
+                    if time.monotonic() >= deadline:
+                        raise RunLockBusy(error_message) from error
+                    time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+            local.shared = shared
+        local.holders += 1
+    finally:
+        local.condition.release()
+    try:
         yield
     finally:
-        if acquired:
-            fcntl.lockf(descriptor, fcntl.LOCK_UN, 1, storage_id, os.SEEK_SET)
-        local.release()
+        with local.condition:
+            local.holders -= 1
+            if not local.holders:
+                fcntl.lockf(descriptor, fcntl.LOCK_UN, 1, storage_id, os.SEEK_SET)
+                local.condition.notify_all()

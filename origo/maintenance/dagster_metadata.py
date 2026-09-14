@@ -45,9 +45,9 @@ def deployed_config() -> OperationalMetadataMaintenanceConfig:
     return OperationalMetadataMaintenanceConfig(
         dry_run=mode == 'true',
         metadata_budget_bytes=int(
-            os.environ.get('ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES', str(600 * 1024**3))
+            os.environ.get('ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES', str(13 * 1024**3))
         ),
-        max_runtime_seconds=int(os.environ.get('ORIGO_METADATA_MAX_RUNTIME_SECONDS', '60')),
+        max_runtime_seconds=int(os.environ.get('ORIGO_METADATA_MAX_RUNTIME_SECONDS', '600')),
     )
 
 
@@ -182,7 +182,7 @@ maintain_operational_metadata_job = _maintenance_definitions.resolve_job_def(
 operational_metadata_maintenance_schedule = ScheduleDefinition(
     name='operational_metadata_maintenance_schedule',
     job=maintain_operational_metadata_job,
-    cron_schedule='17 2 * * *',
+    cron_schedule='*/10 * * * *',
     execution_timezone='UTC',
     default_status=DefaultScheduleStatus.RUNNING,
     run_config={

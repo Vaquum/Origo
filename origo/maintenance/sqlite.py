@@ -15,6 +15,8 @@ from dagster._core.storage.local_compute_log_manager import LocalComputeLogManag
 from dagster._core.storage.runs.sqlite.sqlite_run_storage import SqliteRunStorage
 from dagster._core.storage.schedules.sqlite.sqlite_schedule_storage import SqliteScheduleStorage
 
+from .codec import decoded_row
+
 JOB_QUERY = """SELECT r.run_body,r.status FROM runs r
 JOIN run_tags t ON r.run_id=t.run_id
 AND t.key='.dagster/repository' AND t.value='__repository__@origo'
@@ -31,6 +33,7 @@ class Layout:
     events: Path
     schedules: Path
     compute: Path
+    artifact_root: Path | None = None
 
     @classmethod
     def from_instance(cls, instance: DagsterInstance) -> 'Layout':
@@ -57,6 +60,7 @@ class Layout:
             Path(events.path_for_shard('index')).resolve(strict=True),
             schedules_path.resolve(strict=True),
             log_path.resolve(),
+            Path(instance.storage_directory()).resolve(),
         )
 
     def shard(self, run_id: str) -> Path:
@@ -87,7 +91,7 @@ def connection(
         uri=True,
         timeout=min(lock_wait, deadline - time.monotonic()),
     )
-    database.row_factory = sqlite3.Row
+    database.row_factory = decoded_row
     database.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
     try:
         yield database

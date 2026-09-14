@@ -40,7 +40,12 @@ from origo.maintenance.sqlite import Layout, connection, maintenance_lock, refre
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVES = ROOT / 'tests/fixtures/binance/spot/daily/trades/revisioned'
 PARTITIONS = StaticPartitionsDefinition(['2017-08-17', '2020-01-01'])
-POLICY = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=600 * 1024**3)
+POLICY = OperationalMetadataMaintenanceConfig(
+    metadata_budget_bytes=600 * 1024**3,
+    projection_success_minutes=30 * 24 * 60,
+    projection_failure_hours=90 * 24,
+    source_archive_after_hours=90 * 24,
+)
 
 
 @asset(name='metadata_proof_archive', partitions_def=PARTITIONS)
@@ -56,7 +61,12 @@ def archive_fact(context: AssetExecutionContext) -> MaterializeResult:
 
 
 @pytest.fixture
-def metadata_instance(tmp_path: Path) -> Iterator[DagsterInstance]:
+def metadata_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[DagsterInstance]:
+    from origo.maintenance import roles
+
+    monkeypatch.setattr(
+        roles, 'PROJECTION_JOBS', roles.PROJECTION_JOBS | {'__ephemeral_asset_job__'}
+    )
     directory = tmp_path / 'instance'
     directory.mkdir()
     with DagsterInstance.local_temp(
@@ -74,6 +84,11 @@ def metadata_instance(tmp_path: Path) -> Iterator[DagsterInstance]:
             },
         },
     ) as instance:
+        from origo.maintenance.compaction import initialize_compaction
+
+        layout = Layout.from_instance(instance)
+        for path in (layout.runs, layout.events, layout.schedules):
+            initialize_compaction(path, time.monotonic() + 10, 1)
         yield instance
 
 
@@ -351,7 +366,7 @@ def test_maintenance_job_schedule_and_deploy() -> None:
 
     job = defs.resolve_job_def('maintain_operational_metadata_job')
     assert job.name == operational_metadata_maintenance_schedule.job_name
-    assert operational_metadata_maintenance_schedule.cron_schedule == '17 2 * * *'
+    assert operational_metadata_maintenance_schedule.cron_schedule == '*/10 * * * *'
     assert operational_metadata_maintenance_schedule.default_status.value == 'RUNNING'
     workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert 'dagster job launch -j maintain_operational_metadata_job' in workflow
@@ -548,6 +563,15 @@ def diagnostic_server(
                         logs.stderr[-2000:] + error_path.read_text()[-6000:]
                     ) from error
                 time.sleep(0.2)
+        # Every isolated test gets the same genuine business-data denominator.
+        client.execute('CREATE DATABASE IF NOT EXISTS origo')
+        client.execute(
+            'CREATE TABLE origo.retention_business (trade_id UInt64,price Float64) ENGINE=MergeTree ORDER BY trade_id'
+        )
+        first = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.csv').read_text().splitlines()[0].split(',')
+        client.execute(
+            'INSERT INTO origo.retention_business VALUES', [(int(first[0]), float(first[1]))]
+        )
         yield name, settings, data
     finally:
         client.disconnect()
@@ -632,14 +656,7 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
     client.execute(
         'INSERT INTO system.metric_log_286 SELECT hostname,event_date,event_time,CurrentMetric_Query FROM system.metric_log ORDER BY event_date DESC,event_time DESC LIMIT 1'
     )
-    client.execute('CREATE DATABASE IF NOT EXISTS origo')
-    client.execute(
-        'CREATE TABLE origo.retention_business (trade_id UInt64,price Float64) ENGINE=MergeTree ORDER BY trade_id'
-    )
     first = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.csv').read_text().splitlines()[0].split(',')
-    client.execute(
-        'INSERT INTO origo.retention_business VALUES', [(int(first[0]), float(first[1]))]
-    )
     client.execute(
         'ALTER TABLE system.metric_log_286 MODIFY SETTING old_parts_lifetime=0, cleanup_delay_period=1, cleanup_delay_period_random_add=0'
     )
@@ -736,6 +753,15 @@ def _diagnostic_environment(
     monkeypatch.setenv('ORIGO_CLICKHOUSE_DATA_ROOT', str(server[2]))
 
 
+def assert_tiny_fixture_exceeds_ratio(outcome: object) -> None:
+    # This real diagnostic fixture contains one exchange trade. Even a minimal
+    # Dagster instance exceeds 10% of it; diagnostic log bytes cannot make it pass.
+    assert outcome.clickhouse_business_bytes > 0
+    assert outcome.dagster_to_business_fraction >= 0.1
+    assert len(outcome.violations) == 1
+    assert outcome.violations[0].startswith('metadata_business_fraction:')
+
+
 def test_metadata_budget_and_catch_up_progress(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
@@ -752,8 +778,8 @@ def test_metadata_budget_and_catch_up_progress(
     assert outcome.last_success_at == 0
     assert metadata_instance.get_run_by_id(run_id) is not None
     healthy = maintain(metadata_instance, POLICY)
-    assert not healthy.violations
-    assert healthy.last_success_at > 0
+    assert_tiny_fixture_exceeds_ratio(healthy)
+    assert healthy.last_success_at == 0
     assert healthy.report.ingress_runs_per_second == 0
     assert healthy.report.cleanup_runs_per_second == 0
     assert healthy.filesystem_free_bytes > 0
@@ -777,14 +803,16 @@ def test_maintenance_logs_and_latency_checks(
         run_config={'ops': {'maintain_operational_metadata': {'config': POLICY.model_dump()}}},
         raise_on_error=False,
     )
-    assert result.success
+    assert not result.success
     checks = [
         event.asset_check_evaluation_data
         for event in result.all_events
         if event.event_type == DagsterEventType.ASSET_CHECK_EVALUATION
     ]
-    assert len(checks) == 1 and checks[0].passed
+    assert len(checks) == 1 and not checks[0].passed
     metadata = checks[0].metadata['maintenance'].value
+    assert len(metadata['violations']) == 1
+    assert metadata['violations'][0].startswith('metadata_business_fraction:')
     assert max(metadata['query_p95_seconds'].values()) < 0.25
     assert {
         'scanned',
@@ -804,10 +832,10 @@ def test_maintenance_logs_and_latency_checks(
             Layout.from_instance(metadata_instance),
             record,
             POLICY,
-            time.time() + 31 * 86400,
+            time.time() + 91 * 86400,
             time.monotonic() + 15,
         )
-        == 'current_asset_check'
+        == 'latest_failure_or_verdict'
     )
 
     failed = maintain_operational_metadata_job.execute_in_process(
@@ -835,7 +863,7 @@ def test_maintenance_logs_and_latency_checks(
     key = AssetCheckKey(AssetKey('maintain_operational_metadata'), 'operational_metadata_health')
     before_checks = metadata_instance.event_log_storage.get_asset_check_summary_records([key])
     layout, journal, candidate = planned(metadata_instance, result.run_id)
-    future = time.time() + 31 * 86400
+    future = time.time() + 91 * 86400
     monkeypatch.setattr(
         retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
     )
@@ -860,7 +888,7 @@ def test_maintenance_logs_and_latency_checks(
         ).fetchone() == (0,)
 
 
-def test_source_receipt_survives_history_retirement(
+def test_source_receipt_survives_history_compaction(
     metadata_instance: DagsterInstance,
     origo_test_env: dict[str, str],
     tmp_path: Path,
@@ -931,9 +959,12 @@ def test_source_receipt_survives_history_retirement(
         # Supersede its current check dependency with another real verification.
         assert _run(environment, reconcile=True).success
         before = store.records(canonical_only=True)
+        receipt_before = store.run_receipt(request.tags['origo_source_event'])
         key = AssetKey('build_binance_spot_trades_canonical_revision_origo')
         materialization = metadata_instance.get_latest_materialization_event(key)
+        events_before = metadata_instance.get_records_for_run(result.run_id)
         layout, journal, candidate = planned(metadata_instance, result.run_id)
+        candidate.action = 'archive'
         future = time.time() + 31 * 86400
         monkeypatch.setattr(
             retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
@@ -948,9 +979,11 @@ def test_source_receipt_survives_history_retirement(
             time.monotonic() + 30,
         )
         assert reclaimed > 0, candidate.reason
-        assert metadata_instance.get_run_by_id(result.run_id) is None
+        assert metadata_instance.get_run_by_id(result.run_id) is not None
+        assert metadata_instance.get_records_for_run(result.run_id) == events_before
+        assert not layout.shard(result.run_id).exists()
         receipt = store.run_receipt(request.tags['origo_source_event'])
-        assert receipt == (0, 'SUCCESS', result.run_id)
+        assert receipt == receipt_before
         assert tick().run_requests == []
         assert store.records(canonical_only=True) == before
         assert metadata_instance.get_latest_materialization_event(key) == materialization
@@ -958,16 +991,24 @@ def test_source_receipt_survives_history_retirement(
         client.disconnect()
 
 
+@pytest.mark.parametrize('compact_source', [False, True])
 def test_restore_verifies_real_instance_and_rejects_missing_evidence(
-    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    metadata_instance: DagsterInstance,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    compact_source: bool,
 ) -> None:
     import shutil
 
     import yaml
 
     from origo.maintenance import backup
+    from origo.sources.registry import SOURCE_REGISTRY
 
-    run_id = execute_archive(metadata_instance)
+    tags = {'origo_source_key': SOURCE_REGISTRY[0].key} if compact_source else None
+    run_id = execute_archive(metadata_instance, tags=tags)
+    if compact_source:
+        metadata_instance.event_log_storage.archive_run(run_id, time.monotonic() + 10)
     layout, journal, _ = planned(metadata_instance, run_id)
     original = tmp_path / 'instance'
     restored = tmp_path / 'restored'
@@ -1017,8 +1058,14 @@ def test_restore_verifies_real_instance_and_rejects_missing_evidence(
     assert receipt.verified_runs == 1 and receipt.manifest_sha256 == journal.manifest_sha256
     assert receipt.instance_id == metadata_instance.run_storage.get_run_storage_id()
     shard = Path(relocated(layout.shard(run_id)))
-    with sqlite3.connect(shard) as database:
-        database.execute('DELETE FROM event_logs')
+    if compact_source:
+        from origo.maintenance.archive import archive_path
+
+        with sqlite3.connect(archive_path(shard.parent)) as database:
+            database.execute('DELETE FROM source_runs WHERE run_id=?', (run_id,))
+    else:
+        with sqlite3.connect(shard) as database:
+            database.execute('DELETE FROM event_logs')
     with pytest.raises(RuntimeError, match='no execution evidence'):
         backup.verify_restored_backup(
             restored, layout, journal, 'damaged-test-copy', time.monotonic() + 15
@@ -1120,13 +1167,14 @@ except TimeoutError:
     assert metadata_instance.event_log_storage.writer_lock_path().stat().st_size == 0
 
 
-@pytest.mark.parametrize('interrupt_at', ['', 'logs', 'compaction'])
+@pytest.mark.parametrize('interrupt_at', ['', 'logs', 'compaction', 'pages'])
 def test_first_apply_resumes_after_live_revalidation(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     interrupt_at: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from origo.maintenance import worker
 
@@ -1200,6 +1248,19 @@ def test_first_apply_resumes_after_live_revalidation(
             elapsed += 45
         return compact(runs_path, after_id, limit, deadline, lock_wait)
 
+    page_compaction = worker.incremental_compaction
+    page_calls = 0
+
+    def timed_pages(path: Path, deadline: float, lock_wait: float) -> int:
+        nonlocal elapsed, page_calls
+        page_calls += 1
+        if interrupt_at == 'pages':
+            # Commit a real bounded vacuum pass, then exhaust the supplied window.
+            page_compaction(path, deadline, lock_wait, pages=128)
+            elapsed = deadline - time.monotonic() + .1
+        return page_compaction(path, deadline, lock_wait)
+
+    monkeypatch.setattr(worker, 'incremental_compaction', timed_pages)
     clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
     for module in (worker, retention, maintenance_sqlite):
         monkeypatch.setattr(module, 'time', clock)
@@ -1208,11 +1269,19 @@ def test_first_apply_resumes_after_live_revalidation(
         metadata_instance.event_log_storage, 'compact_retired_state', timed_compaction
     )
     outcome = worker.maintain(metadata_instance, config)
+    if interrupt_at == 'pages':
+        assert page_calls == 1, 'Later databases must not start reclamation in the reporting reserve.'
+        checkpoint = Journal.model_validate_json(path.read_bytes())
+        assert checkpoint.first_apply_completed and checkpoint.reports[-1] == outcome.report
+        assert outcome.shared_sqlite and outcome.query_p95_seconds
+        assert outcome.clickhouse_business_bytes > 0 and outcome.diagnostic_allocated_bytes > 0
+        assert 'SQLite page reclamation paused; reporting checkpoint' in capsys.readouterr().out
     if interrupt_at == 'logs':
         checkpoint = Journal.model_validate_json(path.read_bytes())
         assert checkpoint.manifest[1].phase == 'logs'
         assert not checkpoint.first_apply_completed
-        assert outcome.report.deleted == 0 and not outcome.violations
+        assert outcome.report.deleted == 0
+        assert_tiny_fixture_exceeds_ratio(outcome)
         assert metadata_instance.get_run_by_id(eligible) is None
         elapsed = 0
         interrupt_at = ''
@@ -1220,7 +1289,7 @@ def test_first_apply_resumes_after_live_revalidation(
         assert outcome.report.eligible_ingress_runs == 0
     assert outcome.report.duration_seconds < config.max_runtime_seconds
     assert outcome.report.deleted == 1 and outcome.report.protected == 1
-    assert not outcome.violations
+    assert_tiny_fixture_exceeds_ratio(outcome)
     assert metadata_instance.get_run_by_id(preserved) is not None
     assert metadata_instance.get_run_by_id(eligible) is None
     assert Journal.model_validate_json(path.read_bytes()).first_apply_completed
@@ -1357,11 +1426,12 @@ def test_completed_inventory_survives_scheduled_dry_runs(
         assert repeated.retained_floor_bytes == completed.retained_floor_bytes
         assert repeated.manifest == completed.manifest
         assert repeated.manifest_sha256 == manifest_sha256(repeated) == approved
-        assert not outcome.violations
+        assert_tiny_fixture_exceeds_ratio(outcome)
         assert outcome.query_p95_seconds and outcome.diagnostic_allocated_bytes > 0
         require_backup(repeated, apply, future)
     applied = run_maintenance(apply)
-    assert applied.report.deleted == 1 and not applied.violations
+    assert applied.report.deleted == 1
+    assert_tiny_fixture_exceeds_ratio(applied)
     assert metadata_instance.get_run_by_id(run_ids[0]) is None
     assert Journal.model_validate_json(path.read_bytes()).first_apply_completed
     # Once first apply commits, subsequent dry runs may inventory the next cycle.
@@ -1391,7 +1461,7 @@ def test_empty_inventory_keeps_discovering_eligible_runs(
     assert journal.manifest[0].run_id == run_id
     assert journal.inventory_started_at == future
     # A changed retention policy invalidates the old inventory and its approval.
-    changed_policy = POLICY.model_copy(update={'success_retention_days': 60})
+    changed_policy = POLICY.model_copy(update={'projection_success_minutes': 60 * 24 * 60})
     changed = worker.maintain(metadata_instance, changed_policy)
     journal = Journal.model_validate_json(Path(changed.journal_path).read_bytes())
     assert changed.inventory_complete and changed.report.candidates == 0
@@ -1427,7 +1497,14 @@ def test_allocated_measurement_survives_disappearing_entries(
     monkeypatch.setattr(Path, 'lstat', remove_before_stat)
     measured = directory_bytes(layout, time.monotonic() + 15)
     assert not target.exists()
-    paths = {layout.runs.parent, layout.events.parent, layout.schedules.parent, layout.compute}
+    assert layout.artifact_root is not None
+    paths = {
+        layout.runs.parent,
+        layout.events.parent,
+        layout.schedules.parent,
+        layout.compute,
+        layout.artifact_root,
+    }
     roots = sorted(
         path
         for path in paths
@@ -1515,7 +1592,8 @@ def test_reporting_reserve_preserves_progress(
     outcome = worker.maintain(metadata_instance, config)
     assert visited == 3  # The second admitted batch runs out of its work window.
     assert not outcome.inventory_complete and outcome.report.scanned == 2
-    assert outcome.report.duration_seconds < 3600 and not outcome.violations
+    assert outcome.report.duration_seconds < 3600
+    assert_tiny_fixture_exceeds_ratio(outcome)
     assert outcome.report.deleted == 0
     journal = Journal.model_validate_json(Path(outcome.journal_path).read_bytes())
     assert journal.inventory_scanned == 2
@@ -1526,7 +1604,7 @@ def test_reporting_reserve_preserves_progress(
     assert resumed.inventory_complete and resumed.report.scanned == 2
     journal = Journal.model_validate_json(Path(resumed.journal_path).read_bytes())
     assert journal.inventory_scanned == 4
-    assert not resumed.violations
+    assert_tiny_fixture_exceeds_ratio(resumed)
     assert all(metadata_instance.get_run_by_id(run_id) is not None for run_id in run_ids)
 
 
@@ -1750,3 +1828,206 @@ def test_inventory_snapshot_never_replaces_live_revalidation(
     assert reclaimed == 0
     assert rows[0].revalidation_reason == 'live_revalidation:' + reason
     assert instance.get_run_by_id(run_id) is not None and layout.shard(run_id).exists()
+
+
+def test_backlog_and_ingress_count_real_projection_runs(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.maintenance import worker
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    future = time.time() + 31 * 86400
+    clock = SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    monkeypatch.setattr(worker, 'time', clock)
+    monkeypatch.setattr(retention, 'time', clock)
+    execute_archive(metadata_instance)
+    before = worker.maintain(metadata_instance, POLICY)
+    assert before.report.backlog_runs == 1
+    execute_archive(metadata_instance)
+    execute_archive(metadata_instance, tags={'origo_source_key': 'binance_spot_trades'})
+    future += 60
+    after = worker.maintain(metadata_instance, POLICY)
+    assert after.report.backlog_runs == 2
+    assert after.report.eligible_ingress_runs == 1
+    assert after.report.ingress_runs_per_second == pytest.approx(1 / 60)
+
+
+@pytest.mark.parametrize('repository_storage', ['explicit_tag', 'remote_origin'])
+def test_obsolete_repository_cursor_does_not_pin_current_projection(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch, repository_storage: str
+) -> None:
+    from dagster import DagsterRunStatus, RunStatusSensorDefinition, define_asset_job
+    from dagster._core.definitions.run_request import InstigatorType
+    from dagster._core.definitions.run_status_sensor_definition import RunStatusSensorCursor
+    from dagster._core.remote_origin import (
+        RegisteredCodeLocationOrigin,
+        RemoteInstigatorOrigin,
+        RemoteJobOrigin,
+        RemoteRepositoryOrigin,
+    )
+    from dagster._core.scheduler.instigation import (
+        InstigatorState,
+        InstigatorStatus,
+        SensorInstigatorData,
+    )
+
+    sensor = RunStatusSensorDefinition(
+        name='metadata_proof_sensor',
+        run_status=DagsterRunStatus.SUCCESS,
+        run_status_sensor_fn=lambda context: None,
+        monitored_jobs=[define_asset_job('__ephemeral_asset_job__')],
+    )
+    monkeypatch.setattr(retention, '_sensor_definitions', lambda: {sensor.name: sensor})
+    run_id = execute_archive(metadata_instance)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
+    if repository_storage == 'remote_origin':
+        from dagster._record import copy
+
+        original = record.dagster_run
+        run = original.with_tags(
+            {key: value for key, value in original.tags.items() if key != '.dagster/repository'}
+        ).with_job_origin(
+            RemoteJobOrigin(
+                RemoteRepositoryOrigin(RegisteredCodeLocationOrigin('origo'), '__repository__'),
+                original.job_name,
+            )
+        )
+        record = copy(record, dagster_run=run)
+        assert '.dagster/repository' not in record.dagster_run.tags
+    layout = Layout.from_instance(metadata_instance)
+    for location, expected in (
+        ('tdw_control_plane', ''),
+        ('origo', 'unconsumed_run_status_cursor'),
+    ):
+        metadata_instance.add_instigator_state(
+            InstigatorState(
+                RemoteInstigatorOrigin(
+                    RemoteRepositoryOrigin(
+                        RegisteredCodeLocationOrigin(location), '__repository__'
+                    ),
+                    sensor.name,
+                ),
+                InstigatorType.SENSOR,
+                InstigatorStatus.RUNNING,
+                SensorInstigatorData(cursor=RunStatusSensorCursor(record_id=0).to_json()),
+            )
+        )
+        assert (
+            protection(
+                metadata_instance,
+                layout,
+                record,
+                POLICY,
+                time.time() + 31 * 86400,
+                time.monotonic() + 10,
+            )
+            == expected
+        )
+
+
+def test_archive_failure_stays_unhealthy_until_successful_retry(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from origo.maintenance import event_storage, worker
+    from origo.sources.registry import SOURCE_REGISTRY
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    instance = metadata_instance
+    run_id = execute_archive(instance, tags={'origo_source_key': SOURCE_REGISTRY[0].key})
+    layout, journal, candidate = planned(instance, run_id)
+    candidate.action = 'archive'
+
+    def bad_source(path: Path, deadline: float) -> bytes:
+        raise RuntimeError('Controlled unarchivable source.')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(event_storage, 'snapshot_image', bad_source)
+        reclaim(
+            instance,
+            layout,
+            candidate,
+            journal,
+            layout.runs.parent / 'failed-source.json',
+            POLICY,
+            time.monotonic() + 10,
+        )
+    assert 'Controlled unarchivable source.' in capsys.readouterr().out
+    for _ in range(2):
+        failed = worker.maintain(instance, POLICY)
+        assert failed.source_archive_error_count == 1
+        assert run_id in failed.source_archive_errors
+        assert 'source_archive_failures:1' in failed.violations
+        assert failed.last_success_at == 0
+    reclaim(
+        instance,
+        layout,
+        candidate,
+        journal,
+        layout.runs.parent / 'failed-source.json',
+        POLICY,
+        time.monotonic() + 10,
+    )
+    recovered = worker.maintain(instance, POLICY)
+    assert recovered.source_archive_error_count == 0 and not recovered.source_archive_errors
+    assert len(recovered.violations) == 1
+    assert recovered.violations[0].startswith('metadata_business_fraction:')
+
+
+@pytest.mark.parametrize('holder', ['reader', 'writer'])
+def test_source_lock_contention_defers_without_poisoning_health(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    holder: str,
+) -> None:
+    from origo.maintenance import archive, worker
+    from origo.maintenance.run_locks import run_lock
+    from origo.sources.registry import SOURCE_REGISTRY
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    instance = metadata_instance
+    source_id = execute_archive(instance, tags={'origo_source_key': SOURCE_REGISTRY[0].key})
+    projection_id = execute_archive(instance)
+    layout, journal, source = planned(instance, source_id)
+    source.action = 'archive'
+    projection = planned(instance, projection_id)[2]
+    journal.manifest.append(projection)
+    future = time.time() + 91 * 86400
+    monkeypatch.setattr(retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic))
+    before = instance.get_records_for_run(source_id)
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    held = (
+        storage.run_connection(source_id)
+        if holder == 'reader'
+        else run_lock(storage.writer_lock_path(), source.storage_id, 1)
+    )
+    journal_path = layout.runs.parent / 'busy-source.json'
+    with held:
+        assert reclaim(instance, layout, source, journal, journal_path, POLICY, time.monotonic() + 15) == 0
+        assert source.exclusion == 'source_in_use' and source.phase == 'planned'
+        assert layout.shard(source_id).exists()
+        assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
+        assert instance.get_records_for_run(source_id) == before
+        assert reclaim(instance, layout, projection, journal, journal_path, POLICY, time.monotonic() + 15) > 0
+        assert instance.get_run_by_id(projection_id) is None
+        assert 'Source compaction deferred' in capsys.readouterr().out
+        outcome = worker.maintain(instance, POLICY)
+        assert outcome.source_archive_error_count == 0 and not outcome.source_archive_errors
+        # The real one-trade fixture still exceeds the capacity ratio. Viewing
+        # source history must not add a false archive failure to that real finding.
+        assert_tiny_fixture_exceeds_ratio(outcome)
+    retry_journal = Journal(instance_id=journal.instance_id, policy_sha256=policy_sha256(POLICY))
+    retry = scan_batch(instance, layout, retry_journal, POLICY, future, time.monotonic() + 15)
+    assert len(retry) == 1 and retry[0].action == 'archive' and not retry[0].exclusion
+    retry_journal.manifest = retry
+    assert reclaim(instance, layout, retry[0], retry_journal, journal_path, POLICY, time.monotonic() + 15) > 0
+    assert not layout.shard(source_id).exists()
+    assert instance.get_records_for_run(source_id) == before
+    assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0

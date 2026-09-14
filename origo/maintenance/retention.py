@@ -2,10 +2,13 @@
 
 import os
 import sqlite3
+import sys
 import time
+import traceback
 from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -28,10 +31,21 @@ from dagster._core.events import PIPELINE_RUN_STATUS_TO_EVENT_TYPE
 from dagster._core.execution.backfill import BULK_ACTION_TERMINAL_STATUSES
 from dagster._core.scheduler.instigation import InstigatorState, SensorInstigatorData
 from dagster._core.storage.local_compute_log_manager import LocalComputeLogManager
+from sqlalchemy.exc import SQLAlchemyError
 
+from .archive import (
+    MAX_DATABASE_BYTES,
+    archive_path,
+    clear_compaction_error,
+    failed_compactions,
+    native_history_lock,
+    record_compaction_error,
+    transition_lock,
+)
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
-from .run_locks import run_lock
+from .roles import run_role
+from .run_locks import RunLockBusy, run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
 from .sqlite import Layout, MaintenanceDeadlineReached, allocated, artifacts, connection
 
@@ -112,15 +126,19 @@ def protection(
         DagsterRunStatus.CANCELED,
     ):
         return 'nonterminal'
-    days = (
-        config.success_retention_days
+    role = run_role(run)
+    if role != 'projection':
+        return 'source_provenance' if role == 'source' else 'unclassified_provenance'
+    retention_seconds = (
+        config.projection_success_minutes * 60
         if run.status == DagsterRunStatus.SUCCESS
-        else config.failure_retention_days
+        else config.projection_failure_hours * 3600
     )
-    if (record.end_time or record.update_timestamp.timestamp()) >= now - days * 86400:
+    if (record.end_time or record.update_timestamp.timestamp()) >= now - retention_seconds:
         return 'retention_window'
+    activity_grace = min(3600, retention_seconds)
     if any(
-        path.exists() and path.stat().st_mtime > now - 3600
+        path.exists() and path.stat().st_mtime > now - activity_grace
         for path in artifacts(layout, run.run_id)
     ):
         return 'recent_artifact_activity'
@@ -143,6 +161,7 @@ def protection(
         'dagster/asset_partition_range_start'
     ):
         return 'failed_partition_range'
+    newer_verdict = True
     if run.status != DagsterRunStatus.SUCCESS:
         partition_tags = {
             key: value
@@ -154,9 +173,36 @@ def protection(
                 'origo_source_partition',
             )
         }
-        latest = instance.get_runs(RunsFilter(job_name=run.job_name, tags=partition_tags), limit=1)
-        if latest and latest[0].run_id == run.run_id:
-            return 'latest_failure_or_verdict'
+        joins = ''.join(
+            f' JOIN run_tags t{index} ON t{index}.run_id=r.run_id AND t{index}.key=? AND t{index}.value=?'
+            for index in range(len(partition_tags))
+        )
+        parameters = [value for pair in partition_tags.items() for value in pair]
+        with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+            # Broad partition tags can match hundreds of thousands of old runs.
+            # Try at most 1,000 recent IDs before the complete historical lookup.
+            upper = int(
+                database.execute(
+                    'SELECT coalesce(max(id),?) FROM runs', (record.storage_id,)
+                ).fetchone()[0]
+            )
+            recent_terms = ''.join(
+                ' AND EXISTS(SELECT 1 FROM run_tags t '
+                'WHERE t.run_id=r.run_id AND t.key=? AND t.value=?)'
+                for _ in partition_tags
+            )
+            newer = database.execute(
+                'SELECT 1 FROM runs r NOT INDEXED WHERE r.id>? AND r.pipeline_name=?'
+                + recent_terms
+                + ' LIMIT 1',
+                (max(record.storage_id, upper - 1000), run.job_name, *parameters),
+            ).fetchone()
+            if newer is None:
+                newer = database.execute(
+                    'SELECT 1 FROM runs r' + joins + ' WHERE r.pipeline_name=? AND r.id>? LIMIT 1',
+                    (*parameters, run.job_name, record.storage_id),
+                ).fetchone()
+        newer_verdict = newer is not None
     source_reason = source_reference_reason(run)
     if source_reason:
         return source_reason
@@ -172,6 +218,28 @@ def protection(
         ).fetchall()
         if len(events) > 1000:
             return 'oversized_reference_set'
+        resolved_plans: set[int] = set()
+        if run.status != DagsterRunStatus.SUCCESS:
+            plans = [
+                row
+                for row in events
+                if row['dagster_event_type'] == 'ASSET_MATERIALIZATION_PLANNED'
+            ]
+            ended = datetime.fromtimestamp(
+                record.end_time or record.update_timestamp.timestamp(), UTC
+            ).replace(tzinfo=None)
+            for plan in plans:
+                # Successful projection runs may already have expired. Their
+                # retained current facts still resolve earlier failed plans.
+                materialized = database.execute(
+                    "SELECT 1 FROM event_logs WHERE asset_key=? AND dagster_event_type='ASSET_MATERIALIZATION' "
+                    'AND partition IS ? AND id>? AND timestamp>? AND run_id!=? LIMIT 1',
+                    (plan['asset_key'], plan['partition'], plan['id'], ended, run.run_id),
+                ).fetchone()
+                if materialized is not None:
+                    resolved_plans.add(int(plan['id']))
+            if not newer_verdict and (not plans or len(resolved_plans) != len(plans)):
+                return 'latest_failure_or_verdict'
         for row in events:
             if (
                 run.status != DagsterRunStatus.SUCCESS
@@ -181,7 +249,11 @@ def protection(
                     'SELECT run_id FROM event_logs WHERE asset_key=? AND dagster_event_type=? AND partition IS ? ORDER BY id DESC LIMIT 1',
                     (row['asset_key'], row['dagster_event_type'], row['partition']),
                 ).fetchone()
-                if latest_plan is not None and latest_plan['run_id'] == run.run_id:
+                if (
+                    latest_plan is not None
+                    and latest_plan['run_id'] == run.run_id
+                    and int(row['id']) not in resolved_plans
+                ):
                     return 'current_failed_asset_partition'
             if str(row['dagster_event_type']).startswith('ASSET_CHECK'):
                 from dagster._core.events.log import EventLogEntry
@@ -245,6 +317,14 @@ def protection(
                 for job in monitored
                 if isinstance(job, (JobDefinition, UnresolvedAssetJobDefinition))
             ]
+            repository = run.tags_for_storage().get('.dagster/repository')
+            if (
+                names
+                and len(names) == len(monitored)
+                and repository is not None
+                and repository != state.origin.repository_origin.get_label()
+            ):
+                continue  # Local monitored jobs belong to this sensor's repository.
             if len(names) != len(monitored) or not names or run.job_name in names:
                 relevant = [
                     row
@@ -257,8 +337,6 @@ def protection(
         if data.cursor and RunStatusSensorCursor.is_valid(data.cursor):
             cursor = RunStatusSensorCursor.from_json(data.cursor)
             if cursor.update_timestamp:
-                from datetime import datetime
-
                 if (
                     record.update_timestamp.timestamp()
                     >= datetime.fromisoformat(cursor.update_timestamp).timestamp()
@@ -294,8 +372,12 @@ def scan_batch(
             (
                 journal.scan_cursor,
                 journal.inventory_upper_id,
-                journal.inventory_started_at - config.success_retention_days * 86400,
-                journal.inventory_started_at - config.failure_retention_days * 86400,
+                journal.inventory_started_at
+                - min(
+                    config.projection_success_minutes * 60, config.source_archive_after_hours * 3600
+                ),
+                journal.inventory_started_at
+                - min(config.projection_failure_hours, config.source_archive_after_hours) * 3600,
                 config.max_runs_per_batch,
             ),
         ).fetchall()
@@ -310,6 +392,18 @@ def scan_batch(
         if run_ids
         else {}
     )
+    packed: set[str] = set()
+    archives = archive_path(layout.events.parent)
+    if run_ids and archives.exists():
+        with connection(archives, deadline, config.lock_wait_seconds) as database:
+            placeholders = ','.join('?' for _ in run_ids)
+            packed = {
+                str(row[0])
+                for row in database.execute(
+                    f'SELECT run_id FROM source_runs WHERE run_id IN ({placeholders})', run_ids
+                )
+            }
+    failures = failed_compactions(layout.events.parent, deadline, run_ids)
     with connection(layout.events, deadline, config.lock_wait_seconds) as event_database:
         references = (
             _scan_references(instance, layout, run_ids, config, deadline, event_database)
@@ -332,6 +426,35 @@ def scan_batch(
                     scan_references=references,
                 )
                 inventory = artifact_inventory(layout, record.dagster_run.run_id, deadline)
+                archive_candidate = reason in ('source_provenance', 'unclassified_provenance')
+                if archive_candidate:
+                    if (
+                        record.dagster_run.run_id in packed
+                        and record.dagster_run.run_id not in failures
+                        and not layout.shard(record.dagster_run.run_id).exists()
+                    ):
+                        reason = 'source_already_compacted'
+                    elif (
+                        not layout.shard(record.dagster_run.run_id).exists()
+                        and record.dagster_run.run_id not in packed
+                    ):
+                        reason = 'source_no_event_shard'
+                    elif (
+                        layout.shard(record.dagster_run.run_id).exists()
+                        and layout.shard(record.dagster_run.run_id).stat().st_size
+                        > MAX_DATABASE_BYTES
+                    ):
+                        reason = 'source_archive_size_limit'
+                    elif any(
+                        path.exists()
+                        and path.stat().st_mtime > now - config.source_archive_after_hours * 3600
+                        for path in artifacts(layout, record.dagster_run.run_id)
+                    ):
+                        reason = 'recent_artifact_activity'
+                    elif record.dagster_run.tags.get('origo_metadata_preserve') == 'true':
+                        reason = 'operator_preserved'
+                    else:
+                        reason = ''
                 candidates.append(
                     Candidate(
                         run_id=record.dagster_run.run_id,
@@ -341,6 +464,7 @@ def scan_batch(
                         allocated_bytes=sum(inventory.values()),
                         artifacts=inventory,
                         reason=reason,
+                        action='archive' if archive_candidate else 'retire',
                     )
                 )
             journal.scan_cursor = int(row['id'])
@@ -367,6 +491,38 @@ def reclaim(
     storage = instance.event_log_storage
     if not isinstance(storage, OrigoSqliteEventLogStorage):
         raise TypeError('Retention requires current-state-preserving event storage.')
+    if candidate.action == 'archive':
+        records = instance.get_run_records(RunsFilter(run_ids=[candidate.run_id]), limit=1)
+        if not records or run_role(records[0].dagster_run) == 'projection':
+            raise RuntimeError('The retained source identity changed before compaction.')
+        candidate.revalidation_reason = ''
+        candidate.phase = 'deleting'
+        save_journal(journal_path, journal)
+        try:
+            released = storage.archive_run(candidate.run_id, deadline)
+        except MaintenanceDeadlineReached:
+            raise
+        except RunLockBusy as error:
+            candidate.revalidation_reason = 'source_in_use'
+            candidate.phase = 'planned'
+            save_journal(journal_path, journal)
+            print(
+                f'Source compaction deferred for {candidate.run_id}; retry next inventory: {error}',
+                flush=True,
+            )
+            return 0
+        except (OSError, sqlite3.DatabaseError, SQLAlchemyError, RuntimeError, ValueError) as error:
+            record_compaction_error(layout.events.parent, candidate.run_id, error, deadline)
+            candidate.revalidation_reason = 'source_archive_error'
+            candidate.phase = 'planned'
+            save_journal(journal_path, journal)
+            print(f'Source compaction failed for {candidate.run_id}; history retained.', flush=True)
+            traceback.print_exc(file=sys.stdout)
+            return 0
+        clear_compaction_error(layout.events.parent, candidate.run_id, deadline)
+        candidate.phase = 'reclaimed'
+        save_journal(journal_path, journal)
+        return released
     with run_lock(storage.writer_lock_path(), candidate.storage_id, config.lock_wait_seconds):
         run_id = candidate.run_id
         records = instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)
@@ -399,18 +555,29 @@ def reclaim(
         raise TypeError('Unsupported compute-log manager.')
     before = artifact_bytes(layout, run_id, deadline)
     logs.delete_logs(prefix=[run_id])
-    for path in artifacts(layout, run_id):
-        if time.monotonic() >= deadline:
-            raise MaintenanceDeadlineReached('Artifact reclamation exceeded maintenance deadline.')
-        if path.exists():
-            metadata = path.lstat()
-            if (
-                path.is_symlink()
-                or metadata.st_nlink != 1
-                or path.resolve().parent != layout.events.parent
-            ):
-                raise ValueError(f'Unsafe retired artifact: {path}')
-            path.unlink()
+    with (
+        transition_lock(layout.events.parent, run_id, deadline=deadline),
+        native_history_lock(
+            layout.events.parent,
+            run_id,
+            min(deadline, time.monotonic() + config.lock_wait_seconds),
+            exclusive=True,
+        ),
+    ):
+        for path in artifacts(layout, run_id):
+            if time.monotonic() >= deadline:
+                raise MaintenanceDeadlineReached(
+                    'Artifact reclamation exceeded maintenance deadline.'
+                )
+            if path.exists():
+                metadata = path.lstat()
+                if (
+                    path.is_symlink()
+                    or metadata.st_nlink != 1
+                    or path.resolve().parent != layout.events.parent
+                ):
+                    raise ValueError(f'Unsafe retired artifact: {path}')
+                path.unlink()
     reclaimed = max(0, before - artifact_bytes(layout, run_id, deadline))
     candidate.phase = 'reclaimed'
     save_journal(journal_path, journal)

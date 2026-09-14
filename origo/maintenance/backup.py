@@ -8,6 +8,7 @@ from typing import Literal
 from dagster import DagsterInstance, RunsFilter
 from pydantic import BaseModel
 
+from .archive import archive_path, read_image
 from .protocol import Journal, OperationalMetadataMaintenanceConfig, manifest_sha256
 from .run_storage import OrigoSqliteRunStorage
 from .sqlite import Layout, artifacts, connection
@@ -42,7 +43,10 @@ def verify_restored_backup(
         raise ValueError('The restored backup must not consume the production filesystem reserve.')
     with DagsterInstance.from_config(str(restored_home)) as restored:
         layout = Layout.from_instance(restored)
-        for path in (layout.runs, layout.events, layout.schedules, layout.compute):
+        restored_paths = [layout.runs, layout.events, layout.schedules, layout.compute]
+        if layout.artifact_root is not None:
+            restored_paths.append(layout.artifact_root)
+        for path in restored_paths:
             if not path.is_relative_to(restored_home):
                 raise ValueError(
                     'Restored Dagster configuration points outside the restored snapshot.'
@@ -51,7 +55,14 @@ def verify_restored_backup(
             raise TypeError('Restored instance must use the configured Origo run storage.')
         if restored.run_storage.get_run_storage_id() != journal.instance_id:
             raise ValueError('Restored backup belongs to a different Dagster instance.')
-        for path in (layout.runs, layout.events, layout.schedules):
+        shared_paths = [layout.runs, layout.events, layout.schedules]
+        packed = archive_path(layout.events.parent)
+        if packed.exists():
+            shared_paths.append(packed)
+        outputs = Path(restored.storage_directory()) / '.origo-outputs.sqlite'
+        if outputs.exists():
+            shared_paths.append(outputs)
+        for path in shared_paths:
             with connection(path, deadline, 1) as database:
                 if [tuple(row) for row in database.execute('PRAGMA quick_check')] != [('ok',)]:
                     raise RuntimeError(f'Restored metadata failed quick_check: {path.name}')
@@ -62,13 +73,19 @@ def verify_restored_backup(
             records = restored.get_run_records(RunsFilter(run_ids=[candidate.run_id]), limit=1)
             if not records or records[0].dagster_run.status.value != candidate.status:
                 raise RuntimeError(f'Restored run does not match the manifest: {candidate.run_id}')
-            if artifacts(production, candidate.run_id)[0].exists():
+            if (
+                artifacts(production, candidate.run_id)[0].exists()
+                or read_image(production.events.parent, candidate.run_id, deadline) is not None
+            ):
                 shard = artifacts(layout, candidate.run_id)[0]
-                with connection(shard, deadline, 1) as database:
-                    if [tuple(row) for row in database.execute('PRAGMA quick_check')] != [('ok',)]:
-                        raise RuntimeError(
-                            f'Restored run shard failed quick_check: {candidate.run_id}'
-                        )
+                if shard.exists():
+                    with connection(shard, deadline, 1) as database:
+                        if [tuple(row) for row in database.execute('PRAGMA quick_check')] != [
+                            ('ok',)
+                        ]:
+                            raise RuntimeError(
+                                f'Restored run shard failed quick_check: {candidate.run_id}'
+                            )
                 live_events = restored.get_records_for_run(candidate.run_id, limit=1).records
                 if not live_events:
                     raise RuntimeError(
@@ -102,8 +119,9 @@ def require_backup(
         raise RuntimeError(
             'Complete the bounded inventory before choosing the first-apply byte budget.'
         )
-    if config.metadata_budget_bytes < journal.retained_floor_bytes:
-        raise RuntimeError('The byte budget is below the measured retained-state floor.')
+    # An over-budget instance must still be allowed to reclaim history. The
+    # pre-compaction floor includes reusable shared SQLite pages; health fails
+    # until the actual post-maintenance footprint reaches the configured budget.
     if manifest_sha256(journal) != journal.manifest_sha256:
         raise RuntimeError('The dry-run manifest changed after it was approved.')
     payload = Path(config.backup_receipt).read_bytes()

@@ -1,3 +1,16 @@
+# v3.8.4
+- Defer source compaction when readers or writers hold its locks, without recording a false archive failure or blocking unrelated projection retirement.
+- Bound SQLite page reclamation by the maintenance work deadline so an interrupted pass still reports its checkpoint, capacity and health.
+- Allow parallel native run-history reads and event writes; source compaction retries while an active reader still needs the native shard.
+
+- Preserve source, mixed and unclassified run provenance; losslessly compact terminal source event databases and shared JSON payloads while keeping their Dagit history readable and late writes recoverable.
+- Pack small asset output values without changing their serialized bytes; retain normal Dagster input loading and expose the actual packed storage location in output metadata.
+- Bound recent failed-run resolution lookups before checking complete history, keeping broad partition tags from stalling cleanup.
+- Isolate source compaction failures, preserve their diagnostics across maintenance runs, and keep unrelated projection cleanup moving.
+- Keep resolved projection failures resolved after successor run histories expire by checking later materializations for every failed plan.
+- Retire settled projection histories after a one-minute shutdown grace (24 hours for resolved failures), preserving current asset/partition/check state and fresh execution dependencies.
+- Check Dagster physical storage against 10% of ClickHouse business data and a 13 GiB ceiling; schedule maintenance every 10 minutes, enable incremental SQLite reclamation after an explicit backed-up migration, and retain terminal scheduler ticks for one/seven days. ClickHouse diagnostics retain their separate 14-day policy.
+
 # v3.8.3
 
 - Scan metadata history in run-ID order and batch run, retry-reference and sensor-state reads with one read-only event connection per batch; preserve per-run live revalidation before reclamation.

@@ -731,3 +731,31 @@ def test_run_and_tag_deletion_roll_back_together(metadata_instance: DagsterInsta
         assert database.execute(
             'SELECT * FROM run_tags WHERE run_id=? ORDER BY id', (run_id,)
         ).fetchall() == before
+
+
+def test_projection_shutdown_grace_tracks_terminal_and_late_activity(
+    metadata_instance: DagsterInstance,
+) -> None:
+    import os
+
+    run_id = execute_archive(metadata_instance)
+    layout = Layout.from_instance(metadata_instance)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
+    assert record.end_time is not None
+    ended = record.end_time
+    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    assert policy.projection_success_minutes == 1
+    assert policy.projection_failure_hours == 24
+    assert retention.protection(
+        metadata_instance, layout, record, policy, ended + 59, time.monotonic() + 10
+    ) == 'retention_window'
+    assert retention.protection(
+        metadata_instance, layout, record, policy, ended + 61, time.monotonic() + 10
+    ) == ''
+    os.utime(layout.shard(run_id), (ended + 70, ended + 70))
+    assert retention.protection(
+        metadata_instance, layout, record, policy, ended + 100, time.monotonic() + 10
+    ) == 'recent_artifact_activity'
+    assert retention.protection(
+        metadata_instance, layout, record, policy, ended + 131, time.monotonic() + 10
+    ) == ''

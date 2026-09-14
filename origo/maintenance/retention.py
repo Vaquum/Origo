@@ -126,15 +126,16 @@ def protection(
     role = run_role(run)
     if role != 'projection':
         return 'source_provenance' if role == 'source' else 'unclassified_provenance'
-    hours = (
-        config.projection_success_hours
+    retention_seconds = (
+        config.projection_success_minutes * 60
         if run.status == DagsterRunStatus.SUCCESS
-        else config.projection_failure_hours
+        else config.projection_failure_hours * 3600
     )
-    if (record.end_time or record.update_timestamp.timestamp()) >= now - hours * 3600:
+    if (record.end_time or record.update_timestamp.timestamp()) >= now - retention_seconds:
         return 'retention_window'
+    activity_grace = min(3600, retention_seconds)
     if any(
-        path.exists() and path.stat().st_mtime > now - 3600
+        path.exists() and path.stat().st_mtime > now - activity_grace
         for path in artifacts(layout, run.run_id)
     ):
         return 'recent_artifact_activity'
@@ -345,7 +346,7 @@ def scan_batch(
                 journal.scan_cursor,
                 journal.inventory_upper_id,
                 journal.inventory_started_at
-                - min(config.projection_success_hours, config.source_archive_after_hours) * 3600,
+                - min(config.projection_success_minutes * 60, config.source_archive_after_hours * 3600),
                 journal.inventory_started_at
                 - min(config.projection_failure_hours, config.source_archive_after_hours) * 3600,
                 config.max_runs_per_batch,

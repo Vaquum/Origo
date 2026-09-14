@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class OperationalMetadataMaintenanceConfig(Config):
     dry_run: bool = True
-    projection_success_hours: int = Field(default=1, ge=1)
+    projection_success_minutes: int = Field(default=1, ge=1)
     projection_failure_hours: int = Field(default=24, ge=1)
     source_archive_after_hours: int = Field(default=1, ge=1)
     diagnostic_retention_days: int = Field(default=14, ge=14, le=14)
@@ -85,7 +85,7 @@ class Journal(BaseModel):
 
 
 def policy_sha256(config: OperationalMetadataMaintenanceConfig) -> str:
-    value = f'2:{config.projection_success_hours}:{config.projection_failure_hours}:{config.source_archive_after_hours}:{config.diagnostic_retention_days}'
+    value = f'3:{config.projection_success_minutes}:{config.projection_failure_hours}:{config.source_archive_after_hours}:{config.diagnostic_retention_days}'
     return hashlib.sha256(value.encode()).hexdigest()
 
 

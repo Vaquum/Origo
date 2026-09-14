@@ -42,7 +42,7 @@ ARCHIVES = ROOT / 'tests/fixtures/binance/spot/daily/trades/revisioned'
 PARTITIONS = StaticPartitionsDefinition(['2017-08-17', '2020-01-01'])
 POLICY = OperationalMetadataMaintenanceConfig(
     metadata_budget_bytes=600 * 1024**3,
-    projection_success_hours=30 * 24,
+    projection_success_minutes=30 * 24 * 60,
     projection_failure_hours=90 * 24,
     source_archive_after_hours=90 * 24,
 )
@@ -1001,7 +1001,6 @@ def test_restore_verifies_real_instance_and_rejects_missing_evidence(
     import yaml
 
     from origo.maintenance import backup
-
     from origo.sources.registry import SOURCE_REGISTRY
 
     tags = {'origo_source_key': SOURCE_REGISTRY[0].key} if compact_source else None
@@ -1439,7 +1438,7 @@ def test_empty_inventory_keeps_discovering_eligible_runs(
     assert journal.manifest[0].run_id == run_id
     assert journal.inventory_started_at == future
     # A changed retention policy invalidates the old inventory and its approval.
-    changed_policy = POLICY.model_copy(update={'projection_success_hours': 60 * 24})
+    changed_policy = POLICY.model_copy(update={'projection_success_minutes': 60 * 24 * 60})
     changed = worker.maintain(metadata_instance, changed_policy)
     journal = Journal.model_validate_json(Path(changed.journal_path).read_bytes())
     assert changed.inventory_complete and changed.report.candidates == 0

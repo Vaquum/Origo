@@ -142,7 +142,7 @@ history. Images above 64 MiB remain unmodified and appear as an inventory exclus
 Dagster schema upgrades migrate one packed database at a time during an outage.
 
 Explicit projection jobs include bars, derived depth tables, Arrow and published
-files. Successful histories are eligible after one hour; resolved failed/canceled
+files. Successful histories are eligible after a one-minute shutdown grace; resolved failed/canceled
 histories after 24 hours. Current asset facts keep their original IDs, tags, input
 versions and partitions after a projection run expires. Active runs, active/unknown
 backfills, retries, current checks, unresolved failures and unconsumed sensor events
@@ -211,7 +211,7 @@ ops:
   maintain_operational_metadata:
     config:
       dry_run: true
-      projection_success_hours: 1
+      projection_success_minutes: 1
       projection_failure_hours: 24
       source_archive_after_hours: 1
       diagnostic_retention_days: 14

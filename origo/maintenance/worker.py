@@ -281,7 +281,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                     "AND ((status='SUCCESS' AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?) OR (status IN ('FAILURE','CANCELED') AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?))",
                     (
                         *projection_names,
-                        time.time() - config.projection_success_hours * 3600,
+                        time.time() - config.projection_success_minutes * 60,
                         time.time() - config.projection_failure_hours * 3600,
                     ),
                 ).fetchone()[0]

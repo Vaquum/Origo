@@ -38,6 +38,17 @@ def transition_lock(base: Path, run_id: str, *, deadline: float) -> Iterator[Non
         yield
 
 
+@contextmanager
+def native_history_lock(
+    base: Path, run_id: str, deadline: float, *, exclusive: bool = False
+) -> Iterator[None]:
+    # Native readers and event writers share access; only unlinking is exclusive.
+    identity = int.from_bytes(hashlib.sha256(run_id.encode()).digest()[:8], 'big') % (2**63)
+    path = archive_path(base).parent / 'native-readers'
+    with run_lock(path, identity, max(0, deadline - time.monotonic()), shared=not exclusive):
+        yield
+
+
 def initialize_archive(base: Path) -> Path:
     path = archive_path(base)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +175,9 @@ def restore_for_write(base: Path, shard: Path, run_id: str, deadline: float) -> 
         if auxiliary.exists():
             auxiliary.unlink()
     temporary.replace(shard)
+    with connection(shard, deadline, 1, write=True) as database:
+        if database.execute('PRAGMA journal_mode=WAL').fetchone()[0] != 'wal':
+            raise RuntimeError('Restored event history could not enable concurrent WAL access.')
     sync_directory(base)
     remove_image(base, run_id, deadline)
 

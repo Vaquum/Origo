@@ -38,7 +38,9 @@ from .archive import (
     archive_path,
     clear_compaction_error,
     failed_compactions,
+    native_history_lock,
     record_compaction_error,
+    transition_lock,
 )
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
@@ -218,7 +220,11 @@ def protection(
             return 'oversized_reference_set'
         resolved_plans: set[int] = set()
         if run.status != DagsterRunStatus.SUCCESS:
-            plans = [row for row in events if row['dagster_event_type'] == 'ASSET_MATERIALIZATION_PLANNED']
+            plans = [
+                row
+                for row in events
+                if row['dagster_event_type'] == 'ASSET_MATERIALIZATION_PLANNED'
+            ]
             ended = datetime.fromtimestamp(
                 record.end_time or record.update_timestamp.timestamp(), UTC
             ).replace(tzinfo=None)
@@ -367,7 +373,9 @@ def scan_batch(
                 journal.scan_cursor,
                 journal.inventory_upper_id,
                 journal.inventory_started_at
-                - min(config.projection_success_minutes * 60, config.source_archive_after_hours * 3600),
+                - min(
+                    config.projection_success_minutes * 60, config.source_archive_after_hours * 3600
+                ),
                 journal.inventory_started_at
                 - min(config.projection_failure_hours, config.source_archive_after_hours) * 3600,
                 config.max_runs_per_batch,
@@ -538,18 +546,29 @@ def reclaim(
         raise TypeError('Unsupported compute-log manager.')
     before = artifact_bytes(layout, run_id, deadline)
     logs.delete_logs(prefix=[run_id])
-    for path in artifacts(layout, run_id):
-        if time.monotonic() >= deadline:
-            raise MaintenanceDeadlineReached('Artifact reclamation exceeded maintenance deadline.')
-        if path.exists():
-            metadata = path.lstat()
-            if (
-                path.is_symlink()
-                or metadata.st_nlink != 1
-                or path.resolve().parent != layout.events.parent
-            ):
-                raise ValueError(f'Unsafe retired artifact: {path}')
-            path.unlink()
+    with (
+        transition_lock(layout.events.parent, run_id, deadline=deadline),
+        native_history_lock(
+            layout.events.parent,
+            run_id,
+            min(deadline, time.monotonic() + config.lock_wait_seconds),
+            exclusive=True,
+        ),
+    ):
+        for path in artifacts(layout, run_id):
+            if time.monotonic() >= deadline:
+                raise MaintenanceDeadlineReached(
+                    'Artifact reclamation exceeded maintenance deadline.'
+                )
+            if path.exists():
+                metadata = path.lstat()
+                if (
+                    path.is_symlink()
+                    or metadata.st_nlink != 1
+                    or path.resolve().parent != layout.events.parent
+                ):
+                    raise ValueError(f'Unsafe retired artifact: {path}')
+                path.unlink()
     reclaimed = max(0, before - artifact_bytes(layout, run_id, deadline))
     candidate.phase = 'reclaimed'
     save_journal(journal_path, journal)

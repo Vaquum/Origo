@@ -210,6 +210,34 @@ def test_projection_retirement_preserves_current_state(
     assert metadata_instance.get_status_by_partition(key, ['2017-08-17'], PARTITIONS) == state
 
 
+
+def test_projection_unlink_waits_for_existing_reader(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance = metadata_instance
+    run_id = execute_archive(instance)
+    layout, journal, candidate = planned(instance, run_id)
+    before = instance.get_records_for_run(run_id).records
+    facts = instance.fetch_materializations(AssetKey('metadata_proof_archive'), limit=1)
+    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3, lock_wait_seconds=.1)
+    future = time.time() + 2 * 3600
+    monkeypatch.setattr(retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic))
+    journal_path = layout.runs.parent / 'reader-retirement.json'
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    with storage.run_connection(run_id) as reader:
+        result = reader.exec_driver_sql('SELECT event FROM event_logs ORDER BY id')
+        first = result.fetchone()
+        assert first is not None
+        with pytest.raises(TimeoutError, match='active reader'):
+            retention.reclaim(instance, layout, candidate, journal, journal_path, policy, time.monotonic() + 10)
+        assert candidate.phase == 'logs' and layout.shard(run_id).exists()
+        assert len(result.fetchall()) + 1 == len(before)
+    assert retention.reclaim(instance, layout, candidate, journal, journal_path, policy, time.monotonic() + 10) > 0
+    assert not layout.shard(run_id).exists()
+    assert instance.fetch_materializations(AssetKey('metadata_proof_archive'), limit=1) == facts
+
+
 def test_shared_compaction_releases_physical_space(
     metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -555,6 +583,107 @@ def test_archiving_one_run_does_not_block_another_run(
             release.set()
         assert archive_future.result(timeout=5) > 0
     assert metadata_instance.get_records_for_run(first).records
+
+
+@pytest.mark.parametrize('separate_storage', [False, True])
+@pytest.mark.parametrize('rehydrated', [False, True])
+def test_native_readers_do_not_block_logging_or_allow_unlink(
+    metadata_instance: DagsterInstance, separate_storage: bool, rehydrated: bool
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    instance = metadata_instance
+    run_id = _source(instance)
+    run = instance.get_run_by_id(run_id)
+    assert run is not None
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    layout = Layout.from_instance(instance)
+    if rehydrated:
+        storage.archive_run(run_id, time.monotonic() + 10)
+        instance.report_engine_event('Restore this source history before concurrent access.', dagster_run=run)
+    with sqlite3.connect(layout.shard(run_id)) as database:
+        assert database.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+    before = instance.get_records_for_run(run_id).records
+    entered = [threading.Event() for _ in range(3)]
+    release = [threading.Event() for _ in range(3)]
+
+    def read_history(index: int) -> int:
+        reader = (
+            OrigoSqliteEventLogStorage(base_dir=str(layout.events.parent))
+            if separate_storage
+            else storage
+        )
+
+        def hold(value: str) -> str:
+            entered[index].set()
+            if not release[index].wait(15):
+                raise TimeoutError('Test did not release the history query.')
+            return value
+
+        try:
+            with reader.run_connection(run_id) as database:
+                native = database.connection.driver_connection
+                assert isinstance(native, sqlite3.Connection)
+                native.create_function('hold_history', 1, hold)
+                return len(
+                    database.exec_driver_sql(
+                        'SELECT hold_history(event) FROM event_logs'
+                    ).fetchall()
+                )
+        finally:
+            if separate_storage:
+                reader.dispose()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        readers = [executor.submit(read_history, index) for index in range(3)]
+        try:
+            assert all(event.wait(3) for event in entered), 'History readers must run concurrently.'
+            write = executor.submit(
+                instance.report_engine_event,
+                'Source logging continues while its history is being read.',
+                dagster_run=run,
+            )
+            write.result(timeout=2)
+            with pytest.raises(TimeoutError, match='active reader'):
+                storage.archive_run(run_id, time.monotonic() + 10)
+            assert layout.shard(run_id).exists()
+            assert archive.read_image(layout.events.parent, run_id, time.monotonic() + 5) is None
+            release[0].set()
+            assert readers[0].result(timeout=2) == len(before)
+            # Closing one reader must not release another reader's lock, in
+            # this process or another Dagster process.
+            import subprocess
+            import sys
+
+            other_process = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    'import sys,time; from pathlib import Path; '
+                    'from origo.maintenance.archive import native_history_lock; '
+                    'lock = native_history_lock(Path(sys.argv[1]), sys.argv[2], '
+                    'time.monotonic() + .1, exclusive=True); lock.__enter__()',
+                    str(layout.events.parent),
+                    run_id,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            assert other_process.returncode != 0 and 'TimeoutError' in other_process.stderr
+            with pytest.raises(TimeoutError, match='active reader'):
+                storage.archive_run(run_id, time.monotonic() + 10)
+        finally:
+            for event in release:
+                event.set()
+        assert all(reader.result(timeout=2) == len(before) for reader in readers)
+    after = instance.get_records_for_run(run_id).records
+    assert after[: len(before)] == before and len(after) == len(before) + 1
+    assert storage.archive_run(run_id, time.monotonic() + 10) > 0
+    assert not layout.shard(run_id).exists()
+    assert instance.get_records_for_run(run_id).records == after
 
 
 def test_capacity_does_not_count_the_application_tree(tmp_path: Path) -> None:

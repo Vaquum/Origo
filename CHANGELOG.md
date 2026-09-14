@@ -1,4 +1,5 @@
 # v3.8.4
+- Allow parallel native run-history reads and event writes; source compaction retries while an active reader still needs the native shard.
 
 - Preserve source, mixed and unclassified run provenance; losslessly compact terminal source event databases and shared JSON payloads while keeping their Dagit history readable and late writes recoverable.
 - Pack small asset output values without changing their serialized bytes; retain normal Dagster input loading and expose the actual packed storage location in output metadata.

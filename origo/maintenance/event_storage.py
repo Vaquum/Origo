@@ -8,7 +8,7 @@ facts remain available through the same Dagster APIs until superseded.
 import sqlite3
 import time
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Self
 from uuid import UUID
@@ -19,6 +19,7 @@ from dagster._core.instance import RUNLESS_RUN_ID
 from dagster._core.storage.event_log.sqlite import sqlite_event_log as upstream
 from dagster._core.storage.event_log.sqlite.sqlite_event_log import SqliteEventLogStorage
 from dagster._core.storage.sql import get_alembic_config, run_alembic_upgrade
+from dagster._core.storage.sqlite import SQLITE_BUSY_TIMEOUT_SECONDS
 from dagster._core.storage.sqlite_storage import SqliteStorageConfig
 from dagster._serdes import ConfigurableClassData, deserialize_value
 from sqlalchemy import Connection, create_engine
@@ -26,6 +27,7 @@ from sqlalchemy.pool import NullPool
 
 from .archive import (
     archive_path,
+    native_history_lock,
     read_image,
     remove_image,
     restore_for_write,
@@ -95,22 +97,34 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
             raise ValueError('A run ID is required for an event connection.')
         base = Path(self.path_for_shard('index')).parent
         deadline = time.monotonic() + 5
-        with transition_lock(base, run_id, deadline=deadline):
-            payload = read_image(base, run_id, deadline)
-            if payload is None:
-                with super().run_connection(run_id) as database:
-                    yield database
-                return
-        memory = sqlite3.connect(':memory:')
-        memory.deserialize(payload)
-        memory.execute('PRAGMA query_only=ON')
-        engine = create_engine('sqlite://', creator=lambda: memory, poolclass=NullPool)
-        try:
-            with engine.connect() as database:
-                yield database
-        finally:
-            engine.dispose()
-            memory.close()
+        with ExitStack() as resources:
+            with transition_lock(base, run_id, deadline=deadline):
+                payload = read_image(base, run_id, deadline)
+                if payload is None:
+                    engine = create_engine(
+                        self.conn_string_for_shard(run_id),
+                        poolclass=NullPool,
+                        connect_args={'timeout': SQLITE_BUSY_TIMEOUT_SECONDS},
+                    )
+                    resources.callback(engine.dispose)
+                    # Upstream holds _db_lock for the whole query. Only schema
+                    # initialization needs that mutex; readers must not serialize writes.
+                    with self._db_lock:
+                        if run_id not in self._initialized_dbs:
+                            self._initdb(engine)
+                            self._initialized_dbs.add(run_id)
+                    resources.enter_context(native_history_lock(base, run_id, deadline))
+                    database = resources.enter_context(engine.connect())
+                    resources.enter_context(database.begin())
+                else:
+                    memory = sqlite3.connect(':memory:')
+                    resources.callback(memory.close)
+                    memory.deserialize(payload)
+                    memory.execute('PRAGMA query_only=ON')
+                    engine = create_engine('sqlite://', creator=lambda: memory, poolclass=NullPool)
+                    resources.callback(engine.dispose)
+                    database = resources.enter_context(engine.connect())
+            yield database
 
     def archive_run(self, run_id: str, deadline: float) -> int:
         if str(UUID(run_id)) != run_id:
@@ -128,11 +142,17 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
                 DagsterRunStatus.CANCELED,
             ):
                 raise RuntimeError('Source compaction requires a retained terminal run.')
-            with transition_lock(base, run_id, deadline=deadline):
+            with transition_lock(base, run_id, deadline=deadline), ExitStack() as readers:
                 paths = [Path(str(shard) + suffix) for suffix in ('', '-wal', '-shm')]
                 for path in paths:
                     if path.exists() and (path.is_symlink() or path.stat().st_nlink != 1):
                         raise ValueError(f'Unsafe source event shard: {path}')
+                if shard.exists():
+                    readers.enter_context(
+                        native_history_lock(
+                            base, run_id, min(deadline, time.monotonic() + 1), exclusive=True
+                        )
+                    )
                 archive_files = [
                     Path(str(archive_path(base)) + suffix) for suffix in ('', '-wal', '-shm')
                 ]

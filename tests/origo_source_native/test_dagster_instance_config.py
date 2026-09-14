@@ -126,6 +126,12 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = yaml.safe_load((REPO_ROOT / name).read_text())
         for worker in ('dagit', 'dagster'):
+            environment = compose['services'][worker]['environment']
+            assert 'DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager' in environment
+            assert 'DAGSTER_DEFAULT_IO_MANAGER_ATTRIBUTE=packed_io_manager' in environment
+            assert not any(
+                'DAGSTER_DEFAULT_IO_MANAGER_SILENCE_FAILURES' in value for value in environment
+            )
             mounts = compose['services'][worker]['volumes']
             assert 'source-locks:/opt/origo/locks' in mounts
             assert 'clickhouse-data:/opt/origo/clickhouse-data:ro' in mounts
@@ -134,7 +140,15 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
 
 def test_sensor_tick_history_has_bounded_retention() -> None:
     assert _validated_instance_config()['retention']['sensor']['purge_after_days'] == {
-        'skipped': 7,
-        'success': 7,
-        'failure': 30,
+        'skipped': 1,
+        'success': 1,
+        'failure': 7,
+    }
+
+
+def test_schedule_tick_history_has_bounded_retention() -> None:
+    assert _validated_instance_config()['retention']['schedule']['purge_after_days'] == {
+        'skipped': 1,
+        'success': 1,
+        'failure': 7,
     }

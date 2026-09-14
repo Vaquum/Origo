@@ -1,6 +1,7 @@
 """Keep repository membership correlated with a selected job on Dagster 1.13.21."""
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import Self, cast
 
 from dagster import RunsFilter
@@ -9,7 +10,10 @@ from dagster._core.storage.runs.schema import RunsTable, RunTagsTable
 from dagster._core.storage.runs.sqlite.sqlite_run_storage import SqliteRunStorage
 from dagster._core.storage.sqlite_storage import SqliteStorageConfig
 from dagster._serdes import ConfigurableClassData
-from sqlalchemy import Select, literal_column, select
+from sqlalchemy import Connection, Select, delete, literal_column, select
+
+from . import roles
+from .codec import compress_run_json, json_rows
 
 
 class OrigoSqliteRunStorage(SqliteRunStorage):
@@ -18,6 +22,46 @@ class OrigoSqliteRunStorage(SqliteRunStorage):
         cls, inst_data: ConfigurableClassData | None, config_value: SqliteStorageConfig
     ) -> Self:
         return cls.from_local(inst_data=inst_data, **config_value)
+
+    @contextmanager
+    def connect(self) -> Iterator[Connection]:
+        with super().connect() as database, json_rows(database):
+            yield database
+
+    def compress_run(self, run_id: str) -> None:
+        with self.connect() as database:
+            compress_run_json(database, 'runs', run_id)
+
+    def delete_run(self, run_id: str) -> None:
+        source_tag = (
+            select(1)
+            .select_from(RunTagsTable)
+            .where(
+                RunTagsTable.c.run_id == RunsTable.c.run_id,
+                RunTagsTable.c.key == 'origo_source_key',
+                RunTagsTable.c.value != '',
+            )
+            .correlate(RunsTable)
+        )
+        # Classification is part of the DELETE itself: a concurrent source tag
+        # cannot turn a protected run into a disposable projection after a read.
+        query = delete(RunsTable).where(
+            RunsTable.c.run_id == run_id,
+            RunsTable.c.pipeline_name.in_(roles.PROJECTION_JOBS - roles.SOURCE_JOBS),
+            ~source_tag.exists(),
+        )
+        with self.connect() as database:
+            database.execute(query)
+            if (
+                database.execute(
+                    select(1).select_from(RunsTable).where(RunsTable.c.run_id == run_id)
+                ).first()
+                is not None
+            ):
+                raise RuntimeError('Source and unclassified runs cannot be retired.')
+            # SQLite does not enable foreign-key cascades on Dagster connections.
+            # Remove tags in the same transaction, after the source guard passed.
+            database.execute(delete(RunTagsTable).where(RunTagsTable.c.run_id == run_id))
 
     def _runs_query(
         self,

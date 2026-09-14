@@ -16,8 +16,11 @@ from pydantic import BaseModel, Field
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
+from . import roles
+from .archive import archive_path, failed_compaction_count, failed_compactions
 from .backup import require_backup, verify_restored_backup
 from .clickhouse import diagnostic_allocated_bytes, maintain_diagnostics
+from .compaction import incremental_compaction
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import (
     Journal,
@@ -46,6 +49,9 @@ class Outcome(BaseModel):
     manifest_sha256: str
     shared_sqlite: dict[str, dict[str, int]] = Field(default_factory=dict)
     query_p95_seconds: dict[str, float] = Field(default_factory=dict)
+    dagster_allocated_bytes: int = 0
+    clickhouse_business_bytes: int = 0
+    dagster_to_business_fraction: float | None = None
     diagnostic_active_bytes: int = 0
     diagnostic_inactive_bytes: int = 0
     diagnostic_expired_part_bytes: int = 0
@@ -56,16 +62,23 @@ class Outcome(BaseModel):
     diagnostic_allocated_bytes: int = 0
     diagnostic_net_reclaimed_bytes: int = 0
     filesystem_free_bytes: int = 0
+    source_archive_error_count: int = 0
+    source_archive_errors: dict[str, str] = Field(default_factory=dict)
     violations: list[str] = Field(default_factory=lambda: list[str]())
 
 
 def directory_bytes(layout: Layout, deadline: float) -> int:
     paths = {layout.runs.parent, layout.events.parent, layout.schedules.parent, layout.compute}
+    if layout.artifact_root is not None:
+        paths.add(layout.artifact_root)
     roots = sorted(
         path
         for path in paths
         if not any(path != other and path.is_relative_to(other) for other in paths)
     )
+    if layout.artifact_root is not None and not layout.artifact_root.exists():
+        paths.discard(layout.artifact_root)
+        roots = [path for path in roots if path != layout.artifact_root]
     for path in paths:
         if not stat.S_ISDIR(path.lstat().st_mode):
             raise NotADirectoryError(f'Configured storage root is not a directory: {path}')
@@ -152,6 +165,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         print(f'Dagster allocated bytes before maintenance: {before_bytes}', flush=True)
         counts: Counter[str] = Counter()
         resumed_candidates = 0
+        retirement_candidates = 0
         resumed_completions = 0
         inventory_held = (
             config.dry_run
@@ -188,6 +202,9 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                     batch = journal.manifest
                 report.scanned += len(batch)
                 report.candidates += sum(not row.exclusion for row in batch)
+                retirement_candidates += sum(
+                    not row.exclusion and row.action == 'retire' for row in batch
+                )
                 report.protected += sum(bool(row.exclusion) for row in batch)
                 counts.update(row.exclusion for row in batch if row.exclusion)
                 print(
@@ -214,14 +231,18 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                             work_deadline,
                         )
                         if not candidate.exclusion:
-                            report.deleted += 1
-                            resumed_completions += int(already_retired)
+                            if candidate.action == 'archive':
+                                report.archived += 1
+                            else:
+                                report.deleted += 1
+                                resumed_completions += int(already_retired)
                         else:
                             report.protected += 1
                             report.candidates -= 1
+                            retirement_candidates -= int(candidate.action == 'retire')
                             counts[candidate.exclusion] += 1
                     journal.first_apply_completed = (
-                        journal.first_apply_completed or report.deleted > 0
+                        journal.first_apply_completed or report.deleted + report.archived > 0
                     )
                     journal.state_cursor, scanned, compacted = (
                         instance.event_log_storage.compact_retired_state(
@@ -241,25 +262,66 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                     break
         except MaintenanceDeadlineReached as error:
             journal = Journal.model_validate_json(journal_path.read_bytes())
-            journal.first_apply_completed = journal.first_apply_completed or report.deleted > 0
+            journal.first_apply_completed = (
+                journal.first_apply_completed or report.deleted + report.archived > 0
+            )
             print(f'Maintenance work window exhausted; reporting checkpoint: {error}', flush=True)
         report.exclusions = dict(counts)
+        archive_errors = failed_compactions(layout.events.parent, deadline)
+        archive_error_count = failed_compaction_count(layout.events.parent, deadline)
+        if archive_error_count:
+            violations.append(f'source_archive_failures:{archive_error_count}')
         with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+            projection_names = sorted(roles.PROJECTION_JOBS - roles.SOURCE_JOBS)
+            job_placeholders = ','.join('?' for _ in projection_names)
             report.backlog_runs = int(
                 database.execute(
-                    "SELECT count(*) FROM runs WHERE (status='SUCCESS' AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?) OR (status IN ('FAILURE','CANCELED') AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?)",
+                    f'SELECT count(*) FROM runs WHERE pipeline_name IN ({job_placeholders}) '
+                    "AND NOT EXISTS (SELECT 1 FROM run_tags t WHERE t.run_id=runs.run_id AND t.key='origo_source_key' AND length(t.value)>0) "
+                    "AND ((status='SUCCESS' AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?) OR (status IN ('FAILURE','CANCELED') AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?))",
                     (
-                        time.time() - config.success_retention_days * 86400,
-                        time.time() - config.failure_retention_days * 86400,
+                        *projection_names,
+                        time.time() - config.projection_success_minutes * 60,
+                        time.time() - config.projection_failure_hours * 3600,
                     ),
                 ).fetchone()[0]
             )
+        shared_paths = [layout.runs, layout.events, layout.schedules]
+        packed = archive_path(layout.events.parent)
+        if packed.exists():
+            shared_paths.append(packed)
+        outputs = Path(instance.storage_directory()) / '.origo-outputs.sqlite'
+        if outputs.exists():
+            shared_paths.append(outputs)
+        if not config.dry_run:
+            for path in shared_paths:
+                with connection(path, deadline, config.lock_wait_seconds) as database:
+                    initialized = database.execute('PRAGMA auto_vacuum').fetchone()[0] == 2
+                if not initialized:
+                    violations.append(f'sqlite_compaction_not_initialized:{path.name}')
+                elif time.monotonic() < work_deadline:
+                    try:
+                        report.reclaimed_bytes += incremental_compaction(
+                            path, work_deadline, config.lock_wait_seconds
+                        )
+                    except MaintenanceDeadlineReached as error:
+                        print(
+                            f'SQLite page reclamation paused; reporting checkpoint: {error}',
+                            flush=True,
+                        )
         shared = {
             path.name: shared_bytes(path, deadline, config.lock_wait_seconds)
-            for path in (layout.runs, layout.events, layout.schedules)
+            for path in shared_paths
         }
-        client = make_clickhouse_client(get_clickhouse_settings())
+        settings = get_clickhouse_settings()
+        client = make_clickhouse_client(settings)
         try:
+            business_rows = client.execute(
+                'SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND database=%(database)s',
+                {'database': settings.database},
+                settings={'max_execution_time': 5, 'max_threads': 1},
+            )
+            business_bytes = int(str(business_rows[0][0]))
             clickhouse_root = Path(
                 os.environ.get('ORIGO_CLICKHOUSE_DATA_ROOT', '/opt/origo/clickhouse-data')
             )
@@ -278,19 +340,17 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             and journal.inventory_complete
             and (not inventory_held or journal.retained_floor_bytes == 0)
         ):
-            journal.retained_floor_bytes = max(
-                0, after_bytes - journal.inventory_eligible_bytes
-            ) + max(0, diagnostic_after - diagnostics.entirely_expired_bytes)
+            journal.retained_floor_bytes = max(0, after_bytes - journal.inventory_eligible_bytes)
             print(
                 f'Inventory complete: runs={journal.inventory_scanned} conservative_retained_floor_bytes={journal.retained_floor_bytes}',
                 flush=True,
             )
         violations.extend(f'diagnostic_ttl_drift:{table}' for table in diagnostics.drift)
         violations.extend(diagnostics.errors)
-        if report.allocated_bytes > config.metadata_budget_bytes:
-            violations.append(
-                f'metadata_budget:{report.allocated_bytes}>{config.metadata_budget_bytes}'
-            )
+        if after_bytes * 10 >= business_bytes:
+            violations.append(f'metadata_business_fraction:{after_bytes}/{business_bytes}>=0.1')
+        if after_bytes > config.metadata_budget_bytes:
+            violations.append(f'metadata_budget:{after_bytes}>{config.metadata_budget_bytes}')
         report.duration_seconds = time.monotonic() - started
         report.active_cleanup_runs_per_second = report.deleted / max(report.duration_seconds, 0.001)
         previous = next(
@@ -306,7 +366,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             report.cleanup_runs_per_second = report.deleted / interval
             if (
                 not config.dry_run
-                and report.candidates > resumed_candidates
+                and retirement_candidates > resumed_candidates
                 and report.backlog_runs >= previous.backlog_runs > 0
             ):
                 violations.append('retention_backlog_not_decreasing')
@@ -326,6 +386,9 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             retained_floor_bytes=journal.retained_floor_bytes,
             inventory_complete=journal.inventory_complete,
             last_success_at=journal.last_success_at,
+            dagster_allocated_bytes=after_bytes,
+            clickhouse_business_bytes=business_bytes,
+            dagster_to_business_fraction=after_bytes / business_bytes if business_bytes else None,
             diagnostic_active_bytes=diagnostics.active_bytes,
             diagnostic_inactive_bytes=diagnostics.inactive_bytes,
             diagnostic_expired_part_bytes=diagnostics.entirely_expired_bytes,
@@ -334,6 +397,8 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             diagnostic_net_reclaimed_bytes=max(0, diagnostic_before - diagnostic_after),
             filesystem_free_bytes=os.statvfs(layout.runs).f_bavail
             * os.statvfs(layout.runs).f_frsize,
+            source_archive_error_count=archive_error_count,
+            source_archive_errors=archive_errors,
             violations=violations,
         )
 

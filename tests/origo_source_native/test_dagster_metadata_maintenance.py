@@ -1475,7 +1475,14 @@ def test_allocated_measurement_survives_disappearing_entries(
     monkeypatch.setattr(Path, 'lstat', remove_before_stat)
     measured = directory_bytes(layout, time.monotonic() + 15)
     assert not target.exists()
-    paths = {layout.runs.parent, layout.events.parent, layout.schedules.parent, layout.compute}
+    assert layout.artifact_root is not None
+    paths = {
+        layout.runs.parent,
+        layout.events.parent,
+        layout.schedules.parent,
+        layout.compute,
+        layout.artifact_root,
+    }
     roots = sorted(
         path
         for path in paths

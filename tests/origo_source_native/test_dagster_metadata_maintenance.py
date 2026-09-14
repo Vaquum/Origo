@@ -366,7 +366,7 @@ def test_maintenance_job_schedule_and_deploy() -> None:
 
     job = defs.resolve_job_def('maintain_operational_metadata_job')
     assert job.name == operational_metadata_maintenance_schedule.job_name
-    assert operational_metadata_maintenance_schedule.cron_schedule == '*/15 * * * *'
+    assert operational_metadata_maintenance_schedule.cron_schedule == '*/10 * * * *'
     assert operational_metadata_maintenance_schedule.default_status.value == 'RUNNING'
     workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert 'dagster job launch -j maintain_operational_metadata_job' in workflow
@@ -563,6 +563,15 @@ def diagnostic_server(
                         logs.stderr[-2000:] + error_path.read_text()[-6000:]
                     ) from error
                 time.sleep(0.2)
+        # Every isolated test gets the same genuine business-data denominator.
+        client.execute('CREATE DATABASE IF NOT EXISTS origo')
+        client.execute(
+            'CREATE TABLE origo.retention_business (trade_id UInt64,price Float64) ENGINE=MergeTree ORDER BY trade_id'
+        )
+        first = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.csv').read_text().splitlines()[0].split(',')
+        client.execute(
+            'INSERT INTO origo.retention_business VALUES', [(int(first[0]), float(first[1]))]
+        )
         yield name, settings, data
     finally:
         client.disconnect()
@@ -647,14 +656,7 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
     client.execute(
         'INSERT INTO system.metric_log_286 SELECT hostname,event_date,event_time,CurrentMetric_Query FROM system.metric_log ORDER BY event_date DESC,event_time DESC LIMIT 1'
     )
-    client.execute('CREATE DATABASE IF NOT EXISTS origo')
-    client.execute(
-        'CREATE TABLE origo.retention_business (trade_id UInt64,price Float64) ENGINE=MergeTree ORDER BY trade_id'
-    )
     first = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.csv').read_text().splitlines()[0].split(',')
-    client.execute(
-        'INSERT INTO origo.retention_business VALUES', [(int(first[0]), float(first[1]))]
-    )
     client.execute(
         'ALTER TABLE system.metric_log_286 MODIFY SETTING old_parts_lifetime=0, cleanup_delay_period=1, cleanup_delay_period_random_add=0'
     )

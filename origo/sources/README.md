@@ -113,7 +113,7 @@ CI success, silence, or a workaround is not approval to change the contract.
 ## Operational metadata maintenance
 
 `maintain_operational_metadata_job` is the Dagit entry point. The
-`operational_metadata_maintenance_schedule` runs every 15 minutes; deployment launches
+`operational_metadata_maintenance_schedule` runs every 10 minutes; deployment launches
 this same job through the configured project workspace. Deployments start in inspection mode. The configured SQLite adapters
 fix the Jobs-page repository query and preserve current materialization/observation
 IDs, tags, data versions and partition facts after their old run details expire.

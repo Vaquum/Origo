@@ -1,5 +1,6 @@
 """Retention and lossless provenance checks driven by real Binance archive runs."""
 
+import hashlib
 import sqlite3
 import time
 from pathlib import Path
@@ -328,3 +329,248 @@ def test_corrupt_shared_json_fails_loudly(metadata_instance: DagsterInstance) ->
     with pytest.raises(ValueError, match='checksum'):
         metadata_instance.get_run_by_id(run_id)
     assert archive.read_image(layout.events.parent, run_id, time.monotonic() + 10) is not None
+
+
+@pytest.mark.parametrize('partition', ['2017-08-17', '2020-01-01'])
+def test_packed_io_round_trip_and_overwrite(tmp_path: Path, partition: str) -> None:
+    from dagster import build_input_context, build_output_context
+    from upath import UPath
+
+    from origo.maintenance.io_manager import PackedFilesystemIOManager
+    from origo.maintenance.outputs import MAX_OUTPUT_BYTES
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    manager = PackedFilesystemIOManager(str(tmp_path))
+    path = UPath(tmp_path / 'archive')
+    output = build_output_context(asset_key=AssetKey('archive'))
+    value = (ARCHIVES / f'BTCUSDT-trades-{partition}.zip').read_bytes()
+    metadata = {'archive_sha256': hashlib.sha256(value).hexdigest()}
+    for expected in (metadata, value, metadata):
+        manager.dump_to_path(output, expected, path)
+        assert manager.has_output(output)
+        reopened = PackedFilesystemIOManager(str(tmp_path))
+        assert reopened.load_from_path(build_input_context(), path) == expected
+        assert path.exists() == (isinstance(expected, bytes) and len(expected) > MAX_OUTPUT_BYTES)
+    manager.unlink(path)
+    assert not manager.has_output(output)
+
+
+def test_existing_output_migration_verifies_before_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dagster import build_input_context, build_output_context
+    from dagster._core.storage.fs_io_manager import PickledObjectFilesystemIOManager
+    from upath import UPath
+
+    from origo.maintenance.io_manager import PackedFilesystemIOManager
+    from origo.maintenance.outputs import OutputStore, pack_existing_assets
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    payload = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip').read_bytes()
+    path = tmp_path / 'archive'
+    output = build_output_context(asset_key=AssetKey('archive'))
+    legacy = PickledObjectFilesystemIOManager(base_dir=str(tmp_path))
+    legacy.dump_to_path(output, payload, UPath(path))
+    original = path.read_bytes()
+    unlink = Path.unlink
+
+    def interrupted(target: Path, missing_ok: bool = False) -> None:
+        if target == path:
+            raise OSError('Controlled interruption after output commit.')
+        unlink(target, missing_ok=missing_ok)
+
+    store = OutputStore(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, 'unlink', interrupted)
+        with pytest.raises(OSError, match='Controlled interruption'):
+            pack_existing_assets(store, [['archive']], time.monotonic() + 10)
+    assert path.read_bytes() == original == store.read('archive')
+    assert pack_existing_assets(store, [['archive']], time.monotonic() + 10) == 1
+    assert not path.exists()
+    manager = PackedFilesystemIOManager(str(tmp_path))
+    assert manager.load_from_path(build_input_context(), UPath(path)) == payload
+    with sqlite3.connect(store.path) as database:
+        database.execute('UPDATE outputs SET payload=?', (payload,))
+        database.commit()
+    with pytest.raises(ValueError, match='checksum'):
+        manager.load_from_path(build_input_context(), UPath(path))
+
+
+def test_packed_io_is_used_by_normal_asset_materialization(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    from dagster import asset, materialize
+
+    from origo.maintenance.outputs import OutputStore
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    monkeypatch.setenv('DAGSTER_DEFAULT_IO_MANAGER_MODULE', 'origo.maintenance.io_manager')
+    monkeypatch.setenv('DAGSTER_DEFAULT_IO_MANAGER_ATTRIBUTE', 'packed_io_manager')
+    monkeypatch.delenv('DAGSTER_DEFAULT_IO_MANAGER_SILENCE_FAILURES', raising=False)
+    payload = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip').read_bytes()
+
+    @asset
+    def archive_bytes() -> bytes:
+        return payload
+
+    @asset
+    def archive_digest(archive_bytes: bytes) -> str:
+        return hashlib.sha256(archive_bytes).hexdigest()
+
+    result = materialize([archive_bytes, archive_digest], instance=metadata_instance)
+    assert result.success
+    store = OutputStore(Path(metadata_instance.storage_directory()))
+    assert store.read('archive_bytes') is not None
+    assert store.read('archive_digest') is not None
+    handled = [
+        event.dagster_event.event_specific_data.metadata
+        for event in metadata_instance.all_logs(result.run_id)
+        if event.dagster_event is not None
+        and event.dagster_event.event_type_value == 'HANDLED_OUTPUT'
+    ]
+    assert {value['storage_key'].value for value in handled} == {'archive_bytes', 'archive_digest'}
+    assert all(value['path'].value == str(store.path) for value in handled)
+    assert not (store.root / 'archive_bytes').exists()
+    assert not (store.root / 'archive_digest').exists()
+    assert (
+        metadata_instance.get_latest_materialization_event(AssetKey('archive_digest')) is not None
+    )
+
+
+def test_output_migration_rejects_uncommitted_different_file(tmp_path: Path) -> None:
+    from origo.maintenance.outputs import OutputStore, pack_existing_assets
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    store = OutputStore(tmp_path)
+    path = tmp_path / 'archive'
+    original = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip').read_bytes()
+    path.write_bytes(original)
+    with store.lock('archive'):
+        store.pack(path)
+    interrupted = hashlib.sha256(original).hexdigest().encode()
+    path.write_bytes(interrupted)
+    with pytest.raises(RuntimeError, match='Raw and committed packed output differ'):
+        pack_existing_assets(store, [['archive']], time.monotonic() + 10)
+    assert path.read_bytes() == interrupted
+    assert store.read('archive') == original
+
+
+def test_run_scoped_outputs_keep_filesystem_lifetime(tmp_path: Path) -> None:
+    from dagster import build_output_context
+    from upath import UPath
+
+    from origo.maintenance.io_manager import PackedFilesystemIOManager
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    manager = PackedFilesystemIOManager(str(tmp_path))
+    output = build_output_context(step_key='archive', name='result')
+    path = UPath(tmp_path / 'result')
+    value = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip').read_bytes()
+    manager.dump_to_path(output, value, path)
+    assert path.exists()
+    assert manager.store.read('result') is None
+
+
+def test_packed_asset_can_become_partitioned(tmp_path: Path) -> None:
+    from dagster import build_output_context
+    from upath import UPath
+
+    from origo.maintenance.io_manager import PackedFilesystemIOManager
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    manager = PackedFilesystemIOManager(str(tmp_path))
+    path = UPath(tmp_path / 'archive')
+    output = build_output_context(asset_key=AssetKey('archive'))
+    value = (ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip').read_bytes()
+    manager.dump_to_path(output, value, path)
+    assert manager.store.read('archive') is not None
+    manager._handle_transition_to_partitioned_asset(output, path)
+    assert manager.store.read('archive') is None
+    path.mkdir()
+    manager.dump_to_path(output, value, path / '2017-08-17')
+    assert manager.store.read('archive/2017-08-17') is not None
+
+
+def test_archiving_one_run_does_not_block_another_run(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from origo.maintenance import event_storage
+
+    first = _source(metadata_instance)
+    second = _source(metadata_instance)
+    second_run = metadata_instance.get_run_by_id(second)
+    assert second_run is not None
+    entered = threading.Event()
+    release = threading.Event()
+    original = event_storage.snapshot_image
+
+    def slow_snapshot(path: Path, deadline: float) -> bytes:
+        if path.stem == first:
+            entered.set()
+            if not release.wait(10):
+                raise TimeoutError('Test did not release the paused source snapshot.')
+        return original(path, deadline)
+
+    monkeypatch.setattr(event_storage, 'snapshot_image', slow_snapshot)
+    storage = metadata_instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        archive_future = executor.submit(storage.archive_run, first, time.monotonic() + 15)
+        assert entered.wait(3)
+        try:
+            write = executor.submit(
+                metadata_instance.report_engine_event,
+                'Unrelated source run remains writable during compaction.',
+                dagster_run=second_run,
+            )
+            write.result(timeout=2)
+            assert any(
+                'Unrelated source run remains writable' in row.event_log_entry.message
+                for row in metadata_instance.get_records_for_run(second).records
+            )
+        finally:
+            release.set()
+        assert archive_future.result(timeout=5) > 0
+    assert metadata_instance.get_records_for_run(first).records
+
+
+def test_capacity_does_not_count_the_application_tree(tmp_path: Path) -> None:
+    from origo.maintenance.worker import directory_bytes
+
+    from .test_dagster_metadata_maintenance import ARCHIVES
+
+    application = tmp_path / 'application'
+    storage = application / 'storage'
+    storage.mkdir(parents=True)
+    home = tmp_path / 'instance'
+    home.mkdir()
+    with DagsterInstance.local_temp(
+        str(home),
+        overrides={
+            'local_artifact_storage': {
+                'module': 'dagster._core.storage.root',
+                'class': 'LocalArtifactStorage',
+                'config': {'base_dir': str(application)},
+            }
+        },
+    ) as instance:
+        layout = Layout.from_instance(instance)
+        assert layout.artifact_root == storage
+        layout.compute.mkdir(parents=True, exist_ok=True)
+        before = directory_bytes(layout, time.monotonic() + 10)
+        fixture = ARCHIVES / 'BTCUSDT-trades-2017-08-17.zip'
+        (application / fixture.name).write_bytes(fixture.read_bytes())
+        assert directory_bytes(layout, time.monotonic() + 10) == before
+        (storage / fixture.name).write_bytes(fixture.read_bytes())
+        assert directory_bytes(layout, time.monotonic() + 10) > before

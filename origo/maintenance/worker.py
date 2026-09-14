@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
+from . import roles
 from .archive import archive_path
 from .backup import require_backup, verify_restored_backup
 from .clickhouse import diagnostic_allocated_bytes, maintain_diagnostics
@@ -30,7 +31,6 @@ from .protocol import (
     save_journal,
 )
 from .retention import reclaim, scan_batch
-from .roles import PROJECTION_JOBS
 from .run_storage import OrigoSqliteRunStorage
 from .sqlite import (
     Layout,
@@ -74,6 +74,9 @@ def directory_bytes(layout: Layout, deadline: float) -> int:
         for path in paths
         if not any(path != other and path.is_relative_to(other) for other in paths)
     )
+    if layout.artifact_root is not None and not layout.artifact_root.exists():
+        paths.discard(layout.artifact_root)
+        roots = [path for path in roots if path != layout.artifact_root]
     for path in paths:
         if not stat.S_ISDIR(path.lstat().st_mode):
             raise NotADirectoryError(f'Configured storage root is not a directory: {path}')
@@ -263,7 +266,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             print(f'Maintenance work window exhausted; reporting checkpoint: {error}', flush=True)
         report.exclusions = dict(counts)
         with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
-            projection_names = sorted(PROJECTION_JOBS)
+            projection_names = sorted(roles.PROJECTION_JOBS - roles.SOURCE_JOBS)
             job_placeholders = ','.join('?' for _ in projection_names)
             report.backlog_runs = int(
                 database.execute(
@@ -281,6 +284,9 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         packed = archive_path(layout.events.parent)
         if packed.exists():
             shared_paths.append(packed)
+        outputs = Path(instance.storage_directory()) / '.origo-outputs.sqlite'
+        if outputs.exists():
+            shared_paths.append(outputs)
         if not config.dry_run:
             for path in shared_paths:
                 with connection(path, deadline, config.lock_wait_seconds) as database:

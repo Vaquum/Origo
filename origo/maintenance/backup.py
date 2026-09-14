@@ -59,6 +59,9 @@ def verify_restored_backup(
         packed = archive_path(layout.events.parent)
         if packed.exists():
             shared_paths.append(packed)
+        outputs = Path(restored.storage_directory()) / '.origo-outputs.sqlite'
+        if outputs.exists():
+            shared_paths.append(outputs)
         for path in shared_paths:
             with connection(path, deadline, 1) as database:
                 if [tuple(row) for row in database.execute('PRAGMA quick_check')] != [('ok',)]:

@@ -1,4 +1,4 @@
-"""Initialize physical page reclamation during a backed-up, quiesced maintenance outage."""
+"""Pack existing asset outputs after every writer uses Origo's packed IO manager."""
 
 import argparse
 import json
@@ -7,24 +7,23 @@ from pathlib import Path
 
 from dagster import DagsterInstance
 
-from origo.maintenance.archive import archive_path
 from origo.maintenance.backup import BackupReceipt
-from origo.maintenance.compaction import initialize_compaction
+from origo.maintenance.outputs import OutputStore, pack_existing_assets
 from origo.maintenance.sqlite import Layout, maintenance_lock
+from origo.maintenance.worker import directory_bytes
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--instance-home', type=Path, required=True)
     parser.add_argument('--backup-receipt', type=Path, required=True)
-    parser.add_argument('--writers-quiesced', action='store_true', required=True)
-    parser.add_argument('--max-runtime-seconds', type=int, default=900)
+    parser.add_argument('--all-writers-use-packed-io', action='store_true', required=True)
+    parser.add_argument('--max-runtime-seconds', type=int, default=600)
     args = parser.parse_args()
     if args.max_runtime_seconds <= 0:
-        raise ValueError('The maintenance outage must have a positive runtime bound.')
+        raise ValueError('Output migration must have a positive runtime bound.')
     receipt = BackupReceipt.model_validate_json(args.backup_receipt.read_bytes())
     with DagsterInstance.from_config(str(args.instance_home)) as instance:
-        layout = Layout.from_instance(instance)
         if not (
             receipt.instance_id == instance.run_storage.get_run_storage_id()
             and receipt.verified_at <= time.time() < receipt.expires_at
@@ -32,19 +31,20 @@ def main() -> int:
             and receipt.snapshot_id
             and Path(receipt.restored_home).is_dir()
         ):
-            raise RuntimeError('Physical compaction requires a current verified restore receipt.')
+            raise RuntimeError('Output packing requires a current verified restore receipt.')
+        layout = Layout.from_instance(instance)
         deadline = time.monotonic() + args.max_runtime_seconds
-        paths = [layout.runs, layout.events, layout.schedules]
-        packed = archive_path(layout.events.parent)
-        if packed.exists():
-            paths.append(packed)
-        outputs = Path(instance.storage_directory()) / '.origo-outputs.sqlite'
-        if outputs.exists():
-            paths.append(outputs)
+        store = OutputStore(Path(instance.storage_directory()))
         with maintenance_lock(layout.runs.parent / 'operational-maintenance/maintenance.lock', 1):
-            for path in paths:
-                released = initialize_compaction(path, deadline, 1)
-                print(json.dumps({'database': path.name, 'released_bytes': released}), flush=True)
+            before = directory_bytes(layout, deadline)
+            packed = pack_existing_assets(
+                store, (key.path for key in instance.get_asset_keys()), deadline
+            )
+            after = directory_bytes(layout, deadline)
+            print(
+                json.dumps({'packed_outputs': packed, 'net_released_bytes': before - after}),
+                flush=True,
+            )
     return 0
 
 

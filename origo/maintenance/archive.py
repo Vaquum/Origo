@@ -4,7 +4,6 @@ Readers deserialize the original schema; event IDs and Dagster payloads do not
 change. The transition lock prevents a reader opening a shard while it is moved.
 """
 
-import fcntl
 import hashlib
 import os
 import sqlite3
@@ -14,6 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from .run_locks import run_lock
 from .sqlite import MaintenanceDeadlineReached, connection
 
 MAX_DATABASE_BYTES = 64 * 1024**2
@@ -31,26 +31,11 @@ def archive_path(base: Path) -> Path:
 
 
 @contextmanager
-def transition_lock(base: Path, *, write: bool, deadline: float) -> Iterator[None]:
-    path = archive_path(base).with_suffix('.lock')
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('a') as handle:
-        mode = fcntl.LOCK_EX if write else fcntl.LOCK_SH
-        acquired = False
-        while not acquired:
-            try:
-                fcntl.flock(handle, mode | fcntl.LOCK_NB)
-                acquired = True
-            except BlockingIOError as error:
-                if time.monotonic() >= deadline:
-                    raise MaintenanceDeadlineReached(
-                        'Source archive transition is busy.'
-                    ) from error
-                time.sleep(min(0.01, max(0, deadline - time.monotonic())))
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+def transition_lock(base: Path, run_id: str, *, deadline: float) -> Iterator[None]:
+    identity = int.from_bytes(hashlib.sha256(run_id.encode()).digest()[:8], 'big') % (2**63)
+    path = archive_path(base).parent / 'event-transitions'
+    with run_lock(path, identity, max(0, deadline - time.monotonic())):
+        yield
 
 
 def initialize_archive(base: Path) -> Path:
@@ -158,7 +143,7 @@ def sync_directory(path: Path) -> None:
 
 
 def restore_for_write(base: Path, shard: Path, run_id: str, deadline: float) -> None:
-    """Called under the run writer lock and the exclusive transition lock."""
+    """Called under the run writer lock and the per-run transition lock."""
     payload = read_image(base, run_id, deadline)
     if payload is None:
         return

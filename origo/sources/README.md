@@ -283,3 +283,32 @@ no growing projection backlog. Missing proof or a failed storage/latency conditi
 exits nonzero. Compression samples and lower-bound capacity estimates do not certify
 production. Source retention grows with authoritative coverage; if required evidence
 cannot fit the capacity limits, the check fails instead of discarding it.
+
+
+Small asset outputs (up to 64 KiB in Dagster's existing serialized form) share
+`storage/.origo-outputs.sqlite`. Their bytes and checksums are preserved; normal
+Dagster input loads, partition paths and overwrite behavior use the packed IO
+manager. New handled-output metadata identifies the database and its storage key.
+Larger values and run-scoped op outputs keep their filesystem representation.
+Both services select `origo.maintenance.io_manager.packed_io_manager` through
+Dagster's default IO-manager environment settings; silent fallback is disabled.
+
+After every writer uses that manager, migrate existing asset outputs with
+`python tools/metadata_pack_outputs.py --instance-home <home> --backup-receipt
+<receipt.json> --all-writers-use-packed-io --max-runtime-seconds 600`. It uses the
+same per-output locks as live writes, commits at most 100 values together, verifies
+all committed bytes, and only then unlinks their original files. Interrupted runs
+resume from remaining files. A conflicting raw/packed value fails visibly and
+retains both. Preserve this migration's output with the maintenance run. Rollback
+must retain the packed IO manager as well as both compatible SQLite adapters.
+
+Source event transitions lock only the affected run. A slow archive or historical
+read cannot take a global lock away from unrelated runs' live logging. Packed
+reads release the transition lock after obtaining their immutable image. Database
+upgrades and instance wipes retain Dagster's quiesced-instance requirement.
+
+Local run-status sensor dependencies are matched by repository as well as job name.
+A cursor left by a renamed code location cannot pin a different repository's new
+projection runs. Current repository cursors still protect unconsumed events. Failure
+protection tests for a newer matching run directly, without sorting all historical
+runs to find the latest one.

@@ -1806,3 +1806,84 @@ def test_inventory_snapshot_never_replaces_live_revalidation(
     assert reclaimed == 0
     assert rows[0].revalidation_reason == 'live_revalidation:' + reason
     assert instance.get_run_by_id(run_id) is not None and layout.shard(run_id).exists()
+
+
+def test_backlog_and_ingress_count_real_projection_runs(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.maintenance import worker
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    future = time.time() + 31 * 86400
+    clock = SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    monkeypatch.setattr(worker, 'time', clock)
+    monkeypatch.setattr(retention, 'time', clock)
+    execute_archive(metadata_instance)
+    before = worker.maintain(metadata_instance, POLICY)
+    assert before.report.backlog_runs == 1
+    execute_archive(metadata_instance)
+    execute_archive(metadata_instance, tags={'origo_source_key': 'binance_spot_trades'})
+    future += 60
+    after = worker.maintain(metadata_instance, POLICY)
+    assert after.report.backlog_runs == 2
+    assert after.report.eligible_ingress_runs == 1
+    assert after.report.ingress_runs_per_second == pytest.approx(1 / 60)
+
+
+def test_obsolete_repository_cursor_does_not_pin_current_projection(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dagster import DagsterRunStatus, RunStatusSensorDefinition, define_asset_job
+    from dagster._core.definitions.run_request import InstigatorType
+    from dagster._core.definitions.run_status_sensor_definition import RunStatusSensorCursor
+    from dagster._core.remote_origin import (
+        RegisteredCodeLocationOrigin,
+        RemoteInstigatorOrigin,
+        RemoteRepositoryOrigin,
+    )
+    from dagster._core.scheduler.instigation import (
+        InstigatorState,
+        InstigatorStatus,
+        SensorInstigatorData,
+    )
+
+    sensor = RunStatusSensorDefinition(
+        name='metadata_proof_sensor',
+        run_status=DagsterRunStatus.SUCCESS,
+        run_status_sensor_fn=lambda context: None,
+        monitored_jobs=[define_asset_job('__ephemeral_asset_job__')],
+    )
+    monkeypatch.setattr(retention, '_sensor_definitions', lambda: {sensor.name: sensor})
+    run_id = execute_archive(metadata_instance)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
+    layout = Layout.from_instance(metadata_instance)
+    for location, expected in (
+        ('tdw_control_plane', ''),
+        ('origo', 'unconsumed_run_status_cursor'),
+    ):
+        metadata_instance.add_instigator_state(
+            InstigatorState(
+                RemoteInstigatorOrigin(
+                    RemoteRepositoryOrigin(
+                        RegisteredCodeLocationOrigin(location), '__repository__'
+                    ),
+                    sensor.name,
+                ),
+                InstigatorType.SENSOR,
+                InstigatorStatus.RUNNING,
+                SensorInstigatorData(cursor=RunStatusSensorCursor(record_id=0).to_json()),
+            )
+        )
+        assert (
+            protection(
+                metadata_instance,
+                layout,
+                record,
+                POLICY,
+                time.time() + 31 * 86400,
+                time.monotonic() + 10,
+            )
+            == expected
+        )

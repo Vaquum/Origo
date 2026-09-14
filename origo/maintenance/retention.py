@@ -159,8 +159,17 @@ def protection(
                 'origo_source_partition',
             )
         }
-        latest = instance.get_runs(RunsFilter(job_name=run.job_name, tags=partition_tags), limit=1)
-        if latest and latest[0].run_id == run.run_id:
+        joins = ''.join(
+            f' JOIN run_tags t{index} ON t{index}.run_id=r.run_id AND t{index}.key=? AND t{index}.value=?'
+            for index in range(len(partition_tags))
+        )
+        parameters = [value for pair in partition_tags.items() for value in pair]
+        with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+            newer = database.execute(
+                'SELECT 1 FROM runs r' + joins + ' WHERE r.pipeline_name=? AND r.id>? LIMIT 1',
+                (*parameters, run.job_name, record.storage_id),
+            ).fetchone()
+        if newer is None:
             return 'latest_failure_or_verdict'
     source_reason = source_reference_reason(run)
     if source_reason:
@@ -250,6 +259,14 @@ def protection(
                 for job in monitored
                 if isinstance(job, (JobDefinition, UnresolvedAssetJobDefinition))
             ]
+            repository = run.tags.get('.dagster/repository')
+            if (
+                names
+                and len(names) == len(monitored)
+                and repository is not None
+                and repository != state.origin.repository_origin.get_label()
+            ):
+                continue  # Local monitored jobs belong to this sensor's repository.
             if len(names) != len(monitored) or not names or run.job_name in names:
                 relevant = [
                     row

@@ -95,22 +95,22 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
             raise ValueError('A run ID is required for an event connection.')
         base = Path(self.path_for_shard('index')).parent
         deadline = time.monotonic() + 5
-        with transition_lock(base, write=False, deadline=deadline):
+        with transition_lock(base, run_id, deadline=deadline):
             payload = read_image(base, run_id, deadline)
             if payload is None:
                 with super().run_connection(run_id) as database:
                     yield database
-            else:
-                memory = sqlite3.connect(':memory:')
-                memory.deserialize(payload)
-                memory.execute('PRAGMA query_only=ON')
-                engine = create_engine('sqlite://', creator=lambda: memory, poolclass=NullPool)
-                try:
-                    with engine.connect() as database:
-                        yield database
-                finally:
-                    engine.dispose()
-                    memory.close()
+                return
+        memory = sqlite3.connect(':memory:')
+        memory.deserialize(payload)
+        memory.execute('PRAGMA query_only=ON')
+        engine = create_engine('sqlite://', creator=lambda: memory, poolclass=NullPool)
+        try:
+            with engine.connect() as database:
+                yield database
+        finally:
+            engine.dispose()
+            memory.close()
 
     def archive_run(self, run_id: str, deadline: float) -> int:
         if str(UUID(run_id)) != run_id:
@@ -128,7 +128,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
                 DagsterRunStatus.CANCELED,
             ):
                 raise RuntimeError('Source compaction requires a retained terminal run.')
-            with transition_lock(base, write=True, deadline=deadline):
+            with transition_lock(base, run_id, deadline=deadline):
                 paths = [Path(str(shard) + suffix) for suffix in ('', '-wal', '-shm')]
                 for path in paths:
                     if path.exists() and (path.is_symlink() or path.stat().st_nlink != 1):
@@ -180,7 +180,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
         configuration = get_alembic_config(upstream.__file__)
         for run_id in self.get_all_run_ids():
             deadline = time.monotonic() + 120
-            with transition_lock(base, write=True, deadline=deadline):
+            with transition_lock(base, run_id, deadline=deadline):
                 payload = read_image(base, run_id, deadline)
                 if payload is None:
                     with super().run_connection(run_id) as database:
@@ -203,12 +203,13 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
 
     def wipe(self) -> None:
         base = Path(self.path_for_shard('index')).parent
-        with transition_lock(base, write=True, deadline=time.monotonic() + 30):
-            super().wipe()
-            for suffix in ('', '-wal', '-shm'):
-                path = Path(str(archive_path(base)) + suffix)
-                if path.exists():
-                    path.unlink()
+        # Like Dagster schema upgrades, an instance wipe requires quiesced workers.
+        super().wipe()
+        for suffix in ('', '-wal', '-shm'):
+            path = Path(str(archive_path(base)) + suffix)
+            if path.exists():
+                path.unlink()
+        if archive_path(base).parent.exists():
             sync_directory(archive_path(base).parent)
 
     def writer_lock_path(self) -> Path:
@@ -228,7 +229,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
             ):
                 raise RuntimeError(f'Refusing an event for an absent run: {event.run_id}')
             base = Path(self.path_for_shard('index')).parent
-            with transition_lock(base, write=True, deadline=time.monotonic() + 5):
+            with transition_lock(base, event.run_id, deadline=time.monotonic() + 5):
                 restore_for_write(
                     base,
                     Path(self.path_for_shard(event.run_id)),
@@ -243,7 +244,7 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
             raise RuntimeError('Cannot update an event of an absent run.')
         base = Path(self.path_for_shard('index')).parent
         with run_lock(self.writer_lock_path(), records[0].storage_id, 5):
-            with transition_lock(base, write=True, deadline=time.monotonic() + 5):
+            with transition_lock(base, event.run_id, deadline=time.monotonic() + 5):
                 restore_for_write(
                     base,
                     Path(self.path_for_shard(event.run_id)),
@@ -257,10 +258,10 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
             raise RuntimeError('Retire the run before deleting its execution history.')
         base = Path(self.path_for_shard('index')).parent
         deadline = time.monotonic() + 10
-        with transition_lock(base, write=True, deadline=deadline):
+        with transition_lock(base, run_id, deadline=deadline):
             if read_image(base, run_id, deadline) is not None:
                 remove_image(base, run_id, deadline)
-            else:
+            elif Path(self.path_for_shard(run_id)).exists():
                 with super().run_connection(run_id) as database:
                     self.delete_events_for_run(database, run_id)
         path = Path(self.path_for_shard('index'))

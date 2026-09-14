@@ -60,7 +60,7 @@ class Layout:
             Path(events.path_for_shard('index')).resolve(strict=True),
             schedules_path.resolve(strict=True),
             log_path.resolve(),
-            Path(instance.storage_directory()).parent.resolve(strict=True),
+            Path(instance.storage_directory()).resolve(),
         )
 
     def shard(self, run_id: str) -> Path:

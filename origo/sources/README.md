@@ -114,7 +114,7 @@ CI success, silence, or a workaround is not approval to change the contract.
 
 `maintain_operational_metadata_job` is the Dagit entry point. The daily
 `operational_metadata_maintenance_schedule` runs at 02:17 UTC; deployment launches
-this same job. Deployments start in inspection mode. The configured SQLite adapters
+this same job through the configured project workspace. Deployments start in inspection mode. The configured SQLite adapters
 fix the Jobs-page repository query and preserve current materialization/observation
 IDs, tags, data versions and partition facts after their old run details expire.
 ClickHouse's native 14-day diagnostic TTL operates independently of this schedule.
@@ -135,6 +135,13 @@ materialization metadata retains the successful input identity after history exp
 
 1. In Dagit, launch `maintain_operational_metadata_job` with the configuration below.
    The deployment default permits at most one hour, in batches of at most 500 runs.
+   Scan, reclamation and compaction use a separate work deadline. Reporting gets
+   10% of runtime, bounded to 15–300 seconds and at most half the usable runtime
+   for short invocations. Exhausting the work window reports the last durable
+   checkpoint and resumes on the next invocation. Disk measurement counts allocated
+   blocks without following symlinks, counts hard links once, and logs paths that disappear during
+   traversal. Missing configured roots, permission and I/O errors still fail the run,
+   as does exhausting the absolute reporting deadline.
    Each completed batch checkpoints its cursor. Repeat until the result says
    `inventory_complete: true`; an incomplete inventory is not a deletion approval.
    Once an eligible first manifest has a complete inventory, scheduled and deploy

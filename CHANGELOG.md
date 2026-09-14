@@ -1,3 +1,7 @@
+# v3.8.2
+
+- Enforce a separate work deadline for operational-metadata reporting, tolerate disappearing transient files while rejecting missing storage roots, and launch deployment maintenance in the configured Dagster workspace.
+
 # v3.8.1
 
 - Bound Dagster execution history while preserving current partition facts, retry holds and source receipts; expose inspection, catch-up and health through one Dagit maintenance job.

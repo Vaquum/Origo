@@ -45,7 +45,7 @@ from .archive import (
 from .event_storage import OrigoSqliteEventLogStorage
 from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, save_journal
 from .roles import run_role
-from .run_locks import run_lock
+from .run_locks import RunLockBusy, run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
 from .sqlite import Layout, MaintenanceDeadlineReached, allocated, artifacts, connection
 
@@ -502,6 +502,15 @@ def reclaim(
             released = storage.archive_run(candidate.run_id, deadline)
         except MaintenanceDeadlineReached:
             raise
+        except RunLockBusy as error:
+            candidate.revalidation_reason = 'source_in_use'
+            candidate.phase = 'planned'
+            save_journal(journal_path, journal)
+            print(
+                f'Source compaction deferred for {candidate.run_id}; retry next inventory: {error}',
+                flush=True,
+            )
+            return 0
         except (OSError, sqlite3.DatabaseError, SQLAlchemyError, RuntimeError, ValueError) as error:
             record_compaction_error(layout.events.parent, candidate.run_id, error, deadline)
             candidate.revalidation_reason = 'source_archive_error'

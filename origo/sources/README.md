@@ -302,6 +302,12 @@ resume from remaining files. A conflicting raw/packed value fails visibly and
 retains both. Preserve this migration's output with the maintenance run. Rollback
 must retain the packed IO manager as well as both compatible SQLite adapters.
 
+A source run whose history is still being read or written is deferred to the next
+inventory. Lock contention is reported as `source_in_use`, leaves the source
+history intact, and creates no compaction error; unrelated projection retirement
+continues. Genuine snapshot, integrity and I/O failures retain their error status
+until compaction succeeds.
+
 Source event transitions lock only the affected run. A slow archive or historical
 read cannot take a global lock away from unrelated runs' live logging. Packed
 reads release the transition lock after obtaining their immutable image. Database

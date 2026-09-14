@@ -662,9 +662,13 @@ def test_native_readers_do_not_block_logging_or_allow_unlink(
                     sys.executable,
                     '-c',
                     'import sys,time; from pathlib import Path; '
-                    'from origo.maintenance.archive import native_history_lock; '
-                    'lock = native_history_lock(Path(sys.argv[1]), sys.argv[2], '
-                    'time.monotonic() + .1, exclusive=True); lock.__enter__()',
+                    'from origo.maintenance.archive import native_history_lock\n'
+                    'try:\n'
+                    '    with native_history_lock(Path(sys.argv[1]), sys.argv[2], '
+                    'time.monotonic() + .1, exclusive=True):\n'
+                    '        sys.exit(0)\n'
+                    'except TimeoutError:\n'
+                    '    sys.exit(75)\n',
                     str(layout.events.parent),
                     run_id,
                 ],
@@ -672,7 +676,7 @@ def test_native_readers_do_not_block_logging_or_allow_unlink(
                 text=True,
                 timeout=5,
             )
-            assert other_process.returncode != 0 and 'TimeoutError' in other_process.stderr
+            assert other_process.returncode == 75
             with pytest.raises(TimeoutError, match='active reader'):
                 storage.archive_run(run_id, time.monotonic() + 10)
         finally:
@@ -717,7 +721,7 @@ def test_capacity_does_not_count_the_application_tree(tmp_path: Path) -> None:
         assert directory_bytes(layout, time.monotonic() + 10) > before
 
 
-@pytest.mark.parametrize('stage', ['snapshot', 'shared_json'])
+@pytest.mark.parametrize('stage', ['snapshot', 'shared_json', 'io_timeout'])
 def test_bad_source_compaction_does_not_stop_projection_retirement(
     metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -740,13 +744,15 @@ def test_bad_source_compaction_does_not_stop_projection_retirement(
     before = instance.get_records_for_run(source_id)
 
     def broken_snapshot(path: Path, deadline: float) -> bytes:
+        if stage == 'io_timeout':
+            raise TimeoutError('Controlled source snapshot I/O timeout.')
         raise RuntimeError('Controlled source integrity-check failure.')
 
     def broken_json(run_id: str) -> None:
         raise RuntimeError('Controlled shared JSON failure after archive commit.')
 
     with monkeypatch.context() as patch:
-        if stage == 'snapshot':
+        if stage in ('snapshot', 'io_timeout'):
             patch.setattr(event_storage, 'snapshot_image', broken_snapshot)
         else:
             patch.setattr(instance.run_storage, 'compress_run', broken_json)

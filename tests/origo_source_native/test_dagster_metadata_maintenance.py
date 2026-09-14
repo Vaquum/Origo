@@ -1976,3 +1976,58 @@ def test_archive_failure_stays_unhealthy_until_successful_retry(
     assert recovered.source_archive_error_count == 0 and not recovered.source_archive_errors
     assert len(recovered.violations) == 1
     assert recovered.violations[0].startswith('metadata_business_fraction:')
+
+
+@pytest.mark.parametrize('holder', ['reader', 'writer'])
+def test_source_lock_contention_defers_without_poisoning_health(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    holder: str,
+) -> None:
+    from origo.maintenance import archive, worker
+    from origo.maintenance.run_locks import run_lock
+    from origo.sources.registry import SOURCE_REGISTRY
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    instance = metadata_instance
+    source_id = execute_archive(instance, tags={'origo_source_key': SOURCE_REGISTRY[0].key})
+    projection_id = execute_archive(instance)
+    layout, journal, source = planned(instance, source_id)
+    source.action = 'archive'
+    projection = planned(instance, projection_id)[2]
+    journal.manifest.append(projection)
+    future = time.time() + 91 * 86400
+    monkeypatch.setattr(retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic))
+    before = instance.get_records_for_run(source_id)
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    held = (
+        storage.run_connection(source_id)
+        if holder == 'reader'
+        else run_lock(storage.writer_lock_path(), source.storage_id, 1)
+    )
+    journal_path = layout.runs.parent / 'busy-source.json'
+    with held:
+        assert reclaim(instance, layout, source, journal, journal_path, POLICY, time.monotonic() + 15) == 0
+        assert source.exclusion == 'source_in_use' and source.phase == 'planned'
+        assert layout.shard(source_id).exists()
+        assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
+        assert instance.get_records_for_run(source_id) == before
+        assert reclaim(instance, layout, projection, journal, journal_path, POLICY, time.monotonic() + 15) > 0
+        assert instance.get_run_by_id(projection_id) is None
+        assert 'Source compaction deferred' in capsys.readouterr().out
+        outcome = worker.maintain(instance, POLICY)
+        assert outcome.source_archive_error_count == 0 and not outcome.source_archive_errors
+        # The real one-trade fixture still exceeds the capacity ratio. Viewing
+        # source history must not add a false archive failure to that real finding.
+        assert_tiny_fixture_exceeds_ratio(outcome)
+    retry_journal = Journal(instance_id=journal.instance_id, policy_sha256=policy_sha256(POLICY))
+    retry = scan_batch(instance, layout, retry_journal, POLICY, future, time.monotonic() + 15)
+    assert len(retry) == 1 and retry[0].action == 'archive' and not retry[0].exclusion
+    retry_journal.manifest = retry
+    assert reclaim(instance, layout, retry[0], retry_journal, journal_path, POLICY, time.monotonic() + 15) > 0
+    assert not layout.shard(source_id).exists()
+    assert instance.get_records_for_run(source_id) == before
+    assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0

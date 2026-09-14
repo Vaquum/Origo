@@ -1,4 +1,5 @@
 # v3.8.4
+- Defer source compaction when readers or writers hold its locks, without recording a false archive failure or blocking unrelated projection retirement.
 - Bound SQLite page reclamation by the maintenance work deadline so an interrupted pass still reports its checkpoint, capacity and health.
 - Allow parallel native run-history reads and event writes; source compaction retries while an active reader still needs the native shard.
 

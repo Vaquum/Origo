@@ -11,6 +11,10 @@ from pathlib import Path
 from weakref import WeakValueDictionary
 
 
+class RunLockBusy(TimeoutError):
+    """A live reader, writer or retirement still owns the requested run lock."""
+
+
 class _LocalLock:
     def __init__(self) -> None:
         self.condition = threading.Condition()
@@ -63,11 +67,11 @@ def run_lock(
             _threads[thread_key] = local
     error_message = f'Run {storage_id} has an active reader, writer or retirement.'
     if not local.condition.acquire(timeout=max(0, deadline - time.monotonic())):
-        raise TimeoutError(error_message)
+        raise RunLockBusy(error_message)
     try:
         while local.holders and not (shared and local.shared):
             if not local.condition.wait(timeout=max(0, deadline - time.monotonic())):
-                raise TimeoutError(error_message)
+                raise RunLockBusy(error_message)
         if not local.holders:
             acquired = False
             while not acquired:
@@ -77,7 +81,7 @@ def run_lock(
                     acquired = True
                 except BlockingIOError as error:
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(error_message) from error
+                        raise RunLockBusy(error_message) from error
                     time.sleep(min(0.05, max(0, deadline - time.monotonic())))
             local.shared = shared
         local.holders += 1

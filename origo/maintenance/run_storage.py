@@ -59,6 +59,9 @@ class OrigoSqliteRunStorage(SqliteRunStorage):
                 is not None
             ):
                 raise RuntimeError('Source and unclassified runs cannot be retired.')
+            # SQLite does not enable foreign-key cascades on Dagster connections.
+            # Remove tags in the same transaction, after the source guard passed.
+            database.execute(delete(RunTagsTable).where(RunTagsTable.c.run_id == run_id))
 
     def _runs_query(
         self,

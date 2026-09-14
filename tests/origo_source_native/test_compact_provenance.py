@@ -75,9 +75,17 @@ def test_source_and_mixed_runs_are_never_retired(metadata_instance: DagsterInsta
     )
     assert metadata_instance.get_run_by_id(run_id) is not None
     assert layout.shard(run_id).exists()
+    with sqlite3.connect(layout.runs) as database:
+        tags_before = database.execute(
+            'SELECT * FROM run_tags WHERE run_id=? ORDER BY id', (run_id,)
+        ).fetchall()
     with pytest.raises(RuntimeError, match='cannot be retired'):
         metadata_instance.delete_run(run_id)
     assert metadata_instance.get_run_by_id(run_id) is not None
+    with sqlite3.connect(layout.runs) as database:
+        assert database.execute(
+            'SELECT * FROM run_tags WHERE run_id=? ORDER BY id', (run_id,)
+        ).fetchall() == tags_before
 
 
 def test_compacted_source_preserves_dagster_reads(metadata_instance: DagsterInstance) -> None:
@@ -194,6 +202,10 @@ def test_projection_retirement_preserves_current_state(
         > 0
     )
     assert metadata_instance.get_run_by_id(run_id) is None
+    with sqlite3.connect(layout.runs) as database:
+        assert database.execute(
+            'SELECT count(*) FROM run_tags WHERE run_id=?', (run_id,)
+        ).fetchone()[0] == 0
     assert metadata_instance.fetch_materializations(key, limit=1).records == before
     assert metadata_instance.get_status_by_partition(key, ['2017-08-17'], PARTITIONS) == state
 
@@ -656,3 +668,66 @@ def test_bad_source_compaction_does_not_stop_projection_retirement(
     )
     assert archive.failed_compaction_count(layout.events.parent, time.monotonic() + 10) == 0
     assert instance.get_records_for_run(source_id) == before
+
+
+@pytest.mark.parametrize('unrelated_id_gap', [0, 2000])
+def test_failure_resolution_checks_matching_history_beyond_recent_runs(
+    metadata_instance: DagsterInstance, unrelated_id_gap: int
+) -> None:
+    instance = metadata_instance
+    failed = execute_archive(instance, tags={'proof_fail': 'true'})
+    layout = Layout.from_instance(instance)
+    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    record = instance.get_run_records(RunsFilter(run_ids=[failed]), limit=1)[0]
+    future = time.time() + 2 * 86400
+    # A newer execution of another partition does not resolve this failure.
+    unrelated = execute_archive(instance, partition='2020-01-01')
+    assert retention.protection(
+        instance, layout, record, policy, future, time.monotonic() + 10
+    ) == 'latest_failure_or_verdict'
+    execute_archive(instance)
+    # Real execution IDs may be sparse after retention. Exercise resolution
+    # both within the recent range and in the complete historical lookup.
+    with sqlite3.connect(layout.runs) as database:
+        database.execute(
+            'UPDATE runs SET id=(SELECT max(id) FROM runs)+1+? WHERE run_id=?',
+            (unrelated_id_gap, unrelated),
+        )
+    assert retention.protection(
+        instance, layout, record, policy, future, time.monotonic() + 10
+    ) == ''
+
+
+def test_run_and_tag_deletion_roll_back_together(metadata_instance: DagsterInstance) -> None:
+    from sqlalchemy import Engine, event
+
+    run_id = execute_archive(metadata_instance)
+    layout = Layout.from_instance(metadata_instance)
+    with sqlite3.connect(layout.runs) as database:
+        before = database.execute(
+            'SELECT * FROM run_tags WHERE run_id=? ORDER BY id', (run_id,)
+        ).fetchall()
+    assert before
+
+    def interrupt_tag_delete(
+        connection: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        if statement.startswith('DELETE FROM run_tags'):
+            raise RuntimeError('Controlled failure after the guarded run deletion.')
+
+    event.listen(Engine, 'before_cursor_execute', interrupt_tag_delete)
+    try:
+        with pytest.raises(RuntimeError, match='Controlled failure'):
+            metadata_instance.run_storage.delete_run(run_id)
+    finally:
+        event.remove(Engine, 'before_cursor_execute', interrupt_tag_delete)
+    assert metadata_instance.get_run_by_id(run_id) is not None
+    with sqlite3.connect(layout.runs) as database:
+        assert database.execute(
+            'SELECT * FROM run_tags WHERE run_id=? ORDER BY id', (run_id,)
+        ).fetchall() == before

@@ -174,10 +174,29 @@ def protection(
         )
         parameters = [value for pair in partition_tags.items() for value in pair]
         with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+            # Broad partition tags can match hundreds of thousands of old runs.
+            # Try at most 1,000 recent IDs before the complete historical lookup.
+            upper = int(
+                database.execute(
+                    'SELECT coalesce(max(id),?) FROM runs', (record.storage_id,)
+                ).fetchone()[0]
+            )
+            recent_terms = ''.join(
+                ' AND EXISTS(SELECT 1 FROM run_tags t '
+                'WHERE t.run_id=r.run_id AND t.key=? AND t.value=?)'
+                for _ in partition_tags
+            )
             newer = database.execute(
-                'SELECT 1 FROM runs r' + joins + ' WHERE r.pipeline_name=? AND r.id>? LIMIT 1',
-                (*parameters, run.job_name, record.storage_id),
+                'SELECT 1 FROM runs r NOT INDEXED WHERE r.id>? AND r.pipeline_name=?'
+                + recent_terms
+                + ' LIMIT 1',
+                (max(record.storage_id, upper - 1000), run.job_name, *parameters),
             ).fetchone()
+            if newer is None:
+                newer = database.execute(
+                    'SELECT 1 FROM runs r' + joins + ' WHERE r.pipeline_name=? AND r.id>? LIMIT 1',
+                    (*parameters, run.job_name, record.storage_id),
+                ).fetchone()
         if newer is None:
             return 'latest_failure_or_verdict'
     source_reason = source_reference_reason(run)

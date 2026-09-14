@@ -1,8 +1,11 @@
 """Select, revalidate and retire execution history without changing current facts."""
 
 import os
+import sqlite3
 import time
 from collections.abc import Sequence
+from contextlib import nullcontext
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -23,7 +26,7 @@ from dagster._core.definitions.run_status_sensor_definition import RunStatusSens
 from dagster._core.definitions.unresolved_asset_job_definition import UnresolvedAssetJobDefinition
 from dagster._core.events import PIPELINE_RUN_STATUS_TO_EVENT_TYPE
 from dagster._core.execution.backfill import BULK_ACTION_TERMINAL_STATUSES
-from dagster._core.scheduler.instigation import SensorInstigatorData
+from dagster._core.scheduler.instigation import InstigatorState, SensorInstigatorData
 from dagster._core.storage.local_compute_log_manager import LocalComputeLogManager
 
 from .event_storage import OrigoSqliteEventLogStorage
@@ -31,6 +34,40 @@ from .protocol import Candidate, Journal, OperationalMetadataMaintenanceConfig, 
 from .run_locks import run_lock
 from .source_receipts import preserve_source_receipt, source_reference_reason
 from .sqlite import Layout, MaintenanceDeadlineReached, allocated, artifacts, connection
+
+# Explicit row-ID order avoids SQLite's status-index OR plan, which sorts the
+# remaining backlog before LIMIT on every batch. NOT INDEXED still uses rowid.
+_INVENTORY_QUERY = "SELECT id,run_id FROM runs NOT INDEXED WHERE id>? AND id<=? AND ((status='SUCCESS' AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?) OR (status IN ('FAILURE','CANCELED') AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?)) ORDER BY id LIMIT ?"
+
+
+@dataclass(frozen=True)
+class ScanReferences:
+    retry_run_ids: frozenset[str]
+    sensor_states: Sequence[InstigatorState]
+    event_database: sqlite3.Connection
+
+
+def _scan_references(
+    instance: DagsterInstance,
+    layout: Layout,
+    run_ids: Sequence[str],
+    config: OperationalMetadataMaintenanceConfig,
+    deadline: float,
+    event_database: sqlite3.Connection,
+) -> ScanReferences:
+    placeholders = ','.join('?' for _ in run_ids)
+    with connection(layout.runs, deadline, config.lock_wait_seconds) as database:
+        rows = database.execute(
+            'SELECT DISTINCT t.value FROM run_tags t JOIN runs r ON r.run_id=t.run_id '
+            "WHERE t.key IN ('dagster/parent_run_id','dagster/root_run_id') "
+            f'AND t.value IN ({placeholders})',
+            tuple(run_ids),
+        ).fetchall()
+    return ScanReferences(
+        frozenset(str(row['value']) for row in rows),
+        tuple(instance.all_instigator_state()),
+        event_database,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -65,6 +102,8 @@ def protection(
     config: OperationalMetadataMaintenanceConfig,
     now: float,
     deadline: float,
+    *,
+    scan_references: ScanReferences | None = None,
 ) -> str:
     run = record.dagster_run
     if run.status not in (
@@ -92,9 +131,12 @@ def protection(
         backfill = instance.get_backfill(backfill_id)
         if backfill is None or backfill.status not in BULK_ACTION_TERMINAL_STATUSES:
             return 'active_or_unknown_backfill'
-    for tag in ('dagster/parent_run_id', 'dagster/root_run_id'):
-        if instance.get_runs(RunsFilter(tags={tag: run.run_id}), limit=1):
-            return 'retry_lineage_reference'
+    if scan_references is None:
+        for tag in ('dagster/parent_run_id', 'dagster/root_run_id'):
+            if instance.get_runs(RunsFilter(tags={tag: run.run_id}), limit=1):
+                return 'retry_lineage_reference'
+    elif run.run_id in scan_references.retry_run_ids:
+        return 'retry_lineage_reference'
     if run.tags.get('dagster/will_retry') == 'true':
         return 'retry_pending'
     if run.status != DagsterRunStatus.SUCCESS and run.tags.get(
@@ -118,7 +160,12 @@ def protection(
     source_reason = source_reference_reason(run)
     if source_reason:
         return source_reason
-    with connection(layout.events, deadline, config.lock_wait_seconds) as database:
+    event_connection = (
+        connection(layout.events, deadline, config.lock_wait_seconds)
+        if scan_references is None
+        else nullcontext(scan_references.event_database)
+    )
+    with event_connection as database:
         events = database.execute(
             'SELECT id,asset_key,dagster_event_type,partition,timestamp,event FROM event_logs WHERE run_id=? ORDER BY id LIMIT 1001',
             (run.run_id,),
@@ -169,7 +216,12 @@ def protection(
                         ).fetchone()
                         if latest is not None and latest['run_id'] == run.run_id:
                             return 'current_asset_check'
-    for state in instance.all_instigator_state():
+    states = (
+        instance.all_instigator_state()
+        if scan_references is None
+        else scan_references.sensor_states
+    )
+    for state in states:
         data = state.instigator_data
         if not isinstance(data, SensorInstigatorData):
             continue
@@ -178,10 +230,11 @@ def protection(
         sensor = _sensor_definitions().get(state.name)
         relevant = []
         if isinstance(sensor, AssetSensorDefinition):
+            asset_key = sensor.asset_key.to_string()
             relevant = [
                 row
                 for row in events
-                if row['asset_key'] == sensor.asset_key.to_string()
+                if row['asset_key'] == asset_key
                 and row['dagster_event_type'] == 'ASSET_MATERIALIZATION'
             ]
         elif isinstance(sensor, RunStatusSensorDefinition):
@@ -237,7 +290,7 @@ def scan_batch(
             journal.inventory_scanned = 0
             journal.inventory_complete = False
         ids = database.execute(
-            "SELECT id,run_id FROM runs WHERE id>? AND id<=? AND ((status='SUCCESS' AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?) OR (status IN ('FAILURE','CANCELED') AND coalesce(end_time,CAST(strftime('%s',update_timestamp) AS REAL))<?)) ORDER BY id LIMIT ?",
+            _INVENTORY_QUERY,
             (
                 journal.scan_cursor,
                 journal.inventory_upper_id,
@@ -246,29 +299,51 @@ def scan_batch(
                 config.max_runs_per_batch,
             ),
         ).fetchall()
-    candidates: list[Candidate] = []
-    for row in ids:
-        if time.monotonic() >= deadline:
-            raise MaintenanceDeadlineReached('Candidate scan exceeded maintenance deadline.')
-        records = instance.get_run_records(RunsFilter(run_ids=[str(row['run_id'])]), limit=1)
-        if records:
-            record = records[0]
-            reason = protection(
-                instance, layout, record, config, journal.inventory_started_at, deadline
-            )
-            inventory = artifact_inventory(layout, record.dagster_run.run_id, deadline)
-            candidates.append(
-                Candidate(
-                    run_id=record.dagster_run.run_id,
-                    storage_id=record.storage_id,
-                    status=record.dagster_run.status.value,
-                    ended_at=record.end_time or record.update_timestamp.timestamp(),
-                    allocated_bytes=sum(inventory.values()),
-                    artifacts=inventory,
-                    reason=reason,
+    # Only inventory shares these reads. Reclamation revalidates every candidate
+    # against fresh run/dependency state under its existing writer lock.
+    run_ids = [str(row['run_id']) for row in ids]
+    records = (
+        {
+            record.dagster_run.run_id: record
+            for record in instance.get_run_records(RunsFilter(run_ids=run_ids), limit=len(run_ids))
+        }
+        if run_ids
+        else {}
+    )
+    with connection(layout.events, deadline, config.lock_wait_seconds) as event_database:
+        references = (
+            _scan_references(instance, layout, run_ids, config, deadline, event_database)
+            if run_ids
+            else None
+        )
+        candidates: list[Candidate] = []
+        for row in ids:
+            if time.monotonic() >= deadline:
+                raise MaintenanceDeadlineReached('Candidate scan exceeded maintenance deadline.')
+            record = records.get(str(row['run_id']))
+            if record is not None:
+                reason = protection(
+                    instance,
+                    layout,
+                    record,
+                    config,
+                    journal.inventory_started_at,
+                    deadline,
+                    scan_references=references,
                 )
-            )
-        journal.scan_cursor = int(row['id'])
+                inventory = artifact_inventory(layout, record.dagster_run.run_id, deadline)
+                candidates.append(
+                    Candidate(
+                        run_id=record.dagster_run.run_id,
+                        storage_id=record.storage_id,
+                        status=record.dagster_run.status.value,
+                        ended_at=record.end_time or record.update_timestamp.timestamp(),
+                        allocated_bytes=sum(inventory.values()),
+                        artifacts=inventory,
+                        reason=reason,
+                    )
+                )
+            journal.scan_cursor = int(row['id'])
     journal.inventory_scanned += len(ids)
     journal.inventory_eligible_bytes += sum(
         row.allocated_bytes for row in candidates if not row.reason

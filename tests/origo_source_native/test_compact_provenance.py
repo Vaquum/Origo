@@ -759,3 +759,63 @@ def test_projection_shutdown_grace_tracks_terminal_and_late_activity(
     assert retention.protection(
         metadata_instance, layout, record, policy, ended + 131, time.monotonic() + 10
     ) == ''
+
+
+def test_resolved_failure_stays_resolved_after_success_history_expires(
+    metadata_instance: DagsterInstance,
+) -> None:
+    failed = execute_archive(metadata_instance, tags={'proof_fail': 'true'})
+    succeeded = execute_archive(metadata_instance)
+    before = metadata_instance.fetch_materializations(AssetKey('metadata_proof_archive'), limit=1)
+    metadata_instance.delete_run(succeeded)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[failed]), limit=1)[0]
+    assert retention.protection(
+        metadata_instance,
+        Layout.from_instance(metadata_instance),
+        record,
+        OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3),
+        time.time() + 2 * 86400,
+        time.monotonic() + 10,
+    ) == ''
+    assert metadata_instance.fetch_materializations(
+        AssetKey('metadata_proof_archive'), limit=1
+    ) == before
+
+
+def test_failed_projection_requires_later_materializations_for_every_plan(
+    metadata_instance: DagsterInstance,
+) -> None:
+    from dagster import AssetExecutionContext, DataVersion, MaterializeResult, asset, materialize
+
+    from .test_dagster_metadata_maintenance import ARCHIVES, archive_fact
+
+    @asset(partitions_def=PARTITIONS)
+    def second_archive(context: AssetExecutionContext) -> MaterializeResult:
+        payload = (ARCHIVES / f'BTCUSDT-trades-{context.partition_key}.zip').read_bytes()
+        return MaterializeResult(data_version=DataVersion(hashlib.sha256(payload).hexdigest()))
+
+    failed = materialize(
+        [archive_fact, second_archive],
+        instance=metadata_instance,
+        partition_key='2017-08-17',
+        tags={'proof_fail': 'true'},
+        raise_on_error=False,
+    )
+    assert not failed.success
+    succeeded = execute_archive(metadata_instance)
+    metadata_instance.delete_run(succeeded)
+    record = metadata_instance.get_run_records(RunsFilter(run_ids=[failed.run_id]), limit=1)[0]
+    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    layout = Layout.from_instance(metadata_instance)
+    future = time.time() + 2 * 86400
+    assert retention.protection(
+        metadata_instance, layout, record, policy, future, time.monotonic() + 10
+    ) == 'latest_failure_or_verdict'
+    later = materialize(
+        [second_archive], instance=metadata_instance, partition_key='2017-08-17'
+    )
+    assert later.success
+    metadata_instance.delete_run(later.run_id)
+    assert retention.protection(
+        metadata_instance, layout, record, policy, future, time.monotonic() + 10
+    ) == ''

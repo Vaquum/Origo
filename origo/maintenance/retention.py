@@ -8,6 +8,7 @@ import traceback
 from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -158,6 +159,7 @@ def protection(
         'dagster/asset_partition_range_start'
     ):
         return 'failed_partition_range'
+    newer_verdict = True
     if run.status != DagsterRunStatus.SUCCESS:
         partition_tags = {
             key: value
@@ -198,8 +200,7 @@ def protection(
                     'SELECT 1 FROM runs r' + joins + ' WHERE r.pipeline_name=? AND r.id>? LIMIT 1',
                     (*parameters, run.job_name, record.storage_id),
                 ).fetchone()
-        if newer is None:
-            return 'latest_failure_or_verdict'
+        newer_verdict = newer is not None
     source_reason = source_reference_reason(run)
     if source_reason:
         return source_reason
@@ -215,6 +216,24 @@ def protection(
         ).fetchall()
         if len(events) > 1000:
             return 'oversized_reference_set'
+        resolved_plans: set[int] = set()
+        if run.status != DagsterRunStatus.SUCCESS:
+            plans = [row for row in events if row['dagster_event_type'] == 'ASSET_MATERIALIZATION_PLANNED']
+            ended = datetime.fromtimestamp(
+                record.end_time or record.update_timestamp.timestamp(), UTC
+            ).replace(tzinfo=None)
+            for plan in plans:
+                # Successful projection runs may already have expired. Their
+                # retained current facts still resolve earlier failed plans.
+                materialized = database.execute(
+                    "SELECT 1 FROM event_logs WHERE asset_key=? AND dagster_event_type='ASSET_MATERIALIZATION' "
+                    'AND partition IS ? AND id>? AND timestamp>? AND run_id!=? LIMIT 1',
+                    (plan['asset_key'], plan['partition'], plan['id'], ended, run.run_id),
+                ).fetchone()
+                if materialized is not None:
+                    resolved_plans.add(int(plan['id']))
+            if not newer_verdict and (not plans or len(resolved_plans) != len(plans)):
+                return 'latest_failure_or_verdict'
         for row in events:
             if (
                 run.status != DagsterRunStatus.SUCCESS
@@ -224,7 +243,11 @@ def protection(
                     'SELECT run_id FROM event_logs WHERE asset_key=? AND dagster_event_type=? AND partition IS ? ORDER BY id DESC LIMIT 1',
                     (row['asset_key'], row['dagster_event_type'], row['partition']),
                 ).fetchone()
-                if latest_plan is not None and latest_plan['run_id'] == run.run_id:
+                if (
+                    latest_plan is not None
+                    and latest_plan['run_id'] == run.run_id
+                    and int(row['id']) not in resolved_plans
+                ):
                     return 'current_failed_asset_partition'
             if str(row['dagster_event_type']).startswith('ASSET_CHECK'):
                 from dagster._core.events.log import EventLogEntry
@@ -308,8 +331,6 @@ def protection(
         if data.cursor and RunStatusSensorCursor.is_valid(data.cursor):
             cursor = RunStatusSensorCursor.from_json(data.cursor)
             if cursor.update_timestamp:
-                from datetime import datetime
-
                 if (
                     record.update_timestamp.timestamp()
                     >= datetime.fromisoformat(cursor.update_timestamp).timestamp()

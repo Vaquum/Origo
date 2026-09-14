@@ -4,6 +4,7 @@
 - Pack small asset output values without changing their serialized bytes; retain normal Dagster input loading and expose the actual packed storage location in output metadata.
 - Bound recent failed-run resolution lookups before checking complete history, keeping broad partition tags from stalling cleanup.
 - Isolate source compaction failures, preserve their diagnostics across maintenance runs, and keep unrelated projection cleanup moving.
+- Keep resolved projection failures resolved after successor run histories expire by checking later materializations for every failed plan.
 - Retire settled projection histories after a one-minute shutdown grace (24 hours for resolved failures), preserving current asset/partition/check state and fresh execution dependencies.
 - Check Dagster physical storage against 10% of ClickHouse business data and a 13 GiB ceiling; schedule maintenance every 10 minutes, enable incremental SQLite reclamation after an explicit backed-up migration, and retain terminal scheduler ticks for one/seven days. ClickHouse diagnostics retain their separate 14-day policy.
 

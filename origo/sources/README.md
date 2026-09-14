@@ -146,7 +146,7 @@ files. Successful histories are eligible after a one-minute shutdown grace; reso
 histories after 24 hours. Current asset facts keep their original IDs, tags, input
 versions and partitions after a projection run expires. Active runs, active/unknown
 backfills, retries, current checks, unresolved failures and unconsumed sensor events
-remain protected. Fresh checks precede each deletion. Unchanged Parquet inputs do
+remain protected. Later materializations for every planned asset can resolve an older failure even after the successful run records expire; that run’s own materializations cannot clear its failure. Fresh checks precede each deletion. Unchanged Parquet inputs do
 not launch another Arrow build. Terminal successful/skipped sensor and schedule
 ticks expire after one day; failed ticks after seven days. Instigator cursors and
 source run evidence are independent of those operational tick logs.

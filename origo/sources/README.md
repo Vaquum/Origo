@@ -142,6 +142,9 @@ materialization metadata retains the successful input identity after history exp
    blocks without following symlinks, counts hard links once, and logs paths that disappear during
    traversal. Missing configured roots, permission and I/O errors still fail the run,
    as does exhausting the absolute reporting deadline.
+   Inventory reads at most 500 run records in run-ID order, without sorting the
+   remaining backlog. Retry references and sensor state are loaded once per batch;
+   reclamation still checks fresh dependencies for each run under its writer lock.
    Each completed batch checkpoints its cursor. Repeat until the result says
    `inventory_complete: true`; an incomplete inventory is not a deletion approval.
    Once an eligible first manifest has a complete inventory, scheduled and deploy

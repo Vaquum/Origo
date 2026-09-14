@@ -1489,9 +1489,13 @@ def test_reporting_reserve_preserves_progress(
         config: OperationalMetadataMaintenanceConfig,
         now: float,
         deadline: float,
+        *,
+        scan_references: retention.ScanReferences | None = None,
     ) -> str:
         nonlocal elapsed, visited
-        result = protect(instance, layout, record, config, now, deadline)
+        result = protect(
+            instance, layout, record, config, now, deadline, scan_references=scan_references
+        )
         visited += 1
         elapsed += 1100
         return result
@@ -1598,3 +1602,135 @@ def test_deploy_launch_uses_configured_location(
         origin = runs[0].remote_job_origin
         assert origin is not None
         assert origin.repository_origin.code_location_origin.location_name == 'origo'
+
+
+def _save_sensor_run_key(instance: DagsterInstance, run_key: str) -> None:
+    from dagster._core.definitions.run_request import InstigatorType
+    from dagster._core.remote_origin import (
+        RegisteredCodeLocationOrigin,
+        RemoteInstigatorOrigin,
+        RemoteRepositoryOrigin,
+    )
+    from dagster._core.scheduler.instigation import (
+        InstigatorState,
+        InstigatorStatus,
+        SensorInstigatorData,
+    )
+
+    instance.add_instigator_state(
+        InstigatorState(
+            RemoteInstigatorOrigin(
+                RemoteRepositoryOrigin(RegisteredCodeLocationOrigin('origo'), '__repository__'),
+                'metadata_proof_sensor',
+            ),
+            InstigatorType.SENSOR,
+            InstigatorStatus.RUNNING,
+            SensorInstigatorData(last_run_key=run_key),
+        )
+    )
+
+
+def test_inventory_selection_uses_ordered_primary_key(metadata_instance: DagsterInstance) -> None:
+    succeeded = execute_archive(metadata_instance)
+    execute_archive(metadata_instance, tags={'proof_fail': 'true'})
+    execute_archive(metadata_instance)
+    layout = Layout.from_instance(metadata_instance)
+    upper = metadata_instance.get_run_records(limit=1)[0].storage_id
+    execute_archive(metadata_instance)  # Excluded by the inventory snapshot's upper ID.
+    now = time.time() + 31 * 86400
+    params = (0, upper, now - 30 * 86400, now - 90 * 86400, 1)
+    with connection(layout.runs, time.monotonic() + 15, 1) as database:
+        actual = database.execute(retention._INVENTORY_QUERY, params).fetchall()
+        original = database.execute(
+            retention._INVENTORY_QUERY.replace(' NOT INDEXED', ''), params
+        ).fetchall()
+        assert [tuple(row) for row in actual] == [tuple(row) for row in original]
+        assert [row['run_id'] for row in actual] == [succeeded]
+        plan = '\n'.join(
+            str(tuple(row))
+            for row in database.execute('EXPLAIN QUERY PLAN ' + retention._INVENTORY_QUERY, params)
+        )
+        assert 'INTEGER PRIMARY KEY' in plan and 'TEMP B-TREE' not in plan
+        params = (actual[-1]['id'], upper, params[2], params[3], 500)
+        rows = database.execute(retention._INVENTORY_QUERY, params).fetchall()
+        assert len(rows) == 1 and rows[0]['id'] == upper
+
+
+def test_inventory_batches_reads_with_identical_protections(
+    metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Sequence
+
+    from dagster._core.scheduler.instigation import InstigatorState
+
+    instance = metadata_instance
+    parent = execute_archive(instance)
+    execute_archive(instance, tags={'dagster/parent_run_id': parent, 'dagster/root_run_id': parent})
+    execute_archive(instance, tags={'origo_metadata_preserve': 'true'})
+    sensor_run = execute_archive(instance, tags={'dagster/run_key': 'archive_key'})
+    _save_sensor_run_key(instance, 'archive_key')
+    execute_archive(instance, tags={'proof_fail': 'true'}, partition='2020-01-01')
+    layout, journal, _ = planned(instance, parent)
+    now = time.time() + 91 * 86400
+    expected = {
+        record.dagster_run.run_id: protection(
+            instance, layout, record, POLICY, now, time.monotonic() + 15
+        )
+        for record in instance.get_run_records(limit=500)
+    }
+    load_states = instance.all_instigator_state
+    load_records = instance.get_run_records
+    loads = {'sensors': 0, 'records': 0}
+
+    def counted_states() -> Sequence[InstigatorState]:
+        loads['sensors'] += 1
+        return load_states()
+
+    def counted_records(filters: RunsFilter, limit: int) -> Sequence[RunRecord]:
+        loads['records'] += 1
+        return load_records(filters, limit=limit)
+
+    monkeypatch.setattr(instance, 'all_instigator_state', counted_states)
+    monkeypatch.setattr(instance, 'get_run_records', counted_records)
+    rows = scan_batch(instance, layout, journal, POLICY, now, time.monotonic() + 15)
+    assert {row.run_id: row.reason for row in rows} == expected
+    assert expected[parent] == 'retry_lineage_reference'
+    assert expected[sensor_run] == 'sensor_last_run_key'
+    assert loads == {'sensors': 1, 'records': 1}
+    assert [row.storage_id for row in rows] == sorted(row.storage_id for row in rows)
+    assert journal.inventory_scanned == len(expected)
+    assert journal.inventory_eligible_bytes == sum(
+        row.allocated_bytes for row in rows if not row.reason
+    )
+    assert journal.inventory_complete
+
+
+@pytest.mark.parametrize('new_reference', ['retry', 'sensor'])
+def test_inventory_snapshot_never_replaces_live_revalidation(
+    metadata_instance: DagsterInstance,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    new_reference: str,
+) -> None:
+    instance = metadata_instance
+    run_id = execute_archive(instance, tags={'dagster/run_key': 'archive_key'})
+    layout, journal, _ = planned(instance, run_id)
+    future = time.time() + 31 * 86400
+    rows = scan_batch(instance, layout, journal, POLICY, future, time.monotonic() + 15)
+    assert len(rows) == 1 and not rows[0].reason
+    journal.manifest = rows
+    if new_reference == 'retry':
+        execute_archive(instance, tags={'dagster/parent_run_id': run_id})
+        reason = 'retry_lineage_reference'
+    else:
+        _save_sensor_run_key(instance, 'archive_key')
+        reason = 'sensor_last_run_key'
+    monkeypatch.setattr(
+        retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
+    )
+    reclaimed = reclaim(
+        instance, layout, rows[0], journal, tmp_path / 'journal.json', POLICY, time.monotonic() + 15
+    )
+    assert reclaimed == 0
+    assert rows[0].revalidation_reason == 'live_revalidation:' + reason
+    assert instance.get_run_by_id(run_id) is not None and layout.shard(run_id).exists()

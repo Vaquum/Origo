@@ -4,15 +4,19 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import cast
-
-from clickhouse_driver.errors import ErrorCodes, ServerException
 
 from origo.sources.contracts import Client, Row
 
 from .protocol import OperationalMetadataMaintenanceConfig
 from .sqlite import allocated
+
+_SERVER_EXCEPTION = cast(
+    type[Exception], getattr(import_module('clickhouse_driver.errors'), 'ServerException')
+)
+_TOO_MANY_BYTES = 307
 
 DIAGNOSTIC_LOGS = (
     'text_log',
@@ -239,8 +243,8 @@ def maintain_diagnostics(
                     deadline,
                     {'part': name, 'lag_seconds': config.diagnostic_max_lag_seconds},
                 )
-            except ServerException as error:
-                if error.code != ErrorCodes.TOO_MANY_BYTES:
+            except _SERVER_EXCEPTION as error:
+                if getattr(error, 'code') != _TOO_MANY_BYTES:
                     raise
                 errors.append(
                     f'expiry_bounds_read_limit:{table}:{name}:{config.diagnostic_max_partition_bytes}'

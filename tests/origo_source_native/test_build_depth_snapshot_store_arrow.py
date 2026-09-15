@@ -261,6 +261,15 @@ def test_depth_retention_window_and_latest_target(
         _publish(series, 21)
     assert _chunk(series, 0).exists()
     _seed(series, [0, 20], latest=20)
+    wrong_schema = (FIXTURES / 'bar.arrow').read_bytes()
+    _chunk(series, 20).write_bytes(wrong_schema)
+    manifest = json.loads(manifest_path.read_text())
+    manifest['version'] = hashlib.sha256(wrong_schema).hexdigest()[:16]
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match='Invalid latest depth IPC'):
+        _publish(series, 21)
+    assert _chunk(series, 0).exists()
+    _seed(series, [0, 20], latest=20)
     original_unlink = Path.unlink
 
     def fail_expiry(path: Path, missing_ok: bool = False) -> None:

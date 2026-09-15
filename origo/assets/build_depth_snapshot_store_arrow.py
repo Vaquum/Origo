@@ -340,7 +340,20 @@ def _latest_manifest_target(directory: Path, series: str) -> tuple[datetime, Pat
     if manifest.get('version') != hashlib.sha256(payload).hexdigest()[:VERSION_HEX]:
         raise RuntimeError(f'Latest depth target checksum mismatch: {target}')
     frame = pl.read_ipc(io.BytesIO(payload), rechunk=False)
-    if frame.n_chunks() != 1 or frame.height != manifest.get('rows'):
+    book = pl.Array(
+        pl.Struct({'price': pl.Float64, 'qty': pl.Float64}),
+        spec_for_depth_snapshot_series(series).depth,
+    )
+    schema = pl.Schema(
+        {
+            'ts': pl.Int64,
+            'source_timestamp_ms': pl.UInt64,
+            'last_update_id': pl.UInt64,
+            'bids': book,
+            'asks': book,
+        }
+    )
+    if frame.schema != schema or frame.n_chunks() != 1 or frame.height != manifest.get('rows'):
         raise RuntimeError(f'Invalid latest depth IPC: {target}')
     return minute, relative
 

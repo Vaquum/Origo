@@ -1097,8 +1097,8 @@
     },
     {
       "file": "prediction.arrow",
-      "source_path": "/tmp/origo-depth-retention/prediction.arrow",
-      "source_resolved_path": "/tmp/origo-depth-retention/prediction.arrow",
+      "source_path": "/var/lib/docker/volumes/furnace_conduit/_data/time_15m/latest.arrow",
+      "source_resolved_path": "/var/lib/docker/volumes/furnace_conduit/_data/time_15m/latest.arrow",
       "source_symlink_target": null,
       "original_ipc_sha256": "be1659d587e4e3c4f0d79377a81d85602d6dcbd2f49b2b2574b60da53da7a1e6",
       "selected_row_indices": [
@@ -1106,7 +1106,9 @@
         1
       ],
       "fixture_sha256": "12579f2772914ae7f134b79c584ec39220a1e08d1f19a9ea4b819feec4a9d180",
-      "capture_unix_time": 1789464104.440318
+      "capture_unix_time": 1789464104.440318,
+      "capture_copy_path": "/tmp/origo-depth-retention/prediction.arrow",
+      "consumer_path": "/opt/conduit/time_15m/latest.arrow"
     },
     {
       "file": "legacy_depth.arrow",

@@ -4,6 +4,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import cast
 
@@ -11,6 +12,11 @@ from origo.sources.contracts import Client, Row
 
 from .protocol import OperationalMetadataMaintenanceConfig
 from .sqlite import allocated
+
+_SERVER_EXCEPTION = cast(
+    type[Exception], getattr(import_module('clickhouse_driver.errors'), 'ServerException')
+)
+_TOO_MANY_BYTES = 307
 
 DIAGNOSTIC_LOGS = (
     'text_log',
@@ -167,10 +173,13 @@ def maintain_diagnostics(
     errors.extend(f'enabled_diagnostic_log_missing:{root}' for root in sorted(missing))
     if not tables:
         raise RuntimeError('No managed diagnostic logs were found.')
-    table_parameters = {'tables': tuple(tables)}
+    table_parameters = {
+        'tables': tuple(tables),
+        'lag_days': (config.diagnostic_max_lag_seconds + 86399) // 86400,
+    }
     parts = _execute(
         client,
-        "SELECT table,name,partition_id,active,bytes_on_disk,toString(min_date),toString(max_date),max_date<today()-14 FROM system.parts WHERE database='system' AND table IN %(tables)s ORDER BY min_date,table,name LIMIT 5001",
+        "SELECT table,name,partition_id,active,bytes_on_disk,toString(min_date),toString(max_date),max_date<today()-14,min_date<today()-14-%(lag_days)s FROM system.parts WHERE database='system' AND table IN %(tables)s ORDER BY min_date,table,name LIMIT 5001",
         deadline,
         table_parameters,
     )
@@ -209,23 +218,61 @@ def maintain_diagnostics(
         )
     active_bytes = sum(int(str(row[4])) for row in parts if row[3])
     inactive_bytes = sum(int(str(row[4])) for row in parts if not row[3])
-    expired_bytes = sum(int(str(row[4])) for row in parts if row[3] and row[7])
     active = [row for row in parts if row[3]]
-    oldest = min((str(row[5]) for row in active), default='')
-    lagging = _execute(
-        client,
-        "SELECT table,toString(min(min_date)) FROM system.parts WHERE database='system' AND table IN %(tables)s AND active GROUP BY table HAVING min(min_date)<toDate(now()-INTERVAL 14 DAY)-%(lag_days)s",
-        deadline,
-        {**table_parameters, 'lag_days': (config.diagnostic_max_lag_seconds + 86399) // 86400},
+    expired_parts: set[tuple[str, str]] = set()
+    lagging_parts: set[tuple[str, str]] = set()
+    oldest_dates: list[str] = []
+    lagging: dict[str, str] = {}
+    for part in active:
+        table, name = str(part[0]), str(part[1])
+        oldest_date = str(part[5])
+        if part[7] or part[8]:
+            root = diagnostic_root(table)
+            if root is None:
+                raise ValueError('Invalid diagnostic table identity.')
+            timestamp = timestamp_expression(root)
+            # Date-key bounds can remain stale after TTL removes rows from a part.
+            try:
+                bounds = _execute(
+                    client,
+                    f'SELECT count(),toString(toDate(min({timestamp}))),'
+                    f'max({timestamp})<now()-INTERVAL 14 DAY,'
+                    f'min({timestamp})<now()-INTERVAL 14 DAY-'
+                    f'toIntervalSecond(%(lag_seconds)s) FROM system.{table} '
+                    f'WHERE _part=%(part)s SETTINGS max_bytes_to_read={config.diagnostic_max_partition_bytes}',
+                    deadline,
+                    {'part': name, 'lag_seconds': config.diagnostic_max_lag_seconds},
+                )
+            except _SERVER_EXCEPTION as error:
+                if getattr(error, 'code') != _TOO_MANY_BYTES:
+                    raise
+                errors.append(
+                    f'expiry_bounds_read_limit:{table}:{name}:{config.diagnostic_max_partition_bytes}'
+                )
+                oldest_dates.append(oldest_date)
+                continue
+            count, actual_oldest, expired, overdue = bounds[0]
+            if not count:
+                continue
+            oldest_date = str(actual_oldest)
+            if expired:
+                expired_parts.add((table, name))
+            if overdue:
+                lagging_parts.add((table, name))
+                lagging[table] = min(lagging.get(table, oldest_date), oldest_date)
+        oldest_dates.append(oldest_date)
+    expired_bytes = sum(
+        int(str(part[4])) for part in active if (str(part[0]), str(part[1])) in expired_parts
     )
-    errors.extend(f'expiry_lag:{table}:{oldest_date}' for table, oldest_date in lagging)
+    oldest = min(oldest_dates, default='')
+    errors.extend(f'expiry_lag:{table}:{oldest_date}' for table, oldest_date in lagging.items())
     action = ''
     busy_tables = {str(row[0]) for row in mutations + merges}
-    lagging_tables = {str(row[0]) for row in lagging}
     for part in active:
         if config.dry_run or str(part[0]) in busy_tables or time.monotonic() >= deadline - 5:
             continue
-        if not part[7] and str(part[0]) not in lagging_tables:
+        identity = (str(part[0]), str(part[1]))
+        if identity not in expired_parts and identity not in lagging_parts:
             continue
         table, name, partition_id = str(part[0]), str(part[1]), str(part[2])
         root = diagnostic_root(table)
@@ -246,7 +293,7 @@ def maintain_diagnostics(
         if count and maximum < cutoff:
             _execute(client, f"ALTER TABLE system.{table} DROP PART '{name}'", deadline)
             action += f'drop_expired_part:{table}:{name};'
-        elif table in lagging_tables and not mutations:
+        elif identity in lagging_parts and not mutations:
             size = _execute(
                 client,
                 "SELECT sum(bytes_on_disk) FROM system.parts WHERE database='system' AND table=%(table)s AND partition_id=%(partition)s AND active",

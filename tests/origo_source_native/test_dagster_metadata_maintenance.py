@@ -694,6 +694,116 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
     client.disconnect()
 
 
+def test_clickhouse_stale_partition_dates_do_not_repeat_catch_up(
+    diagnostic_server: tuple[str, object, Path],
+) -> None:
+    from datetime import date, datetime
+
+    from origo.maintenance.clickhouse import maintain_diagnostics
+
+    client = _diagnostic_client(diagnostic_server)
+    historical = json.loads(
+        (ROOT / 'tests/fixtures/dagster_metadata/metric_log_sample.json').read_text()
+    )
+    table = 'system.metric_log_289'
+    client.execute(
+        f'CREATE TABLE {table} (hostname String DEFAULT hostName(),event_date Date,'
+        'event_time DateTime,CurrentMetric_Query Int64) ENGINE=MergeTree '
+        'PARTITION BY tuple() ORDER BY (event_date,event_time)'
+    )
+    try:
+        client.execute(
+            f'INSERT INTO {table} (event_date,event_time,CurrentMetric_Query) VALUES',
+            [
+                (
+                    date.fromisoformat(historical['event_date']),
+                    datetime.fromisoformat(historical['event_time']),
+                    historical['CurrentMetric_Query'],
+                )
+            ],
+        )
+        client.execute('SYSTEM FLUSH LOGS')
+        client.execute(
+            f'INSERT INTO {table} SELECT hostname,event_date,event_time,CurrentMetric_Query '
+            'FROM system.metric_log ORDER BY event_date DESC,event_time DESC LIMIT 1'
+        )
+        recent = client.execute(f'SELECT * FROM {table} WHERE event_time>=now()-INTERVAL 14 DAY')
+        assert recent
+        client.execute(f'OPTIMIZE TABLE {table} FINAL')
+        apply = POLICY.model_copy(update={'dry_run': False})
+        before = maintain_diagnostics(client, apply, time.monotonic() + 30)
+        assert before.scheduled_action == 'materialize_ttl:metric_log_289:all;'
+        deadline = time.monotonic() + 20
+        while client.execute(f'SELECT * FROM {table}') != recent:
+            if time.monotonic() >= deadline:
+                pytest.fail('Real diagnostic catch-up did not preserve only recent events.')
+            time.sleep(0.1)
+        # No Date partition key: ClickHouse emits epoch bounds for real recent rows.
+        assert client.execute(
+            "SELECT count() FROM system.parts WHERE database='system' "
+            "AND table='metric_log_289' AND active AND rows>0 AND min_date=toDate(0)"
+        ) == [(1,)]
+        after = maintain_diagnostics(client, apply, time.monotonic() + 30)
+        assert not any(error.startswith('expiry_lag:metric_log_289:') for error in after.errors)
+        assert 'metric_log_289' not in after.scheduled_action
+        assert after.entirely_expired_bytes == 0
+        assert after.oldest_date != '1970-01-01'
+        assert client.execute(f'SELECT * FROM {table}') == recent
+    finally:
+        client.execute(f'DROP TABLE {table} SYNC')
+        client.disconnect()
+
+
+def test_clickhouse_expiry_read_limit_does_not_block_other_parts(
+    diagnostic_server: tuple[str, object, Path],
+) -> None:
+    from datetime import date, datetime
+
+    from origo.maintenance.clickhouse import maintain_diagnostics
+
+    client = _diagnostic_client(diagnostic_server)
+    historical = json.loads(
+        (ROOT / 'tests/fixtures/dagster_metadata/metric_log_sample.json').read_text()
+    )
+    record = (
+        date.fromisoformat(historical['event_date']),
+        datetime.fromisoformat(historical['event_time']),
+        historical['CurrentMetric_Query'],
+    )
+    tables = ('metric_log_291', 'metric_log_292')
+    for table in tables:
+        client.execute(
+            f'CREATE TABLE system.{table} (hostname String DEFAULT hostName(),event_date Date,'
+            'event_time DateTime,CurrentMetric_Query Int64) ENGINE=MergeTree '
+            'PARTITION BY toYYYYMM(event_date) ORDER BY (event_date,event_time)'
+        )
+    try:
+        for table, records in zip(tables, ([record, record], [record]), strict=True):
+            client.execute(
+                f'INSERT INTO system.{table} (event_date,event_time,CurrentMetric_Query) VALUES',
+                records,
+            )
+        limited = POLICY.model_copy(update={'diagnostic_max_partition_bytes': 4})
+        dry = maintain_diagnostics(client, limited, time.monotonic() + 30)
+        assert any(
+            error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in dry.errors
+        )
+        assert any(error.startswith('expiry_lag:metric_log_292:') for error in dry.errors)
+        applied = maintain_diagnostics(
+            client, limited.model_copy(update={'dry_run': False}), time.monotonic() + 30
+        )
+        assert any(
+            error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in applied.errors
+        )
+        assert applied.scheduled_action.startswith('drop_expired_part:metric_log_292:')
+        assert client.execute('SELECT count() FROM system.metric_log_291') == [(2,)]
+        assert client.execute('SELECT count() FROM system.metric_log_292') == [(0,)]
+    finally:
+        for table in tables:
+            client.execute(f'DROP TABLE system.{table} SYNC')
+        client.disconnect()
+
+
 def test_clickhouse_expiry_lag_and_failure_visibility(
     diagnostic_server: tuple[str, object, Path],
 ) -> None:

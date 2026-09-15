@@ -1,3 +1,8 @@
+# v3.8.6
+
+- Report diagnostic timestamp-read byte limits per part and continue checking and reclaiming other parts.
+- Verify diagnostic expiry against actual event timestamps so stale ClickHouse partition dates cannot report false retention failures or repeatedly schedule completed catch-up work.
+
 # v3.8.5
 
 - Reduce metadata-retirement overhead by reusing SQLAlchemy engines, unlinking retired event shards without schema initialization, and refreshing cached sensor state on committed changes. Source provenance, current asset facts, and fresh retry checks remain protected.

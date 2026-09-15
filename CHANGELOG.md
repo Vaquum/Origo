@@ -1,3 +1,7 @@
+# v3.9.0 on September 11, 2026
+
+- Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
 # v3.8.9
 
 - Correlate repository membership for Dagster sensor and schedule run queries so Automation controls do not wait behind repeated repository tag scans.

@@ -4,7 +4,7 @@ The feed is one dict per UTC day carrying the six sections in
 ``FEED_SECTIONS``: 15-minute and daily OHLCV bars from the 1m
 ``binance_spot_klines`` projection, measured volume-at-price from
 ``binance_daily_spot_trades``, and per-minute series, exact daily
-percentiles and 8-hour session aggregates of the ``binance_spot_depth20_1m``
+percentiles and 8-hour session aggregates of the ``binance_spot_depth200_1m``
 book projection.
 
 Completeness policy: bars must cover the day exactly (96 x 15 distinct
@@ -18,7 +18,7 @@ not suppress the whole feed.
 Every time field the sections carry (``bar_start``, ``minute_start``,
 ``session_start``) is declared as UTC epoch seconds in the SQL itself via
 ``toUnixTimestamp``, so the feed's time representation is part of the
-``btc_briefing/1`` contract rather than inherited from the server's Arrow
+``btc_briefing/2`` contract rather than inherited from the server's Arrow
 serialization of ``DateTime``.
 
 The asset is daily-partitioned: each partition builds, validates and
@@ -42,7 +42,7 @@ from huggingface_hub import HfApi
 
 from .daily_trades_to_origo import daily_partitions
 
-FEED_VERSION: Final[str] = 'btc_briefing/1'
+FEED_VERSION: Final[str] = 'btc_briefing/2'
 FEED_SECTIONS: Final[tuple[str, ...]] = (
     'bars_15m',
     'bars_1d',
@@ -152,7 +152,7 @@ def _require_rows(rows: list[dict[str, object]], *, day: date, section: str) -> 
 def build_briefing_feed(
     client: _ClickHouseArrowClientProtocol, day: date
 ) -> dict[str, object]:
-    """Build the ``btc_briefing/1`` feed dict for one complete UTC day.
+    """Build the ``btc_briefing/2`` feed dict for one complete UTC day.
 
     The dict carries ``feed_version``, ``day`` and every section in
     ``FEED_SECTIONS``, each section a list of row dicts straight from its
@@ -218,10 +218,14 @@ def _get_huggingface_token() -> str:
 def _build_dataset_card(*, day: str, file_name: str, sha256: str) -> str:
     return f"""# BTC daily briefing feed
 
-One `{FEED_VERSION}` feed file per UTC day, built from the origo ClickHouse
+This dataset retains one JSON file per published UTC day. Read each file's
+`feed_version`; historical files keep the contract under which they were
+published.
+
+The latest snapshot uses `{FEED_VERSION}` and is built from the origo ClickHouse
 tables: 15m/1d OHLCV bars, measured volume-at-price in integer satoshis split
 by taker side, and per-minute series, exact daily percentiles and 8h session
-aggregates of the depth20 book. Time fields are UTC epoch seconds.
+aggregates of the depth200 book. Its time fields are UTC epoch seconds.
 
 Latest snapshot:
 
@@ -350,7 +354,7 @@ def publish_briefing_feed_to_huggingface(
     group_name='binance_data',
     description=(
         'Builds, validates and publishes the daily BTC briefing feed '
-        '(btc_briefing/1) for the partition day from the origo ClickHouse tables '
+        '(btc_briefing/2) for the partition day from the origo ClickHouse tables '
         'to the vaquum/btc_briefing_feed HuggingFace dataset.'
     ),
 )

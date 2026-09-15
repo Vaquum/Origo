@@ -39,7 +39,7 @@ def _create_briefing_tables(origo_assets: dict[str, Any]) -> None:
             origo_assets['create_origo_database'],
             origo_assets['create_binance_daily_spot_trades_table_origo'],
             origo_assets['create_binance_spot_klines_table_origo'],
-            origo_assets['create_binance_spot_depth20_1m_table_origo'],
+            origo_assets['create_binance_spot_depth200_1m_table_origo'],
         ]
     )
     assert result.success
@@ -106,18 +106,18 @@ def _insert_day_trades(query_origo: Callable[[str], list[tuple[Any, ...]]]) -> N
 def _insert_day_book_minutes(query_origo: Callable[[str], list[tuple[Any, ...]]]) -> None:
     query_origo(
         f"""
-        INSERT INTO binance_spot_depth20_1m
+        INSERT INTO binance_spot_depth200_1m
             (datetime, source_timestamp_ms, book_mid_price, book_spread_bps,
-             book_bid_depth_20_notional, book_ask_depth_20_notional, book_imbalance_20)
+             book_bid_depth_200_notional, book_ask_depth_200_notional, book_imbalance_200)
         SELECT
             toDateTime('{DAY.isoformat()} 00:00:00') + 60 * number AS datetime,
             toUnixTimestamp(datetime) * 1000 AS source_timestamp_ms,
             42000 + (number % 60) AS book_mid_price,
             1 + (number % 10) / 10 AS book_spread_bps,
-            1000000 + 1000 * (number % 20) AS book_bid_depth_20_notional,
-            1000000 - 1000 * (number % 20) AS book_ask_depth_20_notional,
-            (book_bid_depth_20_notional - book_ask_depth_20_notional)
-              / (book_bid_depth_20_notional + book_ask_depth_20_notional) AS book_imbalance_20
+            1000000 + 1000 * (number % 20) AS book_bid_depth_200_notional,
+            1000000 - 1000 * (number % 20) AS book_ask_depth_200_notional,
+            (book_bid_depth_200_notional - book_ask_depth_200_notional)
+              / (book_bid_depth_200_notional + book_ask_depth_200_notional) AS book_imbalance_200
         FROM numbers(1440)
         """
     )
@@ -152,9 +152,9 @@ def _insert_adjacent_day_rows(query_origo: Callable[[str], list[tuple[Any, ...]]
     for book_datetime in ('2023-12-31 23:59:00', '2024-01-02 00:00:00'):
         query_origo(
             f"""
-            INSERT INTO binance_spot_depth20_1m
+            INSERT INTO binance_spot_depth200_1m
                 (datetime, source_timestamp_ms, book_mid_price, book_spread_bps,
-                 book_bid_depth_20_notional, book_ask_depth_20_notional, book_imbalance_20)
+                 book_bid_depth_200_notional, book_ask_depth_200_notional, book_imbalance_200)
             SELECT toDateTime('{book_datetime}'), 1, 1.0, 1.0, 1.0, 1.0, 0.0
             """
         )
@@ -166,9 +166,9 @@ def _insert_replaced_book_minute(query_origo: Callable[[str], list[tuple[Any, ..
     # exactly once, which only holds if the book queries read FINAL.
     query_origo(
         f"""
-        INSERT INTO binance_spot_depth20_1m
+        INSERT INTO binance_spot_depth200_1m
             (datetime, source_timestamp_ms, book_mid_price, book_spread_bps,
-             book_bid_depth_20_notional, book_ask_depth_20_notional, book_imbalance_20)
+             book_bid_depth_200_notional, book_ask_depth_200_notional, book_imbalance_200)
         SELECT toDateTime('{DAY.isoformat()} 00:00:00'), {DAY_START_EPOCH * 1000 + 1},
                {REPLACED_MINUTE_MID_PRICE}, 1.0, 1000000.0, 1000000.0, 0.0
         """
@@ -206,11 +206,8 @@ def test_build_briefing_feed_signature_is_client_and_day() -> None:
     assert signature.return_annotation == dict[str, object]
 
 
-def test_feed_version_is_pinned() -> None:
-    assert FEED_VERSION == 'btc_briefing/1'
-
-
-def test_feed_sections_are_exactly_the_six_published() -> None:
+def test_the_feed_declares_its_version_and_sections() -> None:
+    assert FEED_VERSION == 'btc_briefing/2'
     assert sorted(FEED_SECTIONS) == [
         'bars_15m',
         'bars_1d',
@@ -221,7 +218,20 @@ def test_feed_sections_are_exactly_the_six_published() -> None:
     ]
 
 
-def test_feed_contains_every_declared_section(
+def test_the_book_sections_are_built_from_the_depth200_projection() -> None:
+    for sql_file_name in (
+        'briefing_book_percentiles.sql',
+        'briefing_book_series.sql',
+        'briefing_book_sessions.sql',
+    ):
+        query = (publish_btc_briefing_feed_module._SQL_DIR / sql_file_name).read_text(
+            encoding='utf-8'
+        )
+        assert query.count('binance_spot_depth200_1m') == 1
+        assert 'binance_spot_depth20_1m' not in query
+
+
+def test_the_book_metrics_are_named_for_the_depth_they_measure(
     origo_assets: dict[str, Any],
     query_origo: Callable[[str], list[tuple[Any, ...]]],
 ) -> None:
@@ -234,6 +244,31 @@ def test_feed_contains_every_declared_section(
     for section in FEED_SECTIONS:
         assert section in feed
         assert len(feed[section]) > 0
+    assert {row['metric'] for row in feed['book_percentiles']} == {
+        'book_mid_price',
+        'book_spread_bps',
+        'book_bid_depth_200_notional',
+        'book_ask_depth_200_notional',
+        'book_imbalance_200',
+    }
+    assert set(feed['book_series'][0]) == {
+        'minute_start',
+        'book_mid_price',
+        'book_spread_bps',
+        'book_bid_depth_200_notional',
+        'book_ask_depth_200_notional',
+        'book_imbalance_200',
+    }
+    assert set(feed['book_sessions'][0]) == {
+        'session_start',
+        'minutes',
+        'open_mid_price',
+        'close_mid_price',
+        'avg_spread_bps',
+        'avg_bid_depth_200_notional',
+        'avg_ask_depth_200_notional',
+        'avg_imbalance_200',
+    }
 
 
 def test_bars_cover_the_day_with_no_short_bar(
@@ -443,6 +478,17 @@ def test_asset_is_daily_partitioned() -> None:
     )
 
 
+def test_dataset_card_scopes_the_contract_to_each_file() -> None:
+    card = publish_btc_briefing_feed_module._build_dataset_card(
+        day=DAY.isoformat(),
+        file_name='btc_briefing_20240101.json',
+        sha256='abc123',
+    )
+
+    assert 'historical files keep the contract under which they were' in card
+    assert f'latest snapshot uses `{FEED_VERSION}`' in card
+
+
 def test_sensor_is_registered_in_definitions() -> None:
     definitions_module = importlib.import_module('origo.definitions')
     assert any(
@@ -489,7 +535,7 @@ def test_latest_pointer_declares_version_and_day(
         feed, repo_id='test/btc-briefing', token='test-token'
     )
 
-    assert uploaded['latest']['feed_version'] == 'btc_briefing/1'
+    assert uploaded['latest']['feed_version'] == 'btc_briefing/2'
     assert uploaded['latest']['day'] == DAY.isoformat()
     assert uploaded['latest']['file_name'] == 'btc_briefing_20240101.json'
     assert (

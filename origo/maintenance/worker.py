@@ -372,6 +372,15 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                 not config.dry_run
                 and retirement_candidates > resumed_candidates
                 and report.backlog_runs >= previous.backlog_runs > 0
+                # A complete scan has handled its frozen cohort. Raw backlog
+                # also counts policy holds and runs that became old afterward.
+                and (
+                    journal.scan_cursor != 0
+                    or any(
+                        row.action == 'retire' and not row.exclusion and row.phase != 'reclaimed'
+                        for row in journal.manifest
+                    )
+                )
             ):
                 violations.append('retention_backlog_not_decreasing')
         if not violations:

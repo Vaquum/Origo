@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.8.7
+
+Completed metadata scans no longer report a growing cleanup backlog solely because protected projection runs or newly aged arrivals remain. Interrupted scans and unfinished retirement batches retain the backlog alarm.
+
 # v3.8.6
 
 - Report diagnostic timestamp-read byte limits per part and continue checking and reclaiming other parts.

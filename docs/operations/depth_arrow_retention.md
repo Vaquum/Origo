@@ -6,6 +6,8 @@ Depth20 and depth200 minute IPC chunks are a live cache. The publisher keeps chu
 
 Only canonical `chunks/YYYY/MM/DD/HH/YYYYMMDDTHHMM00Z.arrow` files under the two depth series can expire. The current manifest's series, partition, target path, checksum and IPC payload must validate first. Symlinks are never followed for publication or deletion; unrecognized chunk paths remain and generate warnings. Filesystem errors fail the Dagster run. Empty canonical chunk directories are removed. No retention index, new service or schedule is introduced.
 
+Republishing the current latest minute first hard-links its committed bytes to `.latest.previous.arrow` under the series lock. If the process exits before committing the new manifest, the next publisher validates that recovery copy against the existing manifest and restores it before expiry. If the manifest was committed, its matching new target is retained and the recovery copy is removed. An invalid recovery copy cannot authorize expiry. This private file exists only during replacement or interrupted recovery; it is not a retention index.
+
 The existing uncompressed, single-record-batch IPC schema and manifest fields remain unchanged. Bar/prediction versions and their `latest.arrow` links, legacy flat depth exports, and ClickHouse business tables are outside this policy. Open memory maps remain readable after an expired path is unlinked. A reader resolving an old pathname and delaying its open must reread `latest.json` if that path expires.
 
 ## Mandatory preflight before the first deployment

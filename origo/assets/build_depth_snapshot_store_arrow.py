@@ -44,6 +44,7 @@ DEPTH200_SOURCE_JOB_NAME = 'refresh_binance_spot_depth200_data_source_job'
 LATEST_MANIFEST_NAME = 'latest.json'
 VERSION_HEX = 16
 _RETENTION_MINUTES = 30
+_LATEST_BACKUP_NAME = '.latest.previous.arrow'
 
 BookLevel = tuple[float, float]
 
@@ -318,24 +319,7 @@ def _require_local_path(directory: Path, relative: Path) -> Path:
     return target
 
 
-def _latest_manifest_target(directory: Path, series: str) -> tuple[datetime, Path] | None:
-    manifest_path = _require_local_path(directory, Path(LATEST_MANIFEST_NAME))
-    if not manifest_path.exists():
-        return None
-    raw_manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if not isinstance(raw_manifest, dict):
-        raise RuntimeError(f'Invalid depth manifest: {manifest_path}')
-    manifest = cast(dict[str, object], raw_manifest)
-    if manifest.get('series') != series:
-        raise RuntimeError(f'Wrong series in depth manifest: {manifest_path}')
-    partition = manifest.get('source_partition_key')
-    if not isinstance(partition, str):
-        raise RuntimeError(f'{manifest_path} does not contain source_partition_key.')
-    minute = minute_start_from_partition_key(partition)
-    relative = depth_snapshot_chunk_relative_path(minute)
-    if manifest.get('chunk') != relative.as_posix():
-        raise RuntimeError(f'Invalid latest depth target: {manifest_path}')
-    target = _require_local_path(directory, relative)
+def _validate_latest_chunk(target: Path, series: str, manifest: dict[str, object]) -> None:
     payload = target.read_bytes()
     if manifest.get('version') != hashlib.sha256(payload).hexdigest()[:VERSION_HEX]:
         raise RuntimeError(f'Latest depth target checksum mismatch: {target}')
@@ -355,6 +339,43 @@ def _latest_manifest_target(directory: Path, series: str) -> tuple[datetime, Pat
     )
     if frame.schema != schema or frame.n_chunks() != 1 or frame.height != manifest.get('rows'):
         raise RuntimeError(f'Invalid latest depth IPC: {target}')
+
+
+def _latest_manifest_target(directory: Path, series: str) -> tuple[datetime, Path] | None:
+    manifest_path = _require_local_path(directory, Path(LATEST_MANIFEST_NAME))
+    backup = _require_local_path(directory, Path(_LATEST_BACKUP_NAME))
+    if not manifest_path.exists():
+        if backup.exists():
+            raise RuntimeError(f'Latest depth recovery copy without manifest: {backup}')
+        return None
+    raw_manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if not isinstance(raw_manifest, dict):
+        raise RuntimeError(f'Invalid depth manifest: {manifest_path}')
+    manifest = cast(dict[str, object], raw_manifest)
+    if manifest.get('series') != series:
+        raise RuntimeError(f'Wrong series in depth manifest: {manifest_path}')
+    partition = manifest.get('source_partition_key')
+    if not isinstance(partition, str):
+        raise RuntimeError(f'{manifest_path} does not contain source_partition_key.')
+    minute = minute_start_from_partition_key(partition)
+    relative = depth_snapshot_chunk_relative_path(minute)
+    if manifest.get('chunk') != relative.as_posix():
+        raise RuntimeError(f'Invalid latest depth target: {manifest_path}')
+    target = _require_local_path(directory, relative)
+    if backup.exists():
+        try:
+            _validate_latest_chunk(target, series, manifest)
+        except (FileNotFoundError, RuntimeError):
+            _validate_latest_chunk(backup, series, manifest)
+            os.replace(backup, target)
+            get_dagster_logger().warning(
+                f'{series}: recovered committed latest depth chunk {relative}'
+            )
+        else:
+            backup.unlink()
+            get_dagster_logger().info(f'{series}: removed completed latest depth recovery copy')
+    else:
+        _validate_latest_chunk(target, series, manifest)
     return minute, relative
 
 
@@ -457,6 +478,10 @@ def publish_depth_snapshot_chunk(
         chunk = _require_local_path(directory, relative_chunk)
         payload = _ipc_payload(build.df)
         version = hashlib.sha256(payload).hexdigest()[:VERSION_HEX]
+        backup = None
+        if latest is not None and relative_chunk == latest[1]:
+            backup = _require_local_path(directory, Path(_LATEST_BACKUP_NAME))
+            os.link(chunk, backup)
         _atomic_write_bytes(chunk, payload)
         if latest is not None and minute_start < latest[0]:
             status = 'skipped_not_newer'
@@ -478,6 +503,8 @@ def publish_depth_snapshot_chunk(
             )
             status = 'published'
             protected = relative_chunk
+        if backup is not None:
+            backup.unlink()
         _prune_depth_chunks(directory, cutoff, protected)
     return DepthSnapshotChunkPublish(status, version, relative_chunk.as_posix())
 

@@ -351,6 +351,77 @@ def test_concurrent_depth_publish_and_prune_keep_manifest_readable(
     ] == _key(35)
 
 
+def _crash_current_republication(root: str, series: str, boundary: str) -> None:
+    os.environ['LOCAL_ARROW_DIR'] = root
+    depth_store._retention_cutoff = lambda: BASE + timedelta(minutes=5)
+    write = depth_store._atomic_write_bytes
+
+    def interrupted_write(target: Path, payload: bytes) -> None:
+        if target == _chunk(series, 20) and boundary == 'before_chunk':
+            os._exit(23)
+        write(target, payload)
+        if target == _chunk(series, 20) and boundary == 'after_chunk':
+            os._exit(23)
+        if target.name == LATEST_MANIFEST_NAME and boundary == 'after_manifest':
+            os._exit(23)
+
+    depth_store._atomic_write_bytes = interrupted_write
+    _publish(series, 20)
+
+
+@pytest.mark.parametrize('series', DEPTH_SNAPSHOT_SERIES)
+@pytest.mark.parametrize('boundary', ['before_chunk', 'after_chunk', 'after_manifest'])
+def test_current_depth_republication_recovers_committed_chunk_after_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    series: str,
+    boundary: str,
+) -> None:
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path))
+    monkeypatch.setenv('POLARS_MAX_THREADS', '2')
+    original = _build(series, 20).df.head(1)
+    publish_depth_snapshot_chunk(
+        series, _key(20), BarSeriesBuild(original, source_rows=1, dropped_duplicate_ts=0)
+    )
+    _chunk(series, 0).write_bytes(_fixture(series, 0).read_bytes())
+    directory = series_store_dir(series)
+    before_manifest = (directory / LATEST_MANIFEST_NAME).read_bytes()
+    process = multiprocessing.get_context('spawn').Process(
+        target=_crash_current_republication, args=(str(tmp_path), series, boundary)
+    )
+    process.start()
+    process.join(timeout=20)
+    assert process.exitcode == 23
+    assert _chunk(series, 0).exists()
+    if boundary != 'after_manifest':
+        assert (directory / LATEST_MANIFEST_NAME).read_bytes() == before_manifest
+    if boundary == 'after_chunk':
+        manifest_path = directory / LATEST_MANIFEST_NAME
+        manifest_path.unlink()
+        with pytest.raises(RuntimeError, match='recovery copy without manifest'):
+            _publish(series, 21)
+        assert _chunk(series, 0).exists()
+        manifest_path.write_bytes(before_manifest)
+        backup = directory / '.latest.previous.arrow'
+        committed_bytes = backup.read_bytes()
+        backup.write_bytes((FIXTURES / 'bar.arrow').read_bytes())
+        with pytest.raises(RuntimeError, match='checksum mismatch'):
+            _publish(series, 21)
+        assert _chunk(series, 0).exists()
+        backup.write_bytes(committed_bytes)
+    assert _publish(series, 21).status == 'published'
+    committed = _build(series, 20).df if boundary == 'after_manifest' else original
+    assert pl.read_ipc(_chunk(series, 20)).equals(committed)
+    assert not _chunk(series, 0).exists()
+    assert not (directory / '.latest.previous.arrow').exists()
+    if boundary == 'after_chunk':
+        assert any('recovered committed latest depth chunk' in r.message for r in caplog.records)
+    manifest = json.loads((directory / LATEST_MANIFEST_NAME).read_text())
+    assert manifest['source_partition_key'] == _key(21)
+    assert manifest['version'] == hashlib.sha256(_chunk(series, 21).read_bytes()).hexdigest()[:16]
+
+
 @pytest.mark.parametrize('series', DEPTH_SNAPSHOT_SERIES)
 def test_depth_retention_covers_repair_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origo_definitions_module: object, series: str

@@ -1,6 +1,6 @@
 # v3.8.8
 
-- Retain thirty completed UTC minutes of depth Arrow chunks plus the current latest target; reject expired publications and report expiry through Dagster.
+- Retain thirty completed UTC minutes of depth Arrow chunks plus the current latest target; reject expired publications and report expiry through Dagster. Retain invalid date paths with warnings without blocking publication.
 
 # v3.8.7
 

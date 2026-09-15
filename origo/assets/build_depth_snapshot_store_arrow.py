@@ -385,7 +385,13 @@ def _prune_depth_chunks(directory: Path, cutoff: datetime, protected: Path) -> N
             for name in files:
                 path = folder / name
                 relative = path.relative_to(directory)
-                minute = _recognized_chunk_minute(relative)
+                try:
+                    minute = _recognized_chunk_minute(relative)
+                except ValueError:
+                    logger.warning(
+                        f'{directory.name}: retaining unrecognized depth path {relative}'
+                    )
+                    continue
                 if path.is_symlink() or minute is None:
                     logger.warning(
                         f'{directory.name}: retaining unrecognized depth path {relative}'
@@ -401,13 +407,20 @@ def _prune_depth_chunks(directory: Path, cutoff: datetime, protected: Path) -> N
                     logger.warning(f'{directory.name}: retaining depth directory symlink {child}')
             folder_key = folder.relative_to(root).as_posix()
             if re.fullmatch(r'\d{4}(?:/\d{2}){0,3}', folder_key) and not any(folder.iterdir()):
-                datetime.strptime(
-                    folder_key,
-                    ('%Y', '%Y/%m', '%Y/%m/%d', '%Y/%m/%d/%H')[
-                        len(folder.parts) - len(root.parts) - 1
-                    ],
-                )
-                folder.rmdir()
+                try:
+                    datetime.strptime(
+                        folder_key,
+                        ('%Y', '%Y/%m', '%Y/%m/%d', '%Y/%m/%d/%H')[
+                            len(folder.parts) - len(root.parts) - 1
+                        ],
+                    )
+                except ValueError:
+                    logger.warning(
+                        f'{directory.name}: retaining unrecognized depth directory '
+                        f'{folder.relative_to(directory)}'
+                    )
+                else:
+                    folder.rmdir()
     except Exception:
         logger.exception(
             f'{directory.name}: depth expiry failed after expired_files={removed} '

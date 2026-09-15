@@ -419,6 +419,45 @@ def test_depth_retention_leaves_other_stores_untouched(
     assert _tree(tmp_path) == snapshot
 
 
+@pytest.mark.parametrize('series', DEPTH_SNAPSHOT_SERIES)
+def test_invalid_depth_dates_are_retained_with_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    series: str,
+) -> None:
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path))
+    _seed(series, [0, 20], latest=20)
+    directory = series_store_dir(series)
+    invalid_dirs = [
+        directory / 'chunks' / name for name in ['0000', '2026/13', '2026/02/30', '2026/09/15/24']
+    ]
+    for folder in invalid_dirs:
+        folder.mkdir(parents=True)
+    obsolete = directory / 'chunks/2025/12/31/23'
+    obsolete.mkdir(parents=True)
+    for index, status in [(20, 'published'), (0, 'skipped_expired')]:
+        caplog.clear()
+        assert _publish(series, index).status == status
+        assert all(folder.is_dir() for folder in invalid_dirs)
+        assert all(
+            any(str(folder.relative_to(directory)) in record.message for record in caplog.records)
+            for folder in invalid_dirs
+        )
+        assert not _chunk(series, 0).exists()
+        assert not obsolete.exists()
+        assert _chunk(series, 20).exists()
+    invalid_file = directory / 'chunks/2026/09/15/08/20261315T080000Z.arrow'
+    payload = _fixture(series, 0).read_bytes()
+    invalid_file.write_bytes(payload)
+    caplog.clear()
+    assert _publish(series, 21).status == 'published'
+    assert invalid_file.read_bytes() == payload
+    assert any(
+        str(invalid_file.relative_to(directory)) in record.message for record in caplog.records
+    )
+
+
 def test_depth_fixture_provenance() -> None:
     for record in json.loads((FIXTURES / 'provenance.json').read_text())['records']:
         assert (

@@ -1,3 +1,7 @@
+# v3.8.9
+
+- Correlate repository membership for Dagster sensor and schedule run queries so Automation controls do not wait behind repeated repository tag scans.
+
 # v3.8.8
 
 - Retain thirty completed UTC minutes of depth Arrow chunks plus the current latest target; reject expired publications and report expiry through Dagster. Retain invalid date paths with warnings without blocking publication. Recover interrupted current-minute replacements from their committed chunk before expiry.

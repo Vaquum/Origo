@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.8.8
+
+- Retain thirty completed UTC minutes of depth Arrow chunks plus the current latest target; reject expired publications and report expiry through Dagster. Retain invalid date paths with warnings without blocking publication. Recover interrupted current-minute replacements from their committed chunk before expiry.
+
 # v3.8.7
 
 Completed metadata scans no longer report a growing cleanup backlog solely because protected projection runs or newly aged arrivals remain. Interrupted scans and unfinished retirement batches retain the backlog alarm.

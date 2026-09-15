@@ -2200,9 +2200,10 @@ def test_retirement_does_not_initialize_expiring_event_shards(
 def test_repeated_run_and_asset_queries_reuse_engines_with_fresh_results(
     metadata_instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from sqlalchemy import Engine, create_engine
-    from dagster._core.storage.runs.sqlite import sqlite_run_storage
     from dagster._core.storage.event_log.sqlite import sqlite_event_log
+    from dagster._core.storage.runs.sqlite import sqlite_run_storage
+    from sqlalchemy import Engine, create_engine
+
     from origo.maintenance import event_storage, run_storage
 
     instance = metadata_instance
@@ -2273,7 +2274,9 @@ def test_live_sensor_cache_repeats_reads_changed_by_a_concurrent_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from collections.abc import Sequence
+
     from dagster._core.scheduler.instigation import InstigatorState
+
     from origo.maintenance.sqlite import MaintenanceDeadlineReached
 
     instance = metadata_instance
@@ -2303,3 +2306,95 @@ def test_live_sensor_cache_repeats_reads_changed_by_a_concurrent_commit(
         )
         with pytest.raises(MaintenanceDeadlineReached, match='Live sensor check'):
             states()
+
+
+@pytest.mark.parametrize('boundary', ['complete_equal', 'complete_growing', 'cursor', 'manifest'])
+def test_completed_scan_distinguishes_policy_holds_from_unfinished_cleanup(
+    metadata_instance: DagsterInstance,
+    diagnostic_server: tuple[str, object, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    from collections.abc import Callable, Sequence
+
+    from dagster._core.scheduler.instigation import InstigatorState
+
+    from origo.maintenance import sqlite as maintenance_sqlite
+    from origo.maintenance import worker
+    from origo.maintenance.protocol import Report
+
+    _diagnostic_environment(diagnostic_server, monkeypatch)
+    eligible = execute_archive(metadata_instance)
+    protected = execute_archive(metadata_instance, tags={'origo_metadata_preserve': 'true'})
+    pending = execute_archive(metadata_instance)
+    if boundary.startswith('complete'):
+        metadata_instance.add_run_tags(pending, {'origo_metadata_preserve': 'true'})
+    future = time.time() + 31 * 86400
+    config = POLICY.model_copy(
+        update={'dry_run': False, 'max_runs_per_batch': 1 if boundary == 'cursor' else 500}
+    )
+    layout = Layout.from_instance(metadata_instance)
+    journal = Journal(
+        instance_id=metadata_instance.run_storage.get_run_storage_id(),
+        policy_sha256=policy_sha256(config),
+        first_apply_completed=True,
+        reports=[
+            Report(
+                observed_at=future - 600,
+                dry_run=False,
+                backlog_runs=1 if boundary == 'complete_growing' else 2,
+            )
+        ],
+    )
+    journal_path = layout.runs.parent / 'operational-maintenance' / 'journal.json'
+    save_journal(journal_path, journal)
+    elapsed = 0.0
+    clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
+    for module in (worker, retention, maintenance_sqlite):
+        monkeypatch.setattr(module, 'time', clock)
+    real_reclaim = worker.reclaim
+
+    def stop_after_first_retirement(
+        instance: DagsterInstance,
+        layout: Layout,
+        candidate: Candidate,
+        journal: Journal,
+        journal_path: Path,
+        policy: OperationalMetadataMaintenanceConfig,
+        deadline: float,
+        *,
+        sensor_states: Callable[[], Sequence[InstigatorState]] | None,
+    ) -> int:
+        nonlocal elapsed
+        result = real_reclaim(
+            instance,
+            layout,
+            candidate,
+            journal,
+            journal_path,
+            policy,
+            deadline,
+            sensor_states=sensor_states,
+        )
+        if candidate.run_id == eligible and boundary in ('cursor', 'manifest'):
+            elapsed = deadline - time.monotonic() + 0.01
+        return result
+
+    monkeypatch.setattr(worker, 'reclaim', stop_after_first_retirement)
+    outcome = worker.maintain(metadata_instance, config)
+    saved = Journal.model_validate_json(journal_path.read_bytes())
+    assert outcome.report.deleted == 1
+    assert outcome.report.backlog_runs == 2
+    assert metadata_instance.get_run_by_id(eligible) is None
+    assert metadata_instance.get_run_by_id(protected) is not None
+    assert metadata_instance.get_run_by_id(pending) is not None
+    assert ('retention_backlog_not_decreasing' in outcome.violations) == (
+        boundary in ('cursor', 'manifest')
+    )
+    assert (saved.scan_cursor != 0) == (boundary == 'cursor')
+    if boundary == 'manifest':
+        assert any(
+            row.run_id == pending and not row.exclusion and row.phase == 'planned'
+            for row in saved.manifest
+        )

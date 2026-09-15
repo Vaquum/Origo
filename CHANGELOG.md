@@ -1,3 +1,7 @@
+# v3.8.8
+
+- Retain thirty completed UTC minutes of depth Arrow chunks plus the current latest target; reject expired publications and report expiry through Dagster.
+
 # v3.8.7
 
 Completed metadata scans no longer report a growing cleanup backlog solely because protected projection runs or newly aged arrivals remain. Interrupted scans and unfinished retirement batches retain the backlog alarm.

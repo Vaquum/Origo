@@ -175,6 +175,73 @@ def test_statistics_restore_actual_job_query_plan(metadata_instance: DagsterInst
         assert database.execute('SELECT count(*) FROM sqlite_stat1').fetchone()[0] > 0
 
 
+@pytest.mark.parametrize('tag_key', ['dagster/sensor_name', 'dagster/schedule_name'])
+def test_instigation_queries_probe_repository_by_run_id(
+    metadata_instance: DagsterInstance, tag_key: str
+) -> None:
+    instance = metadata_instance
+    name = (
+        'bar_store_source_sensor'
+        if tag_key == 'dagster/sensor_name'
+        else 'daily_binance_spot_pipeline_schedule'
+    )
+    for tags in (
+        {tag_key: name},
+        {tag_key: name, 'filter': 'yes'},
+        {tag_key: name, '.dagster/repository': '__repository__@tdw_control_plane'},
+        {},
+    ):
+        execute_archive(instance, tags=tags)
+    layout = Layout.from_instance(instance)
+    refresh_statistics((layout.runs, layout.events, layout.schedules), time.monotonic() + 15, 1)
+    upstream = SqliteRunStorage.from_local(str(layout.runs.parent))
+    storage = instance.run_storage
+    assert isinstance(storage, OrigoSqliteRunStorage)
+    for tags in (
+        {tag_key: name, '.dagster/repository': '__repository__@origo'},
+        {'.dagster/repository': '__repository__@origo', tag_key: name},
+        {
+            tag_key: name,
+            '.dagster/repository': ['__repository__@origo', '__repository__@tdw_control_plane'],
+        },
+        {tag_key: name, '.dagster/repository': '__repository__@origo', 'filter': 'yes'},
+        {tag_key: name, '.dagster/repository': []},
+        {tag_key: name},
+        {'.dagster/repository': '__repository__@origo'},
+    ):
+        filters = RunsFilter(tags=tags)
+        assert storage.get_run_ids(filters) == upstream.get_run_ids(filters)
+        assert storage.get_runs_count(filters) == upstream.get_runs_count(filters)
+        for ascending in (False, True):
+            original = upstream.get_run_records(filters, limit=1, ascending=ascending)
+            actual = storage.get_run_records(filters, limit=1, ascending=ascending)
+            assert actual == original
+            if actual:
+                cursor = actual[-1].dagster_run.run_id
+                assert storage.get_run_records(
+                    filters, limit=1, ascending=ascending, cursor=cursor
+                ) == upstream.get_run_records(filters, limit=1, ascending=ascending, cursor=cursor)
+        query = str(
+            storage._runs_query(filters, limit=1).compile(compile_kwargs={'literal_binds': True})
+        )
+        if tag_key in tags and '.dagster/repository' in tags:
+            with sqlite3.connect(layout.runs) as database:
+                plan = '\n'.join(
+                    str(row) for row in database.execute('EXPLAIN QUERY PLAN ' + query)
+                )
+            assert 'EXISTS' in query
+            assert 'idx_run_tags_run_idx (run_id=?)' in plan
+            assert 'SCAN run_tags' not in plan
+        else:
+            assert 'EXISTS' not in query
+    filters = RunsFilter(tags={tag_key: name, '.dagster/repository': '__repository__@origo'})
+    original = upstream.get_run_records(filters)
+    for record in original:
+        storage.compress_run(record.dagster_run.run_id)
+    assert storage.get_run_records(filters) == original
+    upstream.dispose()
+
+
 def test_cleanup_preserves_dagit_state_and_recovery(metadata_instance: DagsterInstance) -> None:
     instance = metadata_instance
     run_id = execute_archive(instance)

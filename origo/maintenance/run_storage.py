@@ -1,4 +1,4 @@
-"""Keep repository membership correlated with a selected job on Dagster 1.13.21."""
+"""Keep repository membership correlated with selected runs on Dagster 1.13.21."""
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -85,7 +85,11 @@ class OrigoSqliteRunStorage(SqliteRunStorage):
         bucket_by: JobBucket | TagBucket | None = None,
     ) -> Select[tuple[object, ...]]:
         repository = filters.tags.get('.dagster/repository') if filters else None
-        correlated = filters is not None and bool(filters.job_name) and repository is not None
+        correlated = (
+            filters is not None
+            and repository is not None
+            and (bool(filters.job_name) or len(filters.tags) > 1)
+        )
         if correlated and filters is not None:
             filters = RunsFilter(
                 run_ids=filters.run_ids,
@@ -105,7 +109,8 @@ class OrigoSqliteRunStorage(SqliteRunStorage):
         )
         if correlated and repository is not None:
             # SQLite STAT1 averages a nearly universal repository tag together with
-            # unique run keys. Even full ANALYZE estimates six matches, versus 2.8M.
+            # unique run keys. Job, sensor, and schedule queries must probe membership
+            # by run ID rather than rescan that repository for every matching run.
             membership = (
                 select(1)
                 .select_from(RunTagsTable)

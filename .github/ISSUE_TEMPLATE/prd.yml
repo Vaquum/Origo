@@ -1,6 +1,23 @@
 name: PRD
 description: Define a product requirement and proposed delivery shape.
 body:
+  - type: markdown
+    attributes:
+      value: |
+        **Adding a data source:** Before drafting this PRD, you MUST read the
+        [source onboarding playbook](https://github.com/Vaquum/Origo/blob/main/docs/Developer/Source-onboarding.md).
+        Apply its native Dagster workflow, code-owned automation, complete projection/file
+        inventory and acceptance requirements to this PRD and every resulting slice.
+        A PRD that adds a source without following the playbook is incomplete.
+
+  - type: checkboxes
+    id: source_playbook
+    attributes:
+      label: Source onboarding prerequisite
+      options:
+        - label: If this PRD adds a data source, I read the source onboarding playbook before drafting it and applied its requirements to the design and work slices.
+          required: true
+
   - type: textarea
     id: objective
     attributes:

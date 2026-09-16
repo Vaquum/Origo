@@ -9,6 +9,11 @@ body:
   - type: markdown
     attributes:
       value: |
+        **Adding a data source:** Before drafting or implementing this slice, you MUST read the
+        [source onboarding playbook](https://github.com/Vaquum/Origo/blob/main/docs/Developer/Source-onboarding.md).
+        Apply its native Dagster workflow, code-owned automation, complete projection/file
+        inventory and acceptance requirements. A source slice that does not follow it is incomplete.
+
         ## How this template works
 
         Every section below opens with a blockquoted **Significance** note. That note
@@ -312,6 +317,8 @@ body:
     attributes:
       label: Author Checks
       options:
+        - label: If this slice adds a data source, I read the source onboarding playbook before drafting it and included its required footprint and acceptance evidence.
+          required: true
         - label: The Significance blockquote at the top of every section above remains in this issue unchanged.
           required: true
         - label: Every MVC assertion is executable (shell command, SQL query, Python expression, or HTTP request) and has a definite expected output.

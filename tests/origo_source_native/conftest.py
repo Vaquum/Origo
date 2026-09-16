@@ -207,6 +207,7 @@ def binance_depth200_base_url(binance_fixture_server_root_url: str) -> str:
 @pytest.fixture()
 def origo_test_env(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     clickhouse_settings: dict[str, str],
     binance_daily_base_url: str,
     binance_futures_daily_base_url: str,
@@ -215,6 +216,7 @@ def origo_test_env(
     _drop_origo_database(clickhouse_settings)
     for key, value in clickhouse_settings.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(tmp_path / 'source-files'))
     monkeypatch.setenv('BINANCE_SPOT_DAILY_TRADES_BASE_URL', binance_daily_base_url)
     monkeypatch.setenv('BINANCE_FUTURES_DAILY_TRADES_BASE_URL', binance_futures_daily_base_url)
     monkeypatch.setenv('BINANCE_SPOT_DEPTH200_BASE_URL', binance_depth200_base_url)

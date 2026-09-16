@@ -93,7 +93,7 @@ def test_every_failure_is_visible_in_one_log_without_blocking_unrelated_work(
         assert client.execute('SELECT count() FROM origo.source_certification_log') == [(1,)]
         assert runtime.audit() == ()
         assert runtime.repair('2017-08-17') == record
-        guide = (Path(__file__).resolve().parents[2] / 'origo/sources/README.md').read_text()
+        guide = (Path(__file__).resolve().parents[2] / 'docs/Developer/Source-onboarding.md').read_text()
         query = guide.split('```sql\n', 1)[1].split('```', 1)[0]
         assert len(client.execute(query)) == len(cases)
 

@@ -1,3 +1,10 @@
+# v3.9.1
+
+- Replace typed backfill date configuration with native Dagster asset partition selection, coverage, gaps and retries. Selected source partitions prepare, verify and publish their complete declared footprint automatically.
+- Activate schedules and sensors from code for every enabled source, including CANARY; preserve source provenance and independent file publication state.
+- Put the source onboarding playbook in docs/Developer and require reading it before any new-source PRD or slice; document uniform native operations and per-source acceptance evidence.
+- Verify that later source data triggers every declared publisher and completed publications suppress duplicate requests.
+
 # v3.9.0
 
 - Prepare enabled revisioned sources and managed sensors from code at daemon startup; persist declared files on a shared volume.

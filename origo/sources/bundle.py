@@ -1,6 +1,6 @@
 import hashlib
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -264,6 +264,16 @@ def _execute_operation(
             'verified_at': datetime.now(UTC).isoformat(),
             'legacy_parity': checks,
         }
+    if operation == 'provisional' and not config.partition_key:
+        adapter = spec.provisional
+        if adapter is None:
+            raise ValueError('No provisional adapter is declared.')
+        candidates = adapter.candidates(
+            datetime.now(UTC), runtime.store.anchor(), runtime.store.active_intervals()
+        )
+        for partition in candidates:
+            runtime.build(partition.key, provisional=True)
+        return {'refreshed_partitions': [partition.key for partition in candidates]}
     if operation in ('provisional', 'repair'):
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
@@ -322,11 +332,10 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         partitions_def=DailyPartitionsDefinition(
             start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
         )
-        if operation == 'canonical'
+        if operation in ('canonical', 'repair', 'certify')
         else None,
-        backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=1)
-        if operation == 'canonical'
-        else None,
+        output_required=operation != 'canonical',
+        backfill_policy=BackfillPolicy.single_run() if operation == 'canonical' else None,
         pool=f'{spec.key}_heavy'
         if operation in ('canonical', 'repair', 'cleanup', 'audit', 'certify')
         or operation.startswith('consumer_')
@@ -337,9 +346,29 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation == 'canonical'
         else None,
     )
-    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> _SourceResult:
+    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> Iterator[_SourceResult]:
+        if operation == 'canonical' and (
+            context.job_def.name != f'refresh_{spec.key}_canonical_source_job'
+            or context.has_partition_key_range
+        ):
+            from .backfill import execute_partition_backfill
+
+            def run_day(day: str) -> dict[str, object]:
+                return execute_source(
+                    spec,
+                    'canonical',
+                    SourceRunConfig(partition_key=day, automatic_capacity=True),
+                    run_id=context.run.run_id,
+                )
+
+            execute_partition_backfill(spec, context, run_day)
+            return
         try:
-            if operation == 'canonical':
+            spec.require_enabled(operation)
+            from .prepare import prepare_source
+
+            prepare_source(spec, context.instance)
+            if operation in ('canonical', 'repair', 'certify'):
                 key = context.partition_key
                 if config.partition_key and config.partition_key != key:
                     raise ValueError('Run config date must match the selected Dagit partition.')
@@ -351,19 +380,8 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     partition_key=key,
                     reconcile_only=config.reconcile_only,
                     capacity_probe=config.capacity_probe,
+                    automatic_capacity=not config.reconcile_only,
                 )
-            if operation in ('canonical', 'repair', 'audit'):
-                required = {f'{spec.key}_reconciliation_sensor', f'{spec.key}_failure_sensor'}
-                running = {
-                    state.instigator_name
-                    for state in context.instance.all_instigator_state()
-                    if state.status.value == 'RUNNING'
-                }
-                if not required <= running:
-                    raise SourceError(
-                        'DAGIT_MONITORING_REQUIRED',
-                        'Source preparation is incomplete; the deployment must prepare managed source monitoring.',
-                    )
             result = execute_source(spec, operation, config, run_id=context.run.run_id)
         except Exception as error:
             context.log.error(
@@ -401,7 +419,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
             version = hashlib.sha256(
                 str((result['revision'], result['build_id'], result['generation'])).encode()
             ).hexdigest()
-            return MaterializeResult(
+            yield MaterializeResult(
                 value=None,
                 metadata={
                     'source_state': MetadataValue.json(result),
@@ -409,23 +427,24 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 },
                 data_version=DataVersion(version),
             )
-        return MaterializeResult(
-            value=None,
-            metadata={'source_result': MetadataValue.json(result)},
-            check_results=[
-                AssetCheckResult(
-                    passed=result['healthy'] is True,
-                    check_name='source_health',
-                    metadata={
-                        'unresolved_failures': MetadataValue.int(
-                            int(str(result['unresolved_failures']))
-                        )
-                    },
-                )
-            ]
-            if operation == 'reconcile'
-            else [],
-        )
+        else:
+            yield MaterializeResult(
+                value=None,
+                metadata={'source_result': MetadataValue.json(result)},
+                check_results=[
+                    AssetCheckResult(
+                        passed=result['healthy'] is True,
+                        check_name='source_health',
+                        metadata={
+                            'unresolved_failures': MetadataValue.int(
+                                int(str(result['unresolved_failures']))
+                            )
+                        },
+                    )
+                ]
+                if operation == 'reconcile'
+                else [],
+            )
 
     return execute
 
@@ -470,21 +489,19 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         )
         for operation, name in names.items()
     )
-    from .backfill import build_backfill_job
-
-    definitions = Definitions(assets=assets, jobs=unresolved)
-
-    def run_day(day: str, run_id: str) -> dict[str, object]:
-        return execute_source(
-            spec,
-            'canonical',
-            SourceRunConfig(partition_key=day, automatic_capacity=True),
-            run_id=run_id,
-        )
-
-    jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved) + (
-        build_backfill_job(spec, run_day),
+    unresolved += (
+        _define_job(
+            f'backfill_{spec.key}_source_job',
+            selection=[names['canonical']],
+            tags={
+                'origo_source_key': spec.key,
+                'origo_source_operation': 'backfill',
+                'dagster/max_runtime': '0',
+            },
+        ),
     )
+    definitions = Definitions(assets=assets, jobs=unresolved)
+    jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved)
 
     def request(
         operation: str,
@@ -616,7 +633,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         cron_schedule=spec.orchestration.canonical_cron,
         execution_timezone='UTC',
         default_status=DefaultScheduleStatus.RUNNING
-        if spec.rollout_stage == RolloutStage.LIVE
+        if spec.rollout_stage != RolloutStage.DORMANT
         else DefaultScheduleStatus.STOPPED,
     )
     def canonical(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
@@ -644,7 +661,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         cron_schedule=spec.orchestration.audit_cron,
         execution_timezone='UTC',
         default_status=DefaultScheduleStatus.RUNNING
-        if spec.rollout_stage == RolloutStage.LIVE
+        if spec.rollout_stage != RolloutStage.DORMANT
         else DefaultScheduleStatus.STOPPED,
     )
     def audit(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
@@ -662,7 +679,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             cron_schedule=spec.orchestration.provisional_cron,
             execution_timezone='UTC',
             default_status=DefaultScheduleStatus.RUNNING
-            if spec.rollout_stage == RolloutStage.LIVE
+            if spec.rollout_stage != RolloutStage.DORMANT
             else DefaultScheduleStatus.STOPPED,
         )
         def provisional(
@@ -744,7 +761,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             (op for op, job_name in job_names.items() if job_name == context.dagster_run.job_name),
             None,
         )
-        is_backfill = context.dagster_run.job_name == f'backfill_{spec.key}_source_job'
+        from .prepare import is_source_backfill
+
+        is_backfill = is_source_backfill(context.dagster_run, spec)
         if is_backfill:
             operation = 'canonical'
         if operation is None:
@@ -772,7 +791,18 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             if recorded[0][0]:
                 return
             if is_backfill:
-                runtime.failures.record(operation='backfill', error_code='RUN_FAILED', scope='NONE')
+                tags = context.dagster_run.tags
+                key = (
+                    tags.get('origo_source_partition')
+                    if tags.get('origo_source_phase') == 'canonical'
+                    else None
+                )
+                runtime.failures.record(
+                    operation='canonical' if key else 'backfill',
+                    error_code='RUN_FAILED',
+                    scope='PARTITION' if key else 'NONE',
+                    partition=key,
+                )
                 return
             value: object = context.dagster_run.run_config
             for key in ('ops', names[operation], 'config'):

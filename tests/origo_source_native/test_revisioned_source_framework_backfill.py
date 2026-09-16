@@ -120,7 +120,7 @@ def _run(
     )
 
 
-def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> None:
+def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_range() -> None:
     assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
@@ -130,9 +130,9 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> No
 
     with partition_loading_context(effective_dt=datetime(2020, 1, 3, tzinfo=UTC)):
         assert asset.partitions_def.get_last_partition_key() == '2020-01-02'
-    assert asset.backfill_policy.max_partitions_per_run == 1
+    assert asset.backfill_policy.max_partitions_per_run is None
     assert all(
-        schedule.default_status == DefaultScheduleStatus.STOPPED for schedule in source.schedules
+        schedule.default_status == DefaultScheduleStatus.RUNNING for schedule in source.schedules
     )
     assert all(sensor.default_status == DefaultSensorStatus.RUNNING for sensor in source.sensors)
     assert 'binance_spot_trades_reconciliation_sensor' in {sensor.name for sensor in source.sensors}
@@ -244,15 +244,25 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         )
 
 
+@pytest.mark.parametrize('kind', ['implicit', 'refresh_range'])
 def test_reconciliation_restores_committed_state_after_worker_loss(
     backfill_env: BackfillEnv,
+    kind: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dagster import build_run_status_sensor_context
 
     runtime, instance, source = backfill_env
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
-    native_job = Definitions(assets=[asset]).get_implicit_global_asset_job_def()
+    native_job = (
+        Definitions(assets=[asset]).get_implicit_global_asset_job_def()
+        if kind == 'implicit'
+        else next(
+            job
+            for job in source.jobs
+            if job.name == 'refresh_binance_spot_trades_canonical_source_job'
+        )
+    )
     from origo.sources import bundle
     from origo.sources.contracts import RevisionedSourceSpec
 
@@ -278,9 +288,8 @@ def test_reconciliation_restores_committed_state_after_worker_loss(
             asset_selection=[asset.key],
             tags={
                 'dagster/asset_partition_range_start': DAY,
-                'dagster/asset_partition_range_end': DAY,
+                'dagster/asset_partition_range_end': '2017-08-18',
             },
-            run_config={'ops': {ASSET: {'config': {'capacity_probe': True}}}},
         )
     assert not failed.success
     record = runtime.store.records(canonical_only=True)[0]
@@ -477,7 +486,9 @@ def test_capacity_probe_and_limits_gate_historical_work(
         raise AssertionError('Capacity-blocked work contacted its provider.')
 
     monkeypatch.setattr(binance_daily, 'get_response', no_provider)
-    assert not _run(backfill_env).success
+    with monkeypatch.context() as patch:
+        patch.setattr(capacity._Volume, 'sample', lambda self: (10**12, 10**11, 10**8, 9 * 10**7))
+        assert not _run(backfill_env).success
     assert not attempted
     monkeypatch.setattr(binance_daily, 'get_response', archive_response)
     assert _run(backfill_env, probe=True).success
@@ -620,24 +631,32 @@ def test_native_backfill_queue_serializes_heavy_runs(tmp_path: Path) -> None:
         assert not released.is_blocked(second)
 
 
-def test_internal_canonical_job_requires_prepared_monitoring_before_io(
+def test_canonical_job_fails_before_provider_io_when_preparation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from origo.sources import bundle
+    from origo.sources import bundle, prepare
+    from origo.sources.contracts import RevisionedSourceSpec, SourceError
+
+    def unavailable(spec: RevisionedSourceSpec, instance: DagsterInstance) -> None:
+        raise SourceError('PREPARATION_UNAVAILABLE', 'Source preparation unavailable.')
+
+    monkeypatch.setattr(prepare, 'prepare_source', unavailable)
 
     def forbidden() -> None:
         raise AssertionError('Unmonitored backfill must not construct external settings.')
 
     monkeypatch.setattr(bundle, 'get_clickhouse_settings', forbidden)
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
-    job = next(job for job in source.jobs if job.name == 'refresh_binance_spot_trades_canonical_source_job')
+    job = next(
+        job for job in source.jobs if job.name == 'refresh_binance_spot_trades_canonical_source_job'
+    )
     root = tmp_path / 'instance'
     root.mkdir()
     with DagsterInstance.local_temp(str(root)) as instance:
         result = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
         assert not result.success
         assert any(
-            'DAGIT_MONITORING_REQUIRED' in event.user_message
+            'PREPARATION_UNAVAILABLE' in event.user_message
             for event in instance.all_logs(result.run_id)
         )
 
@@ -685,13 +704,13 @@ def test_system_logging_survives_database_failure(
         raise OSError('Injected database outage')
 
     def failed_persistence(runtime: SourceRuntime) -> dict[str, object]:
+        patch.setattr(SourceStore, 'execute', unavailable)
         runtime.failures.record(
             operation='cleanup', error_code='INJECTED_DATABASE_OUTAGE', scope='NONE', partition=DAY
         )
         raise AssertionError('Failure persistence unexpectedly succeeded')
 
     with monkeypatch.context() as patch:
-        patch.setattr(SourceStore, 'execute', unavailable)
         patch.setattr(dagit, 'observe_source', failed_persistence)
         failed = health.execute_in_process(instance=instance, raise_on_error=False)
     assert not failed.success
@@ -823,7 +842,7 @@ def test_failed_automatic_verification_waits_for_operator_or_state_change(
     assert instance.get_run_by_id(failed.run_id).status.value == 'FAILURE'
 
 
-@pytest.mark.parametrize('kind', ['implicit', 'backfill_alias', 'canonical'])
+@pytest.mark.parametrize('kind', ['implicit', 'backfill_alias', 'canonical', 'refresh_range'])
 def test_reconciliation_waits_for_native_partition_runs(
     backfill_env: BackfillEnv,
     kind: str,

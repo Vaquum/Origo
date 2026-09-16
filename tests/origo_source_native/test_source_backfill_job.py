@@ -66,6 +66,13 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store, instance, bundle = ready_job
+    assert {component.key for component in store.spec.components} == {
+        'raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned',
+        'raw_latest', 'time_latest', 'dollar_latest',
+    }
+    assert {consumer.key for consumer in store.spec.consumers} == {
+        'parquet', 'arrow', 'huggingface_shadow',
+    }
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]
     assert instance.all_instigator_state() == []
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
@@ -321,6 +328,7 @@ def test_projection_runs_retire_without_losing_source_history_or_receipts(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:
     from dagster import DagsterRun, DagsterRunStatus
+
     from origo.maintenance.roles import run_role
     from origo.maintenance.run_storage import OrigoSqliteRunStorage
     from origo.maintenance.source_receipts import preserve_source_receipt, source_reference_reason
@@ -353,3 +361,43 @@ def test_projection_runs_retire_without_losing_source_history_or_receipts(
                 assert storage.has_run(run.run_id)
     finally:
         storage.dispose()
+
+
+def test_new_verified_data_automatically_requests_every_consumer(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+) -> None:
+    store, instance, bundle = ready_job
+    backfill = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
+    assert backfill.execute_in_process(instance=instance, run_config=_config()).success
+    previous_token = store.snapshot().token
+    canonical = next(
+        job for job in bundle.jobs
+        if job.name == f'refresh_{store.spec.key}_canonical_source_job'
+    )
+    assert canonical.execute_in_process(instance=instance, partition_key='2020-01-01').success
+    assert store.canonical_verified()
+    assert store.snapshot().token != previous_token
+    definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
+    for consumer in store.spec.consumers:
+        sensor = next(
+            sensor for sensor in bundle.sensors
+            if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
+        )
+        with build_sensor_context(instance=instance, definitions=definitions) as context:
+            requests = sensor.evaluate_tick(context).run_requests
+        assert len(requests) == 1
+        request = requests[0]
+        assert request.tags['origo_source_state_token'] == store.snapshot().token
+        publisher = next(
+            job for job in bundle.jobs
+            if job.name == f'publish_{store.spec.key}_{consumer.key}_job'
+        )
+        assert publisher.execute_in_process(
+            instance=instance, run_config=request.run_config, tags=request.tags
+        ).success
+        manifest = json.loads(
+            (tmp_path / 'files' / store.spec.key / consumer.key / 'latest.json').read_text()
+        )
+        assert manifest['state_token'] == store.snapshot().token
+        with build_sensor_context(instance=instance, definitions=definitions) as context:
+            assert sensor.evaluate_tick(context).run_requests == []

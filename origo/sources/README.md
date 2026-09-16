@@ -28,14 +28,91 @@ flowchart LR
 
 ## Add a source
 
-1. Use `binance_spot_trades.py` as the worked example: one typed specification, explicit component and consumer functions, and adapter-owned authority. For a new provider, first implement its canonical/provisional adapter contracts; do not copy Binance authority into the kernel.
-2. Retain unmodified official rows and provenance under `tests/fixtures/<provider>/...`; record archive and response hashes. Synthetic market rows are prohibited.
-3. Add the specification to `SOURCE_REGISTRY` in `registry.py`, with `RolloutStage.DORMANT`.
-4. Run `pytest tests/origo_source_native/test_binance_daily_source_adapter.py tests/origo_source_native/test_revisioned_source_framework*.py -q`, then `pytest tests/origo_source_native -q` and the repository gates.
-5. Inspect the generated definitions. Dormant sources perform no automatic I/O. Enabling CANARY or LIVE in the specification makes deployment prepare the source and activate its managed monitors and consumer sensors.
-6. Submit the source and its proofs in one slice PR. A new provider still uses this checklist and the same failure table.
+This is the onboarding playbook for every registered source. The operator contract
+is **Jobs → `backfill_<source_key>_source_job` → dates → Launch Run**. A source PR is
+incomplete if the operator must create tables, enable sensors, run a capacity
+probe, launch projections or publish files separately. Deployment and the shared
+job own that preparation. Source-specific instructions in a chat are not part of
+the system contract.
 
-The spot adapter stores individual trades. Aggregate responses locate the REST range; historicalTrades supplies rows. All five canonical projection calculations and the twelve consumer series reuse the frozen spot formulas. The shadow implementation leaves legacy identities and artifacts intact. Publication destinations must contain the source key.
+### Required code footprint
+
+| Engineer supplies in the source PR | Contract and worked example |
+| --- | --- |
+| Provider adapters in `adapters/` | Implement `CanonicalAdapter` and, where available, `ProvisionalAdapter` from [contracts.py](contracts.py). Own discovery, checksums, completeness, timestamp/identity normalization and provider errors. See [binance_daily.py](adapters/binance_daily.py); never copy Binance authority into the kernel. |
+| Projection profile in `profiles/` | Declare every `ComponentSpec`: schema, key, time column, build function and provisional/current mapping. See [spot.py](profiles/spot.py). |
+| Independent verifier in `profiles/` | Supply `spec.verify` with proof for every canonical component of the exact active generation. See [spot_parity.py](profiles/spot_parity.py). A new provider needs its own reference evidence; a renamed spot comparator is not proof. |
+| Publication profile in `profiles/` | Declare every `ConsumerSpec`, file series, schema, coverage, destination and public/shadow policy. Render from a pinned snapshot and commit a checksummed manifest only after rechecking its token. See [spot_consumers.py](profiles/spot_consumers.py). |
+| One source specification and registration | Follow [binance_spot_trades.py](binance_spot_trades.py): unique key/names, first UTC day, adapters, components, consumers, verifier, retry/schedule policy and rollout stage. Add it once to `SOURCE_REGISTRY` in [registry.py](registry.py). |
+| Real evidence and tests | Retain official files/response evidence and hashes under `tests/fixtures/<provider>/...`; add source-specific tests under `tests/origo_source_native/`. Synthetic market rows are prohibited. |
+| Deployment inputs, when needed | Declare any new credential names and persistent mounts in the deployment configuration. Resolve credentials through the existing secret mechanism; never commit values or require operator shell exports/UI setup for each run. |
+
+Register unfinished work as `DORMANT`. The PR delivering an operator-runnable
+source must declare `CANARY` or `LIVE` in code. CANARY enables verification and
+shadow publications; LIVE additionally enables the declared ingestion/audit
+schedules. Public ownership/promotion requires its separate reviewed routing
+change. Changing the stage alone does not turn a shadow renderer into a public
+uploader.
+
+The current period-job contract is daily UTC canonical partitions. Providers with
+hourly files need an adapter that proves complete daily partitions, or an explicit
+extension of the shared partition contract before using this job. Provider-specific
+parsing, schemas and verification remain engineering work; orchestration is shared.
+
+### Generated automatically from the registration
+
+| Shared code | What each registered source receives |
+| --- | --- |
+| [definitions.py](../definitions.py), [bundle.py](bundle.py), [backfill.py](backfill.py) | Assets, per-day state, one period backfill job, operational jobs, source pools, retry policy, schedules and consumer/failure/reconciliation sensors. Do not copy these definitions into a source module. |
+| [bootstrap.py](bootstrap.py), [prepare.py](prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats preparation idempotently. |
+| [lifecycle.py](lifecycle.py), [publication.py](publication.py) | Verified generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
+| [bundle.py](bundle.py) consumer sensors | Later eligible state changes request publication automatically. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
+| [roles.py](../maintenance/roles.py), [source_receipts.py](../maintenance/source_receipts.py) | Protected source/backfill provenance and short retention for standalone projection jobs, with durable deduplication receipts. Keep the generated run tags. |
+
+The framework executes the components and consumers declared by the profile; it
+does not infer missing products from a source name. For trade/aggregate-trade
+sources, preserve the agreed footprint: raw data; time, dollar, volume, tick and
+imbalance bars; aligned data; and Parquet, Arrow and Hugging Face file consumers.
+Declare provisional equivalents where supported. Reuse compatible profile
+functions, and prove any provider-specific normalization or formula adaptation.
+An omitted product or changed meaning requires an explicit reviewed contract
+change, not a smaller declaration that happens to pass the shared job.
+
+The current spot file contract is twelve series: six time intervals and six dollar
+bar sizes. It does not export every database component. Arrow includes its Parquet
+inputs; Hugging Face shadow files retain the legacy 2020 start cutoff. Record the
+complete series/schema/coverage contract for each added source, including any
+approved difference. The spot adapter stores individual trades: aggregate responses
+locate the REST range, while historicalTrades supplies rows.
+
+### Acceptance evidence required in every source PR
+
+Use [test_source_backfill_job.py](../../tests/origo_source_native/test_source_backfill_job.py)
+as the executable worked example. Add equivalent evidence using the **new source's
+own specification and real files**; passing the existing spot tests alone does not
+certify another source.
+
+| Required proof | Reference test/scenario |
+| --- | --- |
+| Empty ClickHouse source schema and empty Dagster automation state; one job produces verified generations and every expected file with matching checksums/state tokens | `test_one_job_prepares_verifies_and_publishes_all_files`; assert the expected product list explicitly, not just whatever the new spec happens to declare. |
+| Missing/invalid provider input fails the correct day, preserves completed days and blocks publication | `test_unavailable_day_blocks_publication_and_preserves_completed_day` |
+| Publication failure fails the same run; retry preserves source generations and already committed files | `test_file_failure_fails_job_and_retry_keeps_verified_generation` |
+| A changed eligible generation triggers consumers; unchanged state does not; retiring projection history preserves deduplication | `test_new_verified_data_automatically_requests_every_consumer` and `test_projection_runs_retire_without_losing_source_history_or_receipts` |
+| Repeated deployment restores declared automation without losing cursors; new storage remeasures verification; setup failures appear in Runs | `test_preparation_applies_rollout_state_without_manual_switches`, `test_storage_change_remeasures_independent_verification`, `test_deployment_preparation_failures_are_dagster_runs` |
+| Actual UI matches system state | Open the generated Jobs/Launchpad/Runs views on an isolated instance. Inspect a successful and failed real-fixture run, per-day materializations and errors/logs. Record evidence in the PR; do not launch production history as a test. |
+
+Run the new source tests, the shared backfill/framework tests and
+`pytest tests/origo_source_native -q`, then the repository gates. The required
+`.github/workflows/pr_checks_tests.yml` / `pr_checks_tests` job runs this suite on
+every PR. Shared regression tests protect the framework; the source author and
+reviewer must ensure the new source's acceptance cases are actually included.
+`test_binance_daily_source_adapter.py` is the existing provider-test example.
+
+Include the source key, rollout, exact product inventory, credential/mount names
+and acceptance commands/results in the source's slice/PR. The reviewer rejects
+manual activation/setup steps, missing products and unsupported claims of parity.
+After merge/deployment, hand the operator the generated job name and date inputs;
+full-history production validation and public promotion remain separate evidence.
 
 ## Run and promote
 
@@ -79,7 +156,7 @@ Promotion still requires `zero-bang` approval of the full-history proof and publ
 | `SOURCE` | An explicitly source-wide prerequisite only. |
 | `ROUTE` | The named future route change only; the current route stays active. |
 
-Handled failures record before re-raising. The stopped run-failure observer records uncaught job/worker failures when enabled. Recovery and acknowledgement append to the same failure key; deterministic event IDs make logger retries idempotent. Successful component and activation tables are correctness evidence, not alternate failure histories. Canonical discovery records its partition before provider I/O; the hourly audit retries up to five oldest requested partitions that have never activated, so a missing sidecar cannot drop a day. Canonical run keys still include the validated revision.
+Handled failures record before re-raising. The managed run-failure observer records uncaught job/worker failures for enabled sources. Recovery and acknowledgement append to the same failure key; deterministic event IDs make logger retries idempotent. Successful component and activation tables are correctness evidence, not alternate failure histories. Canonical discovery records its partition before provider I/O; the hourly audit retries up to five oldest requested partitions that have never activated, so a missing sidecar cannot drop a day. Canonical run keys still include the validated revision.
 
 ```sql
 SELECT source_key, failure_key,

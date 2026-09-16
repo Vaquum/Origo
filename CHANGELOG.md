@@ -1,3 +1,8 @@
+# v3.9.1
+
+- Define the source onboarding playbook: required code footprint, generated automation, complete product inventory and per-source acceptance evidence for the one-job operator contract.
+- Verify that later source data triggers every declared publisher and completed publications suppress duplicate requests.
+
 # v3.9.0
 
 - Prepare enabled revisioned sources and managed sensors from code at daemon startup; persist declared files on a shared volume.

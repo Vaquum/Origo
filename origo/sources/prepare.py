@@ -21,6 +21,7 @@ from dagster._core.scheduler.instigation import (
     SensorInstigatorData,
 )
 from dagster._core.storage.dagster_run import DagsterRun
+from dagster._core.storage.tags import BACKFILL_ID_TAG
 from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -106,10 +107,18 @@ def prepare_source(
 
 
 def is_source_backfill(run: DagsterRun, spec: RevisionedSourceSpec) -> bool:
+    canonical_job = f'refresh_{spec.key}_canonical_source_job'
     return run.job_name == f'backfill_{spec.key}_source_job' or (
-        AssetKey(f'build_{spec.key}_canonical_revision_origo') in (run.asset_selection or ())
+        (
+            run.job_name == canonical_job
+            or AssetKey(f'build_{spec.key}_canonical_revision_origo') in (run.asset_selection or ())
+        )
         and run.tags.get('origo_source_reconciliation') != 'true'
-        and run.job_name != f'refresh_{spec.key}_canonical_source_job'
+        and (
+            run.job_name != canonical_job
+            or 'dagster/asset_partition_range_start' in run.tags
+            or run.tags.get('origo_source_operation') == 'backfill'
+        )
     )
 
 
@@ -175,7 +184,9 @@ def backfill_owns_publication(instance: DagsterInstance, spec: RevisionedSourceS
     latest = max(records, key=lambda record: record.create_timestamp, default=None)
     native = next(_native_backfills(instance, spec), None)
     if native is not None and (
-        latest is None or native.backfill_timestamp > latest.create_timestamp.timestamp()
+        latest is None
+        or latest.dagster_run.tags.get(BACKFILL_ID_TAG) == native.backfill_id
+        or native.backfill_timestamp > latest.create_timestamp.timestamp()
     ):
         return native.status not in (BulkActionStatus.COMPLETED_SUCCESS, BulkActionStatus.COMPLETED)
     return latest is not None and latest.dagster_run.status != DagsterRunStatus.SUCCESS

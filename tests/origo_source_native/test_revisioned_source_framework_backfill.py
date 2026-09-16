@@ -244,15 +244,25 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         )
 
 
+@pytest.mark.parametrize('kind', ['implicit', 'refresh_range'])
 def test_reconciliation_restores_committed_state_after_worker_loss(
     backfill_env: BackfillEnv,
+    kind: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dagster import build_run_status_sensor_context
 
     runtime, instance, source = backfill_env
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
-    native_job = Definitions(assets=[asset]).get_implicit_global_asset_job_def()
+    native_job = (
+        Definitions(assets=[asset]).get_implicit_global_asset_job_def()
+        if kind == 'implicit'
+        else next(
+            job
+            for job in source.jobs
+            if job.name == 'refresh_binance_spot_trades_canonical_source_job'
+        )
+    )
     from origo.sources import bundle
     from origo.sources.contracts import RevisionedSourceSpec
 
@@ -278,9 +288,8 @@ def test_reconciliation_restores_committed_state_after_worker_loss(
             asset_selection=[asset.key],
             tags={
                 'dagster/asset_partition_range_start': DAY,
-                'dagster/asset_partition_range_end': DAY,
+                'dagster/asset_partition_range_end': '2017-08-18',
             },
-            run_config={'ops': {ASSET: {'config': {'capacity_probe': True}}}},
         )
     assert not failed.success
     record = runtime.store.records(canonical_only=True)[0]
@@ -833,7 +842,7 @@ def test_failed_automatic_verification_waits_for_operator_or_state_change(
     assert instance.get_run_by_id(failed.run_id).status.value == 'FAILURE'
 
 
-@pytest.mark.parametrize('kind', ['implicit', 'backfill_alias', 'canonical'])
+@pytest.mark.parametrize('kind', ['implicit', 'backfill_alias', 'canonical', 'refresh_range'])
 def test_reconciliation_waits_for_native_partition_runs(
     backfill_env: BackfillEnv,
     kind: str,

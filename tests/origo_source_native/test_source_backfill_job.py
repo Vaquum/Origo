@@ -315,3 +315,41 @@ def test_deployment_preparation_failures_are_dagster_runs(
         error is not None and 'Source preparation storage unavailable' in error.to_string()
         for error in errors
     )
+
+
+def test_projection_runs_retire_without_losing_source_history_or_receipts(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+) -> None:
+    from dagster import DagsterRun, DagsterRunStatus
+    from origo.maintenance.roles import run_role
+    from origo.maintenance.run_storage import OrigoSqliteRunStorage
+    from origo.maintenance.source_receipts import preserve_source_receipt, source_reference_reason
+
+    store, instance, bundle = ready_job
+    prepare_source(store.spec, instance)
+    storage = OrigoSqliteRunStorage.from_local(str(tmp_path / 'run-policy'))
+    try:
+        for job in bundle.jobs:
+            if not (job.name.startswith('publish_') or job.name.startswith('backfill_')):
+                continue
+            run = DagsterRun(job_name=job.name, status=DagsterRunStatus.SUCCESS, tags=job.tags)
+            storage.add_run(run)
+            if job.name.startswith('publish_'):
+                assert run_role(run) == 'projection'
+                assert not run.tags.get('origo_source_key')
+                assert source_reference_reason(run) == ''
+                identity = f'{store.spec.key}:consumer:{job.name}:verified-test-receipt'
+                tagged = run.with_tags(
+                    {**run.tags, 'origo_source_event': identity, 'origo_source_attempt': '0'}
+                )
+                preserve_source_receipt(tagged)
+                assert store.run_receipt(identity) == (0, 'SUCCESS', run.run_id)
+                storage.delete_run(run.run_id)
+                assert not storage.has_run(run.run_id)
+            else:
+                assert run_role(run) == 'source'
+                with pytest.raises(RuntimeError, match='cannot be retired'):
+                    storage.delete_run(run.run_id)
+                assert storage.has_run(run.run_id)
+    finally:
+        storage.dispose()

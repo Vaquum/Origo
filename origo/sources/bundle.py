@@ -460,7 +460,11 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             job_names[operation],
             selection=[name],
             tags={
-                'origo_source_key': spec.key,
+                (
+                    'origo_projection_source_key'
+                    if operation.startswith('consumer_')
+                    else 'origo_source_key'
+                ): spec.key,
                 'origo_source_operation': operation,
             },
         )
@@ -589,7 +593,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                         }
                     },
                     tags={
-                        'origo_source_key': spec.key,
+                        (
+                            'origo_projection_source_key' if consumer_key else 'origo_source_key'
+                        ): spec.key,
                         'origo_source_operation': operation,
                         **(
                             {'origo_source_state_token': key}

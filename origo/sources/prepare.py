@@ -2,10 +2,12 @@ import argparse
 import json
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
-from dagster import DagsterInstance, DagsterRunStatus, RunsFilter, get_dagster_logger
+from dagster import AssetKey, DagsterInstance, DagsterRunStatus, RunsFilter, get_dagster_logger
+from dagster._core.execution.backfill import BulkActionsFilter, BulkActionStatus, PartitionBackfill
 from dagster._core.remote_origin import (
     ManagedGrpcPythonEnvCodeLocationOrigin,
     RemoteInstigatorOrigin,
@@ -18,6 +20,7 @@ from dagster._core.scheduler.instigation import (
     ScheduleInstigatorData,
     SensorInstigatorData,
 )
+from dagster._core.storage.dagster_run import DagsterRun
 from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -81,9 +84,7 @@ def prepare_source(
         (
             f'{spec.key}_{role}_schedule',
             InstigatorType.SCHEDULE,
-            InstigatorStatus.RUNNING
-            if spec.rollout_stage == RolloutStage.LIVE
-            else InstigatorStatus.STOPPED,
+            InstigatorStatus.RUNNING if enabled else InstigatorStatus.STOPPED,
             ScheduleInstigatorData(cron, start_timestamp=time.time()),
         )
         for role, cron in schedules
@@ -104,20 +105,58 @@ def prepare_source(
     )
 
 
+def is_source_backfill(run: DagsterRun, spec: RevisionedSourceSpec) -> bool:
+    return run.job_name == f'backfill_{spec.key}_source_job' or (
+        AssetKey(f'build_{spec.key}_canonical_revision_origo') in (run.asset_selection or ())
+        and run.tags.get('origo_source_reconciliation') != 'true'
+        and run.job_name != f'refresh_{spec.key}_canonical_source_job'
+    )
+
+
+def _native_backfills(
+    instance: DagsterInstance,
+    spec: RevisionedSourceSpec,
+    statuses: list[BulkActionStatus] | None = None,
+) -> Iterator[PartitionBackfill]:
+    key = AssetKey(f'build_{spec.key}_canonical_revision_origo')
+    cursor = None
+    while True:
+        page = instance.get_backfills(
+            filters=BulkActionsFilter(statuses=statuses), cursor=cursor, limit=25
+        )
+        for backfill in page:
+            if key in (backfill.asset_selection or ()):
+                yield backfill
+        if len(page) < 25:
+            return
+        cursor = page[-1].backfill_id
+
+
 def backfill_active(instance: DagsterInstance, spec: RevisionedSourceSpec) -> bool:
-    return bool(
-        instance.get_runs(
+    if (
+        next(
+            _native_backfills(
+                instance,
+                spec,
+                [BulkActionStatus.REQUESTED, BulkActionStatus.CANCELING, BulkActionStatus.FAILING],
+            ),
+            None,
+        )
+        is not None
+    ):
+        return True
+    return any(
+        is_source_backfill(run, spec)
+        for run in instance.get_runs(
             RunsFilter(
-                job_name=f'backfill_{spec.key}_source_job',
                 statuses=[
                     DagsterRunStatus.QUEUED,
                     DagsterRunStatus.NOT_STARTED,
                     DagsterRunStatus.STARTING,
                     DagsterRunStatus.STARTED,
                     DagsterRunStatus.CANCELING,
-                ],
-            ),
-            limit=1,
+                ]
+            )
         )
     )
 
@@ -125,8 +164,21 @@ def backfill_active(instance: DagsterInstance, spec: RevisionedSourceSpec) -> bo
 def backfill_owns_publication(instance: DagsterInstance, spec: RevisionedSourceSpec) -> bool:
     if backfill_active(instance, spec):
         return True
-    latest = instance.get_runs(RunsFilter(job_name=f'backfill_{spec.key}_source_job'), limit=1)
-    return bool(latest and latest[0].status != DagsterRunStatus.SUCCESS)
+    records = [
+        record
+        for filters in (
+            RunsFilter(job_name=f'backfill_{spec.key}_source_job'),
+            RunsFilter(tags={'origo_source_key': spec.key, 'origo_source_operation': 'backfill'}),
+        )
+        for record in instance.get_run_records(filters, limit=1)
+    ]
+    latest = max(records, key=lambda record: record.create_timestamp, default=None)
+    native = next(_native_backfills(instance, spec), None)
+    if native is not None and (
+        latest is None or native.backfill_timestamp > latest.create_timestamp.timestamp()
+    ):
+        return native.status not in (BulkActionStatus.COMPLETED_SUCCESS, BulkActionStatus.COMPLETED)
+    return latest is not None and latest.dagster_run.status != DagsterRunStatus.SUCCESS
 
 
 def publication_current(

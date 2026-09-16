@@ -2,7 +2,7 @@ import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,7 +17,6 @@ from dagster import (
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources import capacity
 from origo.sources.adapters import binance_daily
-from origo.sources.backfill import BackfillConfig, selected_days
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import ConsumerSpec, Snapshot, SnapshotReader, SourceBundle
@@ -50,14 +49,17 @@ def ready_job(
     client = make_clickhouse_client(get_clickhouse_settings())
     (tmp_path / 'dagster').mkdir()
     try:
-        with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
+        with DagsterInstance.local_temp(
+            str(tmp_path / 'dagster'),
+            overrides={'python_logs': {'managed_python_loggers': [''], 'python_log_level': 'INFO'}},
+        ) as instance:
             yield SourceStore(client, 'origo', spec), instance, build_source_bundle(spec)
     finally:
         client.disconnect()
 
 
-def _config(end: str = DAY) -> dict[str, object]:
-    return {'ops': {'select_period': {'config': {'start_date': DAY, 'end_date': end}}}}
+def _selection(end: str = DAY) -> dict[str, str]:
+    return {'dagster/asset_partition_range_start': DAY, 'dagster/asset_partition_range_end': end}
 
 
 def test_one_job_prepares_verifies_and_publishes_all_files(
@@ -67,11 +69,21 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
 ) -> None:
     store, instance, bundle = ready_job
     assert {component.key for component in store.spec.components} == {
-        'raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned',
-        'raw_latest', 'time_latest', 'dollar_latest',
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
     }
     assert {consumer.key for consumer in store.spec.consumers} == {
-        'parquet', 'arrow', 'huggingface_shadow',
+        'parquet',
+        'arrow',
+        'huggingface_shadow',
     }
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]
     assert instance.all_instigator_state() == []
@@ -83,11 +95,11 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
         )
 
     monkeypatch.setattr(SourceStore, 'rows', no_copy)
-    result = job.execute_in_process(instance=instance, run_config=_config(), raise_on_error=False)
+    result = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
     assert result.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
     assert all(state.status.value == 'RUNNING' for state in instance.all_instigator_state())
-    assert len(instance.all_instigator_state()) == len(bundle.sensors)
+    assert len(instance.all_instigator_state()) == len(bundle.sensors) + len(bundle.schedules)
     assert store.canonical_verified()
     assert store.execute('SELECT min(successful) FROM origo.source_capacity_log') == [(1,)]
     token = store.snapshot().token
@@ -145,7 +157,7 @@ def test_file_failure_fails_job_and_retry_keeps_verified_generation(
         ),
     )
     job = next(job for job in build_source_bundle(spec).jobs if job.name.startswith('backfill_'))
-    failed = job.execute_in_process(instance=instance, run_config=_config(), raise_on_error=False)
+    failed = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
     assert not failed.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
     assert not (tmp_path / 'files' / spec.key / 'arrow' / 'latest.json').exists()
@@ -156,7 +168,7 @@ def test_file_failure_fails_job_and_retry_keeps_verified_generation(
         is not None
     )
     before = store.snapshot()
-    retried = job.execute_in_process(instance=instance, run_config=_config(), raise_on_error=False)
+    retried = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
     assert retried.success
     assert store.snapshot() == before
     assert manifest.read_bytes() == published
@@ -167,9 +179,14 @@ def test_unavailable_day_blocks_publication_and_preserves_completed_day(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:
     store, instance, bundle = ready_job
-    job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
+    job = Definitions(
+        assets=bundle.assets, jobs=bundle.jobs
+    ).resolve_implicit_global_asset_job_def()
     result = job.execute_in_process(
-        instance=instance, run_config=_config('2017-08-18'), raise_on_error=False
+        instance=instance,
+        tags=_selection('2017-08-18'),
+        asset_selection=[AssetKey(ASSET)],
+        raise_on_error=False,
     )
     assert not result.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
@@ -198,24 +215,29 @@ def test_unavailable_day_blocks_publication_and_preserves_completed_day(
 
 
 def test_period_defaults_and_boundaries_are_shared_across_sources() -> None:
-    spec = BINANCE_SPOT_TRADES_SPEC
-    days = selected_days(spec, BackfillConfig())
-    assert days[0] == DAY
-    assert days[-1] == (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
-    assert selected_days(spec, BackfillConfig(start_date=DAY, end_date=DAY)) == (DAY,)
-    for start, end in [('2017-08-16', DAY), ('2017-08-18', DAY), (DAY, '2999-01-01')]:
-        with pytest.raises(ValueError, match='inclusive UTC period'):
-            selected_days(spec, BackfillConfig(start_date=start, end_date=end))
-    alternate = replace(spec, key='another_registered_source')
-    job = next(
-        job for job in build_source_bundle(alternate).jobs if job.name.startswith('backfill_')
-    )
-    assert job.name == 'backfill_another_registered_source_source_job'
-    assert {node.name for node in job.nodes} == {
-        'select_period',
-        'build_and_verify',
-        'publish_files',
-    }
+    from dagster._core.definitions.partitions.context import partition_loading_context
+
+    for spec in (
+        BINANCE_SPOT_TRADES_SPEC,
+        replace(BINANCE_SPOT_TRADES_SPEC, key='another_registered_source'),
+    ):
+        job = next(
+            job for job in build_source_bundle(spec).jobs if job.name.startswith('backfill_')
+        )
+        assert job.is_asset_job
+        assert isinstance(job.partitions_def, DailyPartitionsDefinition)
+        assert job.backfill_policy.max_partitions_per_run is None
+        assert job.partitions_def.get_first_partition_key() == DAY
+        with partition_loading_context(effective_dt=datetime(2020, 1, 3, tzinfo=UTC)):
+            assert job.partitions_def.get_last_partition_key() == '2020-01-02'
+        assert job.get_run_config_for_partition_key(DAY) == {}
+        assert job.name == f'backfill_{spec.key}_source_job'
+        from dagster import validate_run_config
+
+        for operation in build_source_bundle(spec).jobs:
+            validate_run_config(operation, {})
+            if operation.name.startswith(('repair_', 'certify_')):
+                assert isinstance(operation.partitions_def, DailyPartitionsDefinition)
 
 
 def test_storage_change_remeasures_independent_verification(
@@ -227,7 +249,7 @@ def test_storage_change_remeasures_independent_verification(
 
     store, instance, bundle = ready_job
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
-    assert job.execute_in_process(instance=instance, run_config=_config()).success
+    assert job.execute_in_process(instance=instance, tags=_selection()).success
     previous = store.snapshot()
     verifier = store.spec.verify
     assert verifier is not None
@@ -243,7 +265,7 @@ def test_storage_change_remeasures_independent_verification(
     )
     updated = build_source_bundle(replace(store.spec, verify=counted))
     retry = next(job for job in updated.jobs if job.name.startswith('backfill_'))
-    assert retry.execute_in_process(instance=instance, run_config=_config()).success
+    assert retry.execute_in_process(instance=instance, tags=_selection()).success
     assert comparisons == 1
     assert store.snapshot() == previous
     assert (
@@ -368,11 +390,10 @@ def test_new_verified_data_automatically_requests_every_consumer(
 ) -> None:
     store, instance, bundle = ready_job
     backfill = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
-    assert backfill.execute_in_process(instance=instance, run_config=_config()).success
+    assert backfill.execute_in_process(instance=instance, tags=_selection()).success
     previous_token = store.snapshot().token
     canonical = next(
-        job for job in bundle.jobs
-        if job.name == f'refresh_{store.spec.key}_canonical_source_job'
+        job for job in bundle.jobs if job.name == f'refresh_{store.spec.key}_canonical_source_job'
     )
     assert canonical.execute_in_process(instance=instance, partition_key='2020-01-01').success
     assert store.canonical_verified()
@@ -380,7 +401,8 @@ def test_new_verified_data_automatically_requests_every_consumer(
     definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
     for consumer in store.spec.consumers:
         sensor = next(
-            sensor for sensor in bundle.sensors
+            sensor
+            for sensor in bundle.sensors
             if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
         )
         with build_sensor_context(instance=instance, definitions=definitions) as context:
@@ -389,8 +411,7 @@ def test_new_verified_data_automatically_requests_every_consumer(
         request = requests[0]
         assert request.tags['origo_source_state_token'] == store.snapshot().token
         publisher = next(
-            job for job in bundle.jobs
-            if job.name == f'publish_{store.spec.key}_{consumer.key}_job'
+            job for job in bundle.jobs if job.name == f'publish_{store.spec.key}_{consumer.key}_job'
         )
         assert publisher.execute_in_process(
             instance=instance, run_config=request.run_config, tags=request.tags
@@ -401,3 +422,29 @@ def test_new_verified_data_automatically_requests_every_consumer(
         assert manifest['state_token'] == store.snapshot().token
         with build_sensor_context(instance=instance, definitions=definitions) as context:
             assert sensor.evaluate_tick(context).run_requests == []
+
+
+def test_native_backfill_reserves_source_before_worker_starts(tmp_path: Path) -> None:
+    from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
+
+    from origo.sources.prepare import backfill_active, backfill_owns_publication
+
+    spec = BINANCE_SPOT_TRADES_SPEC
+    with DagsterInstance.local_temp(str(tmp_path)) as instance:
+        pending = PartitionBackfill(
+            backfill_id='native-selection',
+            status=BulkActionStatus.REQUESTED,
+            from_failure=False,
+            tags={},
+            backfill_timestamp=1.0,
+            asset_selection=[AssetKey(ASSET)],
+        )
+        instance.add_backfill(pending)
+        assert backfill_active(instance, spec)
+        assert backfill_owns_publication(instance, spec)
+        assert not backfill_active(instance, replace(spec, key='another_source'))
+        instance.update_backfill(pending.with_status(BulkActionStatus.FAILED))
+        assert not backfill_active(instance, spec)
+        assert backfill_owns_publication(instance, spec)
+        instance.update_backfill(pending.with_status(BulkActionStatus.COMPLETED_SUCCESS))
+        assert not backfill_owns_publication(instance, spec)

@@ -46,6 +46,12 @@ When reviewing comments left on an issue you are working on, always address the 
 
 The opinion is the deliverable. Confirming before posting adds a round-trip and slows collaboration.
 
+## Operator UX
+
+Before drafting or implementing any PRD or slice that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD and Slice templates require it.
+
+Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and retry controls. The operator selects what to run through those controls. Never require the operator to type YAML, JSON, dates, identifiers, paths or configuration text into Dagit, or follow source-specific manual preparation instructions from a chat. Configuration, dependencies, preparation, automation and publication belong in versioned code. Deployment activates scheduled work and sensors for every enabled source; operators never enable them manually. Adding and backfilling a registered source automatically builds every declared projection and file output without separate operator launches. Apply this uniformly to full backfills, selected gaps, retries and other operator-facing operations across registered sources. A source PR is incomplete until this workflow is verified in the actual GUI with real data. Screenshots illustrate the required native behavior; they are not a request to build a custom interface.
+
 ## Beyond the laws
 
 The gates check shape, scope, format, ratchets, and named test suites. They do not check whether the slice's capability actually works. The operator judges that at review time, against the following stance:

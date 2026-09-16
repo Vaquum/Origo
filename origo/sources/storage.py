@@ -332,6 +332,7 @@ class SourceStore:
                 self.client,
                 component,
                 table,
+                schema_version=self.spec.schema_version,
                 predicate=predicate,
                 params=cast(dict[str, object], params) if params is not None else None,
             )

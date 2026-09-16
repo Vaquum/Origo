@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import os
+import platform
 import resource
 import socket
 import subprocess
@@ -36,7 +37,7 @@ from origo.assets.daily_trades_to_origo import _extract_csv, _parse_trade_rows
 from origo.sources.adapters import binance_daily
 from origo.sources.archive import archive_session
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC as SPEC
-from origo.sources.columnar import BoundedClient
+from origo.sources.columnar import BoundedClient, binary_hash
 from origo.sources.contracts import BuildContext, CanonicalAdapter, Client, Partition, Revision
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.spot_parity import _LEGACY
@@ -301,6 +302,27 @@ def scenario(
             "SELECT max(memory_usage) FROM system.query_log WHERE type='QueryFinish' AND query_start_time_microseconds >= toDateTime64(%(start)s,6,'UTC')",
             {'start': query_start},
         )[0][0]
+        if mode == 'legacy':
+            proofs = {
+                day: {
+                    component.key: binary_hash(
+                        client,
+                        component,
+                        database + '.' + _LEGACY[component.key][0],
+                        predicate=f'toDate({component.time_column})=toDate(%(day)s)',
+                        params={'day': day},
+                        schema_version=SPEC.schema_version,
+                    )
+                    for component in SPEC.components
+                    if not component.provisional
+                }
+                for day in days
+            }
+        else:
+            proofs = {
+                record.partition.key: dict(record.component_hashes)
+                for record in runtime.store.records(canonical_only=True)
+            }
         rows = sum(int(str(item['rows'])) for item in measurements)
         return {
             'mode': mode,
@@ -314,6 +336,7 @@ def scenario(
             'days': measurements,
             'clickhouse': client.execute('SELECT version()')[0][0],
             'clickhouse_peak_query_memory_bytes': peak_query_memory,
+            'component_proofs': proofs,
         }
     finally:
         client.execute(f'DROP DATABASE IF EXISTS {database} SYNC')
@@ -337,7 +360,28 @@ def main() -> None:
         parser.error('Dates must be unique and worker counts positive.')
     report: dict[str, object] = {
         'archives': archive_evidence(args.archives, args.days),
-        'scope': 'Cached official archives; worker startup included, Dagster orchestration excluded. Legacy: frozen ingest and six projections. Revised: source build, seven-component independent parity, all declared shadow files. No Hugging Face network upload.',
+        'scope': 'Cached official archives; worker startup included, Dagster orchestration excluded. Legacy: frozen ingest and six projections. Revised: source build, seven-component independent parity, all declared shadow files. An additional cross-scenario audit of frozen legacy output hashes runs outside the measured interval. No Hugging Face network upload.',
+        'git_revision': subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip(),
+        'working_tree_dirty': bool(
+            subprocess.run(
+                ['git', 'status', '--porcelain'],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        ),
+        'platform': platform.platform(),
+        'docker_cpus': int(
+            subprocess.run(
+                ['docker', 'info', '--format', '{{.NCPU}}'],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        ),
         'host_cpus': os.cpu_count(),
         'container_memory_limit': args.memory,
         'results': [],
@@ -353,6 +397,8 @@ def main() -> None:
                 result = scenario(
                     mode, workers, args.days, env, args.archives.resolve(), Path(directory)
                 )
+                if results and result['component_proofs'] != results[0]['component_proofs']:
+                    raise ValueError('Exact component output changed between benchmark scenarios.')
                 results.append(result)
                 args.output.write_text(json.dumps(report, indent=2) + '\n')
                 print(json.dumps(result), flush=True)

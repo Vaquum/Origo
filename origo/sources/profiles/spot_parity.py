@@ -93,6 +93,9 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     reference = identifier(f'{database}_source_parity_binance_spot_trades_{record.build_id.hex}')
     settings = replace(get_clickhouse_settings(), database=reference)
     checks: dict[str, object] = {}
+    # The runtime holds this partition's exclusive lock, so a prior workspace
+    # for this exact build can only belong to an interrupted verification.
+    client.execute(f'DROP DATABASE IF EXISTS {reference} SYNC')
     client.execute(f'CREATE DATABASE {reference}')
     with preserve_primary_failure(
         'legacy comparison database', lambda: client.execute(f'DROP DATABASE {reference} SYNC')

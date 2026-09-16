@@ -158,8 +158,9 @@ def test_previous_hash_generations_remain_verifiable(
         client.disconnect()
 
 
+@pytest.mark.parametrize('day', ['2020-01-01', '2025-01-01'])
 def test_chunk_hash_matches_independent_rowbinary_encoding(
-    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, day: str
 ) -> None:
     import hashlib
     import json
@@ -167,20 +168,26 @@ def test_chunk_hash_matches_independent_rowbinary_encoding(
     import zipfile
     from datetime import UTC, datetime
 
-    from origo.sources.columnar import HASH_CHUNK_ROWS, binary_hash
+    from origo.sources import columnar
+    from origo.sources.columnar import binary_hash
 
-    day = '2020-01-01'
-    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
-    with zipfile.ZipFile(ARCHIVES / f'BTCUSDT-trades-{day}.zip') as archive:
-        rows = _parse_trade_rows(archive.read(f'BTCUSDT-trades-{day}.csv'))
+    chunk_rows = 65536 if day == '2020-01-01' else 1024
+    monkeypatch.setattr(columnar, 'HASH_CHUNK_ROWS', chunk_rows)
+    csv = ARCHIVES / f'BTCUSDT-trades-{day}.csv'
+    if csv.exists():
+        rows = _parse_trade_rows(csv.read_bytes())
+    else:
+        with zipfile.ZipFile(ARCHIVES / f'BTCUSDT-trades-{day}.zip') as archive:
+            rows = _parse_trade_rows(archive.read(f'BTCUSDT-trades-{day}.csv'))
     spec = BINANCE_SPOT_TRADES_SPEC
     component = spec.components[0]
     header = json.dumps([(c.name, c.sql_type) for c in component.columns], separators=(',', ':'))
     expected = hashlib.sha256(b'origo-source-rowbinary-chunks-v2\n' + header.encode() + b'\n')
-    expected.update(HASH_CHUNK_ROWS.to_bytes(8, 'big'))
+    expected.update(spec.schema_version.to_bytes(8, 'big'))
+    expected.update(chunk_rows.to_bytes(8, 'big'))
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
-    for chunk, offset in enumerate(range(0, len(rows), HASH_CHUNK_ROWS)):
-        selected = rows[offset : offset + HASH_CHUNK_ROWS]
+    for chunk, offset in enumerate(range(0, len(rows), chunk_rows)):
+        selected = rows[offset : offset + chunk_rows]
         block = bytearray()
         for row in selected:
             stamp = row[-1].replace(tzinfo=UTC) - epoch
@@ -193,12 +200,24 @@ def test_chunk_hash_matches_independent_rowbinary_encoding(
     runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'hash')
     try:
         runtime.setup()
-        record = runtime.build(day)
-        assert len(rows) > HASH_CHUNK_ROWS * 2
-        assert dict(record.component_hashes)['raw'] == 'v2:' + expected.hexdigest()
-        table = runtime.store.component_table('raw')
+        table = 'origo.real_hash_rows'
+        columns = ', '.join(f'{c.name} {c.sql_type}' for c in component.columns)
+        client.execute(
+            f'CREATE TABLE {table} ({columns}) ENGINE=MergeTree ORDER BY (datetime, trade_id)'
+        )
+        client.execute(f'INSERT INTO {table} VALUES', rows)
+        assert len(rows) > chunk_rows * 2
+        count, digest = runtime.store.validate_component(
+            component, table, spec.canonical.partition(day)
+        )
+        assert count == len(rows)
+        assert digest == 'v2:' + expected.hexdigest()
         # Different read blocks must preserve ordering and chunk boundaries.
         client.execute('SET max_block_size=8192')
         assert binary_hash(runtime.store.client, component, table) == 'v2:' + expected.hexdigest()
+        assert (
+            binary_hash(runtime.store.client, component, table, schema_version=2)
+            != 'v2:' + expected.hexdigest()
+        )
     finally:
         client.disconnect()

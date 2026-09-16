@@ -156,9 +156,11 @@ canonical pool is separate from serial maintenance/publication pools. Capacity
 reserves include the configured maximum concurrent working sets.
 
 The data path uses native Polars/Arrow parsing and bulk transport, ClickHouse
-projections and SHA256 of fixed, ordered 65,536-row RowBinary chunks computed
+projections and SHA256 of fixed, ordered 1,048,576-row RowBinary chunks computed
 inside ClickHouse. Only chunk digests cross the wire; the root hash binds the
-schema, encoding, chunk sizes and counts. Query
+schema version, column types, encoding, chunk sizes and counts. Hashing seeks
+through primary keys in bounded pages; it never buffers a complete day inside
+the hash aggregate. Query
 aggregation uses one thread per daily worker to retain deterministic floating-point
 reduction; parallelism is across independent days. New component hashes have a
 `v2:` prefix; existing v1 generations are checked with their original encoding.

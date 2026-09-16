@@ -600,3 +600,39 @@ def test_backfill_worker_loss_in_file_step_has_consumer_scope(
         "SELECT operation,blocking_scope,partition_key,consumer FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
     ) == [('consumer', 'CONSUMER', None, 'arrow')]
     assert job.execute_in_process(instance=instance, partition_key=DAY).success
+
+
+def test_native_retry_reclaims_its_interrupted_comparison_without_manual_cleanup(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
+) -> None:
+    from origo.sources.contracts import Client, StateRecord
+
+    store, instance, _source = ready_job
+    verifier = store.spec.verify
+    assert verifier is not None
+    interrupted = False
+
+    def lose_worker(client: Client, database: str, record: StateRecord) -> dict[str, object]:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            client.execute(
+                f'CREATE DATABASE {database}_source_parity_{store.spec.key}_{record.build_id.hex}'
+            )
+            raise OSError('Worker lost after creating its comparison database')
+        return verifier(client, database, record)
+
+    source = build_source_bundle(replace(store.spec, verify=lose_worker))
+    job = next(job for job in source.jobs if job.name.startswith('backfill_'))
+    first = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
+    assert not first.success
+    record = store.records(canonical_only=True)[0]
+    reference = f'origo_source_parity_{store.spec.key}_{record.build_id.hex}'
+    assert store.execute('EXISTS DATABASE ' + reference) == [(1,)]
+    assert not store.canonical_verified()
+    retry = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
+    assert retry.success
+    assert store.execute('EXISTS DATABASE ' + reference) == [(0,)]
+    assert store.records(canonical_only=True) == (record,)
+    assert store.canonical_verified()
+    assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]

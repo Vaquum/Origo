@@ -7,6 +7,7 @@ import json
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime
 from importlib import import_module
 from typing import Protocol, cast
 
@@ -50,7 +51,7 @@ def insert_arrow(table: str, data: ArrowTable) -> None:
         client.insert_arrow(table, data.combine_chunks())
 
 
-HASH_CHUNK_ROWS = 65536
+HASH_CHUNK_ROWS = 1048576
 
 
 def binary_hash(
@@ -60,6 +61,7 @@ def binary_hash(
     *,
     predicate: str = '1',
     params: Mapping[str, object] | None = None,
+    schema_version: int = 1,
 ) -> str:
     """SHA256 tree over fixed ordered RowBinary chunks, computed inside ClickHouse.
 
@@ -71,21 +73,50 @@ def binary_hash(
         f'if({c.name}=0, toFloat64(0), {c.name})' if c.sql_type == 'Float64' else c.name
         for c in component.columns
     )
-    query = f"""SELECT chunk, count(), hex(SHA256(arrayStringConcat(
-        arrayMap(item -> item.2, arraySort(item -> item.1, groupArray((ordinal, encoded)))))))
-        FROM (
-            SELECT row_number() OVER (ORDER BY {', '.join(component.primary_key)}) - 1 AS ordinal,
-                intDiv(ordinal, {HASH_CHUNK_ROWS}) AS chunk,
-                formatRow('RowBinary', {columns}) AS encoded
-            FROM {table} WHERE {predicate}
-        ) GROUP BY chunk ORDER BY chunk"""
+    ordering = ', '.join(component.primary_key)
     header = json.dumps([(c.name, c.sql_type) for c in component.columns], separators=(',', ':'))
     digest = hashlib.sha256(b'origo-source-rowbinary-chunks-v2\n' + header.encode() + b'\n')
+    digest.update(schema_version.to_bytes(8, 'big'))
     digest.update(HASH_CHUNK_ROWS.to_bytes(8, 'big'))
-    for chunk, count, chunk_hash in client.execute(query, params):
-        digest.update(int(str(chunk)).to_bytes(8, 'big'))
-        digest.update(int(str(count)).to_bytes(8, 'big'))
+    bindings = dict(params or {})
+    seek = '1'
+    chunk = 0
+    while True:
+        count, chunk_hash, last = client.execute(
+            f"""SELECT count(), hex(SHA256(arrayStringConcat(arrayMap(item -> item.2,
+                arraySort(item -> item.1, groupArray((tuple({ordering}), encoded))))))),
+                max(tuple({ordering}))
+            FROM (
+                SELECT {ordering}, formatRow('RowBinary', {columns}) AS encoded
+                FROM {table} WHERE ({predicate}) AND ({seek})
+                ORDER BY {ordering} LIMIT {HASH_CHUNK_ROWS}
+            )""",
+            bindings,
+        )[0]
+        size = int(str(count))
+        if not size:
+            break
+        digest.update(chunk.to_bytes(8, 'big'))
+        digest.update(size.to_bytes(8, 'big'))
         digest.update(bytes.fromhex(str(chunk_hash)))
+        if size < HASH_CHUNK_ROWS:
+            break
+        if not isinstance(last, tuple):
+            raise TypeError('Component hash cursor must be a tuple.')
+        cursor = cast(tuple[object, ...], last)
+        if len(cursor) != len(component.primary_key):
+            raise TypeError('Component hash cursor must contain every primary key column.')
+        casts: list[str] = []
+        for name, value in zip(component.primary_key, cursor, strict=True):
+            parameter = 'source_hash_after_' + name
+            # Driver datetime parameters otherwise discard subsecond cursor precision.
+            bindings[parameter] = (
+                value.strftime('%Y-%m-%d %H:%M:%S.%f') if isinstance(value, datetime) else value
+            )
+            sql_type = next(c.sql_type for c in component.columns if c.name == name)
+            casts.append(f'CAST(%({parameter})s AS {sql_type})')
+        seek = f'tuple({ordering}) > tuple({", ".join(casts)})'
+        chunk += 1
     return 'v2:' + digest.hexdigest()
 
 

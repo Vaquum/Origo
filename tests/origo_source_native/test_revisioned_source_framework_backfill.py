@@ -107,7 +107,9 @@ def _run(
     environment: BackfillEnv, *, day: str = DAY, reconcile: bool = False, probe: bool = False
 ) -> ExecuteInProcessResult:
     _runtime, instance, source = environment
-    job = next(job for job in source.jobs if job.name == 'backfill_binance_spot_trades_source_job')
+    job = next(
+        job for job in source.jobs if job.name == 'refresh_binance_spot_trades_canonical_source_job'
+    )
     return job.execute_in_process(
         instance=instance,
         partition_key=day,
@@ -132,10 +134,14 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> No
     assert all(
         schedule.default_status == DefaultScheduleStatus.STOPPED for schedule in source.schedules
     )
-    assert all(sensor.default_status == DefaultSensorStatus.STOPPED for sensor in source.sensors)
+    assert all(sensor.default_status == DefaultSensorStatus.RUNNING for sensor in source.sensors)
     assert 'binance_spot_trades_reconciliation_sensor' in {sensor.name for sensor in source.sensors}
     assert (
-        next(job for job in source.jobs if job.name.startswith('backfill_')).partitions_def
+        next(
+            job
+            for job in source.jobs
+            if job.name == 'refresh_binance_spot_trades_canonical_source_job'
+        ).partitions_def
         == asset.partitions_def
     )
 

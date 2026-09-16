@@ -48,6 +48,7 @@ def _volumes(runtime: SourceRuntime) -> tuple[_Volume, ...]:
         data,
         runtime.lock_root,
         Path(os.environ.get('ORIGO_SOURCE_DAGSTER_VOLUME_PATH', '/opt/dagster-instance')),
+        Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
     )
     return tuple(_Volume(f'{path}:{path.stat().st_dev}:{server}', path) for path in paths)
 
@@ -55,7 +56,7 @@ def _volumes(runtime: SourceRuntime) -> tuple[_Volume, ...]:
 class CapacityMonitor:
     """Measure source storage working sets and gate subsequent heavy runs."""
 
-    def __init__(self, runtime: SourceRuntime, *, probe: bool) -> None:
+    def __init__(self, runtime: SourceRuntime, *, probe: bool | None) -> None:
         self.runtime, self.probe = runtime, probe
         self.volumes = _volumes(runtime)
         self.start: dict[str, int] = {}
@@ -86,7 +87,9 @@ class CapacityMonitor:
                 {'source': runtime.spec.key, 'volume': volume.identity},
             )
             measured = int(str(records[0][0]))
-            if not records[0][1] and not self.probe:
+            if not records[0][1] and self.probe is None:
+                self.probe = True
+            if not records[0][1] and self.probe is False:
                 raise SourceError(
                     'CAPACITY_MEASUREMENT_REQUIRED',
                     'Launch one representative day with capacity_probe enabled before a range backfill.',

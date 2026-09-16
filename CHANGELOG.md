@@ -1,3 +1,9 @@
+# v3.9.0
+
+- Prepare enabled revisioned sources and managed sensors from code at daemon startup; persist declared files on a shared volume.
+- Run an inclusive period from one Jobs/Launchpad backfill: verify each day, measure capacity automatically, and complete every declared file publication before success. Preserve per-day asset state and failures in Dagster.
+- Query pinned ClickHouse projections for spot files instead of copying all historical raw rows into Python.
+
 # v3.8.9
 
 - Correlate repository membership for Dagster sensor and schedule run queries so Automation controls do not wait behind repeated repository tag scans.

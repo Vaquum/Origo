@@ -32,51 +32,40 @@ flowchart LR
 2. Retain unmodified official rows and provenance under `tests/fixtures/<provider>/...`; record archive and response hashes. Synthetic market rows are prohibited.
 3. Add the specification to `SOURCE_REGISTRY` in `registry.py`, with `RolloutStage.DORMANT`.
 4. Run `pytest tests/origo_source_native/test_binance_daily_source_adapter.py tests/origo_source_native/test_revisioned_source_framework*.py -q`, then `pytest tests/origo_source_native -q` and the repository gates.
-5. Inspect the generated definitions. All schedules and sensors must remain stopped; only explicit setup may perform I/O while dormant.
+5. Inspect the generated definitions. Dormant sources perform no automatic I/O. Enabling CANARY or LIVE in the specification makes deployment prepare the source and activate its managed monitors and consumer sensors.
 6. Submit the source and its proofs in one slice PR. A new provider still uses this checklist and the same failure table.
 
 The spot adapter stores individual trades. Aggregate responses locate the REST range; historicalTrades supplies rows. All five canonical projection calculations and the twelve consumer series reuse the frozen spot formulas. The shadow implementation leaves legacy identities and artifacts intact. Publication destinations must contain the source key.
 
 ## Run and promote
 
-Use one code location and an absolute shared `ORIGO_SOURCE_LOCK_DIR` (default `/opt/origo/locks`) visible to every worker. Multi-host execution is unsupported. Setup creates isolated source objects and the shared state tables:
-
-```sh
-dagster job execute -m origo.definitions -j create_binance_spot_trades_source_origo_job
-```
-
-The registered spot specification is now `CANARY`. New sources still enter the registry as `DORMANT`. Dagster schedules and sensors remain stopped until an operator starts them. Neither importing definitions nor deployment starts ingestion or creates source tables.
+Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.prepare` before starting the daemon. Their healthcheck verifies preparation without changing state. Re-deployment repairs stopped managed sensors while retaining their cursors. Dormant sources remain inactive. The job repeats this idempotent preparation, so a fresh instance follows the same path.
 
 ### Backfill and compare from Dagit
 
-1. Open **Jobs → create_binance_spot_trades_source_origo_job → Launchpad** and launch setup. The default coverage anchor is `2017-08-17T00:00:00+00:00`; an explicitly configured anchor is immutable. Offset-less dates/times mean UTC.
-2. Start **binance_spot_trades_reconciliation_sensor** and **binance_spot_trades_failure_sensor**. Reconciliation reads ClickHouse state, bridges durable failure/recovery events into a Dagster run, and requests native verification runs. Backfill, repair and audit jobs reject execution until both monitors are running. Keep the canonical/provisional schedules and consumer sensors stopped for the historical proof.
-3. Open **backfill_binance_spot_trades_source_job → Launchpad**. Select one representative high-volume day already available in the legacy history and not yet verified by the new source. Launch that single partition with:
+Open **Jobs → backfill_binance_spot_trades_source_job → Launchpad**, choose the inclusive UTC period, and launch once:
 
-   ```yaml
-   ops:
-     build_binance_spot_trades_canonical_revision_origo:
-       config:
-         capacity_probe: true
-   ```
+```yaml
+ops:
+  select_period:
+    config:
+      start_date: "2017-08-17"
+      end_date: ""
+```
 
-   The probe runs ingestion and independent legacy comparison, measures the mounted volumes, and persists the largest observed working set. It cannot run as a range backfill. A failed probe retains valid measurements but creates no capacity approval; retry it with `capacity_probe: true` until verification succeeds. A verified day cannot serve as a new probe because its cached proof would skip the legacy working set. After a storage move or ClickHouse server replacement, launch an unverified representative day as a new probe; automatic daily ingestion does not grant its own capacity approval.
-4. Open **Assets → binance_spot_trades → build_binance_spot_trades_canonical_revision_origo → Partitions**. Select `2017-08-17` through the last closed UTC day and launch the native backfill with default configuration. One day runs at a time in the source's Dagster concurrency pool; source locks also exclude competing writers. The `backfill_binance_spot_trades_source_job` exposes the same partitioned asset.
-5. Follow the native backfill and partition views. Each materialization's `source_state` metadata contains the official archive revision, build ID, generation, verification time, and all seven legacy comparison counts/hashes. A day materializes only after the complete committed generation passes content validation and exact legacy parity. Failed attempts retain their original run history.
-6. Open the partition's run **Logs** for archive, component, comparison, capacity, failure and recovery events. **Compute logs** retain stdout/stderr. The **reconcile_binance_spot_trades_source_origo** asset reports the last successful authority read; its **source_health** check reports unresolved source failures without failing the observation run; its runs also show failures originally recorded outside a run, tagged with their original run ID. Database-read failure is a failed reconciliation, never an empty or successful snapshot.
-7. Fix the recorded cause, then use Dagit's native failed-partition retry/backfill controls. Unchanged complete generations retain their activation and reuse matching parity evidence after validating current contents. An archive correction receives a new generation and new proof. Retries first reclaim any interrupted legacy comparison workspace under the source lock. The cleanup job exposes that workspace in `verification_databases` during its dry run. Storage or source-wide health failures stop work before archive download; queued Dagster runs may already exist.
-8. Historical parity is complete only when the entire selected history is verified, with no failed/missing partitions and healthy reconciliation. A green fixture test or a successful setup/probe is not full-history evidence. Keep production legacy readers and publishers on their existing paths until the later routing cutover.
+Empty start means the source's declared first day; empty end means yesterday UTC at launch. Empty configuration selects the whole closed history. There are no setup jobs, sensor switches, capacity probes, asset-navigation steps or separate publication jobs for the operator. A missing provider archive is a visible failed day; it is never silently skipped.
 
-Dagit reflects the most recently reconciled state, not an atomic transaction with ClickHouse. The sensor checks changed generations, missing materializations and failed partitions each minute, and rotates through partitions whose last verification is at least 24 hours old for content validation. Dagster materialization data versions identify unchanged generations; a completed native backfill does not immediately trigger another verification. Changed/failed days are prioritized; at most five verification runs form one batch. The sensor waits for that batch to finish before requesting another, while continuing health observations. Health runs bridge new events no more often than every five minutes and otherwise provide an hourly heartbeat. Failed health checks remain visible between observations. Sensor ticks retain seven days of success/skips and thirty days of failures; the cursor stores only the rotation offset. It recognizes canonical jobs and native Dagit backfill jobs under both single-partition and partition-range tags, and skips a day while any source run for it is queued or active. A deterministic data/configuration failure holds automatic verification for the observed revision/build/generation until the identity changes or an operator retries. Transient failures, lost workers and cancellations retry after 1, 5, 30 and then at most once per 60 minutes; these waits release the heavy pool. Reconcile-only failures are verification failures and never create an ingestion-retry requirement. A successful operator verification resumes periodic checks; it does not erase the failed run. For an immediate exhaustive verification, launch a native backfill of the desired range with `reconcile_only: true`. This reads/compares active data without rebuilding it. A generation without matching proof must pass capacity admission before its legacy comparison. Inspect `verified_at` and reconciliation health when assessing freshness; disabled or failing reconciliation is not current authority.
+The shared factory generates `select_period → build_and_verify[day] → publish_files` for every registered source. Each selected day is a separate Dagster step in one run. Execution is sequential in the source heavy pool. A full-history run is exempt from the short operational-job runtime limit; Dagster continues monitoring worker failures. Storage admission retains the 30% free-byte, twice-measured-working-set and 10% free-inode requirements. The first use of new storage measures a complete build and independent comparison automatically; cached parity cannot substitute for that measurement.
 
-Normal ingestion uses hourly op retries only for explicitly transient provider failures (transport, 404/408/418/429/5xx) and revision changes. Configuration, validation, permission and lock failures terminate the run immediately. An operator can retry after fixing the reported cause. Within one run, ingestion and the frozen legacy parser share checksum-verified archive bytes; retained content is independently read after legacy comparison before materialization. Cleanup failures are logged without replacing the primary error.
+Each successful day materializes its native source asset partition with revision, build ID, generation, verification time, data version and all seven legacy comparison results. Python logging and stdout/stderr flow through Dagster. Failed days keep their failure history; the publication step cannot run unless every selected day succeeds. Native re-execution can retry failed steps; relaunching the same period validates and reuses unchanged generations.
 
+Publication runs once after the selected period, rather than rebuilding all files after every day. The spot renderer queries pinned time/dollar projections in ClickHouse without loading the historical raw trade archive into Python. Every declared consumer must complete before the job succeeds. File failures fail the same run. Consumer sensors defer to an active backfill and do not republish an already current manifest. Reconciliation continues health observations while leaving verification to the active job.
 
-Dagster and Dagit are pinned to the tested `1.13.21` runtime in project and Docker dependencies. The checked-in instance configuration captures Python logging and compute logs, persists logs in the shared Dagster volume, and limits source pools to one run. Both compose variants mount the same lock volume and a read-only view of the actual ClickHouse data volume. Capacity admission validates the server UUID and local default disk, checks all declared mounts, and requires at least 30% free bytes, twice the largest measured working set, and 10% free inodes. A changed volume needs a new probe. The first probe only proves its selected day; subsequent days retain valid measurements, including failed attempts, while only successful verification grants admission.
+The shared `source-publications` volume preserves manifests and files across worker replacement. The CANARY spot specification declares Parquet, Arrow and Hugging Face **shadow** files; this does not upload over the legacy public Hugging Face datasets. Legacy public identities retain their existing owners until the separately approved LIVE routing promotion. CANARY ingestion schedules remain stopped by code, so deployment does not launch the full historical workload itself.
 
-`LIVE` promotion remains a separate reviewed slice requiring seven consecutive production handoffs and consumer evidence. Historical spot parity precedes futures reuse and live certification. This slice changes no public spot route or publisher ownership.
+Dagit reflects the latest verified and reconciled state, not an atomic transaction with ClickHouse. Reconciliation observes failures and repairs missing/stale asset materializations. Its health check must be healthy alongside the backfill result. Fixture tests prove this workflow, not parity across the entire production history; that evidence comes from the operator's selected backfill.
 
-For rollback, stop the source schedules and call `SourceRuntime.rollback(record, operator=..., reason=...)` for a retained complete build. It appends a new activation; it does not delete data. An older official revision additionally requires `quarantine=True` and remains critical until the official revision is restored. Run cleanup with `dry_run=True` first and inspect its exact build IDs. Active builds are retained; cleanup and rollback share the heavy-then-partition lock order.
+Promotion still requires `zero-bang` approval of the full-history proof and public routing change. Use the source `rollback` operation for a deliberate generation rollback; never overwrite activation history.
 
 ## Failure scope
 

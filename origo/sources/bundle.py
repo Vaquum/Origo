@@ -111,6 +111,7 @@ class SourceRunConfig(Config):
     dry_run: bool = True
     reconcile_only: bool = False
     capacity_probe: bool = False
+    automatic_capacity: bool = False
 
 
 def execute_source(
@@ -211,7 +212,9 @@ def _execute_operation(
         )
         if not config.reconcile_only or (active and not proof):
             try:
-                capacity = CapacityMonitor(runtime, probe=config.capacity_probe)
+                capacity = CapacityMonitor(
+                    runtime, probe=None if config.automatic_capacity else config.capacity_probe
+                )
                 capacity.check()
             except Exception as error:
                 runtime.failures.record(
@@ -248,7 +251,10 @@ def _execute_operation(
                     runtime.repair(config.partition_key)
                 if runtime.parity_failed(config.partition_key):
                     runtime.repair(config.partition_key)
-            record, checks = runtime.verify(config.partition_key)
+            record, checks = runtime.verify(
+                config.partition_key,
+                force=config.automatic_capacity and capacity is not None and capacity.probe is True,
+            )
             successful = True
         return {
             'partition_key': record.partition.key,
@@ -297,7 +303,11 @@ def _execute_operation(
         return {'state_token': runtime.certify(config.partition_key, review_state='PENDING').token}
     if operation.startswith('consumer_'):
         consumer = operation.removeprefix('consumer_')
-        destination = config.destination or f'/opt/origo/shadow/{spec.key}/{consumer}'
+        destination = config.destination or str(
+            Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
+            / spec.key
+            / consumer
+        )
         return {'state_token': runtime.publish(consumer, destination).token}
     raise ValueError(f'Unknown source operation: {operation}')
 
@@ -319,6 +329,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         else None,
         pool=f'{spec.key}_heavy'
         if operation in ('canonical', 'repair', 'cleanup', 'audit', 'certify')
+        or operation.startswith('consumer_')
         else None,
         retry_policy=RetryPolicy(
             max_retries=spec.orchestration.retry_count, delay=spec.orchestration.retry_delay
@@ -351,7 +362,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 if not required <= running:
                     raise SourceError(
                         'DAGIT_MONITORING_REQUIRED',
-                        'Start the source reconciliation and failure sensors in Dagit before backfilling.',
+                        'Source preparation is incomplete; the deployment must prepare managed source monitoring.',
                     )
             result = execute_source(spec, operation, config, run_id=context.run.run_id)
         except Exception as error:
@@ -455,15 +466,21 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         )
         for operation, name in names.items()
     )
-    unresolved += (
-        _define_job(
-            f'backfill_{spec.key}_source_job',
-            selection=[names['canonical']],
-            tags={'origo_source_key': spec.key, 'origo_source_operation': 'canonical'},
-        ),
-    )
+    from .backfill import build_backfill_job
+
     definitions = Definitions(assets=assets, jobs=unresolved)
-    jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved)
+
+    def run_day(day: str, run_id: str) -> dict[str, object]:
+        return execute_source(
+            spec,
+            'canonical',
+            SourceRunConfig(partition_key=day, automatic_capacity=True),
+            run_id=run_id,
+        )
+
+    jobs = tuple(definitions.resolve_job_def(job.name) for job in unresolved) + (
+        build_backfill_job(spec, run_day),
+    )
 
     def request(
         operation: str,
@@ -666,19 +683,34 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             @_sensor(
                 name=f'{spec.key}_{consumer_key}_sensor',
                 job=definitions.resolve_job_def(job_names['consumer_' + consumer_key]),
-                default_status=DefaultSensorStatus.STOPPED,
+                default_status=DefaultSensorStatus.STOPPED
+                if spec.rollout_stage == RolloutStage.DORMANT
+                else DefaultSensorStatus.RUNNING,
             )
             def publish(context: SensorEvaluationContext) -> RunRequest | SkipReason:
                 if spec.rollout_stage == RolloutStage.DORMANT:
                     return SkipReason(f'{spec.key} is DORMANT.')
+                from .prepare import backfill_active, publication_current
+
+                if backfill_active(context.instance, spec):
+                    return SkipReason(
+                        'The backfill job owns publication until its selected period completes.'
+                    )
                 settings = get_clickhouse_settings()
                 client = make_clickhouse_client(settings)
                 try:
-                    snapshot = SourceStore(client, settings.database, spec).snapshot(
-                        canonical_only=canonical_only
-                    )
+                    store = SourceStore(client, settings.database, spec)
+                    snapshot = store.snapshot(canonical_only=canonical_only)
                     if not snapshot.records:
                         return SkipReason('Source has no eligible active partitions.')
+                    if not store.canonical_verified():
+                        return SkipReason(
+                            'Canonical state has not passed independent verification.'
+                        )
+                    if publication_current(spec, consumer_key, snapshot.token):
+                        return SkipReason(
+                            'Declared files already publish the current source state.'
+                        )
                     return request('consumer_' + consumer_key, snapshot.token, context)
                 finally:
                     client.disconnect()
@@ -689,14 +721,17 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
 
     @_failure_sensor(
         name=f'{spec.key}_failure_sensor',
-        default_status=DefaultSensorStatus.STOPPED,
+        default_status=DefaultSensorStatus.STOPPED
+        if spec.rollout_stage == RolloutStage.DORMANT
+        else DefaultSensorStatus.RUNNING,
     )
     def failure(context: RunStatusSensorContext) -> None:
         operation = next(
             (op for op, job_name in job_names.items() if job_name == context.dagster_run.job_name),
             None,
         )
-        if context.dagster_run.job_name == f'backfill_{spec.key}_source_job':
+        is_backfill = context.dagster_run.job_name == f'backfill_{spec.key}_source_job'
+        if is_backfill:
             operation = 'canonical'
         if operation is None:
             selected = context.dagster_run.asset_selection or set()
@@ -721,6 +756,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 {'source': spec.key, 'run': context.dagster_run.run_id},
             )
             if recorded[0][0]:
+                return
+            if is_backfill:
+                runtime.failures.record(operation='backfill', error_code='RUN_FAILED', scope='NONE')
                 return
             value: object = context.dagster_run.run_config
             for key in ('ops', names[operation], 'config'):

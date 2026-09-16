@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dagster import DefaultSensorStatus
 
+from origo.sources.bundle import build_source_bundle
 from origo.sources.registry import SOURCE_REGISTRY
 
 
-def test_legacy_sensors_run_and_revisioned_source_sensors_stop(
+def test_all_enabled_source_sensors_run(
     origo_definitions_module: object,
 ) -> None:
     defs = getattr(origo_definitions_module, 'defs')
@@ -15,12 +16,9 @@ def test_legacy_sensors_run_and_revisioned_source_sensors_stop(
         if sensor.default_status is not DefaultSensorStatus.RUNNING
     }
     expected_stopped = {
-        f'{source.key}_{consumer.key}_sensor'
+        sensor.name
         for source in SOURCE_REGISTRY
-        for consumer in source.consumers
-    } | {
-        f'{source.key}_{role}_sensor'
-        for source in SOURCE_REGISTRY
-        for role in ('failure', 'reconciliation')
+        if source.rollout_stage.value == 'DORMANT'
+        for sensor in build_source_bundle(source).sensors
     }
     assert not_running == expected_stopped

@@ -134,8 +134,22 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
             )
             mounts = compose['services'][worker]['volumes']
             assert 'source-locks:/opt/origo/locks' in mounts
+            assert 'source-publications:/opt/origo/shadow' in mounts
             assert 'clickhouse-data:/opt/origo/clickhouse-data:ro' in mounts
             assert 'dagster-instance:/opt/dagster-instance' in mounts
+
+        assert compose['services']['dagster']['command'] == [
+            '/bin/sh',
+            '-ec',
+            'python -m origo.sources.prepare && exec dagster-daemon run',
+        ]
+        assert compose['services']['dagster']['healthcheck']['test'] == [
+            'CMD',
+            'python',
+            '-m',
+            'origo.sources.prepare',
+            '--check',
+        ]
 
 
 def test_sensor_tick_history_has_bounded_retention() -> None:

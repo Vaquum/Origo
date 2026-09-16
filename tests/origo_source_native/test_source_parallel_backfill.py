@@ -169,16 +169,18 @@ def test_chunk_hash_matches_independent_rowbinary_encoding(
     from datetime import UTC, datetime
 
     from origo.sources import columnar
-    from origo.sources.columnar import binary_hash
+    from origo.sources.columnar import binary_hash, insert_arrow
 
     chunk_rows = 65536 if day == '2020-01-01' else 1024
     monkeypatch.setattr(columnar, 'HASH_CHUNK_ROWS', chunk_rows)
+    monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', chunk_rows)
     csv = ARCHIVES / f'BTCUSDT-trades-{day}.csv'
     if csv.exists():
-        rows = _parse_trade_rows(csv.read_bytes())
+        body = csv.read_bytes()
     else:
         with zipfile.ZipFile(ARCHIVES / f'BTCUSDT-trades-{day}.zip') as archive:
-            rows = _parse_trade_rows(archive.read(f'BTCUSDT-trades-{day}.csv'))
+            body = archive.read(f'BTCUSDT-trades-{day}.csv')
+    rows = _parse_trade_rows(body)
     spec = BINANCE_SPOT_TRADES_SPEC
     component = spec.components[0]
     header = json.dumps([(c.name, c.sql_type) for c in component.columns], separators=(',', ':'))
@@ -205,7 +207,7 @@ def test_chunk_hash_matches_independent_rowbinary_encoding(
         client.execute(
             f'CREATE TABLE {table} ({columns}) ENGINE=MergeTree ORDER BY (datetime, trade_id)'
         )
-        client.execute(f'INSERT INTO {table} VALUES', rows)
+        insert_arrow(table, spot_table(body, spec.canonical.partition(day)))
         assert len(rows) > chunk_rows * 2
         count, digest = runtime.store.validate_component(
             component, table, spec.canonical.partition(day)
@@ -263,41 +265,40 @@ def test_interrupted_bulk_batch_retries_without_exposing_partial_rows(
     from collections.abc import Iterator
     from contextlib import contextmanager
 
+    import numpy as np
+
     from origo.sources import columnar
-    from origo.sources.arrow_types import ArrowTable
 
     monkeypatch.setattr(binance_daily, 'get_response', archive_response)
     monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 65536)
     spec = BINANCE_SPOT_TRADES_SPEC
     client = make_clickhouse_client(get_clickhouse_settings())
     runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'batch')
-    real_client = columnar.arrow_client
+    real_client = columnar.native_column_client
     committed: list[int] = []
 
     @contextmanager
-    def interrupted_client() -> Iterator[columnar.ArrowClient]:
+    def interrupted_client() -> Iterator[columnar.NativeColumnClient]:
         with real_client() as transport:
 
             class Interrupted:
-                def query_arrow(self, query: str) -> ArrowTable:
-                    return transport.query_arrow(query)
+                def execute(self, query: str, data: list[object], *, columnar: bool) -> int:
+                    prefix: list[object] = []
+                    for column in data:
+                        assert isinstance(column, np.ndarray)
+                        prefix.append(column[:65536])
+                    committed.append(transport.execute(query, prefix, columnar=columnar))
+                    raise OSError('Connection lost before second bulk batch')
 
-                def insert_arrow(self, table: str, arrow_table: ArrowTable) -> object:
-                    if committed:
-                        raise OSError('Connection lost before second bulk batch')
-                    result = transport.insert_arrow(table, arrow_table)
-                    committed.append(arrow_table.num_rows)
-                    return result
-
-                def close(self) -> None:
-                    transport.close()
+                def disconnect(self) -> None:
+                    transport.disconnect()
 
             yield Interrupted()
 
     try:
         runtime.setup()
         with monkeypatch.context() as patch:
-            patch.setattr(columnar, 'arrow_client', interrupted_client)
+            patch.setattr(columnar, 'native_column_client', interrupted_client)
             with pytest.raises(OSError, match='second bulk batch'):
                 runtime.build('2020-01-01')
         assert committed == [65536]
@@ -310,5 +311,27 @@ def test_interrupted_bulk_batch_retries_without_exposing_partial_rows(
         assert verified == record
         assert proof['raw']['row_count'] == 194010
         assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
+    finally:
+        client.disconnect()
+
+
+def test_projection_parity_survives_different_insert_block_boundaries(
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from origo.sources import columnar
+
+    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
+    spec = BINANCE_SPOT_TRADES_SPEC
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'order')
+    try:
+        runtime.setup()
+        monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 16000)
+        record = runtime.build('2020-01-01')
+        # Verification writes the independent archive in a different physical layout.
+        monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 1048576)
+        verified, checks = runtime.verify('2020-01-01')
+        assert verified == record
+        assert checks['raw']['row_count'] == 194010 and len(checks) == 7
     finally:
         client.disconnect()

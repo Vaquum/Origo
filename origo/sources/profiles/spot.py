@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import cast
 
 from ..contracts import BuildContext, Client, Column, ComponentSpec, Row
+from .legacy_order import OrderedRawClient
 
 _MEASURES = tuple(
     Column(name, 'UInt64' if name == 'no_of_trades' else 'Float64')
@@ -60,6 +61,8 @@ class _ProjectionClient:
 def _raw(context: BuildContext) -> None:
     if context.revision.insert_bulk is not None and not context.partition.provisional:
         context.revision.insert_bulk(context.table('raw'))
+        # Only this private day's stage: stable blocks preserve exact float reductions.
+        context.client.execute(f'OPTIMIZE TABLE {context.table("raw")} FINAL')
         return
     provisional = context.partition.provisional
     table = context.table('raw_latest' if provisional else 'raw')
@@ -77,7 +80,7 @@ def _daily(module: str) -> Callable[[BuildContext], None]:
         legacy = importlib.import_module(f'origo.assets.{module}')
         calculate = cast(Callable[[Client, str, str], None], legacy._insert_partition_rows)
         calculate(
-            _ProjectionClient(context.client),
+            _ProjectionClient(OrderedRawClient(context.client, context.table('raw'))),
             context.database,
             context.partition.start.date().isoformat(),
         )

@@ -19,6 +19,7 @@ from ..columnar import binary_hash, insert_arrow
 from ..contracts import Client, SourceError, StateRecord, identifier
 from ..hashing import content_hash
 from ..storage import ordered_component_rows
+from .legacy_order import OrderedRawClient
 from .spot import SPOT_COMPONENTS
 
 pa = cast(ArrowModule, importlib.import_module('pyarrow'))
@@ -105,6 +106,7 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
             create = cast(Callable[[Client, ClickHouseSettings], None], getattr(module, function))
             create(client, settings)
         insert_arrow(f'{reference}.binance_daily_spot_trades', _reference_table(csv_body))
+        client.execute(f'OPTIMIZE TABLE {reference}.binance_daily_spot_trades FINAL')
         for component, (table, _module, _create) in _LEGACY.items():
             if component == 'raw':
                 continue
@@ -121,7 +123,11 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 calculate_arrow(settings, day)
             else:
                 calculate = cast(Callable[[Client, str, str], None], module._insert_partition_rows)
-                calculate(client, reference, day)
+                calculate(
+                    OrderedRawClient(client, f'{reference}.binance_daily_spot_trades'),
+                    reference,
+                    day,
+                )
         for component in (item for item in SPOT_COMPONENTS if not item.provisional):
             table = _LEGACY[component.key][0]
             legacy_schema = client.execute(f'DESCRIBE TABLE {reference}.{table}')

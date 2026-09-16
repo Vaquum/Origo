@@ -192,7 +192,7 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         result = _run(backfill_env, day='2020-01-01', probe=True)
     assert len(archives) == 1
     assert dict(retained_reads) == {
-        key: 3 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+        key: 2 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
     }
     assert result.success
     rows = runtime.store.execute(

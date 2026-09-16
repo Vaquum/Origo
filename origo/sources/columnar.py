@@ -12,11 +12,12 @@ from datetime import datetime
 from importlib import import_module
 from typing import Protocol, cast
 
+import numpy as np
 from dagster import get_dagster_logger
 
 from origo.assets.create_origo_database import get_clickhouse_settings
 
-from .arrow_types import ArrowTable
+from .arrow_types import ArrowColumn, ArrowTable
 from .contracts import Client, ComponentSpec, Row
 
 QUERY_THREADS = 1
@@ -50,20 +51,63 @@ def arrow_client() -> Iterator[ArrowClient]:
         client.close()
 
 
+class NativeColumnClient(Protocol):
+    def execute(self, query: str, data: list[object], *, columnar: bool) -> int: ...
+    def disconnect(self) -> None: ...
+
+
+@contextmanager
+def native_column_client() -> Iterator[NativeColumnClient]:
+    settings = get_clickhouse_settings()
+    factory = getattr(import_module('clickhouse_driver'), 'Client')
+    client = cast(
+        NativeColumnClient,
+        factory(
+            host=settings.host,
+            port=settings.port,
+            user=settings.user,
+            password=settings.password,
+            compression='lz4',
+            settings={
+                'use_numpy': True,
+                # NumPy array_split rounds the block count down and rebalances rows.
+                # Half the cap keeps even a rebalanced final block below the cap.
+                'insert_block_size': INSERT_BATCH_ROWS // 2,
+                'max_threads': QUERY_THREADS,
+                'max_memory_usage': QUERY_MEMORY_BYTES,
+            },
+        ),
+    )
+    try:
+        yield client
+    finally:
+        client.disconnect()
+
+
 def insert_arrow(table: str, data: ArrowTable) -> None:
-    with arrow_client() as client:
-        for offset in range(0, data.num_rows, INSERT_BATCH_ROWS):
-            batch = data.slice(offset, INSERT_BATCH_ROWS).combine_chunks()
-            started = time.perf_counter()
-            client.insert_arrow(table, batch)
-            get_dagster_logger('origo.sources').info(
-                'phase=bulk_insert table=%s rows=%s completed_rows=%s total_rows=%s seconds=%.3f',
-                table,
-                batch.num_rows,
-                offset + batch.num_rows,
-                data.num_rows,
-                time.perf_counter() - started,
-            )
+    columns: list[object] = []
+    for name in data.column_names:
+        values = np.asarray(cast(ArrowColumn, data[name]).to_numpy(zero_copy_only=False))
+        if values.dtype.kind == 'M':
+            # Both raw contracts use UTC DateTime64(6). Native integer ticks avoid
+            # timezone conversion and the driver's per-row DatetimeIndex splitting.
+            if np.datetime_data(values.dtype) != ('us', 1):
+                raise ValueError('Native raw timestamps must use UTC microsecond ticks.')
+            values = values.view(np.int64)
+        columns.append(values)
+    started = time.perf_counter()
+    with native_column_client() as client:
+        inserted = client.execute(
+            f'INSERT INTO {table} ({", ".join(data.column_names)}) VALUES', columns, columnar=True
+        )
+    if inserted != data.num_rows:
+        raise RuntimeError('Native bulk insert did not acknowledge every input row.')
+    get_dagster_logger('origo.sources').info(
+        'phase=bulk_insert table=%s rows=%s seconds=%.3f',
+        table,
+        inserted,
+        time.perf_counter() - started,
+    )
 
 
 HASH_CHUNK_ROWS = 1048576
@@ -107,6 +151,7 @@ def binary_hash(
                 ORDER BY {ordering} LIMIT {HASH_CHUNK_ROWS}
             )""",
             bindings,
+            settings={'read_in_order_use_buffering': 0},
         )[0]
         size = int(str(count))
         if not size:
@@ -130,7 +175,22 @@ def binary_hash(
             )
             sql_type = next(c.sql_type for c in component.columns if c.name == name)
             casts.append(f'CAST(%({parameter})s AS {sql_type})')
-        seek = f'tuple({ordering}) > tuple({", ".join(casts)})'
+        # ClickHouse 25.3 does not prune our parameterized tuple comparison.
+        # Expand the same lexicographic order so pages skip prior index granules.
+        seek = ' OR '.join(
+            '('
+            + ' AND '.join(
+                [
+                    f'{prior}={bound}'
+                    for prior, bound in zip(
+                        component.primary_key[:index], casts[:index], strict=True
+                    )
+                ]
+                + [f'{name}>{casts[index]}']
+            )
+            + ')'
+            for index, name in enumerate(component.primary_key)
+        )
         chunk += 1
     return 'v2:' + digest.hexdigest()
 

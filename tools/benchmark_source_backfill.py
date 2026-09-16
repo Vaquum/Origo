@@ -38,7 +38,14 @@ from origo.sources.adapters import binance_daily
 from origo.sources.archive import archive_session
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC as SPEC
 from origo.sources.columnar import BoundedClient, binary_hash
-from origo.sources.contracts import BuildContext, CanonicalAdapter, Client, Partition, Revision
+from origo.sources.contracts import (
+    BuildContext,
+    CanonicalAdapter,
+    Client,
+    Partition,
+    Revision,
+    SourceError,
+)
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.spot_parity import _LEGACY
 from origo.sources.storage import SourceStore
@@ -261,6 +268,8 @@ def worker(args: tuple[str, str, dict[str, str], str, str]) -> dict[str, object]
         maximum = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         result['worker_peak_rss_bytes'] = maximum if sys.platform == 'darwin' else maximum * 1024
         return result
+    except SourceError as error:
+        raise RuntimeError(f'{error.code}: {error.safe_message}') from error
     finally:
         client.disconnect()
 
@@ -302,6 +311,12 @@ def scenario(
             "SELECT max(memory_usage) FROM system.query_log WHERE type='QueryFinish' AND query_start_time_microseconds >= toDateTime64(%(start)s,6,'UTC')",
             {'start': query_start},
         )[0][0]
+        raw_hash_reads = client.execute(
+            'SELECT count(), sum(read_rows), max(read_rows) FROM system.query_log '
+            "WHERE type='QueryFinish' AND query_start_time_microseconds >= toDateTime64(%(start)s,6,'UTC') "
+            "AND startsWith(query, 'SELECT count(), hex(SHA256') AND position(query, 'tuple(datetime, trade_id)')>0",
+            {'start': query_start},
+        )[0]
         if mode == 'legacy':
             proofs = {
                 day: {
@@ -336,6 +351,9 @@ def scenario(
             'days': measurements,
             'clickhouse': client.execute('SELECT version()')[0][0],
             'clickhouse_peak_query_memory_bytes': peak_query_memory,
+            'raw_hash_query_count': raw_hash_reads[0],
+            'raw_hash_rows_read': raw_hash_reads[1],
+            'raw_hash_peak_rows_read': raw_hash_reads[2],
             'component_proofs': proofs,
         }
     finally:

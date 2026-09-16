@@ -155,15 +155,21 @@ databases. Source-wide cleanup takes the exclusive maintenance fence. The
 canonical pool is separate from serial maintenance/publication pools. Capacity
 reserves include the configured maximum concurrent working sets.
 
-The data path uses native Polars/Arrow parsing and bulk transport in batches of
-at most 1,048,576 rows, ClickHouse
-projections and SHA256 of fixed, ordered 1,048,576-row RowBinary chunks computed
+The data path uses native Polars/Arrow parsing and NumPy columnar transport
+over the native ClickHouse protocol in blocks of at most 1,048,576 rows.
+UTC microsecond timestamps travel as integer ticks, avoiding per-row Python datetime
+conversion. ClickHouse projections and SHA256 of fixed, ordered 1,048,576-row RowBinary chunks computed
 inside ClickHouse. Only chunk digests cross the wire; the root hash binds the
 schema version, column types, encoding, chunk sizes and counts. Hashing seeks
 through primary keys in bounded pages; it never buffers a complete day inside
-the hash aggregate. Query
-aggregation uses one thread per daily worker to retain deterministic floating-point
-reduction; parallelism is across independent days. New component hashes have a
+the hash aggregate. Retained-generation reads include the leading `source_date`
+key. The keyset cursor uses explicit lexicographic comparisons because ClickHouse
+25.3 did not prune the equivalent tuple comparison; benchmark reports include actual
+hash rows read. Each private single-day raw stage is consolidated with `OPTIMIZE
+FINAL`, and projection input is explicitly ordered by `datetime, trade_id`. Together
+with one aggregation thread per daily worker, this stabilizes floating-point
+reduction across insert block boundaries. Retained history is never consolidated
+by this step. Parallelism is across independent days. New component hashes have a
 `v2:` prefix; existing v1 generations are checked with their original encoding.
 Retries reuse the original generation. Existing data schemas and public identities remain unchanged; the backfill receipt table is additive.
 The reference parser independently uses Arrow CSV and is checked against the
@@ -190,8 +196,11 @@ when measuring or changing this path:
   and after independent verification, rather than also scanning each copy twice
   during the build.
 - Entries 092/109: a 15,364,010-row day exposed an HTTP insertion timeout. Bound
-  bulk requests; prove interrupted-batch retry does not expose or duplicate partial
-  data. Include genuinely large complete archives and peak memory in benchmarks.
+  native-protocol blocks; prove interrupted-insert retry does not expose or duplicate
+  partial data. Do not route whole raw days through HTTP insertion. Changing insert
+  boundaries can also change floating-point aggregation order; compare all component
+  hashes on complete high-volume days after any transport change. Include complete
+  large archives and peak memory in benchmarks.
 - Entries 095/110/150: audit the full expected partition set, including older gaps;
   a maximum successful date is not completeness. Exercise the actual native Dagster
   entry point as well as isolated runtime benchmarks. Both must execute the same

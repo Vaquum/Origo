@@ -357,6 +357,7 @@ class SourceRuntime:
             )
         params = {
             'source': self.spec.key,
+            'source_date': record.partition.start.date(),
             'partition': record.partition.key,
             'revision': record.revision,
             'build': record.build_id,
@@ -373,7 +374,7 @@ class SourceRuntime:
                     component,
                     self.store.component_table(component.key),
                     record.partition,
-                    predicate='partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
+                    predicate='source_date=%(source_date)s AND partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
                     params=params,
                     legacy_hash=not expected[component.key].startswith('v2:'),
                 )

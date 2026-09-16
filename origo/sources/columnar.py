@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from importlib import import_module
 from typing import Protocol, cast
+
+from dagster import get_dagster_logger
 
 from origo.assets.create_origo_database import get_clickhouse_settings
 
@@ -18,6 +21,7 @@ from .contracts import Client, ComponentSpec, Row
 
 QUERY_THREADS = 1
 QUERY_MEMORY_BYTES = 2 * 1024**3
+INSERT_BATCH_ROWS = 1048576
 
 
 class ArrowClient(Protocol):
@@ -48,7 +52,18 @@ def arrow_client() -> Iterator[ArrowClient]:
 
 def insert_arrow(table: str, data: ArrowTable) -> None:
     with arrow_client() as client:
-        client.insert_arrow(table, data.combine_chunks())
+        for offset in range(0, data.num_rows, INSERT_BATCH_ROWS):
+            batch = data.slice(offset, INSERT_BATCH_ROWS).combine_chunks()
+            started = time.perf_counter()
+            client.insert_arrow(table, batch)
+            get_dagster_logger('origo.sources').info(
+                'phase=bulk_insert table=%s rows=%s completed_rows=%s total_rows=%s seconds=%.3f',
+                table,
+                batch.num_rows,
+                offset + batch.num_rows,
+                data.num_rows,
+                time.perf_counter() - started,
+            )
 
 
 HASH_CHUNK_ROWS = 1048576

@@ -155,7 +155,8 @@ databases. Source-wide cleanup takes the exclusive maintenance fence. The
 canonical pool is separate from serial maintenance/publication pools. Capacity
 reserves include the configured maximum concurrent working sets.
 
-The data path uses native Polars/Arrow parsing and bulk transport, ClickHouse
+The data path uses native Polars/Arrow parsing and bulk transport in batches of
+at most 1,048,576 rows, ClickHouse
 projections and SHA256 of fixed, ordered 1,048,576-row RowBinary chunks computed
 inside ClickHouse. Only chunk digests cross the wire; the root hash binds the
 schema version, column types, encoding, chunk sizes and counts. Hashing seeks
@@ -173,6 +174,28 @@ Performance evidence must name rows, elapsed time, worker count, hardware,
 seconds per million, memory and whether verification/publication/network are
 included. Measure representative high-volume archives at increasing concurrency;
 small-fixture correctness is not full-history throughput evidence.
+
+Apply the [previous live performance findings](https://github.com/Vaquum/Origo-Playground/blob/main/spec/live-performance-investigation-log.md)
+when measuring or changing this path:
+
+- Entries 043/080: measure concurrent *completed source rows*, not ClickHouse
+  `InsertedRows` (which also counts staging, copies and reference verification).
+  The previous server workload peaked at 15 workers: 769,380 rows/s versus
+  737,743 at 30. Those numbers concern an older workload, not this implementation.
+  Sweep the current workload on the deployed hardware before changing its limit.
+- Entries 087–089/121/124: separate database query time from client preparation,
+  hashing, audit and orchestration time. Never rescan accumulated raw history per
+  day. Reuse evidence only while the underlying generation is unchanged; mutation
+  requires a fresh check. Retained copies are checked immediately before activation
+  and after independent verification, rather than also scanning each copy twice
+  during the build.
+- Entries 092/109: a 15,364,010-row day exposed an HTTP insertion timeout. Bound
+  bulk requests; prove interrupted-batch retry does not expose or duplicate partial
+  data. Include genuinely large complete archives and peak memory in benchmarks.
+- Entries 095/110/150: audit the full expected partition set, including older gaps;
+  a maximum successful date is not completeness. Exercise the actual native Dagster
+  entry point as well as isolated runtime benchmarks. Both must execute the same
+  limits, proof and publication contract.
 
 Each verified day materializes its source partition with revision, build ID,
 generation, verification time, data version and comparison results. Completed

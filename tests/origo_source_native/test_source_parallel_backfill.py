@@ -221,3 +221,94 @@ def test_chunk_hash_matches_independent_rowbinary_encoding(
         )
     finally:
         client.disconnect()
+
+
+def test_copied_content_is_checked_before_activation(
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from uuid import UUID
+
+    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
+    spec = BINANCE_SPOT_TRADES_SPEC
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'copy')
+    original = SourceRuntime._build_components
+
+    def damage_copy(
+        self: SourceRuntime, partition: Partition, revision: Revision, build_id: UUID, expected: int
+    ) -> StateRecord:
+        result = original(self, partition, revision, build_id, expected)
+        table = self.store.component_table('raw')
+        first = self.store.execute(f'SELECT min(trade_id) FROM {table}')[0][0]
+        self.store.execute(
+            f'ALTER TABLE {table} DELETE WHERE trade_id=%(first)s SETTINGS mutations_sync=2',
+            {'first': first},
+        )
+        return result
+
+    try:
+        runtime.setup()
+        monkeypatch.setattr(SourceRuntime, '_build_components', damage_copy)
+        with pytest.raises(SourceError, match='Retained raw content'):
+            runtime.build('2017-08-17')
+        assert runtime.store.records(canonical_only=True) == ()
+        assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(0,)]
+    finally:
+        client.disconnect()
+
+
+def test_interrupted_bulk_batch_retries_without_exposing_partial_rows(
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    from origo.sources import columnar
+    from origo.sources.arrow_types import ArrowTable
+
+    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
+    monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 65536)
+    spec = BINANCE_SPOT_TRADES_SPEC
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'batch')
+    real_client = columnar.arrow_client
+    committed: list[int] = []
+
+    @contextmanager
+    def interrupted_client() -> Iterator[columnar.ArrowClient]:
+        with real_client() as transport:
+
+            class Interrupted:
+                def query_arrow(self, query: str) -> ArrowTable:
+                    return transport.query_arrow(query)
+
+                def insert_arrow(self, table: str, arrow_table: ArrowTable) -> object:
+                    if committed:
+                        raise OSError('Connection lost before second bulk batch')
+                    result = transport.insert_arrow(table, arrow_table)
+                    committed.append(arrow_table.num_rows)
+                    return result
+
+                def close(self) -> None:
+                    transport.close()
+
+            yield Interrupted()
+
+    try:
+        runtime.setup()
+        with monkeypatch.context() as patch:
+            patch.setattr(columnar, 'arrow_client', interrupted_client)
+            with pytest.raises(OSError, match='second bulk batch'):
+                runtime.build('2020-01-01')
+        assert committed == [65536]
+        assert runtime.store.records(canonical_only=True) == ()
+        assert runtime.store.execute(
+            f'SELECT count() FROM {runtime.store.component_table("raw")}'
+        ) == [(0,)]
+        record = runtime.build('2020-01-01')
+        verified, proof = runtime.verify('2020-01-01')
+        assert verified == record
+        assert proof['raw']['row_count'] == 194010
+        assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
+    finally:
+        client.disconnect()

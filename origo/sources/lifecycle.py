@@ -287,18 +287,9 @@ class SourceRuntime:
                         FROM {context.table(component.key)}""",
                         params,
                     )
-                    actual = self.store.validate_component(
-                        component,
-                        self.store.component_table(component.key),
-                        partition,
-                        predicate='partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
-                        params=params,
-                    )
-                    if actual != (count, digest):
-                        raise SourceError(
-                            'COMPONENT_CONTENT_INVALID',
-                            'Stored component differs from its validated build.',
-                        )
+                    # Retained contents are checked together immediately before activation,
+                    # under this partition's exclusive lock. Rehashing each copy here
+                    # would duplicate that complete fresh read without changing visibility.
                     self.store.execute(
                         f'INSERT INTO {self.store.table("source_component_log")} VALUES',
                         [

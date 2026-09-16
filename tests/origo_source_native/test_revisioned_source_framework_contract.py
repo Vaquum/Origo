@@ -29,7 +29,7 @@ def test_spot_trades_is_registered_canary_without_changing_existing_definitions(
     assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
     source = bundle.build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
-    assert all(value.default_status == DefaultScheduleStatus.STOPPED for value in source.schedules)
+    assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
     assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
@@ -98,7 +98,7 @@ def test_core_imports_no_exchange_transport_or_parser() -> None:
 
 
 def test_source_onboarding_guide_defines_one_path_one_failure_query_and_blocking_matrix() -> None:
-    text = (ROOT / 'README.md').read_text()
+    text = (ROOT.parents[1] / 'docs/Developer/Source-onboarding.md').read_text()
     assert text.count('```mermaid') == 1
     for term in ('Revision', 'Attempt', 'Component', 'Activation', 'Route', 'Lock', 'Consumer'):
         assert f'| {term} |' in text

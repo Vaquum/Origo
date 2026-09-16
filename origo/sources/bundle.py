@@ -791,7 +791,18 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             if recorded[0][0]:
                 return
             if is_backfill:
-                runtime.failures.record(operation='backfill', error_code='RUN_FAILED', scope='NONE')
+                tags = context.dagster_run.tags
+                key = (
+                    tags.get('origo_source_partition')
+                    if tags.get('origo_source_phase') == 'canonical'
+                    else None
+                )
+                runtime.failures.record(
+                    operation='canonical' if key else 'backfill',
+                    error_code='RUN_FAILED',
+                    scope='PARTITION' if key else 'NONE',
+                    partition=key,
+                )
                 return
             value: object = context.dagster_run.run_config
             for key in ('ops', names[operation], 'config'):

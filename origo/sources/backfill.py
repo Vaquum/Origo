@@ -70,6 +70,10 @@ def execute_partition_backfill(
         )
     verified: list[dict[str, object]] = []
     for day in days:
+        context.instance.add_run_tags(
+            context.run.run_id,
+            {'origo_source_partition': day, 'origo_source_phase': 'canonical'},
+        )
         try:
             result = run_day(day)
         except Exception as error:
@@ -97,6 +101,7 @@ def execute_partition_backfill(
                 tags={'dagster/data_version': version},
             )
         )
+    context.instance.add_run_tags(context.run.run_id, {'origo_source_phase': 'publication'})
     root = Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
 
     def materialized(consumer: str, result: dict[str, object]) -> None:

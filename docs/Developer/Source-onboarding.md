@@ -61,7 +61,7 @@ and sensors. CANARY keeps publications in the declared shadow destinations. Publ
 change. Changing the stage alone does not turn a shadow renderer into a public
 uploader.
 
-The current period-job contract is daily UTC canonical partitions. Providers with
+The shared backfill contract is daily UTC canonical partitions. Providers with
 hourly files need an adapter that proves complete daily partitions, or an explicit
 extension of the shared partition contract before using this job. Provider-specific
 parsing, schemas and verification remain engineering work; orchestration is shared.
@@ -119,8 +119,7 @@ Include the source key, rollout, exact product inventory, credential/mount names
 and acceptance commands/results in the source's slice/PR. The reviewer rejects
 manual activation/setup steps, missing products and unsupported claims of parity.
 After merge/deployment, hand the operator the generated job name; native partition controls provide the selection and coverage.
-
-full-history production validation and public promotion remain separate evidence.
+Full-history production validation and public promotion remain separate evidence.
 
 ## Run and promote
 

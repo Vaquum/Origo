@@ -620,7 +620,7 @@ def test_native_backfill_queue_serializes_heavy_runs(tmp_path: Path) -> None:
         assert not released.is_blocked(second)
 
 
-def test_backfill_requires_dagit_monitoring_before_io(
+def test_internal_canonical_job_requires_prepared_monitoring_before_io(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from origo.sources import bundle
@@ -630,7 +630,7 @@ def test_backfill_requires_dagit_monitoring_before_io(
 
     monkeypatch.setattr(bundle, 'get_clickhouse_settings', forbidden)
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
-    job = next(job for job in source.jobs if job.name.startswith('backfill_'))
+    job = next(job for job in source.jobs if job.name == 'refresh_binance_spot_trades_canonical_source_job')
     root = tmp_path / 'instance'
     root.mkdir()
     with DagsterInstance.local_temp(str(root)) as instance:

@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from dagster import get_dagster_logger
@@ -9,11 +10,17 @@ from .capacity import CapacityMonitor
 from .cleanup import preserve_primary_failure
 from .contracts import RevisionedSourceSpec, SourceError
 from .lifecycle import SourceRuntime
+from .prepare import publication_current
 from .storage import SourceStore
 
 
 def publish_backfill(
-    spec: RevisionedSourceSpec, verified: list[dict[str, object]], root: Path, *, run_id: str
+    spec: RevisionedSourceSpec,
+    verified: list[dict[str, object]],
+    root: Path,
+    *,
+    run_id: str,
+    materialized: Callable[[str, dict[str, object]], None],
 ) -> dict[str, dict[str, object]]:
     from .dagit import observe_source
 
@@ -61,15 +68,19 @@ def publish_backfill(
         with preserve_primary_failure(
             'publication capacity', lambda: capacity.finish(successful=published)
         ):
-            results: dict[str, dict[str, object]] = {
-                consumer.key: {
-                    'state_token': runtime.publish(
-                        consumer.key, str(root / spec.key / consumer.key)
-                    ).token,
+            results: dict[str, dict[str, object]] = {}
+            for consumer in spec.consumers:
+                snapshot = runtime.store.snapshot(canonical_only=consumer.canonical_only)
+                if publication_current(spec, consumer.key, snapshot.token, root=root):
+                    runtime.failures.recover(operation='consumer', consumer=consumer.key)
+                else:
+                    snapshot = runtime.publish(consumer.key, str(root / spec.key / consumer.key))
+                result: dict[str, object] = {
+                    'state_token': snapshot.token,
                     'destination': str(root / spec.key / consumer.key),
                 }
-                for consumer in spec.consumers
-            }
+                results[consumer.key] = result
+                materialized(consumer.key, result)
             published = True
 
         check()

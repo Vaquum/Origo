@@ -69,11 +69,13 @@ def test_native_completion_does_not_enqueue_another_verification(
     original = SourceRuntime.verify
     cursors = []
 
-    def during_run(self: SourceRuntime, key: str) -> tuple[StateRecord, dict[str, object]]:
+    def during_run(
+        self: SourceRuntime, key: str, *, force: bool = False
+    ) -> tuple[StateRecord, dict[str, object]]:
         requests, cursor = _requests(backfill_env)
         assert all(r.partition_key is None for r in requests)
         cursors.append(cursor)
-        return original(self, key)
+        return original(self, key, force=force)
 
     monkeypatch.setattr(SourceRuntime, 'verify', during_run)
     asset = next(a for a in source.assets if a.key == AssetKey(ASSET))
@@ -220,7 +222,9 @@ def test_actual_retry_policy_only_retries_explicit_transient_errors(
     assert sum(e.event_type_value == 'STEP_UP_FOR_RETRY' for e in result.all_events) == attempts - 1
     calls.clear()
     # Config rejection is inside the same terminal boundary, before source I/O.
-    job = next(j for j in source.jobs if j.name.startswith('backfill_'))
+    job = next(
+        j for j in source.jobs if j.name == 'refresh_binance_spot_trades_canonical_source_job'
+    )
     result = job.execute_in_process(
         instance=instance,
         partition_key=DAY,
@@ -231,7 +235,7 @@ def test_actual_retry_policy_only_retries_explicit_transient_errors(
     assert not any(e.event_type_value == 'STEP_UP_FOR_RETRY' for e in result.all_events)
     _observe_failure((runtime, instance, source), result)
     assert runtime.store.execute(
-        "SELECT partition_key FROM origo.source_failure_log WHERE dagster_run_id=%(run)s",
+        'SELECT partition_key FROM origo.source_failure_log WHERE dagster_run_id=%(run)s',
         {'run': result.run_id},
     ) == [(DAY,)]
 
@@ -268,7 +272,9 @@ def test_cleanup_failures_preserve_primary_verdict(
     runtime, instance, _ = backfill_env
     assert backfill._run(backfill_env, probe=True).success
 
-    def mismatch(self: SourceRuntime, key: str) -> tuple[StateRecord, dict[str, object]]:
+    def mismatch(
+        self: SourceRuntime, key: str, *, force: bool = False
+    ) -> tuple[StateRecord, dict[str, object]]:
         raise SourceError('LEGACY_PARITY_MISMATCH', 'Injected parity failure')
 
     def failed_sampling(self: capacity.CapacityMonitor, *, successful: bool) -> None:
@@ -356,8 +362,9 @@ def test_real_capacity_volume_admission_preconditions(
     (data / 'uuid').write_text(str(server))
     monkeypatch.setenv('ORIGO_SOURCE_CLICKHOUSE_VOLUME_PATH', str(data))
     monkeypatch.setenv('ORIGO_SOURCE_DAGSTER_VOLUME_PATH', str(tmp_path / 'dagster'))
+    monkeypatch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(tmp_path))
     volumes = _real_volumes(runtime)
-    assert len(volumes) == 3
+    assert len(volumes) == 4
     assert all(
         str(server) in v.identity and str(v.path.stat().st_dev) in v.identity for v in volumes
     )

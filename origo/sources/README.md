@@ -39,7 +39,7 @@ The spot adapter stores individual trades. Aggregate responses locate the REST r
 
 ## Run and promote
 
-Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.prepare` before starting the daemon. Their healthcheck verifies preparation without changing state. Re-deployment repairs stopped managed sensors while retaining their cursors. Dormant sources remain inactive. The job repeats this idempotent preparation, so a fresh instance follows the same path.
+Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.bootstrap` before starting the daemon. This executes the recorded `prepare_revisioned_sources_job`; preparation errors and logging appear in Dagster Runs. Their healthcheck verifies preparation without changing state. Re-deployment applies the declared rollout while retaining sensor cursors: DORMANT stops all managed automation, CANARY runs monitors and consumer sensors, and LIVE also runs declared ingestion/audit schedules. Dormant sources perform no external preparation I/O. The job repeats this idempotent preparation, so a fresh instance follows the same path.
 
 ### Backfill and compare from Dagit
 
@@ -59,7 +59,7 @@ The shared factory generates `select_period → build_and_verify[day] → publis
 
 Each successful day materializes its native source asset partition with revision, build ID, generation, verification time, data version and all seven legacy comparison results. Python logging and stdout/stderr flow through Dagster. Failed days keep their failure history; the publication step cannot run unless every selected day succeeds. Native re-execution can retry failed steps; relaunching the same period validates and reuses unchanged generations.
 
-Publication runs once after the selected period, rather than rebuilding all files after every day. The spot renderer queries pinned time/dollar projections in ClickHouse without loading the historical raw trade archive into Python. Every declared consumer must complete before the job succeeds. File failures fail the same run. Consumer sensors defer to an active backfill and do not republish an already current manifest. Reconciliation continues health observations while leaving verification to the active job.
+Publication runs once after the selected period, rather than rebuilding all files after every day. The spot renderer queries pinned time/dollar projections in ClickHouse without loading the historical raw trade archive into Python. Every declared consumer must complete before the job succeeds. File failures fail the same run. Consumer sensors defer while a backfill is active or its latest attempt failed/canceled, and do not republish an already current manifest. Retrying reuses complete files already committed for the same source token. Reconciliation continues health observations while leaving verification to the active job.
 
 The shared `source-publications` volume preserves manifests and files across worker replacement. The CANARY spot specification declares Parquet, Arrow and Hugging Face **shadow** files; this does not upload over the legacy public Hugging Face datasets. Legacy public identities retain their existing owners until the separately approved LIVE routing promotion. CANARY ingestion schedules remain stopped by code, so deployment does not launch the full historical workload itself.
 

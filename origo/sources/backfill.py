@@ -7,8 +7,11 @@ from typing import Protocol, cast
 
 import dagster
 from dagster import (
+    AssetKey,
     AssetMaterialization,
     Config,
+    DagsterEvent,
+    DagsterEventType,
     DynamicOut,
     DynamicOutput,
     ExecutorDefinition,
@@ -20,6 +23,7 @@ from dagster import (
     in_process_executor,
     op,
 )
+from dagster._core.events import AssetMaterializationPlannedData
 
 from .contracts import RevisionedSourceSpec, failure_code, failure_message, retryable_source_error
 
@@ -30,7 +34,7 @@ class _JobFactory(Protocol):
     ) -> Callable[[Callable[[], None]], JobDefinition]: ...
 
 
-_job = cast(_JobFactory, getattr(dagster, 'job'))
+source_job = cast(_JobFactory, getattr(dagster, 'job'))
 
 
 class BackfillConfig(Config):
@@ -74,7 +78,31 @@ def build_backfill_job(
         )
         context.log.info('source=%s period=%s..%s days=%s', spec.key, days[0], days[-1], len(days))
         for day in days:
-            yield DynamicOutput(day, mapping_key=day.replace('-', '_'))
+            mapping_key = day.replace('-', '_')
+            context.instance.report_dagster_event(
+                DagsterEvent(
+                    event_type_value=DagsterEventType.ASSET_MATERIALIZATION_PLANNED.value,
+                    job_name=context.job_def.name,
+                    step_key=f'build_and_verify[{mapping_key}]',
+                    event_specific_data=AssetMaterializationPlannedData(
+                        AssetKey(f'build_{spec.key}_canonical_revision_origo'), partition=day
+                    ),
+                ),
+                run_id=context.run_id,
+            )
+            yield DynamicOutput(day, mapping_key=mapping_key)
+        for consumer in spec.consumers:
+            context.instance.report_dagster_event(
+                DagsterEvent(
+                    event_type_value=DagsterEventType.ASSET_MATERIALIZATION_PLANNED.value,
+                    job_name=context.job_def.name,
+                    step_key='publish_files',
+                    event_specific_data=AssetMaterializationPlannedData(
+                        AssetKey(f'publish_{spec.key}_{consumer.key}')
+                    ),
+                ),
+                run_id=context.run_id,
+            )
 
     @op(pool=f'{spec.key}_heavy')
     def build_and_verify(context: OpExecutionContext, day: str) -> dict[str, object]:
@@ -111,17 +139,21 @@ def build_backfill_job(
         from .publication import publish_backfill
 
         root = Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
-        results = publish_backfill(spec, verified, root, run_id=context.run_id)
-        for consumer, result in results.items():
+
+        def materialized(consumer: str, result: dict[str, object]) -> None:
             context.log_event(
                 AssetMaterialization(
                     asset_key=f'publish_{spec.key}_{consumer}',
                     metadata={'source_result': MetadataValue.json(result)},
                 )
             )
+
+        results = publish_backfill(
+            spec, verified, root, run_id=context.run_id, materialized=materialized
+        )
         context.add_output_metadata({'verified_days': len(verified), 'consumers': list(results)})
 
-    @_job(
+    @source_job(
         name=f'backfill_{spec.key}_source_job',
         description='Choose inclusive start_date and end_date in Launchpad, then launch once. Empty dates select all closed daily archives. Success includes verified database projections and every declared file publication.',
         executor_def=in_process_executor,

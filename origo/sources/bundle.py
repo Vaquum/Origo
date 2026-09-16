@@ -553,7 +553,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                         if status == 'SUCCESS':
                             return SkipReason('Source event has a durable successful-run receipt.')
                         if status not in ('FAILURE', 'CANCELED'):
-                            raise RuntimeError(f'Retired source event has nonterminal receipt: {status}')
+                            raise RuntimeError(
+                                f'Retired source event has nonterminal receipt: {status}'
+                            )
                         attempt = previous_attempt + 1
                 event_id = uuid5(NAMESPACE_URL, f'{identity}:{attempt}:REQUESTED')
                 exists = runtime.store.execute(
@@ -607,7 +609,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         job=definitions.resolve_job_def(job_names['canonical']),
         cron_schedule=spec.orchestration.canonical_cron,
         execution_timezone='UTC',
-        default_status=DefaultScheduleStatus.STOPPED,
+        default_status=DefaultScheduleStatus.RUNNING
+        if spec.rollout_stage == RolloutStage.LIVE
+        else DefaultScheduleStatus.STOPPED,
     )
     def canonical(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
         if spec.rollout_stage == RolloutStage.DORMANT:
@@ -633,7 +637,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         job=definitions.resolve_job_def(job_names['audit']),
         cron_schedule=spec.orchestration.audit_cron,
         execution_timezone='UTC',
-        default_status=DefaultScheduleStatus.STOPPED,
+        default_status=DefaultScheduleStatus.RUNNING
+        if spec.rollout_stage == RolloutStage.LIVE
+        else DefaultScheduleStatus.STOPPED,
     )
     def audit(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
         if spec.rollout_stage == RolloutStage.DORMANT:
@@ -649,7 +655,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             job=definitions.resolve_job_def(job_names['provisional']),
             cron_schedule=spec.orchestration.provisional_cron,
             execution_timezone='UTC',
-            default_status=DefaultScheduleStatus.STOPPED,
+            default_status=DefaultScheduleStatus.RUNNING
+            if spec.rollout_stage == RolloutStage.LIVE
+            else DefaultScheduleStatus.STOPPED,
         )
         def provisional(
             context: ScheduleEvaluationContext,
@@ -690,9 +698,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             def publish(context: SensorEvaluationContext) -> RunRequest | SkipReason:
                 if spec.rollout_stage == RolloutStage.DORMANT:
                     return SkipReason(f'{spec.key} is DORMANT.')
-                from .prepare import backfill_active, publication_current
+                from .prepare import backfill_owns_publication, publication_current
 
-                if backfill_active(context.instance, spec):
+                if backfill_owns_publication(context.instance, spec):
                     return SkipReason(
                         'The backfill job owns publication until its selected period completes.'
                     )

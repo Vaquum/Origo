@@ -64,20 +64,32 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
         reader.execute(f'CREATE DATABASE {database}')
         files: list[dict[str, object]] = []
         try:
+            reader.execute(
+                f'CREATE TABLE {database}.pinned_state '
+                '(partition_key String, revision String, build_id UUID, provisional UInt8) ENGINE=Memory'
+            )
+            reader.execute(
+                f'INSERT INTO {database}.pinned_state VALUES',
+                [
+                    (
+                        record.partition.key,
+                        record.revision,
+                        record.build_id,
+                        int(record.partition.provisional),
+                    )
+                    for record in snapshot.records
+                ],
+            )
             for component in reader.spec.components:
                 if component.key not in ('time', 'dollar', 'time_latest', 'raw_latest'):
                     continue
                 columns = ', '.join(column.name for column in component.columns)
-                states = tuple(
-                    (record.partition.key, record.revision, record.build_id)
-                    for record in snapshot.records
-                    if record.partition.provisional == component.provisional
-                )
-                predicate = '(partition_key, revision, build_id) IN %(states)s' if states else '0'
                 reader.execute(
                     f'CREATE VIEW {database}.{component.key} AS SELECT {columns} '
-                    f'FROM {reader.component_table(component.key)} WHERE {predicate}',
-                    {'states': states} if states else None,
+                    f'FROM {reader.component_table(component.key)} '
+                    'WHERE (partition_key, revision, build_id) IN '
+                    f'(SELECT partition_key, revision, build_id FROM {database}.pinned_state '
+                    f'WHERE provisional={int(component.provisional)})'
                 )
             months = sorted(
                 {

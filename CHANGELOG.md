@@ -1,3 +1,7 @@
+# v3.9.2
+
+- Run source backfills as bounded parallel native daily partitions with dependent file publication; use native bulk parsing, transport and versioned content proofs while retaining legacy generation verification.
+
 # v3.9.1
 
 - Replace typed backfill date configuration with native Dagster asset partition selection, coverage, gaps and retries. Selected source partitions prepare, verify and publish their complete declared footprint automatically.

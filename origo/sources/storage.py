@@ -102,7 +102,9 @@ class StorageError(RuntimeError):
 
 class SourceStore:
     def __init__(self, client: Client, database: str, spec: RevisionedSourceSpec) -> None:
-        self.client, self.database, self.spec = client, identifier(database), spec
+        from .columnar import BoundedClient
+
+        self.client, self.database, self.spec = BoundedClient(client), identifier(database), spec
 
     def table(self, name: str) -> str:
         return f'{self.database}.{identifier(name)}'
@@ -118,9 +120,9 @@ class SourceStore:
 
     def run_receipt(self, identity: str) -> tuple[int, str, str] | None:
         rows = self.execute(
-            f"SELECT attempt,status,dagster_run_id FROM {self.table('source_run_log')} "
+            f'SELECT attempt,status,dagster_run_id FROM {self.table("source_run_log")} '
             "WHERE source_key=%(source)s AND event_key=%(identity)s AND dagster_run_id!='' "
-            "ORDER BY attempt DESC,recorded_at DESC LIMIT 1",
+            'ORDER BY attempt DESC,recorded_at DESC LIMIT 1',
             {'source': self.spec.key, 'identity': identity},
         )
         return (_int(rows[0][0]), str(rows[0][1]), str(rows[0][2])) if rows else None
@@ -128,11 +130,11 @@ class SourceStore:
     def record_run_receipt(self, identity: str, attempt: int, status: str, run_id: str) -> None:
         event_id = uuid5(NAMESPACE_URL, f'{identity}:{attempt}:{run_id}:{status}')
         if not self.execute(
-            f"SELECT event_id FROM {self.table('source_run_log')} WHERE event_id=%(event)s LIMIT 1",
+            f'SELECT event_id FROM {self.table("source_run_log")} WHERE event_id=%(event)s LIMIT 1',
             {'event': event_id},
         ):
             self.execute(
-                f"INSERT INTO {self.table('source_run_log')} VALUES",
+                f'INSERT INTO {self.table("source_run_log")} VALUES',
                 [(event_id, self.spec.key, identity, attempt, status, run_id, datetime.now(UTC))],
             )
 
@@ -147,6 +149,11 @@ class SourceStore:
             status LowCardinality(String), dagster_run_id String, recorded_at DateTime64(6, 'UTC')
         ) ENGINE=MergeTree PARTITION BY toYYYYMM(recorded_at)
         ORDER BY (source_key, event_key, attempt, recorded_at)""")
+
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_backfill_log')} (
+            source_key String, backfill_id String, partition_key String, revision String,
+            build_id UUID, generation UInt64, dagster_run_id String
+        ) ENGINE=MergeTree ORDER BY (source_key, backfill_id, partition_key)""")
 
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_discovery_log')} (
             source_key String, partition_key String, requested_at DateTime64(6, 'UTC')
@@ -301,7 +308,34 @@ class SourceStore:
         *,
         predicate: str = '1',
         params: object | None = None,
+        legacy_hash: bool = False,
     ) -> tuple[int, str]:
+        if not legacy_hash:
+            from .columnar import binary_hash, validation_query
+
+            native_count, unique, first, last, nonfinite = self.execute(
+                validation_query(component, table, predicate), params
+            )[0]
+            if (
+                native_count != unique
+                or nonfinite
+                or (
+                    native_count
+                    and not (partition.start <= _utc(first) <= _utc(last) < partition.end)
+                )
+            ):
+                raise SourceError(
+                    'COMPONENT_CONTENT_INVALID',
+                    f'Component {component.key} contains duplicate, non-finite or out-of-bounds rows.',
+                )
+            return _int(native_count), binary_hash(
+                self.client,
+                component,
+                table,
+                schema_version=self.spec.schema_version,
+                predicate=predicate,
+                params=cast(dict[str, object], params) if params is not None else None,
+            )
         indexes = tuple(
             next(i for i, column in enumerate(component.columns) if column.name == key)
             for key in component.primary_key

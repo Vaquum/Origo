@@ -300,7 +300,9 @@ def test_cleanup_failures_preserve_primary_verdict(
         def execute(
             self, query: str, params: object | None = None, settings: object | None = None
         ) -> list[tuple[object, ...]]:
-            if query.startswith('DROP DATABASE'):
+            if query.startswith('DROP DATABASE ') and not query.startswith(
+                'DROP DATABASE IF EXISTS '
+            ):
                 raise OSError('Injected reference cleanup failure')
             return runtime.store.client.execute(query, params, settings)
 

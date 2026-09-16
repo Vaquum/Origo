@@ -32,7 +32,7 @@ run_monitoring:
 concurrency:
   pools:
     default_limit: 1
-    granularity: run
+    granularity: op
 
 python_logs:
   managed_python_loggers:

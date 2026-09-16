@@ -94,7 +94,10 @@ class CapacityMonitor:
                     'CAPACITY_MEASUREMENT_REQUIRED',
                     'Launch one representative day with capacity_probe enabled before a range backfill.',
                 )
-            reserve = max((total * 3 + 9) // 10, measured * 2)
+            reserve = max(
+                (total * 3 + 9) // 10,
+                measured * 2 * runtime.spec.orchestration.canonical_concurrency,
+            )
             if total <= 0 or free < reserve or inodes <= 0 or available * 10 < inodes:
                 raise SourceError(
                     'CAPACITY_RESERVE_BREACHED', f'Storage reserve breached on {volume.path}.'

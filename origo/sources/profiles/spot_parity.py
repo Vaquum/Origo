@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -12,11 +13,18 @@ from origo.assets.create_origo_database import ClickHouseSettings, get_clickhous
 
 from ..adapters import binance_daily
 from ..archive import verified_archive
+from ..arrow_types import ArrowCompute, ArrowCSV, ArrowModule, ArrowTable
 from ..cleanup import preserve_primary_failure
-from ..contracts import Client, Row, SourceError, StateRecord, identifier
+from ..columnar import binary_hash, insert_arrow
+from ..contracts import Client, SourceError, StateRecord, identifier
 from ..hashing import content_hash
 from ..storage import ordered_component_rows
+from .legacy_order import OrderedRawClient
 from .spot import SPOT_COMPONENTS
+
+pa = cast(ArrowModule, importlib.import_module('pyarrow'))
+pc = cast(ArrowCompute, importlib.import_module('pyarrow.compute'))
+csv = cast(ArrowCSV, importlib.import_module('pyarrow.csv'))
 
 _LEGACY = {
     'raw': ('binance_daily_spot_trades', 'create_binance_trades_table_origo', '_create_raw_table'),
@@ -73,7 +81,7 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     url = cast(dict[str, object], evidence).get('object_url')
     if not isinstance(url, str):
         raise SourceError('PARITY_INPUT_INVALID', 'Archive evidence has no object URL.')
-    # Independently run the frozen parser on exactly the retained official ZIP revision.
+    # Independently decode exactly the retained official ZIP revision.
     archive = verified_archive(
         url,
         record.revision,
@@ -82,11 +90,13 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
     )
     raw = importlib.import_module('origo.assets.daily_trades_to_origo')
     extract = cast(Callable[[bytes], tuple[str, bytes]], raw._extract_csv)
-    parse = cast(Callable[[bytes], list[Row]], raw._parse_trade_rows)
     _, csv_body = extract(archive)
-    reference = identifier(f'{database}_source_parity_binance_spot_trades')
+    reference = identifier(f'{database}_source_parity_binance_spot_trades_{record.build_id.hex}')
     settings = replace(get_clickhouse_settings(), database=reference)
     checks: dict[str, object] = {}
+    # The runtime holds this partition's exclusive lock, so a prior workspace
+    # for this exact build can only belong to an interrupted verification.
+    client.execute(f'DROP DATABASE IF EXISTS {reference} SYNC')
     client.execute(f'CREATE DATABASE {reference}')
     with preserve_primary_failure(
         'legacy comparison database', lambda: client.execute(f'DROP DATABASE {reference} SYNC')
@@ -95,7 +105,8 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
             module = importlib.import_module('origo.assets.' + module_name)
             create = cast(Callable[[Client, ClickHouseSettings], None], getattr(module, function))
             create(client, settings)
-        client.execute(f'INSERT INTO {reference}.binance_daily_spot_trades VALUES', parse(csv_body))
+        insert_arrow(f'{reference}.binance_daily_spot_trades', _reference_table(csv_body))
+        client.execute(f'OPTIMIZE TABLE {reference}.binance_daily_spot_trades FINAL')
         for component, (table, _module, _create) in _LEGACY.items():
             if component == 'raw':
                 continue
@@ -112,7 +123,11 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 calculate_arrow(settings, day)
             else:
                 calculate = cast(Callable[[Client, str, str], None], module._insert_partition_rows)
-                calculate(client, reference, day)
+                calculate(
+                    OrderedRawClient(client, f'{reference}.binance_daily_spot_trades'),
+                    reference,
+                    day,
+                )
         for component in (item for item in SPOT_COMPONENTS if not item.provisional):
             table = _LEGACY[component.key][0]
             legacy_schema = client.execute(f'DESCRIBE TABLE {reference}.{table}')
@@ -122,9 +137,14 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                     'LEGACY_SCHEMA_MISMATCH', f'Legacy schema differs: {component.key}.'
                 )
             legacy_count = client.execute(f'SELECT count() FROM {reference}.{table}')[0][0]
-            legacy_hash = content_hash(
-                ordered_component_rows(client.execute, component, f'{reference}.{table}'),
-                schema_version=1,
+            actual_hash = dict(record.component_hashes)[component.key]
+            legacy_hash = (
+                binary_hash(client, component, f'{reference}.{table}')
+                if actual_hash.startswith('v2:')
+                else content_hash(
+                    ordered_component_rows(client.execute, component, f'{reference}.{table}'),
+                    schema_version=1,
+                )
             )
             # The runtime validates the retained rows against these immutable hashes
             # after the independent legacy computation, under the source heavy lock.
@@ -159,3 +179,40 @@ def verify_spot_legacy(client: Client, database: str, record: StateRecord) -> di
                 )
             checks[component.key] = {'row_count': actual_count, 'sha256': actual_hash}
         return checks
+
+
+def _reference_table(body: bytes) -> ArrowTable:
+    # Independent Arrow CSV decoder; the production adapter uses validated Polars expressions.
+    names = [
+        'trade_id',
+        'price',
+        'quantity',
+        'quote_quantity',
+        'timestamp',
+        'is_buyer_maker',
+        'is_best_match',
+    ]
+    table = csv.read_csv(
+        io.BytesIO(body),
+        read_options=csv.ReadOptions(column_names=names),
+        convert_options=csv.ConvertOptions(
+            column_types={
+                'trade_id': pa.uint64(),
+                'price': pa.float64(),
+                'quantity': pa.float64(),
+                'quote_quantity': pa.float64(),
+                'timestamp': pa.uint64(),
+                'is_buyer_maker': pa.bool_(),
+                'is_best_match': pa.bool_(),
+            },
+            true_values=['True', 'true'],
+            false_values=['False', 'false'],
+        ),
+    )
+    stamp = table['timestamp']
+    micros = pc.if_else(pc.less(stamp, 10**13), pc.multiply(stamp, 1000), stamp)
+    table = table.set_column(5, names[5], pc.cast(table[5], pa.uint8()))
+    table = table.set_column(6, names[6], pc.cast(table[6], pa.uint8()))
+    return table.append_column(
+        'datetime', pc.cast(pc.cast(micros, pa.int64()), pa.timestamp('us', tz='UTC'))
+    )

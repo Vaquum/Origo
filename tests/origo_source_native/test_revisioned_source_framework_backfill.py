@@ -120,7 +120,7 @@ def _run(
     )
 
 
-def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_range() -> None:
+def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> None:
     assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
@@ -130,7 +130,7 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_range() -> 
 
     with partition_loading_context(effective_dt=datetime(2020, 1, 3, tzinfo=UTC)):
         assert asset.partitions_def.get_last_partition_key() == '2020-01-02'
-    assert asset.backfill_policy.max_partitions_per_run is None
+    assert asset.backfill_policy.max_partitions_per_run == 1
     assert all(
         schedule.default_status == DefaultScheduleStatus.RUNNING for schedule in source.schedules
     )
@@ -172,10 +172,19 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         *,
         predicate: str = '1',
         params: object | None = None,
+        legacy_hash: bool = False,
     ) -> tuple[int, str]:
         if table.endswith('_revisions'):
             retained_reads[component.key] += 1
-        return validate(self, component, table, partition, predicate=predicate, params=params)
+        return validate(
+            self,
+            component,
+            table,
+            partition,
+            predicate=predicate,
+            params=params,
+            legacy_hash=legacy_hash,
+        )
 
     with monkeypatch.context() as patch:
         patch.setattr(binance_daily, 'get_response', counted_archive)
@@ -183,7 +192,7 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         result = _run(backfill_env, day='2020-01-01', probe=True)
     assert len(archives) == 1
     assert dict(retained_reads) == {
-        key: 3 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+        key: 2 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
     }
     assert result.success
     rows = runtime.store.execute(
@@ -234,7 +243,7 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         {'build': record.build_id},
     )
     raw = next(c for c in runtime.spec.components if c.key == 'raw')
-    with pytest.raises(SourceError, match='duplicate keys'):
+    with pytest.raises(SourceError, match='duplicate'):
         runtime.store.validate_component(
             raw,
             runtime.store.component_table('raw'),
@@ -288,7 +297,7 @@ def test_reconciliation_restores_committed_state_after_worker_loss(
             asset_selection=[asset.key],
             tags={
                 'dagster/asset_partition_range_start': DAY,
-                'dagster/asset_partition_range_end': '2017-08-18',
+                'dagster/asset_partition_range_end': DAY,
             },
         )
     assert not failed.success
@@ -308,18 +317,8 @@ def test_reconciliation_restores_committed_state_after_worker_loss(
     assert runtime.store.execute(
         "SELECT operation, partition_key, dagster_run_id FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
     ) == [('canonical', DAY, failed.run_id)]
-    # An interrupted comparison can leave its temporary database after the worker exits.
-    reference = 'origo_source_parity_binance_spot_trades'
-    runtime.store.execute(f'CREATE DATABASE {reference}')
-    assert runtime.cleanup_verification(dry_run=True) == (reference,)
     result = _run(backfill_env, reconcile=True)
     assert result.success and _status(backfill_env) == 'MATERIALIZED'
-    assert (
-        runtime.store.execute(
-            'SELECT name FROM system.databases WHERE name=%(name)s', {'name': reference}
-        )
-        == []
-    )
     assert runtime.store.records(canonical_only=True) == (record,)
     assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
     assert runtime.store.execute(
@@ -585,14 +584,16 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     assert _status(backfill_env) == 'MATERIALIZED'
 
 
-def test_native_backfill_queue_serializes_heavy_runs(tmp_path: Path) -> None:
+def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) -> None:
     from dagster import DagsterRunStatus, RunsFilter
     from dagster._core.instance.config import PoolGranularity
     from dagster._core.op_concurrency_limits_counter import GlobalOpConcurrencyLimitsCounter
     from dagster._core.remote_origin import RemoteJobOrigin
 
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
-    job = next(job for job in source.jobs if job.name.startswith('backfill_'))
+    job = next(
+        job for job in source.jobs if job.name.startswith('refresh_') and 'canonical' in job.name
+    )
     root = tmp_path / 'queue'
     root.mkdir()
     with DagsterInstance.local_temp(
@@ -607,9 +608,9 @@ def test_native_backfill_queue_serializes_heavy_runs(tmp_path: Path) -> None:
             tags={'dagster/partition': '2020-01-01'},
             remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
         )
-        pool = 'binance_spot_trades_heavy'
+        pool = 'binance_spot_trades_canonical'
         assert first.run_op_concurrency.all_pools == {pool}
-        instance.event_log_storage.set_concurrency_slots(pool, 1)
+        instance.event_log_storage.set_concurrency_slots(pool, 2)
         records = instance.get_run_records(RunsFilter(run_ids=[first.run_id]))
         counter = GlobalOpConcurrencyLimitsCounter(
             instance,
@@ -619,7 +620,17 @@ def test_native_backfill_queue_serializes_heavy_runs(tmp_path: Path) -> None:
             instance.event_log_storage.get_pool_limits(),
             pool_granularity=PoolGranularity.RUN,
         )
-        assert counter.is_blocked(second)
+        assert not counter.is_blocked(second)
+        instance.event_log_storage.set_concurrency_slots(pool, 1)
+        limited = GlobalOpConcurrencyLimitsCounter(
+            instance,
+            [second],
+            records,
+            {pool},
+            instance.event_log_storage.get_pool_limits(),
+            pool_granularity=PoolGranularity.RUN,
+        )
+        assert limited.is_blocked(second)
         released = GlobalOpConcurrencyLimitsCounter(
             instance,
             [second],

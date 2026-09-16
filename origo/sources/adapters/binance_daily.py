@@ -20,8 +20,9 @@ import requests
 from dagster import get_dagster_logger
 
 from ..archive import verified_archive
+from ..columnar import insert_arrow
 from ..contracts import Partition, Revision, Row, SourceError
-from ..hashing import content_hash
+from .binance_columnar import spot_table, table_digest
 
 
 @dataclass(frozen=True)
@@ -222,8 +223,9 @@ class BinanceSpotDaily:
                 )
             csv_body = archive.read(name + '.csv')
         try:
-            count = sum(1 for _ in spot_csv_rows(csv_body, partition))
-            normalized = content_hash(spot_csv_rows(csv_body, partition), schema_version=1)
+            table = spot_table(csv_body, partition)
+            count = table.num_rows
+            normalized = table_digest(table)
         except ValueError as error:
             raise SourceError('ARCHIVE_ROWS_INVALID', str(error)) from error
         evidence = json.dumps(
@@ -242,7 +244,12 @@ class BinanceSpotDaily:
             expected,
         )
         return Revision(
-            expected, normalized, evidence, count, lambda: spot_csv_rows(csv_body, partition)
+            expected,
+            normalized,
+            evidence,
+            count,
+            lambda: spot_csv_rows(csv_body, partition),
+            insert_bulk=lambda destination: insert_arrow(destination, table),
         )
 
     def discover(self, partition: Partition) -> str:

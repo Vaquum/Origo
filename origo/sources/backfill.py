@@ -1,23 +1,14 @@
-import hashlib
-import os
 from collections.abc import Callable
-from pathlib import Path
 from typing import Protocol, cast
 
 import dagster
 from dagster import (
     AssetExecutionContext,
-    AssetKey,
-    AssetMaterialization,
-    DagsterEvent,
-    DagsterEventType,
     ExecutorDefinition,
     Failure,
     JobDefinition,
-    MetadataValue,
     RetryRequested,
 )
-from dagster._core.events import AssetMaterializationPlannedData
 
 from .contracts import RevisionedSourceSpec, failure_code, failure_message, retryable_source_error
 
@@ -35,81 +26,100 @@ def execute_partition_backfill(
     spec: RevisionedSourceSpec,
     context: AssetExecutionContext,
     run_day: Callable[[str], dict[str, object]],
-) -> None:
+) -> dict[str, object]:
     from .prepare import prepare_source
-    from .publication import publish_backfill
 
     spec.require_enabled('backfill')
     days = tuple(context.partition_keys)
-    if not days:
-        raise ValueError('Select at least one native source partition.')
+    if len(days) != 1:
+        raise ValueError('Source backfills require one daily partition per native Dagster run.')
+    day = days[0]
     prepare_source(spec, context.instance)
     context.instance.add_run_tags(
         context.run.run_id,
         {
             'origo_source_key': spec.key,
             'origo_source_operation': 'backfill',
+            'origo_source_partition': day,
+            'origo_source_phase': 'canonical',
             'dagster/max_runtime': '0',
-            'origo_source_start_date': days[0],
-            'origo_source_end_date': days[-1],
         },
     )
-    context.log.info('source=%s period=%s..%s days=%s', spec.key, days[0], days[-1], len(days))
-    for consumer in spec.consumers:
-        context.log.log_dagster_event(
-            level='INFO',
-            msg=f'Planned publication for {consumer.key}.',
-            dagster_event=DagsterEvent(
-                event_type_value=DagsterEventType.ASSET_MATERIALIZATION_PLANNED.value,
-                job_name=context.job_def.name,
-                step_key=context.op_execution_context.op.name,
-                event_specific_data=AssetMaterializationPlannedData(
-                    AssetKey(f'publish_{spec.key}_{consumer.key}')
-                ),
-            ),
-        )
-    verified: list[dict[str, object]] = []
-    for day in days:
-        context.instance.add_run_tags(
-            context.run.run_id,
-            {'origo_source_partition': day, 'origo_source_phase': 'canonical'},
-        )
-        try:
-            result = run_day(day)
-        except Exception as error:
-            context.log.exception('source=%s partition=%s phase=backfill_failed', spec.key, day)
-            if retryable_source_error(error):
-                raise RetryRequested(
-                    max_retries=spec.orchestration.retry_count,
-                    seconds_to_wait=spec.orchestration.retry_delay,
-                ) from error
-            raise Failure(
-                description=f'{failure_code(error)}: {failure_message(error)}', allow_retries=False
+    context.log.info('source=%s partition=%s phase=backfill_started', spec.key, day)
+    try:
+        result = run_day(day)
+    except Exception as error:
+        context.log.exception('source=%s partition=%s phase=backfill_failed', spec.key, day)
+        if retryable_source_error(error):
+            raise RetryRequested(
+                max_retries=spec.orchestration.retry_count,
+                seconds_to_wait=spec.orchestration.retry_delay,
             ) from error
-        verified.append(result)
-        version = hashlib.sha256(
-            str((result['revision'], result['build_id'], result['generation'])).encode()
-        ).hexdigest()
-        context.log_event(
-            AssetMaterialization(
-                asset_key=f'build_{spec.key}_canonical_revision_origo',
-                partition=day,
-                metadata={
-                    'source_state': MetadataValue.json(result),
-                    'source_result': MetadataValue.json(result),
-                },
-                tags={'dagster/data_version': version},
-            )
-        )
-    context.instance.add_run_tags(context.run.run_id, {'origo_source_phase': 'publication'})
-    root = Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
+        raise Failure(
+            description=f'{failure_code(error)}: {failure_message(error)}', allow_retries=False
+        ) from error
+    return result
 
-    def materialized(consumer: str, result: dict[str, object]) -> None:
-        context.log_event(
-            AssetMaterialization(
-                asset_key=f'publish_{spec.key}_{consumer}',
-                metadata={'source_result': MetadataValue.json(result)},
-            )
-        )
 
-    publish_backfill(spec, verified, root, run_id=context.run.run_id, materialized=materialized)
+def publication_ready(
+    spec: RevisionedSourceSpec, context: AssetExecutionContext, result: dict[str, object]
+) -> bool:
+    """Join this native job backfill's receipts to the current verified generations."""
+    from uuid import UUID
+
+    from dagster._core.storage.tags import BACKFILL_ID_TAG
+
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+
+    from .cleanup import preserve_primary_failure
+    from .storage import SourceStore
+
+    backfill_id = context.run.tags.get(BACKFILL_ID_TAG)
+    if backfill_id is None:
+        return True
+    backfill = context.instance.get_backfill(backfill_id)
+    if backfill is None:
+        raise RuntimeError('Native backfill selection is missing.')
+    if backfill.is_asset_backfill:
+        # Asset backfills natively wait for all upstream partitions before unpartitioned files.
+        return True
+    days = backfill.partition_names
+    if not days or result['partition_key'] not in days:
+        raise RuntimeError('Source partition is outside the native backfill selection.')
+    settings = get_clickhouse_settings()
+    client = make_clickhouse_client(settings)
+    with preserve_primary_failure('disconnect', client.disconnect):
+        store = SourceStore(client, settings.database, spec)
+        store.execute(
+            f'INSERT INTO {store.table("source_backfill_log")} VALUES',
+            [
+                (
+                    spec.key,
+                    backfill_id,
+                    result['partition_key'],
+                    result['revision'],
+                    UUID(str(result['build_id'])),
+                    result['generation'],
+                    context.run.run_id,
+                )
+            ],
+        )
+        completed = store.execute(
+            f"""SELECT uniqExact(r.partition_key)
+            FROM {store.table('source_backfill_log')} r
+            INNER JOIN {store.table('source_active_partitions')} a
+                USING (source_key, partition_key, revision, build_id, generation)
+            INNER JOIN {store.table('source_parity_log')} p
+                USING (source_key, partition_key, revision, build_id, generation)
+            WHERE r.source_key=%(source)s AND r.backfill_id=%(backfill)s
+                AND r.partition_key IN %(days)s AND NOT a.provisional""",
+            {'source': spec.key, 'backfill': backfill_id, 'days': tuple(days)},
+        )[0][0]
+    context.log.info(
+        'source=%s phase=backfill_verified partitions=%s/%s backfill=%s',
+        spec.key,
+        completed,
+        len(days),
+        backfill_id,
+    )
+    return completed == len(days)

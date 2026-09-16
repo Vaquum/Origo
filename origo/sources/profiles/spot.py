@@ -5,9 +5,10 @@ import re
 from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol, cast
+from typing import cast
 
 from ..contracts import BuildContext, Client, Column, ComponentSpec, Row
+from .legacy_order import OrderedRawClient
 
 _MEASURES = tuple(
     Column(name, 'UInt64' if name == 'no_of_trades' else 'Float64')
@@ -58,6 +59,11 @@ class _ProjectionClient:
 
 
 def _raw(context: BuildContext) -> None:
+    if context.revision.insert_bulk is not None and not context.partition.provisional:
+        context.revision.insert_bulk(context.table('raw'))
+        # Only this private day's stage: stable blocks preserve exact float reductions.
+        context.client.execute(f'OPTIMIZE TABLE {context.table("raw")} FINAL')
+        return
     provisional = context.partition.provisional
     table = context.table('raw_latest' if provisional else 'raw')
 
@@ -74,7 +80,7 @@ def _daily(module: str) -> Callable[[BuildContext], None]:
         legacy = importlib.import_module(f'origo.assets.{module}')
         calculate = cast(Callable[[Client, str, str], None], legacy._insert_partition_rows)
         calculate(
-            _ProjectionClient(context.client),
+            _ProjectionClient(OrderedRawClient(context.client, context.table('raw'))),
             context.database,
             context.partition.start.date().isoformat(),
         )
@@ -91,32 +97,23 @@ def _minute(module: str) -> Callable[[BuildContext], None]:
     return build
 
 
-class _ArrowTable(Protocol):
-    def to_pylist(self) -> list[dict[str, object]]: ...
-
-
-class _ArrowFactory(Protocol):
-    def table(self, data: Mapping[str, list[object]]) -> _ArrowTable: ...
-
-
 def _imbalance(context: BuildContext) -> None:
-    values = context.client.execute(
-        f'SELECT * FROM {context.table("raw")} ORDER BY datetime, trade_id'
-    )
-    if not values:
-        raise RuntimeError('A canonical imbalance component requires non-empty raw input.')
-    columns = {column.name: [row[index] for row in values] for index, column in enumerate(_RAW)}
-    arrow = cast(_ArrowFactory, importlib.import_module('pyarrow'))
+    from ..columnar import arrow_client
+
     legacy = importlib.import_module(
         'origo.assets.refresh_binance_spot_dollar_imbalance_klines_origo'
     )
-    calculate = cast(Callable[[_ArrowTable], _ArrowTable], legacy._kline_rows)
-    bars = calculate(arrow.table(columns)).to_pylist()
-    schema = _bar_columns('dollar_imbalance', imbalance=True)
-    context.client.execute(
-        f'INSERT INTO {context.table("imbalance")} VALUES',
-        [tuple(bar[column.name] for column in schema) for bar in bars],
-    )
+    with arrow_client() as client:
+        values = client.query_arrow(
+            f'SELECT * FROM {context.table("raw")} ORDER BY datetime, trade_id'
+        )
+        if not values.num_rows:
+            raise RuntimeError('A canonical imbalance component requires non-empty raw input.')
+        from ..arrow_types import ArrowTable
+
+        calculate = cast(Callable[[ArrowTable], ArrowTable], legacy._kline_rows)
+        bars = calculate(values)
+        client.insert_arrow(context.table('imbalance'), bars)
 
 
 def _bar_columns(kind: str, *, imbalance: bool = False) -> tuple[Column, ...]:

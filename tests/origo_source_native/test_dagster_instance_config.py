@@ -117,7 +117,7 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
     import yaml
 
     config = _validated_instance_config()
-    assert config['concurrency']['pools'] == {'default_limit': 1, 'granularity': 'run'}
+    assert config['concurrency']['pools'] == {'default_limit': 1, 'granularity': 'op'}
     assert config['python_logs'] == {'managed_python_loggers': [''], 'python_log_level': 'INFO'}
     assert config['compute_logs']['config']['base_dir'] == '/opt/dagster-instance/compute_logs'
     dependencies = (REPO_ROOT / 'docker-requirements.txt').read_text().splitlines()

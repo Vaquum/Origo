@@ -77,6 +77,7 @@ class Revision:
     row_count: int
     rows: Callable[[], Iterable[Row]]
     complete: bool = True
+    insert_bulk: Callable[[str], None] | None = None
 
 
 class CanonicalAdapter(Protocol):
@@ -203,6 +204,11 @@ class OrchestrationSpec:
     audit_cron: str
     retry_count: int = 23
     retry_delay: int = 3600
+    canonical_concurrency: int = 8
+
+    def __post_init__(self) -> None:
+        if self.canonical_concurrency < 1:
+            raise ValueError('Canonical concurrency must be positive.')
 
 
 @dataclass(frozen=True)

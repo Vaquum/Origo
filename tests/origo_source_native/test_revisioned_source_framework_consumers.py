@@ -109,6 +109,9 @@ def test_spot_consumers_pin_one_state_token_without_blocking_database_activation
 
         target = source_root / 'parquet'
         before = (target / 'latest.json').read_bytes()
+        # Missing output requires rendering even when the source token is unchanged.
+        manifest = json.loads(before)
+        (target / 'versions' / manifest['version'] / manifest['files'][0]['path']).unlink()
         original = store.snapshot
         advanced = False
 

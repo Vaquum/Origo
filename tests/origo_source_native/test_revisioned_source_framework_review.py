@@ -184,6 +184,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
     try:
         runtime.setup()
         runtime.build('2017-08-17')
+        runtime.verify('2017-08-17')
         observer = next(value for value in source.sensors if value.name.endswith('_failure_sensor'))
         (tmp_path / 'dagster').mkdir()
         with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:

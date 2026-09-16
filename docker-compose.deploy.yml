@@ -39,6 +39,7 @@ services:
     volumes:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
@@ -68,13 +69,20 @@ services:
     volumes:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
     depends_on:
       clickhouse:
         condition: service_healthy
-    command: dagster-daemon run
+    command: ["/bin/sh", "-ec", "python -m origo.sources.bootstrap && exec dagster-daemon run"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.sources.prepare", "--check"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
@@ -99,3 +107,5 @@ volumes:
     name: tdw-control-plane_arrow
 
   source-locks:
+
+  source-publications:

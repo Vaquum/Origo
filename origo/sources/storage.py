@@ -419,6 +419,16 @@ class SourceStore:
         records = self.records(canonical_only=canonical_only)
         return Snapshot(state_token(self.spec.key, records), records)
 
+    def canonical_verified(self) -> bool:
+        missing = self.execute(
+            f"""SELECT count() FROM {self.table('source_active_partitions')} a
+            LEFT ANTI JOIN {self.table('source_parity_log')} p
+            USING (source_key, partition_key, revision, build_id, generation)
+            WHERE source_key=%(source)s AND NOT provisional""",
+            {'source': self.spec.key},
+        )
+        return missing == [(0,)]
+
     def rows(self, component: str, snapshot: Snapshot) -> list[Row]:
         specification = next(item for item in self.spec.components if item.key == component)
         result: list[Row] = []

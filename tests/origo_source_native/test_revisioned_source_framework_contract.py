@@ -30,7 +30,7 @@ def test_spot_trades_is_registered_canary_without_changing_existing_definitions(
     source = bundle.build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
     assert all(value.default_status == DefaultScheduleStatus.STOPPED for value in source.schedules)
-    assert all(value.default_status == DefaultSensorStatus.STOPPED for value in source.sensors)
+    assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
     assert 'publish_binance_spot_klines_to_huggingface_sensor' in names

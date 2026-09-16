@@ -1472,6 +1472,7 @@ from .maintenance.dagster_metadata import (
     operational_metadata_maintenance_schedule,
 )
 
+from .sources.bootstrap import prepare_revisioned_sources_job
 from .sources.bundle import build_source_bundle
 from .sources.registry import SOURCE_REGISTRY
 
@@ -1483,7 +1484,7 @@ defs = Definitions.merge(
     defs,
     Definitions(
         assets=[maintain_operational_metadata],
-        jobs=[maintain_operational_metadata_job],
+        jobs=[maintain_operational_metadata_job, prepare_revisioned_sources_job],
         schedules=[operational_metadata_maintenance_schedule],
     ),
     *(

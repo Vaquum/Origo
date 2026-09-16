@@ -64,16 +64,33 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
         reader.execute(f'CREATE DATABASE {database}')
         files: list[dict[str, object]] = []
         try:
+            reader.execute(
+                f'CREATE TABLE {database}.pinned_state '
+                '(partition_key String, revision String, build_id UUID, provisional UInt8) ENGINE=Memory'
+            )
+            reader.execute(
+                f'INSERT INTO {database}.pinned_state VALUES',
+                [
+                    (
+                        record.partition.key,
+                        record.revision,
+                        record.build_id,
+                        int(record.partition.provisional),
+                    )
+                    for record in snapshot.records
+                ],
+            )
             for component in reader.spec.components:
-                columns = ', '.join(
-                    f'{column.name} {column.sql_type}' for column in component.columns
-                )
+                if component.key not in ('time', 'dollar', 'time_latest', 'raw_latest'):
+                    continue
+                columns = ', '.join(column.name for column in component.columns)
                 reader.execute(
-                    f'CREATE TABLE {database}.{component.key} ({columns}) ENGINE=MergeTree ORDER BY ({", ".join(component.primary_key)})'
+                    f'CREATE VIEW {database}.{component.key} AS SELECT {columns} '
+                    f'FROM {reader.component_table(component.key)} '
+                    'WHERE (partition_key, revision, build_id) IN '
+                    f'(SELECT partition_key, revision, build_id FROM {database}.pinned_state '
+                    f'WHERE provisional={int(component.provisional)})'
                 )
-                values = reader.rows(component.key, snapshot)
-                if values:
-                    reader.execute(f'INSERT INTO {database}.{component.key} VALUES', values)
             months = sorted(
                 {
                     (record.partition.start.year, record.partition.start.month)
@@ -172,10 +189,12 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
 
 def _manifest_file(root: Path, path: Path, row_count: int) -> dict[str, object]:
     _fsync(path)
+    with path.open('rb') as handle:
+        digest = hashlib.file_digest(handle, 'sha256').hexdigest()
     return {
         'path': str(path.relative_to(root)),
         'row_count': row_count,
-        'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'sha256': digest,
     }
 
 

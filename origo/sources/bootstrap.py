@@ -1,7 +1,7 @@
 from dagster import DagsterInstance, OpExecutionContext, in_process_executor, op
 
 from .backfill import source_job
-from .prepare import prepare_source
+from .prepare import configure_source_pool, prepare_source
 from .registry import SOURCE_REGISTRY
 
 
@@ -27,6 +27,8 @@ def prepare_revisioned_sources_job() -> None:
 
 def main() -> None:
     with DagsterInstance.get() as instance:
+        for spec in SOURCE_REGISTRY:
+            configure_source_pool(spec, instance)
         result = prepare_revisioned_sources_job.execute_in_process(
             instance=instance, raise_on_error=False
         )

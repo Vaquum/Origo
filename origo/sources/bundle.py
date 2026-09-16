@@ -10,7 +10,9 @@ import dagster
 from dagster import (
     AssetCheckResult,
     AssetCheckSpec,
+    AssetDep,
     AssetExecutionContext,
+    AssetMaterialization,
     AssetsDefinition,
     BackfillPolicy,
     Config,
@@ -192,7 +194,6 @@ def _execute_operation(
     if operation == 'canonical':
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
-        runtime.cleanup_verification(dry_run=False)
         proof = runtime.store.execute(
             f"""SELECT count() FROM {runtime.store.table('source_active_partitions')} a
             INNER JOIN {runtime.store.table('source_parity_log')} p
@@ -305,6 +306,21 @@ def _execute_operation(
         if failures:
             raise ExceptionGroup('Some audited partitions could not be corrected.', failures)
         return {'corrected_partitions': list(changed)}
+    if operation == 'complete':
+        from .dagit import observe_source
+        from .prepare import publication_current
+
+        for consumer in spec.consumers:
+            snapshot = runtime.store.snapshot(canonical_only=consumer.canonical_only)
+            if not publication_current(spec, consumer.key, snapshot.token):
+                raise SourceError(
+                    'GENERATION_CHANGED', 'Declared files do not match the current source state.'
+                )
+        runtime.failures.recover(operation='backfill')
+        state = observe_source(runtime)
+        if state['healthy'] is not True:
+            raise SourceError('SOURCE_HEALTH_BLOCKED', 'Backfill has unresolved source failures.')
+        return state
     if operation == 'reconcile':
         from .dagit import observe_source
 
@@ -312,7 +328,20 @@ def _execute_operation(
     if operation == 'certify':
         return {'state_token': runtime.certify(config.partition_key, review_state='PENDING').token}
     if operation.startswith('consumer_'):
+        from .prepare import publication_current
+
         consumer = operation.removeprefix('consumer_')
+        if not runtime.store.canonical_verified():
+            raise SourceError(
+                'PARITY_EVIDENCE_MISSING',
+                'Canonical state requires independent verification before publication.',
+            )
+        definition = next(item for item in spec.consumers if item.key == consumer)
+        snapshot = runtime.store.snapshot(canonical_only=definition.canonical_only)
+        if publication_current(spec, consumer, snapshot.token):
+            runtime.failures.recover(operation='consumer', consumer=consumer)
+            return {'state_token': snapshot.token}
+
         destination = config.destination or str(
             Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
             / spec.key
@@ -335,9 +364,20 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation in ('canonical', 'repair', 'certify')
         else None,
         output_required=operation != 'canonical',
-        backfill_policy=BackfillPolicy.single_run() if operation == 'canonical' else None,
-        pool=f'{spec.key}_heavy'
-        if operation in ('canonical', 'repair', 'cleanup', 'audit', 'certify')
+        backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=1)
+        if operation == 'canonical'
+        else None,
+        deps=(
+            [AssetDep(f'build_{spec.key}_canonical_revision_origo')]
+            if operation.startswith('consumer_')
+            else [AssetDep(f'publish_{spec.key}_{c.key}') for c in spec.consumers]
+            if operation == 'reconcile'
+            else None
+        ),
+        pool=f'{spec.key}_canonical'
+        if operation == 'canonical'
+        else f'{spec.key}_heavy'
+        if operation in ('repair', 'cleanup', 'audit', 'certify')
         or operation.startswith('consumer_')
         else None,
         retry_policy=RetryPolicy(
@@ -351,7 +391,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
             context.job_def.name != f'refresh_{spec.key}_canonical_source_job'
             or context.has_partition_key_range
         ):
-            from .backfill import execute_partition_backfill
+            from .backfill import execute_partition_backfill, publication_ready
 
             def run_day(day: str) -> dict[str, object]:
                 return execute_source(
@@ -361,7 +401,40 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     run_id=context.run.run_id,
                 )
 
-            execute_partition_backfill(spec, context, run_day)
+            result = execute_partition_backfill(spec, context, run_day)
+            if not publication_ready(spec, context, result):
+                from dagster._core.definitions.data_version import DATA_VERSION_TAG
+
+                context.log_event(
+                    AssetMaterialization(
+                        asset_key=name,
+                        partition=str(result['partition_key']),
+                        metadata={
+                            'source_state': MetadataValue.json(result),
+                            'source_result': MetadataValue.json(result),
+                        },
+                        tags={
+                            DATA_VERSION_TAG: hashlib.sha256(
+                                str(
+                                    (result['revision'], result['build_id'], result['generation'])
+                                ).encode()
+                            ).hexdigest()
+                        },
+                    )
+                )
+                return
+            yield MaterializeResult(
+                value=None,
+                metadata={
+                    'source_state': MetadataValue.json(result),
+                    'source_result': MetadataValue.json(result),
+                },
+                data_version=DataVersion(
+                    hashlib.sha256(
+                        str((result['revision'], result['build_id'], result['generation'])).encode()
+                    ).hexdigest()
+                ),
+            )
             return
         try:
             spec.require_enabled(operation)
@@ -382,7 +455,13 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     capacity_probe=config.capacity_probe,
                     automatic_capacity=not config.reconcile_only,
                 )
-            result = execute_source(spec, operation, config, run_id=context.run.run_id)
+            selected_operation = (
+                'complete'
+                if operation == 'reconcile'
+                and context.job_def.name == f'backfill_{spec.key}_source_job'
+                else operation
+            )
+            result = execute_source(spec, selected_operation, config, run_id=context.run.run_id)
         except Exception as error:
             context.log.error(
                 'source=%s partition=%s operation=%s code=%s message=%s',
@@ -492,7 +571,11 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
     unresolved += (
         _define_job(
             f'backfill_{spec.key}_source_job',
-            selection=[names['canonical']],
+            selection=[
+                names['canonical'],
+                *(names['consumer_' + c.key] for c in spec.consumers),
+                names['reconcile'],
+            ],
             tags={
                 'origo_source_key': spec.key,
                 'origo_source_operation': 'backfill',
@@ -764,8 +847,15 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         from .prepare import is_source_backfill
 
         is_backfill = is_source_backfill(context.dagster_run, spec)
+        selected = context.dagster_run.asset_selection or set()
         if is_backfill:
-            operation = 'canonical'
+            failed_steps = {
+                event.step_key for event in context.for_run_failure().get_step_failure_events()
+            }
+            operation = next(
+                (op for op, name in names.items() if name in failed_steps),
+                'canonical',
+            )
         if operation is None:
             selected = context.dagster_run.asset_selection or set()
             operation = next(
@@ -790,7 +880,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             )
             if recorded[0][0]:
                 return
-            if is_backfill:
+            if is_backfill and operation == 'canonical':
                 tags = context.dagster_run.tags
                 key = (
                     tags.get('origo_source_partition')

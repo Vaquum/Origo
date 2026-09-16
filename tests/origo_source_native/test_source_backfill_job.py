@@ -182,9 +182,12 @@ def test_unavailable_day_blocks_publication_and_preserves_completed_day(
     job = Definitions(
         assets=bundle.assets, jobs=bundle.jobs
     ).resolve_implicit_global_asset_job_def()
+    assert job.execute_in_process(
+        instance=instance, partition_key=DAY, asset_selection=[AssetKey(ASSET)]
+    ).success
     result = job.execute_in_process(
         instance=instance,
-        tags=_selection('2017-08-18'),
+        partition_key='2017-08-18',
         asset_selection=[AssetKey(ASSET)],
         raise_on_error=False,
     )
@@ -226,7 +229,7 @@ def test_period_defaults_and_boundaries_are_shared_across_sources() -> None:
         )
         assert job.is_asset_job
         assert isinstance(job.partitions_def, DailyPartitionsDefinition)
-        assert job.backfill_policy.max_partitions_per_run is None
+        assert job.backfill_policy.max_partitions_per_run == 1
         assert job.partitions_def.get_first_partition_key() == DAY
         with partition_loading_context(effective_dt=datetime(2020, 1, 3, tzinfo=UTC)):
             assert job.partitions_def.get_last_partition_key() == '2020-01-02'
@@ -507,3 +510,93 @@ def test_native_backfill_failure_holds_publication_after_last_range_succeeds(
             )
         )
         assert not backfill_owns_publication(instance, spec)
+
+
+def test_native_job_backfill_waits_for_own_selected_generations(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+) -> None:
+    from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
+    from dagster._core.storage.tags import BACKFILL_ID_TAG
+
+    store, instance, bundle = ready_job
+    job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
+    # An earlier verified generation must not satisfy a new backfill's queued day.
+    assert job.execute_in_process(instance=instance, partition_key='2020-01-01').success
+    root = tmp_path / 'files' / store.spec.key
+    previous = {
+        consumer.key: (root / consumer.key / 'latest.json').read_bytes()
+        for consumer in store.spec.consumers
+    }
+    parent = PartitionBackfill(
+        backfill_id='real-native-job',
+        status=BulkActionStatus.REQUESTED,
+        from_failure=False,
+        tags={},
+        backfill_timestamp=datetime.now(UTC).timestamp(),
+        asset_selection=list(job.asset_layer.executable_asset_keys),
+        partition_names=[DAY, '2020-01-01'],
+    )
+    assert not parent.is_asset_backfill
+    instance.add_backfill(parent)
+    first = job.execute_in_process(
+        instance=instance,
+        partition_key=DAY,
+        tags={BACKFILL_ID_TAG: parent.backfill_id},
+    )
+    assert first.success
+    assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY, '2020-01-01'}
+    assert any(event.is_step_skipped for event in first.all_events)
+    for consumer in store.spec.consumers:
+        assert (root / consumer.key / 'latest.json').read_bytes() == previous[consumer.key]
+    last = job.execute_in_process(
+        instance=instance,
+        partition_key='2020-01-01',
+        tags={BACKFILL_ID_TAG: parent.backfill_id},
+    )
+    assert last.success
+    for consumer in store.spec.consumers:
+        assert (
+            json.loads((root / consumer.key / 'latest.json').read_text())['state_token']
+            == store.snapshot().token
+        )
+    assert store.execute('SELECT uniqExact(partition_key) FROM origo.source_backfill_log') == [(2,)]
+
+
+def test_backfill_worker_loss_in_file_step_has_consumer_scope(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dagster import build_run_status_sensor_context
+
+    from origo.sources import bundle as implementation
+    from origo.sources.bundle import SourceRunConfig
+    from origo.sources.lifecycle import SourceRuntime
+
+    store, instance, source = ready_job
+    job = next(job for job in source.jobs if job.name.startswith('backfill_'))
+    original = implementation._execute_operation
+
+    def crash(runtime: SourceRuntime, operation: str, config: SourceRunConfig) -> dict[str, object]:
+        if operation == 'consumer_arrow':
+            raise RuntimeError('Worker failed before publisher dispatch')
+        return original(runtime, operation, config)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(implementation, '_execute_operation', crash)
+        result = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
+    assert not result.success
+    observer = next(sensor for sensor in source.sensors if sensor.name.endswith('_failure_sensor'))
+    run = instance.get_run_by_id(result.run_id)
+    assert run is not None
+    with build_run_status_sensor_context(
+        sensor_name=observer.name,
+        dagster_instance=instance,
+        dagster_run=run,
+        dagster_event=next(
+            e for e in result.all_events if e.event_type_value == 'PIPELINE_FAILURE'
+        ),
+    ) as context:
+        observer(context)
+    assert store.execute(
+        "SELECT operation,blocking_scope,partition_key,consumer FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
+    ) == [('consumer', 'CONSUMER', None, 'arrow')]
+    assert job.execute_in_process(instance=instance, partition_key=DAY).success

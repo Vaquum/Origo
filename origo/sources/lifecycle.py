@@ -21,9 +21,10 @@ from .contracts import (
     StateRecord,
     failure_code,
     failure_message,
+    identifier,
 )
 from .failures import FailureLog
-from .locking import source_lock
+from .locking import partition_work, source_lock
 from .storage import SourceStore
 
 
@@ -47,7 +48,7 @@ class SourceRuntime:
         selected = anchor or datetime.combine(
             self.spec.partitions.first_day, datetime.min.time(), UTC
         )
-        with source_lock(self.lock_root, self.spec.key, 'setup'):
+        with source_lock(self.lock_root, self.spec.key, 'setup', wait=True):
             self.store.setup(anchor=selected)
             marker = self.lock_root / self.spec.key / 'domain_id'
             if not marker.exists():
@@ -125,9 +126,9 @@ class SourceRuntime:
         partition = adapter.partition(key)
         build_id = uuid4()
         operation = 'provisional' if provisional else 'canonical'
-        lock = _partition_lock(partition) if provisional else 'heavy'
+        lock = _partition_lock(partition)
         try:
-            with source_lock(self.lock_root, self.spec.key, lock):
+            with partition_work(self.lock_root, self.spec.key, lock):
                 expected = self.store.generation(partition)
                 if provisional:
                     previous = self.store.execute(
@@ -192,9 +193,8 @@ class SourceRuntime:
                 if provisional:
                     self._activate(record, expected)
                 else:
-                    with source_lock(self.lock_root, self.spec.key, _partition_lock(partition)):
-                        self.spec.canonical.revalidate(partition, revision)
-                        self._activate(record, expected)
+                    self.spec.canonical.revalidate(partition, revision)
+                    self._activate(record, expected)
                 self.failures.recover(operation=operation, partition=key)
                 self.failures.recover(operation='component', partition=key)
                 if not provisional:
@@ -384,6 +384,7 @@ class SourceRuntime:
                     record.partition,
                     predicate='partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s',
                     params=params,
+                    legacy_hash=not expected[component.key].startswith('v2:'),
                 )
             except SourceError as error:
                 if error.code != 'COMPONENT_CONTENT_INVALID':
@@ -406,9 +407,14 @@ class SourceRuntime:
         self.spec.require_enabled('publish', public=consumer.public)
         self.require_shared_mount()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key):
+            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=True):
+                from .publication import publication_current
+
                 snapshot = self.store.snapshot(canonical_only=consumer.canonical_only)
-                consumer.publish(self.store, snapshot, destination)
+                if not publication_current(
+                    self.spec, consumer.key, snapshot.token, root=Path(destination).parent.parent
+                ):
+                    consumer.publish(self.store, snapshot, destination)
                 self.failures.recover(operation='consumer', consumer=consumer.key)
                 return snapshot
         except Exception as error:
@@ -586,8 +592,8 @@ class SourceRuntime:
         try:
             with source_lock(self.lock_root, self.spec.key, 'heavy'):
                 found = self.store.execute(
-                    'SELECT name FROM system.databases WHERE name=%(database)s',
-                    {'database': database},
+                    'SELECT name FROM system.databases WHERE name=%(database)s OR startsWith(name, %(prefix)s) ORDER BY name',
+                    {'database': database, 'prefix': database + '_'},
                 )
                 if found:
                     get_dagster_logger('origo.sources').info(
@@ -598,14 +604,15 @@ class SourceRuntime:
                         self.run_id,
                     )
                     if not dry_run:
-                        self.store.execute(f'DROP DATABASE {database} SYNC')
+                        for (workspace,) in found:
+                            self.store.execute(f'DROP DATABASE {identifier(str(workspace))} SYNC')
                 if not dry_run:
                     self.failures.recover(operation='parity_cleanup')
                 return tuple(str(row[0]) for row in found)
         except Exception as error:
             self.failures.record(
                 operation='parity_cleanup',
-                scope='SOURCE',
+                scope='NONE',
                 error_code=failure_code(error),
                 message=failure_message(error),
             )
@@ -745,7 +752,9 @@ class SourceRuntime:
         self.spec.require_enabled('verify')
         self.require_shared_mount()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'heavy'):
+            with partition_work(
+                self.lock_root, self.spec.key, _partition_lock(self.spec.canonical.partition(key))
+            ):
                 record = next(
                     (
                         item

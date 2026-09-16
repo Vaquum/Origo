@@ -29,7 +29,7 @@ flowchart LR
 | Component | One required output whose count, keys, bounds and hash have been checked. |
 | Activation | A monotonically numbered record selecting one complete attempt. |
 | Route | A later, separately approved switch of an existing public identity to the new source. |
-| Lock | Shared single-host `flock` exclusion; canonical operations take heavy then partition, while provisional operations take their partition lock. |
+| Lock | Shared single-host `flock` exclusion; builders and verifiers take a shared maintenance fence and an exclusive partition lock; maintenance takes the exclusive fence. |
 | Consumer | An independent publisher that pins the active state, renders privately, and checks its token before replacing a manifest. |
 
 ## Add a source
@@ -71,8 +71,8 @@ parsing, schemas and verification remain engineering work; orchestration is shar
 | Shared code | What each registered source receives |
 | --- | --- |
 | [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, schedules and consumer/failure/reconciliation sensors. Do not copy these definitions into a source module. |
-| [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats preparation idempotently. |
-| [lifecycle.py](../../origo/sources/lifecycle.py), [publication.py](../../origo/sources/publication.py) | Verified generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
+| [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats source preparation idempotently; deployment configures pool limits before workers start. |
+| [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Verified generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
 | [bundle.py](../../origo/sources/bundle.py) consumer sensors | Later eligible state changes request publication automatically. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
 | [roles.py](../../origo/maintenance/roles.py), [source_receipts.py](../../origo/maintenance/source_receipts.py) | Protected source/backfill provenance and short retention for standalone projection jobs, with durable deduplication receipts. Keep the generated run tags. |
 
@@ -135,13 +135,42 @@ registered in code; the partition calendar advances automatically. A missing
 provider archive is a visible failure, never silently skipped.
 
 The shared factory generates a native daily-partitioned asset job using
-`BackfillPolicy.single_run()`. Dagster groups selected contiguous partitions into
-one run; a selection of separate gaps may produce several range runs under the
-same native backfill. Source work is serialized through the heavy pool. Long
-backfills are exempt from the short operational-job runtime limit; worker-failure
-monitoring remains active. Storage admission retains the 30% free-byte,
-twice-measured-working-set and 10% free-inode requirements. The first use of new
-storage measures the full build and independent comparison automatically.
+`BackfillPolicy.multi_run(max_partitions_per_run=1)`. Dagster launches independent
+daily runs under a code-owned canonical concurrency pool. Native Jobs backfills
+include the canonical asset, every file consumer and final reconciliation in each
+child run. The canonical step records its verified generation against that
+backfill's selected dates in `source_backfill_log`. Until every selected date has
+its own current verified receipt, it records its materialization and omits its
+optional output; Dagster skips its downstream steps. The last completing child
+runs all file consumers and final reconciliation. Existing generations from
+before this backfill do not satisfy queued work. Simultaneous final children
+serialize and deduplicate each consumer against its current manifest.
+Native asset backfills use Dagster's upstream partition dependency barrier.
+File failure keeps the backfill unsuccessful and native retry resumes it.
+The operator still selects the period once, without entering configuration.
+
+Canonical workers share a maintenance fence and exclusively lock their own
+partition. Different days have separate staging and independent comparison
+databases. Source-wide cleanup takes the exclusive maintenance fence. The
+canonical pool is separate from serial maintenance/publication pools. Capacity
+reserves include the configured maximum concurrent working sets.
+
+The data path uses native Polars/Arrow parsing and bulk transport, ClickHouse
+projections and SHA256 of fixed, ordered 65,536-row RowBinary chunks computed
+inside ClickHouse. Only chunk digests cross the wire; the root hash binds the
+schema, encoding, chunk sizes and counts. Query
+aggregation uses one thread per daily worker to retain deterministic floating-point
+reduction; parallelism is across independent days. New component hashes have a
+`v2:` prefix; existing v1 generations are checked with their original encoding.
+Retries reuse the original generation. Existing data schemas and public identities remain unchanged; the backfill receipt table is additive.
+The reference parser independently uses Arrow CSV and is checked against the
+frozen legacy parser on real millisecond and microsecond files. Legacy projection
+formulas remain unchanged.
+
+Performance evidence must name rows, elapsed time, worker count, hardware,
+seconds per million, memory and whether verification/publication/network are
+included. Measure representative high-volume archives at increasing concurrency;
+small-fixture correctness is not full-history throughput evidence.
 
 Each verified day materializes its source partition with revision, build ID,
 generation, verification time, data version and comparison results. Completed
@@ -149,8 +178,9 @@ days remain visible when another day fails. Python logging and stdout/stderr flo
 through Dagster. Native backfill and run retry controls handle failures; unchanged
 verified generations and completed file publications are reused on retry.
 
-After all days in a range verify, the run publishes every declared consumer from
-pinned projections. A publication failure fails that run. Files expose their own
+After the selected days verify, native downstream steps publish every declared
+consumer from pinned projections. A publication failure fails that consumer and
+the native backfill; final reconciliation checks current manifests and health. Files expose their own
 materializations and source tokens; a source partition's successful verification
 does not claim that a failed file publication succeeded. Publication queries pinned
 ClickHouse projections without copying the historical raw trade archive into
@@ -197,3 +227,12 @@ gh issue edit 309 --repo Vaquum/Origo --body-file approved-slice.md
 
 CI success, silence, or a workaround is not approval to change the contract.
 
+
+Use `PYTHONPATH=. python tools/benchmark_source_backfill.py --archives <cache>
+--days <real dates> --workers 1 2 4 --output <report.json>` for an isolated developer
+benchmark. It validates official archive sidecars, owns a local ClickHouse
+container, and records the frozen legacy ingest/projections separately from the
+revised build, independent parity verification and all declared shadow files.
+The report excludes Dagster startup and network upload; measure those in the
+native GUI acceptance run as well. This is a developer benchmark, not an
+operator backfill procedure.

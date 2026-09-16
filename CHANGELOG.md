@@ -1,6 +1,12 @@
-# v3.9.0 on September 11, 2026
+# v3.10.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.9.0
+
+- Prepare enabled revisioned sources and managed sensors from code at daemon startup; persist declared files on a shared volume.
+- Run an inclusive period from one Jobs/Launchpad backfill: verify each day, measure capacity automatically, and complete every declared file publication before success. Preserve per-day asset state and failures in Dagster.
+- Query pinned ClickHouse projections for spot files instead of copying all historical raw rows into Python.
 
 # v3.8.9
 

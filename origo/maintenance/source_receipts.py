@@ -13,7 +13,7 @@ from origo.sources.storage import SourceStore
 
 
 def source_reference_reason(run: DagsterRun) -> str:
-    source = run.tags.get('origo_source_key')
+    source = run.tags.get('origo_source_key') or run.tags.get('origo_projection_source_key')
     if not source:
         return ''
     spec = next((spec for spec in SOURCE_REGISTRY if spec.key == source), None)
@@ -37,7 +37,7 @@ def source_reference_reason(run: DagsterRun) -> str:
 def preserve_source_receipt(run: DagsterRun) -> None:
     identity = run.tags.get('origo_source_event')
     if identity:
-        source = run.tags['origo_source_key']
+        source = run.tags.get('origo_source_key') or run.tags['origo_projection_source_key']
         spec = next(spec for spec in SOURCE_REGISTRY if spec.key == source)
         settings = get_clickhouse_settings()
         client = make_clickhouse_client(settings)

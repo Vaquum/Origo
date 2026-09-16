@@ -37,6 +37,7 @@ services:
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
       - ./parquet_data:/opt/parquet
       - ./arrow_data:/opt/arrow
@@ -63,13 +64,20 @@ services:
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
       - ./parquet_data:/opt/parquet
       - ./arrow_data:/opt/arrow
     depends_on:
       clickhouse:
         condition: service_healthy
-    command: dagster-daemon run
+    command: ["/bin/sh", "-ec", "python -m origo.sources.bootstrap && exec dagster-daemon run"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.sources.prepare", "--check"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
@@ -77,3 +85,5 @@ volumes:
   dagster-instance:
 
   source-locks:
+
+  source-publications:

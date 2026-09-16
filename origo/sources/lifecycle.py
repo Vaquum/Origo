@@ -740,7 +740,7 @@ class SourceRuntime:
                     related_event=row[2],
                 )
 
-    def verify(self, key: str) -> tuple[StateRecord, dict[str, object]]:
+    def verify(self, key: str, *, force: bool = False) -> tuple[StateRecord, dict[str, object]]:
         """Verify current retained contents and parity for the exact active generation."""
         self.spec.require_enabled('verify')
         self.require_shared_mount()
@@ -771,7 +771,7 @@ class SourceRuntime:
                         'generation': record.generation,
                     },
                 )
-                if rows:
+                if rows and not force:
                     checks: object = json.loads(str(rows[0][0]))
                     if not isinstance(checks, dict):
                         raise SourceError(

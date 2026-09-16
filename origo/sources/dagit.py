@@ -212,7 +212,9 @@ def build_reconciliation_sensor(
         name=f'{spec.key}_reconciliation_sensor',
         jobs=[canonical_job, health_job],
         minimum_interval_seconds=60,
-        default_status=DefaultSensorStatus.STOPPED,
+        default_status=DefaultSensorStatus.STOPPED
+        if spec.rollout_stage == RolloutStage.DORMANT
+        else DefaultSensorStatus.RUNNING,
     )
     def reconcile(context: SensorEvaluationContext) -> list[RunRequest] | SkipReason:
         if spec.rollout_stage == RolloutStage.DORMANT:
@@ -292,7 +294,9 @@ def build_reconciliation_sensor(
                 ),
                 limit=1,
             )
-            if inflight:
+            from .prepare import backfill_active
+
+            if inflight or backfill_active(context.instance, spec):
                 context.log.info(
                     'source=%s reconciliation batch is still queued or running', spec.key
                 )

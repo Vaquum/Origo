@@ -1,6 +1,8 @@
-# v3.10.0
+# v3.11.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.10.0
 
 - Route the spot public identities to the revisioned source: the `mount` consumer owns the Parquet mirror and the Arrow bar store and refreshes only the months whose pinned state changed, the `huggingface` consumer uploads the twelve public datasets from the canonical state, the spot source is LIVE, and the legacy mirror, bar-store and Hugging Face publisher jobs, schedule and sensors are removed. Consumers that pin provisional rows republish as those rows change; canonical-only consumers follow the canonical state.
 

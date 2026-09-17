@@ -128,6 +128,20 @@ def failed_receipts_since(
     ]
 
 
+def failed_attempts(
+    client: Client, database: str, *, feed: str, series: str, minute: datetime
+) -> tuple[int, datetime | None]:
+    """How many times ``minute`` failed for ``feed``/``series`` and when it last did."""
+    rows = client.execute(
+        f"""SELECT count(), max(recorded_at) FROM {identifier(database)}.{WORKER_MINUTE_LOG}
+        WHERE feed = %(feed)s AND series = %(series)s AND minute = %(minute)s
+          AND status = 'FAILED'""",
+        {'feed': feed, 'series': series, 'minute': _utc(minute).replace(tzinfo=None)},
+    )
+    count = int(str(rows[0][0]))
+    return count, (_utc(rows[0][1]) if count else None)
+
+
 def error_log_rows_since(
     client: Client, database: str, since: datetime, until: datetime
 ) -> list[LogRow]:

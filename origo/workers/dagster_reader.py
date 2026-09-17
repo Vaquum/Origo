@@ -33,6 +33,11 @@ CHECKS_QUERY = """query Checks {
     assetChecksOrError { __typename ... on AssetChecks { checks { name } } }
   }
 }"""
+BACKFILLS_QUERY = """query Backfills($status: BulkActionStatus!) {
+  partitionBackfillsOrError(status: $status, limit: 50) {
+    __typename ... on PartitionBackfills { results { id status assetSelection { path } } }
+  }
+}"""
 CHECK_EXECUTIONS_QUERY = """query CheckExecutions($assetKey: AssetKeyInput!, $checkName: String!) {
   assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) {
     status evaluation { timestamp }
@@ -158,6 +163,24 @@ class DagsterReader:
                 )
             )
         return failures
+
+    def backfill_in_flight(self, asset_key: str) -> bool:
+        """Whether a native backfill that selects ``asset_key`` is requested or being cancelled."""
+        for status in ('REQUESTED', 'CANCELING'):
+            data = self.query('Backfills', BACKFILLS_QUERY, {'status': status})
+            backfills = _mapping(data.get('partitionBackfillsOrError'), 'backfills')
+            if backfills.get('__typename') != 'PartitionBackfills':
+                raise DagsterUnreachable('Backfills: backfills were not listed.')
+            for item in _sequence(backfills.get('results'), 'results'):
+                entry = _mapping(item, 'backfill')
+                selection = entry.get('assetSelection')
+                keys = {
+                    '/'.join(str(part) for part in _sequence(_mapping(key, 'key').get('path'), 'path'))
+                    for key in (_sequence(selection, 'selection') if selection is not None else [])
+                }
+                if asset_key in keys:
+                    return True
+        return False
 
     def failed_checks_since(self, since: float, *, exclude_asset: str = '') -> list[CheckFailure]:
         data = self.query('Checks', CHECKS_QUERY)

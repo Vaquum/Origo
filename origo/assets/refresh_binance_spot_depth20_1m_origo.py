@@ -84,6 +84,18 @@ def _insert_minute_row(
     )
 
 
+def refresh_minute(client: ClickHouseClient, database: str, minute_start: datetime) -> int:
+    """Project one minute of depth20 snapshots into the 1m table; the depth worker's entry
+    point, wrapped by the asset below. Raises when the minute has no snapshots."""
+    source_count = _count_source_rows(client, database, minute_start)
+    if source_count == 0:
+        raise RuntimeError(
+            f'No Binance spot depth20 source snapshots found for {minute_start.isoformat()}'
+        )
+    _insert_minute_row(client, database, minute_start)
+    return _count_projection_rows(client, database, minute_start)
+
+
 @asset(
     partitions_def=depth20_minute_partitions,
     group_name='binance_spot_depth20_data',
@@ -102,13 +114,7 @@ def refresh_binance_spot_depth20_1m_origo(
 
     try:
         source_count = _count_source_rows(client, settings.database, minute_start)
-        if source_count == 0:
-            raise RuntimeError(
-                f'No Binance spot depth20 source snapshots found for {minute_start.isoformat()}'
-            )
-
-        _insert_minute_row(client, settings.database, minute_start)
-        inserted_count = _count_projection_rows(client, settings.database, minute_start)
+        inserted_count = refresh_minute(client, settings.database, minute_start)
 
         return {
             'status': 'success',

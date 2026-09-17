@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from dagster import (
+    AssetKey,
     DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
@@ -33,13 +34,14 @@ def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
-    assert 'depth_snapshot_store_source_sensor' in names
-    assert (
-        definitions.defs.get_repository_def()
-        .get_schedule_def('binance_spot_trades_provisional_schedule')
-        .default_status
-        == DefaultScheduleStatus.RUNNING
-    )
+    # The provisional tail and the depth feeds run in workers: no per-minute schedule, no
+    # run-status sensor, one live feed asset per source with a freshness policy.
+    assert 'depth_snapshot_store_source_sensor' not in names
+    assert 'binance_spot_trades_mount_sensor' not in names
+    repository = definitions.defs.get_repository_def()
+    assert not repository.has_schedule_def('binance_spot_trades_provisional_schedule')
+    feed = repository.asset_graph.get(AssetKey('binance_spot_trades_provisional_feed'))
+    assert feed.freshness_policy_or_from_metadata is not None
 
     dormant = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.DORMANT)
     source = bundle.build_source_bundle(dormant)

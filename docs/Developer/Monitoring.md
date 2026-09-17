@@ -14,13 +14,40 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
   from one store into another.
 - **One pane.** Dagit is where an operator looks first. The external asset
   `origo_monitor` carries the five checks the monitor evaluates every minute; the live
-  feed assets carry freshness. If a fact is not visible in Dagit, it is visible in
-  ClickHouse; the monitor's e-mail says which.
+  feed assets (`binance_spot_depth_live_feed`, `<source>_provisional_feed`) carry a
+  five-minute freshness policy the daemon evaluates without a run. If a fact is not
+  visible in Dagit, it is visible in ClickHouse; the monitor's e-mail says which.
 - **One detector.** The monitor runs outside the Dagster process, as its own Compose
   service with its own heartbeat, so it keeps working when the daemon, the queue or the
   webserver is the failure. It stores only a cursor file. It writes every finding into
   Dagit as a check evaluation before it sends an e-mail, and the e-mail says whether that
   write succeeded. No second dashboard, no second alert path.
+
+## The feed workers
+
+The minute paths run outside the Dagster queue as Compose services with heartbeats,
+one tick per minute, restarted by the watchdog when a tick hangs:
+
+- `depth-worker` (`origo.workers.depth`) brings every minute of the last fifteen to
+  completion for depth20 and depth200: raw snapshots from the collector, the 1m
+  projection row and the Arrow chunk, each only when absent. A minute the collector does
+  not serve yet is left for the next tick; a minute that fails stays a candidate for the
+  rest of the lookback and its receipt names the error. The per-minute Dagster jobs stay
+  for operators (backfills, repairs) and nothing schedules them.
+- `provisional-worker` (`origo.workers.provisional`) builds each closed minute of every
+  source with a provisional adapter through the source runtime, oldest missing minute
+  first, then publishes every consumer that pins provisional rows (`mount`) when the
+  pinned state changed, unless a native backfill owns publication. A failing minute is
+  retried with a doubling delay from one minute up to the source's `retry_delay`, at most
+  `retry_count` times, then left to a native run. Canonical-only consumers
+  (`huggingface`) keep their sensors.
+
+Each processed minute and each publication writes one row to `origo.worker_minute_log`
+(`feed`, `series`, `minute`, `rows`, `sha256`, `duration_ms`, `status`, `error_code`,
+`error`); a publication row's `rows` is the number of pinned partitions and its `sha256`
+the pinned state token. Every tick reports the feed's live asset to Dagit with the tick
+minute, the counts and the worker's memory, so the asset's freshness policy is the
+feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 
 ## Where each fact lives
 
@@ -30,6 +57,7 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
 | Did a run fail, which partition | Dagster run storage | Runs view in Dagit; the monitor's `run_failure:<job>` finding names the partitions and runs |
 | Did an asset check fail | Dagster event log | The asset's Checks tab; the monitor's `check_failed:<asset>:<check>` finding |
 | Is a worker alive | `/opt/origo/heartbeats/<feed>.heartbeat` | `origo_monitor:workers_alive`; `python -m origo.workers.<feed> --check` |
+| Is a feed current | Dagster event log (the live feed asset's freshness state) | The asset's freshness in Dagit; `origo_monitor:workers_alive` for the worker behind it |
 | What did a worker do for a minute | `origo.worker_minute_log` | `SELECT * FROM origo.worker_minute_log WHERE minute = ...` |
 | Why did a source build or publication fail | `origo.source_failure_log` | `binance_spot_trades_failure_sensor` output in Dagit; the table itself |
 | What did a container print | `origo.container_log` (14 days) | `SELECT * FROM origo.container_log WHERE service = ... ORDER BY timestamp` |
@@ -50,6 +78,11 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
 4. **The external collectors last.** `origo_monitor:collectors_serving` distinguishes a
    silent collector from a silent worker; probe the collector's `/history` endpoint for
    the last completed minute before touching the worker.
+
+A stale feed with a fresh heartbeat means the worker ticks but every minute fails or
+is skipped: its receipts say which. A stale heartbeat means the container is down or
+stuck: `docker compose ps` shows the healthcheck, and the watchdog's exit is in
+`origo.container_log`.
 
 ## Alerts and the daily digest
 

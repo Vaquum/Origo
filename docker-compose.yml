@@ -121,6 +121,62 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  depth-worker:
+    build: .
+    image: origo-dagster:latest
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:-}
+      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:-}
+      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:-}
+      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:-}
+    volumes:
+      - .:/opt/app
+      - ./arrow_data:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.depth
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.depth", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  provisional-worker:
+    build: .
+    image: origo-dagster:latest
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
+    volumes:
+      - .:/opt/app
+      - ./parquet_data:/opt/parquet
+      - ./arrow_data:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.provisional
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
   dagster-instance:

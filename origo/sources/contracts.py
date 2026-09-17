@@ -216,6 +216,8 @@ class OrchestrationSpec:
     def __post_init__(self) -> None:
         if self.canonical_concurrency < 1:
             raise ValueError('Canonical concurrency must be positive.')
+        if self.provisional_cron != '* * * * *':
+            raise ValueError('Provisional tails run in the provisional worker every minute.')
 
 
 @dataclass(frozen=True)

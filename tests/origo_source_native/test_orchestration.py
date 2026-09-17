@@ -144,8 +144,8 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
             submit(instance, job=job, day=day)
     daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
     runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
-    assert len(runs) == 16
-    assert sum(r.tags['origo/workload'] == 'backfill' for r in runs) == 8
+    assert len(runs) == 18
+    assert sum(r.tags['origo/workload'] == 'backfill' for r in runs) == 10
     assert sum(r.tags['origo/workload'] == 'routine' for r in runs) == 8
     assert runs[0].tags['origo/workload'] == 'routine'
     for job in {r.job_name for r in runs if r.tags['origo/workload'] == 'routine'}:

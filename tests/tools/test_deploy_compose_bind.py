@@ -144,3 +144,63 @@ def test_dagit_bound_to_loopback() -> None:
     dagit = [p for p in _published_ports() if p.service == 'dagit']
     assert len(dagit) == 1
     assert (dagit[0].host_ip, dagit[0].published, dagit[0].target) == (LOOPBACK, '4000', '3000')
+
+
+def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
+    import os
+    import subprocess
+    import textwrap
+
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    start = workflow.index('          prior_workers=()')
+    end_marker = '            "${recovery_args[@]}"'
+    end = workflow.index(end_marker, start) + len(end_marker)
+    recovery = textwrap.dedent(workflow[start:end])
+    # Execute the deployed shell path against Docker responses, including failures.
+    docker = r'''
+set -euo pipefail
+PROJECT_NAME=test
+function docker() {
+    case "$*" in
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
+        printf '%s\n' old-daemon old-ui ;;
+      'inspect --format {{.Id}} {{.Config.Hostname}} old-daemon')
+        printf '%s\n' 'old-daemon daemon-host' ;;
+      'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
+        printf '%s\n' 'old-ui ui-host' ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait clickhouse dagster dagit')
+        return 0 ;;
+      'ps -aq --no-trunc')
+        if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
+        if [ "$RETIREMENT_CASE" != removed ]; then printf '%s\n' old-daemon old-ui; fi
+        printf '%s\n' new-daemon new-ui ;;
+      'inspect --format {{.State.Running}} '*)
+        if [ "$RETIREMENT_CASE" = inspect-error ]; then return 1; fi
+        if [ "$RETIREMENT_CASE" = running ]; then printf true; else printf false; fi ;;
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.orchestration.recovery'*)
+        printf '%s\n' "$@" > "$RECOVERY_CALL" ;;
+      *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
+    esac
+}
+'''
+    for case in ('removed', 'stopped', 'running', 'inventory-error', 'inspect-error'):
+        invocation = tmp_path / case
+        result = subprocess.run(
+            ['bash', '-c', docker + recovery],
+            env={**os.environ, 'RETIREMENT_CASE': case, 'RECOVERY_CALL': str(invocation)},
+            capture_output=True,
+            text=True,
+        )
+        if case.endswith('-error'):
+            assert result.returncode != 0
+            assert not invocation.exists()
+        else:
+            assert result.returncode == 0, result.stderr
+            arguments = invocation.read_text().splitlines()
+            if case == 'running':
+                assert '--retired-worker' not in arguments
+                assert '--legacy-before' not in arguments
+            else:
+                assert arguments.count('--retired-worker') == 2
+                assert 'daemon-host' in arguments and 'ui-host' in arguments
+                assert int(arguments[arguments.index('--legacy-before') + 1]) > 0

@@ -14,6 +14,8 @@ from dagster import (
     build_sensor_context,
 )
 
+from dagster._core.definitions.sensor_definition import SensorExecutionData
+
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources import capacity
 from origo.sources.adapters import binance_daily
@@ -636,3 +638,48 @@ def test_native_retry_reclaims_its_interrupted_comparison_without_manual_cleanup
     assert store.records(canonical_only=True) == (record,)
     assert store.canonical_verified()
     assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
+
+
+def test_retired_failed_publication_keeps_retry_delay_and_attempt_limit(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
+) -> None:
+    store, instance, _ = ready_job
+    spec = replace(
+        store.spec,
+        orchestration=replace(store.spec.orchestration, retry_count=1, retry_delay=3600),
+    )
+    bundle = build_source_bundle(spec)
+    canonical = next(
+        job for job in bundle.jobs if job.name == f'refresh_{spec.key}_canonical_source_job'
+    )
+    assert canonical.execute_in_process(instance=instance, partition_key=DAY).success
+
+    def evaluate(current: SourceBundle) -> SensorExecutionData:
+        sensor = next(s for s in current.sensors if s.name == f'{spec.key}_parquet_sensor')
+        definitions = Definitions(assets=current.assets, jobs=current.jobs, sensors=current.sensors)
+        with build_sensor_context(instance=instance, definitions=definitions) as context:
+            return sensor.evaluate_tick(context)
+
+    request = evaluate(bundle).run_requests[0]
+    publisher = next(job for job in bundle.jobs if job.name == f'publish_{spec.key}_parquet_job')
+    run = instance.create_run_for_job(publisher, tags=request.tags)
+    instance.report_run_failed(run, message='Retry policy fault injection.')
+    identity = request.tags['origo_source_event']
+    store.record_run_receipt(identity, 0, 'FAILURE', run.run_id)
+    instance.delete_run(run.run_id)
+
+    delayed = evaluate(bundle)
+    assert delayed.run_requests == []
+    assert delayed.skip_message == 'Source retry delay has not elapsed.'
+    elapsed = build_source_bundle(
+        replace(spec, orchestration=replace(spec.orchestration, retry_delay=0))
+    )
+    retry = evaluate(elapsed).run_requests[0]
+    assert retry.tags['origo_source_attempt'] == '1'
+    retry_run = instance.create_run_for_job(publisher, tags=retry.tags)
+    instance.report_run_failed(retry_run, message='Retry budget fault injection.')
+    store.record_run_receipt(identity, 1, 'FAILURE', retry_run.run_id)
+    instance.delete_run(retry_run.run_id)
+    exhausted = evaluate(elapsed)
+    assert exhausted.run_requests == []
+    assert exhausted.skip_message.startswith('Automatic source attempts exhausted;')

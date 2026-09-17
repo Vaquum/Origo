@@ -173,10 +173,10 @@ def test_queue_preserves_backfill_and_routine_capacity() -> None:
     coordinator = config['run_coordinator']
     assert coordinator['class'] == 'OrigoQueuedRunCoordinator'
     queue = coordinator['config']
-    assert queue['max_concurrent_runs'] == 16
+    assert queue['max_concurrent_runs'] == 18
     assert queue['dequeue_use_threads'] is True
-    assert queue['dequeue_num_workers'] == 16
+    assert queue['dequeue_num_workers'] == 18
     assert queue['dequeue_interval_seconds'] == 1
-    assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 8} in queue['tag_concurrency_limits']
+    assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 10} in queue['tag_concurrency_limits']
     assert {'key': 'origo/workload', 'value': 'routine', 'limit': 8} in queue['tag_concurrency_limits']
     assert config['run_launcher']['class'] == 'OrigoRunLauncher'

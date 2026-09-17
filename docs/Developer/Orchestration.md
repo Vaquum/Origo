@@ -49,16 +49,31 @@ and backfill/publication runs retain the twenty-six-hour bound; no generated
 backfill runs are unlimited. Automatic source requests honor the declared attempt
 limit and retry delay. Terminal failures remain visible and support native retry.
 
-Deployment performs two recorded recovery passes:
+Deployment performs two recovery passes, each recorded as a Dagster run:
 
-1. `prepare_revisioned_sources_job` classifies outstanding runs with the new
-   native limits and cancels redundant queued copies before the daemon starts.
+1. `python -m origo.sources.bootstrap` classifies outstanding runs with the native
+   limits and cancels redundant queued copies before the daemon starts, then records
+   the counts in `prepare_revisioned_sources_job`.
 2. The deployment workflow captures old container identities, replaces the app,
    and checks Docker for positive confirmation that those containers stopped or
-   were removed. `recover_orchestration_job` then fails runs owned by those retired
-   workers and releases their concurrency claims. Legacy untagged local gRPC runs
-   are covered by a timestamp only when **both** old app containers are confirmed
-   retired. Unknown ownership and current workers are preserved.
+   were removed. `python -m origo.orchestration.recovery` then fails runs owned by
+   those retired workers, releases their concurrency claims, and records the counts
+   in `recover_orchestration_job`. Legacy untagged local gRPC runs are covered by a
+   timestamp only when **both** old app containers are confirmed retired. Unknown
+   ownership and current workers are preserved.
+
+Both passes run in the entry point's `main()` before the recording run exists, never
+inside a captured op. Reporting on a run whose event shard is not yet initialized
+logs through Alembic while the storage lock is held; with root python-log capture
+that log re-enters the same storage and startup deadlocks. The recovery command
+stops with a named phase after `--deadline-seconds` (900 in deployment). The
+container healthcheck passes on state persisted by the previous deployment, so the
+workflow waits for the exec into `dagster-daemon` (at most 900 seconds) before
+running recovery; a bootstrap that has not finished by then fails the deploy with
+the daemon log attached. The compose start waits at most 600 seconds, the deploy
+job at most 45 minutes, and a failed start prints the last 200 daemon log lines. A
+recovery error before the recording run exists appears in that log excerpt, not as
+a Dagster run.
 
 Recovery and launching share a short admission/claim lock. A cancellation marker
 prevents a dequeuer that selected a duplicate just before recovery from starting

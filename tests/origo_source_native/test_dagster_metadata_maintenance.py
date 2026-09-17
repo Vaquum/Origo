@@ -855,7 +855,9 @@ def test_clickhouse_expiry_read_limit_does_not_block_other_parts(
         assert any(
             error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in dry.errors
         )
-        assert any(error.startswith('expiry_lag:metric_log_292:') for error in dry.errors)
+        # Under the tiny bound every rotated partition is oversized: pending, not lagging.
+        assert any(item.startswith('catch_up_deferred:metric_log_292:') for item in dry.pending)
+        assert not any(error.startswith('expiry_lag:metric_log_292:') for error in dry.errors)
         applied = maintain_diagnostics(
             client, limited.model_copy(update={'dry_run': False}), time.monotonic() + 30
         )
@@ -874,7 +876,7 @@ def test_clickhouse_expiry_read_limit_does_not_block_other_parts(
 def test_clickhouse_expiry_lag_and_failure_visibility(
     diagnostic_server: tuple[str, object, Path],
 ) -> None:
-    from datetime import date, datetime
+    from datetime import UTC, date, datetime, timedelta
 
     from origo.maintenance.clickhouse import maintain_diagnostics
 
@@ -915,7 +917,70 @@ def test_clickhouse_expiry_lag_and_failure_visibility(
     assert any(error.startswith('mutation_failed:metric_log_287:') for error in failed.errors)
     client.execute("KILL MUTATION WHERE database='system' AND table='metric_log_287' SYNC")
     client.execute('DROP TABLE system.metric_log_287 SYNC')
-    client.disconnect()
+    # A rotated table's oversized lagging partition drains through per-part expiry: pending
+    # with its expected date. A live table's oversized partition and a free-space shortfall
+    # stay failures. Merges are stopped so only maintenance changes these parts.
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    client.execute(
+        'CREATE TABLE system.metric_log_288 (hostname String DEFAULT hostName(),event_date Date,'
+        'event_time DateTime,CurrentMetric_Query Int64) ENGINE=MergeTree PARTITION BY tuple() '
+        'ORDER BY (event_date,event_time)'
+    )
+    live_partition = row['event_date'][:7].replace('-', '')
+    try:
+        for table in ('metric_log_288', 'metric_log'):
+            client.execute(f'SYSTEM STOP MERGES system.{table}')
+            client.execute(f'SYSTEM STOP TTL MERGES system.{table}')
+        spanning = [
+            (stamp.date(), stamp, 0)
+            for stamp in (now - timedelta(days=20), now - timedelta(days=10))
+        ]
+        for rows in (spanning, spanning[:1]):
+            client.execute(
+                'INSERT INTO system.metric_log_288 (event_date,event_time,CurrentMetric_Query) VALUES',
+                rows,
+            )
+        client.execute(
+            'INSERT INTO system.metric_log (event_date,event_time) VALUES',
+            [(date.fromisoformat(row['event_date']), datetime.fromisoformat(row['event_time']))],
+        )
+        short = maintain_diagnostics(
+            client,
+            POLICY.model_copy(update={'diagnostic_min_free_bytes': 2**62}),
+            time.monotonic() + 30,
+        )
+        assert any(error.startswith('catch_up_disk:metric_log_288:all:') for error in short.errors)
+        assert any(error.startswith('expiry_lag:metric_log_288:') for error in short.errors)
+        bounded = POLICY.model_copy(update={'diagnostic_max_partition_bytes': 64})
+        expiry = (now - timedelta(days=10) + timedelta(days=14)).date().isoformat()
+        dry = maintain_diagnostics(client, bounded, time.monotonic() + 30)
+        assert any(error.startswith('expiry_lag:metric_log:') for error in dry.errors)
+        applied = maintain_diagnostics(
+            client, bounded.model_copy(update={'dry_run': False}), time.monotonic() + 30
+        )
+        assert 'drop_expired_part:metric_log_288:' in applied.scheduled_action
+        assert client.execute('SELECT count() FROM system.metric_log_288') == [(2,)]
+        for report in (dry, applied):
+            assert any(
+                item.startswith('catch_up_deferred:metric_log_288:all:')
+                and item.endswith(':' + expiry)
+                for item in report.pending
+            )
+            assert not any(
+                error.startswith('expiry_lag:metric_log_288:') for error in report.errors
+            )
+            assert any(
+                error.startswith(f'catch_up_capacity:metric_log:{live_partition}:')
+                for error in report.errors
+            )
+            assert not any(error.startswith('catch_up_disk:') for error in report.errors)
+    finally:
+        client.execute(f"ALTER TABLE system.metric_log DROP PARTITION '{live_partition}'")
+        for table in ('metric_log_288', 'metric_log'):
+            client.execute(f'SYSTEM START TTL MERGES system.{table}')
+            client.execute(f'SYSTEM START MERGES system.{table}')
+        client.execute('DROP TABLE system.metric_log_288 SYNC')
+        client.disconnect()
 
 
 def _diagnostic_environment(
@@ -957,6 +1022,10 @@ def test_metadata_budget_and_catch_up_progress(
     healthy = maintain(metadata_instance, POLICY)
     assert_tiny_fixture_exceeds_ratio(healthy)
     assert healthy.last_success_at == 0
+    from origo.maintenance.worker import Outcome
+
+    assert 'pending' in Outcome.model_fields and 'pending' in healthy.model_dump()
+    assert all(isinstance(item, str) for item in healthy.pending)
     assert healthy.report.ingress_runs_per_second == 0
     assert healthy.report.cleanup_runs_per_second == 0
     assert healthy.filesystem_free_bytes > 0

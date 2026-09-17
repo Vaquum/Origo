@@ -223,7 +223,6 @@ class RevisionedSourceSpec:
     components: tuple[ComponentSpec, ...]
     consumers: tuple[ConsumerSpec, ...]
     orchestration: OrchestrationSpec
-    verify: Callable[[Client, str, StateRecord], dict[str, object]] | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
@@ -269,6 +268,5 @@ def retryable_source_error(error: Exception) -> bool:
         'PROVIDER_HTTP_418',
         'PROVIDER_HTTP_429',
         'OFFICIAL_REVISION_CHANGED',
-        'PARITY_REVISION_CHANGED',
         'GENERATION_CHANGED',
     } or error.code.startswith('PROVIDER_HTTP_5')

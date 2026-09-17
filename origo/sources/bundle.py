@@ -194,24 +194,17 @@ def _execute_operation(
     if operation == 'canonical':
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
-        proof = runtime.store.execute(
-            f"""SELECT count() FROM {runtime.store.table('source_active_partitions')} a
-            INNER JOIN {runtime.store.table('source_parity_log')} p
-            USING (source_key, partition_key, revision, build_id, generation)
-            WHERE source_key=%(source)s AND partition_key=%(partition)s AND NOT provisional""",
-            {'source': spec.key, 'partition': config.partition_key},
-        )[0][0]
-        if config.capacity_probe and proof:
-            raise SourceError(
-                'CAPACITY_PROBE_ALREADY_VERIFIED',
-                'Select an unverified day for measurement; use normal backfill configuration to retry a verified day.',
-            )
-        capacity: CapacityMonitor | None = None
         active = any(
             record.partition.key == config.partition_key
             for record in runtime.store.records(canonical_only=True)
         )
-        if not config.reconcile_only or (active and not proof):
+        if config.capacity_probe and active:
+            raise SourceError(
+                'CAPACITY_PROBE_ALREADY_ACTIVE',
+                'Select a day that is not active for measurement; use normal backfill configuration to retry an active day.',
+            )
+        capacity: CapacityMonitor | None = None
+        if not config.reconcile_only:
             try:
                 capacity = CapacityMonitor(
                     runtime, probe=None if config.automatic_capacity else config.capacity_probe
@@ -250,20 +243,14 @@ def _execute_operation(
                     if error.code != 'RETAINED_CONTENT_INVALID':
                         raise
                     runtime.repair(config.partition_key)
-                if runtime.parity_failed(config.partition_key):
-                    runtime.repair(config.partition_key)
-            record, checks = runtime.verify(
-                config.partition_key,
-                force=config.automatic_capacity and capacity is not None and capacity.probe is True,
-            )
+            record = runtime.reconcile(config.partition_key)
             successful = True
         return {
             'partition_key': record.partition.key,
             'revision': record.revision,
             'build_id': str(record.build_id),
             'generation': record.generation,
-            'verified_at': datetime.now(UTC).isoformat(),
-            'legacy_parity': checks,
+            'reconciled_at': datetime.now(UTC).isoformat(),
         }
     if operation == 'provisional' and not config.partition_key:
         adapter = spec.provisional
@@ -291,7 +278,6 @@ def _execute_operation(
         }
     if operation == 'cleanup':
         return {
-            'verification_databases': list(runtime.cleanup_verification(dry_run=config.dry_run)),
             'build_ids': list(runtime.cleanup(dry_run=config.dry_run)),
             'dry_run': config.dry_run,
         }
@@ -331,10 +317,10 @@ def _execute_operation(
         from .prepare import publication_current
 
         consumer = operation.removeprefix('consumer_')
-        if not runtime.store.canonical_verified():
+        if not runtime.store.canonical_ready():
             raise SourceError(
-                'PARITY_EVIDENCE_MISSING',
-                'Canonical state requires independent verification before publication.',
+                'SOURCE_NOT_READY',
+                'Canonical state has incomplete evidence or unresolved partition failures.',
             )
         definition = next(item for item in spec.consumers if item.key == consumer)
         snapshot = runtime.store.snapshot(canonical_only=definition.canonical_only)
@@ -472,7 +458,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 failure_message(error),
             )
             if operation == 'canonical':
-                # A data/configuration verdict holds automatic verification; worker and
+                # A data/configuration verdict holds automatic reconciliation; worker and
                 # transport failures are retried by the sensor after releasing the pool.
                 verdict = (
                     isinstance(error, SourceError)
@@ -840,9 +826,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                     snapshot = store.snapshot(canonical_only=canonical_only)
                     if not snapshot.records:
                         return SkipReason('Source has no eligible active partitions.')
-                    if not store.canonical_verified():
+                    if not store.canonical_ready():
                         return SkipReason(
-                            'Canonical state has not passed independent verification.'
+                            'Canonical state has incomplete evidence or unresolved failures.'
                         )
                     if publication_current(spec, consumer_key, snapshot.token):
                         return SkipReason(
@@ -935,7 +921,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             if not isinstance(partition_key, str):
                 raise TypeError('Source partition key must be a string.')
             observed_operation = (
-                'verification'
+                'integrity'
                 if operation == 'canonical'
                 and (
                     _config_mapping(value).get('reconcile_only') is True

@@ -246,11 +246,6 @@ class SourceStore:
             )
             SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
             WHERE NOT e.provisional OR e.partition_end<=f.frontier""")
-        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_parity_log')} (
-            source_key String, partition_key String, revision String, build_id UUID,
-            generation UInt64, checks_json String, dagster_run_id String,
-            recorded_at DateTime64(6, 'UTC')
-        ) ENGINE = MergeTree ORDER BY (source_key, partition_key, build_id, generation)""")
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_capacity_log')} (
             source_key String, volume_id String, working_set_bytes UInt64,
             dagster_run_id String, successful UInt8, measured_at DateTime64(6, 'UTC')
@@ -453,15 +448,41 @@ class SourceStore:
         records = self.records(canonical_only=canonical_only)
         return Snapshot(state_token(self.spec.key, records), records)
 
-    def canonical_verified(self) -> bool:
-        missing = self.execute(
+    def complete_builds(self) -> tuple[str, dict[str, object]]:
+        """Subquery of builds whose component log carries every declared canonical component."""
+        keys = tuple(
+            component.key for component in self.spec.components if not component.provisional
+        )
+        return (
+            f"""(SELECT source_key, partition_key, revision, build_id
+            FROM {self.table('source_component_log')}
+            WHERE source_key=%(source)s AND component IN %(components)s
+            GROUP BY source_key, partition_key, revision, build_id
+            HAVING uniqExact(component)=%(component_count)s)""",
+            {'source': self.spec.key, 'components': keys, 'component_count': len(keys)},
+        )
+
+    def canonical_ready(self) -> bool:
+        """Every active canonical generation has complete component evidence and no open partition failure."""
+        builds, params = self.complete_builds()
+        incomplete = self.execute(
             f"""SELECT count() FROM {self.table('source_active_partitions')} a
-            LEFT ANTI JOIN {self.table('source_parity_log')} p
-            USING (source_key, partition_key, revision, build_id, generation)
-            WHERE source_key=%(source)s AND NOT provisional""",
+            LEFT ANTI JOIN {builds} c USING (source_key, partition_key, revision, build_id)
+            WHERE a.source_key=%(source)s AND NOT a.provisional""",
+            params,
+        )
+        blocked = self.execute(
+            f"""SELECT count() FROM {self.table('source_active_partitions')} a
+            INNER JOIN (
+                SELECT ifNull(any(partition_key), '') AS partition_key
+                FROM {self.table('source_failure_log')}
+                WHERE source_key=%(source)s AND blocking_scope='PARTITION'
+                GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED'
+            ) f ON a.partition_key=f.partition_key
+            WHERE a.source_key=%(source)s AND NOT a.provisional""",
             {'source': self.spec.key},
         )
-        return missing == [(0,)]
+        return incomplete == [(0,)] and blocked == [(0,)]
 
     def rows(self, component: str, snapshot: Snapshot) -> list[Row]:
         specification = next(item for item in self.spec.components if item.key == component)

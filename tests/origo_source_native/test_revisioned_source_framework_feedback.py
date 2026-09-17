@@ -17,8 +17,8 @@ from dagster import (
 from origo.sources import bundle, capacity, dagit
 from origo.sources.bundle import SourceRunConfig, build_source_bundle
 from origo.sources.contracts import RevisionedSourceSpec, SourceError, StateRecord
+from origo.sources.failures import FailureLog
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.profiles.spot_parity import verify_spot_legacy
 from origo.sources.storage import SourceStore, StorageError
 
 from . import test_revisioned_source_framework_backfill as backfill
@@ -61,23 +61,21 @@ def _observe_failure(env: BackfillEnv, result: backfill.ExecuteInProcessResult) 
         sensor(context)
 
 
-def test_native_completion_does_not_enqueue_another_verification(
+def test_native_completion_does_not_enqueue_another_reconciliation(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime, instance, source = backfill_env
-    original = SourceRuntime.verify
+    original = SourceRuntime.reconcile
     cursors = []
 
-    def during_run(
-        self: SourceRuntime, key: str, *, force: bool = False
-    ) -> tuple[StateRecord, dict[str, object]]:
+    def during_run(self: SourceRuntime, key: str) -> StateRecord:
         requests, cursor = _requests(backfill_env)
         assert all(r.partition_key is None for r in requests)
         cursors.append(cursor)
-        return original(self, key, force=force)
+        return original(self, key)
 
-    monkeypatch.setattr(SourceRuntime, 'verify', during_run)
+    monkeypatch.setattr(SourceRuntime, 'reconcile', during_run)
     asset = next(a for a in source.assets if a.key == AssetKey(ASSET))
     job = Definitions(assets=[asset]).get_implicit_global_asset_job_def()
     result = job.execute_in_process(
@@ -147,7 +145,7 @@ def test_transient_verification_and_cancellation_retry_without_poisoning_ingesti
         assert runtime.store.execute(
             'SELECT operation FROM origo.source_failure_log WHERE dagster_run_id=%(run)s',
             {'run': run_id},
-        ) == [('verification',)]
+        ) == [('integrity',)]
     if failure_mode == 'connection_reset':
         assert not instance.get_run_by_id(run_id).tags.get('origo_source_verdict')
     assert all(r.partition_key is None for r in _requests(backfill_env)[0])
@@ -188,7 +186,7 @@ def test_transient_verification_and_cancellation_retry_without_poisoning_ingesti
         (SourceError('PROVIDER_HTTP_403', 'Provider rejected the request'), 1),
         (SourceError('PROVIDER_HTTP_503', 'Provider unavailable'), 3),
         (SourceError('OFFICIAL_REVISION_CHANGED', 'Republished while building'), 3),
-        (SourceError('PARITY_REVISION_CHANGED', 'Republished before comparison'), 3),
+        (SourceError('GENERATION_CHANGED', 'Activation advanced during reconciliation'), 3),
     ],
 )
 def test_actual_retry_policy_only_retries_explicit_transient_errors(
@@ -272,10 +270,8 @@ def test_cleanup_failures_preserve_primary_verdict(
     runtime, instance, _ = backfill_env
     assert backfill._run(backfill_env, probe=True).success
 
-    def mismatch(
-        self: SourceRuntime, key: str, *, force: bool = False
-    ) -> tuple[StateRecord, dict[str, object]]:
-        raise SourceError('LEGACY_PARITY_MISMATCH', 'Injected parity failure')
+    def invalid(self: SourceRuntime, key: str) -> StateRecord:
+        raise SourceError('RETAINED_CONTENT_INVALID', 'Injected integrity failure')
 
     def failed_sampling(self: capacity.CapacityMonitor, *, successful: bool) -> None:
         self.stop.set()
@@ -283,41 +279,104 @@ def test_cleanup_failures_preserve_primary_verdict(
         raise OSError('Injected capacity persistence failure')
 
     with monkeypatch.context() as patch:
-        patch.setattr(SourceRuntime, 'verify', mismatch)
+        patch.setattr(SourceRuntime, 'reconcile', invalid)
         patch.setattr(capacity.CapacityMonitor, 'finish', failed_sampling)
         result = backfill._run(backfill_env)
     assert not result.success
     assert (
         instance.get_run_by_id(result.run_id).tags['origo_source_verdict']
-        == 'LEGACY_PARITY_MISMATCH'
+        == 'RETAINED_CONTENT_INVALID'
     )
     messages = '\n'.join(e.user_message for e in instance.all_logs(result.run_id))
     assert (
-        'Cleanup failed: capacity measurement' in messages and 'LEGACY_PARITY_MISMATCH' in messages
+        'Cleanup failed: capacity measurement' in messages
+        and 'RETAINED_CONTENT_INVALID' in messages
     )
 
-    class DropFailure:
-        def execute(
-            self, query: str, params: object | None = None, settings: object | None = None
-        ) -> list[tuple[object, ...]]:
-            if query.startswith('DROP DATABASE ') and not query.startswith(
-                'DROP DATABASE IF EXISTS '
-            ):
-                raise OSError('Injected reference cleanup failure')
-            return runtime.store.client.execute(query, params, settings)
 
-        def disconnect(self) -> None:
-            raise AssertionError('Verifier must not disconnect the shared client')
+def test_reconcile_retires_removed_parity_failures(
+    backfill_env: BackfillEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid4
 
+    runtime, instance, source = backfill_env
+    assert backfill._run(backfill_env, probe=True).success
     record = runtime.store.records(canonical_only=True)[0]
-    corrupt = replace(
-        record, component_hashes=tuple((key, '0' * 64) for key, _ in record.component_hashes)
+    runtime.rollback(record, operator='test', reason='Test removed parity retirement')
+    request = next(r for r in _requests(backfill_env)[0] if r.partition_key == DAY)
+    job = next(j for j in source.jobs if j.name == request.job_name)
+    held_id = str(uuid4())
+    held = instance.create_run_for_job(
+        job,
+        run_id=held_id,
+        status=DagsterRunStatus.STARTED,
+        tags={
+            **request.tags,
+            'dagster/partition': DAY,
+            'origo_source_verdict': 'LEGACY_PARITY_MISMATCH',
+            'origo_source_verdict_run': held_id,
+        },
+        run_config=request.run_config,
     )
-    with pytest.raises(SourceError) as error:
-        verify_spot_legacy(DropFailure(), runtime.store.database, corrupt)
-    assert error.value.code == 'LEGACY_PARITY_MISMATCH'
-    assert 'legacy comparison database also failed' in ' '.join(error.value.__notes__)
-    runtime.cleanup_verification(dry_run=False)
+    instance.report_run_failed(held)
+    # Open keys written by the retired comparison policy, and one live ingestion key
+    # from a run that committed nothing.
+    injected = FailureLog(runtime.store, runtime.lock_root, str(uuid4()))
+    injected.record(
+        operation='verification',
+        scope='PARTITION',
+        partition=DAY,
+        error_code='LEGACY_PARITY_MISMATCH',
+    )
+    injected.record(
+        operation='repair', scope='PARTITION', partition=DAY, error_code='RETAINED_PARITY_FAILED'
+    )
+    injected.record(
+        operation='canonical',
+        scope='PARTITION',
+        partition=DAY,
+        error_code='RETAINED_CONTENT_INVALID',
+    )
+    assert not runtime.store.canonical_ready()
+    now = datetime.now(UTC) + timedelta(seconds=61)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            return now
+
+    monkeypatch.setattr(dagit, 'datetime', Clock)
+    released = next(r for r in _requests(backfill_env)[0] if r.partition_key == DAY)
+    assert released.tags['origo_source_retry_attempt'] == '2'
+    result = job.execute_in_process(
+        instance=instance,
+        partition_key=DAY,
+        run_config=released.run_config,
+        tags=released.tags,
+        raise_on_error=False,
+    )
+    assert not result.success
+    assert (
+        instance.get_run_by_id(result.run_id).tags['origo_source_verdict']
+        == 'INGESTION_FAILURE_UNRESOLVED'
+    )
+    assert runtime.store.execute(
+        'SELECT argMax(error_code, event_time), argMax(event_type, event_time), '
+        'argMax(details_json, event_time) FROM origo.source_failure_log '
+        'WHERE partition_key=%(day)s GROUP BY failure_key ORDER BY 1',
+        {'day': DAY},
+    ) == [
+        ('INGESTION_FAILURE_UNRESOLVED', 'FAILED', '{}'),
+        ('LEGACY_PARITY_MISMATCH', 'RECOVERED', '{"reason": "legacy parity removed"}'),
+        ('RETAINED_CONTENT_INVALID', 'FAILED', '{}'),
+        ('RETAINED_PARITY_FAILED', 'RECOVERED', '{"reason": "legacy parity removed"}'),
+    ]
+    assert all(r.partition_key is None for r in _requests(backfill_env)[0])
+    # A successful ingestion retry closes the live key; reconciliation then closes its own.
+    runtime.build(DAY)
+    assert runtime.reconcile(DAY) == runtime.store.records(canonical_only=True)[0]
+    assert runtime.store.canonical_ready()
 
 
 def test_health_checks_report_failures_without_creating_run_storm(

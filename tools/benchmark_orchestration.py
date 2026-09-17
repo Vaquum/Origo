@@ -36,13 +36,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC as SPEC
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
-from tools.benchmark_source_backfill import (
-    _legacy_setup,
-    archive_evidence,
-    clickhouse,
-    throughput,
-    worker,
-)
+from tools.benchmark_source_backfill import archive_evidence, clickhouse, throughput, worker
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,7 +52,7 @@ class Work(Config):
 def verified_archive(context: OpExecutionContext, config: Work) -> None:
     env = {key: value for key, value in os.environ.items() if key.startswith('CLICKHOUSE_')}
     env['CLICKHOUSE_DATABASE'] = config.database
-    result = worker(('revised', config.day, env, config.archives, config.root + '/locks'))
+    result = worker((config.day, env, config.archives, config.root + '/locks'))
     Path(config.root, config.day + '.json').write_text(json.dumps(result))
     context.add_output_metadata({'rows': result['rows'], 'day': config.day})
 
@@ -75,10 +69,11 @@ def routine_ingestion_and_publication(context: OpExecutionContext, config: Work)
     os.environ.update(env)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        _legacy_setup(client, env['CLICKHOUSE_DATABASE'])
-        result = worker(
-            ('legacy', config.day, env, config.archives, config.root + '/routine-locks')
+        store = SourceStore(client, env['CLICKHOUSE_DATABASE'], SPEC)
+        SourceRuntime(SPEC, store, Path(config.root) / 'routine-locks', context.run_id).setup(
+            anchor=datetime.strptime(config.day, '%Y-%m-%d').replace(tzinfo=UTC)
         )
+        result = worker((config.day, env, config.archives, config.root + '/routine-locks'))
         http = clickhouse_connect.get_client(
             host=env['CLICKHOUSE_HOST'],
             port=int(env['CLICKHOUSE_HTTP_PORT']),
@@ -87,7 +82,7 @@ def routine_ingestion_and_publication(context: OpExecutionContext, config: Work)
         )
         try:
             table = http.query_arrow(
-                f'SELECT * FROM {env["CLICKHOUSE_DATABASE"]}.binance_spot_klines ORDER BY datetime'
+                f'SELECT * FROM {store.component_table("time")} ORDER BY datetime'
             )
             destination = Path(config.root, context.run_id + '.parquet')
             pq.write_table(table, destination, compression='zstd')

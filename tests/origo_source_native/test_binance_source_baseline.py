@@ -324,8 +324,8 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
             'exec', str(container), 'cat', '/etc/clickhouse-server/config.d/clickhouse-config.xml'
         )
         assert copied == (REPO_ROOT / 'clickhouse-config.xml').read_text().strip()
-        # The deployed image places profiles in config.d, not users.d: these effective
-        # defaults are the existing runtime contract, not the inactive XML intentions.
+        # Profiles in config.d are inert; only users.d/clickhouse-users.xml changes a
+        # session default. These effective values are the runtime contract.
         expected = {
             'max_memory_usage': '0',
             'max_bytes_before_external_sort': '0',
@@ -352,10 +352,16 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
             'enable_optimize_predicate_expression': '1',
             'allow_experimental_analyzer': '1',
             'async_insert': '0',
+            'log_processors_profiles': '0',
         }
         actual = dict(client.execute('SELECT name, value FROM system.settings'))
         assert {name: actual[name] for name in expected} == expected
         assert str(actual['max_threads']).startswith("'auto(")
+        client.execute('SYSTEM FLUSH LOGS')
+        stored, verbose = client.execute(
+            "SELECT count(), countIf(level > 'Information') FROM system.text_log"
+        )[0]
+        assert stored > 0 and verbose == 0
         server = dict(client.execute('SELECT name, value FROM system.server_settings'))
         assert server['max_server_memory_usage_to_ram_ratio'] == '0.9'
         assert server['background_merges_mutations_concurrency_ratio'] == '2'

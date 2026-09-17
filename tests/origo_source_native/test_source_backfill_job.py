@@ -102,7 +102,7 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
     assert all(state.status.value == 'RUNNING' for state in instance.all_instigator_state())
     assert len(instance.all_instigator_state()) == len(bundle.sensors) + len(bundle.schedules)
-    assert store.canonical_verified()
+    assert store.canonical_ready()
     assert store.execute('SELECT min(successful) FROM origo.source_capacity_log') == [(1,)]
     token = store.snapshot().token
     for consumer in store.spec.consumers:
@@ -195,7 +195,7 @@ def test_unavailable_day_blocks_publication_and_preserves_completed_day(
     )
     assert not result.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
-    assert store.canonical_verified()
+    assert store.canonical_ready()
     assert list((tmp_path / 'files').rglob('latest.json')) == []
     statuses = instance.get_status_by_partition(
         AssetKey(ASSET),
@@ -245,34 +245,21 @@ def test_period_defaults_and_boundaries_are_shared_across_sources() -> None:
                 assert isinstance(operation.partitions_def, DailyPartitionsDefinition)
 
 
-def test_storage_change_remeasures_independent_verification(
+def test_storage_change_remeasures_capacity(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from origo.sources.contracts import Client, StateRecord
-
     store, instance, bundle = ready_job
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
     assert job.execute_in_process(instance=instance, tags=_selection()).success
     previous = store.snapshot()
-    verifier = store.spec.verify
-    assert verifier is not None
-    comparisons = 0
-
-    def counted(client: Client, database: str, record: StateRecord) -> dict[str, object]:
-        nonlocal comparisons
-        comparisons += 1
-        return verifier(client, database, record)
-
     monkeypatch.setattr(
         capacity, '_volumes', lambda runtime: (capacity._Volume('replacement-volume', tmp_path),)
     )
-    updated = build_source_bundle(replace(store.spec, verify=counted))
-    retry = next(job for job in updated.jobs if job.name.startswith('backfill_'))
-    assert retry.execute_in_process(instance=instance, tags=_selection()).success
-    assert comparisons == 1
+    assert job.execute_in_process(instance=instance, tags=_selection()).success
     assert store.snapshot() == previous
+    assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
     assert (
         store.execute(
             "SELECT countIf(successful) FROM origo.source_capacity_log WHERE volume_id='replacement-volume'"
@@ -401,7 +388,7 @@ def test_new_verified_data_automatically_requests_every_consumer(
         job for job in bundle.jobs if job.name == f'refresh_{store.spec.key}_canonical_source_job'
     )
     assert canonical.execute_in_process(instance=instance, partition_key='2020-01-01').success
-    assert store.canonical_verified()
+    assert store.canonical_ready()
     assert store.snapshot().token != previous_token
     definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
     for consumer in store.spec.consumers:
@@ -602,42 +589,6 @@ def test_backfill_worker_loss_in_file_step_has_consumer_scope(
         "SELECT operation,blocking_scope,partition_key,consumer FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
     ) == [('consumer', 'CONSUMER', None, 'arrow')]
     assert job.execute_in_process(instance=instance, partition_key=DAY).success
-
-
-def test_native_retry_reclaims_its_interrupted_comparison_without_manual_cleanup(
-    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
-) -> None:
-    from origo.sources.contracts import Client, StateRecord
-
-    store, instance, _source = ready_job
-    verifier = store.spec.verify
-    assert verifier is not None
-    interrupted = False
-
-    def lose_worker(client: Client, database: str, record: StateRecord) -> dict[str, object]:
-        nonlocal interrupted
-        if not interrupted:
-            interrupted = True
-            client.execute(
-                f'CREATE DATABASE {database}_source_parity_{store.spec.key}_{record.build_id.hex}'
-            )
-            raise OSError('Worker lost after creating its comparison database')
-        return verifier(client, database, record)
-
-    source = build_source_bundle(replace(store.spec, verify=lose_worker))
-    job = next(job for job in source.jobs if job.name.startswith('backfill_'))
-    first = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
-    assert not first.success
-    record = store.records(canonical_only=True)[0]
-    reference = f'origo_source_parity_{store.spec.key}_{record.build_id.hex}'
-    assert store.execute('EXISTS DATABASE ' + reference) == [(1,)]
-    assert not store.canonical_verified()
-    retry = job.execute_in_process(instance=instance, partition_key=DAY, raise_on_error=False)
-    assert retry.success
-    assert store.execute('EXISTS DATABASE ' + reference) == [(0,)]
-    assert store.records(canonical_only=True) == (record,)
-    assert store.canonical_verified()
-    assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
 
 
 def test_retired_failed_publication_keeps_retry_delay_and_attempt_limit(

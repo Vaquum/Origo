@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.9.5
+
+- Remove the one-time legacy parity comparison from the source framework: reconciliation re-checks retained content under the partition lock, repair shares the maintenance fence with builders, publication readiness is component evidence plus open partition failures, and open failures with retired parity codes are closed on reconciliation. Report a rotated diagnostic table's oversized lagging partition as pending until its expected expiry, separate free-space shortfalls from capacity limits, store only Information and above in `text_log`, and disable processor profile logging.
+
 # v3.9.4
 
 - Run startup and deployment recovery before any captured Dagster op exists so cancelling redundant queued runs cannot deadlock event storage; bound the recovery command, the compose start and the deploy job, and print the daemon log on a failed start.

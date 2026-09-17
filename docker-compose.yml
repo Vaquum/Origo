@@ -109,6 +109,10 @@ services:
     environment:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+      # Vector 0.58 leaves ${...} references in its configuration literal unless told to
+      # interpolate them; the configuration is a read-only mount in a container that runs
+      # nothing else.
+      - VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./deploy/vector.yaml:/etc/vector/vector.yaml:ro

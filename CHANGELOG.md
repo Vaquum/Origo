@@ -1,3 +1,7 @@
+# v3.12.1
+
+- Deliver the monitor's alerts and ship the container log: `send_alert` names its sender with a `User-Agent`, because Resend's edge answers the default urllib agent with 403 (Cloudflare error 1010) before the request reaches the API, and the Vector service sets `VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true`, because Vector 0.58 otherwise leaves `${CLICKHOUSE_PASSWORD}` and `${COMPOSE_PROJECT_NAME}` literal in its configuration and the ClickHouse sink fails its healthcheck with 401.
+
 # v3.12.0
 
 - Monitor from outside Dagster: a `monitor` worker evaluates five checks on the external asset `origo_monitor` every minute (Dagster reachable, queue bounded with run and check failures, workers alive from heartbeats and receipts, collectors serving, no error logs), writes the evaluations to Dagit through the webserver, then e-mails new findings through Resend with a per-key cooldown and a daily digest. Vector ships every container's output into `origo.container_log` with the 14-day diagnostic retention. `docs/Developer/Monitoring.md` fixes the model and the investigation order and `AGENTS.md` points to it. The run queue reserves a maintenance lane so `maintain_operational_metadata_job` runs while the backfill and routine lanes are full. The processor profile log is retired in the ClickHouse configuration and rotated or retired log tables are reported with their expiry and dropped whole after retention. The briefing sensors skip days before the book projection exists.

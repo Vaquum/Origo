@@ -128,6 +128,36 @@ def failed_receipts_since(
     ]
 
 
+def failed_attempts(
+    client: Client,
+    database: str,
+    *,
+    feed: str,
+    series: str,
+    minute: datetime | None = None,
+    token: str | None = None,
+) -> tuple[int, datetime | None]:
+    """How many FAILED receipts one unit of work holds for ``feed``/``series`` and when the
+    last one was recorded. A build is identified by its ``minute``; a publication by the
+    pinned state ``token`` it tried to publish (its ``sha256``)."""
+    if (minute is None) == (token is None):
+        raise ValueError('Identify the work by its minute or by its token, not both.')
+    params: dict[str, object] = {'feed': feed, 'series': series}
+    if minute is not None:
+        params['minute'] = _utc(minute).replace(tzinfo=None)
+        identity = 'minute = %(minute)s'
+    else:
+        params['token'] = token
+        identity = 'sha256 = %(token)s'
+    rows = client.execute(
+        f"""SELECT count(), max(recorded_at) FROM {identifier(database)}.{WORKER_MINUTE_LOG}
+        WHERE feed = %(feed)s AND series = %(series)s AND {identity} AND status = 'FAILED'""",
+        params,
+    )
+    count = int(str(rows[0][0]))
+    return count, (_utc(rows[0][1]) if count else None)
+
+
 def error_log_rows_since(
     client: Client, database: str, since: datetime, until: datetime
 ) -> list[LogRow]:

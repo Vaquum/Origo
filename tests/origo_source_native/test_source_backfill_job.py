@@ -3,6 +3,7 @@ import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
 from pathlib import Path
 
 import pytest
@@ -133,10 +134,18 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
             path = root / 'versions' / manifest['version'] / file['path']
             assert hashlib.sha256(path.read_bytes()).hexdigest() == file['sha256']
         sensor = next(
-            sensor
-            for sensor in bundle.sensors
-            if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
+            (
+                sensor
+                for sensor in bundle.sensors
+                if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
+            ),
+            None,
         )
+        # A consumer that pins provisional rows is published by the provisional worker,
+        # not by a sensor; canonical-only consumers keep theirs.
+        assert (sensor is not None) == consumer.canonical_only
+        if sensor is None:
+            continue
         with build_sensor_context(
             instance=instance,
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),
@@ -395,7 +404,7 @@ def test_projection_runs_retire_without_losing_source_history_or_receipts(
         storage.dispose()
 
 
-def test_new_verified_data_automatically_requests_every_consumer(
+def test_new_verified_data_automatically_requests_every_canonical_only_consumer(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:
     store, instance, bundle = ready_job
@@ -409,7 +418,9 @@ def test_new_verified_data_automatically_requests_every_consumer(
     assert store.canonical_ready()
     assert store.snapshot().token != previous_token
     definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
-    for consumer in store.spec.consumers:
+    canonical_only = [consumer for consumer in store.spec.consumers if consumer.canonical_only]
+    assert [consumer.key for consumer in canonical_only] == ['huggingface']
+    for consumer in canonical_only:
         sensor = next(
             sensor
             for sensor in bundle.sensors
@@ -497,28 +508,61 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
             if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
         )
         for consumer in spec.consumers
+        if consumer.canonical_only
     }
+    assert set(sensors) == {'huggingface'}
+    # The consumer that pins provisional rows is the provisional worker's: it publishes
+    # when the pinned state changed and a native backfill does not own publication.
+    from origo.workers.dagster_reader import DagsterReader
+    from origo.workers.provisional import ProvisionalFeed
+    from origo.workers.receipts import ensure_monitoring_tables
+    from origo.workers.report import Reporter
+
+    ensure_monitoring_tables(store.client, 'origo')
+
+    class _NoBackfill:
+        def backfill_owns_publication(self, source_key: str) -> bool:
+            return False
+
+    worker = ProvisionalFeed(
+        [spec],
+        publication_root=tmp_path / 'files',
+        reporter=cast(Reporter, object()),
+        dagster=cast(DagsterReader, _NoBackfill()),
+    )
     provisional_refresh()
-    for consumer in spec.consumers:
+    for consumer in sensors:
         with build_sensor_context(instance=instance, definitions=definitions) as context:
-            requests = sensors[consumer.key].evaluate_tick(context).run_requests
-        if consumer.canonical_only:
-            assert requests == []
-        else:
-            assert len(requests) == 1
-            assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
+            assert sensors[consumer].evaluate_tick(context).run_requests == []
+    manifest_path = tmp_path / 'files' / spec.key / 'mount' / 'latest.json'
+    published, unpublished = worker._publish(store, spec, datetime.now(UTC))
+    assert (published, unpublished) == ([f'{spec.key}:mount'], [])
+    pinned = json.loads(manifest_path.read_text())
+    assert pinned['state_token'] == canonical
+    # The overlapping renderer refreshed the provisional state during the render, so the
+    # files pin a state behind the current one and the next publication follows it; once
+    # the state stops moving, the worker publishes nothing.
+    assert pinned['pinned_token'] not in (canonical, store.snapshot().token)
+    assert worker._publish(store, store.spec, datetime.now(UTC)) == ([f'{spec.key}:mount'], [])
+    pinned = json.loads(manifest_path.read_text())
+    assert pinned['state_token'] == canonical
+    assert pinned['pinned_token'] == store.snapshot().token
+    assert worker._publish(store, store.spec, datetime.now(UTC)) == ([], [])
     canonical_job = next(
         job for job in source.jobs if job.name == f'refresh_{store.spec.key}_canonical_source_job'
     )
     assert canonical_job.execute_in_process(instance=instance, partition_key='2020-01-01').success
     advanced = store.snapshot(canonical_only=True).token
     assert advanced != canonical
-    for consumer in spec.consumers:
+    for consumer in sensors:
         with build_sensor_context(instance=instance, definitions=definitions) as context:
-            requests = sensors[consumer.key].evaluate_tick(context).run_requests
+            requests = sensors[consumer].evaluate_tick(context).run_requests
         assert len(requests) == 1
-        expected = advanced if consumer.canonical_only else store.snapshot().token
-        assert requests[0].tags['origo_source_state_token'] == expected
+        assert requests[0].tags['origo_source_state_token'] == advanced
+    assert worker._publish(store, store.spec, datetime.now(UTC)) == ([f'{spec.key}:mount'], [])
+    pinned = json.loads(manifest_path.read_text())
+    assert pinned['state_token'] == advanced
+    assert pinned['pinned_token'] == store.snapshot().token
 
 
 def test_canonical_day_retires_failed_provisional_intervals_inside_it(
@@ -624,7 +668,7 @@ def test_native_backfill_failure_holds_publication_after_last_range_succeeds(
         assert not backfill_active(instance, spec)
         assert backfill_owns_publication(instance, spec)
         definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
-        for consumer in spec.consumers:
+        for consumer in (item for item in spec.consumers if item.canonical_only):
             sensor = next(
                 s for s in bundle.sensors if s.name == f'{spec.key}_{consumer.key}_sensor'
             )
@@ -749,13 +793,15 @@ def test_retired_failed_publication_keeps_retry_delay_and_attempt_limit(
     assert canonical.execute_in_process(instance=instance, partition_key=DAY).success
 
     def evaluate(current: SourceBundle) -> SensorExecutionData:
-        sensor = next(s for s in current.sensors if s.name == f'{spec.key}_mount_sensor')
+        sensor = next(s for s in current.sensors if s.name == f'{spec.key}_huggingface_sensor')
         definitions = Definitions(assets=current.assets, jobs=current.jobs, sensors=current.sensors)
         with build_sensor_context(instance=instance, definitions=definitions) as context:
             return sensor.evaluate_tick(context)
 
     request = evaluate(bundle).run_requests[0]
-    publisher = next(job for job in bundle.jobs if job.name == f'publish_{spec.key}_mount_job')
+    publisher = next(
+        job for job in bundle.jobs if job.name == f'publish_{spec.key}_huggingface_job'
+    )
     run = instance.create_run_for_job(publisher, tags=request.tags)
     instance.report_run_failed(run, message='Retry policy fault injection.')
     identity = request.tags['origo_source_event']

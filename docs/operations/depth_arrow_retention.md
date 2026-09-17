@@ -33,11 +33,11 @@ The inventory captured Origo image `41fbd596e222729cb6d0b1abff17e504bb208f81`, P
 - Mill `bars.py` maps supported time/dollar bar series; `settings.py` constructs their `latest.arrow` paths.
 - Furnace `prediction_cache.py::_series_klines` and `maker_eval.py` read bar `latest.arrow`; the scheduler uses the same prediction-cache path. Prediction output is in the separate conduit mount.
 - `tdw-arrow-tester` mounts Arrow read-only and runs `sleep infinity`; it has no active file-reading workload.
-- Origo's Dagster/Dagit containers are the publisher/runtime, with the existing minute source and repair jobs. No consumer above requires historical depth chunks for replay. Recheck this inventory if any image or reader changes before rollout.
+- Origo's depth worker (`origo.workers.depth`) publishes each minute's chunk; the Dagster/Dagit containers keep the source and repair jobs for operator backfills. No consumer above requires historical depth chunks for replay. Recheck this inventory if any image or reader changes before rollout.
 
 ## First expiry and acceptance
 
-After preflight and reviewed merge, verify the actual deployed image/version before observing the first normal `build_depth_snapshot_store_arrow_job` for **each** series. Do not add another scheduler or launch duplicate backfill work. Capture each native Dagster run ID, terminal status, expiry log, cutoff, protected path, expired file count, reclaimed logical bytes and sweep duration. Failures must appear in the same run's logs and status.
+After preflight and reviewed merge, verify the actual deployed image/version before observing the first normal `build_depth_snapshot_store_arrow_job` for **each** series (an operator run; the depth worker publishes the current chunks and shares the same retention path). Do not add another scheduler or launch duplicate backfill work. Capture each native Dagster run ID, terminal status, expiry log, cutoff, protected path, expired file count, reclaimed logical bytes and sweep duration. Failures must appear in the same run's logs and status.
 
 Measure filesystem allocated bytes before and after the first sweep; do not substitute logged logical file sizes for physical reclamation. Validate both current manifests and open their targets. Enumerate remaining chunks: no recognized file may precede the recorded cutoff except its protected target. Account for ordinary publication while inspecting the tree.
 

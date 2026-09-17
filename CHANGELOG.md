@@ -1,6 +1,10 @@
-# v3.13.0
+# v3.14.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.13.0
+
+- Run the minute feeds as observed workers: `depth-worker` ingests, projects and publishes the depth20 and depth200 minutes with a lookback catch-up, and `provisional-worker` builds every eligible provisional interval of each source and publishes the consumers that pin provisional rows (`mount`) when the pinned state changed, unless a native backfill owns publication. Both write one receipt per minute to `origo.worker_minute_log`, report partition materializations and a live feed asset to Dagster, keep a heartbeat and are restarted by their watchdog. A failing provisional minute, or a failing publication of one pinned state, is retried with a doubling delay up to the source's `retry_delay`, at most `retry_count` times; publication of a consumer that pins provisional rows follows the same backfill-ownership rule as the consumer sensors. The six per-minute depth schedules, the source's provisional schedule, the depth Arrow run-status sensor and the `mount` sensor are removed; each live feed asset carries a five-minute freshness policy the daemon evaluates without a run or a sensor, and the jobs stay for operator use. `OrchestrationSpec` requires the one-minute provisional cadence. `docs/Developer/Monitoring.md` describes the workers, their receipts and how a stale feed is read.
 
 # v3.12.1
 

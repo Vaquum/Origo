@@ -13,7 +13,9 @@ from dagster import (
     AssetDep,
     AssetExecutionContext,
     AssetMaterialization,
+    AssetSpec,
     AssetsDefinition,
+    FreshnessPolicy,
     BackfillPolicy,
     Config,
     DagsterRunStatus,
@@ -40,6 +42,7 @@ from dagster import (
 )
 from dagster._core.definitions.unresolved_asset_job_definition import UnresolvedAssetJobDefinition
 
+from origo.workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
 from .archive import archive_session
@@ -517,6 +520,11 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
     return execute
 
 
+def live_feed_asset(spec: RevisionedSourceSpec) -> str:
+    """The external asset the provisional worker materializes each tick for ``spec``."""
+    return f'{spec.key}_provisional_feed'
+
+
 def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
     names = {
         'setup': f'create_{spec.key}_source_origo',
@@ -537,6 +545,22 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         }
     )
     assets = tuple(_source_asset(spec, operation, name) for operation, name in names.items())
+    if spec.provisional is not None:
+        assets += (
+            AssetsDefinition(
+                specs=[
+                    AssetSpec(
+                        live_feed_asset(spec),
+                        group_name=spec.key,
+                        description='The provisional worker materializes this every tick; '
+                        'its freshness policy is the feed\'s liveness in Dagit.',
+                        freshness_policy=None
+                        if spec.rollout_stage == RolloutStage.DORMANT
+                        else FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW),
+                    )
+                ]
+            ),
+        )
     job_names = {operation: f'{name}_job' for operation, name in names.items()}
     job_names['canonical'] = f'refresh_{spec.key}_canonical_source_job'
     if spec.provisional is not None:
@@ -766,44 +790,13 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         return RunRequest(run_key=f'{spec.key}:audit:{tick.isoformat()}')
 
     schedules: list[ScheduleDefinition] = [canonical, audit]
-    if spec.provisional is not None:
-
-        @_schedule(
-            name=f'{spec.key}_provisional_schedule',
-            job=definitions.resolve_job_def(job_names['provisional']),
-            cron_schedule=spec.orchestration.provisional_cron,
-            execution_timezone='UTC',
-            default_status=DefaultScheduleStatus.RUNNING
-            if spec.rollout_stage != RolloutStage.DORMANT
-            else DefaultScheduleStatus.STOPPED,
-        )
-        def provisional(
-            context: ScheduleEvaluationContext,
-        ) -> RunRequest | SkipReason | list[RunRequest]:
-            if spec.rollout_stage == RolloutStage.DORMANT:
-                return SkipReason(f'{spec.key} is DORMANT.')
-            adapter = spec.provisional
-            if adapter is None:
-                raise ValueError('No provisional adapter is declared.')
-            now = context.scheduled_execution_time or datetime.now(UTC)
-            settings = get_clickhouse_settings()
-            client = make_clickhouse_client(settings)
-            try:
-                store = SourceStore(client, settings.database, spec)
-                candidates = adapter.candidates(now, store.anchor(), store.active_intervals())
-            finally:
-                client.disconnect()
-            requests: list[RunRequest] = []
-            for partition in candidates:
-                proposed = request('provisional', partition.key, context)
-                if isinstance(proposed, RunRequest):
-                    requests.append(proposed)
-            return requests or SkipReason('No eligible closed intervals require work.')
-
-        schedules.append(provisional)
+    # Provisional tails and the consumers that pin them run in origo.workers.provisional every
+    # minute; the bundle declares the live feed asset that worker materializes each tick, with
+    # the freshness policy the daemon evaluates, and keeps a sensor only for canonical-only
+    # consumers.
 
     sensors: list[SensorDefinition] = []
-    for consumer in spec.consumers:
+    for consumer in (item for item in spec.consumers if item.canonical_only):
 
         def make_consumer_sensor(consumer_key: str, canonical_only: bool) -> SensorDefinition:
             @_sensor(

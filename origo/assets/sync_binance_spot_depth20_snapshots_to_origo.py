@@ -106,6 +106,40 @@ def _count_minute_rows(
     return clickhouse_scalar_int(result)
 
 
+def sync_minute(
+    client: ClickHouseClient,
+    database: str,
+    minute_start: datetime,
+    *,
+    base_url: str,
+    auth_token: str,
+) -> int:
+    """Download one closed minute of depth20 snapshots from the history API and insert it.
+
+    The context-free entry point the depth worker calls every minute; the asset below wraps
+    it for operator-launched runs. Returns the rows present for the minute after the insert
+    and raises when the collector returned no rows.
+    """
+    history = _download_history(base_url, auth_token, minute_start)
+    rows = [_parse_snapshot_line(line) for line in history.splitlines() if line.strip()]
+    if not rows:
+        raise RuntimeError(f'No Binance spot depth20 snapshots found for {minute_start.isoformat()}')
+    client.execute(
+        f"""
+        INSERT INTO {database}.{SNAPSHOTS_TABLE_NAME}
+        (
+            datetime,
+            source_timestamp_ms,
+            last_update_id,
+            bids,
+            asks
+        ) VALUES
+        """,
+        rows,
+    )
+    return _count_minute_rows(client, database, minute_start)
+
+
 @asset(
     partitions_def=depth20_minute_partitions,
     group_name='binance_spot_depth20_data',
@@ -116,33 +150,17 @@ def sync_binance_spot_depth20_snapshots_to_origo(
     context: AssetExecutionContext,
 ) -> dict[str, object]:
     minute_start = minute_start_from_context(context)
-    history = _download_history(
-        _require_env('BINANCE_SPOT_DEPTH20_BASE_URL'),
-        _require_env('BINANCE_SPOT_DEPTH20_AUTH_TOKEN'),
-        minute_start,
-    )
-    rows = [_parse_snapshot_line(line) for line in history.splitlines() if line.strip()]
-    if not rows:
-        raise RuntimeError(f'No Binance spot depth20 snapshots found for {minute_start.isoformat()}')
-
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
 
     try:
-        client.execute(
-            f"""
-            INSERT INTO {settings.database}.{SNAPSHOTS_TABLE_NAME}
-            (
-                datetime,
-                source_timestamp_ms,
-                last_update_id,
-                bids,
-                asks
-            ) VALUES
-            """,
-            rows,
+        inserted_count = sync_minute(
+            client,
+            settings.database,
+            minute_start,
+            base_url=_require_env('BINANCE_SPOT_DEPTH20_BASE_URL'),
+            auth_token=_require_env('BINANCE_SPOT_DEPTH20_AUTH_TOKEN'),
         )
-        inserted_count = _count_minute_rows(client, settings.database, minute_start)
 
         return {
             'status': 'success',

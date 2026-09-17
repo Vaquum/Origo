@@ -427,7 +427,8 @@ def test_depth_retention_covers_repair_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origo_definitions_module: object, series: str
 ) -> None:
     monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path))
-    lookback = getattr(origo_definitions_module, 'DEPTH_SOURCE_LOOKBACK_MINUTES')
+    from origo.workers.depth import DEPTH_SOURCE_LOOKBACK_MINUTES as lookback
+
     assert lookback == 15
     _publish(series, 34)
     for index in range(35 - lookback, 35):
@@ -587,25 +588,20 @@ def test_definitions_wires_depth_snapshot_arrow_job(origo_definitions_module: ob
     assert asset_def.partitions_def.get_partition_keys() == list(DEPTH_SNAPSHOT_SERIES)
 
 
-def test_definitions_wires_depth_snapshot_arrow_sensor_to_depth_source_jobs(
+def test_definitions_keep_the_depth_source_jobs_for_operators_without_a_chunk_sensor(
     origo_definitions_module: object,
 ) -> None:
-    sensor = getattr(origo_definitions_module, 'depth_snapshot_store_source_sensor')
-    arrow_job = getattr(origo_definitions_module, 'build_depth_snapshot_store_arrow_job')
+    defs = getattr(origo_definitions_module, 'defs')
     depth20_job = getattr(origo_definitions_module, 'refresh_binance_spot_depth20_data_source_job')
     depth200_job = getattr(
         origo_definitions_module, 'refresh_binance_spot_depth200_data_source_job'
     )
 
-    assert sensor.name == 'depth_snapshot_store_source_sensor'
-    assert arrow_job.name == 'build_depth_snapshot_store_arrow_job'
     assert depth20_job.name == DEPTH20_SOURCE_JOB_NAME
     assert depth200_job.name == DEPTH200_SOURCE_JOB_NAME
-    assert sensor.job_name == arrow_job.name
-    assert {job.name for job in sensor._monitored_jobs} == {
-        DEPTH20_SOURCE_JOB_NAME,
-        DEPTH200_SOURCE_JOB_NAME,
-    }
+    # The depth worker publishes each minute's chunk itself; nothing watches these jobs.
+    assert not hasattr(origo_definitions_module, 'depth_snapshot_store_source_sensor')
+    assert 'depth_snapshot_store_source_sensor' not in {sensor.name for sensor in defs.sensors}
 
 
 def test_expired_asset_skips_source_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

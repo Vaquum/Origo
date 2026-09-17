@@ -71,7 +71,9 @@ def prepare_source(
         '__repository__',
     )
     names = [f'{spec.key}_{role}_sensor' for role in ('reconciliation', 'failure')]
-    names.extend(f'{spec.key}_{consumer.key}_sensor' for consumer in spec.consumers)
+    names.extend(
+        f'{spec.key}_{consumer.key}_sensor' for consumer in spec.consumers if consumer.canonical_only
+    )
     managed: list[
         tuple[str, InstigatorType, InstigatorStatus, SensorInstigatorData | ScheduleInstigatorData]
     ] = [
@@ -87,8 +89,6 @@ def prepare_source(
         ('canonical', spec.orchestration.canonical_cron),
         ('audit', spec.orchestration.audit_cron),
     ]
-    if spec.provisional is not None:
-        schedules.append(('provisional', spec.orchestration.provisional_cron))
     managed.extend(
         (
             f'{spec.key}_{role}_schedule',

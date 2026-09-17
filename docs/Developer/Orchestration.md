@@ -29,9 +29,12 @@ queues or activate automation in Dagit.
   received after the active run read its input. Identical work is serialized by
   the native identity tag limit. Distinct dates, depth chunk minutes, changed
   source revisions and separate backfill receipts remain distinct work.
-- Depth reconciliation checks outstanding partitions/chunks before emitting run
-  requests. Current-state mirror, audit and metadata schedules skip outstanding
-  work. The central coordinator also catches concurrent submissions from multiple
+- The minute feeds are not runs. The depth worker and the provisional worker
+  (`origo.workers.depth`, `origo.workers.provisional`) process each minute outside the
+  queue, write receipts to `origo.worker_minute_log` and report materializations of
+  their live feed assets; see [Monitoring.md](Monitoring.md). The per-minute depth jobs
+  stay for operator backfills and repairs and nothing schedules them. Current-state
+  mirror, audit and metadata schedules skip outstanding work. The central coordinator also catches concurrent submissions from multiple
   schedules/sensors/UI processes under a shared filesystem admission lock.
 
 A canceled duplicate retains its Dagster record and identifies the retained run.

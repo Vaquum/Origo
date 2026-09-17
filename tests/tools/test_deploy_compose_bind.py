@@ -168,7 +168,7 @@ function docker() {
         printf '%s\n' 'old-daemon daemon-host' ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
         printf '%s\n' 'old-ui ui-host' ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi

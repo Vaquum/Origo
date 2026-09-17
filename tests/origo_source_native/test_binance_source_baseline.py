@@ -22,7 +22,6 @@ from dagster import (
     DailyPartitionsDefinition,
     DefaultScheduleStatus,
     DefaultSensorStatus,
-    RunRequest,
     build_schedule_context,
     materialize,
 )
@@ -507,8 +506,11 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
     repository = definitions.defs.get_repository_def()
     for consumer in ('mount', 'huggingface'):
         assert repository.has_job(f'publish_binance_spot_trades_{consumer}_job')
-        sensor = repository.get_sensor_def(f'binance_spot_trades_{consumer}_sensor')
-        assert sensor.default_status == DefaultSensorStatus.RUNNING
+    # mount pins provisional rows, so the provisional worker publishes it; huggingface is
+    # canonical-only and keeps its sensor.
+    assert not repository.has_sensor_def('binance_spot_trades_mount_sensor')
+    sensor = repository.get_sensor_def('binance_spot_trades_huggingface_sensor')
+    assert sensor.default_status == DefaultSensorStatus.RUNNING
     assert not any(
         'to_huggingface' in name or name in ('build_bar_store_arrow_job', 'publish_binance_spot_klines_to_mount_job')
         for name in (job.name for job in definitions.defs.jobs)

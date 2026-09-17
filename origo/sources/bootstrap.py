@@ -1,5 +1,7 @@
 from dagster import DagsterInstance, OpExecutionContext, in_process_executor, op
 
+from origo.orchestration.recovery import recover_queue
+
 from .backfill import source_job
 from .prepare import configure_source_pool, prepare_source
 from .registry import SOURCE_REGISTRY
@@ -7,6 +9,7 @@ from .registry import SOURCE_REGISTRY
 
 @op
 def prepare_registered_sources(context: OpExecutionContext) -> None:
+    context.log.info('orchestration_recovery queue=%s', recover_queue(context.instance))
     for spec in SOURCE_REGISTRY:
         context.log.info(
             'source=%s phase=preparation_started stage=%s', spec.key, spec.rollout_stage

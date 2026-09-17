@@ -36,6 +36,7 @@ bind-mount it read-only.
 import fcntl
 import hashlib
 import io
+import json
 import os
 import time
 import uuid
@@ -139,6 +140,20 @@ def series_source_files(spec: MountKlineSpec, parquet_root: Path) -> list[Path]:
     if not base.exists():
         return []
     return sorted(base.glob("**/*.parquet"))
+
+
+def source_identity(spec: MountKlineSpec, root: Path) -> str | None:
+    """Content-independent identity of a series' mirror files (path, inode, size, mtime)."""
+    files = sorted((root / spec.sub_path).glob("*/*.parquet"))
+    if not files:
+        return None
+    generations: list[tuple[str, int, int, int]] = []
+    for path in files:
+        stat = path.stat()
+        generations.append(
+            (str(path.relative_to(root)), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        )
+    return hashlib.sha256(json.dumps(generations, separators=(",", ":")).encode()).hexdigest()
 
 
 def _output_columns(family: str) -> tuple[str, ...]:
@@ -342,8 +357,6 @@ def build_bar_store_arrow(
     series = context.partition_key
     spec = spec_for_series(series)
     parquet_root = parquet_source_root()
-
-    from origo.maintenance.arrow_inputs import source_identity
 
     input_identity = source_identity(spec, parquet_root)
     build = build_series_frame(spec, parquet_root)

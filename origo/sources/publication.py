@@ -7,8 +7,18 @@ from .contracts import RevisionedSourceSpec
 
 
 def publication_current(
-    spec: RevisionedSourceSpec, consumer: str, token: str, *, root: Path | None = None
+    spec: RevisionedSourceSpec,
+    consumer: str,
+    token: str,
+    *,
+    root: Path | None = None,
+    pinned: bool = False,
 ) -> bool:
+    """Whether the consumer's manifest publishes ``token`` and every listed file exists.
+
+    ``pinned`` compares the token of the state a renderer pinned (canonical and provisional
+    partitions); otherwise the canonical currency token is compared.
+    """
     path = (
         (root or Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')))
         / spec.key
@@ -21,7 +31,7 @@ def publication_current(
     if not isinstance(manifest, dict):
         raise ValueError('Publication manifest must be an object.')
     data = cast(dict[str, object], manifest)
-    if data.get('state_token') != token:
+    if data.get('pinned_token' if pinned else 'state_token') != token:
         return False
     files = data.get('files')
     version = data.get('version')
@@ -33,6 +43,9 @@ def publication_current(
         relative = cast(dict[str, object], entry).get('path')
         if not isinstance(relative, str):
             raise ValueError('Publication file evidence requires a path.')
-        if not (path.parent / 'versions' / version / relative).is_file():
+        location = Path(relative)
+        if not location.is_absolute():
+            location = path.parent / 'versions' / version / relative
+        if not location.is_file():
             return False
     return True

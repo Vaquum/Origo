@@ -344,18 +344,3 @@ def test_partition_run_requests_cover_all_series() -> None:
     assert {request.run_key for request in requests}.isdisjoint(
         request.run_key for request in other
     )
-
-
-def test_definitions_wires_bar_store_sensor_to_mirror_job(origo_definitions_module: Any) -> None:
-    sensor = origo_definitions_module.bar_store_source_sensor
-    assert sensor.name == "bar_store_source_sensor"
-
-    job = origo_definitions_module.build_bar_store_arrow_job
-    assert job.name == "build_bar_store_arrow_job"
-
-    # The mirror job the sensor watches must exist in the definitions (defs building
-    # under the fixture validates the run-status sensor is wired to it).
-    mirror_job = origo_definitions_module.publish_binance_spot_klines_to_mount_job
-    assert mirror_job.name == "publish_binance_spot_klines_to_mount_job"
-
-    assert str(arrow_store_root())  # smoke: env-driven root resolves

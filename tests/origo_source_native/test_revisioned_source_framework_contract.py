@@ -22,18 +22,18 @@ from origo.sources.registry import SOURCE_REGISTRY
 ROOT = Path(__file__).resolve().parents[2] / 'origo/sources'
 
 
-def test_spot_trades_is_registered_canary_without_changing_existing_definitions(
+def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert SOURCE_REGISTRY == (BINANCE_SPOT_TRADES_SPEC,)
-    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
+    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
     source = bundle.build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
     assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
     assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
-    assert 'publish_binance_spot_klines_to_huggingface_sensor' in names
+    assert 'depth_snapshot_store_source_sensor' in names
     assert (
         definitions.defs.get_repository_def()
         .get_schedule_def('binance_spot_latest_1m_schedule')
@@ -55,9 +55,8 @@ def test_spot_trades_is_registered_canary_without_changing_existing_definitions(
         'repair',
         'cleanup',
         'certify',
-        'consumer_parquet',
-        'consumer_arrow',
-        'consumer_huggingface_shadow',
+        'consumer_mount',
+        'consumer_huggingface',
         'unknown',
     ):
         with pytest.raises(RuntimeError, match='DORMANT'):

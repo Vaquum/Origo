@@ -175,7 +175,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
 ) -> None:
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     monkeypatch.setattr(daily, 'get_response', archive_response)
-    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.LIVE)
     source = bundle.build_source_bundle(spec)
     client = make_clickhouse_client(get_clickhouse_settings())
     runtime = SourceRuntime(
@@ -194,7 +194,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
                 ('audit', 'audit', 'NONE', None, None),
                 ('cleanup', 'cleanup', 'NONE', None, None),
                 ('certify', 'certification', 'PARTITION', '2017-08-17', None),
-                ('consumer_parquet', 'consumer', 'CONSUMER', None, 'parquet'),
+                ('consumer_mount', 'consumer', 'CONSUMER', None, 'mount'),
             ):
                 job = next(
                     value
@@ -203,7 +203,7 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
                 )
                 config = bundle.SourceRunConfig(
                     partition_key='old-state-token' if consumer else (partition or ''),
-                    destination=str(tmp_path / spec.key / 'parquet') if consumer else '',
+                    destination=str(tmp_path / spec.key / 'mount') if consumer else '',
                 )
                 run_config = {'ops': {job.nodes[0].name: {'config': config.model_dump()}}}
                 with monkeypatch.context() as patch:

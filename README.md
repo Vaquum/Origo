@@ -44,7 +44,7 @@ In the wider Vaquum architecture, Origo sits upstream as the data layer. Limen c
 ## Capabilities
 
 - Revisioned spot source: checksum-verified Binance BTCUSDT daily trade archives (from 2017-08-17) built per day into raw trades, 1-minute klines, dollar, volume, tick and dollar-imbalance bars and the aligned 1-minute rows, with provisional minute intervals covering the open day, activation history, reconciliation and rollback
-- Legacy spot table names (`binance_daily_spot_trades`, `binance_spot_klines`, the bar tables and the `_latest` names) served as views over the source's current state
+- Legacy spot table names (`binance_daily_spot_trades`, `binance_spot_klines`, the bar tables and the `_latest` names) served as views over the source's current state; `aligned_1m_exchange` holds the futures pipeline's rows and the spot aligned rows are `binance_spot_trades_aligned_current`
 - Checksum-verified ingestion of USDT-M futures daily trade archives (from 2019-09-08) with ingestion ledgers, atomic daily partition writes through a count-verified staging table promoted with `MOVE PARTITION`, 1-minute klines, the aligned 1-minute table and hourly ledger-driven gap repair
 - Binance spot order-book depth snapshots (20- and 200-level) with 1-minute projections and per-minute reconciliation
 - Hugging Face publishing of twelve kline datasets (six time intervals and six dollar-bar sizes), the local monthly Parquet mirror of the same series and the versioned mmap-ready Arrow bar store, all published by the revisioned spot source from one pinned state

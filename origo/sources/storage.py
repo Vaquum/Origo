@@ -280,6 +280,8 @@ class SourceStore:
             )
         for name in (*_RETIRED_TABLES, *self.spec.retired_tables):
             self._drop_table(name)
+        for name, predicate in self.spec.retired_rows:
+            self._delete_rows(name, predicate)
         for alias, key in self.spec.aliases:
             if self._engine(alias) not in (None, 'View'):
                 self._drop_table(alias)
@@ -295,6 +297,17 @@ class SourceStore:
             {'database': self.database, 'name': table_name(name)},
         )
         return str(rows[0][0]) if rows else None
+
+    def _delete_rows(self, name: str, predicate: str) -> None:
+        """Delete a retired pipeline's rows from a shared table that remains, once."""
+        if self._engine(name) in (None, 'View'):
+            return
+        table = f'{self.database}.{table_name(name)}'
+        if not self.execute(f'SELECT 1 FROM {table} WHERE {predicate} LIMIT 1'):
+            return
+        self.execute(
+            f'ALTER TABLE {table} DELETE WHERE {predicate}', settings={'mutations_sync': 2}
+        )
 
     def _drop_table(self, name: str) -> None:
         # Retired legacy tables exceed the server drop limit; lift it for this statement only.

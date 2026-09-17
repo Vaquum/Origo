@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -38,12 +39,26 @@ def test_real_spot_events_produce_all_declared_components(
         client.execute('CREATE DATABASE IF NOT EXISTS origo')
         for name in ('binance_spot_klines', 'source_parity_log', 'binance_spot_15M_dollar_klines_latest'):
             client.execute(f'CREATE TABLE origo.{name} (x UInt8) ENGINE=MergeTree ORDER BY x')
+        # The shared aligned table keeps the futures pipeline's rows and loses the spot rows
+        # the retired refresh wrote.
+        client.execute(
+            'CREATE TABLE origo.aligned_1m_exchange (dataset_source String, datetime DateTime) '
+            'ENGINE=MergeTree ORDER BY (dataset_source, datetime)'
+        )
+        client.execute(
+            'INSERT INTO origo.aligned_1m_exchange VALUES',
+            [('binance_spot', datetime(2020, 1, 1)), ('binance_futures', datetime(2020, 1, 1))],
+        )
         runtime.setup()
+        assert client.execute('SELECT dataset_source FROM origo.aligned_1m_exchange') == [
+            ('binance_futures',)
+        ]
         engines = dict(
             client.execute("SELECT name, engine FROM system.tables WHERE database = 'origo'")
         )
         assert {engines.get(alias) for alias, _ in spec.aliases} == {'View'}
         assert not {'source_parity_log', *spec.retired_tables} & set(engines)
+        assert engines['aligned_1m_exchange'] == 'MergeTree'
         runtime.setup()
         record = runtime.build(day)
         snapshot = store.snapshot()

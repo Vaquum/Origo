@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -80,9 +82,15 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             frame.write_parquet(target)
         source_root = tmp_path / spec.key
 
-        # The mount consumer owns the public Parquet mirror and Arrow bar store.
+        # The mount consumer owns the public Parquet mirror and Arrow bar store, and sweeps the
+        # staging a render that died left on the mirror.
+        stale = tmp_path / 'parquet' / '.staging-stale'
+        stale.mkdir(parents=True)
+        (stale / 'x.parquet').write_bytes(b'x')
+        os.utime(stale, (time.time() - 7200, time.time() - 7200))
         mount = source_root / 'mount'
         snapshot = runtime.publish('mount', str(mount))
+        assert not stale.exists()
         manifest = json.loads((mount / 'latest.json').read_text())
         assert manifest['state_token'] == snapshot.token == manifest['pinned_token']
         assert list(manifest['month_tokens']) == ['2020-01']

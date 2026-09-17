@@ -234,6 +234,9 @@ class RevisionedSourceSpec:
     # without a successor that setup drops.
     aliases: tuple[tuple[str, str], ...] = ()
     retired_tables: tuple[str, ...] = ()
+    # Rows a retired pipeline wrote into a table it shared with another pipeline, as
+    # (table name, SQL predicate); setup deletes them wherever the table remains.
+    retired_rows: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         identifier(self.key)
@@ -246,6 +249,9 @@ class RevisionedSourceSpec:
                 raise ValueError('An alias must map a distinct table name to a declared component.')
         for name in self.retired_tables:
             table_name(name)
+        for name, predicate in self.retired_rows:
+            if not predicate.strip() or ';' in predicate or table_name(name) in self.retired_tables:
+                raise ValueError('Retired rows need a single predicate on a table that stays.')
         if len(aliases) != len(set(aliases)) or set(aliases) & set(self.retired_tables):
             raise ValueError('Alias and retired table names must be unique.')
         if self.schema_version < 1 or not keys or len(keys) != len(set(keys)):

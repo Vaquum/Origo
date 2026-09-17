@@ -44,6 +44,9 @@ _PATTERN = re.compile(r'\b(' + '|'.join(sorted(_NAMES, key=len, reverse=True)) +
 # The legacy spot table names, served as views over the components that replaced them;
 # aligned_1m_exchange stays a table because the futures pipeline still writes it.
 SPOT_ALIASES = tuple((name, key) for name, key in _NAMES.items() if name != 'aligned_1m_exchange')
+# The rows the retired spot refresh wrote into the futures pipeline's aligned table; the live
+# spot aligned rows are the source's own component.
+SPOT_RETIRED_ROWS = (('aligned_1m_exchange', "dataset_source = 'binance_spot'"),)
 # Legacy tables without a successor: ingestion ledgers, watermarks and the per-interval cuts.
 SPOT_RETIRED_TABLES = (
     'binance_daily_spot_trades_ingestion',

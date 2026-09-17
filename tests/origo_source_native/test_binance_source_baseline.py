@@ -413,6 +413,7 @@ def test_spot_source_identity_contract(
             for label in ('15M', '30M', '60M', '120M', '240M')
         ),
     )
+    assert spec.retired_rows == (('aligned_1m_exchange', "dataset_source = 'binance_spot'"),)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'baseline').setup()

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -48,6 +49,8 @@ from .formulas.spot_series import (
 )
 
 EXPORT_START_DATE = f'{EXPORT_START_YEAR:04d}-{EXPORT_START_MONTH:02d}-01'
+# A staging directory or partial manifest older than this belongs to a render that died.
+ORPHAN_STAGING_MAX_AGE_SECONDS = 3600
 
 
 # The public Hugging Face datasets, exactly as the retired per-series publishers named them.
@@ -151,6 +154,21 @@ def _write_parquet(frame: pl.DataFrame, target: Path) -> None:
     frame.write_parquet(pending, compression='zstd')
     _fsync(pending)
     os.replace(pending, target)
+
+
+def _clear_orphan_staging(parquet_root: Path, root: Path, now: float) -> None:
+    """Remove staging directories and partial manifests a hard-killed render left behind.
+
+    Renders of one consumer are serialized, so anything older than the grace window is an
+    orphan; the window keeps a render that is still running out of reach.
+    """
+    cutoff = now - ORPHAN_STAGING_MAX_AGE_SECONDS
+    for orphan in parquet_root.glob('.staging-*'):
+        if orphan.is_dir() and orphan.stat().st_mtime < cutoff:
+            shutil.rmtree(orphan, ignore_errors=True)
+    for orphan in root.glob('.*.partial-*'):
+        if orphan.is_file() and orphan.stat().st_mtime < cutoff:
+            orphan.unlink(missing_ok=True)
 
 
 def _root(destination: str, reader: SnapshotReader, kind: str) -> tuple[SourceStore, Path]:
@@ -274,7 +292,8 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
     Months render into a staging directory beside the mirror and Arrow versions are written
     without flipping ``latest``; only a render whose canonical state is unchanged moves the
     months into place and activates the versions, so a discarded render leaves the public
-    roots exactly as the manifest describes them.
+    roots exactly as the manifest describes them. Staging left by a render that died is
+    swept once it is older than the grace window.
     """
     store, root = _root(destination, reader, 'mount')
     if not snapshot.records:
@@ -288,6 +307,7 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
     tokens = month_tokens(store.spec.key, snapshot)
     state = store.canonical_token(snapshot)
     parquet_root = parquet_source_root()
+    _clear_orphan_staging(parquet_root, root, time.time())
     staging = parquet_root / f'.staging-{uuid4().hex}'
     files: list[dict[str, object]] = []
     staged_months: dict[Path, Path] = {}

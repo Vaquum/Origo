@@ -57,7 +57,6 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
             raise ValueError('A shadow destination must be absolute and scoped to this source key.')
         if not snapshot.records:
             raise RuntimeError('A consumer cannot publish an empty source state.')
-        canonical_only = kind == 'huggingface_shadow'
         build = root / 'versions' / (snapshot.token + '-' + uuid4().hex)
         build.mkdir(parents=True)
         database = 'source_consumer_' + uuid4().hex
@@ -160,9 +159,11 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
                         target = build / f'{series.name}.arrow'
                         shaped.df.write_ipc(target, compression='uncompressed')
                         files.append(_manifest_file(build, target, shaped.df.height))
+            current = reader.canonical_token(snapshot)
             manifest = {
                 'source_key': reader.spec.key,
-                'state_token': snapshot.token,
+                'state_token': current,
+                'pinned_token': snapshot.token,
                 'active_through': max(
                     record.partition.end for record in snapshot.records
                 ).isoformat(),
@@ -173,9 +174,9 @@ def _renderer(kind: str) -> Callable[[SnapshotReader, Snapshot, str], None]:
             target = build / 'manifest.json'
             target.write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
             _fsync(target)
-            if reader.snapshot(canonical_only=canonical_only).token != snapshot.token:
+            if reader.snapshot(canonical_only=True).token != current:
                 raise RuntimeError(
-                    'Consumer state changed while rendering; staged output remains unpublished.'
+                    'Canonical state changed while rendering; staged output remains unpublished.'
                 )
             pending = root / ('.latest-' + uuid4().hex)
             pending.write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')

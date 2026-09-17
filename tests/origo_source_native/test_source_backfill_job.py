@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -414,6 +414,87 @@ def test_new_verified_data_automatically_requests_every_consumer(
         assert manifest['state_token'] == store.snapshot().token
         with build_sensor_context(instance=instance, definitions=definitions) as context:
             assert sensor.evaluate_tick(context).run_requests == []
+
+
+def test_publication_follows_canonical_state_across_provisional_refreshes(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from origo.sources.contracts import Partition, StateRecord
+    from origo.sources.lifecycle import SourceRuntime
+
+    store, instance, bundle = ready_job
+    SourceRuntime(store.spec, store, tmp_path / 'locks', 'test-setup').setup()
+    generations = iter(range(1, 100))
+
+    def provisional_refresh() -> None:
+        # Scheduling state only: one more partial-day generation after the canonical day.
+        start = datetime(2017, 8, 18, tzinfo=UTC)
+        partition = Partition(
+            start.strftime('%Y-%m-%dT%H:%M:%SZ'), start, start + timedelta(minutes=1), True
+        )
+        store.insert_activation(
+            StateRecord(partition, next(generations), 'provisional', uuid4(), ()),
+            'provisional-refresh',
+        )
+
+    def overlapping(
+        publish: Callable[[SnapshotReader, Snapshot, str], None],
+    ) -> Callable[[SnapshotReader, Snapshot, str], None]:
+        def render(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+            provisional_refresh()
+            publish(reader, snapshot, destination)
+
+        return render
+
+    provisional_refresh()
+    spec = replace(
+        store.spec,
+        consumers=tuple(
+            replace(consumer, publish=overlapping(consumer.publish))
+            for consumer in store.spec.consumers
+        ),
+    )
+    source = build_source_bundle(spec)
+    backfill = next(job for job in source.jobs if job.name.startswith('backfill_'))
+    assert backfill.execute_in_process(instance=instance, tags=_selection()).success
+    canonical = store.snapshot(canonical_only=True).token
+    assert store.snapshot().token != canonical
+    for consumer in spec.consumers:
+        manifest = json.loads(
+            (tmp_path / 'files' / store.spec.key / consumer.key / 'latest.json').read_text()
+        )
+        assert manifest['state_token'] == canonical
+        if consumer.canonical_only:
+            assert manifest['pinned_token'] == canonical
+        else:
+            assert manifest['pinned_token'] not in (canonical, store.snapshot().token)
+    definitions = Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors)
+    sensors = {
+        consumer.key: next(
+            sensor
+            for sensor in source.sensors
+            if sensor.name == f'{store.spec.key}_{consumer.key}_sensor'
+        )
+        for consumer in spec.consumers
+    }
+    provisional_refresh()
+    for sensor in sensors.values():
+        with build_sensor_context(instance=instance, definitions=definitions) as context:
+            assert sensor.evaluate_tick(context).run_requests == []
+    canonical_job = next(
+        job for job in source.jobs if job.name == f'refresh_{store.spec.key}_canonical_source_job'
+    )
+    assert canonical_job.execute_in_process(instance=instance, partition_key='2020-01-01').success
+    advanced = store.snapshot(canonical_only=True).token
+    assert advanced != canonical
+    for sensor in sensors.values():
+        with build_sensor_context(instance=instance, definitions=definitions) as context:
+            requests = sensor.evaluate_tick(context).run_requests
+        assert len(requests) == 1
+        assert requests[0].tags['origo_source_state_token'] == advanced
 
 
 def test_native_backfill_reserves_source_before_worker_starts(tmp_path: Path) -> None:

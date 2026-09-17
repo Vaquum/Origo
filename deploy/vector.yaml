@@ -1,0 +1,45 @@
+# Vector ships every container's stdout and stderr of this Compose project into
+# origo.container_log (created by the monitor worker; daily partitions, 14-day TTL).
+# The Docker socket is mounted read-only and the container runs nothing else.
+sources:
+  containers:
+    type: docker_logs
+    include_labels:
+      - "com.docker.compose.project=${COMPOSE_PROJECT_NAME}"
+
+transforms:
+  shape:
+    type: remap
+    inputs: [containers]
+    source: |
+      service = if exists(.label."com.docker.compose.service") {
+        string!(.label."com.docker.compose.service")
+      } else {
+        string!(.container_name)
+      }
+      message = string!(.message)
+      level = if match(message, r'\b(ERROR|CRITICAL|Traceback)\b|<Error>|<Fatal>') { "ERROR" } else { "INFO" }
+      . = {
+        "timestamp": .timestamp,
+        "service": service,
+        "container": string!(.container_name),
+        "stream": string!(.stream),
+        "level": level,
+        "message": message,
+      }
+
+sinks:
+  clickhouse:
+    type: clickhouse
+    inputs: [shape]
+    endpoint: http://clickhouse:8123
+    database: origo
+    table: container_log
+    auth:
+      strategy: basic
+      user: default
+      password: "${CLICKHOUSE_PASSWORD}"
+    skip_unknown_fields: true
+    date_time_best_effort: true
+    batch:
+      timeout_secs: 5

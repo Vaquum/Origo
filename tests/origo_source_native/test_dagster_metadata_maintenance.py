@@ -803,21 +803,32 @@ def test_clickhouse_expiry_read_limit_does_not_block_other_parts(
         assert any(
             error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in dry.errors
         )
-        # Under the tiny bound every rotated partition is oversized: pending, not lagging.
-        assert any(item.startswith('catch_up_deferred:metric_log_292:') for item in dry.pending)
-        assert not any(error.startswith('expiry_lag:metric_log_292:') for error in dry.errors)
+        # Rotated tables are retired: pending with their drop date, never lagging, and the
+        # read limit does not stop their retirement because part date bounds need no read.
+        for table in tables:
+            assert table in dry.retired
+            assert any(item.startswith(f'retired_drop:{table}:') for item in dry.pending)
+            assert not any(error.startswith(f'expiry_lag:{table}:') for error in dry.errors)
         applied = maintain_diagnostics(
             client, limited.model_copy(update={'dry_run': False}), time.monotonic() + 30
         )
         assert any(
             error.startswith('expiry_bounds_read_limit:metric_log_291:') for error in applied.errors
         )
-        assert applied.scheduled_action.startswith('drop_expired_part:metric_log_292:')
-        assert client.execute('SELECT count() FROM system.metric_log_291') == [(2,)]
-        assert client.execute('SELECT count() FROM system.metric_log_292') == [(0,)]
+        assert applied.scheduled_action == (
+            'drop_retired_table:metric_log_291;drop_retired_table:metric_log_292;'
+        )
+        remaining = {
+            row[0]
+            for row in client.execute(
+                "SELECT name FROM system.tables WHERE database='system' AND name LIKE 'metric_log_29%'"
+            )
+        }
+        assert remaining == set()
+        assert not any('metric_log_29' in item for item in applied.retired)
     finally:
         for table in tables:
-            client.execute(f'DROP TABLE system.{table} SYNC')
+            client.execute(f'DROP TABLE IF EXISTS system.{table} SYNC')
         client.disconnect()
 
 
@@ -845,7 +856,10 @@ def test_clickhouse_expiry_lag_and_failure_visibility(
     )
     report = maintain_diagnostics(client, POLICY, time.monotonic() + 30)
     assert 'metric_log_287' in report.drift
-    assert any(error.startswith('expiry_lag:metric_log_287:') for error in report.errors)
+    # A rotated table is retired: reported with the date it can be dropped, never as lag.
+    assert 'metric_log_287' in report.retired
+    assert any(item.startswith('retired_drop:metric_log_287:') for item in report.pending)
+    assert not any(error.startswith('expiry_lag:metric_log_287:') for error in report.errors)
     assert report.entirely_expired_bytes > 0
     assert client.execute('SELECT count(*) FROM system.metric_log_287') == [(1,)]
     client.execute(
@@ -897,10 +911,11 @@ def test_clickhouse_expiry_lag_and_failure_visibility(
             POLICY.model_copy(update={'diagnostic_min_free_bytes': 2**62}),
             time.monotonic() + 30,
         )
-        assert any(error.startswith('catch_up_disk:metric_log_288:all:') for error in short.errors)
-        assert any(error.startswith('expiry_lag:metric_log_288:') for error in short.errors)
+        assert any(error.startswith('catch_up_disk:metric_log:') for error in short.errors)
+        assert any(error.startswith('expiry_lag:metric_log:') for error in short.errors)
+        assert not any('metric_log_288' in error for error in short.errors)
         bounded = POLICY.model_copy(update={'diagnostic_max_partition_bytes': 64})
-        expiry = (now - timedelta(days=10) + timedelta(days=14)).date().isoformat()
+        expiry = (now - timedelta(days=10) + timedelta(days=15)).date().isoformat()
         dry = maintain_diagnostics(client, bounded, time.monotonic() + 30)
         assert any(error.startswith('expiry_lag:metric_log:') for error in dry.errors)
         applied = maintain_diagnostics(
@@ -909,11 +924,8 @@ def test_clickhouse_expiry_lag_and_failure_visibility(
         assert 'drop_expired_part:metric_log_288:' in applied.scheduled_action
         assert client.execute('SELECT count() FROM system.metric_log_288') == [(2,)]
         for report in (dry, applied):
-            assert any(
-                item.startswith('catch_up_deferred:metric_log_288:all:')
-                and item.endswith(':' + expiry)
-                for item in report.pending
-            )
+            assert 'metric_log_288' in report.retired
+            assert f'retired_drop:metric_log_288:{expiry}' in report.pending
             assert not any(
                 error.startswith('expiry_lag:metric_log_288:') for error in report.errors
             )
@@ -928,6 +940,83 @@ def test_clickhouse_expiry_lag_and_failure_visibility(
             client.execute(f'SYSTEM START TTL MERGES system.{table}')
             client.execute(f'SYSTEM START MERGES system.{table}')
         client.execute('DROP TABLE system.metric_log_288 SYNC')
+        client.disconnect()
+
+
+def test_processors_profile_log_is_retired_at_source(
+    diagnostic_server: tuple[str, object, Path],
+) -> None:
+    from origo.maintenance.clickhouse import DIAGNOSTIC_LOGS, RETIRED_LOGS, maintain_diagnostics
+
+    assert len(DIAGNOSTIC_LOGS) == 17 and 'processors_profile_log' not in DIAGNOSTIC_LOGS
+    assert RETIRED_LOGS == ('processors_profile_log',)
+    client = _diagnostic_client(diagnostic_server)
+    try:
+        client.execute('SYSTEM FLUSH LOGS')
+        tables = {
+            row[0]
+            for row in client.execute("SELECT name FROM system.tables WHERE database='system'")
+        }
+        assert 'processors_profile_log' not in tables
+        report = maintain_diagnostics(client, POLICY, time.monotonic() + 30)
+        assert not any('processors_profile_log' in error for error in report.errors)
+        assert report.retired == ()
+    finally:
+        client.disconnect()
+
+
+def test_retired_suffixed_diagnostic_tables_are_reported_and_dropped_after_retention(
+    diagnostic_server: tuple[str, object, Path],
+) -> None:
+    from datetime import UTC, date, datetime, timedelta
+
+    from origo.maintenance.clickhouse import RETIRED_TABLE_GRACE_DAYS, maintain_diagnostics
+
+    client = _diagnostic_client(diagnostic_server)
+    ddl = (
+        '(hostname String DEFAULT hostName(),event_date Date,event_time DateTime,message String) '
+        'ENGINE=MergeTree PARTITION BY toYYYYMM(event_date) ORDER BY (event_date,event_time)'
+    )
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    old = datetime(2017, 8, 17, 4)
+    try:
+        client.execute(f'CREATE TABLE system.text_log_1 {ddl}')
+        client.execute(f'CREATE TABLE system.processors_profile_log_1 {ddl}')
+        client.execute(
+            'INSERT INTO system.text_log_1 (event_date,event_time,message) VALUES',
+            [(old.date(), old, 'rotated')],
+        )
+        recent = now - timedelta(days=2)
+        client.execute(
+            'INSERT INTO system.processors_profile_log_1 (event_date,event_time,message) VALUES',
+            [(recent.date(), recent, 'retired root')],
+        )
+        dry = maintain_diagnostics(client, POLICY, time.monotonic() + 30)
+        assert {'text_log_1', 'processors_profile_log_1'} <= set(dry.retired)
+        expected_old = (old.date() + timedelta(days=RETIRED_TABLE_GRACE_DAYS)).isoformat()
+        expected_recent = (recent.date() + timedelta(days=RETIRED_TABLE_GRACE_DAYS)).isoformat()
+        assert f'retired_drop:text_log_1:{expected_old}' in dry.pending
+        assert f'retired_drop:processors_profile_log_1:{expected_recent}' in dry.pending
+        assert not any(
+            error.startswith(('expiry_lag:text_log_1', 'catch_up_capacity:text_log_1'))
+            for error in dry.errors
+        )
+        assert not dry.scheduled_action
+        applied = maintain_diagnostics(
+            client, OperationalMetadataMaintenanceConfig(dry_run=False), time.monotonic() + 30
+        )
+        assert 'drop_retired_table:text_log_1;' in applied.scheduled_action
+        assert 'drop_retired_table:processors_profile_log_1;' not in applied.scheduled_action
+        tables = {
+            row[0]
+            for row in client.execute("SELECT name FROM system.tables WHERE database='system'")
+        }
+        assert 'text_log_1' not in tables and 'processors_profile_log_1' in tables
+        assert 'processors_profile_log_1' in applied.retired and 'text_log_1' not in applied.retired
+        assert date.today() < date.fromisoformat(expected_recent)
+    finally:
+        client.execute('DROP TABLE IF EXISTS system.text_log_1 SYNC')
+        client.execute('DROP TABLE IF EXISTS system.processors_profile_log_1 SYNC')
         client.disconnect()
 
 

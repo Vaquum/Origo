@@ -77,10 +77,9 @@
     <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
     <settings>merge_with_ttl_timeout=3600</settings>
   </asynchronous_metric_log>
-  <processors_profile_log>
-    <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
-    <settings>merge_with_ttl_timeout=3600</settings>
-  </processors_profile_log>
+  <!-- Processor profiles are never written (log_processors_profiles=0); the log is retired
+       and its remaining tables drain through the maintenance job. -->
+  <processors_profile_log remove="1"/>
   <latency_log>
     <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
     <settings>merge_with_ttl_timeout=3600</settings>

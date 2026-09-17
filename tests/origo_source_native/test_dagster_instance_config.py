@@ -112,6 +112,26 @@ def test_active_partition_days_covers_in_progress_and_recent_terminal() -> None:
     assert excluded == {date(2024, 1, 1), date(2024, 1, 2)}
 
 
+def test_queue_reserves_a_maintenance_lane() -> None:
+    """19 slots: 10 backfill, 8 routine and one lane only the maintenance job can occupy."""
+    config = _validated_instance_config()
+    coordinator = config['run_coordinator']
+    assert isinstance(coordinator, dict)
+    queue = coordinator['config']
+    assert isinstance(queue, dict)
+    assert (queue['max_concurrent_runs'], queue['dequeue_num_workers']) == (19, 19)
+    limits = {
+        (limit['key'], limit['value']): limit['limit']
+        for limit in queue['tag_concurrency_limits']
+        if isinstance(limit['value'], str)
+    }
+    assert limits == {
+        ('origo/workload', 'backfill'): 10,
+        ('origo/workload', 'routine'): 8,
+        ('origo/workload', 'maintenance'): 1,
+    }
+
+
 def test_source_backfill_pool_and_system_logs_are_configured() -> None:
     import yaml
 
@@ -172,9 +192,9 @@ def test_queue_preserves_backfill_and_routine_capacity() -> None:
     coordinator = config['run_coordinator']
     assert coordinator['class'] == 'OrigoQueuedRunCoordinator'
     queue = coordinator['config']
-    assert queue['max_concurrent_runs'] == 18
+    assert queue['max_concurrent_runs'] == 19
     assert queue['dequeue_use_threads'] is True
-    assert queue['dequeue_num_workers'] == 18
+    assert queue['dequeue_num_workers'] == 19
     assert queue['dequeue_interval_seconds'] == 1
     assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 10} in queue['tag_concurrency_limits']
     assert {'key': 'origo/workload', 'value': 'routine', 'limit': 8} in queue['tag_concurrency_limits']

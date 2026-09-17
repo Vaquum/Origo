@@ -17,6 +17,8 @@ ROUTINE_JOB_TAG = 'origo/routine_job'
 WORKER_TAG = 'origo/worker_container'
 CLAIM_TAG = 'origo/launch_claimed'
 REDUNDANT_TAG = 'origo/redundant_run'
+# The one job with its own queue lane: it must run while backfill and routine lanes are full.
+MAINTENANCE_JOB = 'maintain_operational_metadata_job'
 ACTIVE = [DagsterRunStatus.STARTING, DagsterRunStatus.STARTED, DagsterRunStatus.CANCELING]
 OUTSTANDING = [DagsterRunStatus.QUEUED, *ACTIVE]
 # These tags affect execution. Scheduler timestamps/run keys describe requests,
@@ -55,16 +57,17 @@ def execution_tags(run: DagsterRun) -> dict[str, str]:
         'repair_binance_spot_depth200_projection_job',
         'build_depth_snapshot_store_arrow_job',
         'publish_binance_spot_trades_mount_job',
-        'maintain_operational_metadata_job',
+        MAINTENANCE_JOB,
     }
     daily = re.fullmatch(r'\d{4}-\d{2}-\d{2}', run.tags.get('dagster/partition', '')) is not None
     default_runtime = '1800' if short_job and not bulk else '93600'
     requested_runtime = run.tags.get('dagster/max_runtime', default_runtime)
+    maintenance = run.job_name == MAINTENANCE_JOB and not bulk
     return {
-        WORKLOAD_TAG: 'backfill' if bulk else 'routine',
+        WORKLOAD_TAG: 'maintenance' if maintenance else 'backfill' if bulk else 'routine',
         IDENTITY_TAG: request_identity(run),
-        **({ROUTINE_JOB_TAG: run.job_name} if not bulk else {}),
-        'dagster/priority': '0' if bulk else '200' if daily else '100',
+        **({ROUTINE_JOB_TAG: run.job_name} if not (bulk or maintenance) else {}),
+        'dagster/priority': '300' if maintenance else '0' if bulk else '200' if daily else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,
     }

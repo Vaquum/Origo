@@ -28,6 +28,9 @@ jobs:
       ORIGO_KNOWN_HOSTS: ${{ vars.ORIGO_KNOWN_HOSTS }}
       ORIGO_METADATA_DRY_RUN: ${{ vars.ORIGO_METADATA_DRY_RUN || 'true' }}
       ORIGO_METADATA_MAX_RUNTIME_SECONDS: ${{ vars.ORIGO_METADATA_MAX_RUNTIME_SECONDS || '600' }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ORIGO_ALERT_EMAIL_FROM: ${{ vars.ORIGO_ALERT_EMAIL_FROM || 'onboarding@resend.dev' }}
+      ORIGO_ALERT_EMAIL_TO: ${{ vars.ORIGO_ALERT_EMAIL_TO }}
 
     steps:
       - name: Checkout repository
@@ -41,6 +44,9 @@ jobs:
           test -n "$PROJECT_NAME"
           test -n "$HUGGINGFACE_DATASET_REPO_ID"
           test -n "$ORIGO_KNOWN_HOSTS"
+          test -n "$RESEND_API_KEY"
+          test -n "$ORIGO_ALERT_EMAIL_FROM"
+          test -n "$ORIGO_ALERT_EMAIL_TO"
 
       - name: Set image names
         run: |
@@ -90,6 +96,8 @@ jobs:
           BINANCE_SPOT_DEPTH20_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH20_AUTH_TOKEN }}
           BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
+          RESEND_API_KEY: test-key
+          ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
 
       - name: Start SSH agent
@@ -106,8 +114,9 @@ jobs:
 
       - name: Upload deploy compose file
         run: |
-          ssh "$ORIGO_USER@$ORIGO_HOST" "mkdir -p '$DEPLOY_DIR'"
+          ssh "$ORIGO_USER@$ORIGO_HOST" "mkdir -p '$DEPLOY_DIR/deploy'"
           scp docker-compose.deploy.yml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/docker-compose.deploy.yml"
+          scp deploy/vector.yaml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/vector.yaml"
 
       - name: Deploy updated images
         env:
@@ -142,6 +151,9 @@ jobs:
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
               "ORIGO_METADATA_DRY_RUN": os.environ["ORIGO_METADATA_DRY_RUN"],
               "ORIGO_METADATA_MAX_RUNTIME_SECONDS": os.environ["ORIGO_METADATA_MAX_RUNTIME_SECONDS"],
+              "RESEND_API_KEY": os.environ["RESEND_API_KEY"],
+              "ORIGO_ALERT_EMAIL_FROM": os.environ["ORIGO_ALERT_EMAIL_FROM"],
+              "ORIGO_ALERT_EMAIL_TO": os.environ["ORIGO_ALERT_EMAIL_TO"],
           }
 
           for key, value in values.items():
@@ -178,7 +190,7 @@ jobs:
             prior_workers+=("$(docker inspect --format '{{.Id}} {{.Config.Hostname}}' "$worker")")
           done
           retirement_boundary=$(date +%s)
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
           # so wait for the exec into dagster-daemon before recovery contends for the queue lock.

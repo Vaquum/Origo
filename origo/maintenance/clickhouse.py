@@ -4,6 +4,7 @@ import os
 import re
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from importlib import import_module
@@ -27,7 +28,6 @@ DIAGNOSTIC_LOGS = (
     'part_log',
     'metric_log',
     'asynchronous_metric_log',
-    'processors_profile_log',
     'latency_log',
     'query_metric_log',
     'error_log',
@@ -40,16 +40,28 @@ DIAGNOSTIC_LOGS = (
     's3queue_log',
     'backup_log',
 )
+# Logs the server no longer writes: their tables stay until every part is past retention.
+RETIRED_LOGS = ('processors_profile_log',)
+RETIRED_TABLE_GRACE_DAYS = 15
 
 
 def diagnostic_root(table: str) -> str | None:
     return next(
         (
             root
-            for root in DIAGNOSTIC_LOGS
+            for root in (*DIAGNOSTIC_LOGS, *RETIRED_LOGS)
             if table == root or re.fullmatch(re.escape(root) + r'_[0-9]+', table)
         ),
         None,
+    )
+
+
+def retired_diagnostic_tables(tables: Sequence[str]) -> tuple[str, ...]:
+    """Tables that receive no new rows: rotated ``<root>_N`` copies and retired logs."""
+    return tuple(
+        table
+        for table in tables
+        if table not in DIAGNOSTIC_LOGS and diagnostic_root(table) is not None
     )
 
 
@@ -76,6 +88,7 @@ class DiagnosticInventory:
     errors: tuple[str, ...]
     pending: tuple[str, ...]
     scheduled_action: str = ''
+    retired: tuple[str, ...] = ()
 
 
 def _execute(
@@ -174,6 +187,7 @@ def maintain_diagnostics(
     errors.extend(f'enabled_diagnostic_log_missing:{root}' for root in sorted(missing))
     if not tables:
         raise RuntimeError('No managed diagnostic logs were found.')
+    retired = retired_diagnostic_tables(tables)
     table_parameters = {
         'tables': tuple(tables),
         'lag_days': (config.diagnostic_max_lag_seconds + 86399) // 86400,
@@ -285,14 +299,24 @@ def maintain_diagnostics(
         free = int(
             str(_execute(client, 'SELECT min(free_space) FROM system.disks', deadline)[0][0])
         )
+    # A retired table receives no new rows: it is reported with the date its newest part
+    # passes retention, drains through the per-part drop below and is dropped whole once
+    # every part is older than the grace, so it never counts as lag or capacity failure.
+    retired_expiry: dict[str, date] = {}
+    for (table, partition_id), newest_date in newest_dates.items():
+        if table in retired:
+            expiry = date.fromisoformat(newest_date) + timedelta(days=RETIRED_TABLE_GRACE_DAYS)
+            retired_expiry[table] = max(retired_expiry.get(table, expiry), expiry)
+    for table in retired:
+        pending.append(f'retired_drop:{table}:{retired_expiry.get(table, date.today())}')
     for (table, partition_id), dates in sorted(overdue_parts.items()):
         size = partition_bytes[table, partition_id]
+        if table in retired:
+            if size > config.diagnostic_max_partition_bytes:
+                blocked.add((table, partition_id))
+            continue
         if size > config.diagnostic_max_partition_bytes:
             blocked.add((table, partition_id))
-            if table not in DIAGNOSTIC_LOGS:
-                expiry = date.fromisoformat(newest_dates[table, partition_id]) + timedelta(days=14)
-                pending.append(f'catch_up_deferred:{table}:{partition_id}:{size}:{expiry}')
-                continue
             errors.append(f'catch_up_capacity:{table}:{partition_id}:{size}')
         elif free < config.diagnostic_min_free_bytes + 2 * size:
             blocked.add((table, partition_id))
@@ -301,7 +325,16 @@ def maintain_diagnostics(
     errors.extend(f'expiry_lag:{table}:{oldest_date}' for table, oldest_date in lagging.items())
     action = ''
     busy_tables = {str(row[0]) for row in mutations + merges}
+    if not config.dry_run:
+        for table in retired:
+            if table in busy_tables or time.monotonic() >= deadline - 5:
+                continue
+            if retired_expiry.get(table, date.today()) <= date.today():
+                _execute(client, f'DROP TABLE system.{table} SYNC', deadline)
+                action += f'drop_retired_table:{table};'
     for part in active:
+        if str(part[0]) in retired and f'drop_retired_table:{part[0]};' in action:
+            continue
         if config.dry_run or str(part[0]) in busy_tables or time.monotonic() >= deadline - 5:
             continue
         identity = (str(part[0]), str(part[1]))
@@ -353,6 +386,7 @@ def maintain_diagnostics(
             ),
             tuple(dict.fromkeys(pending + list(observed.pending))),
             action,
+            observed.retired,
         )
     return DiagnosticInventory(
         active_bytes,
@@ -364,6 +398,7 @@ def maintain_diagnostics(
         tuple(errors),
         tuple(pending),
         action,
+        retired,
     )
 
 

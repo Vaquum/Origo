@@ -1,0 +1,355 @@
+{
+ "data": {
+  "assetNodes": [
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "audit_binance_spot_trades_revisions_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "build_binance_spot_trades_canonical_revision_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "build_depth_snapshot_store_arrow"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "certify_binance_spot_trades_source_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "cleanup_binance_spot_trades_revisions_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_aligned_1m_exchange_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_daily_futures_trades_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_futures_klines_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_spot_depth200_1m_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_spot_depth200_snapshots_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_spot_depth20_1m_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_spot_depth20_snapshots_table_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_binance_spot_trades_source_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "create_origo_database"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "insert_daily_binance_futures_trades_to_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": [
+      {
+       "name": "operational_metadata_health"
+      }
+     ]
+    },
+    "assetKey": {
+     "path": [
+      "maintain_operational_metadata"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "publish_binance_spot_trades_huggingface"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "publish_binance_spot_trades_mount"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "publish_btc_briefing_feed"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "publish_btc_briefing_history"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "reconcile_binance_spot_depth200_partition_state_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "reconcile_binance_spot_depth20_partition_state_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": [
+      {
+       "name": "source_health"
+      }
+     ]
+    },
+    "assetKey": {
+     "path": [
+      "reconcile_binance_spot_trades_source_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "refresh_aligned_1m_exchange_from_binance_futures_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "refresh_binance_futures_klines_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "refresh_binance_spot_depth200_1m_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "refresh_binance_spot_depth20_1m_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "repair_binance_spot_trades_source_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "sync_binance_spot_depth200_snapshots_to_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "sync_binance_spot_depth20_snapshots_to_origo"
+     ]
+    }
+   },
+   {
+    "assetChecksOrError": {
+     "__typename": "AssetChecks",
+     "checks": []
+    },
+    "assetKey": {
+     "path": [
+      "sync_binance_spot_trades_provisional_origo"
+     ]
+    }
+   }
+  ]
+ }
+}

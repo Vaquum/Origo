@@ -56,8 +56,7 @@ def execution_tags(run: DagsterRun) -> dict[str, str]:
         'repair_binance_spot_depth200_projection_job',
         'refresh_binance_spot_latest_data_source_job',
         'build_depth_snapshot_store_arrow_job',
-        'build_bar_store_arrow_job',
-        'publish_binance_spot_klines_to_mount_job',
+        'publish_binance_spot_trades_mount_job',
         'maintain_operational_metadata_job',
     }
     daily = re.fullmatch(r'\d{4}-\d{2}-\d{2}', run.tags.get('dagster/partition', '')) is not None

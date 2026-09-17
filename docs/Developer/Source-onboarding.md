@@ -85,8 +85,10 @@ An omitted product or changed meaning requires an explicit reviewed contract
 change, not a smaller declaration that happens to pass the shared job.
 
 The current spot file contract is twelve series: six time intervals and six dollar
-bar sizes. It does not export every database component. Arrow includes its Parquet
-inputs; Hugging Face shadow files retain the legacy 2020 start cutoff. Record the
+bar sizes. It does not export every database component. The `mount` consumer
+owns the Parquet mirror months and the Arrow bar store built from them and refreshes
+the months whose pinned state changed; the `huggingface` consumer uploads the twelve
+public datasets from the canonical state. Both keep the 2020 start cutoff. Record the
 complete series/schema/coverage contract for each added source, including any
 approved difference. The spot adapter stores individual trades: aggregate responses
 locate the REST range, while historicalTrades supplies rows.
@@ -225,11 +227,11 @@ open partition failure.
 
 Backfill runs preserve authoritative source provenance. Standalone consumer jobs are generated into the existing projection-retention allowlist, use a distinct projection-source tag, and preserve durable deduplication receipts before their run history is retired.
 
-The shared `source-publications` volume preserves manifests and files across worker replacement. The CANARY spot specification declares Parquet, Arrow and Hugging Face **shadow** files; this does not upload over the legacy public Hugging Face datasets. Legacy public identities retain their existing owners until the separately approved LIVE routing promotion. CANARY schedules run automatically for new data and audit work; full-history backfills remain an operator partition selection.
+The shared `source-publications` volume preserves manifests across worker replacement. The LIVE spot specification declares two public consumers: `mount` writes the Parquet mirror under `LOCAL_PARQUET_DIR` and the Arrow bar store under `LOCAL_ARROW_DIR`, and `huggingface` uploads the twelve public Hugging Face datasets. Their manifests record which pinned state the public files hold. Schedules run automatically for new data and audit work; full-history backfills remain an operator partition selection.
 
 Dagit reflects the latest reconciled state, not an atomic transaction with ClickHouse. Reconciliation observes failures and repairs missing/stale asset materializations. Its health check must be healthy alongside the backfill result. Fixture tests prove this workflow, not the entire production history; that evidence comes from the operator's selected backfill.
 
-Promotion still requires `zero-bang` approval of the full-history proof and public routing change. Use the source `rollback` operation for a deliberate generation rollback; never overwrite activation history.
+Use the source `rollback` operation for a deliberate generation rollback; never overwrite activation history.
 
 ## Failure scope
 

@@ -6,18 +6,13 @@ from dagster import RunRequest, SkipReason
 
 from origo.definitions import (
     _AssetEventLike,
-    _publish_binance_spot_dollar_klines_to_hf_run_request,
-    _publish_binance_spot_klines_to_hf_run_request,
+    _partitioned_run_request,
     _publish_btc_briefing_history_run_request,
     defs,
 )
 
 PARTITION_KEY = '2024-03-05'
-RUN_KEY_PREFIXES = (
-    'publish_binance_spot_klines_to_hf',
-    'publish_binance_spot_1M_dollar_klines_to_hf',
-    'publish_btc_briefing_history',
-)
+RUN_KEY_PREFIXES = ('publish_btc_briefing_feed', 'publish_btc_briefing_history')
 
 
 @dataclass(frozen=True)
@@ -33,14 +28,7 @@ class _AssetEvent:
 
 def _publish_requests(asset_event: _AssetEvent) -> list[RunRequest | SkipReason]:
     return [
-        _publish_binance_spot_klines_to_hf_run_request(
-            asset_event,
-            run_key_prefix=RUN_KEY_PREFIXES[0],
-        ),
-        _publish_binance_spot_dollar_klines_to_hf_run_request(
-            asset_event,
-            run_key_prefix=RUN_KEY_PREFIXES[1],
-        ),
+        _partitioned_run_request(asset_event, run_key_prefix=RUN_KEY_PREFIXES[0]),
         _publish_btc_briefing_history_run_request(asset_event),
     ]
 
@@ -90,21 +78,14 @@ def test_a_partitionless_materialization_is_skipped() -> None:
 
 def test_existing_publish_sensors_are_unchanged() -> None:
     existing = {
-        'publish_binance_spot_klines_to_huggingface_sensor',
-        'publish_binance_spot_15m_klines_to_huggingface_sensor',
-        'publish_binance_spot_30m_klines_to_huggingface_sensor',
-        'publish_binance_spot_1h_klines_to_huggingface_sensor',
-        'publish_binance_spot_2h_klines_to_huggingface_sensor',
-        'publish_binance_spot_4h_klines_to_huggingface_sensor',
-        'publish_binance_spot_1M_dollar_klines_to_huggingface_sensor',
-        'publish_binance_spot_15M_dollar_klines_to_huggingface_sensor',
-        'publish_binance_spot_30M_dollar_klines_to_huggingface_sensor',
-        'publish_binance_spot_60M_dollar_klines_to_huggingface_sensor',
-        'publish_binance_spot_120M_dollar_klines_to_huggingface_sensor',
-        'publish_binance_spot_240M_dollar_klines_to_huggingface_sensor',
         'publish_btc_briefing_feed_sensor',
         'publish_btc_briefing_history_sensor',
-        'bar_store_source_sensor',
         'depth_snapshot_store_source_sensor',
+        'binance_spot_trades_mount_sensor',
+        'binance_spot_trades_huggingface_sensor',
     }
-    assert existing <= {sensor.name for sensor in defs.sensors}
+    names = {sensor.name for sensor in defs.sensors}
+    assert existing <= names
+    assert not any(
+        'to_huggingface_sensor' in name or name == 'bar_store_source_sensor' for name in names
+    )

@@ -120,7 +120,7 @@ def _run(
 
 
 def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> None:
-    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
+    assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
     assert isinstance(asset.partitions_def, DailyPartitionsDefinition)

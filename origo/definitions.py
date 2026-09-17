@@ -29,7 +29,6 @@ from dagster import (
     RunStatusSensorContext,
     RunStatusSensorDefinition,
     RunsFilter,
-    ScheduleDefinition,
     ScheduleEvaluationContext,
     SkipReason,
     TimeWindowPartitionsDefinition,
@@ -40,49 +39,13 @@ from dagster import (
     schedule,
 )
 
-from .orchestration.policy import has_outstanding, outstanding_configs, outstanding_partitions
+from .orchestration.policy import outstanding_configs, outstanding_partitions
 from .orchestration.recovery import recover_orchestration_job
 
 from .assets.daily_trades_to_origo import (
     DEFAULT_BINANCE_SPOT_DAILY_TRADES_BASE_URL,
     daily_partitions as spot_daily_partitions,
     insert_daily_binance_spot_trades_to_origo,
-)
-from .assets.publish_binance_spot_klines_to_huggingface import (
-    publish_binance_spot_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_15m_klines_to_huggingface import (
-    publish_binance_spot_15m_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_30m_klines_to_huggingface import (
-    publish_binance_spot_30m_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_1h_klines_to_huggingface import (
-    publish_binance_spot_1h_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_2h_klines_to_huggingface import (
-    publish_binance_spot_2h_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_4h_klines_to_huggingface import (
-    publish_binance_spot_4h_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_1M_dollar_klines_to_huggingface import (
-    publish_binance_spot_1M_dollar_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_15M_dollar_klines_to_huggingface import (
-    publish_binance_spot_15M_dollar_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_30M_dollar_klines_to_huggingface import (
-    publish_binance_spot_30M_dollar_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_60M_dollar_klines_to_huggingface import (
-    publish_binance_spot_60M_dollar_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_120M_dollar_klines_to_huggingface import (
-    publish_binance_spot_120M_dollar_klines_to_huggingface,
-)
-from .assets.publish_binance_spot_240M_dollar_klines_to_huggingface import (
-    publish_binance_spot_240M_dollar_klines_to_huggingface,
 )
 from .assets.publish_btc_briefing_feed import publish_btc_briefing_feed
 from .assets.publish_btc_briefing_history import publish_btc_briefing_history
@@ -211,15 +174,7 @@ from .assets.refresh_binance_spot_latest_cuts_origo import (
     refresh_binance_spot_latest_cuts_origo,
 )
 from .assets.cleanup_binance_spot_latest_origo import cleanup_binance_spot_latest_origo
-from .assets.publish_binance_spot_klines_to_mount import (
-    MOUNT_EXPORT_ASSETS,
-    SPECS as MOUNT_EXPORT_SPECS,
-    MountExportConfig,
-)
-from .assets.build_bar_store_arrow import (
-    build_bar_store_arrow,
-    series_store_dir,
-)
+from .assets.build_bar_store_arrow import series_store_dir
 from .assets.build_depth_snapshot_store_arrow import (
     DepthSnapshotStoreConfig,
     LATEST_MANIFEST_NAME,
@@ -482,54 +437,6 @@ reconcile_binance_spot_depth200_partition_state_origo_job = define_asset_job(
     selection=['reconcile_binance_spot_depth200_partition_state_origo'],
 )
 
-publish_binance_spot_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_klines_to_huggingface_job",
-    selection=["publish_binance_spot_klines_to_huggingface"])
-
-publish_binance_spot_15m_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_15m_klines_to_huggingface_job",
-    selection=["publish_binance_spot_15m_klines_to_huggingface"])
-
-publish_binance_spot_30m_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_30m_klines_to_huggingface_job",
-    selection=["publish_binance_spot_30m_klines_to_huggingface"])
-
-publish_binance_spot_1h_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_1h_klines_to_huggingface_job",
-    selection=["publish_binance_spot_1h_klines_to_huggingface"])
-
-publish_binance_spot_2h_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_2h_klines_to_huggingface_job",
-    selection=["publish_binance_spot_2h_klines_to_huggingface"])
-
-publish_binance_spot_4h_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_4h_klines_to_huggingface_job",
-    selection=["publish_binance_spot_4h_klines_to_huggingface"])
-
-publish_binance_spot_1M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_1M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_1M_dollar_klines_to_huggingface"])
-
-publish_binance_spot_15M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_15M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_15M_dollar_klines_to_huggingface"])
-
-publish_binance_spot_30M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_30M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_30M_dollar_klines_to_huggingface"])
-
-publish_binance_spot_60M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_60M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_60M_dollar_klines_to_huggingface"])
-
-publish_binance_spot_120M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_120M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_120M_dollar_klines_to_huggingface"])
-
-publish_binance_spot_240M_dollar_klines_to_huggingface_job = define_asset_job(
-    name="publish_binance_spot_240M_dollar_klines_to_huggingface_job",
-    selection=["publish_binance_spot_240M_dollar_klines_to_huggingface"])
-
 publish_btc_briefing_feed_job = define_asset_job(
     name="publish_btc_briefing_feed_job",
     selection=["publish_btc_briefing_feed"])
@@ -537,45 +444,6 @@ publish_btc_briefing_feed_job = define_asset_job(
 publish_btc_briefing_history_job = define_asset_job(
     name="publish_btc_briefing_history_job",
     selection=["publish_btc_briefing_history"])
-
-# Local Parquet Mirror Jobs
-
-publish_binance_spot_klines_to_mount_job = define_asset_job(
-    name="publish_binance_spot_klines_to_mount_job",
-    selection=MOUNT_EXPORT_ASSETS,
-    executor_def=in_process_executor,
-)
-
-backfill_binance_spot_klines_to_mount_job = define_asset_job(
-    name="backfill_binance_spot_klines_to_mount_job",
-    selection=MOUNT_EXPORT_ASSETS,
-    executor_def=in_process_executor,
-    config=RunConfig(
-        ops={
-            f"export_{spec.name}_to_mount": MountExportConfig(mode="backfill")
-            for spec in MOUNT_EXPORT_SPECS
-        }
-    ),
-)
-
-publish_binance_spot_klines_to_mount_schedule = ScheduleDefinition(
-    name="publish_binance_spot_klines_to_mount_schedule",
-    should_execute=lambda context: not has_outstanding(
-        context.instance, 'publish_binance_spot_klines_to_mount_job'
-    ),
-    job=publish_binance_spot_klines_to_mount_job,
-    cron_schedule="* * * * *",
-    execution_timezone="UTC",
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-
-# Local Arrow Bar Store Jobs
-
-build_bar_store_arrow_job = define_asset_job(
-    name="build_bar_store_arrow_job",
-    selection=[build_bar_store_arrow],
-    executor_def=in_process_executor,
-)
 
 build_depth_snapshot_store_arrow_job = define_asset_job(
     name='build_depth_snapshot_store_arrow_job',
@@ -1033,223 +901,21 @@ def binance_futures_daily_gap_repair_schedule(
     )
 
 
-def _publish_binance_spot_klines_to_hf_run_request(
+def _partitioned_run_request(
     asset_event: _AssetEventLike,
     *,
     run_key_prefix: str,
 ) -> RunRequest | SkipReason:
     if not asset_event.dagster_event:
-        return SkipReason(
-            "No Dagster event was attached to the Origo spot trades materialization."
-        )
+        return SkipReason("No Dagster event was attached to the materialization.")
 
     partition_key = asset_event.dagster_event.partition
     if partition_key is None:
-        return SkipReason("Origo spot trades materialization did not include a partition key.")
+        return SkipReason("The materialization did not include a partition key.")
 
     return RunRequest(
         partition_key=partition_key,
         run_key=f"{run_key_prefix}::{partition_key}::{asset_event.run_id}",
-    )
-
-
-def _publish_binance_spot_dollar_klines_to_hf_run_request(
-    asset_event: _AssetEventLike,
-    *,
-    run_key_prefix: str,
-) -> RunRequest | SkipReason:
-    if not asset_event.dagster_event:
-        return SkipReason(
-            "No Dagster event was attached to the Origo dollar klines materialization."
-        )
-
-    partition_key = asset_event.dagster_event.partition
-    if partition_key is None:
-        return SkipReason("Origo dollar klines materialization did not include a partition key.")
-
-    return RunRequest(
-        partition_key=partition_key,
-        run_key=f"{run_key_prefix}::{partition_key}::{asset_event.run_id}",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_15m_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_15m_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_15m_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_30m_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_30m_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_30m_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_1h_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_1h_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_1h_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_2h_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_2h_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_2h_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
-    job=publish_binance_spot_4h_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_4h_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_4h_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_1M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_1M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_1M_dollar_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_15M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_15M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_15M_dollar_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_30M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_30M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_30M_dollar_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_60M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_60M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_60M_dollar_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_120M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_120M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_120M_dollar_klines_to_hf",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_dollar_klines_origo"),
-    job=publish_binance_spot_240M_dollar_klines_to_huggingface_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-def publish_binance_spot_240M_dollar_klines_to_huggingface_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_binance_spot_dollar_klines_to_hf_run_request(
-        asset_event,
-        run_key_prefix="publish_binance_spot_240M_dollar_klines_to_hf",
     )
 
 
@@ -1262,7 +928,7 @@ def publish_btc_briefing_feed_sensor(
     context: object,
     asset_event: _AssetEventLike,
 ) -> RunRequest | SkipReason:
-    return _publish_binance_spot_klines_to_hf_run_request(
+    return _partitioned_run_request(
         asset_event,
         run_key_prefix="publish_btc_briefing_feed",
     )
@@ -1304,12 +970,6 @@ def publish_btc_briefing_history_sensor(
     return _publish_btc_briefing_history_run_request(asset_event)
 
 
-def _bar_store_on_mirror_success(context: RunStatusSensorContext) -> list[RunRequest]:
-    from .maintenance.arrow_inputs import changed_arrow_requests
-
-    return changed_arrow_requests(context)
-
-
 def _depth_snapshot_store_on_source_success(context: RunStatusSensorContext) -> RunRequest:
     source_partition_key = context.dagster_run.tags.get('dagster/partition')
     if source_partition_key is None:
@@ -1324,15 +984,6 @@ def _depth_snapshot_store_on_source_success(context: RunStatusSensorContext) -> 
 # Built as a RunStatusSensorDefinition (class) rather than the @run_status_sensor
 # decorator: the decorator factory is partially typed in the dagster stubs (would add a
 # pyright error), while the class constructor types cleanly.
-bar_store_source_sensor = RunStatusSensorDefinition(
-    name="bar_store_source_sensor",
-    run_status=DagsterRunStatus.SUCCESS,
-    run_status_sensor_fn=_bar_store_on_mirror_success,
-    monitored_jobs=[publish_binance_spot_klines_to_mount_job],
-    request_job=build_bar_store_arrow_job,
-    default_status=DefaultSensorStatus.RUNNING,
-)
-
 depth_snapshot_store_source_sensor = RunStatusSensorDefinition(
     name='depth_snapshot_store_source_sensor',
     run_status=DagsterRunStatus.SUCCESS,
@@ -1383,22 +1034,8 @@ defs = Definitions(
             cleanup_binance_spot_latest_origo,
             refresh_aligned_1m_exchange_from_binance_spot_origo,
             refresh_aligned_1m_exchange_from_binance_futures_origo,
-            publish_binance_spot_klines_to_huggingface,
-            publish_binance_spot_15m_klines_to_huggingface,
-            publish_binance_spot_30m_klines_to_huggingface,
-            publish_binance_spot_1h_klines_to_huggingface,
-            publish_binance_spot_2h_klines_to_huggingface,
-            publish_binance_spot_4h_klines_to_huggingface,
-            publish_binance_spot_1M_dollar_klines_to_huggingface,
-            publish_binance_spot_15M_dollar_klines_to_huggingface,
-            publish_binance_spot_30M_dollar_klines_to_huggingface,
-            publish_binance_spot_60M_dollar_klines_to_huggingface,
-            publish_binance_spot_120M_dollar_klines_to_huggingface,
-            publish_binance_spot_240M_dollar_klines_to_huggingface,
             publish_btc_briefing_feed,
             publish_btc_briefing_history,
-            *MOUNT_EXPORT_ASSETS,
-            build_bar_store_arrow,
             build_depth_snapshot_store_arrow],
 
     schedules=[
@@ -1413,25 +1050,11 @@ defs = Definitions(
         binance_spot_latest_1m_schedule,
         binance_spot_daily_gap_repair_schedule,
         binance_futures_daily_gap_repair_schedule,
-        publish_binance_spot_klines_to_mount_schedule,
     ],
 
     sensors=[
-        publish_binance_spot_klines_to_huggingface_sensor,
-        publish_binance_spot_15m_klines_to_huggingface_sensor,
-        publish_binance_spot_30m_klines_to_huggingface_sensor,
-        publish_binance_spot_1h_klines_to_huggingface_sensor,
-        publish_binance_spot_2h_klines_to_huggingface_sensor,
-        publish_binance_spot_4h_klines_to_huggingface_sensor,
-        publish_binance_spot_1M_dollar_klines_to_huggingface_sensor,
-        publish_binance_spot_15M_dollar_klines_to_huggingface_sensor,
-        publish_binance_spot_30M_dollar_klines_to_huggingface_sensor,
-        publish_binance_spot_60M_dollar_klines_to_huggingface_sensor,
-        publish_binance_spot_120M_dollar_klines_to_huggingface_sensor,
-        publish_binance_spot_240M_dollar_klines_to_huggingface_sensor,
         publish_btc_briefing_feed_sensor,
         publish_btc_briefing_history_sensor,
-        bar_store_source_sensor,
         depth_snapshot_store_source_sensor,
     ],
 
@@ -1463,23 +1086,8 @@ defs = Definitions(
           repair_binance_spot_depth200_projection_job,
           reconcile_binance_spot_depth20_partition_state_origo_job,
           reconcile_binance_spot_depth200_partition_state_origo_job,
-          publish_binance_spot_klines_to_huggingface_job,
-          publish_binance_spot_15m_klines_to_huggingface_job,
-          publish_binance_spot_30m_klines_to_huggingface_job,
-          publish_binance_spot_1h_klines_to_huggingface_job,
-          publish_binance_spot_2h_klines_to_huggingface_job,
-          publish_binance_spot_4h_klines_to_huggingface_job,
-          publish_binance_spot_1M_dollar_klines_to_huggingface_job,
-          publish_binance_spot_15M_dollar_klines_to_huggingface_job,
-          publish_binance_spot_30M_dollar_klines_to_huggingface_job,
-          publish_binance_spot_60M_dollar_klines_to_huggingface_job,
-          publish_binance_spot_120M_dollar_klines_to_huggingface_job,
-          publish_binance_spot_240M_dollar_klines_to_huggingface_job,
           publish_btc_briefing_feed_job,
           publish_btc_briefing_history_job,
-          publish_binance_spot_klines_to_mount_job,
-          backfill_binance_spot_klines_to_mount_job,
-          build_bar_store_arrow_job,
           build_depth_snapshot_store_arrow_job])
 
 # TODO: Put everything in to same order in all segments of the code

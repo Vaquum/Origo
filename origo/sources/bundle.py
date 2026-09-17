@@ -322,10 +322,13 @@ def _execute_operation(
                 'SOURCE_NOT_READY',
                 'Canonical state has incomplete evidence or unresolved partition failures.',
             )
-        snapshot = runtime.store.snapshot(canonical_only=True)
-        if publication_current(spec, consumer, snapshot.token):
+        definition = next(item for item in spec.consumers if item.key == consumer)
+        snapshot = runtime.store.snapshot(canonical_only=definition.canonical_only)
+        if publication_current(
+            spec, consumer, snapshot.token, pinned=not definition.canonical_only
+        ):
             runtime.failures.recover(operation='consumer', consumer=consumer)
-            return {'state_token': snapshot.token}
+            return {'state_token': runtime.store.snapshot(canonical_only=True).token}
 
         destination = config.destination or str(
             Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
@@ -363,7 +366,8 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation == 'canonical'
         else f'{spec.key}_heavy'
         if operation in ('repair', 'cleanup', 'audit', 'certify')
-        or operation.startswith('consumer_')
+        else f'{spec.key}_{operation}'
+        if operation.startswith('consumer_')
         else None,
         retry_policy=RetryPolicy(
             max_retries=spec.orchestration.retry_count, delay=spec.orchestration.retry_delay
@@ -801,7 +805,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
     sensors: list[SensorDefinition] = []
     for consumer in spec.consumers:
 
-        def make_consumer_sensor(consumer_key: str) -> SensorDefinition:
+        def make_consumer_sensor(consumer_key: str, canonical_only: bool) -> SensorDefinition:
             @_sensor(
                 name=f'{spec.key}_{consumer_key}_sensor',
                 job=definitions.resolve_job_def(job_names['consumer_' + consumer_key]),
@@ -812,24 +816,30 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             def publish(context: SensorEvaluationContext) -> RunRequest | SkipReason:
                 if spec.rollout_stage == RolloutStage.DORMANT:
                     return SkipReason(f'{spec.key} is DORMANT.')
+                from origo.orchestration.policy import has_outstanding
+
                 from .prepare import backfill_owns_publication, publication_current
 
                 if backfill_owns_publication(context.instance, spec):
                     return SkipReason(
                         'The backfill job owns publication until its selected period completes.'
                     )
+                if has_outstanding(context.instance, job_names['consumer_' + consumer_key]):
+                    return SkipReason('A publication run for this consumer is still outstanding.')
                 settings = get_clickhouse_settings()
                 client = make_clickhouse_client(settings)
                 try:
                     store = SourceStore(client, settings.database, spec)
-                    snapshot = store.snapshot(canonical_only=True)
-                    if not snapshot.records:
+                    if not store.snapshot(canonical_only=True).records:
                         return SkipReason('Source has no eligible active partitions.')
                     if not store.canonical_ready():
                         return SkipReason(
                             'Canonical state has incomplete evidence or unresolved failures.'
                         )
-                    if publication_current(spec, consumer_key, snapshot.token):
+                    snapshot = store.snapshot(canonical_only=canonical_only)
+                    if publication_current(
+                        spec, consumer_key, snapshot.token, pinned=not canonical_only
+                    ):
                         return SkipReason(
                             'Declared files already publish the current source state.'
                         )
@@ -839,7 +849,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
 
             return publish
 
-        sensors.append(make_consumer_sensor(consumer.key))
+        sensors.append(make_consumer_sensor(consumer.key, consumer.canonical_only))
 
     @_failure_sensor(
         name=f'{spec.key}_failure_sensor',

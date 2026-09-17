@@ -592,19 +592,6 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
             arrow.series_store_dir(name) / arrow.LATEST_NAME
             == Path('/opt/arrow') / name / 'latest.arrow'
         )
-        _assert_asset(f'export_{name}_to_mount', 'binance_local_parquet', set())
-    exports = {f'export_{s[0]}_to_mount' for s in series}
-    for name in (
-        'publish_binance_spot_klines_to_mount_job',
-        'backfill_binance_spot_klines_to_mount_job',
-    ):
-        _assert_job(name, exports)
-    _assert_job('build_bar_store_arrow_job', {'build_bar_store_arrow'})
-    _assert_schedule(
-        'publish_binance_spot_klines_to_mount_schedule',
-        'publish_binance_spot_klines_to_mount_job',
-        '* * * * *',
-    )
     for fn, size, defaults in (
         (
             rollups.time_month,
@@ -639,47 +626,24 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
         assert {
             n: p.default for n, p in parameters.items() if p.default is not inspect.Parameter.empty
         } == defaults
+    from origo.sources.profiles.spot_consumers import HUGGINGFACE_DATASETS
+
+    repository = definitions.defs.get_repository_def()
+    for consumer in ('mount', 'huggingface'):
+        assert repository.has_job(f'publish_binance_spot_trades_{consumer}_job')
+        sensor = repository.get_sensor_def(f'binance_spot_trades_{consumer}_sensor')
+        assert sensor.default_status == DefaultSensorStatus.RUNNING
+    assert not any(
+        'to_huggingface' in name or name in ('build_bar_store_arrow_job', 'publish_binance_spot_klines_to_mount_job')
+        for name in (job.name for job in definitions.defs.jobs)
+    )
     for family, resolutions in (('time', _TIME_SERIES), ('dollar', _DOLLAR_SERIES)):
-        for label, size in resolutions:
-            suffix = ('' if label == '1m' else f'{label}_') + (
-                'dollar_' if family == 'dollar' else ''
-            )
-            name = f'publish_binance_spot_{suffix}klines_to_huggingface'
-            module = importlib.import_module(f'origo.assets.{name}')
-            _assert_asset(name, 'binance_data', set(), '2017-08-17')
-            _assert_job(f'{name}_job', {name})
-            sensor = definitions.defs.get_repository_def().get_sensor_def(f'{name}_sensor')
-            assert sensor.default_status == DefaultSensorStatus.RUNNING
-            assert sensor.minimum_interval_seconds == 30
-            assert sensor.asset_key == AssetKey(
-                f'refresh_binance_spot_{"dollar_" if family == "dollar" else ""}klines_origo'
-            )
-            assert sensor.job_name == f'{name}_job'
-            helper = f'publish_binance_spot_{"dollar_" if family == "dollar" else ""}kline_snapshot_to_huggingface'
-            publish = Mock(return_value={})
-            with monkeypatch.context() as patch:
-                patch.setattr(module, helper, publish)
-                getattr(module, name).op.compute_fn.decorated_fn(Mock())
-            kwargs = publish.call_args.kwargs
-            repo_suffix = f'{label}_{"dollar_" if family == "dollar" else ""}klines'
-            assert kwargs['default_repo_id'] == f'vaquum/binance_btcusdt_{repo_suffix}'
-            assert kwargs['repo_id_env'] == (
-                'HUGGINGFACE_DATASET_REPO_ID' if label == '1m' else None
-            )
-            assert (
-                kwargs['file_prefix']
-                == f'btcusdt_{label}_{"dollar_" if family == "dollar" else ""}kline_20200101_to_'
-            )
-            assert kwargs['dollar_size' if family == 'dollar' else 'kline_size_seconds'] == (
-                size * 1_000_000.0 if family == 'dollar' else size * 60
-            )
-            event = Mock(run_id='baseline-run', dagster_event=Mock(partition='2024-01-01'))
-            (request,) = sensor._asset_materialization_fn(Mock(), event)
-            assert isinstance(request, RunRequest)
-            assert (
-                request.run_key
-                == f'publish_binance_spot_{suffix}klines_to_hf::2024-01-01::baseline-run'
-            )
+        for label, _ in resolutions:
+            dollar = 'dollar_' if family == 'dollar' else ''
+            repo_id, repo_env, prefix, _resolution = HUGGINGFACE_DATASETS[f'{family}_{label}']
+            assert repo_id == f'vaquum/binance_btcusdt_{label}_{dollar}klines'
+            assert repo_env == ('HUGGINGFACE_DATASET_REPO_ID' if label == '1m' else None)
+            assert prefix == f'btcusdt_{label}_{dollar}kline_20200101_to_'
 
 
 def test_futures_source_identity_contract(

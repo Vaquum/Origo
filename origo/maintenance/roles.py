@@ -9,27 +9,12 @@ from origo.sources.registry import SOURCE_REGISTRY
 PROJECTION_JOBS = frozenset(
     {
         'maintain_operational_metadata_job',
-        'build_bar_store_arrow_job',
         'build_depth_snapshot_store_arrow_job',
-        'publish_binance_spot_klines_to_mount_job',
-        'backfill_binance_spot_klines_to_mount_job',
         'publish_btc_briefing_feed_job',
         'publish_btc_briefing_history_job',
         'backfill_binance_spot_dollar_klines_origo_job',
         'repair_binance_spot_depth20_projection_job',
         'repair_binance_spot_depth200_projection_job',
-        'publish_binance_spot_klines_to_huggingface_job',
-        'publish_binance_spot_15m_klines_to_huggingface_job',
-        'publish_binance_spot_30m_klines_to_huggingface_job',
-        'publish_binance_spot_1h_klines_to_huggingface_job',
-        'publish_binance_spot_2h_klines_to_huggingface_job',
-        'publish_binance_spot_4h_klines_to_huggingface_job',
-        'publish_binance_spot_1M_dollar_klines_to_huggingface_job',
-        'publish_binance_spot_15M_dollar_klines_to_huggingface_job',
-        'publish_binance_spot_30M_dollar_klines_to_huggingface_job',
-        'publish_binance_spot_60M_dollar_klines_to_huggingface_job',
-        'publish_binance_spot_120M_dollar_klines_to_huggingface_job',
-        'publish_binance_spot_240M_dollar_klines_to_huggingface_job',
     }
 ) | frozenset(
     f'publish_{spec.key}_{consumer.key}_job'

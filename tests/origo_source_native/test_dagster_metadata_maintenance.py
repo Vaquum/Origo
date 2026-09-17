@@ -180,7 +180,7 @@ def test_instigation_queries_probe_repository_by_run_id(
 ) -> None:
     instance = metadata_instance
     name = (
-        'bar_store_source_sensor'
+        'depth_snapshot_store_source_sensor'
         if tag_key == 'dagster/sensor_name'
         else 'daily_binance_spot_pipeline_schedule'
     )
@@ -495,51 +495,6 @@ def _real_minute_bars(path: Path, *, limit: int | None = None) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     bars.write_parquet(path)
-
-
-def test_redundant_triggers_do_not_create_runs(
-    metadata_instance: DagsterInstance, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from dagster import DagsterEventType, build_run_status_sensor_context
-
-    from origo.definitions import defs
-    from origo.maintenance.arrow_inputs import changed_arrow_requests
-
-    instance = metadata_instance
-    parquet = tmp_path / 'parquet'
-    path = parquet / 'time/1m/2017/08.parquet'
-    _real_minute_bars(path, limit=25)
-    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(parquet))
-    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
-    source_id = execute_archive(instance)
-    source = instance.get_run_by_id(source_id)
-    event = (
-        instance.get_records_for_run(source_id, of_type=DagsterEventType.PIPELINE_SUCCESS)
-        .records[0]
-        .event_log_entry.dagster_event
-    )
-    assert source is not None and event is not None
-    with build_run_status_sensor_context(
-        sensor_name='bar_store_source_sensor',
-        dagster_run=source,
-        dagster_event=event,
-        dagster_instance=instance,
-    ) as context:
-        requests = changed_arrow_requests(context)
-        assert len(requests) == 1 and requests[0].partition_key == 'time_1m'
-        result = defs.resolve_job_def('build_bar_store_arrow_job').execute_in_process(
-            instance=instance, partition_key='time_1m', tags=requests[0].tags
-        )
-        assert result.success
-        assert changed_arrow_requests(context) == []
-        instance.delete_run(result.run_id)
-        assert changed_arrow_requests(context) == []
-        # Atomic publication of additional genuine archive rows closes more intervals.
-        temporary = path.with_suffix('.partial')
-        _real_minute_bars(temporary)
-        temporary.replace(path)
-        next_requests = changed_arrow_requests(context)
-        assert len(next_requests) == 1 and next_requests[0].run_key != requests[0].run_key
 
 
 @pytest.fixture(scope='module')

@@ -166,3 +166,17 @@ def test_schedule_tick_history_has_bounded_retention() -> None:
         'success': 1,
         'failure': 7,
     }
+
+
+def test_queue_preserves_backfill_and_routine_capacity() -> None:
+    config = _validated_instance_config()
+    coordinator = config['run_coordinator']
+    assert coordinator['class'] == 'OrigoQueuedRunCoordinator'
+    queue = coordinator['config']
+    assert queue['max_concurrent_runs'] == 16
+    assert queue['dequeue_use_threads'] is True
+    assert queue['dequeue_num_workers'] == 16
+    assert queue['dequeue_interval_seconds'] == 1
+    assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 8} in queue['tag_concurrency_limits']
+    assert {'key': 'origo/workload', 'value': 'routine', 'limit': 8} in queue['tag_concurrency_limits']
+    assert config['run_launcher']['class'] == 'OrigoRunLauncher'

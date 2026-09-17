@@ -179,8 +179,12 @@ _maintenance_definitions = Definitions(
 maintain_operational_metadata_job = _maintenance_definitions.resolve_job_def(
     'maintain_operational_metadata_job'
 )
+from origo.orchestration.policy import has_outstanding
+
+
 operational_metadata_maintenance_schedule = ScheduleDefinition(
     name='operational_metadata_maintenance_schedule',
+    should_execute=lambda context: not has_outstanding(context.instance, 'maintain_operational_metadata_job'),
     job=maintain_operational_metadata_job,
     cron_schedule='*/10 * * * *',
     execution_timezone='UTC',

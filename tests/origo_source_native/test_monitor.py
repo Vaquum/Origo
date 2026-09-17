@@ -204,8 +204,18 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
     health = cast(dict[str, Any], recorder.graphql['Health'])
     health['data']['queued']['count'] = 501
     recorder.graphql['Failures'] = {'data': {'runsOrError': {'__typename': 'Runs', 'results': []}}}
+    # The execution's own timestamp is its run's start: an hour ago, as for a check evaluated
+    # inside a queued or long run. The evaluation was stored inside this tick's window.
     recorder.graphql['CheckExecutions'] = {
-        'data': {'assetCheckExecutions': [{'status': 'FAILED', 'timestamp': NOW.timestamp()}]}
+        'data': {
+            'assetCheckExecutions': [
+                {
+                    'status': 'FAILED',
+                    'timestamp': (NOW - timedelta(hours=1)).timestamp(),
+                    'evaluation': {'timestamp': NOW.timestamp()},
+                }
+            ]
+        }
     }
     checks = cast(dict[str, Any], recorder.graphql['Checks'])
     declared = {
@@ -214,13 +224,26 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         for check in node['assetChecksOrError'].get('checks', [])
     }
     assert declared
-    outcome = _monitor(recorder, tmp_path).tick(NOW)
+    monitor = _monitor(recorder, tmp_path)
+    outcome = monitor.tick(NOW)
     assert 'queue_backlog' in outcome.failed
     assert declared <= set(outcome.failed)
+    # The same evaluation is behind the cursor on the next tick, so it is not found again.
+    again = monitor.tick(NOW + timedelta(minutes=1))
+    assert 'queue_backlog' in again.failed
+    assert not declared & set(again.failed)
 
     health['data']['queued']['count'] = 3
     recorder.graphql['CheckExecutions'] = {
-        'data': {'assetCheckExecutions': [{'status': 'SUCCEEDED', 'timestamp': NOW.timestamp()}]}
+        'data': {
+            'assetCheckExecutions': [
+                {
+                    'status': 'SUCCEEDED',
+                    'timestamp': NOW.timestamp(),
+                    'evaluation': {'timestamp': NOW.timestamp()},
+                }
+            ]
+        }
     }
     quiet = _monitor(recorder, tmp_path / 'quiet').tick(NOW)
     assert quiet.failed == ()

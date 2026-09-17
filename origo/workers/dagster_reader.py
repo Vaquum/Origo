@@ -34,7 +34,9 @@ CHECKS_QUERY = """query Checks {
   }
 }"""
 CHECK_EXECUTIONS_QUERY = """query CheckExecutions($assetKey: AssetKeyInput!, $checkName: String!) {
-  assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) { status timestamp }
+  assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) {
+    status evaluation { timestamp }
+  }
 }"""
 
 
@@ -62,6 +64,7 @@ class CheckFailure:
     asset_key: str
     check_name: str
     timestamp: float
+    """When the failed evaluation was stored, not when its run started."""
 
 
 def _mapping(value: object, what: str) -> dict[str, object]:
@@ -179,8 +182,16 @@ class DagsterReader:
                 if not executions:
                     continue
                 latest = _mapping(executions[0], 'execution')
-                stamp = latest.get('timestamp')
+                if latest.get('status') != 'FAILED':
+                    continue
+                # The execution's own timestamp is when its run started; a check evaluated
+                # inside a queued or long run fails minutes after that, so the window is
+                # compared with the time the evaluation was stored.
+                evaluation = latest.get('evaluation')
+                if not isinstance(evaluation, dict):
+                    continue
+                stamp = cast(dict[str, object], evaluation).get('timestamp')
                 timestamp = float(stamp) if isinstance(stamp, (int, float)) else 0.0
-                if latest.get('status') == 'FAILED' and timestamp > since:
+                if timestamp > since:
                     failed.append(CheckFailure(asset_key, name, timestamp))
         return failed

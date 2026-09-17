@@ -488,6 +488,24 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     assert not _run(backfill_env).success
     assert not _run(backfill_env, reconcile=True).success
     assert _status(backfill_env) == 'FAILED'
+    from dagster import RunRequest, build_sensor_context
+
+    sensor = next(
+        sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
+    )
+
+    def tick() -> list[RunRequest]:
+        with build_sensor_context(
+            instance=instance,
+            definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
+        ) as context:
+            return list(sensor.evaluate_tick(context).run_requests)
+
+    # The failed day is the only partition the sensor asks to reconcile.
+    requests = tick()
+    assert [request.partition_key for request in requests if request.partition_key] == [DAY]
+    request = next(request for request in requests if request.partition_key == DAY)
+    assert request.run_config['ops'][ASSET]['config']['reconcile_only'] is True
 
     def checksum_only(url: str) -> binance_daily.Response:
         assert url.endswith('.CHECKSUM'), (
@@ -498,17 +516,9 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     monkeypatch.setattr(binance_daily, 'get_response', checksum_only)
     assert _run(backfill_env).success
     assert runtime.store.records(canonical_only=True) == (first,)
-    from dagster import build_sensor_context
-
-    sensor = next(
-        sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
-    )
-    with build_sensor_context(
-        instance=instance,
-        definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
-    ) as context:
-        requests = sensor.evaluate_tick(context).run_requests
-    assert all(request.partition_key is None for request in requests)
+    # A verified day whose Dagster record matches the store is not re-materialized, now or a
+    # day later: the sensor used to rotate one day per tick through the whole history.
+    assert all(request.partition_key is None for request in tick())
     from datetime import timedelta, tzinfo
 
     from origo.sources import dagit
@@ -519,14 +529,7 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
             return datetime.now(zone) + timedelta(days=1)
 
     monkeypatch.setattr(dagit, 'datetime', TickClock)
-    with build_sensor_context(
-        instance=instance,
-        definitions=Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors),
-    ) as context:
-        requests = sensor.evaluate_tick(context).run_requests
-    assert any(request.partition_key == DAY for request in requests)
-    request = next(request for request in requests if request.partition_key == DAY)
-    assert request.run_config['ops'][ASSET]['config']['reconcile_only'] is True
+    assert all(request.partition_key is None for request in tick())
     job = next(job for job in source.jobs if job.name == request.job_name)
     from dagster import DagsterRunStatus
     from dagster._core.remote_origin import RemoteJobOrigin
@@ -709,10 +712,14 @@ def test_reconciliation_failures_do_not_starve_other_partitions() -> None:
         for index in range(12)
     ]
     urgent = keys[:8]
-    selected = [_reconciliation_selection(keys, urgent, tick) for tick in range(len(keys))]
-    assert all(len(batch) <= 5 for batch in selected)
-    assert set().union(*(set(batch) for batch in selected)) == set(keys)
-    assert set().union(*(set(batch) for batch in selected[:2])) >= set(urgent)
+    selected = [_reconciliation_selection(urgent, tick) for tick in range(len(keys))]
+    assert all(len(batch) <= 4 for batch in selected)
+    # Every urgent partition is reached within two ticks, and a partition whose Dagster
+    # record already matches the store is never re-materialized: the sensor used to add one
+    # rotating day per tick, which re-ran the whole history once every two days.
+    assert set().union(*(set(batch) for batch in selected[:2])) == set(urgent)
+    assert set().union(*(set(batch) for batch in selected)) == set(urgent)
+    assert _reconciliation_selection([], 7) == []
 
 
 @pytest.mark.parametrize(
@@ -771,7 +778,13 @@ def test_failed_automatic_reconciliation_waits_for_operator_or_state_change(
             cursor = result.cursor
             return result.run_requests
 
+    # A verified day whose Dagster record matches the store is not reconciled by itself; a
+    # state change (a rollback re-activates the record under a new generation) admits it.
+    assert all(request.partition_key is None for request in requests())
+    changed = runtime.rollback(record, operator='test', reason='Test state-change admission')
+    now += timedelta(minutes=1)
     request = next(request for request in requests() if request.partition_key == DAY)
+    assert request.tags['origo_source_authority'].endswith(f':{changed.generation}')
     job = next(job for job in source.jobs if job.name == request.job_name)
     failed = job.execute_in_process(
         instance=instance,
@@ -793,7 +806,7 @@ def test_failed_automatic_reconciliation_waits_for_operator_or_state_change(
     assert len(instance.get_runs()) == run_count
     assert _status(backfill_env) == 'FAILED'
 
-    advanced = runtime.rollback(record, operator='test', reason='Test state-change admission')
+    advanced = runtime.rollback(changed, operator='test', reason='Test second state change')
     now += timedelta(minutes=1)
     request = next(request for request in requests() if request.partition_key == DAY)
     assert request.tags['origo_source_authority'].endswith(f':{advanced.generation}')
@@ -808,12 +821,18 @@ def test_failed_automatic_reconciliation_waits_for_operator_or_state_change(
     now += timedelta(minutes=1)
     assert all(request.partition_key is None for request in requests())
 
-    # An explicit successful operator reconciliation resumes checks without changing generation.
+    # An explicit successful operator reconciliation clears the hold without changing the
+    # generation: the day then differs in nothing and is not requested, while the next
+    # state change is admitted again instead of held behind the old failure.
     monkeypatch.setattr(SourceRuntime, 'reconcile', original)
     assert _run(backfill_env, reconcile=True).success
     assert runtime.store.records(canonical_only=True)[0] == advanced
     now += timedelta(minutes=1)
-    assert any(request.partition_key == DAY for request in requests())
+    assert all(request.partition_key is None for request in requests())
+    resumed = runtime.rollback(advanced, operator='test', reason='Test admission after operator run')
+    now += timedelta(minutes=1)
+    request = next(request for request in requests() if request.partition_key == DAY)
+    assert request.tags['origo_source_authority'].endswith(f':{resumed.generation}')
     assert instance.get_run_by_id(failed.run_id).status.value == 'FAILURE'
 
 

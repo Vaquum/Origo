@@ -64,7 +64,16 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._respond(200, document)
             return
-        server.posts.append((self.path, {**body, '_authorization': self.headers.get('Authorization', '')}))
+        server.posts.append(
+            (
+                self.path,
+                {
+                    **body,
+                    '_authorization': self.headers.get('Authorization', ''),
+                    '_user_agent': self.headers.get('User-Agent', ''),
+                },
+            )
+        )
         if self.path == '/emails':
             self._respond(server.email_status, {'id': f'email-{len(server.posts)}'})
             return
@@ -405,6 +414,8 @@ def test_send_alert_posts_to_resend(recorder: _Recorder) -> None:
     send_alert(settings, 'Origo alert: 1 new finding', 'body line\n')
     (path, body), = [(path, body) for path, body in recorder.posts if path == '/emails']
     assert body['_authorization'] == 'Bearer test-key'
+    # Resend's edge rejects the default urllib agent with 403 (Cloudflare error 1010).
+    assert body['_user_agent'] == 'origo-monitor'
     assert (body['from'], body['to'], body['subject'], body['text']) == (
         'origo@example.test',
         ['operator@example.test'],
@@ -467,6 +478,10 @@ def test_settings_and_deployment_wiring_are_complete() -> None:
         assert 'worker-heartbeats:/opt/origo/heartbeats' in monitor['volumes']
         assert '/var/run/docker.sock:/var/run/docker.sock:ro' in compose['services']['vector']['volumes']
         assert './deploy/vector.yaml:/etc/vector/vector.yaml:ro' in compose['services']['vector']['volumes']
+        # Without this, Vector 0.58 keeps ${CLICKHOUSE_PASSWORD} literal and the sink gets 401.
+        assert 'VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true' in (
+            compose['services']['vector']['environment']
+        ), name
         assert 'worker-heartbeats' in compose['volumes']
     deploy = yaml.safe_load((REPO_ROOT / 'docker-compose.deploy.yml').read_text())
     environment = deploy['services']['monitor']['environment']

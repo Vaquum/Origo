@@ -22,7 +22,7 @@ from dagster import (
 )
 
 import origo.assets.publish_btc_briefing_history as publish_btc_briefing_history_module
-from origo.assets.daily_trades_to_origo import daily_partitions
+from origo.assets.briefing_partitions import daily_partitions
 from origo.assets.publish_btc_briefing_history import (
     HISTORY_1D_DAYS,
     HISTORY_15M_DAYS,
@@ -33,6 +33,8 @@ from origo.assets.publish_btc_briefing_history import (
     build_briefing_history,
     publish_briefing_history_to_huggingface,
 )
+
+from .helpers import seed_spot_source, seeded_columns
 
 THROUGH_DAY = date(2024, 1, 1)
 THROUGH_DAY_EPOCH = 1_704_067_200
@@ -80,13 +82,9 @@ def _expected_bar(first_minute: int, minutes: int) -> dict[str, float]:
 
 
 def _create_history_tables(origo_assets: dict[str, Any]) -> None:
-    result = materialize(
-        [
-            origo_assets['create_origo_database'],
-            origo_assets['create_binance_spot_klines_table_origo'],
-        ]
-    )
+    result = materialize([origo_assets['create_origo_database']])
     assert result.success
+    seed_spot_source(SPAN_15M_START.isoformat())
 
 
 def _insert_span_minute_klines(
@@ -96,11 +94,13 @@ def _insert_span_minute_klines(
 ) -> None:
     query_origo(
         f"""
-        INSERT INTO binance_spot_klines
-            (datetime, open, high, low, close, mean, std, median, iqr, volume,
+        INSERT INTO binance_spot_trades_time_revisions
+            (source_date, partition_key, revision, build_id,
+             datetime, open, high, low, close, mean, std, median, iqr, volume,
              maker_ratio, no_of_trades, open_liquidity, high_liquidity, low_liquidity,
              close_liquidity, liquidity_sum, maker_volume, maker_liquidity)
         SELECT
+            {seeded_columns(SPAN_15M_START.isoformat())},
             toDateTime('{SPAN_15M_START.isoformat()} 00:00:00') + 60 * number AS datetime,
             42000 + number + multiIf(number % 15 = 0, 100, number % 15 = 7, 200, 0) AS open,
             open + 5 AS high,
@@ -131,11 +131,13 @@ def _insert_kline_at(
 ) -> None:
     query_origo(
         f"""
-        INSERT INTO binance_spot_klines
-            (datetime, open, high, low, close, mean, std, median, iqr, volume,
+        INSERT INTO binance_spot_trades_time_revisions
+            (source_date, partition_key, revision, build_id,
+             datetime, open, high, low, close, mean, std, median, iqr, volume,
              maker_ratio, no_of_trades, open_liquidity, high_liquidity, low_liquidity,
              close_liquidity, liquidity_sum, maker_volume, maker_liquidity)
-        SELECT toDateTime('{kline_datetime}'), 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+        SELECT {seeded_columns(SPAN_15M_START.isoformat())},
+               toDateTime('{kline_datetime}'), 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
                0.0, 1.0, 0.5, 1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5
         """
     )

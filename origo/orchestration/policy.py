@@ -28,7 +28,6 @@ INPUT_TAGS = (
     'origo_source_partition',
     'origo_source_state_token',
     'origo_source_event',
-    'binance_spot_latest_minute_start',
 )
 
 
@@ -54,7 +53,6 @@ def execution_tags(run: DagsterRun) -> dict[str, str]:
         'refresh_binance_spot_depth200_data_source_job',
         'repair_binance_spot_depth20_projection_job',
         'repair_binance_spot_depth200_projection_job',
-        'refresh_binance_spot_latest_data_source_job',
         'build_depth_snapshot_store_arrow_job',
         'publish_binance_spot_trades_mount_job',
         'maintain_operational_metadata_job',

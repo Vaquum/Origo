@@ -6,7 +6,6 @@ import pytest
 from dagster import AssetKey, Definitions
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.assets.daily_trades_to_origo import _parse_trade_rows
 from origo.sources.adapters import binance_daily
 from origo.sources.adapters.binance_columnar import spot_table
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
@@ -17,6 +16,31 @@ from origo.sources.locking import partition_work, source_lock
 from origo.sources.storage import SourceStore
 
 from .test_binance_daily_source_adapter import ARCHIVES, archive_response
+
+
+def _parse_trade_rows(body: bytes) -> list[tuple[object, ...]]:
+    """An independent parse of a spot archive into the row shape the digest packs."""
+    import csv
+    from datetime import UTC, datetime, timedelta
+
+    rows: list[tuple[object, ...]] = []
+    for fields in csv.reader(body.decode().splitlines()):
+        stamp = int(fields[4])
+        micros = stamp * 1000 if len(fields[4]) == 13 else stamp
+        instant = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=micros)
+        rows.append(
+            (
+                int(fields[0]),
+                float(fields[1]),
+                float(fields[2]),
+                float(fields[3]),
+                stamp,
+                fields[5].lower() == 'true',
+                fields[6].lower() == 'true',
+                instant.replace(tzinfo=None),
+            )
+        )
+    return rows
 
 
 def test_native_partition_runs_and_publication_dependencies() -> None:

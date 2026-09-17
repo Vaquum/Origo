@@ -1,5 +1,5 @@
 -- One OHLCV bar per {bucket_seconds:UInt32} bucket of the UTC day {day:Date},
--- rolled up from the 1m origo.binance_spot_klines projection. bar_start is
+-- rolled up from the 1m origo.binance_spot_trades_time_current projection. bar_start is
 -- declared as UTC epoch seconds (toUnixTimestamp) so the feed's time
 -- representation is fixed by this query, not inherited from the server's
 -- Arrow serialization of DateTime. The bar grid is anchored to the day
@@ -19,7 +19,7 @@ SELECT
     sum(no_of_trades) AS no_of_trades,
     uniqExact(datetime) AS source_minutes,
     count() AS source_rows
-FROM origo.binance_spot_klines
+FROM origo.binance_spot_trades_time_current
 WHERE datetime >= day_start
   AND datetime < day_start + 86400
 GROUP BY bar_start

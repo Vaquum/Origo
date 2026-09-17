@@ -2,7 +2,7 @@
 
 The history is one object carrying the two sections in ``HISTORY_SECTIONS``:
 ``HISTORY_15M_DAYS`` days of 15-minute bars and ``HISTORY_1D_DAYS`` days of
-daily bars, both rolled up from the 1m ``binance_spot_klines`` projection.
+daily bars, both rolled up from the 1m ``binance_spot_trades_time_current`` projection.
 Both spans end where ``through_day`` begins, so the history is the multi-day
 run-up to that day and the day's own ``btc_briefing/1`` feed file continues
 it without overlapping it. The two spans are not round numbers: they are the
@@ -43,7 +43,7 @@ from typing import Final, Protocol, cast
 from dagster import AssetExecutionContext, asset
 from huggingface_hub import HfApi
 
-from .daily_trades_to_origo import daily_partitions
+from .briefing_partitions import daily_partitions
 from .publish_btc_briefing_feed import (
     BARS_1D_SECONDS,
     BARS_15M_PER_DAY,

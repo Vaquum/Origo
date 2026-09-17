@@ -11,7 +11,7 @@ SELECT
     sumIf(quantity_sats, is_buyer_maker = 1) AS taker_sell_sats,
     taker_buy_sats + taker_sell_sats AS total_sats,
     count() AS trades
-FROM origo.binance_daily_spot_trades
+FROM origo.binance_spot_trades_raw_current
 WHERE datetime >= toDateTime64({day:Date}, 6)
   AND datetime < toDateTime64({day:Date} + 1, 6)
 GROUP BY price

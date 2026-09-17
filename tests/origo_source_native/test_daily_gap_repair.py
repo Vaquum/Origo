@@ -8,39 +8,39 @@ from dagster import DefaultScheduleStatus, SkipReason
 from origo.utils.daily_gap_repair import gap_repair_run_requests, repair_window
 
 
-def _spot_client_and_spec(origo_definitions_module: Any) -> tuple[Any, str, Any]:
+def _futures_client_and_spec(origo_definitions_module: Any) -> tuple[Any, str, Any]:
     settings = origo_definitions_module.get_origo_clickhouse_settings()
     client = origo_definitions_module.make_origo_clickhouse_client(settings)
-    return client, settings.database, origo_definitions_module.SPOT_DAILY_GAP_REPAIR_SPEC
+    return client, settings.database, origo_definitions_module.FUTURES_DAILY_GAP_REPAIR_SPEC
 
 
 def test_missing_day_with_archive_is_requested_once_per_day(
-    materialize_origo_assets: Any,
+    materialize_binance_futures_raw_assets: Any,
     origo_definitions_module: Any,
 ) -> None:
-    materialize_origo_assets(partition_key='2024-01-01')
-    client, database, spec = _spot_client_and_spec(origo_definitions_module)
+    materialize_binance_futures_raw_assets(partition_key='2019-09-08')
+    client, database, spec = _futures_client_and_spec(origo_definitions_module)
 
     try:
-        result = gap_repair_run_requests(client, database, spec, date(2024, 1, 4), frozenset())
+        result = gap_repair_run_requests(client, database, spec, date(2019, 9, 11), frozenset())
     finally:
         client.disconnect()
 
     assert isinstance(result, list)
-    assert [request.partition_key for request in result] == ['2024-01-02']
-    assert result[0].run_key == 'daily_gap_repair:spot:2024-01-02:2024-01-04'
+    assert [request.partition_key for request in result] == ['2019-09-09']
+    assert result[0].run_key == 'daily_gap_repair:futures:2019-09-09:2019-09-11'
 
 
 def test_day_with_in_progress_run_is_not_repaired(
-    materialize_origo_assets: Any,
+    materialize_binance_futures_raw_assets: Any,
     origo_definitions_module: Any,
 ) -> None:
-    materialize_origo_assets(partition_key='2024-01-01')
-    client, database, spec = _spot_client_and_spec(origo_definitions_module)
+    materialize_binance_futures_raw_assets(partition_key='2019-09-08')
+    client, database, spec = _futures_client_and_spec(origo_definitions_module)
 
     try:
         result = gap_repair_run_requests(
-            client, database, spec, date(2024, 1, 4), frozenset({date(2024, 1, 2)})
+            client, database, spec, date(2019, 9, 11), frozenset({date(2019, 9, 9)})
         )
     finally:
         client.disconnect()
@@ -49,14 +49,14 @@ def test_day_with_in_progress_run_is_not_repaired(
 
 
 def test_loaded_window_skips(
-    materialize_origo_assets: Any,
+    materialize_binance_futures_raw_assets: Any,
     origo_definitions_module: Any,
 ) -> None:
-    materialize_origo_assets(partition_key='2024-01-01')
-    client, database, spec = _spot_client_and_spec(origo_definitions_module)
+    materialize_binance_futures_raw_assets(partition_key='2019-09-08')
+    client, database, spec = _futures_client_and_spec(origo_definitions_module)
 
     try:
-        result = gap_repair_run_requests(client, database, spec, date(2024, 1, 3), frozenset())
+        result = gap_repair_run_requests(client, database, spec, date(2019, 9, 10), frozenset())
     finally:
         client.disconnect()
 
@@ -77,7 +77,6 @@ def test_definitions_wires_gap_repair_schedules(
 ) -> None:
     repository_def = origo_definitions_module.defs.get_repository_def()
     for name, job_name, market in (
-        ('binance_spot_daily_gap_repair_schedule', 'refresh_binance_spot_data_source_job', 'spot'),
         (
             'binance_futures_daily_gap_repair_schedule',
             'refresh_binance_futures_data_source_job',

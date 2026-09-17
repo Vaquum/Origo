@@ -43,21 +43,17 @@ In the wider Vaquum architecture, Origo sits upstream as the data layer. Limen c
 
 ## Capabilities
 
-- Checksum-verified ingestion of Binance BTCUSDT daily trade archives, spot (from 2017-08-17) and USDT-M futures (from 2019-09-08)
-- Ingestion ledgers recording source file, SHA-256 checksums, row counts, Dagster run id, and status for every loaded day
-- Atomic daily partition writes through a count-verified staging table promoted with `MOVE PARTITION`
-- Rebuildable projections from the raw trade record: 1-minute klines plus dollar, volume, tick, and dollar-imbalance bars
-- Aligned 1-minute table refreshed from both the spot and futures markets
-- Rolling `_latest` tables refreshed every minute to cover the span between the last daily load and the latest closed minute
+- Revisioned spot source: checksum-verified Binance BTCUSDT daily trade archives (from 2017-08-17) built per day into raw trades, 1-minute klines, dollar, volume, tick and dollar-imbalance bars and the aligned 1-minute rows, with provisional minute intervals covering the open day, activation history, reconciliation and rollback
+- Legacy spot table names (`binance_daily_spot_trades`, `binance_spot_klines`, the bar tables and the `_latest` names) served as views over the source's current state; `aligned_1m_exchange` holds the futures pipeline's rows and the spot aligned rows are `binance_spot_trades_aligned_current`
+- Checksum-verified ingestion of USDT-M futures daily trade archives (from 2019-09-08) with ingestion ledgers, atomic daily partition writes through a count-verified staging table promoted with `MOVE PARTITION`, 1-minute klines, the aligned 1-minute table and hourly ledger-driven gap repair
 - Binance spot order-book depth snapshots (20- and 200-level) with 1-minute projections and per-minute reconciliation
-- Hourly ledger-driven gap repair for the spot and futures daily pipelines
 - Hugging Face publishing of twelve kline datasets (six time intervals and six dollar-bar sizes), the local monthly Parquet mirror of the same series and the versioned mmap-ready Arrow bar store, all published by the revisioned spot source from one pinned state
 - Ratcheted CI gates on every PR: strict pyright typing, fail-loud (no silent fallbacks), Conventional Commits, and version plus CHANGELOG trails
 - Automatic production deploy of merged `main` through GitHub Actions
 
 ## First Backfill
 
-The first runnable path is the local Docker Compose stack: create the ClickHouse tables, backfill one day of the spot pipeline, and read it back through the query module.
+The first runnable path is the local Docker Compose stack: prepare the spot source, backfill one day, and read it back through the query module.
 
 1. Clone the repository and set the one required secret:
 
@@ -75,20 +71,19 @@ Supported runtime: the containers run Python 3.11 (`python:3.11.12`) and the pac
 docker compose up -d --build
 ```
 
-1. Create the database and tables:
+1. Prepare the spot source (the stack's bootstrap does this on start; the job repeats it idempotently):
 
 ```bash
 docker compose exec -e CLICKHOUSE_PASSWORD dagster \
-  dagster asset materialize -m origo.definitions \
-  --select "create_origo_database,create_binance_daily_spot_trades_table_origo,create_binance_spot_klines_table_origo,create_binance_spot_dollar_klines_table_origo,create_binance_spot_volume_klines_table_origo,create_binance_spot_tick_klines_table_origo,create_binance_spot_dollar_imbalance_klines_table_origo,create_aligned_1m_exchange_table_origo,create_binance_spot_latest_tables_origo"
+  dagster job launch -m origo.definitions -j prepare_revisioned_sources_job
 ```
 
-1. Backfill one day of the spot pipeline — raw trades, every bar projection, and the aligned table:
+1. Backfill one day of the spot source — raw trades, every bar projection and the aligned rows, then the public files:
 
 ```bash
 docker compose exec -e CLICKHOUSE_PASSWORD dagster \
   dagster job backfill -m origo.definitions \
-  -j refresh_binance_spot_data_source_job \
+  -j backfill_binance_spot_trades_source_job \
   --partitions 2024-01-02 --noprompt
 ```
 
@@ -102,7 +97,7 @@ print(dollar_month(ratio=15, year=2024, month=1))
 "
 ```
 
-`time_month` rolls the 1-minute projection up to any minute interval, and `dollar_month` rolls the 1M-dollar bar base up by an integer ratio. Beyond the quickstart, every job, schedule, and sensor is defined in `origo/definitions.py` and can be launched from the Dagster UI at `http://localhost:4000`.
+`time_month` rolls the 1-minute projection up to any minute interval, and `dollar_month` rolls the 1M-dollar bar base up by an integer ratio. Both read the legacy table names, which are views over the spot source: `binance_spot_klines` and `binance_spot_dollar_klines` hold the canonical days, and `binance_spot_klines_latest` and `binance_spot_trades_latest` the provisional minutes of the open day. Beyond the quickstart, every job, schedule, and sensor is defined in `origo/definitions.py` and can be launched from the Dagster UI at `http://localhost:4000`.
 
 ## Risk Boundary
 

@@ -7,24 +7,51 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BINANCE_FIXTURE_ROOT = REPO_ROOT / 'tests' / 'fixtures' / 'binance'
 ORIGO_DATABASE = 'origo'
-BINANCE_SPOT_DATASET_SOURCE = 'binance_spot'
-BINANCE_FUTURES_DATASET_SOURCE = 'binance_futures'
+SEED_REVISION = 'seed'
+SEED_BUILD_ID = UUID(int=1)
 
 
-def _spot_zip_path(date_str: str) -> Path:
+def seeded_columns(day: str) -> str:
+    """Provenance columns that attach seeded rows to the activated partition of ``day``."""
     return (
-        BINANCE_FIXTURE_ROOT
-        / 'spot'
-        / 'daily'
-        / 'trades'
-        / 'BTCUSDT'
-        / f'BTCUSDT-trades-{date_str}.zip'
+        f"toDate('{day}') AS source_date, '{day}' AS partition_key, "
+        f"'{SEED_REVISION}' AS revision, toUUID('{SEED_BUILD_ID}') AS build_id"
     )
+
+
+def seed_spot_source(day: str) -> None:
+    """Prepare the spot source schema and activate one canonical partition for seeded rows.
+
+    Rows inserted into the component tables with ``seeded_columns(day)`` then appear in
+    the source's current views, which the briefing queries read.
+    """
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+    from origo.sources.contracts import StateRecord
+    from origo.sources.storage import SourceStore
+
+    spec = BINANCE_SPOT_TRADES_SPEC
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        store.setup(
+            anchor=datetime.combine(
+                spec.partitions.first_day, datetime.min.time(), timezone.utc
+            )
+        )
+        store.insert_activation(
+            StateRecord(spec.canonical.partition(day), 1, SEED_REVISION, SEED_BUILD_ID, ()),
+            'seed',
+        )
+    finally:
+        client.disconnect()
+BINANCE_FUTURES_DATASET_SOURCE = 'binance_futures'
 
 
 def _futures_zip_path(date_str: str) -> Path:
@@ -63,43 +90,6 @@ def _datetime_from_timestamp(raw_timestamp: str, *, allowed_lengths: set[int]) -
     raise ValueError(
         f'Unsupported fixture timestamp length {timestamp_length} for value {raw_timestamp}'
     )
-
-
-def load_expected_trade_rows(date_str: str) -> list[tuple[Any, ...]]:
-    csv_bytes = _load_csv_bytes(_spot_zip_path(date_str))
-    rows: list[tuple[Any, ...]] = []
-    reader = csv.reader(csv_bytes.decode('utf-8').splitlines())
-
-    for row in reader:
-        dt = _datetime_from_timestamp(row[4], allowed_lengths={13, 16})
-        rows.append(
-            (
-                int(row[0]),
-                float(row[1]),
-                float(row[2]),
-                float(row[3]),
-                int(row[4]),
-                1 if row[5].lower() == 'true' else 0,
-                1 if row[6].lower() == 'true' else 0,
-                dt,
-            )
-        )
-
-    return rows
-
-
-def load_expected_ledger_payload(date_str: str) -> dict[str, Any]:
-    zip_path = _spot_zip_path(date_str)
-    zip_bytes = _load_zip_bytes(zip_path)
-    csv_bytes = _load_csv_bytes(zip_path)
-
-    return {
-        'source_date': date_str,
-        'source_file': f'BTCUSDT-trades-{date_str}.zip',
-        'zip_checksum': hashlib.sha256(zip_bytes).hexdigest(),
-        'csv_checksum': hashlib.sha256(csv_bytes).hexdigest(),
-        'source_row_count': len(load_expected_trade_rows(date_str)),
-    }
 
 
 def load_expected_futures_trade_rows(

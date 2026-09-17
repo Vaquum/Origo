@@ -95,7 +95,7 @@ def test_duplicate_admission_preserves_distinct_source_work(instance):
         == DagsterRunStatus.QUEUED
     )
     assert (
-        submit(instance, tags={'binance_spot_latest_minute_start': '2026-09-17T00:40:00Z'}).status
+        submit(instance, tags={'origo_source_partition': '2026-09-17T00:40:00Z'}).status
         == DagsterRunStatus.QUEUED
     )
     assert (
@@ -138,7 +138,7 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
         'publish_binance_spot_trades_mount_job',
-        'refresh_binance_spot_latest_data_source_job',
+        'refresh_binance_spot_trades_provisional_source_job',
     ):
         for day in ('2017-08-17', '2017-08-18', '2017-08-19'):
             submit(instance, job=job, day=day)
@@ -259,7 +259,7 @@ def test_legacy_retirement_only_covers_old_local_grpc_workers(instance):
 
 def test_runtime_bounds_preserve_daily_retry_envelope(instance):
     short = create_run_for_test(instance, job_name='refresh_binance_spot_depth20_data_source_job')
-    daily = create_run_for_test(instance, job_name='refresh_binance_spot_data_source_job')
+    daily = create_run_for_test(instance, job_name='refresh_binance_spot_trades_canonical_source_job')
     bulk = create_run_for_test(
         instance,
         job_name='backfill_binance_spot_trades_source_job',
@@ -320,12 +320,12 @@ def test_daily_publication_precedes_minute_catchup(instance):
     for job in (
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
-        'refresh_binance_spot_latest_data_source_job',
+        'refresh_binance_spot_trades_provisional_source_job',
         'build_depth_snapshot_store_arrow_job',
     ):
         for minute in range(15):
             submit(instance, job=job, day=f'2026-09-17T00:{minute:02d}:00+0000')
-    daily = submit(instance, job='refresh_binance_spot_data_source_job', day='2026-09-16')
+    daily = submit(instance, job='refresh_binance_spot_trades_canonical_source_job', day='2026-09-16')
     feed = submit(instance, job='publish_btc_briefing_feed_job', day='2026-09-16')
     daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
     runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())

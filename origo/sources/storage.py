@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from typing import cast
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -16,6 +16,7 @@ from .contracts import (
     SourceError,
     StateRecord,
     identifier,
+    table_name,
 )
 from .hashing import activation_id, content_hash, state_token
 
@@ -100,6 +101,10 @@ class StorageError(RuntimeError):
     """A storage operation failed without changing its caller's failure scope."""
 
 
+# Framework tables retired without a successor; setup drops them wherever they remain.
+_RETIRED_TABLES = ('source_parity_log',)
+
+
 class SourceStore:
     def __init__(self, client: Client, database: str, spec: RevisionedSourceSpec) -> None:
         from .columnar import BoundedClient
@@ -112,9 +117,14 @@ class SourceStore:
     def component_table(self, component: str) -> str:
         return self.table(f'{self.spec.names.prefix}_{identifier(component)}_revisions')
 
-    def execute(self, query: str, params: object | None = None) -> list[Row]:
+    def execute(
+        self,
+        query: str,
+        params: object | None = None,
+        settings: Mapping[str, object] | None = None,
+    ) -> list[Row]:
         try:
-            return self.client.execute(query, params)
+            return self.client.execute(query, params, settings)
         except Exception as error:
             raise StorageError(f'Storage operation failed: {type(error).__name__}') from error
 
@@ -268,6 +278,43 @@ class SourceStore:
                 f'CREATE VIEW IF NOT EXISTS {self.table(self.spec.names.prefix + "_" + component.key + "_current")} AS '
                 + ' UNION ALL '.join(selections)
             )
+        for name in (*_RETIRED_TABLES, *self.spec.retired_tables):
+            self._drop_table(name)
+        for name, predicate in self.spec.retired_rows:
+            self._delete_rows(name, predicate)
+        for alias, key in self.spec.aliases:
+            if self._engine(alias) not in (None, 'View'):
+                self._drop_table(alias)
+            component = next(item for item in self.spec.components if item.key == key)
+            self.execute(
+                f'CREATE OR REPLACE VIEW {self.table(alias)} AS '
+                + self._current_select(component, component)
+            )
+
+    def _engine(self, name: str) -> str | None:
+        rows = self.execute(
+            'SELECT engine FROM system.tables WHERE database=%(database)s AND name=%(name)s',
+            {'database': self.database, 'name': table_name(name)},
+        )
+        return str(rows[0][0]) if rows else None
+
+    def _delete_rows(self, name: str, predicate: str) -> None:
+        """Delete a retired pipeline's rows from a shared table that remains, once."""
+        if self._engine(name) in (None, 'View'):
+            return
+        table = f'{self.database}.{table_name(name)}'
+        if not self.execute(f'SELECT 1 FROM {table} WHERE {predicate} LIMIT 1'):
+            return
+        self.execute(
+            f'ALTER TABLE {table} DELETE WHERE {predicate}', settings={'mutations_sync': 2}
+        )
+
+    def _drop_table(self, name: str) -> None:
+        # Retired legacy tables exceed the server drop limit; lift it for this statement only.
+        self.execute(
+            f'DROP TABLE IF EXISTS {self.database}.{table_name(name)} SYNC',
+            settings={'max_table_size_to_drop': 0},
+        )
 
     def _current_select(self, target: ComponentSpec, source: ComponentSpec) -> str:
         selected = ', '.join(f'd.{column.name}' for column in target.columns)

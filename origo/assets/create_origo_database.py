@@ -10,8 +10,10 @@ __all__ = [
     'ClickHouseClientProtocol',
     'ClickHouseSettings',
     'create_origo_database',
+    'database_exists',
     'get_clickhouse_settings',
     'make_clickhouse_client',
+    'table_exists',
 ]
 
 DEFAULT_CLICKHOUSE_HOST = 'clickhouse'
@@ -78,6 +80,33 @@ def make_clickhouse_client(settings: ClickHouseSettings) -> ClickHouseClientProt
 
 _get_clickhouse_settings = get_clickhouse_settings
 _make_clickhouse_client = make_clickhouse_client
+
+
+def database_exists(client: ClickHouseClientProtocol, database: str) -> bool:
+    result = client.execute(
+        f"""
+        SELECT count()
+        FROM system.databases
+        WHERE name = '{database}'
+        """
+    )
+    return bool(result[0][0])
+
+
+def table_exists(
+    client: ClickHouseClientProtocol,
+    settings: ClickHouseSettings,
+    table_name: str,
+) -> bool:
+    result = client.execute(
+        f"""
+        SELECT count()
+        FROM system.tables
+        WHERE database = '{settings.database}'
+          AND name = '{table_name}'
+        """
+    )
+    return bool(result[0][0])
 
 
 @asset(

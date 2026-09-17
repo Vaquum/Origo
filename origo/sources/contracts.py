@@ -38,6 +38,13 @@ def identifier(value: str) -> str:
     return value
 
 
+def table_name(value: str) -> str:
+    """A ClickHouse table name as a legacy pipeline spelled it, upper-case labels included."""
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,119}', value):
+        raise ValueError(f'Invalid table name: {value!r}')
+    return value
+
+
 class Client(Protocol):
     def execute(
         self,
@@ -223,11 +230,30 @@ class RevisionedSourceSpec:
     components: tuple[ComponentSpec, ...]
     consumers: tuple[ConsumerSpec, ...]
     orchestration: OrchestrationSpec
+    # Legacy table names served as views over declared components, and legacy tables
+    # without a successor that setup drops.
+    aliases: tuple[tuple[str, str], ...] = ()
+    retired_tables: tuple[str, ...] = ()
+    # Rows a retired pipeline wrote into a table it shared with another pipeline, as
+    # (table name, SQL predicate); setup deletes them wherever the table remains.
+    retired_rows: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         identifier(self.key)
         keys = [component.key for component in self.components]
         consumers = [consumer.key for consumer in self.consumers]
+        reserved = {f'{self.names.prefix}_{key}_current' for key in keys}
+        aliases = [alias for alias, _ in self.aliases]
+        for alias, component in self.aliases:
+            if identifier(alias) in reserved or component not in keys:
+                raise ValueError('An alias must map a distinct table name to a declared component.')
+        for name in self.retired_tables:
+            table_name(name)
+        for name, predicate in self.retired_rows:
+            if not predicate.strip() or ';' in predicate or table_name(name) in self.retired_tables:
+                raise ValueError('Retired rows need a single predicate on a table that stays.')
+        if len(aliases) != len(set(aliases)) or set(aliases) & set(self.retired_tables):
+            raise ValueError('Alias and retired table names must be unique.')
         if self.schema_version < 1 or not keys or len(keys) != len(set(keys)):
             raise ValueError('Source requires a version and unique components.')
         for component in self.components:

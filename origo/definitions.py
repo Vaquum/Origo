@@ -42,20 +42,12 @@ from dagster import (
 from .orchestration.policy import outstanding_configs, outstanding_partitions
 from .orchestration.recovery import recover_orchestration_job
 
-from .assets.daily_trades_to_origo import (
-    DEFAULT_BINANCE_SPOT_DAILY_TRADES_BASE_URL,
-    daily_partitions as spot_daily_partitions,
-    insert_daily_binance_spot_trades_to_origo,
-)
 from .assets.publish_btc_briefing_feed import publish_btc_briefing_feed
 from .assets.publish_btc_briefing_history import publish_btc_briefing_history
 from .assets.create_origo_database import (
     create_origo_database,
     get_clickhouse_settings as get_origo_clickhouse_settings,
     make_clickhouse_client as make_origo_clickhouse_client,
-)
-from .assets.create_binance_trades_table_origo import (
-    LEDGER_TABLE_NAME as SPOT_DAILY_LEDGER_TABLE_NAME,
 )
 from .assets.create_binance_futures_trades_table_origo import (
     LEDGER_TABLE_NAME as FUTURES_DAILY_LEDGER_TABLE_NAME,
@@ -65,26 +57,8 @@ from .utils.daily_gap_repair import (
     DailyGapRepairSpec,
     gap_repair_run_requests,
 )
-from .assets.create_binance_trades_table_origo import (
-    create_binance_daily_spot_trades_table_origo,
-)
 from .assets.create_binance_futures_trades_table_origo import (
     create_binance_daily_futures_trades_table_origo,
-)
-from .assets.create_binance_spot_klines_table_origo import (
-    create_binance_spot_klines_table_origo,
-)
-from .assets.create_binance_spot_dollar_klines_table_origo import (
-    create_binance_spot_dollar_klines_table_origo,
-)
-from .assets.create_binance_spot_volume_klines_table_origo import (
-    create_binance_spot_volume_klines_table_origo,
-)
-from .assets.create_binance_spot_tick_klines_table_origo import (
-    create_binance_spot_tick_klines_table_origo,
-)
-from .assets.create_binance_spot_dollar_imbalance_klines_table_origo import (
-    create_binance_spot_dollar_imbalance_klines_table_origo,
 )
 from .assets.create_binance_futures_klines_table_origo import (
     create_binance_futures_klines_table_origo,
@@ -109,19 +83,6 @@ from .assets.create_binance_spot_depth200_snapshots_table_origo import (
     SNAPSHOTS_TABLE_NAME as DEPTH200_SNAPSHOTS_TABLE_NAME,
     create_binance_spot_depth200_snapshots_table_origo,
 )
-from .assets.refresh_binance_spot_klines_origo import refresh_binance_spot_klines_origo
-from .assets.refresh_binance_spot_dollar_klines_origo import (
-    refresh_binance_spot_dollar_klines_origo,
-)
-from .assets.refresh_binance_spot_volume_klines_origo import (
-    refresh_binance_spot_volume_klines_origo,
-)
-from .assets.refresh_binance_spot_tick_klines_origo import (
-    refresh_binance_spot_tick_klines_origo,
-)
-from .assets.refresh_binance_spot_dollar_imbalance_klines_origo import (
-    refresh_binance_spot_dollar_imbalance_klines_origo,
-)
 from .assets.refresh_binance_futures_klines_origo import refresh_binance_futures_klines_origo
 from .assets.refresh_binance_spot_depth20_1m_origo import (
     refresh_binance_spot_depth20_1m_origo,
@@ -136,9 +97,6 @@ from .assets.daily_futures_trades_to_origo import (
     DEFAULT_BINANCE_FUTURES_DAILY_TRADES_BASE_URL,
     daily_partitions as futures_daily_partitions,
     insert_daily_binance_futures_trades_to_origo,
-)
-from .assets.refresh_aligned_1m_exchange_from_binance_spot_origo import (
-    refresh_aligned_1m_exchange_from_binance_spot_origo,
 )
 from .assets.refresh_aligned_1m_exchange_from_binance_futures_origo import (
     refresh_aligned_1m_exchange_from_binance_futures_origo,
@@ -157,24 +115,7 @@ from .assets.sync_binance_spot_depth200_snapshots_to_origo import (
 from .assets.reconcile_binance_spot_depth200_partition_state_origo import (
     reconcile_binance_spot_depth200_partition_state_origo,
 )
-from .assets.create_binance_spot_latest_tables_origo import (
-    create_binance_spot_latest_tables_origo,
-)
-from .assets.sync_binance_spot_trades_latest_origo import (
-    LATEST_MINUTE_START_TAG,
-    sync_binance_spot_trades_latest_origo,
-)
-from .assets.refresh_binance_spot_klines_latest_origo import (
-    refresh_binance_spot_klines_latest_origo,
-)
-from .assets.refresh_binance_spot_dollar_klines_latest_origo import (
-    refresh_binance_spot_dollar_klines_latest_origo,
-)
-from .assets.refresh_binance_spot_latest_cuts_origo import (
-    refresh_binance_spot_latest_cuts_origo,
-)
-from .assets.cleanup_binance_spot_latest_origo import cleanup_binance_spot_latest_origo
-from .assets.build_bar_store_arrow import series_store_dir
+from .utils.arrow_store import series_store_dir
 from .assets.build_depth_snapshot_store_arrow import (
     DepthSnapshotStoreConfig,
     LATEST_MANIFEST_NAME,
@@ -227,24 +168,11 @@ DEPTH20_LIVE_RECONCILIATION_SPEC = DepthLiveReconciliationSpec(
     auth_token_env='BINANCE_SPOT_DEPTH20_AUTH_TOKEN',
 )
 
-def _spot_daily_trades_base_url() -> str:
-    return os.environ.get(
-        'BINANCE_SPOT_DAILY_TRADES_BASE_URL', DEFAULT_BINANCE_SPOT_DAILY_TRADES_BASE_URL
-    )
-
-
 def _futures_daily_trades_base_url() -> str:
     return os.environ.get(
         'BINANCE_FUTURES_DAILY_TRADES_BASE_URL', DEFAULT_BINANCE_FUTURES_DAILY_TRADES_BASE_URL
     )
 
-
-SPOT_DAILY_GAP_REPAIR_SPEC = DailyGapRepairSpec(
-    market='spot',
-    ledger_table=SPOT_DAILY_LEDGER_TABLE_NAME,
-    earliest_partition=spot_daily_partitions.start.date(),
-    get_base_url=_spot_daily_trades_base_url,
-)
 
 FUTURES_DAILY_GAP_REPAIR_SPEC = DailyGapRepairSpec(
     market='futures',
@@ -273,40 +201,12 @@ create_origo_database_job = define_asset_job(
     selection=["create_origo_database"]
 )
 
-create_binance_daily_spot_trades_table_origo_job = define_asset_job(
-    name="create_binance_daily_spot_trades_table_origo_job",
-    selection=["create_binance_daily_spot_trades_table_origo"]
-)
 
 create_binance_daily_futures_trades_table_origo_job = define_asset_job(
     name="create_binance_daily_futures_trades_table_origo_job",
     selection=["create_binance_daily_futures_trades_table_origo"]
 )
 
-create_binance_spot_klines_table_origo_job = define_asset_job(
-    name="create_binance_spot_klines_table_origo_job",
-    selection=["create_binance_spot_klines_table_origo"]
-)
-
-create_binance_spot_dollar_klines_table_origo_job = define_asset_job(
-    name="create_binance_spot_dollar_klines_table_origo_job",
-    selection=["create_binance_spot_dollar_klines_table_origo"]
-)
-
-create_binance_spot_volume_klines_table_origo_job = define_asset_job(
-    name="create_binance_spot_volume_klines_table_origo_job",
-    selection=["create_binance_spot_volume_klines_table_origo"]
-)
-
-create_binance_spot_tick_klines_table_origo_job = define_asset_job(
-    name="create_binance_spot_tick_klines_table_origo_job",
-    selection=["create_binance_spot_tick_klines_table_origo"]
-)
-
-create_binance_spot_dollar_imbalance_klines_table_origo_job = define_asset_job(
-    name="create_binance_spot_dollar_imbalance_klines_table_origo_job",
-    selection=["create_binance_spot_dollar_imbalance_klines_table_origo"]
-)
 
 create_binance_futures_klines_table_origo_job = define_asset_job(
     name="create_binance_futures_klines_table_origo_job",
@@ -333,10 +233,6 @@ create_binance_spot_depth200_1m_table_origo_job = define_asset_job(
     selection=['create_binance_spot_depth200_1m_table_origo'],
 )
 
-create_binance_spot_latest_tables_origo_job = define_asset_job(
-    name='create_binance_spot_latest_tables_origo_job',
-    selection=['create_binance_spot_latest_tables_origo'],
-)
 
 create_aligned_1m_exchange_table_origo_job = define_asset_job(
     name="create_aligned_1m_exchange_table_origo_job",
@@ -345,27 +241,6 @@ create_aligned_1m_exchange_table_origo_job = define_asset_job(
 
 # Data Insertion Jobs
 
-refresh_binance_spot_data_source_job = define_asset_job(
-    name="refresh_binance_spot_data_source_job",
-    selection=[
-        "insert_daily_binance_spot_trades_to_origo",
-        "refresh_binance_spot_klines_origo",
-        "refresh_binance_spot_dollar_klines_origo",
-        "refresh_binance_spot_volume_klines_origo",
-        "refresh_binance_spot_tick_klines_origo",
-        "refresh_binance_spot_dollar_imbalance_klines_origo",
-        "refresh_aligned_1m_exchange_from_binance_spot_origo",
-    ])
-
-backfill_binance_spot_dollar_klines_origo_job = define_asset_job(
-    name='backfill_binance_spot_dollar_klines_origo_job',
-    selection=['refresh_binance_spot_dollar_klines_origo'],
-)
-
-backfill_binance_spot_trades_origo_job = define_asset_job(
-    name='backfill_binance_spot_trades_origo_job',
-    selection=['insert_daily_binance_spot_trades_to_origo'],
-)
 
 _BINANCE_SPOT_DEPTH20_DATA_SOURCE_SELECTION = [
     'sync_binance_spot_depth20_snapshots_to_origo',
@@ -395,17 +270,6 @@ refresh_binance_spot_depth200_data_source_job = define_asset_job(
     selection=_BINANCE_SPOT_DEPTH200_DATA_SOURCE_SELECTION,
 )
 
-refresh_binance_spot_latest_data_source_job = define_asset_job(
-    name='refresh_binance_spot_latest_data_source_job',
-    selection=[
-        'create_binance_spot_latest_tables_origo',
-        'sync_binance_spot_trades_latest_origo',
-        'refresh_binance_spot_klines_latest_origo',
-        'refresh_binance_spot_dollar_klines_latest_origo',
-        'refresh_binance_spot_latest_cuts_origo',
-        'cleanup_binance_spot_latest_origo',
-    ],
-)
 
 backfill_binance_spot_depth20_data_source_job = define_asset_job(
     name='backfill_binance_spot_depth20_data_source_job',
@@ -698,14 +562,6 @@ def _depth_arrow_reconciliation_run_requests(
     return run_requests
 
 
-daily_binance_spot_pipeline_schedule = build_schedule_from_partitioned_job(
-    refresh_binance_spot_data_source_job,
-    name='daily_binance_spot_pipeline_schedule',
-    hour_of_day=4,
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-
-
 daily_binance_futures_pipeline_schedule = build_schedule_from_partitioned_job(
     refresh_binance_futures_data_source_job,
     name='daily_binance_futures_pipeline_schedule',
@@ -790,21 +646,6 @@ def binance_spot_depth200_arrow_repair_schedule(
     return _depth_arrow_reconciliation_run_requests(context, DEPTH200_LIVE_RECONCILIATION_SPEC)
 
 
-@schedule(
-    job=refresh_binance_spot_latest_data_source_job,
-    cron_schedule='* * * * *',
-    execution_timezone='UTC',
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-def binance_spot_latest_1m_schedule(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
-    minute_start = _last_completed_minute(context.scheduled_execution_time)
-    minute_key = minute_start.strftime('%Y-%m-%dT%H:%M:%SZ')
-    return RunRequest(
-        run_key=f'binance_spot_latest::{minute_key}',
-        tags={LATEST_MINUTE_START_TAG: minute_key},
-    )
-
-
 _IN_PROGRESS_RUN_STATUSES = [
     DagsterRunStatus.QUEUED,
     DagsterRunStatus.NOT_STARTED,
@@ -874,20 +715,6 @@ def _daily_gap_repair_run_requests(
 
 
 @schedule(
-    job=refresh_binance_spot_data_source_job,
-    cron_schedule='30 * * * *',
-    execution_timezone='UTC',
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-def binance_spot_daily_gap_repair_schedule(
-    context: ScheduleEvaluationContext,
-) -> list[RunRequest] | SkipReason:
-    return _daily_gap_repair_run_requests(
-        context, SPOT_DAILY_GAP_REPAIR_SPEC, 'refresh_binance_spot_data_source_job'
-    )
-
-
-@schedule(
     job=refresh_binance_futures_data_source_job,
     cron_schedule='30 * * * *',
     execution_timezone='UTC',
@@ -920,7 +747,7 @@ def _partitioned_run_request(
 
 
 @asset_sensor(
-    asset_key=AssetKey("refresh_binance_spot_klines_origo"),
+    asset_key=AssetKey("build_binance_spot_trades_canonical_revision_origo"),
     job=publish_btc_briefing_feed_job,
     default_status=DefaultSensorStatus.RUNNING,
 )
@@ -999,27 +826,14 @@ depth_snapshot_store_source_sensor = RunStatusSensorDefinition(
 
 defs = Definitions(
     assets=[create_origo_database,
-            create_binance_daily_spot_trades_table_origo,
             create_binance_daily_futures_trades_table_origo,
-            create_binance_spot_klines_table_origo,
-            create_binance_spot_dollar_klines_table_origo,
-            create_binance_spot_volume_klines_table_origo,
-            create_binance_spot_tick_klines_table_origo,
-            create_binance_spot_dollar_imbalance_klines_table_origo,
             create_binance_futures_klines_table_origo,
             create_binance_spot_depth20_snapshots_table_origo,
             create_binance_spot_depth20_1m_table_origo,
             create_binance_spot_depth200_snapshots_table_origo,
             create_binance_spot_depth200_1m_table_origo,
-            create_binance_spot_latest_tables_origo,
             create_aligned_1m_exchange_table_origo,
-            insert_daily_binance_spot_trades_to_origo,
             insert_daily_binance_futures_trades_to_origo,
-            refresh_binance_spot_klines_origo,
-            refresh_binance_spot_dollar_klines_origo,
-            refresh_binance_spot_volume_klines_origo,
-            refresh_binance_spot_tick_klines_origo,
-            refresh_binance_spot_dollar_imbalance_klines_origo,
             refresh_binance_futures_klines_origo,
             sync_binance_spot_depth20_snapshots_to_origo,
             refresh_binance_spot_depth20_1m_origo,
@@ -1027,19 +841,12 @@ defs = Definitions(
             sync_binance_spot_depth200_snapshots_to_origo,
             refresh_binance_spot_depth200_1m_origo,
             reconcile_binance_spot_depth200_partition_state_origo,
-            sync_binance_spot_trades_latest_origo,
-            refresh_binance_spot_klines_latest_origo,
-            refresh_binance_spot_dollar_klines_latest_origo,
-            refresh_binance_spot_latest_cuts_origo,
-            cleanup_binance_spot_latest_origo,
-            refresh_aligned_1m_exchange_from_binance_spot_origo,
             refresh_aligned_1m_exchange_from_binance_futures_origo,
             publish_btc_briefing_feed,
             publish_btc_briefing_history,
             build_depth_snapshot_store_arrow],
 
     schedules=[
-        daily_binance_spot_pipeline_schedule,
         daily_binance_futures_pipeline_schedule,
         binance_spot_depth20_1m_schedule,
         binance_spot_depth20_projection_repair_schedule,
@@ -1047,8 +854,6 @@ defs = Definitions(
         binance_spot_depth200_1m_schedule,
         binance_spot_depth200_projection_repair_schedule,
         binance_spot_depth200_arrow_repair_schedule,
-        binance_spot_latest_1m_schedule,
-        binance_spot_daily_gap_repair_schedule,
         binance_futures_daily_gap_repair_schedule,
     ],
 
@@ -1059,27 +864,16 @@ defs = Definitions(
     ],
 
     jobs=[create_origo_database_job,
-          create_binance_daily_spot_trades_table_origo_job,
           create_binance_daily_futures_trades_table_origo_job,
-          create_binance_spot_klines_table_origo_job,
-          create_binance_spot_dollar_klines_table_origo_job,
-          create_binance_spot_volume_klines_table_origo_job,
-          create_binance_spot_tick_klines_table_origo_job,
-          create_binance_spot_dollar_imbalance_klines_table_origo_job,
           create_binance_futures_klines_table_origo_job,
           create_binance_spot_depth20_snapshots_table_origo_job,
           create_binance_spot_depth20_1m_table_origo_job,
           create_binance_spot_depth200_snapshots_table_origo_job,
           create_binance_spot_depth200_1m_table_origo_job,
-          create_binance_spot_latest_tables_origo_job,
           create_aligned_1m_exchange_table_origo_job,
-          refresh_binance_spot_data_source_job,
-          backfill_binance_spot_dollar_klines_origo_job,
-          backfill_binance_spot_trades_origo_job,
           refresh_binance_futures_data_source_job,
           refresh_binance_spot_depth20_data_source_job,
           refresh_binance_spot_depth200_data_source_job,
-          refresh_binance_spot_latest_data_source_job,
           backfill_binance_spot_depth20_data_source_job,
           backfill_binance_spot_depth200_data_source_job,
           repair_binance_spot_depth20_projection_job,

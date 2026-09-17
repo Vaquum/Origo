@@ -9,7 +9,6 @@ from dagster import DefaultScheduleStatus, build_schedule_context
 
 from .helpers import (
     BINANCE_FUTURES_DATASET_SOURCE,
-    BINANCE_SPOT_DATASET_SOURCE,
     ORIGO_DATABASE,
     load_expected_futures_ledger_payload,
     load_expected_futures_trade_count,
@@ -153,7 +152,6 @@ def test_binance_source_template_schedules_are_registered_in_defs(
 ) -> None:
     schedule_names = {schedule.name for schedule in origo_definitions_module.defs.schedules}
 
-    assert 'daily_binance_spot_pipeline_schedule' in schedule_names
     assert 'daily_binance_futures_pipeline_schedule' in schedule_names
     assert 'daily_pipeline_schedule' not in schedule_names
     assert 'daily_spot_pipeline_schedule' not in schedule_names
@@ -410,15 +408,12 @@ def test_same_partition_rerun_is_idempotent_across_futures_raw_single_source_and
     assert first_aligned_rows == second_aligned_rows
 
 
-def test_aligned_1m_exchange_contains_spot_and_futures_dataset_sources(
-    materialize_spot_and_futures_data_source_assets,
+def test_aligned_1m_exchange_holds_the_futures_dataset_source(
+    materialize_binance_futures_data_source_assets,
     query_origo,
     origo_assets: dict[str, object],
 ) -> None:
-    spot_result, futures_result = materialize_spot_and_futures_data_source_assets(
-        spot_partition_key='2024-01-01',
-        futures_partition_key='2019-09-08',
-    )
+    result = materialize_binance_futures_data_source_assets(partition_key='2019-09-08')
 
     rows = query_origo(
         f"""
@@ -429,9 +424,7 @@ def test_aligned_1m_exchange_contains_spot_and_futures_dataset_sources(
         """
     )
 
-    assert spot_result.success
-    assert futures_result.success
+    assert result.success
     assert rows == [
         (BINANCE_FUTURES_DATASET_SOURCE, len(_load_tdw_contract_fixture()['aligned_1m_exchange_rows'])),
-        (BINANCE_SPOT_DATASET_SOURCE, 1),
     ]

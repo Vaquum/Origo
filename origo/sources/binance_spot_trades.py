@@ -10,7 +10,12 @@ from .contracts import (
     RolloutStage,
     SourceNames,
 )
-from .profiles.spot import SPOT_COMPONENTS
+from .profiles.spot import (
+    SPOT_ALIASES,
+    SPOT_COMPONENTS,
+    SPOT_RETIRED_ROWS,
+    SPOT_RETIRED_TABLES,
+)
 from .profiles.spot_consumers import SPOT_CONSUMERS
 
 BINANCE_SPOT_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
@@ -24,4 +29,7 @@ BINANCE_SPOT_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     components=SPOT_COMPONENTS,
     consumers=SPOT_CONSUMERS,
     orchestration=OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *'),
+    aliases=SPOT_ALIASES,
+    retired_tables=SPOT_RETIRED_TABLES,
+    retired_rows=SPOT_RETIRED_ROWS,
 )

@@ -143,7 +143,7 @@ class CapacityMonitor:
         self.thread.start()
 
     def finish(self, *, successful: bool) -> None:
-        """Persist valid samples; only successful verification admits future work."""
+        """Persist valid samples; only a successful run admits future work."""
         self.stop.set()
         if self.thread.is_alive():
             self.thread.join(timeout=5)
@@ -152,7 +152,7 @@ class CapacityMonitor:
         if self.errors:
             raise ExceptionGroup('Storage sampling failed.', self.errors)
         # Retained source bytes provide a floor even when a short-lived working set
-        # falls between filesystem samples. The probe includes both implementations.
+        # falls between filesystem samples.
         retained = max(0, self._retained_bytes() - self.retained_before)
         for volume in self.volumes:
             working = max(self.working[volume.identity], retained * 3, 1)

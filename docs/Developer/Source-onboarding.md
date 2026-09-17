@@ -29,7 +29,7 @@ flowchart LR
 | Component | One required output whose count, keys, bounds and hash have been checked. |
 | Activation | A monotonically numbered record selecting one complete attempt. |
 | Route | A later, separately approved switch of an existing public identity to the new source. |
-| Lock | Shared single-host `flock` exclusion; builders and verifiers take a shared maintenance fence and an exclusive partition lock; maintenance takes the exclusive fence. |
+| Lock | Shared single-host `flock` exclusion; build, reconciliation and repair take a shared maintenance fence and an exclusive partition lock; cleanup and rollback take the exclusive fence. |
 | Consumer | An independent publisher that pins the active state, renders privately, and checks its token before replacing a manifest. |
 
 ## Add a source
@@ -49,9 +49,8 @@ Source-specific instructions in a chat are not part of the system contract.
 | --- | --- |
 | Provider adapters in `adapters/` | Implement `CanonicalAdapter` and, where available, `ProvisionalAdapter` from [contracts.py](../../origo/sources/contracts.py). Own discovery, checksums, completeness, timestamp/identity normalization and provider errors. See [binance_daily.py](../../origo/sources/adapters/binance_daily.py); never copy Binance authority into the kernel. |
 | Projection profile in `profiles/` | Declare every `ComponentSpec`: schema, key, time column, build function and provisional/current mapping. See [spot.py](../../origo/sources/profiles/spot.py). |
-| Independent verifier in `profiles/` | Supply `spec.verify` with proof for every canonical component of the exact active generation. See [spot_parity.py](../../origo/sources/profiles/spot_parity.py). A new provider needs its own reference evidence; a renamed spot comparator is not proof. |
 | Publication profile in `profiles/` | Declare every `ConsumerSpec`, file series, schema, coverage, destination and public/shadow policy. Render from a pinned snapshot and commit a checksummed manifest only after rechecking its token. See [spot_consumers.py](../../origo/sources/profiles/spot_consumers.py). |
-| One source specification and registration | Follow [binance_spot_trades.py](../../origo/sources/binance_spot_trades.py): unique key/names, first UTC day, adapters, components, consumers, verifier, retry/schedule policy and rollout stage. Add it once to `SOURCE_REGISTRY` in [registry.py](../../origo/sources/registry.py). |
+| One source specification and registration | Follow [binance_spot_trades.py](../../origo/sources/binance_spot_trades.py): unique key/names, first UTC day, adapters, components, consumers, retry/schedule policy and rollout stage. Add it once to `SOURCE_REGISTRY` in [registry.py](../../origo/sources/registry.py). |
 | Real evidence and tests | Retain official files/response evidence and hashes under `tests/fixtures/<provider>/...`; add source-specific tests under `tests/origo_source_native/`. Synthetic market rows are prohibited. |
 | Deployment inputs, when needed | Declare any new credential names and persistent mounts in the deployment configuration. Resolve credentials through the existing secret mechanism; never commit values or require operator shell exports/UI setup for each run. |
 
@@ -64,7 +63,7 @@ uploader.
 The shared backfill contract is daily UTC canonical partitions. Providers with
 hourly files need an adapter that proves complete daily partitions, or an explicit
 extension of the shared partition contract before using this job. Provider-specific
-parsing, schemas and verification remain engineering work; orchestration is shared.
+parsing, schemas and integrity checks remain engineering work; orchestration is shared.
 
 ### Generated automatically from the registration
 
@@ -72,7 +71,7 @@ parsing, schemas and verification remain engineering work; orchestration is shar
 | --- | --- |
 | [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, schedules and consumer/failure/reconciliation sensors. Do not copy these definitions into a source module. |
 | [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats source preparation idempotently; deployment configures pool limits before workers start. |
-| [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Verified generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
+| [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Reconciled generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
 | [bundle.py](../../origo/sources/bundle.py) consumer sensors | Later eligible state changes request publication automatically. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
 | [roles.py](../../origo/maintenance/roles.py), [source_receipts.py](../../origo/maintenance/source_receipts.py) | Protected source/backfill provenance and short retention for standalone projection jobs, with durable deduplication receipts. Keep the generated run tags. |
 
@@ -101,11 +100,11 @@ certify another source.
 
 | Required proof | Reference test/scenario |
 | --- | --- |
-| Empty ClickHouse source schema and empty Dagster automation state; one job produces verified generations and every expected file with matching checksums/state tokens | `test_one_job_prepares_verifies_and_publishes_all_files`; assert the expected product list explicitly, not just whatever the new spec happens to declare. |
+| Empty ClickHouse source schema and empty Dagster automation state; one job produces reconciled generations and every expected file with matching checksums/state tokens | `test_one_job_prepares_verifies_and_publishes_all_files`; assert the expected product list explicitly, not just whatever the new spec happens to declare. |
 | Missing/invalid provider input fails the correct day, preserves completed days and blocks publication | `test_unavailable_day_blocks_publication_and_preserves_completed_day` |
 | Publication failure fails the same run; retry preserves source generations and already committed files | `test_file_failure_fails_job_and_retry_keeps_verified_generation` |
 | A changed eligible generation triggers consumers; unchanged state does not; retiring projection history preserves deduplication | `test_new_verified_data_automatically_requests_every_consumer` and `test_projection_runs_retire_without_losing_source_history_or_receipts` |
-| Repeated deployment restores declared automation without losing cursors; new storage remeasures verification; setup failures appear in Runs | `test_preparation_applies_rollout_state_without_manual_switches`, `test_storage_change_remeasures_independent_verification`, `test_deployment_preparation_failures_are_dagster_runs` |
+| Repeated deployment restores declared automation without losing cursors; new storage remeasures capacity; setup failures appear in Runs | `test_preparation_applies_rollout_state_without_manual_switches`, `test_storage_change_remeasures_capacity`, `test_deployment_preparation_failures_are_dagster_runs` |
 | Actual UI matches system state | Open Jobs and launch the generated backfill through native partition controls on an isolated instance, without typing configuration. Verify all-history, missing/failed and selected-gap controls, coverage, successful and failed real-fixture runs, retries and logs. Record evidence in the PR; do not launch production history as a test. |
 
 Run the new source tests, the shared backfill/framework tests and
@@ -117,7 +116,7 @@ reviewer must ensure the new source's acceptance cases are actually included.
 
 Include the source key, rollout, exact product inventory, credential/mount names
 and acceptance commands/results in the source's slice/PR. The reviewer rejects
-manual activation/setup steps, missing products and unsupported claims of parity.
+manual activation/setup steps, missing products and unsupported correctness claims.
 After merge/deployment, hand the operator the generated job name; native partition controls provide the selection and coverage.
 Full-history production validation and public promotion remain separate evidence.
 
@@ -138,9 +137,9 @@ The shared factory generates a native daily-partitioned asset job using
 `BackfillPolicy.multi_run(max_partitions_per_run=1)`. Dagster launches independent
 daily runs under a code-owned canonical concurrency pool. Native Jobs backfills
 include the canonical asset, every file consumer and final reconciliation in each
-child run. The canonical step records its verified generation against that
+child run. The canonical step records its reconciled generation against that
 backfill's selected dates in `source_backfill_log`. Until every selected date has
-its own current verified receipt, it records its materialization and omits its
+its own current receipt, it records its materialization and omits its
 optional output; Dagster skips its downstream steps. The last completing child
 runs all file consumers and final reconciliation. Existing generations from
 before this backfill do not satisfy queued work. Simultaneous final children
@@ -172,12 +171,13 @@ reduction across insert block boundaries. Retained history is never consolidated
 by this step. Parallelism is across independent days. New component hashes have a
 `v2:` prefix; existing v1 generations are checked with their original encoding.
 Retries reuse the original generation. Existing data schemas and public identities remain unchanged; the backfill receipt table is additive.
-The reference parser independently uses Arrow CSV and is checked against the
-frozen legacy parser on real millisecond and microsecond files. Legacy projection
-formulas remain unchanged.
+Projection formulas remain unchanged. Rebuilding an unchanged day is not
+bit-reproducible for large bars: ClickHouse aggregate state and block layout move
+the last bits of float sums, so a repair may activate a generation with a new
+state token. Retained-content checks re-hash stored bytes and are unaffected.
 
 Performance evidence must name rows, elapsed time, worker count, hardware,
-seconds per million, memory and whether verification/publication/network are
+seconds per million, memory and whether the integrity check/publication/network are
 included. Measure representative high-volume archives at increasing concurrency;
 small-fixture correctness is not full-history throughput evidence.
 
@@ -185,7 +185,7 @@ Apply the [previous live performance findings](https://github.com/Vaquum/Origo-P
 when measuring or changing this path:
 
 - Entries 043/080: measure concurrent *completed source rows*, not ClickHouse
-  `InsertedRows` (which also counts staging, copies and reference verification).
+  `InsertedRows` (which also counts staging and copies).
   The previous server workload peaked at 15 workers: 769,380 rows/s versus
   737,743 at 30. Those numbers concern an older workload, not this implementation.
   Sweep the current workload on the deployed hardware before changing its limit.
@@ -193,8 +193,8 @@ when measuring or changing this path:
   hashing, audit and orchestration time. Never rescan accumulated raw history per
   day. Reuse evidence only while the underlying generation is unchanged; mutation
   requires a fresh check. Retained copies are checked immediately before activation
-  and after independent verification, rather than also scanning each copy twice
-  during the build.
+  and again by reconciliation, rather than also scanning each copy twice during
+  the build.
 - Entries 092/109: a 15,364,010-row day exposed an HTTP insertion timeout. Bound
   native-protocol blocks; prove interrupted-insert retry does not expose or duplicate
   partial data. Do not route whole raw days through HTTP insertion. Changing insert
@@ -206,26 +206,28 @@ when measuring or changing this path:
   entry point as well as isolated runtime benchmarks. Both must execute the same
   limits, proof and publication contract.
 
-Each verified day materializes its source partition with revision, build ID,
-generation, verification time, data version and comparison results. Completed
+Each reconciled day materializes its source partition with revision, build ID,
+generation, reconciliation time and data version. Completed
 days remain visible when another day fails. Python logging and stdout/stderr flow
 through Dagster. Native backfill and run retry controls handle failures; unchanged
-verified generations and completed file publications are reused on retry.
+generations and completed file publications are reused on retry.
 
-After the selected days verify, native downstream steps publish every declared
+After the selected days reconcile, native downstream steps publish every declared
 consumer from pinned projections. A publication failure fails that consumer and
 the native backfill; final reconciliation checks current manifests and health. Files expose their own
-materializations and source tokens; a source partition's successful verification
+materializations and source tokens; a source partition's successful reconciliation
 does not claim that a failed file publication succeeded. Publication queries pinned
 ClickHouse projections without copying the historical raw trade archive into
 Python. Consumer sensors also publish later eligible source changes automatically.
-Active backfills hold background publication and verification reconciliation.
+Active backfills hold background publication and reconciliation. Publication
+requires every active canonical day to carry complete component evidence and no
+open partition failure.
 
 Backfill runs preserve authoritative source provenance. Standalone consumer jobs are generated into the existing projection-retention allowlist, use a distinct projection-source tag, and preserve durable deduplication receipts before their run history is retired.
 
 The shared `source-publications` volume preserves manifests and files across worker replacement. The CANARY spot specification declares Parquet, Arrow and Hugging Face **shadow** files; this does not upload over the legacy public Hugging Face datasets. Legacy public identities retain their existing owners until the separately approved LIVE routing promotion. CANARY schedules run automatically for new data and audit work; full-history backfills remain an operator partition selection.
 
-Dagit reflects the latest verified and reconciled state, not an atomic transaction with ClickHouse. Reconciliation observes failures and repairs missing/stale asset materializations. Its health check must be healthy alongside the backfill result. Fixture tests prove this workflow, not parity across the entire production history; that evidence comes from the operator's selected backfill.
+Dagit reflects the latest reconciled state, not an atomic transaction with ClickHouse. Reconciliation observes failures and repairs missing/stale asset materializations. Its health check must be healthy alongside the backfill result. Fixture tests prove this workflow, not the entire production history; that evidence comes from the operator's selected backfill.
 
 Promotion still requires `zero-bang` approval of the full-history proof and public routing change. Use the source `rollback` operation for a deliberate generation rollback; never overwrite activation history.
 
@@ -265,8 +267,8 @@ CI success, silence, or a workaround is not approval to change the contract.
 Use `PYTHONPATH=. python tools/benchmark_source_backfill.py --archives <cache>
 --days <real dates> --workers 1 2 4 --output <report.json>` for an isolated developer
 benchmark. It validates official archive sidecars, owns a local ClickHouse
-container, and records the frozen legacy ingest/projections separately from the
-revised build, independent parity verification and all declared shadow files.
+container, and records the source build, its retained-content check and all
+declared shadow files.
 The report excludes Dagster startup and network upload; measure those in the
 native GUI acceptance run as well. This is a developer benchmark, not an
 operator backfill procedure.

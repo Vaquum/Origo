@@ -3,7 +3,9 @@
 import os
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import cast
@@ -168,8 +170,7 @@ def maintain_diagnostics(
                     f'ALTER TABLE system.{table} MODIFY SETTING merge_with_ttl_timeout=3600',
                     deadline,
                 )
-    present = {root for table in tables if (root := diagnostic_root(table)) is not None}
-    missing = set[str](DIAGNOSTIC_LOGS) - present
+    missing = set[str](DIAGNOSTIC_LOGS) - set(tables)
     errors.extend(f'enabled_diagnostic_log_missing:{root}' for root in sorted(missing))
     if not tables:
         raise RuntimeError('No managed diagnostic logs were found.')
@@ -222,10 +223,13 @@ def maintain_diagnostics(
     expired_parts: set[tuple[str, str]] = set()
     lagging_parts: set[tuple[str, str]] = set()
     oldest_dates: list[str] = []
-    lagging: dict[str, str] = {}
+    overdue_parts: dict[tuple[str, str], list[str]] = defaultdict(list)
+    partition_bytes: dict[tuple[str, str], int] = defaultdict(int)
+    newest_dates: dict[tuple[str, str], str] = {}
     for part in active:
-        table, name = str(part[0]), str(part[1])
-        oldest_date = str(part[5])
+        table, name, partition_id = str(part[0]), str(part[1]), str(part[2])
+        oldest_date, newest_date = str(part[5]), str(part[6])
+        partition_bytes[table, partition_id] += int(str(part[4]))
         if part[7] or part[8]:
             root = diagnostic_root(table)
             if root is None:
@@ -236,6 +240,7 @@ def maintain_diagnostics(
                 bounds = _execute(
                     client,
                     f'SELECT count(),toString(toDate(min({timestamp}))),'
+                    f'toString(toDate(max({timestamp}))),'
                     f'max({timestamp})<now()-INTERVAL 14 DAY,'
                     f'min({timestamp})<now()-INTERVAL 14 DAY-'
                     f'toIntervalSecond(%(lag_seconds)s) FROM system.{table} '
@@ -251,20 +256,48 @@ def maintain_diagnostics(
                 )
                 oldest_dates.append(oldest_date)
                 continue
-            count, actual_oldest, expired, overdue = bounds[0]
+            count, actual_oldest, actual_newest, expired, overdue = bounds[0]
             if not count:
                 continue
-            oldest_date = str(actual_oldest)
+            oldest_date, newest_date = str(actual_oldest), str(actual_newest)
             if expired:
                 expired_parts.add((table, name))
             if overdue:
                 lagging_parts.add((table, name))
-                lagging[table] = min(lagging.get(table, oldest_date), oldest_date)
+                overdue_parts[table, partition_id].append(oldest_date)
         oldest_dates.append(oldest_date)
+        newest_dates[table, partition_id] = max(
+            newest_dates.get((table, partition_id), newest_date), newest_date
+        )
     expired_bytes = sum(
         int(str(part[4])) for part in active if (str(part[0]), str(part[1])) in expired_parts
     )
     oldest = min(oldest_dates, default='')
+    # Lagging partitions are classified once here so that dry-run, apply and the
+    # re-observation after an apply pass report the same state. A rotated '<root>_N'
+    # table receives no new rows: its oversized partition drains through the per-part
+    # drop below as each part's newest row passes retention, so it is pending until
+    # that date, not a failure. A live table's oversized partition stays an error.
+    lagging: dict[str, str] = {}
+    blocked: set[tuple[str, str]] = set()
+    free = 0
+    if overdue_parts:
+        free = int(
+            str(_execute(client, 'SELECT min(free_space) FROM system.disks', deadline)[0][0])
+        )
+    for (table, partition_id), dates in sorted(overdue_parts.items()):
+        size = partition_bytes[table, partition_id]
+        if size > config.diagnostic_max_partition_bytes:
+            blocked.add((table, partition_id))
+            if table not in DIAGNOSTIC_LOGS:
+                expiry = date.fromisoformat(newest_dates[table, partition_id]) + timedelta(days=14)
+                pending.append(f'catch_up_deferred:{table}:{partition_id}:{size}:{expiry}')
+                continue
+            errors.append(f'catch_up_capacity:{table}:{partition_id}:{size}')
+        elif free < config.diagnostic_min_free_bytes + 2 * size:
+            blocked.add((table, partition_id))
+            errors.append(f'catch_up_disk:{table}:{partition_id}:{free}')
+        lagging[table] = min([lagging[table], *dates] if table in lagging else dates)
     errors.extend(f'expiry_lag:{table}:{oldest_date}' for table, oldest_date in lagging.items())
     action = ''
     busy_tables = {str(row[0]) for row in mutations + merges}
@@ -293,30 +326,14 @@ def maintain_diagnostics(
         if count and maximum < cutoff:
             _execute(client, f"ALTER TABLE system.{table} DROP PART '{name}'", deadline)
             action += f'drop_expired_part:{table}:{name};'
-        elif identity in lagging_parts and not mutations:
-            size = _execute(
+        elif identity in lagging_parts and not mutations and (table, partition_id) not in blocked:
+            _execute(
                 client,
-                "SELECT sum(bytes_on_disk) FROM system.parts WHERE database='system' AND table=%(table)s AND partition_id=%(partition)s AND active",
+                f"ALTER TABLE system.{table} MATERIALIZE TTL IN PARTITION ID '{partition_id}' SETTINGS mutations_sync=0",
                 deadline,
-                {'table': table, 'partition': partition_id},
             )
-            partition_bytes = int(str(size[0][0]))
-            free = int(
-                str(_execute(client, 'SELECT min(free_space) FROM system.disks', deadline)[0][0])
-            )
-            if (
-                partition_bytes > config.diagnostic_max_partition_bytes
-                or free < config.diagnostic_min_free_bytes + 2 * partition_bytes
-            ):
-                errors.append(f'catch_up_capacity:{table}:{partition_id}:{partition_bytes}')
-            else:
-                _execute(
-                    client,
-                    f"ALTER TABLE system.{table} MATERIALIZE TTL IN PARTITION ID '{partition_id}' SETTINGS mutations_sync=0",
-                    deadline,
-                )
-                action += f'materialize_ttl:{table}:{partition_id};'
-                break
+            action += f'materialize_ttl:{table}:{partition_id};'
+            break
     if action:
         observed = maintain_diagnostics(
             client, config.model_copy(update={'dry_run': True}), deadline
@@ -334,7 +351,7 @@ def maintain_diagnostics(
                     + list(observed.errors)
                 )
             ),
-            observed.pending,
+            tuple(dict.fromkeys(pending + list(observed.pending))),
             action,
         )
     return DiagnosticInventory(

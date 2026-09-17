@@ -64,7 +64,7 @@ def execute_partition_backfill(
 def publication_ready(
     spec: RevisionedSourceSpec, context: AssetExecutionContext, result: dict[str, object]
 ) -> bool:
-    """Join this native job backfill's receipts to the current verified generations."""
+    """Join this native job backfill's receipts to the current complete generations."""
     from uuid import UUID
 
     from dagster._core.storage.tags import BACKFILL_ID_TAG
@@ -104,19 +104,19 @@ def publication_ready(
                 )
             ],
         )
+        builds, params = store.complete_builds()
         completed = store.execute(
             f"""SELECT uniqExact(r.partition_key)
             FROM {store.table('source_backfill_log')} r
             INNER JOIN {store.table('source_active_partitions')} a
                 USING (source_key, partition_key, revision, build_id, generation)
-            INNER JOIN {store.table('source_parity_log')} p
-                USING (source_key, partition_key, revision, build_id, generation)
+            INNER JOIN {builds} c USING (source_key, partition_key, revision, build_id)
             WHERE r.source_key=%(source)s AND r.backfill_id=%(backfill)s
                 AND r.partition_key IN %(days)s AND NOT a.provisional""",
-            {'source': spec.key, 'backfill': backfill_id, 'days': tuple(days)},
+            {**params, 'backfill': backfill_id, 'days': tuple(days)},
         )[0][0]
     context.log.info(
-        'source=%s phase=backfill_verified partitions=%s/%s backfill=%s',
+        'source=%s phase=backfill_complete partitions=%s/%s backfill=%s',
         spec.key,
         completed,
         len(days),

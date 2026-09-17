@@ -117,11 +117,10 @@ def require_backup(
         )
     if not journal.inventory_complete or journal.retained_floor_bytes <= 0:
         raise RuntimeError(
-            'Complete the bounded inventory before choosing the first-apply byte budget.'
+            'Complete the bounded inventory before the first apply.'
         )
-    # An over-budget instance must still be allowed to reclaim history. The
-    # pre-compaction floor includes reusable shared SQLite pages; health fails
-    # until the actual post-maintenance footprint reaches the configured budget.
+    # An instance whose health check fails must still be allowed to reclaim history.
+    # The pre-compaction floor includes reusable shared SQLite pages.
     if manifest_sha256(journal) != journal.manifest_sha256:
         raise RuntimeError('The dry-run manifest changed after it was approved.')
     payload = Path(config.backup_receipt).read_bytes()

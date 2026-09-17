@@ -70,13 +70,13 @@ source run evidence are independent of those operational tick logs.
    retention-policy change permits a new inventory cycle.
 2. Read `maintenance` in the health check metadata and its `journal_path`. The one
    journal contains the exact first manifest, artifact paths/allocated bytes,
-   exclusions, `archive`/`retire` actions and SHA-256. The physical ceiling defaults
-   to 13 GiB; health also requires strictly less than 10% of ClickHouse active
-   business-data bytes. Shared databases, source archives, live shards, logs and
-   maintenance state all count. Diagnostic tables never inflate the denominator.
-   An over-budget instance may perform approved cleanup, but its check remains
-   failed until actual physical usage meets both limits. The old retained-floor
-   estimate includes reusable SQLite pages and is not an admission barrier.
+   exclusions, `archive`/`retire` actions and SHA-256. Health requires Dagster
+   metadata to stay strictly below 10% of ClickHouse active business-data bytes.
+   Shared databases, source archives, live shards, logs and maintenance state all
+   count. Diagnostic tables never inflate the denominator. An instance above that
+   ratio may perform approved cleanup, but its check remains failed until actual
+   physical usage meets the ratio. The old retained-floor estimate includes reusable
+   SQLite pages and is not an admission barrier.
 3. Before first apply, take a consistent snapshot of **the entire Dagster instance**
    and compute logs using the storage platform's atomic snapshot facility, or a
    controlled writer-quiesced copy. Copying separate live SQLite files is not a
@@ -90,14 +90,13 @@ source run evidence are independent of those operational tick logs.
    integrity, instance identity and the manifest's run/shard evidence. The operator
    supplies the snapshot's consistency guarantee; this command does not create a
    backup or turn a live file copy into one.
-5. Review the exact manifest. In Dagit set `dry_run: false`, the measured budget,
-   `backup_receipt` to the readable receipt path and `approved_manifest_sha256` to
+5. Review the exact manifest. In Dagit set `dry_run: false`, `backup_receipt` to
+   the readable receipt path and `approved_manifest_sha256` to
    that exact manifest hash. The first batch requires a matching, unexpired receipt;
    later batches use the durable first-apply checkpoint and revalidate each run.
    Failure/timeout is a failed run and check, with progress retained for another run.
 6. After the first batch's state and physical release have been reconciled, enable
-   recurring apply with repository variables `ORIGO_METADATA_DRY_RUN=false`,
-   `ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=<measured bytes>` and
+   recurring apply with repository variables `ORIGO_METADATA_DRY_RUN=false` and
    `ORIGO_METADATA_MAX_RUNTIME_SECONDS=600`, then deploy. Repeat bounded Dagit
    invocations during catch-up until eligible backlog declines faster than ingress.
 
@@ -113,7 +112,6 @@ ops:
       max_runs_per_batch: 500
       max_runtime_seconds: 600
       lock_wait_seconds: 1
-      metadata_budget_bytes: 13958643712
 ```
 
 The first manifest stays available across inspection batches. Its initial eligibility
@@ -129,11 +127,11 @@ maintenance snapshots after 30 days; Origo does not delete external backups.
 All worker output and exceptions flow into Dagit logs. The blocking
 `operational_metadata_health` check reports candidate/protected/deleted/archived counts,
 exclusion reasons, age-eligible projection backlog (including protected projections), inferred eligible
-arrival rate, cleanup rate, query p95, byte budget, last healthy invocation and free
-filesystem bytes. Arrival rate uses the observed backlog change plus deletions;
+arrival rate, cleanup rate, query p95, business-data ratio, last healthy invocation
+and free filesystem bytes. Arrival rate uses the observed backlog change plus deletions;
 concurrent manual deletion can understate arrivals. Active cleanup throughput and
 between-invocation cleanup rate are separate measurements. Required state is never
-deleted to force a budget to pass.
+deleted to force a check to pass.
 
 `reclaimed_bytes` includes removed projection artifacts, net source-archive savings
 and measured shared-database release. `shared_sqlite.*.reusable_bytes` is still

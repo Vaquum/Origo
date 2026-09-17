@@ -38,11 +38,13 @@ BACKFILLS_QUERY = """query Backfills {
     __typename ... on PartitionBackfills { results { id status timestamp assetSelection { path } } }
   }
 }"""
+# One tag per filter: the production run storage answers a two-tag filter in eleven
+# seconds and a one-tag filter in a fraction of one, so the source is matched client-side.
 BACKFILL_RUNS_QUERY = """query BackfillRuns($job: String!, $tags: [ExecutionTag!]!) {
   byJob: runsOrError(filter: {pipelineName: $job}, limit: 1) {
     __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
   }
-  byTags: runsOrError(filter: {tags: $tags}, limit: 1) {
+  byTags: runsOrError(filter: {tags: $tags}, limit: 25) {
     __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
   }
   active: runsOrError(filter: {statuses: [QUEUED, NOT_STARTED, STARTING, STARTED, CANCELING]}, limit: 200) {
@@ -270,13 +272,13 @@ class DagsterReader:
             BACKFILL_RUNS_QUERY,
             {
                 'job': backfill_job,
-                'tags': [
-                    {'key': 'origo_source_key', 'value': source_key},
-                    {'key': 'origo_source_operation', 'value': 'backfill'},
-                ],
+                'tags': [{'key': 'origo_source_operation', 'value': 'backfill'}],
             },
         )
         runs = {name: _runs(data.get(name), name) for name in ('byJob', 'byTags', 'active')}
+        runs['byTags'] = [
+            run for run in runs['byTags'] if run.tags.get('origo_source_key') == source_key
+        ][:1]
 
         def is_source_backfill(run: RunRecord) -> bool:
             return run.job_name == backfill_job or (

@@ -388,7 +388,27 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
     assert reader.backfill_owns_publication(source) is True
     state['active'] = [run('STARTED', 300.0, canonical_job, origo_source_reconciliation='true')]
     assert reader.backfill_owns_publication(source) is False
-    # Other sources' backfills are not this source's.
+    # Other sources' backfills are not this source's, whether native or tagged runs: the
+    # tagged lookup asks for one tag (a two-tag filter takes eleven seconds on the production
+    # run storage) and keeps only this source's runs.
     state.clear()
     state['backfills'] = [{'id': 'x', 'status': 'FAILED', 'timestamp': 1.0, 'assetSelection': [{'path': ['other']}]}]
     assert reader.backfill_owns_publication(source) is False
+    state['byTags'] = [
+        run('FAILURE', 500.0, 'refresh_other_canonical_source_job', origo_source_key='other', origo_source_operation='backfill'),
+        run('FAILURE', 400.0, canonical_job, origo_source_key=source, origo_source_operation='backfill'),
+    ]
+    assert reader.backfill_owns_publication(source) is True
+    state['byTags'] = [run('FAILURE', 500.0, 'refresh_other_canonical_source_job', origo_source_key='other', origo_source_operation='backfill')]
+    assert reader.backfill_owns_publication(source) is False
+    asked: list[object] = []
+    original = reader.query
+
+    def capture(operation: str, query: str, variables: object = None) -> dict[str, object]:
+        asked.append((operation, variables))
+        return original(operation, query, variables)
+
+    monkeypatch.setattr(reader, 'query', capture)
+    reader.backfill_owns_publication(source)
+    tags = next(v for op, v in asked if op == 'BackfillRuns')
+    assert isinstance(tags, dict) and tags['tags'] == [{'key': 'origo_source_operation', 'value': 'backfill'}]

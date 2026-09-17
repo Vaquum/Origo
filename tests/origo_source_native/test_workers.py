@@ -119,6 +119,9 @@ def test_compose_and_deploy_declare_the_two_feed_workers() -> None:
             assert 'worker-heartbeats:/opt/origo/heartbeats' in service['volumes'], path
             assert service['restart'] == 'unless-stopped', path
             assert service['depends_on']['clickhouse'] == {'condition': 'service_healthy'}, path
+        if path.name == 'docker-compose.deploy.yml':
+            # The mount render peaks above 5 GiB of RSS; 3 GiB killed the worker every tick.
+            assert services['provisional-worker']['mem_limit'] == '16g'
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert (
         'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector '

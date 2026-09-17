@@ -51,8 +51,7 @@ In the wider Vaquum architecture, Origo sits upstream as the data layer. Limen c
 - Rolling `_latest` tables refreshed every minute to cover the span between the last daily load and the latest closed minute
 - Binance spot order-book depth snapshots (20- and 200-level) with 1-minute projections and per-minute reconciliation
 - Hourly ledger-driven gap repair for the spot and futures daily pipelines
-- Hugging Face publishing of twelve kline datasets: six time intervals and six dollar-bar sizes
-- Local monthly Parquet mirror of the twelve kline series, refreshed every minute, with a versioned mmap-ready Arrow bar store rebuilt from it
+- Hugging Face publishing of twelve kline datasets (six time intervals and six dollar-bar sizes), the local monthly Parquet mirror of the same series and the versioned mmap-ready Arrow bar store, all published by the revisioned spot source from one pinned state
 - Ratcheted CI gates on every PR: strict pyright typing, fail-loud (no silent fallbacks), Conventional Commits, and version plus CHANGELOG trails
 - Automatic production deploy of merged `main` through GitHub Actions
 

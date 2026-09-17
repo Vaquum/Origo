@@ -23,7 +23,7 @@ AND t.key='.dagster/repository' AND t.value='__repository__@origo'
 WHERE r.pipeline_name=? ORDER BY r.id DESC LIMIT 5"""
 PROBE_JOBS = (
     'create_binance_spot_trades_source_origo_job',
-    'build_bar_store_arrow_job',
+    'publish_binance_spot_trades_mount_job',
 )
 
 

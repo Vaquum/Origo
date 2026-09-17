@@ -120,12 +120,12 @@ def test_each_native_backfill_keeps_its_receipts(instance):
 
 
 def test_one_pending_refresh_survives_while_a_worker_is_active(instance):
-    first = submit(instance, job='build_bar_store_arrow_job', day='dollar_15M')
+    first = submit(instance, job='build_depth_snapshot_store_arrow_job', day='depth20_snapshots')
     instance.report_dagster_event(
         DagsterEvent('PIPELINE_START', first.job_name), run_id=first.run_id
     )
-    second = submit(instance, job=first.job_name, day='dollar_15M')
-    third = submit(instance, job=first.job_name, day='dollar_15M')
+    second = submit(instance, job=first.job_name, day='depth20_snapshots')
+    third = submit(instance, job=first.job_name, day='depth20_snapshots')
     assert second.status == DagsterRunStatus.QUEUED
     assert third.status == DagsterRunStatus.CANCELED
     assert instance.get_run_by_id(first.run_id).status == DagsterRunStatus.STARTED
@@ -137,7 +137,7 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
     for job in (
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
-        'build_bar_store_arrow_job',
+        'publish_binance_spot_trades_mount_job',
         'refresh_binance_spot_latest_data_source_job',
     ):
         for day in ('2017-08-17', '2017-08-18', '2017-08-19'):

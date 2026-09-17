@@ -175,6 +175,7 @@ class SourceRuntime:
                         )
                         self.failures.recover(operation=operation, partition=key)
                         self.failures.recover(operation='component', partition=key)
+                        self._recover_superseded(key)
                         return current
                     revision = adapter.fetch(partition)
                 current = [
@@ -197,6 +198,7 @@ class SourceRuntime:
                 self.failures.recover(operation='component', partition=key)
                 if not provisional:
                     self.failures.recover(operation='quarantine', partition=key)
+                    self._recover_superseded(key)
                 return record
         except Exception as error:
             self._record_attempt_failure(operation, key, build_id, error)
@@ -400,21 +402,25 @@ class SourceRuntime:
             with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=True):
                 from .publication import publication_current
 
-                # Publication currency is the canonical state. A renderer that declares
-                # provisional components pins the partial-day rows present at render time;
-                # their minute-cadence refreshes neither trigger nor invalidate a publication.
-                current = self.store.snapshot(canonical_only=True)
+                # A canonical-only consumer publishes the canonical state. A consumer that
+                # declares provisional components pins the partial-day rows present now and
+                # republishes as they change; only canonical drift invalidates a render.
+                canonical = self.store.snapshot(canonical_only=True)
+                pinned = (
+                    canonical
+                    if consumer.canonical_only
+                    else self.store.snapshot(canonical_only=False)
+                )
                 if not publication_current(
-                    self.spec, consumer.key, current.token, root=Path(destination).parent.parent
+                    self.spec,
+                    consumer.key,
+                    pinned.token,
+                    root=Path(destination).parent.parent,
+                    pinned=not consumer.canonical_only,
                 ):
-                    pinned = (
-                        current
-                        if consumer.canonical_only
-                        else self.store.snapshot(canonical_only=False)
-                    )
                     consumer.publish(self.store, pinned, destination)
                 self.failures.recover(operation='consumer', consumer=consumer.key)
-                return current
+                return canonical
         except Exception as error:
             self.failures.record(
                 operation='consumer',
@@ -663,6 +669,32 @@ class SourceRuntime:
             )
             raise
 
+    def _recover_superseded(self, day: str) -> None:
+        """Close open provisional-interval failures inside a day the canonical build now covers."""
+        rows = self.store.execute(
+            f"""SELECT failure_key, any(operation), argMax(error_code, event_time),
+            argMax(partition_key, event_time), argMax(component, event_time),
+            argMax(blocking_scope, event_time), argMax(event_id, event_time)
+            FROM {self.store.table('source_failure_log')}
+            WHERE source_key=%(source)s AND operation IN ('provisional', 'component')
+              AND startsWith(ifNull(partition_key, ''), %(prefix)s)
+            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+            {'source': self.spec.key, 'prefix': day + 'T'},
+        )
+        for row in rows:
+            if not isinstance(row[6], UUID):
+                raise TypeError('Superseded recovery must reference a concrete failure event.')
+            self.failures.record(
+                operation=str(row[1]),
+                error_code=str(row[2]),
+                scope=str(row[5]),
+                partition=None if row[3] is None else str(row[3]),
+                component=None if row[4] is None else str(row[4]),
+                event_type='RECOVERED',
+                related_event=row[6],
+                details={'reason': 'superseded by the canonical day'},
+            )
+
     def _recover_committed_failure(self, record: StateRecord) -> None:
         rows = self.store.execute(
             f"""SELECT failure_key, argMax(error_code, event_time), argMax(event_id, event_time),
@@ -728,6 +760,7 @@ class SourceRuntime:
                 for operation in ('integrity', 'verification', 'repair'):
                     self.failures.recover(operation=operation, partition=key)
                 self._recover_committed_failure(record)
+                self._recover_superseded(key)
                 pending = self.store.execute(
                     f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
                     WHERE source_key=%(source)s AND partition_key=%(partition)s

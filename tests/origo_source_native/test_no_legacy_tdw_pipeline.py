@@ -23,6 +23,18 @@ REMOVED_ASSET_MODULES = (
     'monthly_futures_agg_trades_to_tdw',
     'monthly_futures_trades_to_tdw',
     'monthly_trades_to_tdw',
+    'publish_binance_spot_klines_to_huggingface',
+    'publish_binance_spot_15m_klines_to_huggingface',
+    'publish_binance_spot_30m_klines_to_huggingface',
+    'publish_binance_spot_1h_klines_to_huggingface',
+    'publish_binance_spot_2h_klines_to_huggingface',
+    'publish_binance_spot_4h_klines_to_huggingface',
+    'publish_binance_spot_1M_dollar_klines_to_huggingface',
+    'publish_binance_spot_15M_dollar_klines_to_huggingface',
+    'publish_binance_spot_30M_dollar_klines_to_huggingface',
+    'publish_binance_spot_60M_dollar_klines_to_huggingface',
+    'publish_binance_spot_120M_dollar_klines_to_huggingface',
+    'publish_binance_spot_240M_dollar_klines_to_huggingface',
 )
 
 REMOVED_UTIL_MODULES = (

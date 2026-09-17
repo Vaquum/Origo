@@ -33,7 +33,7 @@ def test_native_partition_runs_and_publication_dependencies() -> None:
     assert (
         graph.get(AssetKey('reconcile_binance_spot_trades_source_origo')).parent_keys == consumers
     )
-    assert len(job.asset_layer.executable_asset_keys) == 5
+    assert len(job.asset_layer.executable_asset_keys) == 2 + len(BINANCE_SPOT_TRADES_SPEC.consumers)
     assert job.get_run_config_for_partition_key('2020-01-01') == {}
 
 

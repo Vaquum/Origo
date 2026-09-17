@@ -23,12 +23,28 @@ from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import ConsumerSpec, Snapshot, SnapshotReader, SourceBundle
 from origo.sources.prepare import prepare_source
+from origo.sources.profiles import spot_consumers
 from origo.sources.storage import SourceStore
 
 from .test_binance_daily_source_adapter import archive_response
 
 DAY = '2017-08-17'
 ASSET = 'build_binance_spot_trades_canonical_revision_origo'
+
+
+class FakeHfApi:
+    """Records the Hugging Face calls a publication makes; nothing leaves the host."""
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def __init__(self, token: str) -> None:
+        assert token
+
+    def create_repo(self, **kwargs: object) -> None:
+        self.calls.append(('create_repo', kwargs))
+
+    def upload_folder(self, **kwargs: object) -> None:
+        self.calls.append(('upload_folder', kwargs))
 
 
 @pytest.fixture
@@ -38,6 +54,11 @@ def ready_job(
     monkeypatch.setattr(binance_daily, 'get_response', archive_response)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     monkeypatch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(tmp_path / 'files'))
+    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(tmp_path / 'parquet'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
+    monkeypatch.setenv('HF_TOKEN', 'test-token')
+    FakeHfApi.calls = []
+    monkeypatch.setattr(spot_consumers, 'HfApi', FakeHfApi)
     monkeypatch.setattr(
         capacity, '_volumes', lambda runtime: (capacity._Volume('test-volume', tmp_path),)
     )
@@ -82,11 +103,7 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
         'time_latest',
         'dollar_latest',
     }
-    assert {consumer.key for consumer in store.spec.consumers} == {
-        'parquet',
-        'arrow',
-        'huggingface_shadow',
-    }
+    assert {consumer.key for consumer in store.spec.consumers} == {'mount', 'huggingface'}
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]
     assert instance.all_instigator_state() == []
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
@@ -109,7 +126,9 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
         root = tmp_path / 'files' / store.spec.key / consumer.key
         manifest = json.loads((root / 'latest.json').read_text())
         assert manifest['state_token'] == token
-        assert len(manifest['files']) == (24 if consumer.key == 'arrow' else 12)
+        # The public series start in 2020; the fixture day publishes an empty, current state.
+        assert manifest['files'] == []
+        assert manifest.get('month_tokens', {}) == {} and manifest.get('uploads', []) == []
         for file in manifest['files']:
             path = root / 'versions' / manifest['version'] / file['path']
             assert hashlib.sha256(path.read_bytes()).hexdigest() == file['sha256']
@@ -162,12 +181,11 @@ def test_file_failure_fails_job_and_retry_keeps_verified_generation(
     failed = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
     assert not failed.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
-    assert not (tmp_path / 'files' / spec.key / 'arrow' / 'latest.json').exists()
-    manifest = tmp_path / 'files' / spec.key / 'parquet' / 'latest.json'
+    assert not (tmp_path / 'files' / spec.key / 'huggingface' / 'latest.json').exists()
+    manifest = tmp_path / 'files' / spec.key / 'mount' / 'latest.json'
     published = manifest.read_bytes()
     assert (
-        instance.get_latest_materialization_event(AssetKey(f'publish_{spec.key}_parquet'))
-        is not None
+        instance.get_latest_materialization_event(AssetKey(f'publish_{spec.key}_mount')) is not None
     )
     before = store.snapshot()
     retried = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
@@ -481,20 +499,64 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
         for consumer in spec.consumers
     }
     provisional_refresh()
-    for sensor in sensors.values():
+    for consumer in spec.consumers:
         with build_sensor_context(instance=instance, definitions=definitions) as context:
-            assert sensor.evaluate_tick(context).run_requests == []
+            requests = sensors[consumer.key].evaluate_tick(context).run_requests
+        if consumer.canonical_only:
+            assert requests == []
+        else:
+            assert len(requests) == 1
+            assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
     canonical_job = next(
         job for job in source.jobs if job.name == f'refresh_{store.spec.key}_canonical_source_job'
     )
     assert canonical_job.execute_in_process(instance=instance, partition_key='2020-01-01').success
     advanced = store.snapshot(canonical_only=True).token
     assert advanced != canonical
-    for sensor in sensors.values():
+    for consumer in spec.consumers:
         with build_sensor_context(instance=instance, definitions=definitions) as context:
-            requests = sensor.evaluate_tick(context).run_requests
+            requests = sensors[consumer.key].evaluate_tick(context).run_requests
         assert len(requests) == 1
-        assert requests[0].tags['origo_source_state_token'] == advanced
+        expected = advanced if consumer.canonical_only else store.snapshot().token
+        assert requests[0].tags['origo_source_state_token'] == expected
+
+
+def test_canonical_day_retires_failed_provisional_intervals_inside_it(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+) -> None:
+    from uuid import uuid4
+
+    from origo.sources.failures import FailureLog
+    from origo.sources.lifecycle import SourceRuntime
+
+    store, _instance, _bundle = ready_job
+    runtime = SourceRuntime(store.spec, store, tmp_path / 'locks', 'test-setup')
+    runtime.setup()
+    injected = FailureLog(store, tmp_path / 'locks', str(uuid4()))
+    inside = f'{DAY}T10:15:00Z'
+    injected.record(
+        operation='component',
+        scope='PARTITION',
+        partition=inside,
+        component='raw_latest',
+        error_code='COMPONENT_CONTENT_INVALID',
+    )
+    injected.record(
+        operation='provisional', scope='PARTITION', partition=inside, error_code='RUN_FAILED'
+    )
+    outside = '2017-08-18T00:03:00Z'
+    injected.record(
+        operation='provisional', scope='PARTITION', partition=outside, error_code='RUN_FAILED'
+    )
+    runtime.build(DAY)
+    assert store.execute(
+        'SELECT partition_key, argMax(event_type, event_time), argMax(details_json, event_time) '
+        'FROM origo.source_failure_log GROUP BY failure_key, partition_key ORDER BY partition_key',
+    ) == [
+        (inside, 'RECOVERED', '{"reason": "superseded by the canonical day"}'),
+        (inside, 'RECOVERED', '{"reason": "superseded by the canonical day"}'),
+        (outside, 'FAILED', '{}'),
+    ]
 
 
 def test_native_backfill_reserves_source_before_worker_starts(tmp_path: Path) -> None:
@@ -646,7 +708,7 @@ def test_backfill_worker_loss_in_file_step_has_consumer_scope(
     original = implementation._execute_operation
 
     def crash(runtime: SourceRuntime, operation: str, config: SourceRunConfig) -> dict[str, object]:
-        if operation == 'consumer_arrow':
+        if operation == 'consumer_huggingface':
             raise RuntimeError('Worker failed before publisher dispatch')
         return original(runtime, operation, config)
 
@@ -668,7 +730,7 @@ def test_backfill_worker_loss_in_file_step_has_consumer_scope(
         observer(context)
     assert store.execute(
         "SELECT operation,blocking_scope,partition_key,consumer FROM origo.source_failure_log WHERE error_code='RUN_FAILED'"
-    ) == [('consumer', 'CONSUMER', None, 'arrow')]
+    ) == [('consumer', 'CONSUMER', None, 'huggingface')]
     assert job.execute_in_process(instance=instance, partition_key=DAY).success
 
 
@@ -687,13 +749,13 @@ def test_retired_failed_publication_keeps_retry_delay_and_attempt_limit(
     assert canonical.execute_in_process(instance=instance, partition_key=DAY).success
 
     def evaluate(current: SourceBundle) -> SensorExecutionData:
-        sensor = next(s for s in current.sensors if s.name == f'{spec.key}_parquet_sensor')
+        sensor = next(s for s in current.sensors if s.name == f'{spec.key}_mount_sensor')
         definitions = Definitions(assets=current.assets, jobs=current.jobs, sensors=current.sensors)
         with build_sensor_context(instance=instance, definitions=definitions) as context:
             return sensor.evaluate_tick(context)
 
     request = evaluate(bundle).run_requests[0]
-    publisher = next(job for job in bundle.jobs if job.name == f'publish_{spec.key}_parquet_job')
+    publisher = next(job for job in bundle.jobs if job.name == f'publish_{spec.key}_mount_job')
     run = instance.create_run_for_job(publisher, tags=request.tags)
     instance.report_run_failed(run, message='Retry policy fault injection.')
     identity = request.tags['origo_source_event']

@@ -40,7 +40,7 @@ def test_source_and_mixed_runs_are_never_retired(metadata_instance: DagsterInsta
     assert (
         run_role(
             DagsterRun(
-                job_name='build_bar_store_arrow_job',
+                job_name='build_depth_snapshot_store_arrow_job',
                 tags={'origo_source_key': SOURCE_REGISTRY[0].key},
             )
         )

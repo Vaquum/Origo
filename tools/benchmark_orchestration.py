@@ -187,6 +187,7 @@ def scenario(
                     bulk_records = [r for r in records if r.dagster_run.run_id in backfill_ids]
                     if (
                         mixed
+                        and len(routine_ids) < 3
                         and time.time() >= next_routine
                         and any(not r.dagster_run.is_finished for r in bulk_records)
                     ):
@@ -203,7 +204,7 @@ def scenario(
                 if failed:
                     raise RuntimeError(f'Native evidence runs failed: {failed}')
                 elapsed = max(r.end_time for r in bulk_records) - min(
-                    r.start_time for r in bulk_records
+                    r.create_timestamp.timestamp() for r in bulk_records
                 )
                 rows = sum(json.loads((root / (day + '.json')).read_text())['rows'] for day in days)
                 routine = [
@@ -244,6 +245,7 @@ def main() -> None:
     parser.add_argument('--days', nargs='+', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--memory', default='8g')
+    parser.add_argument('--repeats', type=int, default=1)
     parser.add_argument(
         '--policies', nargs='+', choices=['baseline', 'bounded'], default=['baseline', 'bounded']
     )
@@ -253,37 +255,42 @@ def main() -> None:
         'archives': evidence,
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         'scenarios': [],
+        'host_cpus': os.cpu_count(),
+        'container_memory_limit': args.memory,
+        'routine_max_requests': 3,
     }
     with (
         tempfile.TemporaryDirectory(prefix='origo-queue-evidence-') as temporary,
         clickhouse(args.memory),
     ):
-        for policy in args.policies:
-            for mixed in (False, True):
-                result = scenario(
-                    Path(temporary) / f'{policy}-{mixed}',
-                    args.archives.resolve(),
-                    args.days,
-                    policy=policy,
-                    mixed=mixed,
-                )
-                if (
-                    report['scenarios']
-                    and result['component_proofs'] != report['scenarios'][0]['component_proofs']
-                ):
-                    raise RuntimeError('Source component outputs changed between scenarios.')
-                report['scenarios'].append(result)
-                args.output.write_text(json.dumps(report, indent=2, default=str) + '\n')
-                print(
-                    json.dumps(
-                        {
-                            k: v
-                            for k, v in result.items()
-                            if k not in ('component_proofs', 'native_runs')
-                        }
-                    ),
-                    flush=True,
-                )
+        for repeat in range(args.repeats):
+            for policy in args.policies:
+                for mixed in (False, True):
+                    result = scenario(
+                        Path(temporary) / f'{repeat}-{policy}-{mixed}',
+                        args.archives.resolve(),
+                        args.days,
+                        policy=policy,
+                        mixed=mixed,
+                    )
+                    if (
+                        report['scenarios']
+                        and result['component_proofs'] != report['scenarios'][0]['component_proofs']
+                    ):
+                        raise RuntimeError('Source component outputs changed between scenarios.')
+                    result['repeat'] = repeat
+                    report['scenarios'].append(result)
+                    args.output.write_text(json.dumps(report, indent=2, default=str) + '\n')
+                    print(
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in result.items()
+                                if k not in ('component_proofs', 'native_runs')
+                            }
+                        ),
+                        flush=True,
+                    )
 
 
 if __name__ == '__main__':

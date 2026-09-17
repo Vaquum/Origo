@@ -27,7 +27,7 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
 | Fact | Where | Read it with |
 | --- | --- | --- |
 | Is Dagster up, are the daemons healthy, how deep is the queue | Dagster instance | `origo_monitor:dagster_reachable`, `origo_monitor:queue_bounded` in Dagit; GraphQL `instance.daemonHealth` |
-| Did a run fail, which partition | Dagster run storage | Runs view in Dagit; the monitor's `run_failure:<job>:<partition>` finding |
+| Did a run fail, which partition | Dagster run storage | Runs view in Dagit; the monitor's `run_failure:<job>` finding names the partitions and runs |
 | Did an asset check fail | Dagster event log | The asset's Checks tab; the monitor's `check_failed:<asset>:<check>` finding |
 | Is a worker alive | `/opt/origo/heartbeats/<feed>.heartbeat` | `origo_monitor:workers_alive`; `python -m origo.workers.<feed> --check` |
 | What did a worker do for a minute | `origo.worker_minute_log` | `SELECT * FROM origo.worker_minute_log WHERE minute = ...` |

@@ -36,7 +36,7 @@ from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.contracts import Client
 
-from .dagster_reader import DagsterReader
+from .dagster_reader import DagsterReader, RunFailure
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (
@@ -324,13 +324,24 @@ class Monitor:
                     f'The threshold is {self.queue_threshold}.',
                 )
             )
+        by_job: dict[str, list[RunFailure]] = {}
         for failure in self.dagster.failures_since(cursor.failures_after):
+            by_job.setdefault(failure.job_name, []).append(failure)
+        for job_name, failures in by_job.items():
+            # One key per job: a job failing on successive partitions is one outage under
+            # the cooldown, and the detail names the partitions and runs.
+            detail = '; '.join(
+                f'partition {failure.partition or "-"}, run {failure.run_id}'
+                for failure in failures[:10]
+            )
+            if len(failures) > 10:
+                detail += f'; and {len(failures) - 10} more'
             findings.append(
                 Finding(
-                    f'run_failure:{failure.job_name}:{failure.partition}',
+                    f'run_failure:{job_name}',
                     'queue_bounded',
-                    f'Run of {failure.job_name} failed',
-                    f'partition {failure.partition or "-"}, run {failure.run_id}.',
+                    f'{len(failures)} run{"s" if len(failures) > 1 else ""} of {job_name} failed',
+                    detail + '.',
                 )
             )
         for check in self.dagster.failed_checks_since(

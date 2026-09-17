@@ -172,11 +172,7 @@ def _check_posts(server: _Recorder) -> list[dict[str, Any]]:
 
 def _failure_keys() -> set[str]:
     runs = json.loads((FIXTURES / 'Failures.json').read_text())['data']['runsOrError']['results']
-    keys: set[str] = set()
-    for run in runs:
-        partition = next((t['value'] for t in run['tags'] if t['key'] == 'dagster/partition'), '')
-        keys.add(f'run_failure:{run["jobName"]}:{partition}')
-    return keys
+    return {f'run_failure:{run["jobName"]}' for run in runs}
 
 
 def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldown(
@@ -190,6 +186,17 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
     assert len(emails) == 1
     for key in expected:
         assert key in emails[0]['text']
+    # A job failing on successive partitions is one key, so the cooldown covers the whole
+    # outage; the partitions are in the detail.
+    briefing = [
+        line
+        for line in emails[0]['text'].splitlines()
+        if line.startswith('- run_failure:publish_btc_briefing_feed_job:')
+    ]
+    assert len(briefing) == 1
+    assert '2 runs of publish_btc_briefing_feed_job failed' in briefing[0]
+    assert 'partition 2021-11-28' in briefing[0] and 'partition 2018-01-16' in briefing[0]
+    assert len([key for key in first.failed if key.startswith('run_failure:')]) == len(expected)
     assert all(post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded')
     second = monitor.tick(NOW + timedelta(minutes=1))
     assert set(second.failed) >= expected

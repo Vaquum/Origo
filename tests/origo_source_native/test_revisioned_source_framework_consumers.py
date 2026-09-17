@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -10,9 +12,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from origo.assets.build_bar_store_arrow import build_series_frame
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.assets.publish_binance_spot_klines_to_mount import SPECS
 from origo.query.binance_spot_kline_rollups import dollar_month, time_month
 from origo.sources import publication
 from origo.sources.adapters import binance_daily as daily
@@ -20,17 +20,16 @@ from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.contracts import Partition, RolloutStage, Snapshot, StateRecord
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles import spot_consumers
+from origo.sources.profiles.formulas.huggingface_dollar import get_binance_spot_dollar_klines
+from origo.sources.profiles.formulas.huggingface_time import (
+    get_binance_spot_klines_from_1m_projection,
+)
+from origo.sources.profiles.formulas.spot_series import SPECS
 from origo.sources.profiles.spot_consumers import HUGGINGFACE_DATASETS
 from origo.sources.storage import SourceStore
-from origo.utils.publish_binance_spot_dollar_kline_snapshot_to_huggingface import (
-    _get_binance_spot_dollar_klines,
-)
-from origo.utils.publish_binance_spot_kline_snapshot_to_huggingface import (
-    _get_binance_spot_klines_from_1m_projection,
-)
+from origo.utils.arrow_store import build_series_frame
 
 from .test_binance_daily_source_adapter import archive_response
-from .test_revisioned_source_framework_projections import legacy_spot_day
 
 
 class FakeHfApi:
@@ -63,7 +62,6 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
     monkeypatch.setenv('HF_TOKEN', 'test-token')
     FakeHfApi.calls = []
     monkeypatch.setattr(spot_consumers, 'HfApi', FakeHfApi)
-    legacy_spot_day(day)
     spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.LIVE)
     client = make_clickhouse_client(get_clickhouse_settings())
     store = SourceStore(client, 'origo', spec)
@@ -71,16 +69,8 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
     try:
         runtime.setup(anchor=datetime(2020, 1, 1, tzinfo=UTC))
         record = runtime.build(day)
-        # Empty legacy tail tables let the original monthly readers query the same canonical day.
-        for source, legacy in [
-            ('time', 'binance_spot_klines_latest'),
-            ('raw', 'binance_spot_trades_latest'),
-        ]:
-            schema = next(value for value in spec.components if value.key == source)
-            columns = ', '.join(f'{column.name} {column.sql_type}' for column in schema.columns)
-            client.execute(
-                f'CREATE TABLE origo.{legacy} ({columns}) ENGINE=MergeTree ORDER BY tuple()'
-            )
+        # The legacy table names are views over the built day, so the original monthly
+        # readers produce the expected files from the same canonical rows.
         expected_root = tmp_path / 'legacy-parquet'
         for series in SPECS:
             if series.family == 'time':
@@ -92,9 +82,15 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             frame.write_parquet(target)
         source_root = tmp_path / spec.key
 
-        # The mount consumer owns the public Parquet mirror and Arrow bar store.
+        # The mount consumer owns the public Parquet mirror and Arrow bar store, and sweeps the
+        # staging a render that died left on the mirror.
+        stale = tmp_path / 'parquet' / '.staging-stale'
+        stale.mkdir(parents=True)
+        (stale / 'x.parquet').write_bytes(b'x')
+        os.utime(stale, (time.time() - 7200, time.time() - 7200))
         mount = source_root / 'mount'
         snapshot = runtime.publish('mount', str(mount))
+        assert not stale.exists()
         manifest = json.loads((mount / 'latest.json').read_text())
         assert manifest['state_token'] == snapshot.token == manifest['pinned_token']
         assert list(manifest['month_tokens']) == ['2020-01']
@@ -164,7 +160,7 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             assert upload['file_name'] == f'{prefix}20200101.parquet'
             actual = pl.read_parquet(version / series.name / upload['file_name'])
             if series.family == 'time':
-                expected = _get_binance_spot_klines_from_1m_projection(
+                expected = get_binance_spot_klines_from_1m_projection(
                     kline_size_seconds=series.size * 60,
                     start_date_limit='2020-01-01',
                     end_date_limit='2020-01-02 00:00:00',
@@ -172,7 +168,7 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
                     database_name='origo',
                 )
             else:
-                expected = _get_binance_spot_dollar_klines(
+                expected = get_binance_spot_dollar_klines(
                     dollar_size=float(series.size * 1000000),
                     start_date_limit='2020-01-01',
                     end_date_limit='2020-01-02 00:00:00',
@@ -196,8 +192,13 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             )
         )
 
-        # A canonical change during a render discards the render and records the failure.
+        # A canonical change during a render discards the render, records the failure and
+        # leaves the public roots untouched: a month removed beforehand stays absent, no
+        # series flips and nothing staged remains.
         before = (mount / 'latest.json').read_bytes()
+        removed = tmp_path / 'parquet' / SPECS[0].sub_path / '2020/01.parquet'
+        removed.unlink()
+        targets = {s.name: (tmp_path / 'arrow' / s.name / 'latest.arrow').resolve() for s in SPECS}
         original = store.snapshot
         reads = 0
 
@@ -218,11 +219,15 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             with pytest.raises(RuntimeError, match='state changed'):
                 runtime.publish('mount', str(mount))
         assert (mount / 'latest.json').read_bytes() == before
+        assert not removed.exists()
+        assert {s.name: (tmp_path / 'arrow' / s.name / 'latest.arrow').resolve() for s in SPECS} == targets
+        assert not list((tmp_path / 'parquet').glob('.staging-*'))
         assert store.generation(record.partition) == 2
         assert client.execute(
             "SELECT count() FROM origo.source_failure_log WHERE operation='consumer' AND blocking_scope='CONSUMER' AND event_type='FAILED'"
         ) == [(1,)]
         runtime.publish('mount', str(mount))
+        assert removed.is_file() and not list((tmp_path / 'parquet').glob('.staging-*'))
         assert (
             json.loads((mount / 'latest.json').read_text())['state_token']
             == original(canonical_only=True).token

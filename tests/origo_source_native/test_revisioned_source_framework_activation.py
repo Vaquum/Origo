@@ -240,53 +240,6 @@ def test_real_provisional_components_share_one_generation_and_frontier(
         assert (
             store.execute('SELECT count() FROM origo.binance_spot_trades_dollar_current')[0][0] > 0
         )
-        from origo.assets.create_binance_spot_latest_tables_origo import (
-            _dollar_kline_table_sql,
-            _kline_table_sql,
-            _latest_raw_table_sql,
-        )
-        from origo.assets.refresh_binance_spot_dollar_klines_latest_origo import (
-            _insert_minute_rows as insert_dollar,
-        )
-        from origo.assets.refresh_binance_spot_klines_latest_origo import (
-            _insert_minute_rows as insert_time,
-        )
-        from origo.assets.sync_binance_spot_trades_latest_origo import _insert_latest_rows
-        from origo.utils.binance_spot_latest import _parse_historical_trade
-
-        settings = get_clickhouse_settings()
-        legacy_names = {
-            'raw_latest': 'binance_spot_trades_latest',
-            'time_latest': 'binance_spot_klines_latest',
-            'dollar_latest': 'binance_spot_dollar_klines_latest',
-        }
-        for ddl in (
-            _latest_raw_table_sql(settings),
-            _kline_table_sql(settings, legacy_names['time_latest']),
-            _dollar_kline_table_sql(settings, legacy_names['dollar_latest']),
-        ):
-            client.execute(ddl)
-        # Historical real rows require disabling retention on these disposable legacy tables.
-        for table in legacy_names.values():
-            client.execute(f'ALTER TABLE origo.{table} REMOVE TTL')
-        legacy_rows = tuple(
-            _parse_historical_trade(item)
-            for page in sorted(REST.glob('page-*.json'))
-            for item in json.loads(page.read_text())
-            if int(anchor.timestamp()) * 1000
-            <= item['time']
-            < int(record.partition.end.timestamp()) * 1000
-        )
-        _insert_latest_rows(client, 'origo', minute_start=anchor, rows=legacy_rows)
-        insert_time(client, 'origo', anchor)
-        insert_dollar(client, 'origo', anchor)
-        for component in store.components(record.partition):
-            columns = ', '.join(column.name for column in component.columns)
-            order = ', '.join(component.primary_key)
-            expected = client.execute(
-                f'SELECT {columns} FROM origo.{legacy_names[component.key]} ORDER BY {order}'
-            )
-            assert store.rows(component.key, snapshot) == expected, component.key
         # A repeated fetch of the real interval must not create another activation or duplicate rows.
         requests.extend(provenance['requests'])
         assert runtime.build(key, provisional=True) == record

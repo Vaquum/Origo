@@ -13,7 +13,7 @@ import pytest
 from dagster import materialize
 
 import origo.assets.publish_btc_briefing_feed as publish_btc_briefing_feed_module
-from origo.assets.daily_trades_to_origo import daily_partitions
+from origo.assets.briefing_partitions import daily_partitions
 from origo.assets.publish_btc_briefing_feed import (
     FEED_SECTIONS,
     FEED_VERSION,
@@ -21,6 +21,8 @@ from origo.assets.publish_btc_briefing_feed import (
     build_briefing_feed,
     publish_briefing_feed_to_huggingface,
 )
+
+from .helpers import seed_spot_source, seeded_columns
 
 DAY = date(2024, 1, 1)
 DAY_START_EPOCH = 1_704_067_200
@@ -37,12 +39,11 @@ def _create_briefing_tables(origo_assets: dict[str, Any]) -> None:
     result = materialize(
         [
             origo_assets['create_origo_database'],
-            origo_assets['create_binance_daily_spot_trades_table_origo'],
-            origo_assets['create_binance_spot_klines_table_origo'],
             origo_assets['create_binance_spot_depth200_1m_table_origo'],
         ]
     )
     assert result.success
+    seed_spot_source(DAY.isoformat())
 
 
 def _insert_minute_klines(
@@ -52,11 +53,13 @@ def _insert_minute_klines(
 ) -> None:
     query_origo(
         f"""
-        INSERT INTO binance_spot_klines
-            (datetime, open, high, low, close, mean, std, median, iqr, volume,
+        INSERT INTO binance_spot_trades_time_revisions
+            (source_date, partition_key, revision, build_id,
+             datetime, open, high, low, close, mean, std, median, iqr, volume,
              maker_ratio, no_of_trades, open_liquidity, high_liquidity, low_liquidity,
              close_liquidity, liquidity_sum, maker_volume, maker_liquidity)
         SELECT
+            {seeded_columns(DAY.isoformat())},
             toDateTime('{DAY.isoformat()} 00:00:00') + 60 * number AS datetime,
             42000 + (number % 96) AS open,
             open + 5 AS high,
@@ -86,10 +89,12 @@ def _insert_day_trades(query_origo: Callable[[str], list[tuple[Any, ...]]]) -> N
     # exercised at its full precision, not only on round numbers.
     query_origo(
         f"""
-        INSERT INTO binance_daily_spot_trades
-            (trade_id, price, quantity, quote_quantity, timestamp,
+        INSERT INTO binance_spot_trades_raw_revisions
+            (source_date, partition_key, revision, build_id,
+             trade_id, price, quantity, quote_quantity, timestamp,
              is_buyer_maker, is_best_match, datetime)
         SELECT
+            {seeded_columns(DAY.isoformat())},
             number AS trade_id,
             42000 + (number % 50) * 0.01 AS price,
             0.001 + (number % 7) * 0.00000001 AS quantity,
@@ -131,21 +136,24 @@ def _insert_adjacent_day_rows(query_origo: Callable[[str], list[tuple[Any, ...]]
     for kline_datetime in ('2023-12-31 23:59:00', '2024-01-02 00:00:00'):
         query_origo(
             f"""
-            INSERT INTO binance_spot_klines
-                (datetime, open, high, low, close, mean, std, median, iqr, volume,
+            INSERT INTO binance_spot_trades_time_revisions
+                (source_date, partition_key, revision, build_id,
+                 datetime, open, high, low, close, mean, std, median, iqr, volume,
                  maker_ratio, no_of_trades, open_liquidity, high_liquidity, low_liquidity,
                  close_liquidity, liquidity_sum, maker_volume, maker_liquidity)
-            SELECT toDateTime('{kline_datetime}'), 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+            SELECT {seeded_columns(DAY.isoformat())},
+                   toDateTime('{kline_datetime}'), 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
                    0.0, 1.0, 0.5, 1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5
             """
         )
     for trade_datetime in ('2023-12-31 23:59:59.999999', '2024-01-02 00:00:00.000000'):
         query_origo(
             f"""
-            INSERT INTO binance_daily_spot_trades
-                (trade_id, price, quantity, quote_quantity, timestamp,
+            INSERT INTO binance_spot_trades_raw_revisions
+                (source_date, partition_key, revision, build_id,
+                 trade_id, price, quantity, quote_quantity, timestamp,
                  is_buyer_maker, is_best_match, datetime)
-            SELECT 999999999, 42000.0, 9.0, 378000.0, 0, 0, 1,
+            SELECT {seeded_columns(DAY.isoformat())}, 999999999, 42000.0, 9.0, 378000.0, 0, 0, 1,
                    toDateTime64('{trade_datetime}', 6)
             """
         )

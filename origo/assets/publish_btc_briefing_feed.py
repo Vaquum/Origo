@@ -2,8 +2,8 @@
 
 The feed is one dict per UTC day carrying the six sections in
 ``FEED_SECTIONS``: 15-minute and daily OHLCV bars from the 1m
-``binance_spot_klines`` projection, measured volume-at-price from
-``binance_daily_spot_trades``, and per-minute series, exact daily
+``binance_spot_trades_time_current`` projection, measured volume-at-price from
+``binance_spot_trades_raw_current``, and per-minute series, exact daily
 percentiles and 8-hour session aggregates of the ``binance_spot_depth200_1m``
 book projection.
 
@@ -40,7 +40,7 @@ from typing import Final, Protocol, cast
 from dagster import AssetExecutionContext, asset
 from huggingface_hub import HfApi
 
-from .daily_trades_to_origo import daily_partitions
+from .briefing_partitions import daily_partitions
 
 FEED_VERSION: Final[str] = 'btc_briefing/2'
 FEED_SECTIONS: Final[tuple[str, ...]] = (

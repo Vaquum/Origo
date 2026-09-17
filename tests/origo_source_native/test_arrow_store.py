@@ -16,23 +16,18 @@ from polars.testing import assert_frame_equal
 # tests below need no container -- the placeholder just lets collection succeed.
 os.environ.setdefault("CLICKHOUSE_PASSWORD", "import-guard")
 
-from origo.assets.build_bar_store_arrow import (  # noqa: E402
-    BAR_STORE_PARTITIONS,
+from origo.sources.profiles.formulas.spot_series import MountKlineSpec  # noqa: E402
+from origo.utils.arrow_store import (  # noqa: E402
     BAR_STORE_SERIES,
     LATEST_NAME,
     REAP_GRACE_SECONDS,
     RETENTION_KEEP,
     arrow_store_root,
-    bar_store_partition_run_requests,
-    build_bar_store_arrow,
     build_series_frame,
     publish_series,
     reap_old_versions,
     series_store_dir,
     spec_for_series,
-)
-from origo.assets.publish_binance_spot_klines_to_mount import (  # noqa: E402
-    MountKlineSpec,
 )
 
 # 2024-01-01T00:00:00Z in epoch-milliseconds; the mirror writes Datetime("ms", "UTC").
@@ -99,9 +94,8 @@ def _write_month(parquet_root: Path, spec: MountKlineSpec, df: pl.DataFrame, yea
     df.write_parquet(path)
 
 
-def test_partitions_cover_twelve_series() -> None:
+def test_store_covers_twelve_series() -> None:
     assert len(BAR_STORE_SERIES) == 12
-    assert set(BAR_STORE_PARTITIONS.get_partition_keys()) == set(BAR_STORE_SERIES)
     assert "time_1m" in BAR_STORE_SERIES
     assert "dollar_1M" in BAR_STORE_SERIES
 
@@ -173,9 +167,9 @@ def test_store_values_are_bit_identical_to_parquet(
     assert_frame_equal(stored.select(measures), expected)
 
 
-def test_asset_publishes_mmap_ready_arrow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from dagster import materialize
-
+def test_publish_series_writes_mmap_ready_arrow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("LOCAL_PARQUET_DIR", str(tmp_path / "parquet"))
     monkeypatch.setenv("LOCAL_ARROW_DIR", str(tmp_path / "arrow"))
     spec = spec_for_series("time_1m")
@@ -187,8 +181,8 @@ def test_asset_publishes_mmap_ready_arrow(tmp_path: Path, monkeypatch: pytest.Mo
         1,
     )
 
-    result = materialize([build_bar_store_arrow], partition_key="time_1m")
-    assert result.success
+    outcome = publish_series("time_1m", build_series_frame(spec, tmp_path / "parquet"))
+    assert outcome.status == "published"
 
     latest = series_store_dir("time_1m") / LATEST_NAME
     assert latest.is_symlink()
@@ -333,14 +327,3 @@ def test_retention_keeps_min_versions_and_respects_grace(
     assert paths[5].name in remaining  # the live `latest` target
     assert len(remaining) == 4
 
-
-def test_partition_run_requests_cover_all_series() -> None:
-    requests = bar_store_partition_run_requests("mirror-run-abc")
-    # One run per series, run-keyed to the triggering mirror run for idempotency.
-    assert [request.partition_key for request in requests] == list(BAR_STORE_SERIES)
-    assert all(request.run_key == f"{request.partition_key}:mirror-run-abc" for request in requests)
-    # A different mirror run yields distinct run keys, so each success rebuilds once.
-    other = bar_store_partition_run_requests("mirror-run-xyz")
-    assert {request.run_key for request in requests}.isdisjoint(
-        request.run_key for request in other
-    )

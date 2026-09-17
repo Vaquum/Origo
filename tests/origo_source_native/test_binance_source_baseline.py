@@ -29,10 +29,14 @@ from dagster import (
 
 from origo import definitions
 from origo.assets import daily_futures_trades_to_origo as futures
-from origo.assets import daily_trades_to_origo as spot
-from origo.assets import sync_binance_spot_trades_latest_origo as latest
+from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query import binance_spot_kline_rollups as rollups
-from origo.utils import binance_spot_latest as rest
+from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.contracts import OrchestrationSpec, RolloutStage
+from origo.sources.lifecycle import SourceRuntime
+from origo.sources.profiles.formulas import spot_series
+from origo.sources.storage import SourceStore
+from origo.utils import arrow_store
 from origo.utils import daily_gap_repair as repair
 
 from .conftest import CLICKHOUSE_DOCKERFILE, REPO_ROOT, _make_admin_client
@@ -69,13 +73,6 @@ _LEDGER_COLUMNS = (
 )
 _TIME_SERIES = (('1m', 1), ('15m', 15), ('30m', 30), ('1h', 60), ('2h', 120), ('4h', 240))
 _DOLLAR_SERIES = (('1M', 1), ('15M', 15), ('30M', 30), ('60M', 60), ('120M', 120), ('240M', 240))
-_SPOT_FAMILIES = (
-    'klines',
-    'dollar_klines',
-    'volume_klines',
-    'tick_klines',
-    'dollar_imbalance_klines',
-)
 
 
 def _docker(*args: str) -> str:
@@ -164,11 +161,8 @@ def _setup(market: str) -> list[AssetsDefinition]:
         'create_origo_database',
         f'create_binance_daily_{market}_trades_table_origo',
         'create_aligned_1m_exchange_table_origo',
+        f'create_binance_{market}_klines_table_origo',
     ]
-    families = _SPOT_FAMILIES if market == 'spot' else ('klines',)
-    names.extend(f'create_binance_{market}_{family}_table_origo' for family in families)
-    if market == 'spot':
-        names.append('create_binance_spot_latest_tables_origo')
     assets = _assets()
     return [assets[name] for name in names]
 
@@ -217,7 +211,7 @@ def _assert_daily(
         )
         _assert_job(f'{name}_job', {name})
     _assert_asset(insert, group, {f'create_binance_daily_{market}_trades_table_origo'}, first_day)
-    families = _SPOT_FAMILIES if market == 'spot' else ('klines',)
+    families = ('klines',)
     for family in families:
         _assert_asset(
             f'refresh_{prefix}_{family}_origo',
@@ -373,210 +367,91 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
 def test_spot_source_identity_contract(
     origo_test_env: dict[str, str],
     query_origo: Query,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert origo_test_env['CLICKHOUSE_DATABASE'] == 'origo'
-    assert materialize(_setup('spot')).success
-    _assert_daily('spot', spot, '2017-08-17', 4, query_origo, monkeypatch)
-    raw_columns = (
-        ('trade_id', 'UInt64'),
-        *_RAW_MEASURES,
-        ('is_best_match', 'UInt8'),
-        ('datetime', 'DateTime64(6)'),
+    spec = BINANCE_SPOT_TRADES_SPEC
+    assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
+        'binance_spot_trades',
+        RolloutStage.LIVE,
+        date(2017, 8, 17),
     )
-    assert spot.SPOT_TRADE_COLUMNS == tuple(name for name, _ in raw_columns)
-    _assert_table(
-        query_origo,
-        'binance_daily_spot_trades',
-        raw_columns,
-        'toYYYYMM(datetime)',
-        'datetime, trade_id',
-    )
-    for kind in ('dollar', 'volume', 'tick', 'dollar_imbalance'):
-        _assert_table(
-            query_origo,
-            f'binance_spot_{kind}_klines',
-            _bar_columns(kind),
-            'toYYYYMM(start_datetime)',
-            f'start_datetime, end_datetime, {kind}_bar_id',
-        )
-    _assert_archives(spot, 'spot', ('2024-01-01', '2024-01-02'))
-    _assert_latest(query_origo, monkeypatch)
-    _assert_consumers(monkeypatch)
-    _assert_job(
-        'backfill_binance_spot_trades_origo_job', {'insert_daily_binance_spot_trades_to_origo'}
-    )
-    _assert_job(
-        'backfill_binance_spot_dollar_klines_origo_job',
-        {'refresh_binance_spot_dollar_klines_origo'},
-    )
-
-
-def _assert_latest(query: Query, monkeypatch: pytest.MonkeyPatch) -> None:
-    tables = importlib.import_module('origo.assets.create_binance_spot_latest_tables_origo')
-    _assert_table(
-        query,
-        'binance_spot_trades_latest',
-        (
-            ('minute_start', 'DateTime'),
-            ('trade_id', 'UInt64'),
-            *_RAW_MEASURES,
-            ('is_best_match', 'UInt8'),
-            ('datetime', 'DateTime64(3)'),
-        ),
-        'toYYYYMMDD(minute_start)',
-        'minute_start, trade_id',
-        'toDateTime(datetime) + toIntervalDay(2)',
-    )
-    _assert_table(
-        query,
-        'binance_spot_trades_latest_ingestion',
-        (
-            ('minute_start', 'DateTime'),
-            ('start_trade_id', 'UInt64'),
-            ('end_trade_id', 'UInt64'),
-            ('row_count', 'UInt64'),
-            ('status', 'LowCardinality(String)'),
-            ('dagster_run_id', 'String'),
-            ('loaded_at', 'DateTime'),
-        ),
-        'toYYYYMMDD(minute_start)',
-        'minute_start, status',
-        'minute_start + toIntervalDay(2)',
-    )
-    _assert_table(
-        query,
-        'binance_spot_latest_watermarks',
-        (
-            ('layer', 'LowCardinality(String)'),
-            ('watermark_minute', 'DateTime'),
-            ('updated_at', 'DateTime'),
-        ),
-        '',
-        'layer',
-    )
-    names = [
-        'binance_spot_trades_latest',
-        'binance_spot_trades_latest_ingestion',
-        'binance_spot_latest_watermarks',
+    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert [component.key for component in spec.components] == [
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
     ]
-    for label, _ in _TIME_SERIES:
-        name = f'binance_spot_{"" if label == "1m" else label + "_"}klines_latest'
-        names.append(name)
-        _assert_table(
-            query,
-            name,
-            _TIME_COLUMNS,
-            'toYYYYMMDD(datetime)',
-            'datetime',
-            'datetime + toIntervalDay(2)',
-        )
-    for label, _ in _DOLLAR_SERIES:
-        name = f'binance_spot_{"" if label == "1M" else label + "_"}dollar_klines_latest'
-        names.append(name)
-        _assert_table(
-            query,
-            name,
-            _bar_columns('dollar'),
-            'toYYYYMMDD(start_datetime)',
-            'start_datetime, end_datetime, dollar_bar_id',
-            'start_datetime + toIntervalDay(2)',
-        )
-    assert set(tables.latest_table_names()) == set(names)
-    setup = 'create_binance_spot_latest_tables_origo'
-    sync = 'sync_binance_spot_trades_latest_origo'
-    time = 'refresh_binance_spot_klines_latest_origo'
-    dollar = 'refresh_binance_spot_dollar_klines_latest_origo'
-    cuts = 'refresh_binance_spot_latest_cuts_origo'
-    cleanup = 'cleanup_binance_spot_latest_origo'
-    for name, deps in (
-        (sync, {setup}),
-        (time, {setup, sync}),
-        (dollar, {setup, sync}),
-        (cuts, {setup, time, dollar}),
-        (cleanup, {setup, cuts}),
-    ):
-        _assert_asset(name, 'binance_data', deps)
-    _assert_job(
-        'refresh_binance_spot_latest_data_source_job', {setup, sync, time, dollar, cuts, cleanup}
+    # The legacy table names stay readable as views over the components that replaced them;
+    # the tables without a successor are retired.
+    assert dict(spec.aliases) == {
+        'binance_daily_spot_trades': 'raw',
+        'binance_spot_klines': 'time',
+        'binance_spot_dollar_klines': 'dollar',
+        'binance_spot_volume_klines': 'volume',
+        'binance_spot_tick_klines': 'tick',
+        'binance_spot_dollar_imbalance_klines': 'imbalance',
+        'binance_spot_trades_latest': 'raw_latest',
+        'binance_spot_klines_latest': 'time_latest',
+        'binance_spot_dollar_klines_latest': 'dollar_latest',
+    }
+    assert spec.retired_tables == (
+        'binance_daily_spot_trades_ingestion',
+        'binance_spot_trades_latest_ingestion',
+        'binance_spot_latest_watermarks',
+        *(f'binance_spot_{label}_klines_latest' for label in ('15m', '30m', '1h', '2h', '4h')),
+        *(
+            f'binance_spot_{label}_dollar_klines_latest'
+            for label in ('15M', '30M', '60M', '120M', '240M')
+        ),
     )
-    _assert_schedule(
-        'binance_spot_latest_1m_schedule',
-        'refresh_binance_spot_latest_data_source_job',
-        '* * * * *',
-    )
-    request = definitions.binance_spot_latest_1m_schedule(
-        build_schedule_context(scheduled_execution_time=datetime(2024, 1, 2, 12, 1, tzinfo=UTC))
-    )
-    assert isinstance(request, RunRequest)
-    assert request.run_key == 'binance_spot_latest::2024-01-02T12:00:00Z'
-    assert request.tags['binance_spot_latest_minute_start'] == '2024-01-02T12:00:00Z'
-    assert (
-        latest.LATEST_SYMBOL_ENV_VAR,
-        latest.LATEST_SYMBOL_DEFAULT,
-        latest.LATEST_WATERMARK_LAYER_TRADES,
-    ) == ('BINANCE_SPOT_LATEST_SYMBOL', 'BTCUSDT', 'trades')
-    with monkeypatch.context() as patch:
-        context = Mock(run=Mock(tags={'binance_spot_latest_minute_start': '2024-01-02T12:00:00Z'}))
-        fetch = Mock(side_effect=RuntimeError('baseline stops before market-data fetch'))
-        patch.setattr(latest, 'fetch_closed_minute_trades', fetch)
-        for configured, expected in ((None, 'BTCUSDT'), ('ETHUSDT', 'ETHUSDT')):
-            if configured is None:
-                patch.delenv('BINANCE_SPOT_LATEST_SYMBOL', raising=False)
-            else:
-                patch.setenv('BINANCE_SPOT_LATEST_SYMBOL', configured)
-            with pytest.raises(RuntimeError, match='baseline stops before market-data fetch'):
-                latest.sync_binance_spot_trades_latest_origo.op.compute_fn.decorated_fn(context)
-            fetch.assert_called_with(
-                expected,
-                datetime(2024, 1, 2, 12, tzinfo=UTC),
-                datetime(2024, 1, 2, 12, 1, tzinfo=UTC),
-            )
-    monkeypatch.delenv('BINANCE_SPOT_REST_BASE_URL', raising=False)
-    monkeypatch.delenv('BINANCE_API_KEY', raising=False)
-    assert rest._binance_rest_base_url() == 'https://api.binance.com'
-    assert rest._binance_api_headers() == {}
-    monkeypatch.setenv('BINANCE_SPOT_REST_BASE_URL', 'https://rest.example')
-    monkeypatch.setenv('BINANCE_API_KEY', 'baseline-test-key')
-    assert rest._binance_api_headers() == {'X-MBX-APIKEY': 'baseline-test-key'}
-    assert rest.BINANCE_HISTORICAL_TRADES_LIMIT == 1000
-    with monkeypatch.context() as patch:
-        response = Mock()
-        response.json.return_value = []
-        get = Mock(return_value=response)
-        patch.setattr(rest.requests, 'get', get)
-        rest._aggregate_trades('BTCUSDT', start_time_ms=1704067200000, limit=1)
-        get.assert_called_with(
-            'https://rest.example/api/v3/aggTrades',
-            params={'symbol': 'BTCUSDT', 'startTime': 1704067200000, 'limit': 1},
-            timeout=30,
+    assert spec.retired_rows == (('aligned_1m_exchange', "dataset_source = 'binance_spot'"),)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'baseline').setup()
+    finally:
+        client.disconnect()
+    columns = {
+        component.key: [(column.name, column.sql_type) for column in component.columns]
+        for component in spec.components
+    }
+    for alias, key in spec.aliases:
+        described = [(row[0], row[1]) for row in query_origo(f'DESCRIBE TABLE origo.{alias}')]
+        assert described == columns[key], alias
+        engine = query_origo(
+            f"SELECT engine FROM system.tables WHERE database = 'origo' AND name = '{alias}'"
         )
-        assert rest._historical_trades('BTCUSDT', from_id=1, limit=1000) == ()
-        get.assert_called_with(
-            'https://rest.example/api/v3/historicalTrades',
-            params={'symbol': 'BTCUSDT', 'fromId': 1, 'limit': 1000},
-            headers={'X-MBX-APIKEY': 'baseline-test-key'},
-            timeout=30,
-        )
+        assert engine == [('View',)], alias
+    assert not any(
+        name.startswith(('insert_daily_binance_spot_', 'refresh_binance_spot_klines'))
+        for name in _assets()
+    )
+    _assert_consumers(monkeypatch)
 
 
 def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
-    mount = importlib.import_module('origo.assets.publish_binance_spot_klines_to_mount')
-    arrow = importlib.import_module('origo.assets.build_bar_store_arrow')
     series = [(f'time_{label}', 'time', size, f'time/{label}') for label, size in _TIME_SERIES]
     series += [
         (f'dollar_{label}', 'dollar', size, f'dollar/{label}') for label, size in _DOLLAR_SERIES
     ]
-    assert [(s.name, s.family, s.size, s.sub_path) for s in mount.SPECS] == series
+    assert [(s.name, s.family, s.size, s.sub_path) for s in spot_series.SPECS] == series
     monkeypatch.delenv('LOCAL_PARQUET_DIR', raising=False)
     monkeypatch.delenv('LOCAL_ARROW_DIR', raising=False)
-    assert (mount.EXPORT_START_YEAR, mount.EXPORT_START_MONTH) == (2020, 1)
-    assert arrow.parquet_source_root() == Path('/opt/parquet')
-    assert arrow.LATEST_NAME == 'latest.arrow'
-    assert arrow.BAR_STORE_PARTITIONS.get_partition_keys() == [s[0] for s in series]
+    assert (spot_series.EXPORT_START_YEAR, spot_series.EXPORT_START_MONTH) == (2020, 1)
+    assert arrow_store.parquet_source_root() == Path('/opt/parquet')
+    assert arrow_store.LATEST_NAME == 'latest.arrow'
+    assert list(arrow_store.BAR_STORE_SERIES) == [s[0] for s in series]
     values = tuple(name for name, _ in _MEASURES if name not in ('median', 'iqr'))
-    assert arrow._output_columns('time') == ('ts', *values)
-    assert arrow._output_columns('dollar') == ('ts', 'start_ts', 'dollar_bar_id', *values)
+    assert arrow_store._output_columns('time') == ('ts', *values)
+    assert arrow_store._output_columns('dollar') == ('ts', 'start_ts', 'dollar_bar_id', *values)
     assert tuple(rollups.TIME_KLINE_COLUMNS) == ('datetime', *values)
     assert tuple(rollups.DOLLAR_KLINE_COLUMNS) == (
         'start_datetime',
@@ -586,10 +461,11 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     for name, _, _, subpath in series:
         assert (
-            mount.month_path(subpath, 2024, 1) == Path('/opt/parquet') / subpath / '2024/01.parquet'
+            spot_series.month_path(subpath, 2024, 1)
+            == Path('/opt/parquet') / subpath / '2024/01.parquet'
         )
         assert (
-            arrow.series_store_dir(name) / arrow.LATEST_NAME
+            arrow_store.series_store_dir(name) / arrow_store.LATEST_NAME
             == Path('/opt/arrow') / name / 'latest.arrow'
         )
     for fn, size, defaults in (

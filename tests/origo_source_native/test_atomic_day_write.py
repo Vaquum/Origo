@@ -8,9 +8,9 @@ import pytest
 from origo.utils.atomic_day_write import _staging_table_name, replace_day_via_staging
 
 DATABASE = 'origo'
-MAIN_TABLE = 'binance_daily_spot_trades'
-COLUMNS = ('trade_id', 'price', 'datetime')
-DATE = '2024-01-01'
+MAIN_TABLE = 'binance_daily_futures_trades'
+COLUMNS = ('futures_trade_id', 'price', 'datetime')
+DATE = '2019-09-08'
 STAGING = _staging_table_name(MAIN_TABLE, DATE)
 
 
@@ -39,7 +39,7 @@ class _FakeClient:
 
 
 def _rows(n: int) -> list[tuple[object, ...]]:
-    return [(i, float(i), '2024-01-01 00:00:00') for i in range(n)]
+    return [(i, float(i), '2019-09-08 00:00:00') for i in range(n)]
 
 
 def _mutates_live_table(statements: Sequence[str]) -> bool:
@@ -65,7 +65,7 @@ def test_happy_path_promotes_via_atomic_move_partition() -> None:
     # Promotion is a metadata part-move, NOT a splittable INSERT..SELECT that
     # could commit a partial day on cancellation.
     assert (
-        f"MOVE PARTITION ID '202401' TO TABLE {DATABASE}.{MAIN_TABLE}" in joined
+        f"MOVE PARTITION ID '201909' TO TABLE {DATABASE}.{MAIN_TABLE}" in joined
     )
     assert f'INSERT INTO {DATABASE}.{MAIN_TABLE} ' not in joined
 
@@ -102,10 +102,10 @@ def test_staging_dropped_before_rebuild() -> None:
 
 
 def test_no_staging_table_remains_after_materialize(
-    materialize_origo_assets: Any,
+    materialize_binance_futures_raw_assets: Any,
     query_origo: Any,
 ) -> None:
-    materialize_origo_assets(partition_key='2024-01-01')
+    materialize_binance_futures_raw_assets(partition_key='2019-09-08')
 
     remaining = query_origo(
         f"""
@@ -119,17 +119,17 @@ def test_no_staging_table_remains_after_materialize(
 
 
 def test_replacing_a_day_preserves_other_days_in_the_month(
-    materialize_origo_assets: Any,
+    materialize_binance_futures_raw_assets: Any,
     query_origo: Any,
 ) -> None:
     """MOVE PARTITION must append the day into the live month, not replace it.
 
-    Both days share the 202401 partition; re-ingesting one must leave the
+    Both days share the 201909 partition; re-ingesting one must leave the
     other's rows byte-for-byte intact and leave no duplicate for the
     re-ingested day.
     """
-    materialize_origo_assets(partition_key='2024-01-01')
-    materialize_origo_assets(partition_key='2024-01-02')
+    materialize_binance_futures_raw_assets(partition_key='2019-09-08')
+    materialize_binance_futures_raw_assets(partition_key='2019-09-09')
 
     def _day_count(day: str) -> int:
         return query_origo(
@@ -140,24 +140,24 @@ def test_replacing_a_day_preserves_other_days_in_the_month(
             """
         )[0][0]
 
-    day1_before = _day_count('2024-01-01')
-    day2_before = _day_count('2024-01-02')
+    day1_before = _day_count('2019-09-08')
+    day2_before = _day_count('2019-09-09')
     assert day1_before > 0 and day2_before > 0
 
     # Re-ingest only day 2; day 1 (same month partition) must be untouched.
-    materialize_origo_assets(partition_key='2024-01-02')
+    materialize_binance_futures_raw_assets(partition_key='2019-09-09')
 
-    assert _day_count('2024-01-01') == day1_before
-    assert _day_count('2024-01-02') == day2_before
+    assert _day_count('2019-09-08') == day1_before
+    assert _day_count('2019-09-09') == day2_before
 
     duplicate_ids = query_origo(
         f"""
         SELECT count()
         FROM (
-            SELECT trade_id
+            SELECT futures_trade_id
             FROM {DATABASE}.{MAIN_TABLE}
-            WHERE toDate(datetime) = toDate('2024-01-02')
-            GROUP BY trade_id
+            WHERE toDate(datetime) = toDate('2019-09-09')
+            GROUP BY futures_trade_id
             HAVING count() > 1
         )
         """

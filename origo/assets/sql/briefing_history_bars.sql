@@ -1,6 +1,6 @@
 -- One OHLCV bar per {bucket_seconds:UInt32} bucket of the UTC span that runs
 -- back {days:UInt32} whole days from midnight opening {through_day:Date},
--- rolled up from the 1m origo.binance_spot_klines projection. The span ends
+-- rolled up from the 1m origo.binance_spot_trades_time_current projection. The span ends
 -- where {through_day:Date} begins, so the history composes with that day's
 -- own briefing feed file without overlapping it.
 --
@@ -29,7 +29,7 @@ SELECT
     sum(no_of_trades) AS no_of_trades,
     uniqExact(datetime) AS source_minutes,
     count() AS source_rows
-FROM origo.binance_spot_klines
+FROM origo.binance_spot_trades_time_current
 WHERE datetime >= span_start
   AND datetime < span_end
 GROUP BY bar_start

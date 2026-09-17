@@ -124,7 +124,7 @@ Full-history production validation and public promotion remain separate evidence
 
 ## Run and promote
 
-Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.bootstrap` before starting the daemon. This executes the recorded `prepare_revisioned_sources_job`; preparation errors and logging appear in Dagster Runs. Their healthcheck verifies preparation without changing state. Re-deployment applies the declared rollout while retaining sensor cursors: DORMANT stops all managed automation; CANARY and LIVE run every declared schedule and sensor automatically. Dormant sources perform no external preparation I/O. The job repeats this idempotent preparation, so a fresh instance follows the same path.
+Monitoring of a deployed source follows [Monitoring.md](Monitoring.md): the monitor worker reports failures and the investigation order starts in Dagit. Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.bootstrap` before starting the daemon. This executes the recorded `prepare_revisioned_sources_job`; preparation errors and logging appear in Dagster Runs. Their healthcheck verifies preparation without changing state. Re-deployment applies the declared rollout while retaining sensor cursors: DORMANT stops all managed automation; CANARY and LIVE run every declared schedule and sensor automatically. Dormant sources perform no external preparation I/O. The job repeats this idempotent preparation, so a fresh instance follows the same path.
 
 ### Backfill and compare from Dagit
 

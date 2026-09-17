@@ -78,6 +78,45 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  monitor:
+    build: .
+    image: origo-dagster:latest
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      # Alerts stay disabled locally: the monitor logs findings when ORIGO_ALERT_* is unset.
+      - ORIGO_ALERT_RESEND_API_KEY=${ORIGO_ALERT_RESEND_API_KEY:-}
+      - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-}
+      - ORIGO_ALERT_EMAIL_TO=${ORIGO_ALERT_EMAIL_TO:-}
+    volumes:
+      - .:/opt/app
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.monitor
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.monitor", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  vector:
+    image: timberio/vector:0.58.0-alpine
+    environment:
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./deploy/vector.yaml:/etc/vector/vector.yaml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
   dagster-instance:
@@ -85,3 +124,5 @@ volumes:
   source-locks:
 
   source-publications:
+
+  worker-heartbeats:

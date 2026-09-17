@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datetime import date
+
 from dagster import RunRequest, SkipReason
 
 from origo.definitions import (
+    BRIEFING_FIRST_DAY,
     _AssetEventLike,
     _partitioned_run_request,
     _publish_btc_briefing_history_run_request,
     defs,
 )
 
-PARTITION_KEY = '2024-03-05'
+PARTITION_KEY = '2026-06-05'
 RUN_KEY_PREFIXES = ('publish_btc_briefing_feed', 'publish_btc_briefing_history')
 
 
@@ -89,3 +92,16 @@ def test_existing_publish_sensors_are_unchanged() -> None:
     assert not any(
         'to_huggingface_sensor' in name or name == 'bar_store_source_sensor' for name in names
     )
+
+
+def test_briefing_sensors_skip_days_before_the_book_projection() -> None:
+    assert BRIEFING_FIRST_DAY == date(2026, 5, 14)
+    relaunch = _partitioned_run_request(
+        _AssetEvent(_DagsterEvent('2018-01-16'), 'relaunch-1'), run_key_prefix=RUN_KEY_PREFIXES[0]
+    )
+    assert isinstance(relaunch, SkipReason)
+    assert '2018-01-16' in relaunch.skip_message and '2026-05-14' in relaunch.skip_message
+    first = _partitioned_run_request(
+        _AssetEvent(_DagsterEvent('2026-05-14'), 'run-1'), run_key_prefix=RUN_KEY_PREFIXES[0]
+    )
+    assert isinstance(first, RunRequest) and first.partition_key == '2026-05-14'

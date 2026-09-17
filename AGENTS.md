@@ -52,6 +52,10 @@ Before drafting or implementing any PRD or slice that adds a data source, read a
 
 Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and retry controls. The operator selects what to run through those controls. Never require the operator to type YAML, JSON, dates, identifiers, paths or configuration text into Dagit, or follow source-specific manual preparation instructions from a chat. Configuration, dependencies, preparation, automation and publication belong in versioned code. Deployment activates scheduled work and sensors for every enabled source; operators never enable them manually. Adding and backfilling a registered source automatically builds every declared projection and file output without separate operator launches. Apply this uniformly to full backfills, selected gaps, retries and other operator-facing operations across registered sources. A source PR is incomplete until this workflow is verified in the actual GUI with real data. Screenshots illustrate the required native behavior; they are not a request to build a custom interface.
 
+## Monitoring
+
+Before investigating any failure, read and follow [docs/Developer/Monitoring.md](docs/Developer/Monitoring.md): Dagit first, ClickHouse second, Docker third, the external collectors last. Every monitored fact has one store and Dagit is the one pane; the monitor worker is the one detector and it keeps only a cursor. Do not add a second dashboard, a second alert path or a per-minute Dagster run in place of a worker receipt.
+
 ## Beyond the laws
 
 The gates check shape, scope, format, ratchets, and named test suites. They do not check whether the slice's capability actually works. The operator judges that at review time, against the following stance:

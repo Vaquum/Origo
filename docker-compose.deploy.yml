@@ -83,6 +83,50 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  monitor:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
+      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
+      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
+      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
+      - ORIGO_ALERT_RESEND_API_KEY=${RESEND_API_KEY:?RESEND_API_KEY is required}
+      - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-onboarding@resend.dev}
+      - ORIGO_ALERT_EMAIL_TO=${ORIGO_ALERT_EMAIL_TO:?ORIGO_ALERT_EMAIL_TO is required}
+      - ORIGO_ALERT_COOLDOWN_SECONDS=${ORIGO_ALERT_COOLDOWN_SECONDS:-21600}
+      - ORIGO_ALERT_QUEUE_THRESHOLD=${ORIGO_ALERT_QUEUE_THRESHOLD:-200}
+      - ORIGO_ALERT_DIGEST_HOUR_UTC=${ORIGO_ALERT_DIGEST_HOUR_UTC:-7}
+    volumes:
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.monitor
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.monitor", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  vector:
+    image: timberio/vector:0.58.0-alpine
+    environment:
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./deploy/vector.yaml:/etc/vector/vector.yaml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
     name: tdw-control-plane_clickhouse-data
@@ -107,3 +151,5 @@ volumes:
   source-locks:
 
   source-publications:
+
+  worker-heartbeats:

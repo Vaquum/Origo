@@ -1,0 +1,670 @@
+{
+ "data": {
+  "runsOrError": {
+   "__typename": "Runs",
+   "results": [
+    {
+     "jobName": "publish_btc_briefing_feed_job",
+     "runId": "e6e654a4-e7f0-44fd-a1a0-110b55913e86",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "93600"
+      },
+      {
+       "key": "dagster/partition",
+       "value": "2021-11-28"
+      },
+      {
+       "key": "dagster/partition_set",
+       "value": "publish_btc_briefing_feed_job_partition_set"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "200"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "publish_btc_briefing_feed::2021-11-28::8b572aea-61aa-48be-b14a-fea0f67c814c"
+      },
+      {
+       "key": "dagster/sensor_name",
+       "value": "publish_btc_briefing_feed_sensor"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5794950"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "e6e654a4-e7f0-44fd-a1a0-110b55913e86"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "f8d517f31aa07520dec7c6a9d97a7f7aba521451b1d8a8a911e7d0314fafdc7a"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "publish_btc_briefing_feed_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "18fd8e8d3bf8"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789655841.454735
+    },
+    {
+     "jobName": "publish_btc_briefing_feed_job",
+     "runId": "8ef07824-8447-4466-aed6-5a856bb781ac",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "93600"
+      },
+      {
+       "key": "dagster/partition",
+       "value": "2018-01-16"
+      },
+      {
+       "key": "dagster/partition_set",
+       "value": "publish_btc_briefing_feed_job_partition_set"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "200"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "publish_btc_briefing_feed::2018-01-16::5449d13e-15a2-4d09-a996-5b362c19f0b2"
+      },
+      {
+       "key": "dagster/sensor_name",
+       "value": "publish_btc_briefing_feed_sensor"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5794712"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "8ef07824-8447-4466-aed6-5a856bb781ac"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "58b5a45b894166f9bafd0dc1d578e79ae45f13af93e1c8668083490f6cc808dc"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "publish_btc_briefing_feed_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "18fd8e8d3bf8"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789655082.38046
+    },
+    {
+     "jobName": "publish_binance_spot_trades_mount_job",
+     "runId": "aaafabad-9ef3-418d-9912-b1367f8baeb9",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "binance_spot_trades:consumer:mount:a9544e47a6f38d2d47461f5f92990ab26300d7e327e24211d1b4d117dee4977d"
+      },
+      {
+       "key": "dagster/sensor_name",
+       "value": "binance_spot_trades_mount_sensor"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5794698"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "aaafabad-9ef3-418d-9912-b1367f8baeb9"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "795a9fc187407c7aa203efda9a5719bf8183bbc849c17f17a06de282e1d16585"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "publish_binance_spot_trades_mount_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "b451ad566b13"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      },
+      {
+       "key": "origo_projection_source_key",
+       "value": "binance_spot_trades"
+      },
+      {
+       "key": "origo_source_attempt",
+       "value": "0"
+      },
+      {
+       "key": "origo_source_consumer",
+       "value": "mount"
+      },
+      {
+       "key": "origo_source_event",
+       "value": "binance_spot_trades:consumer:mount:a9544e47a6f38d2d47461f5f92990ab26300d7e327e24211d1b4d117dee4977d"
+      },
+      {
+       "key": "origo_source_operation",
+       "value": "consumer_mount"
+      },
+      {
+       "key": "origo_source_state_token",
+       "value": "a9544e47a6f38d2d47461f5f92990ab26300d7e327e24211d1b4d117dee4977d"
+      }
+     ],
+     "updateTime": 1789655028.053913
+    },
+    {
+     "jobName": "publish_binance_spot_klines_to_mount_job",
+     "runId": "d9c68637-47ac-4f02-8281-561e8b2e8e76",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "publish_binance_spot_klines_to_mount_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791270"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "d9c68637-47ac-4f02-8281-561e8b2e8e76"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "863094545808974cb3097197511e533a5a7fc42b7a335ca37683effbaecadb26"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "publish_binance_spot_klines_to_mount_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647870.065016
+    },
+    {
+     "jobName": "refresh_binance_spot_trades_provisional_source_job",
+     "runId": "c0fedd53-8372-43d7-93be-f2c641f114b6",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "93600"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "binance_spot_trades:provisional:2026-09-17T12:23:00Z:0"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "binance_spot_trades_provisional_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791263"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "c0fedd53-8372-43d7-93be-f2c641f114b6"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "0e3791afc88d5fca0784e6de4382bb27a469ff63548f52725ab1e9a15f3d693f"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "refresh_binance_spot_trades_provisional_source_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      },
+      {
+       "key": "origo_source_attempt",
+       "value": "0"
+      },
+      {
+       "key": "origo_source_event",
+       "value": "binance_spot_trades:provisional:2026-09-17T12:23:00Z"
+      },
+      {
+       "key": "origo_source_key",
+       "value": "binance_spot_trades"
+      },
+      {
+       "key": "origo_source_operation",
+       "value": "provisional"
+      },
+      {
+       "key": "origo_source_partition",
+       "value": "2026-09-17T12:23:00Z"
+      }
+     ],
+     "updateTime": 1789647870.147732
+    },
+    {
+     "jobName": "refresh_binance_spot_latest_data_source_job",
+     "runId": "be66dcbe-f6a1-43bb-8f83-19ab6b8ff59d",
+     "tags": [
+      {
+       "key": "binance_spot_latest_minute_start",
+       "value": "2026-09-17T12:23:00Z"
+      },
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "binance_spot_latest::2026-09-17T12:23:00Z"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "binance_spot_latest_1m_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791262"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "be66dcbe-f6a1-43bb-8f83-19ab6b8ff59d"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "49d517e76dd734e1dbc7e0336ca72c2f6b51d72a58fb9ebd6e1c9c02fff2292b"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "refresh_binance_spot_latest_data_source_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647849.201696
+    },
+    {
+     "jobName": "refresh_binance_spot_depth20_data_source_job",
+     "runId": "e3587eae-6993-4ff2-bf8f-96cdfdf22064",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/partition",
+       "value": "2026-09-17T12:23:00+0000"
+      },
+      {
+       "key": "dagster/partition_set",
+       "value": "refresh_binance_spot_depth20_data_source_job_partition_set"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "binance_spot_depth20:source:2026-09-17T12:23:00+0000:20260917T122400Z"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "binance_spot_depth20_1m_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791261"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "e3587eae-6993-4ff2-bf8f-96cdfdf22064"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "41c24601437b6838dd8590e08f9e2bba80391cd14a6c880861288ef0fc25bc88"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "refresh_binance_spot_depth20_data_source_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647849.631019
+    },
+    {
+     "jobName": "refresh_binance_spot_depth200_data_source_job",
+     "runId": "24750ad6-2544-42ea-8256-9530a39738d0",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/partition",
+       "value": "2026-09-17T12:23:00+0000"
+      },
+      {
+       "key": "dagster/partition_set",
+       "value": "refresh_binance_spot_depth200_data_source_job_partition_set"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/run_key",
+       "value": "binance_spot_depth200:source:2026-09-17T12:23:00+0000:20260917T122400Z"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "binance_spot_depth200_1m_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791260"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "24750ad6-2544-42ea-8256-9530a39738d0"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "a7abb099db5530f5fb4fd6a26a14529e15a7ffbfded22a41c5c6e49a5c59349c"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "refresh_binance_spot_depth200_data_source_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647847.29065
+    },
+    {
+     "jobName": "maintain_operational_metadata_job",
+     "runId": "b5858509-d882-41f5-81e1-56bc5d010bc8",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "operational_metadata_maintenance_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5791113"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "b5858509-d882-41f5-81e1-56bc5d010bc8"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "a98676b4477be795b7d3644a7fd8008a4cc96245b37996958a2826fc3c2dff6a"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "maintain_operational_metadata_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647811.579464
+    },
+    {
+     "jobName": "maintain_operational_metadata_job",
+     "runId": "dee47548-7d10-4470-aa41-62fa3851ab6a",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "operational_metadata_maintenance_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5790703"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "dee47548-7d10-4470-aa41-62fa3851ab6a"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "a98676b4477be795b7d3644a7fd8008a4cc96245b37996958a2826fc3c2dff6a"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "maintain_operational_metadata_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789647212.640202
+    },
+    {
+     "jobName": "maintain_operational_metadata_job",
+     "runId": "a95aeadb-e132-4fbb-bacb-bcd9e66dc64d",
+     "tags": [
+      {
+       "key": "dagster/code_location",
+       "value": "origo"
+      },
+      {
+       "key": "dagster/failure_reason",
+       "value": "STEP_FAILURE"
+      },
+      {
+       "key": "dagster/max_runtime",
+       "value": "1800"
+      },
+      {
+       "key": "dagster/priority",
+       "value": "100"
+      },
+      {
+       "key": "dagster/schedule_name",
+       "value": "operational_metadata_maintenance_schedule"
+      },
+      {
+       "key": "dagster/tick",
+       "value": "5790290"
+      },
+      {
+       "key": "origo/launch_claimed",
+       "value": "a95aeadb-e132-4fbb-bacb-bcd9e66dc64d"
+      },
+      {
+       "key": "origo/request_identity",
+       "value": "a98676b4477be795b7d3644a7fd8008a4cc96245b37996958a2826fc3c2dff6a"
+      },
+      {
+       "key": "origo/routine_job",
+       "value": "maintain_operational_metadata_job"
+      },
+      {
+       "key": "origo/worker_container",
+       "value": "397dafa90e80"
+      },
+      {
+       "key": "origo/workload",
+       "value": "routine"
+      }
+     ],
+     "updateTime": 1789646613.090374
+    }
+   ]
+  }
+ }
+}

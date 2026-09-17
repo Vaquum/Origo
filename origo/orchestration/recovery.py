@@ -1,9 +1,12 @@
-"""Deployment recovery, recorded as a Dagster run. No market data is deleted."""
+"""Deployment recovery: reconcile before any captured op exists, then record the counts as a
+Dagster run. No market data is deleted."""
 
 import argparse
 import json
+import signal
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
+from types import FrameType
 from typing import cast
 
 from dagster import (
@@ -106,16 +109,24 @@ class RecoveryConfig(Config):
     retired_workers: list[str] = Field(default_factory=list)
     # Supplied only after deployment confirms BOTH prior app containers stopped.
     legacy_before: float = 0
+    # Counts computed in main() before the run exists; the op only records them.
+    retired_worker_runs: int = 0
+    queue_counts: dict[str, int] = Field(default_factory=dict)
 
 
 @op
 def recover_orchestration(context: OpExecutionContext, config: RecoveryConfig) -> None:
-    workers = recover_retired_workers(
-        context.instance, set(config.retired_workers), config.legacy_before
+    # No instance.report_* call may run inside a captured op: reporting on a run whose
+    # event shard is not yet initialized logs through Alembic under the storage lock,
+    # Dagster captures that log into the same storage, and startup deadlocks.
+    context.log.info(
+        'orchestration_recovery retired_workers=%s queue=%s',
+        config.retired_worker_runs,
+        config.queue_counts,
     )
-    queue = recover_queue(context.instance)
-    context.log.info('orchestration_recovery retired_workers=%s queue=%s', workers, queue)
-    context.add_output_metadata({'retired_worker_runs': workers, **queue})
+    context.add_output_metadata(
+        {'retired_worker_runs': config.retired_worker_runs, **config.queue_counts}
+    )
 
 
 @source_job(
@@ -128,12 +139,28 @@ def recover_orchestration_job() -> None:
     recover_orchestration()
 
 
+class _Deadline:
+    phase = 'startup'
+
+    @staticmethod
+    def expired(signum: int, frame: FrameType | None) -> None:
+        raise SystemExit(f'Recovery exceeded its deadline during phase {_Deadline.phase}.')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--retired-worker', action='append', default=[])
     parser.add_argument('--legacy-before', type=float, default=0)
+    parser.add_argument('--deadline-seconds', type=int, default=900)
     args = parser.parse_args()
+    signal.signal(signal.SIGALRM, _Deadline.expired)
+    signal.alarm(args.deadline_seconds)
     with DagsterInstance.get() as instance:
+        _Deadline.phase = 'retired_workers'
+        workers = recover_retired_workers(instance, set(args.retired_worker), args.legacy_before)
+        _Deadline.phase = 'queue'
+        queue = recover_queue(instance)
+        _Deadline.phase = 'record'
         result = recover_orchestration_job.execute_in_process(
             instance=instance,
             run_config={
@@ -142,6 +169,8 @@ def main() -> None:
                         'config': {
                             'retired_workers': args.retired_worker,
                             'legacy_before': args.legacy_before,
+                            'retired_worker_runs': workers,
+                            'queue_counts': queue,
                         }
                     }
                 }
@@ -149,6 +178,7 @@ def main() -> None:
             tags={'origo/recovery_time': datetime.now(UTC).isoformat()},
             raise_on_error=False,
         )
+        signal.alarm(0)
         if not result.success:
             raise SystemExit(1)
 

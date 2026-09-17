@@ -1,3 +1,7 @@
+# v3.9.4
+
+- Run startup and deployment recovery before any captured Dagster op exists so cancelling redundant queued runs cannot deadlock event storage; bound the recovery command, the compose start and the deploy job, and print the daemon log on a failed start.
+
 # v3.9.3
 
 Bound duplicate scheduling, reserve native Dagster capacity for routine and backfill work, launch concurrently, and recover retired workers and redundant queued runs during deployment.

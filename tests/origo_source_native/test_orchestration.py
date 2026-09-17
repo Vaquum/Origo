@@ -5,7 +5,7 @@ import time
 
 import pytest
 import yaml
-from dagster import DagsterRunStatus, DagsterEvent
+from dagster import DagsterRunStatus, DagsterEvent, RunsFilter
 from dagster._core.launcher.base import LaunchRunContext, WorkerStatus
 from dagster._core.launcher.default_run_launcher import DefaultRunLauncher
 from dagster._core.run_coordinator.base import SubmitRunContext
@@ -330,3 +330,69 @@ def test_daily_publication_precedes_minute_catchup(instance):
     daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
     runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
     assert [r.run_id for r in runs[:2]] == [daily.run_id, feed.run_id]
+
+
+def test_startup_recovery_completes_outside_captured_logging(origo_test_env, tmp_path, monkeypatch):
+    """Both deployment entry points cancel redundant queued runs before any captured op
+    exists. Cancelling a run whose event shard is uninitialised logs through Alembic
+    under the storage lock; with root python-log capture that log re-enters the same
+    storage, and on the pre-fix shape both commands hang forever."""
+    import os
+    import subprocess
+    import sys
+
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    home = tmp_path / 'dagster-home'
+    home.mkdir()
+    storage = {'config': {'base_dir': str(home / 'storage')}}
+    overrides = {
+        'run_storage': {
+            'module': 'origo.maintenance.run_storage',
+            'class': 'OrigoSqliteRunStorage',
+            **storage,
+        },
+        'event_log_storage': {
+            'module': 'origo.maintenance.event_storage',
+            'class': 'OrigoSqliteEventLogStorage',
+            **storage,
+        },
+        'python_logs': {'managed_python_loggers': [''], 'python_log_level': 'INFO'},
+    }
+    commands = (
+        ('origo.sources.bootstrap', 'prepare_revisioned_sources_job', '2017-08-17', []),
+        (
+            'origo.orchestration.recovery',
+            'recover_orchestration_job',
+            '2017-08-18',
+            ['--deadline-seconds', '30'],
+        ),
+    )
+    with instance_for_test(temp_dir=str(home), overrides=overrides) as instance:
+        env = {**os.environ, 'DAGSTER_HOME': str(home), 'PYTHONPATH': str(ROOT)}
+        for module, job_name, day, arguments in commands:
+            kept, redundant = (
+                create_run_for_test(
+                    instance, status=DagsterRunStatus.QUEUED, tags={'dagster/partition': day}
+                )
+                for _ in range(2)
+            )
+            completed = subprocess.run(
+                [sys.executable, '-m', module, *arguments],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert completed.returncode == 0, completed.stdout + completed.stderr
+            assert instance.get_run_by_id(kept.run_id).status == DagsterRunStatus.QUEUED
+            assert instance.get_run_by_id(redundant.run_id).status == DagsterRunStatus.CANCELED
+            assert any(
+                entry.dagster_event is not None
+                and entry.dagster_event.event_type_value == 'PIPELINE_CANCELED'
+                for entry in instance.all_logs(redundant.run_id)
+            )
+            recorded = instance.get_runs(RunsFilter(job_name=job_name))
+            assert recorded and recorded[0].status == DagsterRunStatus.SUCCESS
+            messages = [entry.user_message for entry in instance.all_logs(recorded[0].run_id)]
+            assert any("'redundant_canceled': 1" in message for message in messages)

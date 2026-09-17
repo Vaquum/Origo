@@ -176,7 +176,9 @@ services:
       clickhouse:
         condition: service_healthy
     command: python -m origo.workers.provisional
-    mem_limit: 3g
+    # The mount render peaks above 5 GiB of RSS (measured 2026-09-17); the limit keeps a
+    # leak from starving the host without killing a normal render.
+    mem_limit: 16g
     healthcheck:
       test: ["CMD", "python", "-m", "origo.workers.provisional", "--check"]
       interval: 60s

@@ -65,15 +65,15 @@ Deployment performs two recovery passes, each recorded as a Dagster run:
 Both passes run in the entry point's `main()` before the recording run exists, never
 inside a captured op. Reporting on a run whose event shard is not yet initialized
 logs through Alembic while the storage lock is held; with root python-log capture
-that log re-enters the same storage and startup deadlocks. Each pass is bounded by
-a SIGALRM deadline that names the phase it stalled in: bootstrap reads
-`ORIGO_STARTUP_DEADLINE_SECONDS` (default 1800), the recovery command takes
-`--deadline-seconds` (900 in deployment). The container healthcheck passes on state
-persisted by the previous deployment, so the workflow waits for the exec into
-`dagster-daemon` (at most 900 seconds) before running recovery; the compose start
-waits at most 600 seconds, the deploy job at most 45 minutes, and a failed start
-prints the last 200 daemon log lines. A recovery error before the recording run
-exists appears in that log excerpt, not as a Dagster run.
+that log re-enters the same storage and startup deadlocks. The recovery command
+stops with a named phase after `--deadline-seconds` (900 in deployment). The
+container healthcheck passes on state persisted by the previous deployment, so the
+workflow waits for the exec into `dagster-daemon` (at most 900 seconds) before
+running recovery; a bootstrap that has not finished by then fails the deploy with
+the daemon log attached. The compose start waits at most 600 seconds, the deploy
+job at most 45 minutes, and a failed start prints the last 200 daemon log lines. A
+recovery error before the recording run exists appears in that log excerpt, not as
+a Dagster run.
 
 Recovery and launching share a short admission/claim lock. A cancellation marker
 prevents a dequeuer that selected a duplicate just before recovery from starting

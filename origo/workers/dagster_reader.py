@@ -7,6 +7,7 @@ as such rather than raised, so the other detectors still run in the same tick.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -96,7 +97,13 @@ class DagsterReader:
                 document: object = json.loads(response.read())
         except urllib.error.HTTPError as error:
             raise DagsterUnreachable(f'{operation}: HTTP {error.code}') from error
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ) as error:
             raise DagsterUnreachable(f'{operation}: {error}') from error
         body = _mapping(document, 'body')
         if body.get('errors'):

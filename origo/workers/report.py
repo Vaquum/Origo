@@ -7,6 +7,7 @@ the caller records the outcome instead of pretending the write happened.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -77,7 +78,7 @@ class Reporter:
             detail = error.read()[:300].decode('utf-8', 'replace')
             log.error('dagster refused %s: HTTP %s %s', path, error.code, detail)
             return False
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
             log.error('dagster unreachable for %s: %s', path, error)
             return False
         if not 200 <= status < 300:

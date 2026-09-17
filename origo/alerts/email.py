@@ -7,6 +7,7 @@ the next minute. The API key lives only in the deployment environment.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -103,7 +104,7 @@ def send_alert(settings: AlertSettings, subject: str, body: str) -> None:
     except urllib.error.HTTPError as error:
         detail = error.read()[:200].decode('utf-8', 'replace')
         raise RuntimeError(f'Alert delivery failed: HTTP {error.code} {detail}') from error
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
         raise RuntimeError(f'Alert delivery failed: {error}') from error
     if not 200 <= status < 300:
         raise RuntimeError(f'Alert delivery failed: HTTP {status}')

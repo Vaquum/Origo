@@ -19,7 +19,7 @@ from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.workers.dagster_reader import DagsterReader
-from origo.workers.monitor import CollectorProbe, Monitor
+from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
@@ -39,6 +39,7 @@ class _Recorder(ThreadingHTTPServer):
             path.stem: json.loads(path.read_text()) for path in FIXTURES.glob('*.json')
         }
         self.history_rows = True
+        self.history_malformed = False
         self.history_calls: list[str] = []
         self.email_status = 200
 
@@ -76,6 +77,10 @@ class _Handler(BaseHTTPRequestHandler):
         server = cast(_Recorder, self.server)
         if self.path.startswith('/history'):
             server.history_calls.append(self.path)
+            if server.history_malformed:
+                self.wfile.write(b'garbage without a status line\r\n')
+                self.close_connection = True
+                return
             self._respond(200, b'{"ts": 1}\n' if server.history_rows else b'')
             return
         self._respond(404, {'error': self.path})
@@ -113,6 +118,13 @@ class _EmptyClient:
 
     def disconnect(self) -> None:
         return None
+
+
+class _FailingClient(_EmptyClient):
+    def execute(
+        self, query: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[tuple[object, ...]]:
+        raise RuntimeError('ClickHouse is down')
 
 
 def _settings(server: _Recorder, **overrides: object) -> AlertSettings:
@@ -226,6 +238,11 @@ def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Pa
     assert 'heartbeat_stale:depth' in outcome.failed
     assert {post['check_name'] for post in _check_posts(recorder)} == set(MONITOR_CHECK_NAMES)
     assert 'dagster_unreachable' in _emails(recorder)[0]['text']
+    # The failure cursor did not move while Dagit was down: the same cursor file, a
+    # reachable Dagit, and every fixture failure is reported.
+    recovered = _monitor(recorder, tmp_path).tick(NOW + timedelta(minutes=1))
+    assert 'dagster_unreachable' not in recovered.failed
+    assert _failure_keys() <= set(recovered.failed)
 
 
 def test_monitor_flags_stale_heartbeats_and_failed_receipts(
@@ -250,7 +267,8 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         touch_heartbeat(stale)
         old = time.time() - 181
         os.utime(stale, (old, old))
-        outcome = _monitor(recorder, tmp_path, client=client).tick(datetime.now(UTC))
+        tick_time = datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS + 30)
+        outcome = _monitor(recorder, tmp_path, client=client).tick(tick_time)
         assert 'heartbeat_stale:depth' in outcome.failed
         assert 'heartbeat_stale:provisional' not in outcome.failed
         assert 'receipt_failed:depth:depth20_snapshots' in outcome.failed
@@ -288,7 +306,7 @@ def test_monitor_alerts_on_error_rows_in_container_log(
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         ensure_monitoring_tables(client, 'origo')
-        stamp = datetime.now(UTC).replace(tzinfo=None)
+        stamp = (datetime.now(UTC) - timedelta(minutes=2)).replace(tzinfo=None)
         client.execute(
             'INSERT INTO origo.container_log VALUES',
             [
@@ -432,3 +450,66 @@ def test_settings_and_deployment_wiring_are_complete() -> None:
     assert 'scp deploy/vector.yaml' in workflow
     assert 'test -n "$RESEND_API_KEY"' in workflow and 'test -n "$ORIGO_ALERT_EMAIL_TO"' in workflow
     assert 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector' in workflow
+
+
+def test_a_failing_detector_is_a_finding_and_the_tick_still_reports(
+    recorder: _Recorder, tmp_path: Path
+) -> None:
+    monitor = _monitor(recorder, tmp_path, client=_FailingClient())
+    outcome = monitor.tick(NOW)
+    assert {'detector_failed:workers', 'detector_failed:logs'} <= set(outcome.failed)
+    assert _failure_keys() <= set(outcome.failed)
+    checks = _check_posts(recorder)
+    assert sorted(post['check_name'] for post in checks) == sorted(MONITOR_CHECK_NAMES)
+    assert {post['check_name']: post['passed'] for post in checks}['workers_alive'] is False
+    assert {post['check_name']: post['passed'] for post in checks}['no_error_logs'] is False
+    email = _emails(recorder)[0]
+    assert 'detector_failed:workers' in email['text'] and 'ClickHouse is down' in email['text']
+    cursor = json.loads((tmp_path / 'monitor.cursor.json').read_text())
+    start = (NOW - timedelta(minutes=Monitor.lookback_minutes)).isoformat()
+    # The detectors that could not read leave their cursors where they were; the Dagster
+    # detector completed and advanced.
+    assert cursor['receipts_after'] == start and cursor['logs_after'] == start
+    assert cursor['failures_after'] == NOW.timestamp()
+    healthy = _monitor(recorder, tmp_path).tick(NOW + timedelta(minutes=1))
+    assert not any(key.startswith('detector_failed') for key in healthy.failed)
+    cursor = json.loads((tmp_path / 'monitor.cursor.json').read_text())
+    window_end = NOW + timedelta(minutes=1) - timedelta(seconds=DELIVERY_LAG_SECONDS)
+    assert cursor['receipts_after'] == window_end.isoformat()
+    assert cursor['logs_after'] == window_end.isoformat()
+
+
+def test_late_deliveries_and_malformed_collector_responses_are_still_reported(
+    recorder: _Recorder, tmp_path: Path, origo_test_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        ensure_monitoring_tables(client, 'origo')
+        first = datetime.now(UTC)
+        monitor = _monitor(recorder, tmp_path, client=client)
+        assert not any(key.startswith(('error_logs', 'receipt_failed')) for key in monitor.tick(first).failed)
+        # Stamped before the first tick, delivered after it: the lagged window still reads them.
+        late = (first - timedelta(seconds=10)).replace(tzinfo=None)
+        client.execute(
+            'INSERT INTO origo.container_log VALUES',
+            [(late, 'dagster', 'origo-dagster-1', 'stderr', 'ERROR', 'late Traceback')],
+        )
+        client.execute(
+            'INSERT INTO origo.worker_minute_log VALUES',
+            [('depth', 'depth20_snapshots', late.replace(second=0, microsecond=0), 0, '', 5, 'FAILED', 'LATE', 'late receipt', 'host', late)],
+        )
+        second = monitor.tick(first + timedelta(seconds=2 * DELIVERY_LAG_SECONDS))
+        assert 'error_logs:dagster' in second.failed
+        assert 'receipt_failed:depth:depth20_snapshots' in second.failed
+    finally:
+        client.disconnect()
+
+    monkeypatch.setenv('DEPTH20_PROBE_URL', _url(recorder))
+    monkeypatch.setenv('DEPTH20_PROBE_TOKEN', 'probe-token')
+    recorder.history_malformed = True
+    probes = (CollectorProbe('depth20', 'DEPTH20_PROBE_URL', 'DEPTH20_PROBE_TOKEN'),)
+    outcome = _monitor(recorder, tmp_path / 'malformed', probes=probes).tick(NOW)
+    assert 'collector_silent:depth20' in outcome.failed
+    assert not any(key.startswith('detector_failed') for key in outcome.failed)
+    serving = [post for post in _check_posts(recorder) if post['check_name'] == 'collectors_serving']
+    assert serving[-1]['passed'] is False and serving[-1]['metadata']['findings'] == 1

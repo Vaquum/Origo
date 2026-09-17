@@ -19,13 +19,14 @@ file; every fact lives in Dagit and ClickHouse.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import logging
 import os
 import sys
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -61,6 +62,10 @@ CHECK_NAMES: tuple[CheckName, ...] = (
 )
 DEFAULT_WEBSERVER_URL = 'http://dagit:3000'
 PROBE_TIMEOUT_SECONDS = 10
+# ClickHouse rows are read up to this far behind the clock: Vector delivers a log line
+# seconds after its stamp and a worker stamps a receipt before inserting it, so a row
+# stamped just before a read and inserted after it must still fall inside a later window.
+DELIVERY_LAG_SECONDS = 60
 log = logging.getLogger('origo.workers.monitor')
 
 
@@ -167,12 +172,26 @@ class Monitor:
     def tick(self, now: datetime) -> TickOutcome:
         now = now.astimezone(UTC)
         minute = now.replace(second=0, microsecond=0)
+        window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
         cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
-        findings: list[Finding] = []
-        findings.extend(self._dagster_findings(cursor, now))
-        findings.extend(self._worker_findings(cursor, now))
-        findings.extend(self._collector_findings(minute - timedelta(minutes=1)))
-        findings.extend(self._log_findings(cursor, now))
+        # Every detector is isolated: a fault in one becomes its own finding on its check,
+        # the other four still run, the evaluations are still written and the e-mail is still
+        # sent. A detector that did not complete its read leaves its cursor where it was.
+        dagster, dagster_read = self._guarded(
+            'queue_bounded', 'dagster', lambda: self._dagster_findings(cursor)
+        )
+        workers, workers_read = self._guarded(
+            'workers_alive', 'workers', lambda: (self._worker_findings(cursor, window_end), True)
+        )
+        collectors, _ = self._guarded(
+            'collectors_serving',
+            'collectors',
+            lambda: (self._collector_findings(minute - timedelta(minutes=1)), True),
+        )
+        logs, logs_read = self._guarded(
+            'no_error_logs', 'logs', lambda: (self._log_findings(cursor, window_end), True)
+        )
+        findings: list[Finding] = [*dagster, *workers, *collectors, *logs]
 
         by_check: dict[CheckName, list[Finding]] = {name: [] for name in CHECK_NAMES}
         for finding in findings:
@@ -219,9 +238,12 @@ class Monitor:
                 f'collectors probed: {len(self.probes)}\n',
             )
             cursor.last_digest_date = today
-        cursor.failures_after = now.timestamp()
-        cursor.receipts_after = now.isoformat()
-        cursor.logs_after = now.isoformat()
+        if dagster_read:
+            cursor.failures_after = now.timestamp()
+        if workers_read:
+            cursor.receipts_after = window_end.isoformat()
+        if logs_read:
+            cursor.logs_after = window_end.isoformat()
         cursor.sent = {
             key: stamp for key, stamp in cursor.sent.items() if now.timestamp() - stamp <= cooldown
         }
@@ -232,6 +254,26 @@ class Monitor:
             tuple(CHECK_NAMES),
             tuple(finding.key for finding in findings),
         )
+
+    @staticmethod
+    def _guarded(
+        check: CheckName, key: str, detector: Callable[[], tuple[list[Finding], bool]]
+    ) -> tuple[list[Finding], bool]:
+        try:
+            return detector()
+        except Exception as error:
+            # A failing detector is loud on its own check; its cursor stays put so the rows
+            # it could not read are read by the next tick.
+            log.exception('%s detector failed', key)
+            detail = f'{type(error).__name__}: {error}'[:300]
+            return [
+                Finding(
+                    f'detector_failed:{key}',
+                    check,
+                    f'The {key} detector failed',
+                    detail,
+                )
+            ], False
 
     def _send(self, subject: str, body: str) -> None:
         if self.settings is None:
@@ -250,7 +292,9 @@ class Monitor:
         lines.append('Investigate in this order: Dagit, ClickHouse, Docker, the collectors.')
         return '\n'.join(lines) + '\n'
 
-    def _dagster_findings(self, cursor: Cursor, now: datetime) -> list[Finding]:
+    def _dagster_findings(self, cursor: Cursor) -> tuple[list[Finding], bool]:
+        """Findings from Dagster and whether the failure queries ran, so the failure cursor
+        only advances past what was actually read."""
         findings: list[Finding] = []
         health = self.dagster.health()
         if not health.reachable:
@@ -261,7 +305,7 @@ class Monitor:
                     'Dagster webserver unreachable',
                     'The GraphQL endpoint did not answer.',
                 )
-            ]
+            ], False
         for daemon in health.unhealthy_daemons:
             findings.append(
                 Finding(
@@ -300,14 +344,15 @@ class Monitor:
                     datetime.fromtimestamp(check.timestamp, UTC).isoformat(),
                 )
             )
-        return findings
+        return findings, True
 
     def _heartbeats(self) -> list[Path]:
         own = heartbeat_path(self.heartbeat_dir, self.name)
         return sorted(path for path in self.heartbeat_dir.glob('*.heartbeat') if path != own)
 
-    def _worker_findings(self, cursor: Cursor, now: datetime) -> list[Finding]:
+    def _worker_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:
         findings: list[Finding] = []
+        now = window_end + timedelta(seconds=DELIVERY_LAG_SECONDS)
         for heartbeat in self._heartbeats():
             if not heartbeat_is_fresh(
                 heartbeat, max_age_seconds=HEARTBEAT_MAX_AGE_SECONDS, now=now.timestamp()
@@ -322,7 +367,7 @@ class Monitor:
                     )
                 )
         for receipt in failed_receipts_since(
-            self.client, self.database, datetime.fromisoformat(cursor.receipts_after)
+            self.client, self.database, datetime.fromisoformat(cursor.receipts_after), window_end
         ):
             findings.append(
                 Finding(
@@ -339,7 +384,14 @@ class Monitor:
         for probe in self.probes:
             try:
                 serving = probe_collector(probe, minute)
-            except (urllib.error.URLError, TimeoutError, OSError, KeyError) as error:
+            except (
+                urllib.error.URLError,
+                http.client.HTTPException,
+                TimeoutError,
+                OSError,
+                KeyError,
+                ValueError,
+            ) as error:
                 serving = False
                 reason = f'{type(error).__name__}: {error}'
             else:
@@ -355,9 +407,9 @@ class Monitor:
                 )
         return findings
 
-    def _log_findings(self, cursor: Cursor, now: datetime) -> list[Finding]:
+    def _log_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:
         rows = error_log_rows_since(
-            self.client, self.database, datetime.fromisoformat(cursor.logs_after)
+            self.client, self.database, datetime.fromisoformat(cursor.logs_after), window_end
         )
         by_service: dict[str, list[str]] = {}
         for row in rows:

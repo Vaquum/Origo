@@ -101,13 +101,17 @@ def record_receipt(
     )
 
 
-def failed_receipts_since(client: Client, database: str, since: datetime) -> list[Receipt]:
+def failed_receipts_since(
+    client: Client, database: str, since: datetime, until: datetime
+) -> list[Receipt]:
+    """Failed receipts recorded in ``(since, until]``; the caller keeps ``until`` behind the
+    clock so a receipt stamped just before a read and inserted after it is read next time."""
     rows = client.execute(
         f"""SELECT feed, series, minute, status, error_code, error, worker_host, recorded_at
         FROM {identifier(database)}.{WORKER_MINUTE_LOG}
-        WHERE status = 'FAILED' AND recorded_at > %(since)s
+        WHERE status = 'FAILED' AND recorded_at > %(since)s AND recorded_at <= %(until)s
         ORDER BY recorded_at LIMIT {_LIMIT}""",
-        {'since': _utc(since).replace(tzinfo=None)},
+        {'since': _utc(since).replace(tzinfo=None), 'until': _utc(until).replace(tzinfo=None)},
     )
     return [
         Receipt(
@@ -124,13 +128,17 @@ def failed_receipts_since(client: Client, database: str, since: datetime) -> lis
     ]
 
 
-def error_log_rows_since(client: Client, database: str, since: datetime) -> list[LogRow]:
+def error_log_rows_since(
+    client: Client, database: str, since: datetime, until: datetime
+) -> list[LogRow]:
+    """Error rows stamped in ``(since, until]``; Vector delivers a row seconds after its
+    stamp, so the caller keeps ``until`` behind the clock by the delivery lag."""
     rows = client.execute(
         f"""SELECT timestamp, service, container, level, message
         FROM {identifier(database)}.{CONTAINER_LOG}
-        WHERE level = 'ERROR' AND timestamp > %(since)s
+        WHERE level = 'ERROR' AND timestamp > %(since)s AND timestamp <= %(until)s
         ORDER BY timestamp LIMIT {_LIMIT}""",
-        {'since': _utc(since).replace(tzinfo=None)},
+        {'since': _utc(since).replace(tzinfo=None), 'until': _utc(until).replace(tzinfo=None)},
     )
     return [
         LogRow(_utc(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4])) for row in rows

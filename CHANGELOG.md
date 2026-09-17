@@ -1,6 +1,9 @@
-# v3.11.0
+# v3.12.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.11.0
+
 - Delete the legacy spot pipeline: the daily ingest, bar projections, latest stack, table setup, mirror and bar-store assets, their jobs, schedules, tests and helpers are removed, and the bar and export formulas they carried live in the spot profile. The revisioned spot source serves the legacy table names as views over its components (canonical rows under the base names, provisional rows under the `_latest` names), retires the ingestion ledgers, watermarks and per-interval cut tables together with the inert parity table at setup, purges the spot rows the retired refresh wrote into the futures pipeline's `aligned_1m_exchange`, and the briefing publications read its current views. The mount consumer stages a render beside the mirror, activates it only after the canonical check so a discarded render leaves the public files untouched, and sweeps staging a render that died left behind.
 
 # v3.10.0

@@ -3,6 +3,7 @@
 import fcntl
 import hashlib
 import json
+import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,13 +60,14 @@ def execution_tags(run: DagsterRun) -> dict[str, str]:
         'publish_binance_spot_klines_to_mount_job',
         'maintain_operational_metadata_job',
     }
+    daily = re.fullmatch(r'\d{4}-\d{2}-\d{2}', run.tags.get('dagster/partition', '')) is not None
     default_runtime = '1800' if short_job and not bulk else '93600'
     requested_runtime = run.tags.get('dagster/max_runtime', default_runtime)
     return {
         WORKLOAD_TAG: 'backfill' if bulk else 'routine',
         IDENTITY_TAG: request_identity(run),
         **({ROUTINE_JOB_TAG: run.job_name} if not bulk else {}),
-        'dagster/priority': '0' if bulk else '100',
+        'dagster/priority': '0' if bulk else '200' if daily else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,
     }

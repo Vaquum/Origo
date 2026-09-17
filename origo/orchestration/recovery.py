@@ -2,13 +2,14 @@
 
 import argparse
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from typing import cast
 
 from dagster import (
     Config,
     DagsterInstance,
+    DagsterRun,
     DagsterRunStatus,
     OpExecutionContext,
     RunsFilter,
@@ -31,14 +32,26 @@ from .policy import (
 )
 
 
+def outstanding_runs(instance: DagsterInstance) -> Iterator[DagsterRun]:
+    cursor: str | None = None
+    while True:
+        batch = instance.get_runs(
+            RunsFilter(statuses=[DagsterRunStatus.QUEUED, *ACTIVE]),
+            ascending=True,
+            cursor=cursor,
+            limit=1000,
+        )
+        if not batch:
+            return
+        cursor = batch[-1].run_id
+        yield from batch
+
+
 def recover_queue(instance: DagsterInstance) -> dict[str, int]:
     kept: set[str] = set()
     counts = {'classified': 0, 'redundant_canceled': 0, 'unique_queued': 0}
     with admission_lock(instance):
-        runs = instance.get_runs(
-            RunsFilter(statuses=[DagsterRunStatus.QUEUED, *ACTIVE]), ascending=True
-        )
-        for run in runs:
+        for run in outstanding_runs(instance):
             tags = execution_tags(run)
             instance.add_run_tags(run.run_id, tags)
             counts['classified'] += 1

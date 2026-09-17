@@ -275,7 +275,14 @@ def test_benchmark_help_is_available():
     import subprocess
     import sys
 
-    result = subprocess.run([sys.executable, 'tools/benchmark_orchestration.py', '--help'], cwd=ROOT, env={**os.environ, 'PYTHONPATH': str(ROOT)}, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        [sys.executable, 'tools/benchmark_orchestration.py', '--help'],
+        cwd=ROOT,
+        env={**os.environ, 'PYTHONPATH': str(ROOT)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert '--archives' in result.stdout
 
 
@@ -283,9 +290,43 @@ def test_depth_chunk_identity_keeps_both_feeds_and_minutes(instance):
     from origo.orchestration.policy import outstanding_configs
 
     job = 'build_depth_snapshot_store_arrow_job'
+
     def config(minute):
-        return {'ops': {'build_depth_snapshot_store_arrow': {'config': {'source_partition_key': minute}}}}
+        return {
+            'ops': {
+                'build_depth_snapshot_store_arrow': {'config': {'source_partition_key': minute}}
+            }
+        }
+
     submit(instance, job=job, day='depth20_snapshots', config=config('2026-09-17T00:40:00+0000'))
     submit(instance, job=job, day='depth200_snapshots', config=config('2026-09-17T00:41:00+0000'))
-    assert outstanding_configs(instance, job, 'build_depth_snapshot_store_arrow', 'source_partition_key', partition='depth20_snapshots') == {'2026-09-17T00:40:00+0000'}
-    assert outstanding_configs(instance, job, 'build_depth_snapshot_store_arrow', 'source_partition_key', partition='depth200_snapshots') == {'2026-09-17T00:41:00+0000'}
+    assert outstanding_configs(
+        instance,
+        job,
+        'build_depth_snapshot_store_arrow',
+        'source_partition_key',
+        partition='depth20_snapshots',
+    ) == {'2026-09-17T00:40:00+0000'}
+    assert outstanding_configs(
+        instance,
+        job,
+        'build_depth_snapshot_store_arrow',
+        'source_partition_key',
+        partition='depth200_snapshots',
+    ) == {'2026-09-17T00:41:00+0000'}
+
+
+def test_daily_publication_precedes_minute_catchup(instance):
+    for job in (
+        'refresh_binance_spot_depth20_data_source_job',
+        'refresh_binance_spot_depth200_data_source_job',
+        'refresh_binance_spot_latest_data_source_job',
+        'build_depth_snapshot_store_arrow_job',
+    ):
+        for minute in range(15):
+            submit(instance, job=job, day=f'2026-09-17T00:{minute:02d}:00+0000')
+    daily = submit(instance, job='refresh_binance_spot_data_source_job', day='2026-09-16')
+    feed = submit(instance, job='publish_btc_briefing_feed_job', day='2026-09-16')
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    assert [r.run_id for r in runs[:2]] == [daily.run_id, feed.run_id]

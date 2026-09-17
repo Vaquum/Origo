@@ -14,7 +14,8 @@ queues or activate automation in Dagit.
 - Native dequeue uses sixteen launch threads and a one-second poll. Canonical
   source operations retain their registered eight-worker pool. Run limits and
   operation pools both apply.
-- Routine runs have higher queue priority, and each routine job has at most two
+- Routine runs have higher queue priority; daily partitions (including briefing
+  publication) precede minute catch-up work. Each routine job has at most two
   active runs. One stalled job cannot occupy every routine slot.
 - Admission permits one queued copy of an execution identity. The identity
   includes job definition, partition/range, execution configuration, asset/check/

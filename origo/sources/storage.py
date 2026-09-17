@@ -448,6 +448,13 @@ class SourceStore:
         records = self.records(canonical_only=canonical_only)
         return Snapshot(state_token(self.spec.key, records), records)
 
+    def canonical_token(self, snapshot: Snapshot) -> str:
+        """The token of the canonical records pinned in a snapshot; publication currency."""
+        return state_token(
+            self.spec.key,
+            tuple(record for record in snapshot.records if not record.partition.provisional),
+        )
+
     def complete_builds(self) -> tuple[str, dict[str, object]]:
         """Subquery of builds whose component log carries every declared canonical component."""
         keys = tuple(

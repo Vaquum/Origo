@@ -72,7 +72,7 @@ parsing, schemas and integrity checks remain engineering work; orchestration is 
 | [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, schedules and consumer/failure/reconciliation sensors. Do not copy these definitions into a source module. |
 | [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats source preparation idempotently; deployment configures pool limits before workers start. |
 | [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Reconciled generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
-| [bundle.py](../../origo/sources/bundle.py) consumer sensors | Later eligible state changes request publication automatically. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
+| [bundle.py](../../origo/sources/bundle.py) consumer sensors | Later canonical state changes request publication automatically; renderers that declare provisional components include the partial-day rows present at render time, and provisional refreshes alone neither trigger nor invalidate a publication. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
 | [roles.py](../../origo/maintenance/roles.py), [source_receipts.py](../../origo/maintenance/source_receipts.py) | Protected source/backfill provenance and short retention for standalone projection jobs, with durable deduplication receipts. Keep the generated run tags. |
 
 The framework executes the components and consumers declared by the profile; it
@@ -218,7 +218,7 @@ the native backfill; final reconciliation checks current manifests and health. F
 materializations and source tokens; a source partition's successful reconciliation
 does not claim that a failed file publication succeeded. Publication queries pinned
 ClickHouse projections without copying the historical raw trade archive into
-Python. Consumer sensors also publish later eligible source changes automatically.
+Python. Consumer sensors also publish later canonical source changes automatically.
 Active backfills hold background publication and reconciliation. Publication
 requires every active canonical day to carry complete component evidence and no
 open partition failure.

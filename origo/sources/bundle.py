@@ -297,7 +297,7 @@ def _execute_operation(
         from .prepare import publication_current
 
         for consumer in spec.consumers:
-            snapshot = runtime.store.snapshot(canonical_only=consumer.canonical_only)
+            snapshot = runtime.store.snapshot(canonical_only=True)
             if not publication_current(spec, consumer.key, snapshot.token):
                 raise SourceError(
                     'GENERATION_CHANGED', 'Declared files do not match the current source state.'
@@ -322,8 +322,7 @@ def _execute_operation(
                 'SOURCE_NOT_READY',
                 'Canonical state has incomplete evidence or unresolved partition failures.',
             )
-        definition = next(item for item in spec.consumers if item.key == consumer)
-        snapshot = runtime.store.snapshot(canonical_only=definition.canonical_only)
+        snapshot = runtime.store.snapshot(canonical_only=True)
         if publication_current(spec, consumer, snapshot.token):
             runtime.failures.recover(operation='consumer', consumer=consumer)
             return {'state_token': snapshot.token}
@@ -802,7 +801,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
     sensors: list[SensorDefinition] = []
     for consumer in spec.consumers:
 
-        def make_consumer_sensor(consumer_key: str, canonical_only: bool) -> SensorDefinition:
+        def make_consumer_sensor(consumer_key: str) -> SensorDefinition:
             @_sensor(
                 name=f'{spec.key}_{consumer_key}_sensor',
                 job=definitions.resolve_job_def(job_names['consumer_' + consumer_key]),
@@ -823,7 +822,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 client = make_clickhouse_client(settings)
                 try:
                     store = SourceStore(client, settings.database, spec)
-                    snapshot = store.snapshot(canonical_only=canonical_only)
+                    snapshot = store.snapshot(canonical_only=True)
                     if not snapshot.records:
                         return SkipReason('Source has no eligible active partitions.')
                     if not store.canonical_ready():
@@ -840,7 +839,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
 
             return publish
 
-        sensors.append(make_consumer_sensor(consumer.key, consumer.canonical_only))
+        sensors.append(make_consumer_sensor(consumer.key))
 
     @_failure_sensor(
         name=f'{spec.key}_failure_sensor',

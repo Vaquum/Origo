@@ -354,8 +354,6 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
         violations.extend(diagnostics.errors)
         if after_bytes * 10 >= business_bytes:
             violations.append(f'metadata_business_fraction:{after_bytes}/{business_bytes}>=0.1')
-        if after_bytes > config.metadata_budget_bytes:
-            violations.append(f'metadata_budget:{after_bytes}>{config.metadata_budget_bytes}')
         report.duration_seconds = time.monotonic() - started
         report.active_cleanup_runs_per_second = report.deleted / max(report.duration_seconds, 0.001)
         previous = next(

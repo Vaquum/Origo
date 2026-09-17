@@ -41,7 +41,6 @@ ROOT = Path(__file__).resolve().parents[2]
 ARCHIVES = ROOT / 'tests/fixtures/binance/spot/daily/trades/revisioned'
 PARTITIONS = StaticPartitionsDefinition(['2017-08-17', '2020-01-01'])
 POLICY = OperationalMetadataMaintenanceConfig(
-    metadata_budget_bytes=600 * 1024**3,
     projection_success_minutes=30 * 24 * 60,
     projection_failure_hours=90 * 24,
     source_archive_after_hours=90 * 24,
@@ -373,7 +372,6 @@ def test_live_revalidation_and_backup_gate(
     path = tmp_path / 'receipt.json'
     path.write_text(receipt.model_dump_json())
     apply = OperationalMetadataMaintenanceConfig(
-        metadata_budget_bytes=POLICY.metadata_budget_bytes,
         dry_run=False,
         backup_receipt=str(path),
         approved_manifest_sha256=journal.manifest_sha256,
@@ -442,10 +440,7 @@ def test_maintenance_job_schedule_and_deploy() -> None:
         for service in ('dagit', 'dagster'):
             environment = compose['services'][service]['environment']
             assert 'ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}' in environment
-            assert any(
-                value.startswith('ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES=')
-                for value in environment
-            )
+            assert not any(value.startswith('ORIGO_OPERATIONAL_METADATA') for value in environment)
     config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
     assert config['run_storage']['class'] == 'OrigoSqliteRunStorage'
     assert config['event_log_storage']['class'] == 'OrigoSqliteEventLogStorage'
@@ -740,9 +735,7 @@ def test_clickhouse_catch_up_preserves_recent_and_source_data(
         'SELECT event_time,CurrentMetric_Query FROM system.metric_log_286 WHERE event_time>=now()-INTERVAL 14 DAY'
     )
     assert recent
-    apply = OperationalMetadataMaintenanceConfig(
-        dry_run=False, metadata_budget_bytes=POLICY.metadata_budget_bytes
-    )
+    apply = OperationalMetadataMaintenanceConfig(dry_run=False)
     inventory = maintain_diagnostics(client, apply, time.monotonic() + 30)
     assert inventory.scheduled_action.startswith('drop_expired_part:metric_log_286:')
     assert (
@@ -1004,7 +997,7 @@ def assert_tiny_fixture_exceeds_ratio(outcome: object) -> None:
     assert outcome.violations[0].startswith('metadata_business_fraction:')
 
 
-def test_metadata_budget_and_catch_up_progress(
+def test_health_outcome_and_catch_up_progress(
     metadata_instance: DagsterInstance,
     diagnostic_server: tuple[str, object, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1013,8 +1006,8 @@ def test_metadata_budget_and_catch_up_progress(
 
     _diagnostic_environment(diagnostic_server, monkeypatch)
     run_id = execute_archive(metadata_instance)
-    outcome = maintain(metadata_instance, POLICY.model_copy(update={'metadata_budget_bytes': 1}))
-    assert any(value.startswith('metadata_budget:') for value in outcome.violations)
+    outcome = maintain(metadata_instance, POLICY)
+    assert not any(value.startswith('metadata_budget') for value in outcome.violations)
     assert outcome.report.allocated_bytes > 1 and outcome.report.deleted == 0
     assert outcome.inventory_complete and outcome.retained_floor_bytes > 1
     assert outcome.last_success_at == 0
@@ -1084,15 +1077,10 @@ def test_maintenance_logs_and_latency_checks(
         == 'latest_failure_or_verdict'
     )
 
+    # A later failed run of the same job makes the earlier one reclaimable.
     failed = maintain_operational_metadata_job.execute_in_process(
         instance=metadata_instance,
-        run_config={
-            'ops': {
-                'maintain_operational_metadata': {
-                    'config': POLICY.model_copy(update={'metadata_budget_bytes': 1}).model_dump()
-                }
-            }
-        },
+        run_config={'ops': {'maintain_operational_metadata': {'config': POLICY.model_dump()}}},
         raise_on_error=False,
     )
     assert not failed.success
@@ -1103,7 +1091,8 @@ def test_maintenance_logs_and_latency_checks(
     ]
     assert len(checks) == 1 and not checks[0].passed
     logs = metadata_instance.get_records_for_run(failed.run_id).records
-    assert any('metadata_budget:' in row.event_log_entry.message for row in logs)
+    assert any('metadata_business_fraction:' in row.event_log_entry.message for row in logs)
+    assert not any('metadata_budget' in row.event_log_entry.message for row in logs)
     from dagster import AssetCheckKey
 
     key = AssetCheckKey(AssetKey('maintain_operational_metadata'), 'operational_metadata_health')

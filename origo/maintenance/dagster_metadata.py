@@ -44,9 +44,6 @@ def deployed_config() -> OperationalMetadataMaintenanceConfig:
         raise ValueError('ORIGO_METADATA_DRY_RUN must be true or false.')
     return OperationalMetadataMaintenanceConfig(
         dry_run=mode == 'true',
-        metadata_budget_bytes=int(
-            os.environ.get('ORIGO_OPERATIONAL_METADATA_BUDGET_BYTES', str(13 * 1024**3))
-        ),
         max_runtime_seconds=int(os.environ.get('ORIGO_METADATA_MAX_RUNTIME_SECONDS', '600')),
     )
 

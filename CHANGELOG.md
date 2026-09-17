@@ -1,3 +1,7 @@
+# v3.9.6
+
+- Publication currency and triggering follow the canonical source state: renderers that declare provisional components pin the partial-day rows present at render time, and minute-cadence provisional refreshes neither invalidate a render nor request another publication. Remove the operational metadata byte budget and its deployment variable; the health check keeps the business-data ratio.
+
 # v3.9.5
 
 - Remove the one-time legacy parity comparison from the source framework: reconciliation re-checks retained content under the partition lock, repair shares the maintenance fence with builders, publication readiness is component evidence plus open partition failures, and open failures with retired parity codes are closed on reconciliation. Report a rotated diagnostic table's oversized lagging partition as pending until its expected expiry, separate free-space shortfalls from capacity limits, store only Information and above in `text_log`, and disable processor profile logging.

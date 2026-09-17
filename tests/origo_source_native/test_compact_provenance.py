@@ -48,7 +48,7 @@ def test_source_and_mixed_runs_are_never_retired(metadata_instance: DagsterInsta
     )
     run_id = _source(metadata_instance)
     layout, journal, candidate = planned(metadata_instance, run_id)
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
     assert (
         retention.protection(
@@ -184,7 +184,7 @@ def test_projection_retirement_preserves_current_state(
     key = AssetKey('metadata_proof_archive')
     before = metadata_instance.fetch_materializations(key, limit=1).records
     state = metadata_instance.get_status_by_partition(key, ['2017-08-17'], PARTITIONS)
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     future = time.time() + 2 * 3600
     monkeypatch.setattr(
         retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
@@ -219,7 +219,7 @@ def test_projection_unlink_waits_for_existing_reader(
     layout, journal, candidate = planned(instance, run_id)
     before = instance.get_records_for_run(run_id).records
     facts = instance.fetch_materializations(AssetKey('metadata_proof_archive'), limit=1)
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3, lock_wait_seconds=.1)
+    policy = OperationalMetadataMaintenanceConfig(lock_wait_seconds=.1)
     future = time.time() + 2 * 3600
     monkeypatch.setattr(retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic))
     journal_path = layout.runs.parent / 'reader-retirement.json'
@@ -255,7 +255,7 @@ def test_shared_compaction_releases_physical_space(
     monkeypatch.setattr(
         retention, 'time', SimpleNamespace(time=lambda: future, monotonic=time.monotonic)
     )
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     for run_id in ids:
         _, journal, candidate = planned(metadata_instance, run_id)
         retention.reclaim(
@@ -812,7 +812,7 @@ def test_failure_resolution_checks_matching_history_beyond_recent_runs(
     instance = metadata_instance
     failed = execute_archive(instance, tags={'proof_fail': 'true'})
     layout = Layout.from_instance(instance)
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     record = instance.get_run_records(RunsFilter(run_ids=[failed]), limit=1)[0]
     future = time.time() + 2 * 86400
     # A newer execution of another partition does not resolve this failure.
@@ -878,7 +878,7 @@ def test_projection_shutdown_grace_tracks_terminal_and_late_activity(
     record = metadata_instance.get_run_records(RunsFilter(run_ids=[run_id]), limit=1)[0]
     assert record.end_time is not None
     ended = record.end_time
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     assert policy.projection_success_minutes == 1
     assert policy.projection_failure_hours == 24
     assert retention.protection(
@@ -908,7 +908,7 @@ def test_resolved_failure_stays_resolved_after_success_history_expires(
         metadata_instance,
         Layout.from_instance(metadata_instance),
         record,
-        OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3),
+        OperationalMetadataMaintenanceConfig(),
         time.time() + 2 * 86400,
         time.monotonic() + 10,
     ) == ''
@@ -940,7 +940,7 @@ def test_failed_projection_requires_later_materializations_for_every_plan(
     succeeded = execute_archive(metadata_instance)
     metadata_instance.delete_run(succeeded)
     record = metadata_instance.get_run_records(RunsFilter(run_ids=[failed.run_id]), limit=1)[0]
-    policy = OperationalMetadataMaintenanceConfig(metadata_budget_bytes=1024**3)
+    policy = OperationalMetadataMaintenanceConfig()
     layout = Layout.from_instance(metadata_instance)
     future = time.time() + 2 * 86400
     assert retention.protection(

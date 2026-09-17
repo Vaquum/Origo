@@ -113,16 +113,17 @@ def test_spot_consumers_pin_one_state_token_without_blocking_database_activation
         manifest = json.loads(before)
         (target / 'versions' / manifest['version'] / manifest['files'][0]['path']).unlink()
         original = store.snapshot
-        advanced = False
+        reads = 0
 
         def advance_before_commit(*, canonical_only: bool = False) -> Snapshot:
-            nonlocal advanced
-            if not advanced:
-                advanced = True
-                return original(canonical_only=canonical_only)
-            runtime.rollback(
-                record, operator='test', reason='Real-build software rollback during render'
-            )
+            nonlocal reads
+            reads += 1
+            # Publication reads the canonical currency, then pins; the third read is the
+            # renderer's pre-commit recheck, where a canonical change must be observed.
+            if reads >= 3:
+                runtime.rollback(
+                    record, operator='test', reason='Real-build software rollback during render'
+                )
             return original(canonical_only=canonical_only)
 
         monkeypatch.setattr(store, 'snapshot', advance_before_commit)

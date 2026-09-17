@@ -18,7 +18,6 @@ class OperationalMetadataMaintenanceConfig(Config):
     max_runs_per_batch: int = Field(default=500, ge=1, le=500)
     max_runtime_seconds: int = Field(default=60, ge=10, le=3600)
     lock_wait_seconds: float = Field(default=1.0, ge=0, le=5)
-    metadata_budget_bytes: int = Field(gt=0)
     backup_receipt: str = ''
     approved_manifest_sha256: str = ''
     diagnostic_max_partition_bytes: int = Field(default=4 * 1024**3, gt=0)

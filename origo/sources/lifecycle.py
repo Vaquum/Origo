@@ -400,13 +400,21 @@ class SourceRuntime:
             with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=True):
                 from .publication import publication_current
 
-                snapshot = self.store.snapshot(canonical_only=consumer.canonical_only)
+                # Publication currency is the canonical state. A renderer that declares
+                # provisional components pins the partial-day rows present at render time;
+                # their minute-cadence refreshes neither trigger nor invalidate a publication.
+                current = self.store.snapshot(canonical_only=True)
                 if not publication_current(
-                    self.spec, consumer.key, snapshot.token, root=Path(destination).parent.parent
+                    self.spec, consumer.key, current.token, root=Path(destination).parent.parent
                 ):
-                    consumer.publish(self.store, snapshot, destination)
+                    pinned = (
+                        current
+                        if consumer.canonical_only
+                        else self.store.snapshot(canonical_only=False)
+                    )
+                    consumer.publish(self.store, pinned, destination)
                 self.failures.recover(operation='consumer', consumer=consumer.key)
-                return snapshot
+                return current
         except Exception as error:
             self.failures.record(
                 operation='consumer',

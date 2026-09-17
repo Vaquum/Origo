@@ -1,3 +1,7 @@
+# v3.11.0
+
+- Delete the legacy spot pipeline: the daily ingest, bar projections, latest stack, table setup, mirror and bar-store assets, their jobs, schedules, tests and helpers are removed, and the bar and export formulas they carried live in the spot profile. The revisioned spot source serves the legacy table names as views over its components (canonical rows under the base names, provisional rows under the `_latest` names), retires the ingestion ledgers, watermarks and per-interval cut tables together with the inert parity table at setup, and the briefing publications read its current views. The mount consumer stages a render beside the mirror and activates it only after the canonical check, so a discarded render leaves the public files untouched.
+
 # v3.10.0
 
 - Route the spot public identities to the revisioned source: the `mount` consumer owns the Parquet mirror and the Arrow bar store and refreshes only the months whose pinned state changed, the `huggingface` consumer uploads the twelve public datasets from the canonical state, the spot source is LIVE, and the legacy mirror, bar-store and Hugging Face publisher jobs, schedule and sensors are removed. Consumers that pin provisional rows republish as those rows change; canonical-only consumers follow the canonical state.

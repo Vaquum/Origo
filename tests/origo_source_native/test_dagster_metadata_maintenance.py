@@ -182,7 +182,7 @@ def test_instigation_queries_probe_repository_by_run_id(
     name = (
         'depth_snapshot_store_source_sensor'
         if tag_key == 'dagster/sensor_name'
-        else 'daily_binance_spot_pipeline_schedule'
+        else 'daily_binance_futures_pipeline_schedule'
     )
     for tags in (
         {tag_key: name},

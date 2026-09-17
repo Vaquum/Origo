@@ -36,7 +36,7 @@ def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     assert 'depth_snapshot_store_source_sensor' in names
     assert (
         definitions.defs.get_repository_def()
-        .get_schedule_def('binance_spot_latest_1m_schedule')
+        .get_schedule_def('binance_spot_trades_provisional_schedule')
         .default_status
         == DefaultScheduleStatus.RUNNING
     )

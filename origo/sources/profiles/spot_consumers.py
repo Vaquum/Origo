@@ -8,71 +8,46 @@ Hugging Face datasets. Both render from ClickHouse views pinned to one snapshot.
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
+import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 from uuid import uuid4
 
 import polars as pl
 from huggingface_hub import HfApi
 
-from origo.assets.build_bar_store_arrow import (
+from origo.query.binance_spot_kline_rollups import dollar_month, time_month
+from origo.utils.arrow_store import (
     LATEST_NAME,
+    StagedSeries,
+    activate_series,
     build_series_frame,
+    discard_series,
     parquet_source_root,
-    publish_series,
+    series_source_files,
     series_store_dir,
+    stage_series,
 )
-from origo.assets.publish_binance_spot_klines_to_mount import (
+
+from ..contracts import ConsumerSpec, Snapshot, SnapshotReader, StateRecord
+from ..hashing import state_token
+from ..storage import SourceStore
+from .formulas import huggingface_dollar as dollar_snapshot
+from .formulas import huggingface_time as time_snapshot
+from .formulas.spot_series import (
     EXPORT_START_MONTH,
     EXPORT_START_YEAR,
     SPECS,
     MountKlineSpec,
     month_path,
 )
-from origo.query.binance_spot_kline_rollups import dollar_month, time_month
-
-from ..contracts import ConsumerSpec, Snapshot, SnapshotReader, StateRecord
-from ..hashing import state_token
-from ..storage import SourceStore
 
 EXPORT_START_DATE = f'{EXPORT_START_YEAR:04d}-{EXPORT_START_MONTH:02d}-01'
-# The retired publishers' query, dataset-card and credential helpers, until they move here.
-time_snapshot = importlib.import_module(
-    'origo.utils.publish_binance_spot_kline_snapshot_to_huggingface'
-)
-dollar_snapshot = importlib.import_module(
-    'origo.utils.publish_binance_spot_dollar_kline_snapshot_to_huggingface'
-)
-
-
-class _TimeExport(Protocol):
-    def __call__(
-        self,
-        *,
-        kline_size_seconds: int,
-        start_date_limit: str,
-        end_date_limit: str,
-        table_name: str,
-        database_name: str,
-    ) -> pl.DataFrame: ...
-
-
-class _DollarExport(Protocol):
-    def __call__(
-        self,
-        *,
-        dollar_size: float,
-        start_date_limit: str,
-        end_date_limit: str,
-        table_name: str,
-        database_name: str,
-    ) -> pl.DataFrame: ...
 
 
 # The public Hugging Face datasets, exactly as the retired per-series publishers named them.
@@ -199,15 +174,23 @@ def _previous_manifest(root: Path) -> dict[str, object]:
     return cast(dict[str, object], manifest)
 
 
-def _commit_manifest(reader: SourceStore, root: Path, manifest: dict[str, object]) -> None:
-    if reader.snapshot(canonical_only=True).token != manifest['state_token']:
+def _require_canonical(reader: SourceStore, token: object) -> None:
+    if reader.snapshot(canonical_only=True).token != token:
         raise RuntimeError(
             'Canonical state changed while rendering; staged output remains unpublished.'
         )
+
+
+def _write_manifest(root: Path, manifest: dict[str, object]) -> None:
     root.mkdir(parents=True, exist_ok=True)
     _write_atomic(
         root / 'latest.json', (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     )
+
+
+def _commit_manifest(reader: SourceStore, root: Path, manifest: dict[str, object]) -> None:
+    _require_canonical(reader, manifest['state_token'])
+    _write_manifest(root, manifest)
 
 
 @contextmanager
@@ -288,6 +271,10 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
 
     Month files and Arrow versions live at the public roots (``LOCAL_PARQUET_DIR`` and
     ``LOCAL_ARROW_DIR``); the manifest under ``destination`` records which state they hold.
+    Months render into a staging directory beside the mirror and Arrow versions are written
+    without flipping ``latest``; only a render whose canonical state is unchanged moves the
+    months into place and activates the versions, so a discarded render leaves the public
+    roots exactly as the manifest describes them.
     """
     store, root = _root(destination, reader, 'mount')
     if not snapshot.records:
@@ -299,53 +286,89 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
         for entry in cast(list[object], previous.get('files') or [])
     }
     tokens = month_tokens(store.spec.key, snapshot)
+    state = store.canonical_token(snapshot)
+    parquet_root = parquet_source_root()
+    staging = parquet_root / f'.staging-{uuid4().hex}'
     files: list[dict[str, object]] = []
+    staged_months: dict[Path, Path] = {}
     rebuilt: set[str] = set()
-    with _pinned(store, snapshot) as database:
-        for month, token in tokens.items():
-            year, number = int(month[:4]), int(month[5:7])
-            for series in SPECS:
-                target = month_path(series.sub_path, year, number)
-                entry = previous_files.get(str(target))
-                if (
-                    entry is not None
-                    and previous_months.get(month) == token
-                    and target.is_file()
-                    and entry.get('sha256') == _sha256(target)
-                ):
+    staged_series: list[StagedSeries] = []
+    try:
+        with _pinned(store, snapshot) as database:
+            for month, token in tokens.items():
+                year, number = int(month[:4]), int(month[5:7])
+                for series in SPECS:
+                    target = month_path(series.sub_path, year, number)
+                    entry = previous_files.get(str(target))
+                    if (
+                        entry is not None
+                        and previous_months.get(month) == token
+                        and target.is_file()
+                        and entry.get('sha256') == _sha256(target)
+                    ):
+                        files.append(entry)
+                        continue
+                    frame = _month_frame(series, year, number, database)
+                    if frame.height == 0:
+                        continue
+                    pending = staging / target.relative_to(parquet_root)
+                    _write_parquet(frame, pending)
+                    staged_months[target] = pending
+                    files.append(
+                        {
+                            'path': str(target),
+                            'row_count': frame.height,
+                            'sha256': _sha256(pending),
+                            'series': series.name,
+                            'month': month,
+                        }
+                    )
+                    rebuilt.add(series.name)
+        for series in SPECS:
+            latest = series_store_dir(series.name) / LATEST_NAME
+            entry = next(
+                (
+                    item
+                    for item in previous_files.values()
+                    if item.get('series') == series.name and item.get('kind') == 'arrow'
+                ),
+                None,
+            )
+            if series.name not in rebuilt and entry is not None and latest.is_symlink():
+                current = latest.resolve()
+                if str(current) == entry['path'] and current.is_file():
                     files.append(entry)
                     continue
-                frame = _month_frame(series, year, number, database)
-                if frame.height == 0:
-                    continue
-                _write_parquet(frame, target)
-                files.append(_entry(target, frame.height, series=series.name, month=month))
-                rebuilt.add(series.name)
-    parquet_root = parquet_source_root()
-    for series in SPECS:
-        latest = series_store_dir(series.name) / LATEST_NAME
-        entry = next(
-            (
-                item
-                for item in previous_files.values()
-                if item.get('series') == series.name and item.get('kind') == 'arrow'
-            ),
-            None,
-        )
-        if series.name not in rebuilt and entry is not None and latest.is_symlink():
-            current = latest.resolve()
-            if str(current) == entry['path'] and current.is_file():
-                files.append(entry)
-                continue
-        build = build_series_frame(series, parquet_root)
-        if build.df.height == 0:
-            continue
-        publish_series(series.name, build)
-        current = latest.resolve()
-        files.append(_entry(current, build.df.height, series=series.name, kind='arrow'))
+            months = {path: path for path in series_source_files(series, parquet_root)}
+            months.update(
+                (target, pending)
+                for target, pending in staged_months.items()
+                if target.is_relative_to(parquet_root / series.sub_path)
+            )
+            build = build_series_frame(
+                series, parquet_root, files=[months[key] for key in sorted(months)]
+            )
+            staged = stage_series(series.name, build)
+            if staged is not None:
+                staged_series.append(staged)
+        _require_canonical(store, state)
+        for target, pending in staged_months.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(pending, target)
+        for staged in staged_series:
+            if activate_series(staged).status == 'skipped_not_newer':
+                discard_series(staged)
+            current = (series_store_dir(staged.series) / LATEST_NAME).resolve()
+            files.append(_entry(current, staged.row_count, series=staged.series, kind='arrow'))
+    except BaseException:
+        for staged in staged_series:
+            discard_series(staged)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     manifest: dict[str, object] = {
         'source_key': store.spec.key,
-        'state_token': store.canonical_token(snapshot),
+        'state_token': state,
         'pinned_token': snapshot.token,
         'active_through': max(record.partition.end for record in snapshot.records).isoformat(),
         'kind': 'mount',
@@ -353,7 +376,7 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
         'files': files,
         'version': snapshot.token,
     }
-    _commit_manifest(store, root, manifest)
+    _write_manifest(root, manifest)
 
 
 def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
@@ -366,7 +389,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
     end_limit = end.strftime('%Y-%m-%d %H:%M:%S')
     build = root / 'versions' / (snapshot.token + '-' + uuid4().hex)
     build.mkdir(parents=True)
-    api = HfApi(token=cast(Callable[[], str], time_snapshot._get_huggingface_token)())
+    api = HfApi(token=time_snapshot.get_huggingface_token())
     files: list[dict[str, object]] = []
     uploads: list[dict[str, object]] = []
     with _pinned(store, snapshot) as database:
@@ -375,10 +398,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                 series.name
             ]
             if series.family == 'time':
-                export_time = cast(
-                    _TimeExport, time_snapshot._get_binance_spot_klines_from_1m_projection
-                )
-                frame = export_time(
+                frame = time_snapshot.get_binance_spot_klines_from_1m_projection(
                     kline_size_seconds=series.size * 60,
                     start_date_limit=EXPORT_START_DATE,
                     end_date_limit=end_limit,
@@ -386,8 +406,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                     database_name=database,
                 )
             else:
-                export_dollar = cast(_DollarExport, dollar_snapshot._get_binance_spot_dollar_klines)
-                frame = export_dollar(
+                frame = dollar_snapshot.get_binance_spot_dollar_klines(
                     dollar_size=float(series.size * 1000000),
                     start_date_limit=EXPORT_START_DATE,
                     end_date_limit=end_limit,
@@ -404,7 +423,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
             digest = _sha256(parquet)
             label = series.name.split('_', 1)[1]
             if series.family == 'time':
-                card = cast(Callable[..., str], time_snapshot._build_dataset_card)(
+                card = time_snapshot.build_dataset_card(
                     export_end_date=export_end_date,
                     row_count=frame.height,
                     file_name=file_name,
@@ -412,7 +431,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                     resolution_label=resolution_label,
                 )
             else:
-                card = cast(Callable[..., str], dollar_snapshot._build_dataset_card)(
+                card = dollar_snapshot.build_dataset_card(
                     export_end_date=export_end_date,
                     row_count=frame.height,
                     file_name=file_name,
@@ -422,7 +441,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                 )
             (folder / 'README.md').write_text(card, encoding='utf-8')
             (folder / 'latest.json').write_text(
-                cast(Callable[..., str], time_snapshot._build_snapshot_metadata)(
+                time_snapshot.build_snapshot_metadata(
                     export_end_date=export_end_date,
                     file_name=file_name,
                     row_count=frame.height,
@@ -430,7 +449,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                 ),
                 encoding='utf-8',
             )
-            repo_id = cast(Callable[..., str], time_snapshot._get_huggingface_dataset_repo_id)(
+            repo_id = time_snapshot.get_huggingface_dataset_repo_id(
                 repo_id_env=repo_id_env, default_repo_id=default_repo_id
             )
             api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)

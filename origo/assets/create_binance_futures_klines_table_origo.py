@@ -1,8 +1,9 @@
 from clickhouse_driver import Client as ClickhouseClient
 from dagster import AssetExecutionContext, asset
 
-from .create_binance_trades_table_origo import _database_exists, _table_exists
 from .create_origo_database import (
+    database_exists,
+    table_exists,
     ClickHouseSettings,
     _get_clickhouse_settings,
     _make_clickhouse_client,
@@ -55,12 +56,12 @@ def create_binance_futures_klines_table_origo(
     client = _make_clickhouse_client(settings)
 
     try:
-        if not _database_exists(client, settings.database):
+        if not database_exists(client, settings.database):
             raise RuntimeError(
                 f'Database {settings.database} does not exist. Run create_origo_database first.'
             )
 
-        table_existed = _table_exists(client, settings, KLINES_TABLE_NAME)
+        table_existed = table_exists(client, settings, KLINES_TABLE_NAME)
         _create_klines_table(client, settings)
 
         context.log.info(f'Ensured table {settings.database}.{KLINES_TABLE_NAME} exists.')

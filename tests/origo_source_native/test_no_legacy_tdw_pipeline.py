@@ -35,11 +35,37 @@ REMOVED_ASSET_MODULES = (
     'publish_binance_spot_60M_dollar_klines_to_huggingface',
     'publish_binance_spot_120M_dollar_klines_to_huggingface',
     'publish_binance_spot_240M_dollar_klines_to_huggingface',
+    'daily_trades_to_origo',
+    'create_binance_trades_table_origo',
+    'create_binance_spot_klines_table_origo',
+    'create_binance_spot_dollar_klines_table_origo',
+    'create_binance_spot_volume_klines_table_origo',
+    'create_binance_spot_tick_klines_table_origo',
+    'create_binance_spot_dollar_imbalance_klines_table_origo',
+    'create_binance_spot_latest_tables_origo',
+    'refresh_binance_spot_klines_origo',
+    'refresh_binance_spot_dollar_klines_origo',
+    'refresh_binance_spot_volume_klines_origo',
+    'refresh_binance_spot_tick_klines_origo',
+    'refresh_binance_spot_dollar_imbalance_klines_origo',
+    'refresh_aligned_1m_exchange_from_binance_spot_origo',
+    'sync_binance_spot_trades_latest_origo',
+    'refresh_binance_spot_klines_latest_origo',
+    'refresh_binance_spot_dollar_klines_latest_origo',
+    'refresh_binance_spot_latest_cuts_origo',
+    'cleanup_binance_spot_latest_origo',
+    'publish_binance_spot_klines_to_mount',
+    'build_bar_store_arrow',
 )
 
 REMOVED_UTIL_MODULES = (
     'asset_insert_to_tdw',
     'get_tdw_monthly_table_config',
+    'binance_spot_latest',
+    'publish_binance_spot_kline_snapshot_to_huggingface',
+    'publish_binance_spot_dollar_kline_snapshot_to_huggingface',
+    'binance_file_to_polars',
+    'check_if_has_header',
 )
 
 LEGACY_SUMMARY_NAMES = (

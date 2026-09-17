@@ -1,57 +1,54 @@
+"""Relocated verbatim from origo/utils/publish_binance_spot_dollar_kline_snapshot_to_huggingface.py; behaviour unchanged."""
+
 import hashlib
 import json
 import os
 import re
-import tempfile
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
-
 import pyarrow as pa
 import polars as pl
-from dagster import AssetExecutionContext
-from huggingface_hub import HfApi
+from origo.sources.profiles.formulas.spot_dollar_klines import DOLLAR_KLINE_SIZE
+from origo.assets.create_origo_database import ClickHouseSettings, get_clickhouse_settings
 
-from origo.assets.create_origo_database import (
-    ClickHouseSettings,
-    get_clickhouse_settings,
-)
-from origo.assets.create_binance_spot_dollar_klines_table_origo import (
-    DOLLAR_KLINES_TABLE_NAME,
-)
-from origo.assets.refresh_binance_spot_dollar_klines_origo import (
-    DOLLAR_KLINE_SIZE,
-)
+DOLLAR_KLINES_TABLE_NAME = 'binance_spot_dollar_klines'
 
-EXPORT_START_DATE = "2020-01-01 00:00:00"
+EXPORT_START_DATE = '2020-01-01 00:00:00'
+
+
 DEFAULT_CLICKHOUSE_HTTP_PORT = 8123
+
+
 _SUPPORTED_DATETIME_FORMATS = (
-    "%Y-%m-%d",
-    "%Y-%m-%d %H:%M:%S",
-    "%Y-%m-%dT%H:%M:%S",
+    '%Y-%m-%d',
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%dT%H:%M:%S',
 )
+
+
 DOLLAR_KLINE_EXPORT_COLUMNS = [
-    "start_datetime",
-    "end_datetime",
-    "dollar_bar_id",
-    "open",
-    "high",
-    "low",
-    "close",
-    "mean",
-    "std",
-    "volume",
-    "maker_ratio",
-    "no_of_trades",
-    "open_liquidity",
-    "high_liquidity",
-    "low_liquidity",
-    "close_liquidity",
-    "liquidity_sum",
-    "maker_volume",
-    "maker_liquidity",
+    'start_datetime',
+    'end_datetime',
+    'dollar_bar_id',
+    'open',
+    'high',
+    'low',
+    'close',
+    'mean',
+    'std',
+    'volume',
+    'maker_ratio',
+    'no_of_trades',
+    'open_liquidity',
+    'high_liquidity',
+    'low_liquidity',
+    'close_liquidity',
+    'liquidity_sum',
+    'maker_volume',
+    'maker_liquidity',
 ]
 
 
@@ -68,17 +65,17 @@ class _ClickHouseArrowClientProtocol(Protocol):
 
 
 def _get_clickhouse_http_port() -> int:
-    value = os.environ.get("CLICKHOUSE_HTTP_PORT", str(DEFAULT_CLICKHOUSE_HTTP_PORT))
+    value = os.environ.get('CLICKHOUSE_HTTP_PORT', str(DEFAULT_CLICKHOUSE_HTTP_PORT))
     try:
         return int(value)
     except ValueError as exc:
-        raise RuntimeError("CLICKHOUSE_HTTP_PORT environment variable must be an integer.") from exc
+        raise RuntimeError('CLICKHOUSE_HTTP_PORT environment variable must be an integer.') from exc
 
 
 def _make_clickhouse_arrow_client(
     settings: ClickHouseSettings,
 ) -> _ClickHouseArrowClientProtocol:
-    client_factory = getattr(import_module("clickhouse_connect"), "get_client")
+    client_factory = getattr(import_module('clickhouse_connect'), 'get_client')
     return cast(
         _ClickHouseArrowClientProtocol,
         client_factory(
@@ -91,17 +88,17 @@ def _make_clickhouse_arrow_client(
     )
 
 
-def _get_huggingface_token() -> str:
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+def get_huggingface_token() -> str:
+    token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGINGFACE_HUB_TOKEN')
     if not token:
         raise RuntimeError(
-            "HF_TOKEN or HUGGINGFACE_HUB_TOKEN must be set before publishing to Hugging Face."
+            'HF_TOKEN or HUGGINGFACE_HUB_TOKEN must be set before publishing to Hugging Face.'
         )
 
     return token
 
 
-def _get_huggingface_dataset_repo_id(
+def get_huggingface_dataset_repo_id(
     *,
     repo_id_env: str | None,
     default_repo_id: str,
@@ -114,20 +111,20 @@ def _get_huggingface_dataset_repo_id(
 
 def _base_bar_count_for_dollar_size(dollar_size: float) -> int:
     if dollar_size <= 0:
-        raise ValueError("dollar_size must be positive.")
+        raise ValueError('dollar_size must be positive.')
 
     base_bar_count = dollar_size / DOLLAR_KLINE_SIZE
     if not base_bar_count.is_integer():
         raise ValueError(
-            f"dollar_size must be an integer multiple of the {DOLLAR_KLINE_SIZE:g} base dollar kline."
+            f'dollar_size must be an integer multiple of the {DOLLAR_KLINE_SIZE:g} base dollar kline.'
         )
 
     return int(base_bar_count)
 
 
 def _validate_clickhouse_identifier(value: str, field_name: str) -> str:
-    if re.fullmatch(r"[A-Za-z0-9_]+", value) is None:
-        raise ValueError(f"Invalid ClickHouse {field_name}: {value}")
+    if re.fullmatch(r'[A-Za-z0-9_]+', value) is None:
+        raise ValueError(f'Invalid ClickHouse {field_name}: {value}')
     return value
 
 
@@ -136,19 +133,19 @@ def _normalize_datetime_literal(value: str, field_name: str) -> str:
     for fmt in _SUPPORTED_DATETIME_FORMATS:
         try:
             parsed = datetime.strptime(value, fmt)
-            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+            return parsed.strftime('%Y-%m-%d %H:%M:%S')
         except ValueError as exc:
             last_error = exc
 
     message = (
-        f"{field_name} must match one of: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, YYYY-MM-DDTHH:MM:SS."
+        f'{field_name} must match one of: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, YYYY-MM-DDTHH:MM:SS.'
     )
     if last_error is None:
         raise ValueError(message)
     raise ValueError(message) from last_error
 
 
-def _get_binance_spot_dollar_klines(
+def get_binance_spot_dollar_klines(
     *,
     dollar_size: float,
     start_date_limit: str,
@@ -157,18 +154,18 @@ def _get_binance_spot_dollar_klines(
     database_name: str,
 ) -> pl.DataFrame:
     base_bar_count = _base_bar_count_for_dollar_size(dollar_size)
-    table_name = _validate_clickhouse_identifier(table_name, "table name")
-    database_name = _validate_clickhouse_identifier(database_name, "database name")
-    start_date_limit = _normalize_datetime_literal(start_date_limit, "start_date_limit")
-    end_date_limit = _normalize_datetime_literal(end_date_limit, "end_date_limit")
+    table_name = _validate_clickhouse_identifier(table_name, 'table name')
+    database_name = _validate_clickhouse_identifier(database_name, 'database name')
+    start_date_limit = _normalize_datetime_literal(start_date_limit, 'start_date_limit')
+    end_date_limit = _normalize_datetime_literal(end_date_limit, 'end_date_limit')
     settings = get_clickhouse_settings()
     client = _make_clickhouse_arrow_client(settings)
 
     try:
         query_parameters: dict[str, int | str] = {
-            "base_bar_count": base_bar_count,
-            "start_dt": start_date_limit,
-            "end_dt": end_date_limit,
+            'base_bar_count': base_bar_count,
+            'start_dt': start_date_limit,
+            'end_dt': end_date_limit,
         }
         arrow_table = client.query_arrow(
             f"""
@@ -241,18 +238,20 @@ def _get_binance_spot_dollar_klines(
     if data.height == 0:
         return data
 
-    return data.with_columns([
-        pl.col("start_datetime").cast(pl.Datetime("ms", time_zone="UTC")),
-        pl.col("end_datetime").cast(pl.Datetime("ms", time_zone="UTC")),
-        pl.col("mean").round(5),
-        pl.col("std").round(6),
-        pl.col("volume").round(9),
-        pl.col("liquidity_sum").round(1),
-        pl.col("maker_liquidity").round(1),
-    ]).sort(["start_datetime", "dollar_bar_id"])
+    return data.with_columns(
+        [
+            pl.col('start_datetime').cast(pl.Datetime('ms', time_zone='UTC')),
+            pl.col('end_datetime').cast(pl.Datetime('ms', time_zone='UTC')),
+            pl.col('mean').round(5),
+            pl.col('std').round(6),
+            pl.col('volume').round(9),
+            pl.col('liquidity_sum').round(1),
+            pl.col('maker_liquidity').round(1),
+        ]
+    ).sort(['start_datetime', 'dollar_bar_id'])
 
 
-def _build_dataset_card(
+def build_dataset_card(
     *,
     export_end_date: str,
     row_count: int,
@@ -282,7 +281,7 @@ Notes:
 """
 
 
-def _build_snapshot_metadata(
+def build_snapshot_metadata(
     export_end_date: str,
     file_name: str,
     row_count: int,
@@ -292,128 +291,14 @@ def _build_snapshot_metadata(
     return (
         json.dumps(
             {
-                "file_name": file_name,
-                "export_start_date": "2020-01-01",
-                "export_end_date": export_end_date,
-                "row_count": row_count,
-                "sha256": file_sha256,
-                "generated_at_utc": generated_at,
+                'file_name': file_name,
+                'export_start_date': '2020-01-01',
+                'export_end_date': export_end_date,
+                'row_count': row_count,
+                'sha256': file_sha256,
+                'generated_at_utc': generated_at,
             },
             indent=2,
         )
-        + "\n"
+        + '\n'
     )
-
-
-def _sha256_for_file(file_path: Path) -> str:
-    digest = hashlib.sha256()
-    with file_path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def publish_binance_spot_dollar_kline_snapshot_to_huggingface(
-    context: AssetExecutionContext,
-    *,
-    dollar_size: float,
-    file_prefix: str,
-    default_repo_id: str,
-    repo_id_env: str | None,
-    size_label: str,
-    resolution_label: str,
-) -> dict[str, object]:
-    partition_date_str = context.asset_partition_key_for_output()
-    export_end_date = partition_date_str
-    export_end_exclusive = (
-        datetime.strptime(export_end_date, "%Y-%m-%d") + timedelta(days=1)
-    ).strftime("%Y-%m-%d 00:00:00")
-    settings = get_clickhouse_settings()
-    database_name = settings.database
-    dataset_repo_id = _get_huggingface_dataset_repo_id(
-        repo_id_env=repo_id_env,
-        default_repo_id=default_repo_id,
-    )
-
-    file_name = f"{file_prefix}{export_end_date.replace('-', '')}.parquet"
-
-    context.log.info(
-        f"Building Binance spot {size_label} dollar klines snapshot through {export_end_date} UTC."
-    )
-    data = _get_binance_spot_dollar_klines(
-        dollar_size=dollar_size,
-        start_date_limit=EXPORT_START_DATE,
-        end_date_limit=export_end_exclusive,
-        table_name=DOLLAR_KLINES_TABLE_NAME,
-        database_name=database_name,
-    )
-
-    if data.height == 0:
-        raise RuntimeError(
-            f"No {size_label} dollar kline rows were returned for export through {export_end_date}."
-        )
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        parquet_path = tmp_path / file_name
-        readme_path = tmp_path / "README.md"
-        metadata_path = tmp_path / "latest.json"
-
-        context.log.info(f"Writing snapshot to {parquet_path}.")
-        data.write_parquet(parquet_path, compression="zstd")
-        file_sha256 = _sha256_for_file(parquet_path)
-
-        readme_path.write_text(
-            _build_dataset_card(
-                export_end_date=export_end_date,
-                row_count=data.height,
-                file_name=file_name,
-                size_label=size_label,
-                resolution_label=resolution_label,
-                database_name=database_name,
-            ),
-            encoding="utf-8",
-        )
-        metadata_path.write_text(
-            _build_snapshot_metadata(
-                export_end_date=export_end_date,
-                file_name=file_name,
-                row_count=data.height,
-                file_sha256=file_sha256,
-            ),
-            encoding="utf-8",
-        )
-
-        api = HfApi(token=_get_huggingface_token())
-        api.create_repo(
-            repo_id=dataset_repo_id,
-            repo_type="dataset",
-            exist_ok=True,
-        )
-
-        commit_message = (
-            f"Add BTCUSDT {size_label} dollar klines snapshot through {export_end_date}"
-        )
-        api.upload_folder(
-            folder_path=str(tmp_path),
-            repo_id=dataset_repo_id,
-            repo_type="dataset",
-            commit_message=commit_message,
-            delete_patterns=[f"{file_prefix}*.parquet"],
-        )
-
-    latest_datetime = data["end_datetime"].max()
-    context.log.info(
-        f"Published {file_name} to {dataset_repo_id} with {data.height} rows."
-    )
-
-    return {
-        "repo_id": dataset_repo_id,
-        "file_name": file_name,
-        "rows_exported": data.height,
-        "latest_datetime": str(latest_datetime),
-        "sha256": file_sha256,
-    }

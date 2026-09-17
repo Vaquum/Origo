@@ -21,7 +21,7 @@ from dagster import DagsterInstance, ExecuteInProcessResult, materialize
 os.environ.setdefault('CLICKHOUSE_PASSWORD', 'import-guard')
 
 import origo.assets.build_depth_snapshot_store_arrow as depth_store
-from origo.assets.build_bar_store_arrow import BarSeriesBuild, series_store_dir
+from origo.utils.arrow_store import BarSeriesBuild, series_store_dir
 from origo.assets.build_depth_snapshot_store_arrow import (
     DEPTH20_SOURCE_JOB_NAME,
     DEPTH200_SOURCE_JOB_NAME,

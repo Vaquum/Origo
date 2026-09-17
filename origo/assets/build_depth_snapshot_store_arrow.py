@@ -24,7 +24,7 @@ from dagster import (
     get_dagster_logger,
 )
 
-from origo.assets.build_bar_store_arrow import BarSeriesBuild, series_store_dir
+from origo.utils.arrow_store import BarSeriesBuild, series_store_dir
 from origo.assets.create_binance_spot_depth20_snapshots_table_origo import (
     ClickHouseClient,
     get_clickhouse_settings,

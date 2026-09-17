@@ -12,8 +12,7 @@ from dagster._core.test_utils import create_run_for_test
 from origo.assets.daily_futures_trades_to_origo import (
     insert_daily_binance_futures_trades_to_origo,
 )
-from origo.assets.daily_trades_to_origo import insert_daily_binance_spot_trades_to_origo
-from origo.definitions import _active_partition_days, refresh_binance_spot_data_source_job
+from origo.definitions import _active_partition_days, refresh_binance_futures_data_source_job
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
@@ -43,8 +42,8 @@ def test_run_monitoring_matches_zombie_guard_contract() -> None:
 
 @pytest.mark.parametrize(
     'daily_asset',
-    [insert_daily_binance_spot_trades_to_origo, insert_daily_binance_futures_trades_to_origo],
-    ids=['spot', 'futures'],
+    [insert_daily_binance_futures_trades_to_origo],
+    ids=['futures'],
 )
 def test_max_runtime_covers_daily_asset_retry_envelope(daily_asset: object) -> None:
     """The cap must clear retry delays plus a per-attempt execution budget.
@@ -87,7 +86,7 @@ def test_active_partition_days_covers_in_progress_and_recent_terminal() -> None:
     the worker exited, so a just-terminated partition may still be written
     by the old worker and stays excluded for the grace period.
     """
-    job_name = refresh_binance_spot_data_source_job.name
+    job_name = refresh_binance_futures_data_source_job.name
     with DagsterInstance.ephemeral() as instance:
         create_run_for_test(
             instance,

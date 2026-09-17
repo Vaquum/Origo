@@ -41,6 +41,20 @@ _NAMES = {
     'binance_spot_dollar_klines_latest': 'dollar_latest',
 }
 _PATTERN = re.compile(r'\b(' + '|'.join(sorted(_NAMES, key=len, reverse=True)) + r')\b')
+# The legacy spot table names, served as views over the components that replaced them;
+# aligned_1m_exchange stays a table because the futures pipeline still writes it.
+SPOT_ALIASES = tuple((name, key) for name, key in _NAMES.items() if name != 'aligned_1m_exchange')
+# Legacy tables without a successor: ingestion ledgers, watermarks and the per-interval cuts.
+SPOT_RETIRED_TABLES = (
+    'binance_daily_spot_trades_ingestion',
+    'binance_spot_trades_latest_ingestion',
+    'binance_spot_latest_watermarks',
+    *(f'binance_spot_{label}_klines_latest' for label in ('15m', '30m', '1h', '2h', '4h')),
+    *(
+        f'binance_spot_{label}_dollar_klines_latest'
+        for label in ('15M', '30M', '60M', '120M', '240M')
+    ),
+)
 
 
 class _ProjectionClient:
@@ -77,8 +91,8 @@ def _raw(context: BuildContext) -> None:
 
 def _daily(module: str) -> Callable[[BuildContext], None]:
     def build(context: BuildContext) -> None:
-        legacy = importlib.import_module(f'origo.assets.{module}')
-        calculate = cast(Callable[[Client, str, str], None], legacy._insert_partition_rows)
+        formulas = importlib.import_module(f'origo.sources.profiles.formulas.{module}')
+        calculate = cast(Callable[[Client, str, str], None], formulas._insert_partition_rows)
         calculate(
             _ProjectionClient(OrderedRawClient(context.client, context.table('raw'))),
             context.database,
@@ -90,8 +104,8 @@ def _daily(module: str) -> Callable[[BuildContext], None]:
 
 def _minute(module: str) -> Callable[[BuildContext], None]:
     def build(context: BuildContext) -> None:
-        legacy = importlib.import_module(f'origo.assets.{module}')
-        calculate = cast(Callable[[Client, str, datetime], None], legacy._insert_minute_rows)
+        formulas = importlib.import_module(f'origo.sources.profiles.formulas.{module}')
+        calculate = cast(Callable[[Client, str, datetime], None], formulas._insert_minute_rows)
         calculate(_ProjectionClient(context.client), context.database, context.partition.start)
 
     return build
@@ -100,8 +114,8 @@ def _minute(module: str) -> Callable[[BuildContext], None]:
 def _imbalance(context: BuildContext) -> None:
     from ..columnar import arrow_client
 
-    legacy = importlib.import_module(
-        'origo.assets.refresh_binance_spot_dollar_imbalance_klines_origo'
+    formulas = importlib.import_module(
+        'origo.sources.profiles.formulas.spot_dollar_imbalance_klines'
     )
     with arrow_client() as client:
         values = client.query_arrow(
@@ -111,7 +125,7 @@ def _imbalance(context: BuildContext) -> None:
             raise RuntimeError('A canonical imbalance component requires non-empty raw input.')
         from ..arrow_types import ArrowTable
 
-        calculate = cast(Callable[[ArrowTable], ArrowTable], legacy._kline_rows)
+        calculate = cast(Callable[[ArrowTable], ArrowTable], formulas._kline_rows)
         bars = calculate(values)
         client.insert_arrow(context.table('imbalance'), bars)
 
@@ -138,28 +152,28 @@ SPOT_COMPONENTS = (
         (Column('datetime', 'DateTime'), *_MEASURES),
         ('datetime',),
         'datetime',
-        _daily('refresh_binance_spot_klines_origo'),
+        _daily('spot_klines'),
     ),
     ComponentSpec(
         'dollar',
         _bar_columns('dollar'),
         ('dollar_bar_id',),
         'start_datetime',
-        _daily('refresh_binance_spot_dollar_klines_origo'),
+        _daily('spot_dollar_klines'),
     ),
     ComponentSpec(
         'volume',
         _bar_columns('volume'),
         ('volume_bar_id',),
         'start_datetime',
-        _daily('refresh_binance_spot_volume_klines_origo'),
+        _daily('spot_volume_klines'),
     ),
     ComponentSpec(
         'tick',
         _bar_columns('tick'),
         ('tick_bar_id',),
         'start_datetime',
-        _daily('refresh_binance_spot_tick_klines_origo'),
+        _daily('spot_tick_klines'),
     ),
     ComponentSpec(
         'imbalance',
@@ -177,7 +191,7 @@ SPOT_COMPONENTS = (
         ),
         ('dataset_source', 'datetime'),
         'datetime',
-        _daily('refresh_aligned_1m_exchange_from_binance_spot_origo'),
+        _daily('spot_aligned'),
     ),
     ComponentSpec(
         'raw_latest',
@@ -193,7 +207,7 @@ SPOT_COMPONENTS = (
         (Column('datetime', 'DateTime'), *_MEASURES),
         ('datetime',),
         'datetime',
-        _minute('refresh_binance_spot_klines_latest_origo'),
+        _minute('spot_klines_latest'),
         provisional=True,
         current_target='time',
     ),
@@ -202,7 +216,7 @@ SPOT_COMPONENTS = (
         _bar_columns('dollar'),
         ('dollar_bar_id',),
         'start_datetime',
-        _minute('refresh_binance_spot_dollar_klines_latest_origo'),
+        _minute('spot_dollar_klines_latest'),
         provisional=True,
         current_target='dollar',
     ),

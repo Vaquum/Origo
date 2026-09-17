@@ -1,7 +1,10 @@
+import os
+import signal
+
 from dagster import Config, DagsterInstance, OpExecutionContext, in_process_executor, op
 from pydantic import Field
 
-from origo.orchestration.recovery import recover_queue
+from origo.orchestration.recovery import Deadline, recover_queue
 
 from .backfill import source_job
 from .prepare import configure_source_pool, prepare_source
@@ -37,13 +40,18 @@ def prepare_revisioned_sources_job() -> None:
 
 
 def main() -> None:
+    Deadline.arm(
+        int(os.environ.get('ORIGO_STARTUP_DEADLINE_SECONDS', '1800')), owner='Startup', phase='pools'
+    )
     with DagsterInstance.get() as instance:
         for spec in SOURCE_REGISTRY:
             configure_source_pool(spec, instance)
         # Cancelling a redundant queued run initializes that run's event shard. Inside a
         # captured op the initialization log re-enters event storage under its lock and
         # deadlocks startup, so recovery runs here, before any DagsterLogManager exists.
+        Deadline.enter('queue')
         counts = recover_queue(instance)
+        Deadline.enter('prepare')
         result = prepare_revisioned_sources_job.execute_in_process(
             instance=instance,
             run_config={
@@ -51,6 +59,7 @@ def main() -> None:
             },
             raise_on_error=False,
         )
+        signal.alarm(0)
         if not result.success:
             raise SystemExit(1)
 

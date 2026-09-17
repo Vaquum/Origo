@@ -139,12 +139,26 @@ def recover_orchestration_job() -> None:
     recover_orchestration()
 
 
-class _Deadline:
+class Deadline:
+    """SIGALRM guard that names the phase in progress when a startup or recovery pass stalls."""
+
+    owner = 'Recovery'
     phase = 'startup'
+
+    @classmethod
+    def arm(cls, seconds: int, *, owner: str, phase: str) -> None:
+        cls.owner = owner
+        cls.phase = phase
+        signal.signal(signal.SIGALRM, cls.expired)
+        signal.alarm(seconds)
+
+    @classmethod
+    def enter(cls, phase: str) -> None:
+        cls.phase = phase
 
     @staticmethod
     def expired(signum: int, frame: FrameType | None) -> None:
-        raise SystemExit(f'Recovery exceeded its deadline during phase {_Deadline.phase}.')
+        raise SystemExit(f'{Deadline.owner} exceeded its deadline during phase {Deadline.phase}.')
 
 
 def main() -> None:
@@ -153,14 +167,14 @@ def main() -> None:
     parser.add_argument('--legacy-before', type=float, default=0)
     parser.add_argument('--deadline-seconds', type=int, default=900)
     args = parser.parse_args()
-    signal.signal(signal.SIGALRM, _Deadline.expired)
-    signal.alarm(args.deadline_seconds)
+    Deadline.arm(args.deadline_seconds, owner='Recovery', phase='retired_workers')
     with DagsterInstance.get() as instance:
-        _Deadline.phase = 'retired_workers'
         workers = recover_retired_workers(instance, set(args.retired_worker), args.legacy_before)
-        _Deadline.phase = 'queue'
+        # The queue pass waits for the admission lock; deployment starts this command only
+        # after the daemon process exists, so bootstrap's own queue pass has finished.
+        Deadline.enter('queue')
         queue = recover_queue(instance)
-        _Deadline.phase = 'record'
+        Deadline.enter('record')
         result = recover_orchestration_job.execute_in_process(
             instance=instance,
             run_config={

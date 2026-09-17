@@ -368,7 +368,12 @@ def test_startup_recovery_completes_outside_captured_logging(origo_test_env, tmp
         ),
     )
     with instance_for_test(temp_dir=str(home), overrides=overrides) as instance:
-        env = {**os.environ, 'DAGSTER_HOME': str(home), 'PYTHONPATH': str(ROOT)}
+        env = {
+            **os.environ,
+            'DAGSTER_HOME': str(home),
+            'PYTHONPATH': str(ROOT),
+            'ORIGO_STARTUP_DEADLINE_SECONDS': '60',
+        }
         for module, job_name, day, arguments in commands:
             kept, redundant = (
                 create_run_for_test(

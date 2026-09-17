@@ -177,6 +177,8 @@ function docker() {
       'inspect --format {{.State.Running}} '*)
         if [ "$RETIREMENT_CASE" = inspect-error ]; then return 1; fi
         if [ "$RETIREMENT_CASE" = running ]; then printf true; else printf false; fi ;;
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster sh -c '*)
+        return 0 ;;
       'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.orchestration.recovery'*)
         printf '%s\n' "$@" > "$RECOVERY_CALL" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
@@ -197,6 +199,7 @@ function docker() {
         else:
             assert result.returncode == 0, result.stderr
             arguments = invocation.read_text().splitlines()
+            assert arguments[arguments.index('--deadline-seconds') + 1] == '900'
             if case == 'running':
                 assert '--retired-worker' not in arguments
                 assert '--legacy-before' not in arguments

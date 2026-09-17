@@ -182,6 +182,19 @@ jobs:
           retirement_boundary=$(date +%s)
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
+          # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
+          # so wait for the exec into dagster-daemon before recovery contends for the queue lock.
+          for attempt in $(seq 1 90); do
+            if docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster sh -c 'grep -q dagster-daemon /proc/1/cmdline'; then
+              break
+            fi
+            if [ "$attempt" -eq 90 ]; then
+              docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster
+              echo "dagster-daemon did not start within 900 seconds" >&2
+              exit 1
+            fi
+            sleep 10
+          done
           existing_worker_ids="$(docker ps -aq --no-trunc)"
           recovery_args=(python -m origo.orchestration.recovery --deadline-seconds 900)
           retired_count=0

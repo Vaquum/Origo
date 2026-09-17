@@ -23,6 +23,7 @@ REQUIRED_VARIABLES = (
     'ORIGO_ALERT_EMAIL_TO',
 )
 REQUEST_TIMEOUT_SECONDS = 10
+USER_AGENT = 'origo-monitor'
 log = logging.getLogger('origo.alerts')
 
 
@@ -79,7 +80,11 @@ class AlertSettings:
 
 
 def send_alert(settings: AlertSettings, subject: str, body: str) -> None:
-    """Deliver one plain-text message to every configured recipient; raise on any failure."""
+    """Deliver one plain-text message to every configured recipient; raise on any failure.
+
+    The request names its sender: Resend sits behind Cloudflare, which answers the default
+    urllib agent with ``403`` and ``error code: 1010`` before the request reaches the API.
+    """
     payload = json.dumps(
         {
             'from': settings.email_from,
@@ -95,6 +100,7 @@ def send_alert(settings: AlertSettings, subject: str, body: str) -> None:
         headers={
             'Authorization': f'Bearer {settings.resend_api_key}',
             'Content-Type': 'application/json',
+            'User-Agent': USER_AGENT,
         },
     )
     try:

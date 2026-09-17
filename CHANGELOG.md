@@ -1,6 +1,7 @@
 # v3.12.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+- Monitor from outside Dagster: a `monitor` worker evaluates five checks on the external asset `origo_monitor` every minute (Dagster reachable, queue bounded with run and check failures, workers alive from heartbeats and receipts, collectors serving, no error logs), writes the evaluations to Dagit through the webserver, then e-mails new findings through Resend with a per-key cooldown and a daily digest. Vector ships every container's output into `origo.container_log` with the 14-day diagnostic retention. `docs/Developer/Monitoring.md` fixes the model and the investigation order and `AGENTS.md` points to it. The run queue reserves a maintenance lane so `maintain_operational_metadata_job` runs while the backfill and routine lanes are full. The processor profile log is retired in the ClickHouse configuration and rotated or retired log tables are reported with their expiry and dropped whole after retention. The briefing sensors skip days before the book projection exists.
 
 # v3.11.0
 

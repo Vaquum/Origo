@@ -26,9 +26,9 @@ run_coordinator:
   module: origo.orchestration.coordinator
   class: OrigoQueuedRunCoordinator
   config:
-    max_concurrent_runs: 18
+    max_concurrent_runs: 19
     dequeue_use_threads: true
-    dequeue_num_workers: 18
+    dequeue_num_workers: 19
     dequeue_interval_seconds: 1
     tag_concurrency_limits:
       - key: origo/workload
@@ -37,6 +37,9 @@ run_coordinator:
       - key: origo/workload
         value: routine
         limit: 8
+      - key: origo/workload
+        value: maintenance
+        limit: 1
       - key: origo/routine_job
         value:
           applyLimitPerUniqueValue: true

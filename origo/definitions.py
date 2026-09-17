@@ -12,12 +12,18 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
+from collections.abc import Iterator
 
 import requests
 from collections.abc import Sequence
 
 from dagster import (
+    AssetCheckResult,
+    AssetCheckSpec,
     AssetKey,
+    AssetsDefinition,
+    AssetSpec,
+    Failure,
     DagsterInstance,
     DagsterRun,
     DagsterRunStatus,
@@ -36,6 +42,7 @@ from dagster import (
     build_schedule_from_partitioned_job,
     define_asset_job,
     in_process_executor,
+    multi_asset_check,
     schedule,
 )
 
@@ -728,6 +735,11 @@ def binance_futures_daily_gap_repair_schedule(
     )
 
 
+# The first day of binance_spot_depth20_1m in production. A canonical spot day before it
+# (a historical relaunch) has no order-book rows, so a briefing run for it can only fail.
+BRIEFING_FIRST_DAY = date(2026, 5, 14)
+
+
 def _partitioned_run_request(
     asset_event: _AssetEventLike,
     *,
@@ -739,6 +751,10 @@ def _partitioned_run_request(
     partition_key = asset_event.dagster_event.partition
     if partition_key is None:
         return SkipReason("The materialization did not include a partition key.")
+    if date.fromisoformat(partition_key) < BRIEFING_FIRST_DAY:
+        return SkipReason(
+            f"{partition_key} precedes the book projection's first day {BRIEFING_FIRST_DAY}."
+        )
 
     return RunRequest(
         partition_key=partition_key,
@@ -824,8 +840,39 @@ depth_snapshot_store_source_sensor = RunStatusSensorDefinition(
 )
 
 
+# The monitor worker (origo.workers.monitor) evaluates these checks every minute from
+# outside Dagster and reports them through the webserver; Dagit shows them on this asset.
+MONITOR_CHECK_NAMES = (
+    'collectors_serving',
+    'dagster_reachable',
+    'no_error_logs',
+    'queue_bounded',
+    'workers_alive',
+)
+origo_monitor = AssetsDefinition(
+    specs=[
+        AssetSpec(
+            'origo_monitor',
+            group_name='monitoring',
+            description='The monitor worker: five checks evaluated every minute outside Dagster.',
+        )
+    ]
+)
+
+
+@multi_asset_check(
+    specs=[AssetCheckSpec(name=name, asset='origo_monitor') for name in MONITOR_CHECK_NAMES]
+)
+def origo_monitor_checks() -> Iterator[AssetCheckResult]:
+    raise Failure(
+        'origo_monitor checks are evaluated by the monitor worker, not inside Dagster.'
+    )
+    yield AssetCheckResult(passed=False)  # pragma: no cover - unreachable, typing only
+
+
 defs = Definitions(
-    assets=[create_origo_database,
+    assets=[origo_monitor,
+            create_origo_database,
             create_binance_daily_futures_trades_table_origo,
             create_binance_futures_klines_table_origo,
             create_binance_spot_depth20_snapshots_table_origo,
@@ -856,6 +903,8 @@ defs = Definitions(
         binance_spot_depth200_arrow_repair_schedule,
         binance_futures_daily_gap_repair_schedule,
     ],
+
+    asset_checks=[origo_monitor_checks],
 
     sensors=[
         publish_btc_briefing_feed_sensor,

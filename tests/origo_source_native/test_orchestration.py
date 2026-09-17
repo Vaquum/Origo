@@ -152,6 +152,40 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
         assert sum(r.job_name == job for r in runs) == 2
 
 
+def test_maintenance_lane_dequeues_while_routine_and_backfill_lanes_are_full(instance):
+    probe = create_run_for_test(instance, job_name='maintain_operational_metadata_job')
+    tags = execution_tags(probe)
+    assert (tags['origo/workload'], tags['dagster/priority']) == ('maintenance', '300')
+    assert 'origo/routine_job' not in tags
+    for index in range(10):
+        create_run_for_test(
+            instance,
+            job_name='backfill_binance_spot_trades_source_job',
+            status=DagsterRunStatus.STARTED,
+            tags={'origo/workload': 'backfill', IDENTITY_TAG: f'backfill-{index}'},
+        )
+    for index in range(8):
+        create_run_for_test(
+            instance,
+            job_name=f'routine_job_{index}',
+            status=DagsterRunStatus.STARTED,
+            tags={'origo/workload': 'routine', IDENTITY_TAG: f'routine-{index}'},
+        )
+    routine = submit(instance, job='refresh_binance_spot_depth20_data_source_job', day='2026-09-17')
+    first = submit(instance, job='maintain_operational_metadata_job', day='2026-09-17T14:00:00Z')
+    second = submit(instance, job='maintain_operational_metadata_job', day='2026-09-17T14:10:00Z')
+    assert routine.status == first.status == second.status == DagsterRunStatus.QUEUED
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    assert [run.run_id for run in runs] == [first.run_id]
+    instance.report_dagster_event(
+        DagsterEvent('PIPELINE_START', first.job_name), run_id=first.run_id
+    )
+    assert instance.get_run_by_id(first.run_id).status == DagsterRunStatus.STARTED
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    assert runs == []
+
+
 def test_recovery_preserves_claimed_and_distinct_work(instance):
     retained = create_run_for_test(
         instance,

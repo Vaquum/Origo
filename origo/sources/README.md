@@ -66,7 +66,9 @@ source run evidence are independent of those operational tick logs.
    Once an eligible first manifest has a complete inventory, scheduled and deploy
    dry runs preserve its inventory totals, retained floor and manifest through
    backup preparation and review. Health, current disk usage and diagnostic checks
-   continue. Inventories without eligible runs continue scanning; first apply or a
+   continue. Rotated or retired system log tables are reported under `retired` with
+   a `retired_drop:<table>:<date>` pending entry and dropped whole after retention;
+   the monitor worker (`docs/Developer/Monitoring.md`) alerts on a failed run. Inventories without eligible runs continue scanning; first apply or a
    retention-policy change permits a new inventory cycle.
 2. Read `maintenance` in the health check metadata and its `journal_path`. The one
    journal contains the exact first manifest, artifact paths/allocated bytes,

@@ -1,0 +1,49 @@
+{
+ "data": {
+  "instance": {
+   "daemonHealth": {
+    "allDaemonStatuses": [
+     {
+      "daemonType": "SENSOR",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "BACKFILL",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "SCHEDULER",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "QUEUED_RUN_COORDINATOR",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "MONITORING",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "ASSET",
+      "healthy": true,
+      "required": true
+     },
+     {
+      "daemonType": "FRESHNESS_DAEMON",
+      "healthy": true,
+      "required": true
+     }
+    ]
+   }
+  },
+  "queued": {
+   "__typename": "Runs",
+   "count": 0
+  }
+ }
+}

@@ -521,7 +521,7 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
     ensure_monitoring_tables(store.client, 'origo')
 
     class _NoBackfill:
-        def backfill_in_flight(self, asset_key: str) -> bool:
+        def backfill_owns_publication(self, source_key: str) -> bool:
             return False
 
     worker = ProvisionalFeed(

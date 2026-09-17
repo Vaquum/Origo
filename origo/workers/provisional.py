@@ -6,9 +6,9 @@ adapter's candidates: the last completed minute plus the missing minutes inside 
 window, oldest first), then publishes every consumer that pins provisional rows when the
 pinned state changed, unless a native backfill of the source owns publication. Each
 interval and each publication writes one receipt; every tick reports the source's live
-feed asset so its freshness check sees the worker. A failing interval is retried with a
-doubling delay from one minute up to the source's ``retry_delay``, at most ``retry_count``
-times, then left to the operator.
+feed asset so its freshness check sees the worker. A failing interval or publication is
+retried with a doubling delay from one minute up to the source's ``retry_delay``, at most
+``retry_count`` times, then left to the operator.
 """
 
 from __future__ import annotations
@@ -20,8 +20,7 @@ import os
 import resource
 import sys
 import time
-from collections.abc import Sequence
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -50,10 +49,6 @@ log = logging.getLogger('origo.workers.provisional')
 
 def live_feed_asset(spec: RevisionedSourceSpec) -> str:
     return f'{spec.key}_provisional_feed'
-
-
-def canonical_asset(spec: RevisionedSourceSpec) -> str:
-    return f'build_{spec.key}_canonical_revision_origo'
 
 
 def _rss_bytes() -> int:
@@ -90,25 +85,45 @@ class ProvisionalFeed:
         return f'worker:{self.name}:{self.host}:{now.strftime("%Y%m%dT%H%M%SZ")}'
 
     def _may_attempt(
-        self, store: SourceStore, spec: RevisionedSourceSpec, partition: Partition
+        self,
+        store: SourceStore,
+        spec: RevisionedSourceSpec,
+        *,
+        series: str,
+        work: str,
+        minute: datetime | None = None,
+        token: str | None = None,
     ) -> bool:
-        """Whether the interval's failures allow another attempt now: none so far, or fewer
-        than ``retry_count`` with the doubling delay since the last one elapsed."""
+        """Whether the work's failures allow another attempt now: none so far, or at most
+        ``retry_count`` retries with the doubling delay since the last failure elapsed."""
         attempts, last_failed = failed_attempts(
-            store.client, store.database, feed=self.name, series=spec.key, minute=partition.start
+            store.client, store.database, feed=self.name, series=series, minute=minute, token=token
         )
         if attempts == 0 or last_failed is None:
             return True
-        if attempts >= spec.orchestration.retry_count:
+        if attempts > spec.orchestration.retry_count:
             log.error(
-                'source=%s partition=%s attempts exhausted after %d failures; a native run is required',
+                'source=%s %s attempts exhausted after %d failures; an operator run is required',
                 spec.key,
-                partition.key,
+                work,
                 attempts,
             )
             return False
         delay = min(spec.orchestration.retry_delay, 60 * 2 ** (attempts - 1))
         return self.clock() >= last_failed + timedelta(seconds=delay)
+
+    @staticmethod
+    def _built_rows(
+        store: SourceStore, spec: RevisionedSourceSpec, partition: Partition, build_id: str
+    ) -> int:
+        """The rows of the interval's largest component for the build just activated."""
+        rows = store.execute(
+            f"""SELECT max(row_count) FROM {store.table('source_component_log')}
+            WHERE source_key = %(source)s AND partition_key = %(partition)s
+              AND build_id = %(build)s""",
+            {'source': spec.key, 'partition': partition.key, 'build': build_id},
+        )
+        return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
 
     def _build_intervals(
         self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime
@@ -124,11 +139,13 @@ class ProvisionalFeed:
         failed: list[str] = []
         for partition in candidates:
             key = f'{spec.key}:{partition.key}'
-            if not self._may_attempt(store, spec, partition):
+            if not self._may_attempt(
+                store, spec, series=spec.key, work=f'partition={partition.key}', minute=partition.start
+            ):
                 continue
             started = time.monotonic()
             try:
-                execute_source(
+                result = execute_source(
                     spec,
                     'provisional',
                     SourceRunConfig(partition_key=partition.key),
@@ -157,9 +174,7 @@ class ProvisionalFeed:
                 feed=self.name,
                 series=spec.key,
                 minute=partition.start,
-                rows=len(store.rows('raw_latest', store.snapshot()))
-                if any(component.key == 'raw_latest' for component in spec.components)
-                else 0,
+                rows=self._built_rows(store, spec, partition, str(result.get('build_id', ''))),
                 sha256='',
                 duration_ms=int((time.monotonic() - started) * 1000),
                 status='OK',
@@ -175,7 +190,7 @@ class ProvisionalFeed:
         if not pinned_consumers:
             return [], []
         try:
-            owned = self.dagster.backfill_in_flight(canonical_asset(spec))
+            owned = self.dagster.backfill_owns_publication(spec.key)
         except DagsterUnreachable as error:
             # Publication follows the state in ClickHouse; an unreadable Dagster is the
             # monitor's finding, not a reason to stop publishing.
@@ -196,6 +211,14 @@ class ProvisionalFeed:
             if not store.canonical_ready():
                 log.info('source=%s canonical state not ready for publication', spec.key)
                 continue
+            if not self._may_attempt(
+                store,
+                spec,
+                series=series,
+                work=f'consumer={consumer.key} state={snapshot.token[:12]}',
+                token=snapshot.token,
+            ):
+                continue
             started = time.monotonic()
             try:
                 execute_source(
@@ -215,7 +238,7 @@ class ProvisionalFeed:
                     series=series,
                     minute=now.replace(second=0, microsecond=0),
                     rows=0,
-                    sha256='',
+                    sha256=snapshot.token,
                     duration_ms=int((time.monotonic() - started) * 1000),
                     status='FAILED',
                     error_code=failure_code(error),

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -23,6 +23,7 @@ from origo.workers.report import Reporter
 
 from .helpers import ORIGO_DATABASE
 
+Query = Callable[[str], list[tuple[object, ...]]]
 RECEIPTS = (
     "SELECT series, formatDateTime(minute, '%Y-%m-%dT%H:%i:%SZ', 'UTC'), rows, sha256, status, "
     f"error_code, error FROM {ORIGO_DATABASE}.worker_minute_log WHERE feed = 'depth' ORDER BY minute"
@@ -91,7 +92,7 @@ def test_candidate_minutes_cover_the_lookback_oldest_first_within_the_partition_
 
 def test_depth_tick_completes_the_incomplete_minutes_oldest_first_and_records_receipts(
     feed: tuple[DepthFeed, _Reporter],
-    query_origo: Any,
+    query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worker, reporter = feed
@@ -188,7 +189,7 @@ def test_depth_tick_completes_the_incomplete_minutes_oldest_first_and_records_re
 
 def test_depth_tick_records_a_failed_minute_and_continues_with_the_next(
     feed: tuple[DepthFeed, _Reporter],
-    query_origo: Any,
+    query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:

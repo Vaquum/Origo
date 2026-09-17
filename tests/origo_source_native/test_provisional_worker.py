@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,12 +17,13 @@ from origo.sources import bundle
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters import binance_spot_rest as rest
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.bundle import SourceRunConfig
 from origo.sources.contracts import OrchestrationSpec, RevisionedSourceSpec, RolloutStage
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 from origo.workers import provisional
 from origo.workers.dagster_reader import DagsterReader, DagsterUnreachable
-from origo.workers.provisional import ProvisionalFeed, canonical_asset, live_feed_asset
+from origo.workers.provisional import ProvisionalFeed, live_feed_asset
 from origo.workers.receipts import ensure_monitoring_tables
 from origo.workers.report import Reporter
 from origo.workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
@@ -35,6 +36,7 @@ ANCHOR = datetime.fromisoformat(PROVENANCE['minute_start']).astimezone(UTC)
 KEY = ANCHOR.strftime('%Y-%m-%dT%H:%M:%SZ')
 # The replayed minute is the last completed one at this tick time.
 NOW = ANCHOR + timedelta(minutes=1, seconds=5)
+Query = Callable[[str], list[tuple[object, ...]]]
 RECEIPTS = (
     f'SELECT series, status, rows, error_code FROM {ORIGO_DATABASE}.worker_minute_log '
     "WHERE feed = 'provisional' ORDER BY recorded_at"
@@ -54,15 +56,15 @@ class _Reporter:
 
 class _Dagster:
     def __init__(self) -> None:
-        self.in_flight = False
+        self.owned = False
         self.unreachable = False
         self.asked: list[str] = []
 
-    def backfill_in_flight(self, asset_key: str) -> bool:
-        self.asked.append(asset_key)
+    def backfill_owns_publication(self, source_key: str) -> bool:
+        self.asked.append(source_key)
         if self.unreachable:
             raise DagsterUnreachable('Backfills: HTTP 502')
-        return self.in_flight
+        return self.owned
 
 
 def _feed(
@@ -70,7 +72,7 @@ def _feed(
     tmp_path: Path,
     dagster: _Dagster,
     reporter: _Reporter,
-    clock: Any = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> ProvisionalFeed:
     return ProvisionalFeed(
         [spec],
@@ -122,7 +124,7 @@ def test_provisional_cron_must_be_one_minute() -> None:
 def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumers_once(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
     tmp_path: Path,
-    query_origo: Any,
+    query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec, requests = spot
@@ -131,7 +133,7 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     operations: list[tuple[str, str, str]] = []
 
     def recording(
-        executed: RevisionedSourceSpec, operation: str, config: Any, *, run_id: str
+        executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
     ) -> dict[str, object]:
         assert executed.key == spec.key
         assert run_id.startswith('worker:provisional:test-host:')
@@ -144,7 +146,7 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     feed = _feed(spec, tmp_path, dagster, reporter)
 
     # A native backfill owns publication: the minute is still built, nothing is published.
-    dagster.in_flight = True
+    dagster.owned = True
     first = feed.tick(NOW)
     assert first.feed == 'provisional'
     assert first.processed == (f'binance_spot_trades:{KEY}',) and first.failed == ()
@@ -152,12 +154,12 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     raw = query_origo(f'SELECT count() FROM {ORIGO_DATABASE}.binance_spot_trades_raw_current')
     assert raw[0][0] > 1000
     assert operations == [('provisional', KEY, '')]
-    assert dagster.asked == [canonical_asset(spec)]
+    assert dagster.asked == [spec.key]
 
     # The minute is covered now, so the next tick builds nothing and publishes the mount
     # consumer, which pins provisional rows. huggingface is canonical-only: its sensor
     # publishes it, never the worker.
-    dagster.in_flight = False
+    dagster.owned = False
     second = feed.tick(NOW)
     assert second.processed == ('binance_spot_trades:mount',) and second.failed == ()
     assert operations[1:] == [
@@ -177,7 +179,13 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
         ('binance_spot_trades', 'OK', ''),
         ('binance_spot_trades:mount', 'OK', ''),
     ]
-    assert receipts[0][2] > 1000 and receipts[1][2] == 1
+    # The build receipt counts the interval's own raw rows (the component log of that
+    # build), the publication receipt the pinned partitions.
+    raw_rows = query_origo(
+        f"SELECT max(row_count) FROM {ORIGO_DATABASE}.source_component_log "
+        f"WHERE partition_key = '{KEY}' AND provisional = 1"
+    )[0][0]
+    assert receipts[0][2] == raw_rows > 1000 and receipts[1][2] == 1
     assert [key for key, _, _ in reporter.materializations] == [live_feed_asset(spec)] * 3
     assert reporter.materializations[0][2]['intervals'] == 1
     assert reporter.materializations[1][2]['publications'] == 1
@@ -187,7 +195,7 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
 def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
     tmp_path: Path,
-    query_origo: Any,
+    query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -204,20 +212,23 @@ def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
     key = f'binance_spot_trades:{KEY}'
 
     with caplog.at_level(logging.ERROR, logger='origo.workers.provisional'):
+        # The delays count from the recorded failures, which the real clock stamps within
+        # seconds of ``start``: one minute before the first retry, two before the second.
         assert feed.tick(NOW).failed == (key,)
-        # One minute must pass after the first failure before the second attempt.
+        offset[0] = timedelta(seconds=30)
         assert feed.tick(NOW).failed == ()
-        offset[0] = timedelta(minutes=2)
+        offset[0] = timedelta(seconds=90)
         assert feed.tick(NOW).failed == (key,)
-        # Two failures reach the limit: no more attempts, an ERROR line names the minute.
+        offset[0] = timedelta(seconds=100)
+        assert feed.tick(NOW).failed == ()
+        offset[0] = timedelta(seconds=200)
+        assert feed.tick(NOW).failed == (key,)
+        # retry_count retries are spent: no more attempts, an ERROR line names the minute.
         offset[0] = timedelta(hours=10)
         assert feed.tick(NOW).failed == ()
 
-    assert query_origo(RECEIPTS) == [
-        ('binance_spot_trades', 'FAILED', 0, 'RuntimeError'),
-        ('binance_spot_trades', 'FAILED', 0, 'RuntimeError'),
-    ]
-    assert f'partition={KEY} attempts exhausted after 2 failures' in caplog.text
+    assert query_origo(RECEIPTS) == [('binance_spot_trades', 'FAILED', 0, 'RuntimeError')] * 3
+    assert f'partition={KEY} attempts exhausted after 3 failures' in caplog.text
     assert 'binance unavailable' in caplog.text
 
 
@@ -253,3 +264,131 @@ def test_dormant_sources_are_skipped_and_the_bundle_declares_the_feed_not_a_sche
             assert live_spec.freshness_policy == FreshnessPolicy.time_window(
                 fail_window=LIVE_FEED_FRESHNESS_WINDOW
             )
+
+
+def test_provisional_publication_failures_back_off_per_pinned_state(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    query_origo: Query,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    spec, _ = spot
+    spec = replace(spec, orchestration=replace(spec.orchestration, retry_count=1, retry_delay=3600))
+    real_execute = provisional.execute_source
+    renders: list[str] = []
+
+    def failing_render(
+        executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
+    ) -> dict[str, object]:
+        if operation == 'provisional':
+            return real_execute(executed, operation, config, run_id=run_id)
+        renders.append(operation)
+        raise RuntimeError('render failed')
+
+    monkeypatch.setattr(provisional, 'execute_source', failing_render)
+    start = datetime.now(UTC)
+    offset = [timedelta(0)]
+    feed = _feed(spec, tmp_path, _Dagster(), _Reporter(), clock=lambda: start + offset[0])
+    series = f'{spec.key}:mount'
+
+    with caplog.at_level(logging.ERROR, logger='origo.workers.provisional'):
+        # The minute is built; the publication of the new pinned state fails once.
+        first = feed.tick(NOW)
+        assert first.processed == (f'{spec.key}:{KEY}',) and first.failed == (series,)
+        assert renders == ['consumer_mount']
+        # Inside the delay the same pinned state is not rendered again.
+        assert feed.tick(NOW).failed == ()
+        assert renders == ['consumer_mount']
+        # After the delay the single retry runs and fails.
+        offset[0] = timedelta(minutes=2)
+        assert feed.tick(NOW).failed == (series,)
+        assert renders == ['consumer_mount', 'consumer_mount']
+        # The retry budget for this pinned state is spent: no more renders, an ERROR line.
+        offset[0] = timedelta(hours=10)
+        assert feed.tick(NOW).failed == ()
+        assert renders == ['consumer_mount', 'consumer_mount']
+
+    token = query_origo(
+        f"SELECT sha256 FROM {ORIGO_DATABASE}.worker_minute_log "
+        f"WHERE series = '{series}' ORDER BY recorded_at LIMIT 1"
+    )[0][0]
+    assert isinstance(token, str) and len(token) == 64
+    assert query_origo(RECEIPTS) == [
+        ('binance_spot_trades', 'OK', query_origo(RECEIPTS)[0][2], ''),
+        (series, 'FAILED', 0, 'RuntimeError'),
+        (series, 'FAILED', 0, 'RuntimeError'),
+    ]
+    assert f'consumer=mount state={token[:12]} attempts exhausted after 2 failures' in caplog.text
+
+
+def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    reader = DagsterReader('http://dagit.invalid')
+    source = 'binance_spot_trades'
+    asset = {'path': [f'build_{source}_canonical_revision_origo']}
+    state: dict[str, object] = {}
+
+    def run(status: str, created: float, job: str, **tags: str) -> dict[str, object]:
+        return {
+            'runId': f'run-{created}',
+            'status': status,
+            'creationTime': created,
+            'jobName': job,
+            'tags': [{'key': key, 'value': value} for key, value in tags.items()],
+            'assetSelection': [asset],
+        }
+
+    def canned(operation: str, query: str, variables: object = None) -> dict[str, object]:
+        if operation == 'Backfills':
+            return {
+                'partitionBackfillsOrError': {
+                    '__typename': 'PartitionBackfills',
+                    'results': state.get('backfills', []),
+                }
+            }
+        return {
+            name: {'__typename': 'Runs', 'results': state.get(name, [])}
+            for name in ('byJob', 'byTags', 'active')
+        }
+
+    monkeypatch.setattr(reader, 'query', canned)
+    backfill_job = f'backfill_{source}_source_job'
+    canonical_job = f'refresh_{source}_canonical_source_job'
+
+    def backfill(status: str, stamp: float, backfill_id: str = 'bf') -> dict[str, object]:
+        return {'id': backfill_id, 'status': status, 'timestamp': stamp, 'assetSelection': [asset]}
+
+    # Nothing native and no backfill run: nothing owns publication.
+    assert reader.backfill_owns_publication(source) is False
+    # A requested, cancelling or failing native backfill owns it.
+    for status in ('REQUESTED', 'CANCELING', 'FAILING'):
+        state['backfills'] = [backfill(status, 100.0)]
+        assert reader.backfill_owns_publication(source) is True
+    # A failed native selection holds publication until a later one completes.
+    state['backfills'] = [backfill('FAILED', 100.0)]
+    assert reader.backfill_owns_publication(source) is True
+    state['backfills'] = [backfill('COMPLETED_SUCCESS', 200.0, 'later'), backfill('FAILED', 100.0)]
+    assert reader.backfill_owns_publication(source) is False
+    # A backfill run newer than the native selection decides instead.
+    state['backfills'] = [backfill('FAILED', 100.0)]
+    state['byJob'] = [run('SUCCESS', 150.0, backfill_job)]
+    assert reader.backfill_owns_publication(source) is False
+    state['byJob'] = [run('FAILURE', 150.0, backfill_job)]
+    assert reader.backfill_owns_publication(source) is True
+    # A run tagged with the native backfill's id defers to that backfill's status.
+    state['backfills'] = [backfill('COMPLETED_SUCCESS', 100.0)]
+    state['byJob'] = [run('FAILURE', 150.0, backfill_job, **{'dagster/backfill': 'bf'})]
+    assert reader.backfill_owns_publication(source) is False
+    # An active canonical range run of the source is a backfill in flight; a reconciliation
+    # run is not.
+    state.clear()
+    state['active'] = [
+        run('STARTED', 300.0, canonical_job, **{'dagster/asset_partition_range_start': '2020-01-01'})
+    ]
+    assert reader.backfill_owns_publication(source) is True
+    state['active'] = [run('STARTED', 300.0, canonical_job, origo_source_reconciliation='true')]
+    assert reader.backfill_owns_publication(source) is False
+    # Other sources' backfills are not this source's.
+    state.clear()
+    state['backfills'] = [{'id': 'x', 'status': 'FAILED', 'timestamp': 1.0, 'assetSelection': [{'path': ['other']}]}]
+    assert reader.backfill_owns_publication(source) is False

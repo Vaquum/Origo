@@ -33,6 +33,27 @@ CHECKS_QUERY = """query Checks {
     assetChecksOrError { __typename ... on AssetChecks { checks { name } } }
   }
 }"""
+BACKFILLS_QUERY = """query Backfills {
+  partitionBackfillsOrError(limit: 50) {
+    __typename ... on PartitionBackfills { results { id status timestamp assetSelection { path } } }
+  }
+}"""
+BACKFILL_RUNS_QUERY = """query BackfillRuns($job: String!, $tags: [ExecutionTag!]!) {
+  byJob: runsOrError(filter: {pipelineName: $job}, limit: 1) {
+    __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
+  }
+  byTags: runsOrError(filter: {tags: $tags}, limit: 1) {
+    __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
+  }
+  active: runsOrError(filter: {statuses: [QUEUED, NOT_STARTED, STARTING, STARTED, CANCELING]}, limit: 200) {
+    __typename ... on Runs {
+      results { runId status creationTime jobName tags { key value } assetSelection { path } }
+    }
+  }
+}"""
+BACKFILL_ID_TAG = 'dagster/backfill'
+_ACTIVE_BACKFILL_STATUSES = ('REQUESTED', 'CANCELING', 'FAILING')
+_COMPLETED_BACKFILL_STATUSES = ('COMPLETED_SUCCESS', 'COMPLETED')
 CHECK_EXECUTIONS_QUERY = """query CheckExecutions($assetKey: AssetKeyInput!, $checkName: String!) {
   assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) {
     status evaluation { timestamp }
@@ -60,6 +81,24 @@ class RunFailure:
 
 
 @dataclass(frozen=True)
+class Backfill:
+    backfill_id: str
+    status: str
+    timestamp: float
+    assets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    run_id: str
+    status: str
+    created_at: float
+    job_name: str
+    tags: dict[str, str]
+    assets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class CheckFailure:
     asset_key: str
     check_name: str
@@ -77,6 +116,39 @@ def _sequence(value: object, what: str) -> list[object]:
     if not isinstance(value, list):
         raise DagsterUnreachable(f'Unexpected Dagster response: {what} is not a list.')
     return cast(list[object], value)
+
+
+def _asset_keys(selection: object) -> tuple[str, ...]:
+    if selection is None:
+        return ()
+    return tuple(
+        '/'.join(str(part) for part in _sequence(_mapping(key, 'key').get('path'), 'path'))
+        for key in _sequence(selection, 'selection')
+    )
+
+
+def _runs(value: object, what: str) -> list[RunRecord]:
+    listed = _mapping(value, what)
+    if listed.get('__typename') != 'Runs':
+        raise DagsterUnreachable(f'{what}: runs were not listed.')
+    records: list[RunRecord] = []
+    for item in _sequence(listed.get('results'), 'results'):
+        run = _mapping(item, 'run')
+        created = run.get('creationTime')
+        records.append(
+            RunRecord(
+                str(run['runId']),
+                str(run['status']),
+                float(created) if isinstance(created, (int, float)) else 0.0,
+                str(run.get('jobName', '')),
+                {
+                    str(_mapping(tag, 'tag')['key']): str(_mapping(tag, 'tag')['value'])
+                    for tag in _sequence(run.get('tags'), 'tags')
+                },
+                _asset_keys(run.get('assetSelection')),
+            )
+        )
+    return records
 
 
 class DagsterReader:
@@ -158,6 +230,78 @@ class DagsterReader:
                 )
             )
         return failures
+
+    def _backfills(self, asset_key: str) -> list[Backfill]:
+        """Native backfills selecting ``asset_key``, newest first."""
+        data = self.query('Backfills', BACKFILLS_QUERY)
+        listed = _mapping(data.get('partitionBackfillsOrError'), 'backfills')
+        if listed.get('__typename') != 'PartitionBackfills':
+            raise DagsterUnreachable('Backfills: backfills were not listed.')
+        found: list[Backfill] = []
+        for item in _sequence(listed.get('results'), 'results'):
+            entry = _mapping(item, 'backfill')
+            assets = _asset_keys(entry.get('assetSelection'))
+            if asset_key not in assets:
+                continue
+            stamp = entry.get('timestamp')
+            found.append(
+                Backfill(
+                    str(entry['id']),
+                    str(entry['status']),
+                    float(stamp) if isinstance(stamp, (int, float)) else 0.0,
+                    assets,
+                )
+            )
+        return sorted(found, key=lambda backfill: backfill.timestamp, reverse=True)
+
+    def backfill_owns_publication(self, source_key: str) -> bool:
+        """The rule of ``origo.sources.prepare.backfill_owns_publication`` read through
+        GraphQL: an active native backfill or backfill run owns publication, and so does the
+        latest one until a later selection completes, so a failed or cancelled backfill never
+        publishes a partial canonical state."""
+        asset_key = f'build_{source_key}_canonical_revision_origo'
+        canonical_job = f'refresh_{source_key}_canonical_source_job'
+        backfill_job = f'backfill_{source_key}_source_job'
+        backfills = self._backfills(asset_key)
+        if any(backfill.status in _ACTIVE_BACKFILL_STATUSES for backfill in backfills):
+            return True
+        data = self.query(
+            'BackfillRuns',
+            BACKFILL_RUNS_QUERY,
+            {
+                'job': backfill_job,
+                'tags': [
+                    {'key': 'origo_source_key', 'value': source_key},
+                    {'key': 'origo_source_operation', 'value': 'backfill'},
+                ],
+            },
+        )
+        runs = {name: _runs(data.get(name), name) for name in ('byJob', 'byTags', 'active')}
+
+        def is_source_backfill(run: RunRecord) -> bool:
+            return run.job_name == backfill_job or (
+                (run.job_name == canonical_job or asset_key in run.assets)
+                and run.tags.get('origo_source_reconciliation') != 'true'
+                and (
+                    run.job_name != canonical_job
+                    or 'dagster/asset_partition_range_start' in run.tags
+                    or run.tags.get('origo_source_operation') == 'backfill'
+                )
+            )
+
+        if any(is_source_backfill(run) for run in runs['active']):
+            return True
+        latest = max(
+            [*runs['byJob'], *runs['byTags']], key=lambda run: run.created_at, default=None
+        )
+        native = backfills[0] if backfills else None
+        if native is not None and (
+            latest is None
+            or latest.tags.get(BACKFILL_ID_TAG) == native.backfill_id
+            or native.timestamp > latest.created_at
+        ):
+            return native.status not in _COMPLETED_BACKFILL_STATUSES
+        return latest is not None and latest.status != 'SUCCESS'
 
     def failed_checks_since(self, since: float, *, exclude_asset: str = '') -> list[CheckFailure]:
         data = self.query('Checks', CHECKS_QUERY)

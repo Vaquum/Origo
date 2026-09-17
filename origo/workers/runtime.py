@@ -15,11 +15,14 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NoReturn, Protocol
 
 HEARTBEAT_MAX_AGE_SECONDS = 180
+# A live feed asset the worker has not materialized for this long fails its freshness
+# policy in Dagit; the monitor's heartbeat check alerts on the worker itself.
+LIVE_FEED_FRESHNESS_WINDOW = timedelta(minutes=5)
 WATCHDOG_EXIT_CODE = 3
 DEFAULT_HEARTBEAT_DIR = '/opt/origo/heartbeats'
 log = logging.getLogger('origo.workers')

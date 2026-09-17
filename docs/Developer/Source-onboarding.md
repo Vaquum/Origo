@@ -56,7 +56,7 @@ Source-specific instructions in a chat are not part of the system contract.
 
 Register unfinished work as `DORMANT`. The PR delivering an operator-runnable
 source must declare `CANARY` or `LIVE` in code. Both CANARY and LIVE automatically run all declared ingestion/audit schedules
-and sensors. CANARY keeps publications in the declared shadow destinations. Public ownership/promotion requires its separate reviewed routing
+and sensors, and the provisional worker builds their provisional tails every minute. CANARY keeps publications in the declared shadow destinations. Public ownership/promotion requires its separate reviewed routing
 change. Changing the stage alone does not turn a shadow renderer into a public
 uploader.
 
@@ -69,10 +69,11 @@ parsing, schemas and integrity checks remain engineering work; orchestration is 
 
 | Shared code | What each registered source receives |
 | --- | --- |
-| [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, schedules and consumer/failure/reconciliation sensors. Do not copy these definitions into a source module. |
+| [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, the canonical and audit schedules, the failure/reconciliation sensors, a sensor per canonical-only consumer and the live feed asset the provisional worker materializes. Do not copy these definitions into a source module. |
+| [workers/provisional.py](../../origo/workers/provisional.py) | The provisional tail: every closed minute of a source with a `ProvisionalAdapter` is built through the source runtime by the provisional worker (`provisional_cron` must be `* * * * *`), and every consumer that pins provisional rows is published by the same worker when the pinned state changed. See [Monitoring.md](Monitoring.md). |
 | [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats source preparation idempotently; deployment configures pool limits before workers start. |
 | [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Reconciled generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
-| [bundle.py](../../origo/sources/bundle.py) consumer sensors | Later canonical state changes request publication automatically; renderers that declare provisional components include the partial-day rows present at render time, and provisional refreshes alone neither trigger nor invalidate a publication. Active or failed backfills hold publication; complete current manifests suppress duplicate work. |
+| [bundle.py](../../origo/sources/bundle.py) consumer sensors | For canonical-only consumers, later canonical state changes request publication automatically; provisional refreshes neither trigger nor invalidate their publication. Consumers that pin provisional rows are published by the provisional worker on every pinned-state change. Active or failed backfills hold publication for both; complete current manifests suppress duplicate work. |
 | [roles.py](../../origo/maintenance/roles.py), [source_receipts.py](../../origo/maintenance/source_receipts.py) | Protected source/backfill provenance and short retention for standalone projection jobs, with durable deduplication receipts. Keep the generated run tags. |
 
 The framework executes the components and consumers declared by the profile; it
@@ -124,7 +125,7 @@ Full-history production validation and public promotion remain separate evidence
 
 ## Run and promote
 
-Monitoring of a deployed source follows [Monitoring.md](Monitoring.md): the monitor worker reports failures and the investigation order starts in Dagit. Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.bootstrap` before starting the daemon. This executes the recorded `prepare_revisioned_sources_job`; preparation errors and logging appear in Dagster Runs. Their healthcheck verifies preparation without changing state. Re-deployment applies the declared rollout while retaining sensor cursors: DORMANT stops all managed automation; CANARY and LIVE run every declared schedule and sensor automatically. Dormant sources perform no external preparation I/O. The job repeats this idempotent preparation, so a fresh instance follows the same path.
+Monitoring of a deployed source follows [Monitoring.md](Monitoring.md): the monitor worker reports failures and the investigation order starts in Dagit. Source setup, managed sensor state, shared mounts and readiness are versioned code. Both Compose configurations run `python -m origo.sources.bootstrap` before starting the daemon. This executes the recorded `prepare_revisioned_sources_job`; preparation errors and logging appear in Dagster Runs. Their healthcheck verifies preparation without changing state. Re-deployment applies the declared rollout while retaining sensor cursors: DORMANT stops all managed automation and the provisional worker skips the source; CANARY and LIVE run every declared schedule and sensor automatically and the worker builds their tails. Dormant sources perform no external preparation I/O. The job repeats this idempotent preparation, so a fresh instance follows the same path.
 
 ### Backfill and compare from Dagit
 

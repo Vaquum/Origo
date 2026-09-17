@@ -131,6 +131,60 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  depth-worker:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
+      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
+      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
+      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
+    volumes:
+      - tdw-arrow:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.depth
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.depth", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  provisional-worker:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
+      - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
+    volumes:
+      - tdw-parquet:/opt/parquet
+      - tdw-arrow:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.provisional
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
     name: tdw-control-plane_clickhouse-data

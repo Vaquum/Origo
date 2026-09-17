@@ -14,7 +14,6 @@ from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import Partition, Revision, SourceError, StateRecord
 from origo.sources.lifecycle import SourceRuntime, _partition_lock
 from origo.sources.locking import partition_work, source_lock
-from origo.sources.profiles.spot_parity import _reference_table
 from origo.sources.storage import SourceStore
 
 from .test_binance_daily_source_adapter import ARCHIVES, archive_response
@@ -38,30 +37,7 @@ def test_native_partition_runs_and_publication_dependencies() -> None:
     assert job.get_run_config_for_partition_key('2020-01-01') == {}
 
 
-@pytest.mark.parametrize('day', ['2017-08-17', '2020-01-01', '2024-12-31', '2025-01-01'])
-def test_native_parsers_match_frozen_legacy_rows(day: str) -> None:
-    import zipfile
-
-    import polars as pl
-
-    path = ARCHIVES / f'BTCUSDT-trades-{day}.csv'
-    if path.exists():
-        body = path.read_bytes()
-    else:
-        with zipfile.ZipFile(ARCHIVES / f'BTCUSDT-trades-{day}.zip') as archive:
-            body = archive.read(f'BTCUSDT-trades-{day}.csv')
-    partition = binance_daily.BinanceSpotDaily().partition(day)
-    expected = _parse_trade_rows(body)
-    for table in (spot_table(body, partition), _reference_table(body)):
-        actual = pl.from_arrow(table).rows()
-        assert len(actual) == len(expected)
-        assert [tuple(row[:-1]) for row in actual] == [tuple(row[:-1]) for row in expected]
-        assert [row[-1].replace(tzinfo=None) for row in actual] == [
-            row[-1].replace(tzinfo=None) for row in expected
-        ]
-
-
-def test_concurrent_days_keep_generation_and_parity_isolated(
+def test_concurrent_days_keep_generations_isolated_and_repair_coexists(
     origo_test_env: dict[str, str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -81,14 +57,17 @@ def test_concurrent_days_keep_generation_and_parity_isolated(
 
     monkeypatch.setattr(binance_daily.BinanceSpotDaily, 'fetch', overlap)
 
-    def run(day: str) -> tuple[StateRecord, dict[str, object]]:
+    def run(day: str) -> tuple[StateRecord, int]:
         connection = make_clickhouse_client(get_clickhouse_settings())
         worker = SourceRuntime(spec, SourceStore(connection, 'origo', spec), root, day)
         try:
             record = worker.build(day)
-            verified, proof = worker.verify(day)
-            assert record == verified
-            return record, proof
+            assert worker.reconcile(day) == record
+            rows = worker.store.execute(
+                "SELECT row_count FROM origo.source_component_log WHERE build_id=%(build)s AND component='raw'",
+                {'build': record.build_id},
+            )
+            return record, int(str(rows[0][0]))
         finally:
             connection.disconnect()
 
@@ -96,16 +75,12 @@ def test_concurrent_days_keep_generation_and_parity_isolated(
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(run, ['2017-08-17', '2020-01-01']))
         assert len({record.build_id for record, _ in results}) == 2
-        assert {proof['raw']['row_count'] for _, proof in results} == {3427, 194010}
-        assert runtime.store.canonical_verified()
-        assert (
-            runtime.store.execute(
-                "SELECT name FROM system.databases WHERE startsWith(name,'origo_source_parity_binance_spot_trades')"
-            )
-            == []
-        )
+        assert {rows for _, rows in results} == {3427, 194010}
+        assert runtime.store.canonical_ready()
         lock = _partition_lock(spec.canonical.partition('2020-01-01'))
         with partition_work(root, spec.key, lock):
+            # Repairing another day shares the maintenance fence with an active builder.
+            assert runtime.repair('2017-08-17') == results[0][0]
             with pytest.raises(SourceError, match='already held'):
                 with partition_work(root, spec.key, lock):
                     pytest.fail('Same partition admitted two writers')
@@ -152,8 +127,7 @@ def test_previous_hash_generations_remain_verifiable(
         runtime.store.insert_activation(previous, 'pre-upgrade-proof')
         runtime._validate_retained(previous)
         assert runtime.build('2017-08-17') == previous
-        verified, checks = runtime.verify('2017-08-17')
-        assert verified == previous and len(checks) == 7
+        assert runtime.reconcile('2017-08-17') == previous
     finally:
         client.disconnect()
 
@@ -307,31 +281,11 @@ def test_interrupted_bulk_batch_retries_without_exposing_partial_rows(
             f'SELECT count() FROM {runtime.store.component_table("raw")}'
         ) == [(0,)]
         record = runtime.build('2020-01-01')
-        verified, proof = runtime.verify('2020-01-01')
-        assert verified == record
-        assert proof['raw']['row_count'] == 194010
+        assert runtime.reconcile('2020-01-01') == record
+        assert runtime.store.execute(
+            "SELECT row_count FROM origo.source_component_log WHERE build_id=%(build)s AND component='raw'",
+            {'build': record.build_id},
+        ) == [(194010,)]
         assert runtime.store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
-    finally:
-        client.disconnect()
-
-
-def test_projection_parity_survives_different_insert_block_boundaries(
-    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from origo.sources import columnar
-
-    monkeypatch.setattr(binance_daily, 'get_response', archive_response)
-    spec = BINANCE_SPOT_TRADES_SPEC
-    client = make_clickhouse_client(get_clickhouse_settings())
-    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'order')
-    try:
-        runtime.setup()
-        monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 16000)
-        record = runtime.build('2020-01-01')
-        # Verification writes the independent archive in a different physical layout.
-        monkeypatch.setattr(columnar, 'INSERT_BATCH_ROWS', 1048576)
-        verified, checks = runtime.verify('2020-01-01')
-        assert verified == record
-        assert checks['raw']['row_count'] == 194010 and len(checks) == 7
     finally:
         client.disconnect()

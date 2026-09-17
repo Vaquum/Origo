@@ -29,6 +29,7 @@ from dagster._core.storage.dagster_run import RunRecord
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
 from .contracts import RevisionedSourceSpec, RolloutStage
+from .failures import REMOVED_PARITY_CODES
 from .lifecycle import SourceRuntime
 from .storage import SourceStore
 
@@ -206,7 +207,7 @@ def build_reconciliation_sensor(
     health_job: JobDefinition,
     asset_name: str,
 ) -> SensorDefinition:
-    """Request native partition verification and source health runs from database state."""
+    """Request native partition reconciliation and source health runs from database state."""
 
     @_sensor(
         name=f'{spec.key}_reconciliation_sensor',
@@ -320,6 +321,7 @@ def build_reconciliation_sensor(
                         latest.status == DagsterRunStatus.FAILURE
                         and latest.tags.get('origo_source_verdict')
                         and latest.tags.get('origo_source_verdict_run') == latest.run_id
+                        and latest.tags['origo_source_verdict'] not in REMOVED_PARITY_CODES
                     ):
                         context.log.info(
                             'source=%s partition=%s phase=reconciliation_held failed_run=%s '

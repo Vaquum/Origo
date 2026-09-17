@@ -53,6 +53,7 @@
 
   <!-- Diagnostic history expires independently of Dagster scheduling. -->
   <text_log>
+    <level>information</level>
     <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
     <settings>merge_with_ttl_timeout=3600</settings>
   </text_log>

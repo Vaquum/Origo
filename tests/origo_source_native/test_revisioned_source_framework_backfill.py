@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -25,7 +24,7 @@ from origo.sources import capacity
 from origo.sources.adapters import binance_daily
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
-from origo.sources.contracts import BuildContext, RolloutStage, SourceBundle
+from origo.sources.contracts import RolloutStage, SourceBundle
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
@@ -146,7 +145,7 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> No
     )
 
 
-def test_backfill_compares_real_archive_with_legacy_and_records_proof(
+def test_backfill_builds_real_archive_and_records_evidence(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,14 +194,21 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
         key: 2 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
     }
     assert result.success
-    rows = runtime.store.execute(
-        'SELECT partition_key, checks_json, dagster_run_id FROM origo.source_parity_log'
+    evidence = runtime.store.execute(
+        'SELECT component, row_count FROM origo.source_component_log '
+        "WHERE partition_key='2020-01-01' AND dagster_run_id=%(run)s",
+        {'run': result.run_id},
     )
-    assert len(rows) == 1
-    assert rows[0][0] == '2020-01-01' and rows[0][2] == result.run_id
-    checks = json.loads(rows[0][1])
-    assert set(checks) == {'raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned'}
-    assert checks['raw']['row_count'] == 194010
+    assert {str(component) for component, _ in evidence} == {
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+    }
+    assert dict(evidence)['raw'] == 194010
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {'2020-01-01'}
     from dagster._core.definitions.automation_tick_evaluation_context import (
         build_run_requests_with_backfill_policies,
@@ -230,7 +236,7 @@ def test_backfill_compares_real_archive_with_legacy_and_records_proof(
     assert instance.get_materialized_partitions(asset.key) == {DAY, '2020-01-01'}
 
     messages = '\n'.join(entry.user_message for entry in instance.all_logs(result.run_id))
-    assert 'phase=legacy_comparison' in messages and 'phase=verified' in messages
+    assert 'phase=reconciled' in messages
 
     # Duplicate an actual archive row exactly at the seek-page boundary.
     record = next(
@@ -331,44 +337,6 @@ def _status(environment: BackfillEnv, day: str = DAY) -> str | None:
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
     status = instance.get_status_by_partition(asset.key, [day], asset.partitions_def)[day]
     return status.value if status else None
-
-
-def test_parity_mismatch_fails_partition_and_is_logged(backfill_env: BackfillEnv) -> None:
-    runtime, instance, _source = backfill_env
-    original = next(component for component in runtime.spec.components if component.key == 'time')
-
-    def missing_bar(context: BuildContext) -> None:
-        original.build(context)
-        # Fault injection deletes a real computed bar; no invented market row is added.
-        context.client.execute(
-            f'ALTER TABLE {context.table("time")} DELETE WHERE datetime IN '
-            f'(SELECT min(datetime) FROM {context.table("time")})',
-            settings={'mutations_sync': 2},
-        )
-
-    spec = replace(
-        runtime.spec,
-        components=tuple(
-            replace(component, build=missing_bar) if component.key == 'time' else component
-            for component in runtime.spec.components
-        ),
-    )
-    environment = (runtime, instance, build_source_bundle(spec))
-    result = _run(environment, probe=True)
-    assert not result.success
-    assert _status(environment) == 'FAILED'
-    assert runtime.store.execute('SELECT count() FROM origo.source_parity_log') == [(0,)]
-    assert runtime.store.execute(
-        "SELECT count() FROM origo.source_failure_log WHERE error_code='LEGACY_PARITY_MISMATCH'"
-    ) == [(1,)]
-    messages = '\n'.join(entry.user_message for entry in instance.all_logs(result.run_id))
-    assert 'LEGACY_PARITY_MISMATCH' in messages and 'component=time' in messages
-    assert runtime.store.execute('SELECT countIf(successful) FROM origo.source_capacity_log') == [
-        (0,)
-    ]
-    # Retry through the normal Dagit job after restoring the correct implementation.
-    assert _run(backfill_env, probe=True).success
-    assert _status(backfill_env) == 'MATERIALIZED'
 
 
 def test_reconciliation_marks_corrupt_missing_and_changed_generations(
@@ -511,7 +479,6 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     runtime, instance, source = backfill_env
     assert _run(backfill_env, probe=True).success
     first = runtime.store.records(canonical_only=True)[0]
-    proof_count = runtime.store.execute('SELECT count() FROM origo.source_parity_log')
     from origo.sources.contracts import SourceError
 
     def unavailable(url: str) -> binance_daily.Response:
@@ -531,7 +498,6 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     monkeypatch.setattr(binance_daily, 'get_response', checksum_only)
     assert _run(backfill_env).success
     assert runtime.store.records(canonical_only=True) == (first,)
-    assert runtime.store.execute('SELECT count() FROM origo.source_parity_log') == proof_count
     from dagster import build_sensor_context
 
     sensor = next(
@@ -752,14 +718,13 @@ def test_reconciliation_failures_do_not_starve_other_partitions() -> None:
 @pytest.mark.parametrize(
     'error_code',
     [
-        'LEGACY_PARITY_MISMATCH',
         'RETAINED_CONTENT_INVALID',
         'ACTIVE_PARTITION_MISSING',
         'INGESTION_FAILURE_UNRESOLVED',
         'CAPACITY_MEASUREMENT_REQUIRED',
     ],
 )
-def test_failed_automatic_verification_waits_for_operator_or_state_change(
+def test_failed_automatic_reconciliation_waits_for_operator_or_state_change(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
     error_code: str,
@@ -769,21 +734,19 @@ def test_failed_automatic_verification_waits_for_operator_or_state_change(
     from dagster import build_sensor_context
 
     from origo.sources import dagit
-    from origo.sources.contracts import Client, SourceError, StateRecord
+    from origo.sources.contracts import SourceError, StateRecord
 
-    runtime, instance, original_source = backfill_env
+    runtime, instance, source = backfill_env
     assert _run(backfill_env, probe=True).success
     record = runtime.store.records(canonical_only=True)[0]
-    runtime.store.execute(
-        'ALTER TABLE origo.source_parity_log DELETE WHERE 1 SETTINGS mutations_sync=2'
-    )
     attempts = []
+    original = SourceRuntime.reconcile
 
-    def fail_verification(client: Client, database: str, record: StateRecord) -> dict[str, object]:
-        attempts.append(record)
-        raise SourceError(error_code, 'Injected verification failure on retained real market data')
+    def fail_reconciliation(self: SourceRuntime, key: str) -> StateRecord:
+        attempts.append(key)
+        raise SourceError(error_code, 'Injected integrity failure on retained real market data')
 
-    source = build_source_bundle(replace(runtime.spec, verify=fail_verification))
+    monkeypatch.setattr(SourceRuntime, 'reconcile', fail_reconciliation)
     sensor = next(
         sensor for sensor in source.sensors if sensor.name.endswith('_reconciliation_sensor')
     )
@@ -845,8 +808,9 @@ def test_failed_automatic_verification_waits_for_operator_or_state_change(
     now += timedelta(minutes=1)
     assert all(request.partition_key is None for request in requests())
 
-    # An explicit successful operator verification resumes checks without changing generation.
-    assert _run((runtime, instance, original_source), reconcile=True).success
+    # An explicit successful operator reconciliation resumes checks without changing generation.
+    monkeypatch.setattr(SourceRuntime, 'reconcile', original)
+    assert _run(backfill_env, reconcile=True).success
     assert runtime.store.records(canonical_only=True)[0] == advanced
     now += timedelta(minutes=1)
     assert any(request.partition_key == DAY for request in requests())

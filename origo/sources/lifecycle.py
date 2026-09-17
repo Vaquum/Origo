@@ -6,7 +6,6 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 from uuid import UUID, uuid4
 
 from dagster import get_dagster_logger
@@ -21,7 +20,6 @@ from .contracts import (
     StateRecord,
     failure_code,
     failure_message,
-    identifier,
 )
 from .failures import FailureLog
 from .locking import partition_work, source_lock
@@ -514,17 +512,6 @@ class SourceRuntime:
                 )
         return tuple(changed)
 
-    def parity_failed(self, key: str) -> bool:
-        """Return whether the day still has a failed legacy comparison."""
-        rows = self.store.execute(
-            f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
-            WHERE source_key=%(source)s AND partition_key=%(partition)s AND operation='verification'
-              AND error_code IN ('LEGACY_PARITY_MISMATCH', 'LEGACY_SCHEMA_MISMATCH')
-            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
-            {'source': self.spec.key, 'partition': key},
-        )
-        return bool(rows)
-
     def repair(self, key: str) -> StateRecord:
         self.spec.require_enabled('repair')
         self.require_shared_mount()
@@ -538,76 +525,37 @@ class SourceRuntime:
         )
         if record is None:
             return self.build(key)
-        try:
-            self._validate_retained(record)
-            if self.parity_failed(key):
-                raise SourceError(
-                    'RETAINED_PARITY_FAILED', 'Retained output failed its legacy comparison.'
-                )
-        except SourceError as error:
-            if error.code not in ('RETAINED_CONTENT_INVALID', 'RETAINED_PARITY_FAILED'):
-                raise
-            self.failures.record(
-                operation='repair',
-                error_code=error.code,
-                message=failure_message(error),
-                scope='PARTITION',
-                partition=key,
-                revision=record.revision,
-                build_id=record.build_id,
-            )
-        else:
-            self.failures.recover(operation='repair', partition=key)
-            return record
+        partition = self.spec.canonical.partition(key)
         build_id = uuid4()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'heavy'):
-                partition = self.spec.canonical.partition(key)
+            with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
+                try:
+                    self._validate_retained(record)
+                except SourceError as error:
+                    if error.code != 'RETAINED_CONTENT_INVALID':
+                        raise
+                    self.failures.record(
+                        operation='repair',
+                        error_code=error.code,
+                        message=failure_message(error),
+                        scope='PARTITION',
+                        partition=key,
+                        revision=record.revision,
+                        build_id=record.build_id,
+                    )
+                else:
+                    self.failures.recover(operation='repair', partition=key)
+                    return record
                 expected = self.store.generation(partition)
                 revision = self.spec.canonical.fetch(partition)
                 rebuilt = self._build_components(partition, revision, build_id, expected)
-                with source_lock(self.lock_root, self.spec.key, _partition_lock(partition)):
-                    self.spec.canonical.revalidate(partition, revision)
-                    self._activate(rebuilt, expected)
+                self.spec.canonical.revalidate(partition, revision)
+                self._activate(rebuilt, expected)
                 self.failures.recover(operation='repair', partition=key)
                 self.failures.recover(operation='component', partition=key)
                 return rebuilt
         except Exception as error:
             self._record_attempt_failure('repair', key, build_id, error)
-            raise
-
-    def cleanup_verification(self, *, dry_run: bool = True) -> tuple[str, ...]:
-        """Reclaim an interrupted comparison workspace under the source heavy lock."""
-        self.spec.require_enabled('cleanup')
-        self.require_shared_mount()
-        database = f'{self.store.database}_source_parity_{self.spec.key}'
-        try:
-            with source_lock(self.lock_root, self.spec.key, 'heavy'):
-                found = self.store.execute(
-                    'SELECT name FROM system.databases WHERE name=%(database)s OR startsWith(name, %(prefix)s) ORDER BY name',
-                    {'database': database, 'prefix': database + '_'},
-                )
-                if found:
-                    get_dagster_logger('origo.sources').info(
-                        'source=%s phase=interrupted_comparison_cleanup database=%s dry_run=%s run=%s',
-                        self.spec.key,
-                        database,
-                        dry_run,
-                        self.run_id,
-                    )
-                    if not dry_run:
-                        for (workspace,) in found:
-                            self.store.execute(f'DROP DATABASE {identifier(str(workspace))} SYNC')
-                if not dry_run:
-                    self.failures.recover(operation='parity_cleanup')
-                return tuple(str(row[0]) for row in found)
-        except Exception as error:
-            self.failures.record(
-                operation='parity_cleanup',
-                scope='NONE',
-                error_code=failure_code(error),
-                message=failure_message(error),
-            )
             raise
 
     def cleanup(self, *, dry_run: bool = True) -> tuple[str, ...]:
@@ -739,14 +687,13 @@ class SourceRuntime:
                     related_event=row[2],
                 )
 
-    def verify(self, key: str, *, force: bool = False) -> tuple[StateRecord, dict[str, object]]:
-        """Verify current retained contents and parity for the exact active generation."""
-        self.spec.require_enabled('verify')
+    def reconcile(self, key: str) -> StateRecord:
+        """Re-check the retained contents and official revision of the active generation."""
+        self.spec.require_enabled('reconcile')
         self.require_shared_mount()
+        partition = self.spec.canonical.partition(key)
         try:
-            with partition_work(
-                self.lock_root, self.spec.key, _partition_lock(self.spec.canonical.partition(key))
-            ):
+            with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
                 record = next(
                     (
                         item
@@ -759,70 +706,19 @@ class SourceRuntime:
                     raise SourceError(
                         'ACTIVE_PARTITION_MISSING', 'No canonical generation is active.'
                     )
-                rows = self.store.execute(
-                    f"""SELECT checks_json FROM {self.store.table('source_parity_log')}
-                    WHERE source_key=%(source)s AND partition_key=%(partition)s
-                      AND revision=%(revision)s AND build_id=%(build)s AND generation=%(generation)s
-                    ORDER BY recorded_at DESC LIMIT 1""",
-                    {
-                        'source': self.spec.key,
-                        'partition': key,
-                        'revision': record.revision,
-                        'build': record.build_id,
-                        'generation': record.generation,
-                    },
-                )
-                if rows and not force:
-                    checks: object = json.loads(str(rows[0][0]))
-                    if not isinstance(checks, dict):
-                        raise SourceError(
-                            'PARITY_EVIDENCE_INVALID', 'Parity evidence must be an object.'
-                        )
-                    result = {
-                        str(name): value for name, value in cast(dict[str, object], checks).items()
-                    }
-                else:
-                    if self.spec.verify is None:
-                        raise SourceError(
-                            'PARITY_VERIFIER_MISSING', 'No legacy verifier is registered.'
-                        )
-                    result = self.spec.verify(self.store.client, self.store.database, record)
+                self.failures.retire_removed_codes(partition=key)
                 self._validate_retained(record)
-                if set(result) != dict(record.component_hashes).keys():
-                    raise SourceError(
-                        'PARITY_EVIDENCE_INVALID', 'Parity proof has an incomplete component set.'
-                    )
-                for component, digest in record.component_hashes:
-                    check = result[component]
-                    if (
-                        not isinstance(check, dict)
-                        or cast(dict[str, object], check).get('sha256') != digest
-                    ):
-                        raise SourceError(
-                            'PARITY_EVIDENCE_INVALID',
-                            'Parity proof does not match retained component hashes.',
-                        )
-                if not rows:
-                    self.store.execute(
-                        f'INSERT INTO {self.store.table("source_parity_log")} VALUES',
-                        [
-                            (
-                                self.spec.key,
-                                key,
-                                record.revision,
-                                record.build_id,
-                                record.generation,
-                                json.dumps(result, sort_keys=True),
-                                self.run_id,
-                                datetime.now(UTC),
-                            )
-                        ],
-                    )
+                self.spec.canonical.revalidate(
+                    record.partition, Revision(record.revision, '', '{}', 0, lambda: iter(()))
+                )
                 if self.store.generation(record.partition) != record.generation:
                     raise SourceError(
-                        'GENERATION_CHANGED', 'Activation advanced during verification.'
+                        'GENERATION_CHANGED', 'Activation advanced during reconciliation.'
                     )
-                self.failures.recover(operation='verification', partition=key)
+                # A validated active generation closes open integrity findings, the
+                # retired comparison operation's findings and failed repair attempts.
+                for operation in ('integrity', 'verification', 'repair'):
+                    self.failures.recover(operation=operation, partition=key)
                 self._recover_committed_failure(record)
                 pending = self.store.execute(
                     f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
@@ -837,17 +733,17 @@ class SourceRuntime:
                         'A failed ingestion attempt still requires a successful retry.',
                     )
                 get_dagster_logger('origo.sources').info(
-                    'source=%s partition=%s revision=%s build=%s generation=%s phase=verified',
+                    'source=%s partition=%s revision=%s build=%s generation=%s phase=reconciled',
                     self.spec.key,
                     key,
                     record.revision,
                     record.build_id,
                     record.generation,
                 )
-                return record, result
+                return record
         except Exception as error:
             self.failures.record(
-                operation='verification',
+                operation='integrity',
                 scope='PARTITION',
                 partition=key,
                 error_code=failure_code(error),

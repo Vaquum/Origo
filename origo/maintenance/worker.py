@@ -65,6 +65,7 @@ class Outcome(BaseModel):
     source_archive_error_count: int = 0
     source_archive_errors: dict[str, str] = Field(default_factory=dict)
     violations: list[str] = Field(default_factory=lambda: list[str]())
+    pending: list[str] = Field(default_factory=lambda: list[str]())
 
 
 def directory_bytes(layout: Layout, deadline: float) -> int:
@@ -413,6 +414,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
             source_archive_error_count=archive_error_count,
             source_archive_errors=archive_errors,
             violations=violations,
+            pending=list(diagnostics.pending),
         )
 
 

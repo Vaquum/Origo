@@ -496,3 +496,12 @@ def test_binance_spot_depth20_reconcile_job_reports_existing_table_minutes(
     assert instance.get_materialized_partitions(
         origo_assets['refresh_binance_spot_depth20_1m_origo'].key
     ) == {partition_key}
+
+
+@pytest.fixture(autouse=True)
+def _schedule_run_storage(monkeypatch):
+    from functools import partial
+
+    with DagsterInstance.local_temp() as instance:
+        monkeypatch.setattr(__name__ + '.build_schedule_context', partial(build_schedule_context, instance=instance))
+        yield

@@ -40,6 +40,9 @@ from dagster import (
     schedule,
 )
 
+from .orchestration.policy import has_outstanding, outstanding_configs, outstanding_partitions
+from .orchestration.recovery import recover_orchestration_job
+
 from .assets.daily_trades_to_origo import (
     DEFAULT_BINANCE_SPOT_DAILY_TRADES_BASE_URL,
     daily_partitions as spot_daily_partitions,
@@ -557,6 +560,9 @@ backfill_binance_spot_klines_to_mount_job = define_asset_job(
 
 publish_binance_spot_klines_to_mount_schedule = ScheduleDefinition(
     name="publish_binance_spot_klines_to_mount_schedule",
+    should_execute=lambda context: not has_outstanding(
+        context.instance, 'publish_binance_spot_klines_to_mount_job'
+    ),
     job=publish_binance_spot_klines_to_mount_job,
     cron_schedule="* * * * *",
     execution_timezone="UTC",
@@ -732,9 +738,12 @@ def _depth_reconciliation_run_requests(
     client = make_depth_clickhouse_client(settings)
     run_key_suffix = _scheduled_run_key_suffix(context)
     run_requests: list[RunRequest] = []
+    pending = outstanding_partitions(context.instance, f"refresh_binance_spot_{spec.series.removesuffix('_snapshots')}_data_source_job")
 
     try:
         for minute_start, partition_key in _depth_candidate_minutes(context, spec):
+            if partition_key in pending:
+                continue
             status = _depth_store_status(client, settings.database, spec, minute_start)
             if status.snapshot_rows == 0 and _depth_source_has_rows(spec, minute_start):
                 run_requests.append(
@@ -759,9 +768,12 @@ def _depth_projection_reconciliation_run_requests(
     client = make_depth_clickhouse_client(settings)
     run_key_suffix = _scheduled_run_key_suffix(context)
     run_requests: list[RunRequest] = []
+    pending = outstanding_partitions(context.instance, f"repair_binance_spot_{spec.series.removesuffix('_snapshots')}_projection_job")
 
     try:
         for minute_start, partition_key in _depth_candidate_minutes(context, spec):
+            if partition_key in pending:
+                continue
             status = _depth_store_status(client, settings.database, spec, minute_start)
             if status.snapshot_rows > 0 and status.projection_rows == 0:
                 run_requests.append(
@@ -786,9 +798,15 @@ def _depth_arrow_reconciliation_run_requests(
     client = make_depth_clickhouse_client(settings)
     run_key_suffix = _scheduled_run_key_suffix(context)
     run_requests: list[RunRequest] = []
+    pending = outstanding_configs(
+        context.instance, 'build_depth_snapshot_store_arrow_job',
+        'build_depth_snapshot_store_arrow', 'source_partition_key', partition=spec.series,
+    )
 
     try:
         for minute_start, partition_key in _depth_candidate_minutes(context, spec):
+            if partition_key in pending:
+                continue
             status = _depth_store_status(client, settings.database, spec, minute_start)
             if status.snapshot_rows > 0 and not _depth_arrow_is_complete(status, minute_start):
                 run_requests.append(
@@ -1484,7 +1502,7 @@ defs = Definitions.merge(
     defs,
     Definitions(
         assets=[maintain_operational_metadata],
-        jobs=[maintain_operational_metadata_job, prepare_revisioned_sources_job],
+        jobs=[maintain_operational_metadata_job, prepare_revisioned_sources_job, recover_orchestration_job],
         schedules=[operational_metadata_maintenance_schedule],
     ),
     *(

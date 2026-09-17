@@ -2,6 +2,10 @@
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
 
+# v3.9.3
+
+Bound duplicate scheduling, reserve native Dagster capacity for routine and backfill work, launch concurrently, and recover retired workers and redundant queued runs during deployment.
+
 # v3.9.2
 
 - Run source backfills as bounded parallel native daily partitions with dependent file publication; use native bulk parsing, transport and versioned content proofs while retaining legacy generation verification.

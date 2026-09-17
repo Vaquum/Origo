@@ -579,7 +579,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             tags={
                 'origo_source_key': spec.key,
                 'origo_source_operation': 'backfill',
-                'dagster/max_runtime': '0',
+                'dagster/max_runtime': '93600',
             },
         ),
     )
@@ -650,10 +650,16 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                             'Source event already succeeded or has a nonterminal run.'
                         )
                     attempt += 1
+                    if attempt > spec.orchestration.retry_count:
+                        return SkipReason('Automatic source attempts exhausted; use native retry after fixing the failure.')
+                    records = context.instance.get_run_records(RunsFilter(run_ids=[latest.run_id]), limit=1)
+                    ended = records[0].end_time if records else None
+                    if ended is not None and datetime.now(UTC).timestamp() - ended < spec.orchestration.retry_delay:
+                        return SkipReason('Source retry delay has not elapsed.')
                 else:
                     receipt = runtime.store.run_receipt(identity)
                     if receipt is not None:
-                        previous_attempt, status, _ = receipt
+                        previous_attempt, status, receipt_run = receipt
                         if status == 'SUCCESS':
                             return SkipReason('Source event has a durable successful-run receipt.')
                         if status not in ('FAILURE', 'CANCELED'):
@@ -661,6 +667,19 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                                 f'Retired source event has nonterminal receipt: {status}'
                             )
                         attempt = previous_attempt + 1
+                        if attempt > spec.orchestration.retry_count:
+                            return SkipReason('Automatic source attempts exhausted; use native retry after fixing the failure.')
+                        terminal_event = uuid5(
+                            NAMESPACE_URL, f'{identity}:{previous_attempt}:{receipt_run}:{status}'
+                        )
+                        recent = runtime.store.execute(
+                            f'SELECT event_id FROM {runtime.store.table("source_run_log")} '
+                            'WHERE event_id=%(event)s AND '
+                            'recorded_at > now64(6) - toIntervalSecond(%(delay)s) LIMIT 1',
+                            {'event': terminal_event, 'delay': spec.orchestration.retry_delay},
+                        )
+                        if recent:
+                            return SkipReason('Source retry delay has not elapsed.')
                 event_id = uuid5(NAMESPACE_URL, f'{identity}:{attempt}:REQUESTED')
                 exists = runtime.store.execute(
                     f'SELECT event_id FROM {runtime.store.table("source_run_log")} WHERE event_id=%(event)s',
@@ -750,6 +769,10 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
     def audit(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
         if spec.rollout_stage == RolloutStage.DORMANT:
             return SkipReason(f'{spec.key} is DORMANT.')
+        from origo.orchestration.policy import has_outstanding
+
+        if has_outstanding(context.instance, job_names['audit']):
+            return SkipReason('Source audit already has outstanding work.')
         tick = context.scheduled_execution_time or datetime.now(UTC)
         return RunRequest(run_key=f'{spec.key}:audit:{tick.isoformat()}')
 

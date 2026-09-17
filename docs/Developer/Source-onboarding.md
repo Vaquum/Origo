@@ -270,3 +270,19 @@ revised build, independent parity verification and all declared shadow files.
 The report excludes Dagster startup and network upload; measure those in the
 native GUI acceptance run as well. This is a developer benchmark, not an
 operator backfill procedure.
+
+## Shared production queue contract
+
+Read [Production orchestration](Orchestration.md) before adding scheduled or
+sensor-triggered work. Every registered source inherits the native queue's
+backfill/routine limits, concurrent launching, duplicate admission and worker
+recovery. Preserve partition/configuration and source event/state tags: they
+identify distinct work and protect backfill receipts. Do not invent a run-key
+scheme that treats every schedule tick as new work while its partition is pending.
+
+Required onboarding evidence includes the source backfill running alongside routine
+ingestion and publication, with measured dispatch latency and source rows/second.
+Also test repeated requests, a failed/stalled worker and deployment recovery.
+Distinct source gaps must remain runnable; duplicate requests must not multiply;
+normal production must retain capacity; backfill throughput must meet the same
+workload's accepted baseline. Record these results in the source slice and PR.

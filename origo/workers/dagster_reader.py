@@ -12,7 +12,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -38,16 +38,8 @@ BACKFILLS_QUERY = """query Backfills {
     __typename ... on PartitionBackfills { results { id status timestamp assetSelection { path } } }
   }
 }"""
-# One tag per filter: the production run storage answers a two-tag filter in eleven
-# seconds and a one-tag filter in a fraction of one, so the source is matched client-side.
-BACKFILL_RUNS_QUERY = """query BackfillRuns($job: String!, $tags: [ExecutionTag!]!) {
-  byJob: runsOrError(filter: {pipelineName: $job}, limit: 1) {
-    __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
-  }
-  byTags: runsOrError(filter: {tags: $tags}, limit: 25) {
-    __typename ... on Runs { results { runId status creationTime jobName tags { key value } } }
-  }
-  active: runsOrError(filter: {statuses: [QUEUED, NOT_STARTED, STARTING, STARTED, CANCELING]}, limit: 200) {
+RUNS_QUERY = """query Runs($filter: RunsFilter!, $cursor: String, $limit: Int!) {
+  runsOrError(filter: $filter, cursor: $cursor, limit: $limit) {
     __typename ... on Runs {
       results { runId status creationTime jobName tags { key value } assetSelection { path } }
     }
@@ -256,6 +248,30 @@ class DagsterReader:
             )
         return sorted(found, key=lambda backfill: backfill.timestamp, reverse=True)
 
+    def _run_pages(
+        self,
+        run_filter: Mapping[str, object],
+        *,
+        limit: int,
+        until: Callable[[RunRecord], bool] | None = None,
+    ) -> list[RunRecord]:
+        """Runs matching ``run_filter``, newest first, page by page until the listing ends
+        or ``until`` accepts a run, which is then the last one returned."""
+        found: list[RunRecord] = []
+        cursor: str | None = None
+        while True:
+            data = self.query(
+                'Runs', RUNS_QUERY, {'filter': dict(run_filter), 'cursor': cursor, 'limit': limit}
+            )
+            page = _runs(data.get('runsOrError'), 'runs')
+            for run in page:
+                found.append(run)
+                if until is not None and until(run):
+                    return found
+            if len(page) < limit:
+                return found
+            cursor = page[-1].run_id
+
     def backfill_owns_publication(self, source_key: str) -> bool:
         """The rule of ``origo.sources.prepare.backfill_owns_publication`` read through
         GraphQL: an active native backfill or backfill run owns publication, and so does the
@@ -267,18 +283,21 @@ class DagsterReader:
         backfills = self._backfills(asset_key)
         if any(backfill.status in _ACTIVE_BACKFILL_STATUSES for backfill in backfills):
             return True
-        data = self.query(
-            'BackfillRuns',
-            BACKFILL_RUNS_QUERY,
-            {
-                'job': backfill_job,
-                'tags': [{'key': 'origo_source_operation', 'value': 'backfill'}],
-            },
+        # One filter each: the production run storage answers a two-tag filter in eleven
+        # seconds and a single-tag or job-name filter in a fraction of one, so the source
+        # is matched while paging newest first, and no page window is ever the limit.
+        backfill_tag = {'key': 'origo_source_operation', 'value': 'backfill'}
+        by_job = self._run_pages({'pipelineName': backfill_job}, limit=1, until=lambda run: True)
+        by_tags = self._run_pages(
+            {'tags': [backfill_tag]},
+            limit=25,
+            until=lambda run: run.tags.get('origo_source_key') == source_key,
         )
-        runs = {name: _runs(data.get(name), name) for name in ('byJob', 'byTags', 'active')}
-        runs['byTags'] = [
-            run for run in runs['byTags'] if run.tags.get('origo_source_key') == source_key
-        ][:1]
+        by_tags = [run for run in by_tags[-1:] if run.tags.get('origo_source_key') == source_key]
+        active = self._run_pages(
+            {'statuses': ['QUEUED', 'NOT_STARTED', 'STARTING', 'STARTED', 'CANCELING']}, limit=200
+        )
+        runs = {'byJob': by_job, 'byTags': by_tags, 'active': active}
 
         def is_source_backfill(run: RunRecord) -> bool:
             return run.job_name == backfill_job or (

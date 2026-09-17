@@ -11,7 +11,6 @@ from typing import Protocol, cast
 import dagster
 from dagster import (
     AssetKey,
-    AssetRecordsFilter,
     DagsterEventType,
     DagsterRunStatus,
     DailyPartitionsDefinition,
@@ -129,11 +128,14 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
     }
 
 
-def _reconciliation_selection(keys: list[str], urgent: list[str], offset: int) -> list[str]:
+def _reconciliation_selection(urgent: list[str], offset: int) -> list[str]:
+    """Up to four of the partitions whose version or status differs, rotating the start
+    with the tick so a failing batch cannot starve the rest. Nothing else is selected: a
+    canonical day whose Dagster record matches the store is not re-materialized, because
+    every build and repair re-checks its retained content and an operator can launch the
+    canonical job for any day."""
     start = offset * 4 % max(1, len(urgent))
-    prioritized = (urgent[start:] + urgent[:start])[:4]
-    rotating = keys[offset % len(keys) : offset % len(keys) + 1] if keys else []
-    return list(dict.fromkeys(prioritized + rotating))
+    return (urgent[start:] + urgent[:start])[:4]
 
 
 def _partition_runs(
@@ -277,9 +279,7 @@ def build_reconciliation_sensor(
                 for key, status in statuses.items()
                 if status is not None and status.value == 'FAILED'
             ]
-            selected = _reconciliation_selection(
-                keys, list(dict.fromkeys(changed + failed_keys)), offset
-            )
+            selected = _reconciliation_selection(list(dict.fromkeys(changed + failed_keys)), offset)
             now = datetime.now(UTC).timestamp()
             requests = (
                 [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
@@ -337,13 +337,6 @@ def build_reconciliation_sensor(
                     delay = (60, 300, 1800, 3600)[attempt - 1]
                     ended = latest_record.end_time or latest_record.update_timestamp.timestamp()
                     if now - ended < delay:
-                        continue
-                elif key not in changed and key not in failed_keys:
-                    materializations = context.instance.fetch_materializations(
-                        AssetRecordsFilter(asset_key=AssetKey(asset_name), asset_partitions=[key]),
-                        limit=1,
-                    ).records
-                    if materializations and now - materializations[0].timestamp < 86400:
                         continue
                 requests.append(
                     RunRequest(

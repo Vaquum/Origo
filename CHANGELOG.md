@@ -1,3 +1,7 @@
+# v3.13.2
+
+- Reconcile only what differs: the source reconciliation sensor requests canonical runs for partitions whose Dagster record differs from the store or whose last run failed, and no longer adds one rotating day per tick, which re-materialized every canonical day once every two days (about 1,440 `refresh_binance_spot_trades_canonical_source_job` runs a day while nothing had changed) and, before the briefing guard, launched a briefing publish for each of them.
+
 # v3.13.1
 
 - Keep the provisional worker alive through the `mount` render: the deploy container's memory limit is raised to 16 GiB (the render needs about 5.1 GiB of RSS at peak, which the Dagster container never bounded, and 3 GiB killed the worker on every tick), and the backfill-ownership lookup asks the run storage for one tag and matches the source client-side, because the two-tag filter takes eleven seconds on production and timed out every tick.

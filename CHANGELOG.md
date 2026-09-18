@@ -1,3 +1,7 @@
+# v3.14.0
+
+- Add the Binance perp trades revisioned source beside spot: the daily adapter serves the vision futures archives from the 2019 first day, the provisional adapter pages closed minutes through `aggTrades` plus `historicalTrades` (paging back 1,000 ids before the locator because an aggregate's open time can hide in-minute trades, recomputing the cents-rounded `quoteQty` as price times quantity, and normalizing decimals so the API's padded text matches the archive's trimmed text), the perp profile, formulas and consumers mirror spot with CANARY shadow publication, and the REST replay test asserts full row equality against the archive on all 2,325 rows of the captured minute. The legacy futures pipeline is deleted in the same slice: its tables, jobs, schedules and tests are removed and the briefing reads the revisioned source.
+
 # v3.13.2
 
 - Reconcile only what differs: the source reconciliation sensor requests canonical runs for partitions whose Dagster record differs from the store or whose last run failed, and no longer adds one rotating day per tick, which re-materialized every canonical day once every two days (about 1,440 `refresh_binance_spot_trades_canonical_source_job` runs a day while nothing had changed) and, before the briefing guard, launched a briefing publish for each of them.

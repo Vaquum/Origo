@@ -7,9 +7,8 @@
 # 5. Add the job to the jobs list
 # 6. If applicable, add a schedule for the job and add it to the schedules list
 
-import os
-from collections.abc import Iterator, Sequence
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import date
 from typing import Protocol
 
 from dagster import (
@@ -20,22 +19,14 @@ from dagster import (
     AssetSpec,
     Failure,
     FreshnessPolicy,
-    DagsterInstance,
-    DagsterRun,
-    DagsterRunStatus,
-    DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
     RunRequest,
-    RunsFilter,
-    ScheduleEvaluationContext,
     SkipReason,
     asset_sensor,
-    build_schedule_from_partitioned_job,
     define_asset_job,
     in_process_executor,
     multi_asset_check,
-    schedule,
 )
 
 from .orchestration.recovery import recover_orchestration_job
@@ -46,20 +37,6 @@ from .assets.create_origo_database import (
     create_origo_database,
     get_clickhouse_settings as get_origo_clickhouse_settings,
     make_clickhouse_client as make_origo_clickhouse_client,
-)
-from .assets.create_binance_futures_trades_table_origo import (
-    LEDGER_TABLE_NAME as FUTURES_DAILY_LEDGER_TABLE_NAME,
-)
-from .utils.daily_gap_repair import (
-    REPAIR_TERMINATION_GRACE_SECONDS,
-    DailyGapRepairSpec,
-    gap_repair_run_requests,
-)
-from .assets.create_binance_futures_trades_table_origo import (
-    create_binance_daily_futures_trades_table_origo,
-)
-from .assets.create_binance_futures_klines_table_origo import (
-    create_binance_futures_klines_table_origo,
 )
 from .assets.create_binance_spot_depth20_1m_table_origo import (
     create_binance_spot_depth20_1m_table_origo,
@@ -73,23 +50,11 @@ from .assets.create_binance_spot_depth200_1m_table_origo import (
 from .assets.create_binance_spot_depth200_snapshots_table_origo import (
     create_binance_spot_depth200_snapshots_table_origo,
 )
-from .assets.refresh_binance_futures_klines_origo import refresh_binance_futures_klines_origo
 from .assets.refresh_binance_spot_depth20_1m_origo import (
     refresh_binance_spot_depth20_1m_origo,
 )
 from .assets.refresh_binance_spot_depth200_1m_origo import (
     refresh_binance_spot_depth200_1m_origo,
-)
-from .assets.create_aligned_1m_exchange_table_origo import (
-    create_aligned_1m_exchange_table_origo,
-)
-from .assets.daily_futures_trades_to_origo import (
-    DEFAULT_BINANCE_FUTURES_DAILY_TRADES_BASE_URL,
-    daily_partitions as futures_daily_partitions,
-    insert_daily_binance_futures_trades_to_origo,
-)
-from .assets.refresh_aligned_1m_exchange_from_binance_futures_origo import (
-    refresh_aligned_1m_exchange_from_binance_futures_origo,
 )
 from .assets.sync_binance_spot_depth20_snapshots_to_origo import (
     sync_binance_spot_depth20_snapshots_to_origo,
@@ -117,20 +82,6 @@ class _AssetEventLike(Protocol):
     run_id: str
 
 
-def _futures_daily_trades_base_url() -> str:
-    return os.environ.get(
-        'BINANCE_FUTURES_DAILY_TRADES_BASE_URL', DEFAULT_BINANCE_FUTURES_DAILY_TRADES_BASE_URL
-    )
-
-
-FUTURES_DAILY_GAP_REPAIR_SPEC = DailyGapRepairSpec(
-    market='futures',
-    ledger_table=FUTURES_DAILY_LEDGER_TABLE_NAME,
-    earliest_partition=futures_daily_partitions.start.date(),
-    get_base_url=_futures_daily_trades_base_url,
-)
-
-
 # Database Maintenance Jobs
 
 create_origo_database_job = define_asset_job(
@@ -138,17 +89,6 @@ create_origo_database_job = define_asset_job(
     selection=["create_origo_database"]
 )
 
-
-create_binance_daily_futures_trades_table_origo_job = define_asset_job(
-    name="create_binance_daily_futures_trades_table_origo_job",
-    selection=["create_binance_daily_futures_trades_table_origo"]
-)
-
-
-create_binance_futures_klines_table_origo_job = define_asset_job(
-    name="create_binance_futures_klines_table_origo_job",
-    selection=["create_binance_futures_klines_table_origo"]
-)
 
 create_binance_spot_depth20_snapshots_table_origo_job = define_asset_job(
     name="create_binance_spot_depth20_snapshots_table_origo_job",
@@ -171,11 +111,6 @@ create_binance_spot_depth200_1m_table_origo_job = define_asset_job(
 )
 
 
-create_aligned_1m_exchange_table_origo_job = define_asset_job(
-    name="create_aligned_1m_exchange_table_origo_job",
-    selection=["create_aligned_1m_exchange_table_origo"]
-)
-
 # Data Insertion Jobs
 
 
@@ -188,14 +123,6 @@ _BINANCE_SPOT_DEPTH200_DATA_SOURCE_SELECTION = [
     'sync_binance_spot_depth200_snapshots_to_origo',
     'refresh_binance_spot_depth200_1m_origo',
 ]
-
-refresh_binance_futures_data_source_job = define_asset_job(
-    name="refresh_binance_futures_data_source_job",
-    selection=[
-        "insert_daily_binance_futures_trades_to_origo",
-        "refresh_binance_futures_klines_origo",
-        "refresh_aligned_1m_exchange_from_binance_futures_origo",
-    ])
 
 refresh_binance_spot_depth20_data_source_job = define_asset_job(
     name='refresh_binance_spot_depth20_data_source_job',
@@ -251,100 +178,6 @@ build_depth_snapshot_store_arrow_job = define_asset_job(
     selection=[build_depth_snapshot_store_arrow],
     executor_def=in_process_executor,
 )
-
-def _scheduled_time(context: ScheduleEvaluationContext) -> datetime:
-    return context.scheduled_execution_time or datetime.now(timezone.utc)
-
-
-daily_binance_futures_pipeline_schedule = build_schedule_from_partitioned_job(
-    refresh_binance_futures_data_source_job,
-    name='daily_binance_futures_pipeline_schedule',
-    hour_of_day=10,
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-
-
-_IN_PROGRESS_RUN_STATUSES = [
-    DagsterRunStatus.QUEUED,
-    DagsterRunStatus.NOT_STARTED,
-    DagsterRunStatus.STARTING,
-    DagsterRunStatus.STARTED,
-    DagsterRunStatus.CANCELING,
-]
-
-
-_RECENTLY_TERMINAL_RUN_STATUSES = [
-    DagsterRunStatus.FAILURE,
-    DagsterRunStatus.CANCELED,
-]
-
-
-def _partition_days(runs: Sequence[DagsterRun]) -> set[date]:
-    days: set[date] = set()
-    for run in runs:
-        partition_key = run.tags.get('dagster/partition')
-        if partition_key is not None:
-            days.add(date.fromisoformat(partition_key))
-    return days
-
-
-def _active_partition_days(instance: DagsterInstance, job_name: str) -> set[date]:
-    """Partitions of ``job_name`` that repair must not touch right now.
-
-    Two groups: runs currently in progress (a regular daily tick inside its
-    op-retry backoff stays STARTED for up to ~23h), and runs that reached a
-    terminal state within the last REPAIR_TERMINATION_GRACE_SECONDS — run
-    monitoring force-marks a timed-out run FAILED without confirming its
-    worker exited, so the partition may still be written by the old worker.
-    Racing either with a repair run would interleave the non-atomic
-    delete-then-insert.
-    """
-    in_progress = instance.get_runs(
-        filters=RunsFilter(job_name=job_name, statuses=_IN_PROGRESS_RUN_STATUSES)
-    )
-    recently_terminal = instance.get_runs(
-        filters=RunsFilter(
-            job_name=job_name,
-            statuses=_RECENTLY_TERMINAL_RUN_STATUSES,
-            updated_after=datetime.now(timezone.utc)
-            - timedelta(seconds=REPAIR_TERMINATION_GRACE_SECONDS),
-        )
-    )
-    return _partition_days(in_progress) | _partition_days(recently_terminal)
-
-
-def _daily_gap_repair_run_requests(
-    context: ScheduleEvaluationContext,
-    spec: DailyGapRepairSpec,
-    job_name: str,
-) -> list[RunRequest] | SkipReason:
-    settings = get_origo_clickhouse_settings()
-    client = make_origo_clickhouse_client(settings)
-    try:
-        return gap_repair_run_requests(
-            client,
-            settings.database,
-            spec,
-            _scheduled_time(context).astimezone(timezone.utc).date(),
-            _active_partition_days(context.instance, job_name),
-        )
-    finally:
-        client.disconnect()
-
-
-@schedule(
-    job=refresh_binance_futures_data_source_job,
-    cron_schedule='30 * * * *',
-    execution_timezone='UTC',
-    default_status=DefaultScheduleStatus.RUNNING,
-)
-def binance_futures_daily_gap_repair_schedule(
-    context: ScheduleEvaluationContext,
-) -> list[RunRequest] | SkipReason:
-    return _daily_gap_repair_run_requests(
-        context, FUTURES_DAILY_GAP_REPAIR_SPEC, 'refresh_binance_futures_data_source_job'
-    )
-
 
 # The first day of binance_spot_depth20_1m in production. A canonical spot day before it
 # (a historical relaunch) has no order-book rows, so a briefing run for it can only fail.
@@ -473,29 +306,21 @@ defs = Definitions(
     assets=[origo_monitor,
             binance_spot_depth_live_feed,
             create_origo_database,
-            create_binance_daily_futures_trades_table_origo,
-            create_binance_futures_klines_table_origo,
             create_binance_spot_depth20_snapshots_table_origo,
             create_binance_spot_depth20_1m_table_origo,
             create_binance_spot_depth200_snapshots_table_origo,
             create_binance_spot_depth200_1m_table_origo,
-            create_aligned_1m_exchange_table_origo,
-            insert_daily_binance_futures_trades_to_origo,
-            refresh_binance_futures_klines_origo,
             sync_binance_spot_depth20_snapshots_to_origo,
             refresh_binance_spot_depth20_1m_origo,
             reconcile_binance_spot_depth20_partition_state_origo,
             sync_binance_spot_depth200_snapshots_to_origo,
             refresh_binance_spot_depth200_1m_origo,
             reconcile_binance_spot_depth200_partition_state_origo,
-            refresh_aligned_1m_exchange_from_binance_futures_origo,
             publish_btc_briefing_feed,
             publish_btc_briefing_history,
             build_depth_snapshot_store_arrow],
 
     schedules=[
-        daily_binance_futures_pipeline_schedule,
-        binance_futures_daily_gap_repair_schedule,
     ],
 
     asset_checks=[origo_monitor_checks],
@@ -506,14 +331,10 @@ defs = Definitions(
     ],
 
     jobs=[create_origo_database_job,
-          create_binance_daily_futures_trades_table_origo_job,
-          create_binance_futures_klines_table_origo_job,
           create_binance_spot_depth20_snapshots_table_origo_job,
           create_binance_spot_depth20_1m_table_origo_job,
           create_binance_spot_depth200_snapshots_table_origo_job,
           create_binance_spot_depth200_1m_table_origo_job,
-          create_aligned_1m_exchange_table_origo_job,
-          refresh_binance_futures_data_source_job,
           refresh_binance_spot_depth20_data_source_job,
           refresh_binance_spot_depth200_data_source_job,
           backfill_binance_spot_depth20_data_source_job,

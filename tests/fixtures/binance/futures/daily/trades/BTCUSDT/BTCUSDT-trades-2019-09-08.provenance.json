@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2019-09-08.zip",
+  "date": "2019-09-08",
+  "zip_sha256": "22a2a3b8b90deab1376a0d2112af9bdce1ccaeaa0db4cbd149d61dd26e311074",
+  "checksum_sidecar": "22a2a3b8b90deab1376a0d2112af9bdce1ccaeaa0db4cbd149d61dd26e311074  BTCUSDT-trades-2019-09-08.zip",
+  "csv_member": "BTCUSDT-trades-2019-09-08.csv",
+  "csv_header": null,
+  "official_row_count": 3754,
+  "selected_row_start": 0,
+  "selected_row_stop": 3754,
+  "selected_sha256": "5aba1c3e8e55a98154e5226df872d308a8ba0e0a4e8b3aa67166c616e5411395",
+  "captured_at": "2026-09-18T06:22:09.706558+00:00",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

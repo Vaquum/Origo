@@ -56,6 +56,12 @@ REMOVED_ASSET_MODULES = (
     'cleanup_binance_spot_latest_origo',
     'publish_binance_spot_klines_to_mount',
     'build_bar_store_arrow',
+    'create_binance_futures_trades_table_origo',
+    'create_binance_futures_klines_table_origo',
+    'daily_futures_trades_to_origo',
+    'refresh_binance_futures_klines_origo',
+    'create_aligned_1m_exchange_table_origo',
+    'refresh_aligned_1m_exchange_from_binance_futures_origo',
 )
 
 REMOVED_UTIL_MODULES = (
@@ -66,6 +72,8 @@ REMOVED_UTIL_MODULES = (
     'publish_binance_spot_dollar_kline_snapshot_to_huggingface',
     'binance_file_to_polars',
     'check_if_has_header',
+    'atomic_day_write',
+    'daily_gap_repair',
 )
 
 LEGACY_SUMMARY_NAMES = (
@@ -128,3 +136,18 @@ def test_tdw_asset_modules_are_absent() -> None:
 
 def test_legacy_package_is_absent() -> None:
     assert importlib.util.find_spec('tdw_control_plane') is None
+
+
+def test_legacy_futures_jobs_and_schedules_are_absent(origo_definitions_module: object) -> None:
+    defs = getattr(origo_definitions_module, 'defs')
+    names = {job.name for job in defs.jobs} | {schedule.name for schedule in defs.schedules}
+    assert names.isdisjoint(
+        {
+            'refresh_binance_futures_data_source_job',
+            'daily_binance_futures_pipeline_schedule',
+            'binance_futures_daily_gap_repair_schedule',
+            'create_binance_daily_futures_trades_table_origo_job',
+            'create_binance_futures_klines_table_origo_job',
+            'create_aligned_1m_exchange_table_origo_job',
+        }
+    )

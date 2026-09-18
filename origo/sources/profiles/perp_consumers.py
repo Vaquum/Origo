@@ -395,9 +395,20 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
     _write_manifest(root, manifest)
 
 
-def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
-    """Upload every public dataset snapshot from the canonical state and keep a local copy."""
-    store, root = _root(destination, reader, 'huggingface')
+def _huggingface(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    upload: bool = True,
+    kind: str = 'huggingface',
+) -> None:
+    """Render every dataset snapshot from the canonical state and keep a local copy.
+
+    With `upload`, also upload to the public dataset repos; without it (the CANARY
+    shadow consumer) the render stays local and the manifest records no uploads.
+    """
+    store, root = _root(destination, reader, kind)
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
     end = max(record.partition.end for record in snapshot.records)
@@ -405,7 +416,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
     end_limit = end.strftime('%Y-%m-%d %H:%M:%S')
     build = root / 'versions' / (snapshot.token + '-' + uuid4().hex)
     build.mkdir(parents=True)
-    api = HfApi(token=time_snapshot.get_huggingface_token())
+    api = HfApi(token=time_snapshot.get_huggingface_token()) if upload else None
     files: list[dict[str, object]] = []
     uploads: list[dict[str, object]] = []
     with _pinned(store, snapshot) as database:
@@ -465,17 +476,6 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                 ),
                 encoding='utf-8',
             )
-            repo_id = time_snapshot.get_huggingface_dataset_repo_id(
-                repo_id_env=repo_id_env, default_repo_id=default_repo_id
-            )
-            api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
-            api.upload_folder(
-                folder_path=str(folder),
-                repo_id=repo_id,
-                repo_type='dataset',
-                commit_message=f'Add BTCUSDT {label} perp klines snapshot through {export_end_date}',
-                delete_patterns=[f'{file_prefix}*.parquet'],
-            )
             files.append(
                 {
                     'path': str(parquet.relative_to(build)),
@@ -483,21 +483,34 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
                     'sha256': digest,
                 }
             )
-            uploads.append(
-                {
-                    'series': series.name,
-                    'repo_id': repo_id,
-                    'file_name': file_name,
-                    'row_count': frame.height,
-                    'sha256': digest,
-                }
-            )
+            if upload:
+                assert api is not None
+                repo_id = time_snapshot.get_huggingface_dataset_repo_id(
+                    repo_id_env=repo_id_env, default_repo_id=default_repo_id
+                )
+                api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
+                api.upload_folder(
+                    folder_path=str(folder),
+                    repo_id=repo_id,
+                    repo_type='dataset',
+                    commit_message=f'Add BTCUSDT {label} perp klines snapshot through {export_end_date}',
+                    delete_patterns=[f'{file_prefix}*.parquet'],
+                )
+                uploads.append(
+                    {
+                        'series': series.name,
+                        'repo_id': repo_id,
+                        'file_name': file_name,
+                        'row_count': frame.height,
+                        'sha256': digest,
+                    }
+                )
     manifest: dict[str, object] = {
         'source_key': store.spec.key,
         'state_token': store.canonical_token(snapshot),
         'pinned_token': snapshot.token,
         'active_through': end.isoformat(),
-        'kind': 'huggingface',
+        'kind': kind,
         'export_end_date': export_end_date,
         'uploads': uploads,
         'files': files,
@@ -506,9 +519,14 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
     _commit_manifest(store, root, manifest)
 
 
+def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+    """Render the snapshot files locally without uploading; the CANARY shadow publication."""
+    _huggingface(reader, snapshot, destination, upload=False, kind='huggingface_shadow')
+
+
 Renderer = Callable[[SnapshotReader, Snapshot, str], None]
 
 PERP_CONSUMERS = (
-    ConsumerSpec('mount', cast(Renderer, _mount), public=True),
-    ConsumerSpec('huggingface', cast(Renderer, _huggingface), canonical_only=True, public=True),
+    ConsumerSpec('mount', cast(Renderer, _mount)),
+    ConsumerSpec('huggingface_shadow', cast(Renderer, _huggingface_shadow), canonical_only=True),
 )

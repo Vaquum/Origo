@@ -1,0 +1,114 @@
+name: capture-perp-rest-fixtures
+# TEMPORARY fixture capture. Deleted before the slice PR opens; never merged.
+on:
+  workflow_dispatch:
+    inputs:
+      minute_start:
+        description: UTC minute, e.g. 2026-09-17T03:00:00Z
+        required: true
+        default: 2026-09-17T03:00:00Z
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture locator and trade pages
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          MINUTE: ${{ inputs.minute_start }}
+        run: |
+          python3 - <<'EOF'
+          import hashlib, json, os, urllib.request
+          from datetime import datetime, timezone
+
+          key = os.environ['BINANCE_API_KEY']
+          assert len(key) == 64, 'BINANCE_API_KEY missing or malformed'
+          minute = os.environ['MINUTE']
+          base = 'https://fapi.binance.com'
+          start = datetime.strptime(minute, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+          start_ms = int(start.timestamp()) * 1000
+          end_ms = start_ms + 60_000
+          os.makedirs('capture', exist_ok=True)
+          requests = []
+          last_weight = 0
+
+          def call(path, params):
+              global last_weight
+              url = base + path + '?' + '&'.join(f'{k}={v}' for k, v in params.items())
+              req = urllib.request.Request(url, headers={'X-MBX-APIKEY': KEY})
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = resp.read()
+                  assert resp.status == 200, f'{path} -> {resp.status}: {body[:200]}'
+                  headers = {
+                      k.lower(): v
+                      for k, v in resp.headers.items()
+                      if k.lower().startswith('x-mbx-used-weight')
+                  }
+                  used = int(headers.get('x-mbx-used-weight-1m', '0'))
+                  weight, last_weight = used - last_weight, used
+              return body, headers, weight
+
+          def save(name, body, path, params, headers):
+              with open(f'capture/{name}', 'wb') as f:
+                  f.write(body)
+              requests.append({
+                  'file': name,
+                  'url': base + path,
+                  'params': params,
+                  'request_headers': {},
+                  'status': 200,
+                  'captured_at': datetime.now(timezone.utc).isoformat(),
+                  'sha256': hashlib.sha256(body).hexdigest(),
+                  'response_headers': headers,
+              })
+
+          body, headers, weight = call(
+              '/fapi/v1/aggTrades',
+              {'symbol': 'BTCUSDT', 'startTime': start_ms, 'endTime': end_ms - 1, 'limit': 1},
+          )
+          print(f'aggTrades weight: {weight}', flush=True)
+          save('locator.json', body, '/fapi/v1/aggTrades',
+               {'symbol': 'BTCUSDT', 'startTime': start_ms, 'endTime': end_ms - 1, 'limit': 1},
+               headers)
+          locator = json.loads(body)
+          assert len(locator) == 1, f'expected a non-empty minute, got {body[:100]}'
+          next_id = locator[0]['f']
+          rows, page, previous_id, previous_time = 0, 0, next_id - 1, start_ms
+          while True:
+              body, headers, weight = call(
+                  '/fapi/v1/historicalTrades',
+                  {'symbol': 'BTCUSDT', 'fromId': next_id, 'limit': 1000},
+              )
+              if page == 0:
+                  print(f'historicalTrades weight: {weight}', flush=True)
+              save(f'page-{page:02d}.json', body, '/fapi/v1/historicalTrades',
+                   {'symbol': 'BTCUSDT', 'fromId': next_id, 'limit': 1000}, headers)
+              trades = json.loads(body)
+              assert trades, 'paging ended before the minute boundary'
+              done = False
+              for trade in trades:
+                  assert trade['id'] > previous_id and trade['T'] >= previous_time, 'unordered page'
+                  previous_id, previous_time = trade['id'], trade['T']
+                  if trade['T'] >= end_ms:
+                      done = True
+                      break
+                  assert trade['T'] >= start_ms, 'trade precedes minute'
+                  rows += 1
+              page += 1
+              if done or page > 100:
+                  break
+              next_id = trades[-1]['id'] + 1
+          assert done, 'minute did not terminate within 100 pages'
+          with open('capture/provenance.json', 'w') as f:
+              json.dump({
+                  'minute_start': start.isoformat(),
+                  'minute_end': (start + __import__('datetime').timedelta(minutes=1)).isoformat(),
+                  'requests': requests,
+              }, f, indent=2)
+          print(f'minute={minute} pages={page} rows={rows} first_id={locator[0]["f"]}', flush=True)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perp-rest-fixtures
+          path: capture/
+          retention-days: 1

@@ -196,3 +196,25 @@ def test_binance_rate_budget_survives_workers_and_respects_retry_headers(
     with pytest.raises(RuntimeError, match='circuit is open'):
         daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=4)
     assert len(calls) == 3
+
+
+def test_weighted_requests_touch_the_worker_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b'[]'
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.setattr(daily, '_request', lambda url, params, headers: response)
+    beat = tmp_path / 'worker.heartbeat'
+    monkeypatch.setenv('ORIGO_WORKER_HEARTBEAT', str(beat))
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=20)
+    assert float(beat.read_text()) > 0
+    # Dagster runs never set the variable: no heartbeat is written.
+    monkeypatch.delenv('ORIGO_WORKER_HEARTBEAT')
+    beat.unlink()
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=20)
+    assert not beat.exists()

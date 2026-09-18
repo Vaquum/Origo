@@ -73,6 +73,7 @@ def _feed(
     dagster: _Dagster,
     reporter: _Reporter,
     clock: Callable[[], datetime] | None = None,
+    heartbeat: Path | None = None,
 ) -> ProvisionalFeed:
     return ProvisionalFeed(
         [spec],
@@ -80,6 +81,7 @@ def _feed(
         reporter=cast(Reporter, reporter),
         dagster=cast(DagsterReader, dagster),
         host='test-host',
+        heartbeat=heartbeat,
         **({'clock': clock} if clock is not None else {}),
     )
 
@@ -230,6 +232,37 @@ def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
     assert query_origo(RECEIPTS) == [('binance_spot_trades', 'FAILED', 0, 'RuntimeError')] * 3
     assert f'partition={KEY} attempts exhausted after 3 failures' in caplog.text
     assert 'binance unavailable' in caplog.text
+
+
+def test_provisional_tick_touches_the_heartbeat_per_unit_of_work(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec, _ = spot
+    beats: list[Path] = []
+    monkeypatch.setattr(provisional, 'touch_heartbeat', beats.append)
+    real_execute = provisional.execute_source
+
+    def recording(
+        executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
+    ) -> dict[str, object]:
+        if operation == 'provisional':
+            return real_execute(executed, operation, config, run_id=run_id)
+        return {}
+
+    monkeypatch.setattr(provisional, 'execute_source', recording)
+    dagster = _Dagster()
+    heartbeat = tmp_path / 'worker.heartbeat'
+    feed = _feed(spec, tmp_path, dagster, _Reporter(), heartbeat=heartbeat)
+    # The owned backfill still builds the minute: one beat for the interval.
+    dagster.owned = True
+    assert feed.tick(NOW).processed == (f'binance_spot_trades:{KEY}',)
+    assert beats == [heartbeat]
+    # The next tick publishes the mount consumer: one beat for the publication.
+    dagster.owned = False
+    assert feed.tick(NOW).processed == ('binance_spot_trades:mount',)
+    assert beats == [heartbeat, heartbeat]
 
 
 def test_dormant_sources_are_skipped_and_the_bundle_declares_the_feed_not_a_schedule() -> None:

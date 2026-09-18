@@ -208,9 +208,13 @@ class BinanceProvisionalBase:
         if _int(locator[0], 'T') < start_ms or _int(locator[0], 'l') < next_id:
             raise ValueError('Invalid Binance individual-trade locator range.')
         rows: list[Row] = []
-        # A zero backtrack pages from the locator; fapi pages from before it because an
-        # aggregate straddling the boundary can hide in-minute trades before the first id.
-        first_id = max(1, next_id - self.PAGING_BACKTRACK_IDS)
+        # A zero backtrack pages from the locator id exactly; fapi pages from before
+        # it (clamped at 1) because an aggregate straddling the boundary can hide
+        # in-minute trades before the first id.
+        if self.PAGING_BACKTRACK_IDS == 0:
+            first_id = next_id
+        else:
+            first_id = max(1, next_id - self.PAGING_BACKTRACK_IDS)
         next_id = first_id
         previous_id, previous_time = (
             next_id - 1,

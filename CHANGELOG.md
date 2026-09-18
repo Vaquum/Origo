@@ -1,3 +1,7 @@
+# v3.16.2
+
+- Drop the two observed Binance-side quirk rows from spot aggregate archives before validation: -1/zero sentinel aggregates and byte-identical duplicate lines from repackaged chunks. A `clean_rows` hook on the archive base (identity by default) lets the agg adapter clean once for both the columnar and streaming consumers; drop counts merge into the revision evidence while `csv_sha256` keeps pinning the archive as served. Anything else malformed still fails loud.
+
 # v3.16.1
 
 - Fix the provisional worker watchdog livelock: each built interval, each publication, and each paced REST request touches the worker heartbeat, so a slow catch-up tick proves liveness instead of tripping the 180s watchdog and retrying the same oldest minute forever. Dagster runs never set `ORIGO_WORKER_HEARTBEAT` and skip the beat.

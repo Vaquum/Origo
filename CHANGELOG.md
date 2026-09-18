@@ -1,3 +1,7 @@
+# v3.14.1
+
+- Scaffold the parameterized vision archive adapter: `BinanceArchiveDaily` owns download, checksum, partition, and row-validation mechanics behind declared per-source parameters (base URL, first day, field count, header policy) and hooks (HTTP seam, table builder, row builder), and the spot and perp daily adapters shrink to those declarations. Error texts are neutralized to `Binance` with every pinned substring preserved; all digests, revision keys, and REST-vs-archive proofs hold with zero test or tool changes.
+
 # v3.14.0
 
 - Add the Binance perp trades revisioned source beside spot: the daily adapter serves the vision futures archives from the 2019 first day, the provisional adapter pages closed minutes through `aggTrades` plus `historicalTrades` (paging back 1,000 ids before the locator because an aggregate's open time can hide in-minute trades, recomputing the cents-rounded `quoteQty` as price times quantity, and normalizing decimals so the API's padded text matches the archive's trimmed text), the perp profile, formulas and consumers mirror spot with CANARY shadow publication, and the REST replay test asserts full row equality against the archive on all 2,325 rows of the captured minute. The legacy futures pipeline is deleted in the same slice: its tables, jobs, schedules and tests are removed and the briefing reads the revisioned source.

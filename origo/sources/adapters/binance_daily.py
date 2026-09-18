@@ -1,28 +1,23 @@
 from __future__ import annotations
 
-import csv
 import fcntl
-import hashlib
-import io
-import json
 import os
-import re
 import time
-import zipfile
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from math import isfinite
 from pathlib import Path
+from typing import ClassVar
 
 import requests
-from dagster import get_dagster_logger
 
-from ..archive import verified_archive
-from ..columnar import insert_arrow
-from ..contracts import Partition, Revision, Row, SourceError
-from .binance_columnar import spot_table, table_digest
+from ..arrow_types import ArrowTable
+from ..contracts import Partition, Row, SourceError
+from .binance_archive import BinanceArchiveDaily, parse_archive_boolean
+from .binance_archive import timestamp_datetime as timestamp_datetime
+from .binance_columnar import spot_table
 
 
 @dataclass(frozen=True)
@@ -123,143 +118,37 @@ def parse_decimal(text: str) -> Decimal:
     return value
 
 
-def timestamp_datetime(value: int) -> datetime:
-    digits = len(str(value))
-    if digits not in (13, 16):
-        raise ValueError('Spot timestamp must contain milliseconds or microseconds.')
-    micros = value * 1000 if digits == 13 else value
-    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=micros)
+@dataclass(frozen=True)
+class BinanceSpotDaily(BinanceArchiveDaily):
+    first_day: date = date(2017, 8, 17)
+    SOURCE_KEY: ClassVar[str] = 'binance_spot_trades'
+    ARCHIVE_BASE_URL_ENV: ClassVar[str] = 'BINANCE_SPOT_TRADES_ARCHIVE_BASE_URL'
+    ARCHIVE_BASE_URL_DEFAULT: ClassVar[str] = (
+        'https://data.binance.vision/data/spot/daily/trades/BTCUSDT'
+    )
+    FIELD_COUNT: ClassVar[int] = 7
+    HEADER: ClassVar[tuple[str, ...] | None] = None
 
+    def _get_response(self, url: str) -> Response:
+        return get_response(url)
 
-def _integer(text: str) -> int:
-    if not re.fullmatch(r'\d+', text):
-        raise ValueError('Spot trade ID and timestamp must be unsigned integers.')
-    return int(text)
+    def build_table(self, csv_body: bytes, partition: Partition) -> ArrowTable:
+        return spot_table(csv_body, partition)
 
-
-def _boolean(text: str) -> int:
-    if text not in ('True', 'False', 'true', 'false'):
-        raise ValueError('Invalid spot boolean field.')
-    return int(text.lower() == 'true')
+    def build_row(
+        self, trade_id: int, timestamp: int, instant: datetime, fields: list[str]
+    ) -> Row:
+        return (
+            trade_id,
+            parse_decimal(fields[1]),
+            parse_decimal(fields[2]),
+            parse_decimal(fields[3]),
+            timestamp,
+            parse_archive_boolean(fields[5]),
+            parse_archive_boolean(fields[6]),
+            instant,
+        )
 
 
 def spot_csv_rows(body: bytes, partition: Partition) -> Iterator[Row]:
-    previous_id = -1
-    previous_time = partition.start
-    count = 0
-    with io.TextIOWrapper(io.BytesIO(body), encoding='utf-8', newline='') as stream:
-        for fields in csv.reader(stream):
-            if len(fields) != 7:
-                raise ValueError('Individual spot archives require exactly seven fields.')
-            trade_id = _integer(fields[0])
-            timestamp = _integer(fields[4])
-            instant = timestamp_datetime(timestamp)
-            if trade_id <= previous_id or instant < previous_time:
-                raise ValueError('Spot rows must have unique ordered IDs and ordered timestamps.')
-            if not partition.start <= instant < partition.end:
-                raise ValueError('Spot row is outside its partition.')
-            yield (
-                trade_id,
-                parse_decimal(fields[1]),
-                parse_decimal(fields[2]),
-                parse_decimal(fields[3]),
-                timestamp,
-                _boolean(fields[5]),
-                _boolean(fields[6]),
-                instant,
-            )
-            previous_id, previous_time = trade_id, instant
-            count += 1
-    if count == 0:
-        raise ValueError('An empty archive is not a canonical spot partition.')
-
-
-def _checksum(body: bytes, member: str) -> str:
-    match = re.fullmatch(rb'([0-9a-f]{64})\s+\*?' + re.escape(member.encode()) + rb'\s*', body)
-    if match is None:
-        raise ValueError('Invalid Binance checksum sidecar.')
-    return match.group(1).decode('ascii')
-
-
-@dataclass(frozen=True)
-class BinanceSpotDaily:
-    first_day: date = date(2017, 8, 17)
-
-    def candidate(self, now: datetime) -> Partition:
-        return self.partition((now.astimezone(UTC).date() - timedelta(days=1)).isoformat())
-
-    def partition(self, key: str) -> Partition:
-        day = date.fromisoformat(key)
-        if key != day.isoformat() or day < self.first_day:
-            raise ValueError('Spot archive partition precedes the declared first day.')
-        start = datetime.combine(day, datetime.min.time(), UTC)
-        return Partition(key, start, start + timedelta(days=1))
-
-    def _url(self, partition: Partition) -> str:
-        base = os.environ.get(
-            'BINANCE_SPOT_TRADES_ARCHIVE_BASE_URL',
-            'https://data.binance.vision/data/spot/daily/trades/BTCUSDT',
-        )
-        return f'{base.rstrip("/")}/BTCUSDT-trades-{partition.key}.zip'
-
-    def fetch(self, partition: Partition) -> Revision:
-        get_dagster_logger('origo.sources').info(
-            'source=binance_spot_trades partition=%s phase=archive_download', partition.key
-        )
-        url = self._url(partition)
-        name = f'BTCUSDT-trades-{partition.key}'
-        expected = _checksum(get_response(url + '.CHECKSUM').body, name + '.zip')
-        body = verified_archive(
-            url,
-            expected,
-            lambda address: get_response(address).body,
-            code='ARCHIVE_CHECKSUM_MISMATCH',
-        )
-        with zipfile.ZipFile(io.BytesIO(body)) as archive:
-            if archive.namelist() != [name + '.csv']:
-                raise SourceError(
-                    'ARCHIVE_MEMBER_INVALID',
-                    'Binance archive must contain exactly the expected CSV member.',
-                )
-            csv_body = archive.read(name + '.csv')
-        try:
-            table = spot_table(csv_body, partition)
-            count = table.num_rows
-            normalized = table_digest(table)
-        except ValueError as error:
-            raise SourceError('ARCHIVE_ROWS_INVALID', str(error)) from error
-        evidence = json.dumps(
-            {
-                'object_url': url,
-                'zip_sha256': expected,
-                'csv_sha256': hashlib.sha256(csv_body).hexdigest(),
-                'member': name + '.csv',
-            },
-            sort_keys=True,
-        )
-        get_dagster_logger('origo.sources').info(
-            'source=binance_spot_trades partition=%s phase=archive_validated rows=%s revision=%s',
-            partition.key,
-            count,
-            expected,
-        )
-        return Revision(
-            expected,
-            normalized,
-            evidence,
-            count,
-            lambda: spot_csv_rows(csv_body, partition),
-            insert_bulk=lambda destination: insert_arrow(destination, table),
-        )
-
-    def discover(self, partition: Partition) -> str:
-        return _checksum(
-            get_response(self._url(partition) + '.CHECKSUM').body,
-            f'BTCUSDT-trades-{partition.key}.zip',
-        )
-
-    def revalidate(self, partition: Partition, revision: Revision) -> None:
-        if self.discover(partition) != revision.key:
-            raise SourceError(
-                'OFFICIAL_REVISION_CHANGED', 'Official Binance revision changed during the build.'
-            )
+    return BinanceSpotDaily().parse_rows(body, partition)

@@ -32,7 +32,9 @@ def parse_decimal(text: str) -> Decimal:
         raise ValueError('Invalid Binance decimal field.') from error
     if not value.is_finite() or value <= 0:
         raise ValueError('Perp price, quantity, and quote quantity must be positive.')
-    return value
+    # The API pads decimals ('76043.50') while the archive trims them ('76043.5');
+    # normalize so the same trade parses to the same Decimal from either source.
+    return value.normalize()
 
 
 def timestamp_datetime(value: int) -> datetime:

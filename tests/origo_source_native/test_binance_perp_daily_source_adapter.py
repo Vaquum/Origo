@@ -4,13 +4,16 @@ import hashlib
 import json
 import zipfile
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from origo.sources.adapters import binance_perp_columnar as columnar
 from origo.sources.adapters import binance_perp_daily as daily
+from origo.sources.adapters import binance_perp_rest as rest
 from origo.sources.adapters.binance_daily import Response
+from origo.sources.contracts import SourceError
 
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures/binance/futures'
 ARCHIVES = FIXTURES / 'daily/trades/BTCUSDT'
@@ -117,3 +120,104 @@ def test_perp_field_parsers_reject_bad_input() -> None:
     with pytest.raises(ValueError, match='precedes the declared first day'):
         adapter.partition('2019-09-07')
     assert adapter.candidate(datetime(2019, 9, 10, 12, tzinfo=UTC)).key == '2019-09-09'
+
+
+def _rest_responses(name: str) -> tuple[dict, dict[str, bytes]]:
+    provenance = json.loads((REST / name).read_text())
+    bodies = {}
+    for request in provenance['requests']:
+        body = (REST / request['file']).read_bytes()
+        assert hashlib.sha256(body).hexdigest() == request['sha256']
+        bodies[request['file']] = body
+    return provenance, bodies
+
+
+def test_real_perp_closed_minutes_obey_binance_provisional_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
+    provenance, bodies = _rest_responses('provenance.json')
+    assert provenance['minute_start'] == '2026-09-16T20:00:00+00:00'
+    calls = list(provenance['requests'])
+
+    def captured(
+        url: str, *, params: dict[str, object], headers: dict[str, str], weight: int
+    ) -> Response:
+        expected = calls.pop(0)
+        assert url == expected['url'] and params == expected['params']
+        assert headers == {'X-MBX-APIKEY': '0' * 64}
+        assert weight == (20 if url.endswith('aggTrades') else 200)
+        return Response(bodies[expected['file']], {}, expected['status'])
+
+    monkeypatch.setattr(rest, 'get_response', captured)
+    adapter = rest.BinancePerpProvisional()
+    now = datetime(2026, 9, 16, 21, 30, tzinfo=UTC)
+    covered = (
+        adapter.partition('2026-09-16T20:01:00Z'),
+        adapter.partition('2026-09-16T20:02:00Z'),
+    )
+    current, *missing = adapter.candidates(now, datetime(2026, 9, 16, 20, tzinfo=UTC), covered)
+    assert current.key == '2026-09-16T21:29:00Z'
+    assert [part.key for part in missing] == [
+        '2026-09-16T20:00:00Z',
+        '2026-09-16T20:03:00Z',
+        '2026-09-16T20:04:00Z',
+        '2026-09-16T20:05:00Z',
+        '2026-09-16T20:06:00Z',
+    ]
+    minute = adapter.partition('2026-09-16T20:00:00Z')
+    revision = adapter.fetch(minute)
+    rows = tuple(revision.rows())
+    assert calls == [] and len(rows) > 1000
+    assert rows == tuple(sorted(rows, key=lambda row: row[0]))
+    assert all(isinstance(row[1], Decimal) for row in rows)
+    assert all(minute.start <= row[-1] < minute.end for row in rows)
+    archive_rows = tuple(
+        daily.perp_csv_rows(
+            (ARCHIVES / 'minute-2026-09-16T20-00.csv').read_bytes(),
+            daily.BinancePerpDaily().partition('2026-09-16'),
+        )
+    )
+    expected = {row[0]: row for row in archive_rows}
+    assert len(expected) == len(rows) == 2325
+    for row in rows:
+        assert row == expected[row[0]]
+
+
+def test_real_empty_minute_requires_two_ticks_and_later_boundary_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
+    provenance, bodies = _rest_responses('empty-provenance.json')
+    calls = list(provenance['requests'])
+
+    def captured(
+        url: str, *, params: dict[str, object], headers: dict[str, str], weight: int
+    ) -> Response:
+        expected = calls.pop(0)
+        assert url == expected['url'] and params == expected['params']
+        assert headers == {'X-MBX-APIKEY': '0' * 64}
+        assert weight == 20
+        return Response(bodies[expected['file']], {}, expected['status'])
+
+    monkeypatch.setattr(rest, 'get_response', captured)
+    now = datetime.fromisoformat(provenance['requests'][0]['captured_at'])
+    monkeypatch.setattr(rest, 'now_utc', lambda: now)
+    adapter = rest.BinancePerpProvisional()
+    partition = adapter.partition('2019-09-08T00:00:00Z')
+    first = adapter.fetch(partition)
+    assert first.row_count == 0 and not first.complete
+    assert calls != []
+    now = datetime.fromisoformat(calls[0]['captured_at'])
+    monkeypatch.setattr(rest, 'now_utc', lambda: now)
+    second = adapter.fetch(partition, first.evidence_json)
+    assert second.row_count == 0 and second.complete and calls == []
+    assert tuple(second.rows()) == ()
+
+
+def test_perp_provisional_fetch_requires_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('BINANCE_API_KEY', raising=False)
+    adapter = rest.BinancePerpProvisional()
+    with pytest.raises(SourceError, match='BINANCE_API_KEY is required') as error:
+        adapter.fetch(adapter.partition('2026-09-16T20:00:00Z'))
+    assert error.value.code == 'PROVIDER_CREDENTIAL_MISSING'

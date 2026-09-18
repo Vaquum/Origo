@@ -16,7 +16,7 @@ from .binance_perp_daily import parse_decimal, timestamp_datetime
 # Measured X-MBX-USED-WEIGHT-1M deltas per call during fixture capture; the adapter
 # test pins them against the recorded requests.
 AGG_TRADES_WEIGHT = 20
-HISTORICAL_TRADES_WEIGHT = 20
+HISTORICAL_TRADES_WEIGHT = 200
 
 
 def _objects(body: bytes) -> tuple[dict[str, object], ...]:
@@ -61,11 +61,17 @@ def historical_row(row: Mapping[str, object]) -> Row:
     timestamp = _int(row, 'time')
     if len(str(timestamp)) != 13:
         raise ValueError('The frozen provisional perp timestamp contract is milliseconds.')
+    price = parse_decimal(_text(row, 'price'))
+    quantity = parse_decimal(_text(row, 'qty'))
+    # fapi rounds quoteQty to cents (observed '76.04' for the authoritative
+    # '76.0435'); validate the field as a schema tripwire, then recompute the
+    # exact quote so the provisional row matches the canonical archive row.
+    parse_decimal(_text(row, 'quoteQty'))
     return (
         _int(row, 'id'),
-        parse_decimal(_text(row, 'price')),
-        parse_decimal(_text(row, 'qty')),
-        parse_decimal(_text(row, 'quoteQty')),
+        price,
+        quantity,
+        (price * quantity).normalize(),
         timestamp,
         _bool(row, 'isBuyerMaker'),
         timestamp_datetime(timestamp),
@@ -179,12 +185,20 @@ class BinancePerpProvisional:
         next_id = _int(locator[0], 'f')
         if _int(locator[0], 'T') < start_ms or _int(locator[0], 'l') < next_id:
             raise ValueError('Invalid Binance individual-trade locator range.')
+        # An aggregate's T is its open time, so an aggregate straddling the minute
+        # boundary can hide in-minute trades before the locator's first id (observed:
+        # 3 hidden trades on 2026-09-16T20:00:00Z). Page from before the locator and
+        # require pre-minute rows as the completeness proof.
+        first_id = max(1, next_id - 1000)
+        next_id = first_id
         rows: list[Row] = []
-        previous_id, previous_time = next_id - 1, start_ms
+        previous_id, previous_time = next_id - 1, 0
+        skipped = 0
         complete = False
+        # fapi rejects limit=1000 here (spot accepts it); 500 is the documented max.
         for _ in range(100):
             page = request(
-                '/fapi/v1/historicalTrades', {'symbol': symbol, 'fromId': next_id, 'limit': 1000}, HISTORICAL_TRADES_WEIGHT
+                '/fapi/v1/historicalTrades', {'symbol': symbol, 'fromId': next_id, 'limit': 500}, HISTORICAL_TRADES_WEIGHT
             )
             if not page:
                 raise RuntimeError('Historical-trade paging ended before the minute boundary.')
@@ -193,13 +207,13 @@ class BinancePerpProvisional:
                 if trade_id <= previous_id or instant < previous_time:
                     raise ValueError('Historical trades are unordered or duplicated.')
                 previous_id, previous_time = trade_id, instant
-                parsed = historical_row(value)
                 if instant >= end_ms:
                     complete = True
                     break
                 if instant < start_ms:
-                    raise ValueError('Historical trade precedes its locator boundary.')
-                rows.append(parsed)
+                    skipped += 1
+                    continue
+                rows.append(historical_row(value))
             if complete:
                 break
             next_id = _int(page[-1], 'id') + 1
@@ -207,6 +221,10 @@ class BinancePerpProvisional:
             raise RuntimeError('Perp closed-minute paging exceeded the 100-page cap.')
         if not rows:
             raise RuntimeError('Empty minute lacks independent completeness evidence.')
+        if skipped == 0 and first_id > 1:
+            raise RuntimeError(
+                'Perp minute paging never reached pre-minute evidence; the backtrack is too short.'
+            )
         result = tuple(rows)
         digest = content_hash(result, schema_version=1)
         return Revision(

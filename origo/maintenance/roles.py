@@ -25,7 +25,6 @@ PROJECTION_JOBS = frozenset(
 SOURCE_JOBS = frozenset(
     {
         'refresh_binance_spot_data_source_job',
-        'refresh_binance_futures_data_source_job',
         'refresh_binance_spot_latest_data_source_job',
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
@@ -33,11 +32,8 @@ SOURCE_JOBS = frozenset(
         'backfill_binance_spot_depth20_data_source_job',
         'backfill_binance_spot_depth200_data_source_job',
         'insert_daily_binance_spot_trades_to_origo_job',
-        'insert_daily_binance_futures_trades_to_origo_job',
         'insert_monthly_trades_to_tdw_job',
-        'insert_monthly_futures_trades_to_tdw_job',
         'insert_monthly_agg_trades_to_tdw_job',
-        'insert_monthly_futures_agg_trades_to_tdw_job',
     }
 )
 

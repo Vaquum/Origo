@@ -25,8 +25,10 @@ from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import ConsumerSpec, Snapshot, SnapshotReader, SourceBundle
 from origo.sources.prepare import prepare_source
 from origo.sources.profiles import perp_consumers
+from origo.sources.profiles.formulas.perp_series import SPECS as PERP_SERIES_SPECS
 from origo.sources.storage import SourceStore
 
+from .acceptance_cases import PERP_CASE
 from .test_binance_perp_daily_source_adapter import archive_response
 
 DAY = '2019-09-08'
@@ -625,3 +627,21 @@ def test_perp_mount_renders_post_cutoff_month_and_sweeps_only_own_staging(
         runtime.publish('mount', str(mount))
     repeated = json.loads((mount / 'latest.json').read_text())
     assert {e['path']: Path(e['path']).stat().st_mtime_ns for e in repeated['files']} == written
+
+
+def test_source_inventory_is_explicit() -> None:
+    assert PERP_CASE.inventory == (
+        'perp_time_1m',
+        'perp_time_15m',
+        'perp_time_30m',
+        'perp_time_1h',
+        'perp_time_2h',
+        'perp_time_4h',
+        'perp_dollar_1M',
+        'perp_dollar_15M',
+        'perp_dollar_30M',
+        'perp_dollar_60M',
+        'perp_dollar_120M',
+        'perp_dollar_240M',
+    )
+    assert tuple(series.name for series in PERP_SERIES_SPECS) == PERP_CASE.inventory

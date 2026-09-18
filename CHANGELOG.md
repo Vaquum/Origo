@@ -1,7 +1,3 @@
-# v3.14.5
-
-- Parameterize the acceptance harness and comparison helper: `acceptance_cases` declares one `SourceCase` per source (spec key, fixture root, twelve-product inventory, time and quote carve-outs) with `SOURCE_CASES`, and `assert_archive_rest_equal` owns the archive-vs-REST comparison both provisional suites shared inline. Each backfill suite pins its explicit twelve-series inventory against the literal and the live series declaration; the spot suite keeps its microseconds-to-milliseconds timestamp carve-out and the perp suite its recomputed price-times-quantity quote carve-out. Zero production-code changes.
-
 # v3.14.4
 
 - Scaffold the profile factory and generic formulas: `ProfileDeclaration` plus `build_components` own the measure columns, projection rewrite client, raw loader, and daily/minute/imbalance builders behind per-source declarations (raw columns, rewrite names, formula prefix, imbalance module), and the spot and perp profiles shrink to those declarations with their legacy aliases and retired tables. The sixteen bar-formula modules keep their table-name constants and delegate to `generic_bars`, which holds each SQL statement and the imbalance Arrow math exactly once; the dead ClickHouse wiring the perp imbalance port already dropped is removed from the spot module. Component hashes hold with zero test changes.

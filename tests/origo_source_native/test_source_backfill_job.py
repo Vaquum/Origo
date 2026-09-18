@@ -25,10 +25,8 @@ from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import ConsumerSpec, Snapshot, SnapshotReader, SourceBundle
 from origo.sources.prepare import prepare_source
 from origo.sources.profiles import spot_consumers
-from origo.sources.profiles.formulas.spot_series import SPECS as SPOT_SERIES_SPECS
 from origo.sources.storage import SourceStore
 
-from .acceptance_cases import SPOT_CASE
 from .test_binance_daily_source_adapter import archive_response
 
 DAY = '2017-08-17'
@@ -825,21 +823,3 @@ def test_retired_failed_publication_keeps_retry_delay_and_attempt_limit(
     exhausted = evaluate(elapsed)
     assert exhausted.run_requests == []
     assert exhausted.skip_message.startswith('Automatic source attempts exhausted;')
-
-
-def test_source_inventory_is_explicit() -> None:
-    assert SPOT_CASE.inventory == (
-        'time_1m',
-        'time_15m',
-        'time_30m',
-        'time_1h',
-        'time_2h',
-        'time_4h',
-        'dollar_1M',
-        'dollar_15M',
-        'dollar_30M',
-        'dollar_60M',
-        'dollar_120M',
-        'dollar_240M',
-    )
-    assert tuple(series.name for series in SPOT_SERIES_SPECS) == SPOT_CASE.inventory

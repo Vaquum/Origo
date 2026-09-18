@@ -10,8 +10,6 @@ import pytest
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters import binance_spot_rest as rest
 
-from .acceptance_cases import SPOT_CASE, assert_archive_rest_equal
-
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures/binance/spot'
 ARCHIVES = FIXTURES / 'daily/trades/revisioned'
 REST = FIXTURES / 'rest/trades'
@@ -120,11 +118,13 @@ def test_real_spot_closed_minutes_obey_binance_provisional_rules(
             daily.BinanceSpotDaily().partition('2025-01-01'),
         )
     )
-    assert_archive_rest_equal(
-        tuple(row for row in archive_rows if partition.start <= row[-1] < partition.end),
-        rows,
-        case=SPOT_CASE,
-    )
+    expected = {row[0]: row for row in archive_rows if partition.start <= row[-1] < partition.end}
+    assert len(expected) == len(rows)
+    for row in rows:
+        official = expected[row[0]]
+        assert row[:4] == official[:4]
+        assert row[5:7] == official[5:7]
+        assert row[4] == official[4] // 1000
 
 
 def test_real_empty_minute_requires_two_ticks_and_later_boundary_evidence(

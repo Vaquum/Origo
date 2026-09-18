@@ -1,11 +1,5 @@
 """Perp Hugging Face snapshots. The rollup math is shared with spot; only the dataset cards name perp."""
 
-from .huggingface_dollar import (
-    get_binance_spot_dollar_klines as get_perp_dollar_klines,
-)
-from .huggingface_time import (
-    get_binance_spot_klines_from_1m_projection as get_perp_klines_from_1m_projection,
-)
 
 
 def build_time_dataset_card(

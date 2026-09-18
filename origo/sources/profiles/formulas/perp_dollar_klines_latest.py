@@ -6,7 +6,9 @@ several measures inside the database; that rounding retired with it.
 """
 
 from datetime import datetime, timedelta
+
 from origo.assets.create_origo_database import ClickHouseClientProtocol
+
 from .perp_dollar_klines import DOLLAR_KLINE_SIZE
 
 LATEST_DOLLAR_KLINES_TABLE_NAME = 'binance_futures_dollar_klines_latest'

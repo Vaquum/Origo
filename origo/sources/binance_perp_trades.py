@@ -15,7 +15,7 @@ from .profiles.perp_consumers import PERP_CONSUMERS
 
 BINANCE_PERP_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     key='binance_perp_trades',
-    rollout_stage=RolloutStage.CANARY,
+    rollout_stage=RolloutStage.LIVE,
     schema_version=1,
     names=SourceNames('binance_perp_trades'),
     partitions=PartitionPolicy(date(2019, 9, 8)),

@@ -80,9 +80,9 @@ def test_spot_trades_is_registered_live_without_changing_existing_definitions(
         assert not sensor.evaluate_tick(build_sensor_context()).run_requests
 
 
-def test_perp_trades_is_registered_canary_with_its_bundle() -> None:
+def test_perp_trades_is_registered_live_with_its_bundle() -> None:
     assert BINANCE_PERP_TRADES_SPEC in SOURCE_REGISTRY
-    assert BINANCE_PERP_TRADES_SPEC.rollout_stage == RolloutStage.CANARY
+    assert BINANCE_PERP_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
     source = bundle.build_source_bundle(BINANCE_PERP_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
     assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
@@ -94,7 +94,8 @@ def test_perp_trades_is_registered_canary_with_its_bundle() -> None:
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
     assert 'binance_perp_trades_mount_sensor' not in names
-    assert 'binance_perp_trades_huggingface_shadow_sensor' in names
+    assert 'binance_perp_trades_huggingface_sensor' in names
+    assert 'binance_perp_trades_huggingface_shadow_sensor' not in names
     repository = definitions.defs.get_repository_def()
     assert not repository.has_schedule_def('binance_perp_trades_provisional_schedule')
     feed = repository.asset_graph.get(AssetKey('binance_perp_trades_provisional_feed'))

@@ -15,6 +15,8 @@ from origo.sources.adapters import binance_perp_rest as rest
 from origo.sources.adapters.binance_daily import Response
 from origo.sources.contracts import SourceError
 
+from .acceptance_cases import PERP_CASE, assert_archive_rest_equal
+
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures/binance/futures'
 ARCHIVES = FIXTURES / 'daily/trades/BTCUSDT'
 REST = FIXTURES / 'rest/trades'
@@ -178,10 +180,8 @@ def test_real_perp_closed_minutes_obey_binance_provisional_rules(
             daily.BinancePerpDaily().partition('2026-09-16'),
         )
     )
-    expected = {row[0]: row for row in archive_rows}
-    assert len(expected) == len(rows) == 2325
-    for row in rows:
-        assert row == expected[row[0]]
+    assert len(rows) == 2325
+    assert_archive_rest_equal(archive_rows, rows, case=PERP_CASE)
 
 
 def test_real_empty_minute_requires_two_ticks_and_later_boundary_evidence(

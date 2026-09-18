@@ -261,6 +261,8 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
                 'base_table': 'binance_spot_dollar_klines',
                 'raw_latest_table': 'binance_spot_trades_latest',
                 'database': 'origo',
+                'id_column': 'trade_id',
+                'quote_expr': 'quote_quantity',
             },
         ),
     ):

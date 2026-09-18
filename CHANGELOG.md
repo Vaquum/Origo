@@ -1,3 +1,7 @@
+# v3.14.4
+
+- Scaffold the profile factory and generic formulas: `ProfileDeclaration` plus `build_components` own the measure columns, projection rewrite client, raw loader, and daily/minute/imbalance builders behind per-source declarations (raw columns, rewrite names, formula prefix, imbalance module), and the spot and perp profiles shrink to those declarations with their legacy aliases and retired tables. The sixteen bar-formula modules keep their table-name constants and delegate to `generic_bars`, which holds each SQL statement and the imbalance Arrow math exactly once; the dead ClickHouse wiring the perp imbalance port already dropped is removed from the spot module. Component hashes hold with zero test changes.
+
 # v3.14.3
 
 - Scaffold the parameterized provisional REST base: `BinanceProvisionalBase` owns minute-partition math, the 36h/5 candidate window, the locate+page loop, the 100-page cap, and the empty-minute two-observation evidence behind declared per-source parameters (host, paths, weights, page limit, credential policy, paging backtrack) and hooks (row mapper, HTTP seam, clock seam), and the spot and perp provisional adapters shrink to those declarations. Every request weight is a named field; `get_response` and `now_utc` keep resolving through the subclass modules so all patch seams hold with zero test changes.

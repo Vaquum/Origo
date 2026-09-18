@@ -6,6 +6,12 @@ minute-partition math, the 36h/5 candidate window, the locate+page loop, the
 stay on the subclasses: the row mapper, and HTTP plus the clock, which resolve
 through the subclass modules so the test patch seams keep working.
 
+A subclass whose rows come from the locator endpoint itself (aggregate
+channels) declares ``HISTORICAL_TRADES_PATH = None``: the loop pages the
+aggregates endpoint with the aggregate id/time fields instead of the
+historical-trades path. The locate, candidate, evidence, and cap mechanics
+are unchanged.
+
 Row 11 (paging start) is the ``PAGING_BACKTRACK_IDS`` parameter: spot pages
 from the locator id and treats a pre-minute row as a boundary violation, while
 fapi backtracks (an aggregate's open time can hide in-minute trades) and
@@ -78,7 +84,7 @@ class BinanceProvisionalBase:
     REST_BASE_URL_DEFAULT: ClassVar[str]
     LATEST_SYMBOL_ENV: ClassVar[str]
     AGG_TRADES_PATH: ClassVar[str]
-    HISTORICAL_TRADES_PATH: ClassVar[str]
+    HISTORICAL_TRADES_PATH: ClassVar[str | None]
     WEIGHT_LOCATOR: ClassVar[int]
     WEIGHT_BOUNDARY: ClassVar[int]
     WEIGHT_HISTORICAL: ClassVar[int]
@@ -204,9 +210,15 @@ class BinanceProvisionalBase:
                 lambda: iter(()),
                 complete=complete,
             )
-        next_id = _int(locator[0], 'f')
-        if _int(locator[0], 'T') < start_ms or _int(locator[0], 'l') < next_id:
-            raise ValueError('Invalid Binance individual-trade locator range.')
+        single_endpoint = self.HISTORICAL_TRADES_PATH is None
+        if single_endpoint:
+            next_id = _int(locator[0], 'a')
+            if not start_ms <= _int(locator[0], 'T') < end_ms:
+                raise ValueError('Invalid Binance aggregate locator range.')
+        else:
+            next_id = _int(locator[0], 'f')
+            if _int(locator[0], 'T') < start_ms or _int(locator[0], 'l') < next_id:
+                raise ValueError('Invalid Binance individual-trade locator range.')
         rows: list[Row] = []
         # A zero backtrack pages from the locator id exactly; fapi pages from before
         # it (clamped at 1) because an aggregate straddling the boundary can hide
@@ -222,18 +234,30 @@ class BinanceProvisionalBase:
         )
         skipped = 0
         complete = False
+        page_path = (
+            self.AGG_TRADES_PATH if single_endpoint else self.HISTORICAL_TRADES_PATH
+        )
+        id_field, time_field = ('a', 'T') if single_endpoint else ('id', 'time')
+        if single_endpoint:
+            ended_message = 'Aggregate paging ended before the minute boundary.'
+            unordered_message = 'Aggregates are unordered or duplicated.'
+            precedes_message = 'Aggregate precedes its locator boundary.'
+        else:
+            ended_message = 'Historical-trade paging ended before the minute boundary.'
+            unordered_message = 'Historical trades are unordered or duplicated.'
+            precedes_message = 'Historical trade precedes its locator boundary.'
         for _ in range(100):
             page = request(
-                self.HISTORICAL_TRADES_PATH,
+                page_path,
                 {'symbol': symbol, 'fromId': next_id, 'limit': self.PAGE_LIMIT},
                 self.WEIGHT_HISTORICAL,
             )
             if not page:
-                raise RuntimeError('Historical-trade paging ended before the minute boundary.')
+                raise RuntimeError(ended_message)
             for value in page:
-                trade_id, instant = _int(value, 'id'), _int(value, 'time')
+                trade_id, instant = _int(value, id_field), _int(value, time_field)
                 if trade_id <= previous_id or instant < previous_time:
-                    raise ValueError('Historical trades are unordered or duplicated.')
+                    raise ValueError(unordered_message)
                 previous_id, previous_time = trade_id, instant
                 parsed = self.map_row(value)
                 if instant >= end_ms:
@@ -241,13 +265,13 @@ class BinanceProvisionalBase:
                     break
                 if instant < start_ms:
                     if self.PAGING_BACKTRACK_IDS == 0:
-                        raise ValueError('Historical trade precedes its locator boundary.')
+                        raise ValueError(precedes_message)
                     skipped += 1
                     continue
                 rows.append(parsed)
             if complete:
                 break
-            next_id = _int(page[-1], 'id') + 1
+            next_id = _int(page[-1], id_field) + 1
         if not complete:
             raise RuntimeError(
                 f'{self.SOURCE_NOUN.capitalize()} closed-minute paging exceeded the 100-page cap.'

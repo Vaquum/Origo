@@ -6,8 +6,8 @@ from ..contracts import Client, Row
 
 
 class OrderedRawClient:
-    def __init__(self, client: Client, table: str) -> None:
-        self.client, self.table = client, table
+    def __init__(self, client: Client, table: str, id_column: str = 'trade_id') -> None:
+        self.client, self.table, self.id_column = client, table, id_column
 
     def execute(
         self, query: str, params: object | None = None, settings: Mapping[str, object] | None = None
@@ -16,7 +16,7 @@ class OrderedRawClient:
         # The legacy formulas need the same ordered input on every execution.
         ordered = query.replace(
             f'FROM {self.table}',
-            f'FROM (SELECT * FROM {self.table} ORDER BY datetime, trade_id)',
+            f'FROM (SELECT * FROM {self.table} ORDER BY datetime, {self.id_column})',
         )
         return self.client.execute(ordered, params, settings)
 

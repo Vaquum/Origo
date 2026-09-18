@@ -1,3 +1,7 @@
+# v3.15.0
+
+- Add the Binance spot aggregate-trades revisioned source (CANARY): canonical adapter over the vision aggTrades daily zips from 2017-08-17, single-endpoint provisional adapter over the spot aggTrades REST channel, ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `spot_agg_`-prefixed series. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`. The scaffold gains the declared parameters the aggregate layout requires, all default-preserving with existing suites green and unchanged: the archive timestamp index, the provisional single-endpoint mode, the factory/formula/consumer id-column and quote-expression parameters, and the acceptance harness aggregate row layout with a third source case.
+
 # v3.14.5
 
 - Parameterize the acceptance harness and comparison helper: `acceptance_cases` declares one `SourceCase` per source (spec key, fixture root, twelve-product inventory, time and quote carve-outs) with `SOURCE_CASES`, and `assert_archive_rest_equal` owns the archive-vs-REST comparison both provisional suites shared inline. Each backfill suite pins its explicit twelve-series inventory against the literal and the live series declaration; the spot suite keeps its microseconds-to-milliseconds timestamp carve-out and the perp suite its recomputed price-times-quantity quote carve-out. Zero production-code changes.

@@ -1,8 +1,9 @@
 """Generic bar math shared by every market-structure source (PRD-0013 row 4).
 
 The SQL and arithmetic below are the relocated spot formulas, unchanged; table
-names, dataset literals, and bar sizes arrive as parameters. Per-source formula
-modules keep their table-name constants and delegate their entry points here.
+names, dataset literals, bar sizes, the raw id column, and the dollar quote
+expression arrive as parameters. Per-source formula modules keep their
+table-name constants and delegate their entry points here.
 """
 
 from __future__ import annotations
@@ -46,16 +47,17 @@ def insert_time_partition_rows(
     *,
     klines_table: str,
     raw_table: str,
+    id_column: str = 'trade_id',
 ) -> None:
     client.execute(
         f"""
         INSERT INTO {database}.{klines_table}
         SELECT
             kline_datetime AS datetime,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -63,10 +65,10 @@ def insert_time_partition_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -90,6 +92,7 @@ def insert_time_minute_rows(
     *,
     klines_table: str,
     raw_table: str,
+    id_column: str = 'trade_id',
 ) -> None:
     start_datetime, end_datetime = _minute_bounds(minute_start)
     client.execute(
@@ -97,10 +100,10 @@ def insert_time_minute_rows(
         INSERT INTO {database}.{klines_table}
         SELECT
             kline_datetime AS datetime,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -108,10 +111,10 @@ def insert_time_minute_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -137,6 +140,8 @@ def insert_dollar_partition_rows(
     klines_table: str,
     raw_table: str,
     kline_size: float,
+    id_column: str = 'trade_id',
+    quote_expr: str = 'quote_quantity',
 ) -> None:
     start_datetime, end_datetime = _partition_datetime_bounds(partition_date)
     client.execute(
@@ -146,10 +151,10 @@ def insert_dollar_partition_rows(
             min(datetime) AS start_datetime,
             max(datetime) AS end_datetime,
             dollar_bar_id,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -157,10 +162,10 @@ def insert_dollar_partition_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -172,10 +177,10 @@ def insert_dollar_partition_rows(
                 SELECT
                     *,
                     greatest(
-                        sum(quote_quantity) OVER (
-                            ORDER BY datetime, trade_id
+                        sum({quote_expr}) OVER (
+                            ORDER BY datetime, {id_column}
                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                        ) - quote_quantity,
+                        ) - {quote_expr},
                         0.0
                     ) AS running_quote_before
                 FROM {database}.{raw_table}
@@ -197,6 +202,8 @@ def insert_dollar_minute_rows(
     klines_table: str,
     raw_table: str,
     kline_size: float,
+    id_column: str = 'trade_id',
+    quote_expr: str = 'quote_quantity',
 ) -> None:
     start_datetime, end_datetime = _minute_bounds(minute_start)
     client.execute(
@@ -206,10 +213,10 @@ def insert_dollar_minute_rows(
             min(datetime) AS start_datetime,
             max(datetime) AS end_datetime,
             dollar_bar_id,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -217,10 +224,10 @@ def insert_dollar_minute_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -232,10 +239,10 @@ def insert_dollar_minute_rows(
                 SELECT
                     *,
                     greatest(
-                        sum(quote_quantity) OVER (
-                            ORDER BY datetime, trade_id
+                        sum({quote_expr}) OVER (
+                            ORDER BY datetime, {id_column}
                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                        ) - quote_quantity,
+                        ) - {quote_expr},
                         0.0
                     ) AS running_quote_before
                 FROM {database}.{raw_table}
@@ -257,6 +264,7 @@ def insert_volume_partition_rows(
     klines_table: str,
     raw_table: str,
     kline_size: float,
+    id_column: str = 'trade_id',
 ) -> None:
     client.execute(
         f"""
@@ -265,10 +273,10 @@ def insert_volume_partition_rows(
             min(datetime) AS start_datetime,
             max(datetime) AS end_datetime,
             volume_bar_id,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -276,10 +284,10 @@ def insert_volume_partition_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -292,7 +300,7 @@ def insert_volume_partition_rows(
                     *,
                     greatest(
                         sum(quantity) OVER (
-                            ORDER BY datetime, trade_id
+                            ORDER BY datetime, {id_column}
                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                         ) - quantity,
                         0.0
@@ -315,6 +323,7 @@ def insert_tick_partition_rows(
     klines_table: str,
     raw_table: str,
     kline_size: int,
+    id_column: str = 'trade_id',
 ) -> None:
     client.execute(
         f"""
@@ -323,10 +332,10 @@ def insert_tick_partition_rows(
             min(datetime) AS start_datetime,
             max(datetime) AS end_datetime,
             tick_bar_id,
-            argMin(price, trade_id) AS open,
+            argMin(price, {id_column}) AS open,
             max(price) AS high,
             min(price) AS low,
-            argMax(price, trade_id) AS close,
+            argMax(price, {id_column}) AS close,
             avg(price) AS mean,
             stddevPopStable(price) AS std,
             quantileExact(0.5)(price) AS median,
@@ -334,10 +343,10 @@ def insert_tick_partition_rows(
             sumKahan(quantity) AS volume,
             avg(is_buyer_maker) AS maker_ratio,
             count() AS no_of_trades,
-            argMin(price * quantity, trade_id) AS open_liquidity,
+            argMin(price * quantity, {id_column}) AS open_liquidity,
             max(price * quantity) AS high_liquidity,
             min(price * quantity) AS low_liquidity,
-            argMax(price * quantity, trade_id) AS close_liquidity,
+            argMax(price * quantity, {id_column}) AS close_liquidity,
             sum(price * quantity) AS liquidity_sum,
             sumKahan(is_buyer_maker * quantity) AS maker_volume,
             sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -348,7 +357,7 @@ def insert_tick_partition_rows(
             FROM (
                 SELECT
                     *,
-                    row_number() OVER (ORDER BY datetime, trade_id) - 1 AS running_trade_count_before
+                    row_number() OVER (ORDER BY datetime, {id_column}) - 1 AS running_trade_count_before
                 FROM {database}.{raw_table}
                 WHERE toDate(datetime) = toDate('{partition_date}')
             )

@@ -104,6 +104,7 @@ def test_live_feed_assets_carry_the_freshness_policy() -> None:
         'binance_spot_depth_live_feed',
         'binance_spot_trades_provisional_feed',
         'binance_perp_trades_provisional_feed',
+        'binance_spot_aggtrades_provisional_feed',
     ):
         node = graph.get(AssetKey(key))
         assert node.freshness_policy_or_from_metadata == expected

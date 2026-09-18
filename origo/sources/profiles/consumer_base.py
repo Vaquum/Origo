@@ -75,6 +75,8 @@ class ConsumerDeclaration:
     renderer_label: str
     label_of: Callable[[str], str]
     commit_infix: str
+    id_column: str = 'trade_id'
+    quote_expr: str = 'quote_quantity'
 
 
 def _fsync(path: Path) -> None:
@@ -216,7 +218,14 @@ def month_tokens(source: str, snapshot: Snapshot, *, export_start_date: str) -> 
     return {month: state_token(source, tuple(grouped[month])) for month in sorted(grouped)}
 
 
-def _month_frame(series: MountKlineSpec, year: int, month: int, database: str) -> pl.DataFrame:
+def _month_frame(
+    series: MountKlineSpec,
+    year: int,
+    month: int,
+    database: str,
+    *,
+    decl: ConsumerDeclaration,
+) -> pl.DataFrame:
     if series.family == 'time':
         return time_month(
             interval_minutes=series.size,
@@ -233,6 +242,8 @@ def _month_frame(series: MountKlineSpec, year: int, month: int, database: str) -
         base_table='dollar',
         raw_latest_table='raw_latest',
         database=database,
+        id_column=decl.id_column,
+        quote_expr=decl.quote_expr,
     )
 
 
@@ -287,7 +298,7 @@ def mount(
                     ):
                         files.append(entry)
                         continue
-                    frame = _month_frame(series, year, number, database)
+                    frame = _month_frame(series, year, number, database, decl=decl)
                     if frame.height == 0:
                         continue
                     pending = staging / target.relative_to(parquet_root)

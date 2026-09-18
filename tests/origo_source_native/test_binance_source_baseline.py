@@ -312,7 +312,7 @@ def test_perp_source_identity_contract(
     spec = BINANCE_PERP_TRADES_SPEC
     assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
         'binance_perp_trades',
-        RolloutStage.CANARY,
+        RolloutStage.LIVE,
         date(2019, 9, 8),
     )
     assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
@@ -339,8 +339,8 @@ def test_perp_source_identity_contract(
         'datetime',
     ]
     assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
-        ('mount', False),
-        ('huggingface_shadow', False),
+        ('mount', True),
+        ('huggingface', True),
     ]
     # No readers of the legacy futures tables exist, so no aliases: the spec drops them.
     assert dict(spec.aliases) == {}

@@ -102,7 +102,7 @@ def test_one_job_prepares_verifies_and_publishes_all_perp_files(
         'time_latest',
         'dollar_latest',
     }
-    assert {consumer.key for consumer in store.spec.consumers} == {'mount', 'huggingface_shadow'}
+    assert {consumer.key for consumer in store.spec.consumers} == {'mount', 'huggingface'}
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]
     assert instance.all_instigator_state() == []
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
@@ -149,12 +149,15 @@ def test_one_job_prepares_verifies_and_publishes_all_perp_files(
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),
         ) as context:
             assert sensor.evaluate_tick(context).run_requests == []
-    # The CANARY shadow consumer renders locally and never uploads.
+    # The LIVE huggingface consumer ran and rendered: the pre-cutoff fixture
+    # day yields an empty manifest, so it correctly records no uploads. The
+    # positive path is pinned by
+    # test_perp_huggingface_upload_records_every_rendered_series.
     assert FakeHfApi.calls == []
-    shadow = json.loads(
-        (tmp_path / 'files' / store.spec.key / 'huggingface_shadow' / 'latest.json').read_text()
+    live = json.loads(
+        (tmp_path / 'files' / store.spec.key / 'huggingface' / 'latest.json').read_text()
     )
-    assert shadow['kind'] == 'huggingface_shadow' and shadow['uploads'] == []
+    assert live['kind'] == 'huggingface' and live['uploads'] == []
     # Re-deployment restores code-owned sensor state without losing its cursor.
     state = instance.all_instigator_state()[0]
     from dagster._core.scheduler.instigation import InstigatorStatus
@@ -192,7 +195,7 @@ def test_perp_file_failure_fails_job_and_retry_keeps_verified_generation(
     failed = job.execute_in_process(instance=instance, tags=_selection(), raise_on_error=False)
     assert not failed.success
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {DAY}
-    assert not (tmp_path / 'files' / spec.key / 'huggingface_shadow' / 'latest.json').exists()
+    assert not (tmp_path / 'files' / spec.key / 'huggingface' / 'latest.json').exists()
     manifest = tmp_path / 'files' / spec.key / 'mount' / 'latest.json'
     published = manifest.read_bytes()
     assert (
@@ -259,7 +262,7 @@ def test_perp_new_verified_data_automatically_requests_every_canonical_only_cons
     assert store.snapshot().token != previous_token
     definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
     canonical_only = [consumer for consumer in store.spec.consumers if consumer.canonical_only]
-    assert [consumer.key for consumer in canonical_only] == ['huggingface_shadow']
+    assert [consumer.key for consumer in canonical_only] == ['huggingface']
     for consumer in canonical_only:
         sensor = next(
             sensor
@@ -348,7 +351,7 @@ def test_perp_publication_follows_canonical_state_across_provisional_refreshes(
         for consumer in spec.consumers
         if consumer.canonical_only
     }
-    assert set(sensors) == {'huggingface_shadow'}
+    assert set(sensors) == {'huggingface'}
     # The consumer that pins provisional rows is the provisional worker's: it publishes
     # when the pinned state changed and a native backfill does not own publication.
     from origo.workers.dagster_reader import DagsterReader

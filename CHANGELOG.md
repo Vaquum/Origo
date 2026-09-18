@@ -1,3 +1,7 @@
+# v3.16.0
+
+- Promote the Binance perp trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2019-09-08 to present, fresh tail) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_perp_*` datasets.
+
 # v3.15.0
 
 - Add the Binance spot aggregate-trades revisioned source (CANARY): canonical adapter over the vision aggTrades daily zips from 2017-08-17, single-endpoint provisional adapter over the spot aggTrades REST channel, ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `spot_agg_`-prefixed series. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`. The scaffold gains the declared parameters the aggregate layout requires, all default-preserving with existing suites green and unchanged: the archive timestamp index, the provisional single-endpoint mode, the factory/formula/consumer id-column and quote-expression parameters, and the acceptance harness aggregate row layout with a third source case.

@@ -27,3 +27,12 @@ jobs:
 
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
+
+      - name: Verify daily-archive fixture bundles
+        run: |
+          for stem in BTCUSDT-trades-2019-09-08 BTCUSDT-trades-2019-09-09 BTCUSDT-trades-2024-04-20; do
+            python3 tools/fixture_bundle.py verify --dir tests/fixtures/binance/futures/daily/trades/BTCUSDT --stem "$stem"
+          done
+          for stem in BTCUSDT-trades-2017-08-17 BTCUSDT-trades-2020-01-01; do
+            python3 tools/fixture_bundle.py verify --dir tests/fixtures/binance/spot/daily/trades/revisioned --stem "$stem"
+          done

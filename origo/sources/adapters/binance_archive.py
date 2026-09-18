@@ -32,7 +32,7 @@ from .binance_columnar import table_digest
 if TYPE_CHECKING:
     from .binance_daily import Response
 
-_COUNT_WORDS = ('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven')
+_COUNT_WORDS = ('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight')
 
 
 def timestamp_datetime(value: int) -> datetime:
@@ -61,6 +61,7 @@ def parse_archive_rows(
     *,
     field_count: int,
     header: tuple[str, ...] | None,
+    timestamp_index: int,
     build_row: Callable[[int, int, datetime, list[str]], Row],
 ) -> Iterator[Row]:
     previous_id = -1
@@ -79,7 +80,7 @@ def parse_archive_rows(
                     f'{_COUNT_WORDS[field_count]} fields.'
                 )
             trade_id = _integer(fields[0])
-            timestamp = _integer(fields[4])
+            timestamp = _integer(fields[timestamp_index])
             instant = timestamp_datetime(timestamp)
             if trade_id <= previous_id or instant < previous_time:
                 raise ValueError('Binance rows must have unique ordered IDs and ordered timestamps.')
@@ -108,6 +109,7 @@ class BinanceArchiveDaily:
     MEMBER_PREFIX: ClassVar[str] = 'BTCUSDT-trades'
     FIELD_COUNT: ClassVar[int]
     HEADER: ClassVar[tuple[str, ...] | None]
+    TIMESTAMP_INDEX: ClassVar[int] = 4
 
     def candidate(self, now: datetime) -> Partition:
         return self.partition((now.astimezone(UTC).date() - timedelta(days=1)).isoformat())
@@ -140,6 +142,7 @@ class BinanceArchiveDaily:
             partition,
             field_count=self.FIELD_COUNT,
             header=self.HEADER,
+            timestamp_index=self.TIMESTAMP_INDEX,
             build_row=self.build_row,
         )
 

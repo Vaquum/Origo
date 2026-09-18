@@ -1,0 +1,75 @@
+{
+  "minute_start": "2026-09-16T02:30:00+00:00",
+  "minute_end": "2026-09-16T02:31:00+00:00",
+  "requests": [
+    {
+      "file": "locator.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1789525800000,
+        "endTime": 1789525859999,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T15:21:27.632997+00:00",
+      "sha256": "e382e6049cdde0b084946a64726f61b5de7c368bccc03dfc894a18da173b4566",
+      "response_headers": {
+        "x-mbx-used-weight": "4",
+        "x-mbx-used-weight-1m": "4"
+      }
+    },
+    {
+      "file": "page-00.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4064947752,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T15:21:28.062128+00:00",
+      "sha256": "673349d483c9ee33732dc6eeadd6922eca92193d5b84cfaf19d747f7ebb533e1",
+      "response_headers": {
+        "x-mbx-used-weight": "8",
+        "x-mbx-used-weight-1m": "8"
+      }
+    },
+    {
+      "file": "page-01.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4064948752,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T15:21:28.489361+00:00",
+      "sha256": "e06dfbef4cb9610c57025eb35e7ec60164c1685dae916dff7787f4c793f2ba8a",
+      "response_headers": {
+        "x-mbx-used-weight": "12",
+        "x-mbx-used-weight-1m": "12"
+      }
+    },
+    {
+      "file": "page-02.json",
+      "url": "https://api.binance.com/api/v3/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 4064949752,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T15:21:28.991973+00:00",
+      "sha256": "7eef5e351e8e8fdaf6b063efde98ce8b10b52ceb0d7c86c68e98e54686beae1c",
+      "response_headers": {
+        "x-mbx-used-weight": "16",
+        "x-mbx-used-weight-1m": "16"
+      }
+    }
+  ]
+}

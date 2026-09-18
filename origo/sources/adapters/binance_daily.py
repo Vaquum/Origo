@@ -27,6 +27,24 @@ class Response:
     status: int
 
 
+WORKER_HEARTBEAT_ENV = 'ORIGO_WORKER_HEARTBEAT'
+
+
+def _beat() -> None:
+    """Touch the worker heartbeat when a worker owns this process.
+
+    A paced catch-up fetch holds the worker inside one tick for minutes; each
+    completed request proves the loop is alive so the watchdog does not mistake
+    slow progress for a hang. Dagster runs never set the variable and skip this.
+    """
+    beat = os.environ.get(WORKER_HEARTBEAT_ENV, '')
+    if not beat:
+        return
+    path = Path(beat)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'{time.time():.3f}\n')
+
+
 def _request(
     url: str, params: Mapping[str, str | int] | None, headers: Mapping[str, str] | None
 ) -> requests.Response:
@@ -71,6 +89,7 @@ def _weighted_request(
         next_request = time.time() + weight / 20
         persist()
         response = _request(url, params, headers)
+        _beat()
         used = int(response.headers.get('X-MBX-USED-WEIGHT-1M', '0'))
         if used >= 1200:
             next_request = max(next_request, time.time() + 60)

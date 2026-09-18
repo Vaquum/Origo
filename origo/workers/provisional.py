@@ -8,7 +8,9 @@ pinned state changed, unless a native backfill of the source owns publication. E
 interval and each publication writes one receipt; every tick reports the source's live
 feed asset so its freshness check sees the worker. A failing interval or publication is
 retried with a doubling delay from one minute up to the source's ``retry_delay``, at most
-``retry_count`` times, then left to the operator.
+``retry_count`` times, then left to the operator. Each built interval, each
+publication, and each paced REST request touches the worker heartbeat, so a slow
+catch-up tick proves liveness instead of tripping the watchdog.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import Partition, RevisionedSourceSpec, RolloutStage, failure_code
 from origo.sources.publication import publication_current
@@ -40,6 +43,7 @@ from .runtime import (
     heartbeat_directory,
     heartbeat_path,
     run_forever,
+    touch_heartbeat,
     utc_now,
 )
 
@@ -69,6 +73,7 @@ class ProvisionalFeed:
         dagster: DagsterReader,
         host: str = '',
         clock: Callable[[], datetime] = utc_now,
+        heartbeat: Path | None = None,
     ) -> None:
         self.specs = tuple(
             spec
@@ -80,6 +85,12 @@ class ProvisionalFeed:
         self.dagster = dagster
         self.host = host or os.uname().nodename
         self.clock = clock
+        self.heartbeat = heartbeat
+
+    def _beat(self) -> None:
+        """Prove the loop is alive after each unit of work inside a slow tick."""
+        if self.heartbeat is not None:
+            touch_heartbeat(self.heartbeat)
 
     def _run_id(self, now: datetime) -> str:
         return f'worker:{self.name}:{self.host}:{now.strftime("%Y%m%dT%H%M%SZ")}'
@@ -167,6 +178,7 @@ class ProvisionalFeed:
                     error=str(error),
                 )
                 failed.append(key)
+                self._beat()
                 continue
             record_receipt(
                 store.client,
@@ -180,6 +192,7 @@ class ProvisionalFeed:
                 status='OK',
             )
             processed.append(key)
+            self._beat()
         return processed, failed
 
     def _publish(
@@ -245,6 +258,7 @@ class ProvisionalFeed:
                     error=str(error),
                 )
                 failed.append(series)
+                self._beat()
                 continue
             record_receipt(
                 store.client,
@@ -258,6 +272,7 @@ class ProvisionalFeed:
                 status='OK',
             )
             processed.append(series)
+            self._beat()
         return processed, failed
 
     def tick(self, now: datetime) -> TickOutcome:
@@ -292,7 +307,7 @@ class ProvisionalFeed:
         )
 
 
-def build_feed(environ: dict[str, str]) -> ProvisionalFeed:
+def build_feed(environ: dict[str, str], *, heartbeat: Path | None = None) -> ProvisionalFeed:
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     try:
@@ -305,6 +320,7 @@ def build_feed(environ: dict[str, str]) -> ProvisionalFeed:
         publication_root=Path(environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
         reporter=Reporter(base_url),
         dagster=DagsterReader(base_url),
+        heartbeat=heartbeat,
     )
 
 
@@ -323,7 +339,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     heartbeat = heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)
     if arguments.check:
         return check_heartbeat(heartbeat)
-    feed = build_feed(dict(os.environ))
+    os.environ[WORKER_HEARTBEAT_ENV] = str(heartbeat)
+    feed = build_feed(dict(os.environ), heartbeat=heartbeat)
     if arguments.once:
         outcome = feed.tick(datetime.now(UTC))
         print(json.dumps({'minute': outcome.minute.isoformat(), 'processed': list(outcome.processed), 'failed': list(outcome.failed)}))

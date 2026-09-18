@@ -1,3 +1,7 @@
+# v3.16.1
+
+- Fix the provisional worker watchdog livelock: each built interval, each publication, and each paced REST request touches the worker heartbeat, so a slow catch-up tick proves liveness instead of tripping the 180s watchdog and retrying the same oldest minute forever. Dagster runs never set `ORIGO_WORKER_HEARTBEAT` and skip the beat.
+
 # v3.16.0
 
 - Promote the Binance perp trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2019-09-08 to present, fresh tail) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_perp_*` datasets.

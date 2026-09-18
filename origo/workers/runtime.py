@@ -1,6 +1,7 @@
 """Shared runtime of an observed worker: the minute loop, the heartbeat and the watchdog.
 
 The loop calls ``feed.tick`` once per interval and touches the heartbeat after every tick,
+and the feed touches it as it completes each unit of work inside a slow tick,
 so the heartbeat proves the loop is alive, not that the tick succeeded; failures are the
 tick's own job to record. A watchdog thread exits the process when the heartbeat is stale,
 which under ``restart: unless-stopped`` restarts the container, and ``check_heartbeat`` is

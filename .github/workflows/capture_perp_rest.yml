@@ -1,12 +1,9 @@
 name: capture-perp-rest-fixtures
 # TEMPORARY fixture capture. Deleted before the slice PR opens; never merged.
 on:
-  workflow_dispatch:
-    inputs:
-      minute_start:
-        description: UTC minute, e.g. 2026-09-17T03:00:00Z
-        required: true
-        default: 2026-09-17T03:00:00Z
+  push:
+    branches: [feat/binance-perp-trades]
+    paths: [.github/workflows/capture_perp_rest.yml]
 jobs:
   capture:
     runs-on: ubuntu-latest
@@ -15,7 +12,7 @@ jobs:
       - name: Capture locator and trade pages
         env:
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          MINUTE: ${{ inputs.minute_start }}
+          MINUTE: 2026-09-17T03:00:00Z
         run: |
           python3 - <<'EOF'
           import hashlib, json, os, urllib.request

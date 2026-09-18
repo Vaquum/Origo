@@ -96,6 +96,7 @@ jobs:
           BINANCE_SPOT_DEPTH20_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH20_AUTH_TOKEN }}
           BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           RESEND_API_KEY: test-key
           ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
@@ -128,6 +129,7 @@ jobs:
           BINANCE_SPOT_DEPTH20_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH20_AUTH_TOKEN }}
           BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
         run: |
           DEPLOY_ENV_FILE="/tmp/origo-deploy.env"
           trap 'rm -f "$DEPLOY_ENV_FILE"' EXIT
@@ -147,6 +149,7 @@ jobs:
               "BINANCE_SPOT_DEPTH20_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH20_AUTH_TOKEN"],
               "BINANCE_SPOT_DEPTH200_BASE_URL": os.environ["BINANCE_SPOT_DEPTH200_BASE_URL"],
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
+              "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
               "ORIGO_METADATA_DRY_RUN": os.environ["ORIGO_METADATA_DRY_RUN"],

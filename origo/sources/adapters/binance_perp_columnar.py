@@ -10,6 +10,7 @@ import polars as pl
 from ..arrow_types import ArrowTable
 from ..contracts import Partition
 
+
 COLUMNS = (
     'trade_id',
     'price',

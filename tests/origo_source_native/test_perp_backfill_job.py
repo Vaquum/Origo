@@ -3,8 +3,8 @@ import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import cast
+from pathlib import Path
 
 import pytest
 from dagster import (
@@ -14,6 +14,8 @@ from dagster import (
     Definitions,
     build_sensor_context,
 )
+
+from dagster._core.definitions.sensor_definition import SensorExecutionData
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources import capacity

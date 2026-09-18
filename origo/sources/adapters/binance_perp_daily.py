@@ -8,10 +8,10 @@ import os
 import re
 import zipfile
 from collections.abc import Iterator
-from itertools import chain
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from itertools import chain
 
 from dagster import get_dagster_logger
 

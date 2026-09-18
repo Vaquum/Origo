@@ -1,8 +1,6 @@
 """Ported from the spot formula; the SQL and arithmetic are unchanged.
 
-The revisioned math is intentionally unrounded (full precision in the database;
-the file exports round at publication). The retired futures pipeline rounded
-several measures inside the database; that rounding retired with it.
+Revisioned math keeps full precision; the retired futures pipeline's in-database rounding retired with it.
 """
 
 from origo.assets.create_origo_database import ClickHouseClientProtocol

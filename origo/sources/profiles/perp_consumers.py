@@ -53,7 +53,7 @@ ORPHAN_STAGING_MAX_AGE_SECONDS = 3600
 HUGGINGFACE_DATASETS: dict[str, tuple[str, str | None, str, str]] = {
     'perp_time_1m': (
         'vaquum/binance_btcusdt_perp_1m_klines',
-        'HUGGINGFACE_DATASET_REPO_ID',
+        'HUGGINGFACE_PERP_DATASET_REPO_ID',
         'btcusdt_perp_1m_kline_20200101_to_',
         '1-minute',
     ),
@@ -155,11 +155,13 @@ def _write_parquet(frame: pl.DataFrame, target: Path) -> None:
 def _clear_orphan_staging(parquet_root: Path, root: Path, now: float) -> None:
     """Remove staging directories and partial manifests a hard-killed render left behind.
 
-    Renders of one consumer are serialized, so anything older than the grace window is an
-    orphan; the window keeps a render that is still running out of reach.
+    Staging directories carry the source key and each consumer sweeps only its own, so a
+    concurrent render of another source is never matched; the grace window protects a
+    render that is still running.
     """
     cutoff = now - ORPHAN_STAGING_MAX_AGE_SECONDS
-    for orphan in parquet_root.glob('.staging-*'):
+    owner = root.parts[-2]  # destinations are <...>/<source_key>/<kind>; see _root.
+    for orphan in parquet_root.glob(f'.{owner}-staging-*'):
         if orphan.is_dir() and orphan.stat().st_mtime < cutoff:
             shutil.rmtree(orphan, ignore_errors=True)
     for orphan in root.glob('.*.partial-*'):
@@ -283,13 +285,13 @@ def _entry(path: Path, row_count: int, **extra: object) -> dict[str, object]:
 def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
     """Refresh the Parquet mirror months whose pinned state changed, then the Arrow series.
 
-    Month files and Arrow versions live at the public roots (``LOCAL_PARQUET_DIR`` and
-    ``LOCAL_ARROW_DIR``); the manifest under ``destination`` records which state they hold.
-    Months render into a staging directory beside the mirror and Arrow versions are written
-    without flipping ``latest``; only a render whose canonical state is unchanged moves the
-    months into place and activates the versions, so a discarded render leaves the public
-    roots exactly as the manifest describes them. Staging left by a render that died is
-    swept once it is older than the grace window.
+    Month files and Arrow versions live under the shared mirror roots (``LOCAL_PARQUET_DIR``
+    and ``LOCAL_ARROW_DIR``); the manifest under ``destination`` records which state they
+    hold. Months render into a staging directory beside the mirror and Arrow versions are
+    written without flipping ``latest``; only a render whose canonical state is unchanged
+    moves the months into place and activates the versions, so a discarded render leaves
+    the shared roots exactly as the manifest describes them. Staging left by a render that
+    died is swept once it is older than the grace window.
     """
     store, root = _root(destination, reader, 'mount')
     if not snapshot.records:
@@ -304,7 +306,7 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
     state = store.canonical_token(snapshot)
     parquet_root = parquet_source_root()
     _clear_orphan_staging(parquet_root, root, time.time())
-    staging = parquet_root / f'.staging-{uuid4().hex}'
+    staging = parquet_root / f'.{store.spec.key}-staging-{uuid4().hex}'
     files: list[dict[str, object]] = []
     staged_months: dict[Path, Path] = {}
     rebuilt: set[str] = set()

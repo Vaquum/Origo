@@ -10,7 +10,7 @@ from .contracts import (
     RolloutStage,
     SourceNames,
 )
-from .profiles.perp import PERP_COMPONENTS
+from .profiles.perp import PERP_COMPONENTS, PERP_RETIRED_TABLES
 from .profiles.perp_consumers import PERP_CONSUMERS
 
 BINANCE_PERP_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
@@ -24,10 +24,5 @@ BINANCE_PERP_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     components=PERP_COMPONENTS,
     consumers=PERP_CONSUMERS,
     orchestration=OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *'),
-    retired_tables=(
-        'binance_daily_futures_trades',
-        'binance_daily_futures_trades_ingestion',
-        'binance_futures_klines',
-        'aligned_1m_exchange',
-    ),
+    retired_tables=PERP_RETIRED_TABLES,
 )

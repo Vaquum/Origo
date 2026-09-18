@@ -570,3 +570,58 @@ def test_perp_huggingface_upload_records_every_rendered_series(
     assert manifest['kind'] == 'huggingface'
     assert len(manifest['uploads']) == len(manifest['files']) == 6
     assert len({entry['repo_id'] for entry in manifest['uploads']}) == 6
+
+
+def test_perp_mount_renders_post_cutoff_month_and_sweeps_only_own_staging(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import time
+    from uuid import uuid4
+
+    import polars as pl
+
+    from origo.sources import publication
+    from origo.sources.lifecycle import SourceRuntime
+    from origo.sources.profiles.formulas.perp_series import SPECS
+
+    store, _instance, _bundle = ready_job
+    day = '2024-04-20'
+    runtime = SourceRuntime(store.spec, store, tmp_path / 'locks', str(uuid4()))
+    runtime.setup(anchor=datetime(2024, 4, 20, tzinfo=UTC))
+    runtime.build(day)
+    parquet = tmp_path / 'parquet'
+    own = parquet / '.binance_perp_trades-staging-stale'
+    own.mkdir(parents=True)
+    (own / 'x.parquet').write_bytes(b'x')
+    foreign = parquet / '.staging-foreign'
+    foreign.mkdir(parents=True)
+    (foreign / 'x.parquet').write_bytes(b'x')
+    old = time.time() - 7200
+    os.utime(own, (old, old))
+    os.utime(foreign, (old, old))
+    mount = tmp_path / store.spec.key / 'mount'
+    snapshot = runtime.publish('mount', str(mount))
+    assert not own.exists()
+    assert (foreign / 'x.parquet').is_file()
+    assert not list(parquet.glob('.binance_perp_trades-staging-*'))
+    manifest = json.loads((mount / 'latest.json').read_text())
+    assert manifest['state_token'] == snapshot.token == manifest['pinned_token']
+    assert list(manifest['month_tokens']) == ['2024-04']
+    assert len(manifest['files']) == 24
+    for entry in manifest['files']:
+        assert Path(entry['path']).is_absolute() and Path(entry['path']).is_file()
+    for series in SPECS:
+        month = parquet / series.sub_path / '2024/04.parquet'
+        assert pl.read_parquet(month).height > 0
+        assert (tmp_path / 'arrow' / series.name / 'latest.arrow').is_file()
+    written = {
+        entry['path']: Path(entry['path']).stat().st_mtime_ns for entry in manifest['files']
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(publication, 'publication_current', lambda *a, **k: False)
+        runtime.publish('mount', str(mount))
+    repeated = json.loads((mount / 'latest.json').read_text())
+    assert {e['path']: Path(e['path']).stat().st_mtime_ns for e in repeated['files']} == written

@@ -13,11 +13,6 @@ from ..hashing import content_hash
 from .binance_daily import get_response
 from .binance_perp_daily import parse_decimal, timestamp_datetime
 
-# Measured X-MBX-USED-WEIGHT-1M deltas per call during fixture capture; the adapter
-# test pins them against the recorded requests.
-AGG_TRADES_WEIGHT = 20
-HISTORICAL_TRADES_WEIGHT = 200
-
 
 def _objects(body: bytes) -> tuple[dict[str, object], ...]:
     payload: object = json.loads(body)
@@ -147,8 +142,11 @@ class BinancePerpProvisional:
         locator = request(
             '/fapi/v1/aggTrades',
             {'symbol': symbol, 'startTime': start_ms, 'endTime': end_ms - 1, 'limit': 1},
-            AGG_TRADES_WEIGHT,
+            20,
         )
+        # An empty locator proves no aggregate OPENS in the minute; a pre-minute aggregate
+        # hiding in-minute trades needs 60s without a new price or side, which fapi cannot
+        # efficiently disprove, so the empty proof assumes it away.
         if not locator:
             tick = now_utc().replace(second=0, microsecond=0).isoformat()
             evidence: dict[str, object] = {
@@ -169,7 +167,7 @@ class BinancePerpProvisional:
                     and previous_tick != tick
                 ):
                     later = request(
-                        '/fapi/v1/aggTrades', {'symbol': symbol, 'startTime': end_ms, 'limit': 1}, AGG_TRADES_WEIGHT
+                        '/fapi/v1/aggTrades', {'symbol': symbol, 'startTime': end_ms, 'limit': 1}, 20
                     )
                     complete = bool(later) and _int(later[0], 'T') >= end_ms
                     evidence['previous_empty_observation'] = prior
@@ -198,7 +196,7 @@ class BinancePerpProvisional:
         # fapi rejects limit=1000 here (spot accepts it); 500 is the documented max.
         for _ in range(100):
             page = request(
-                '/fapi/v1/historicalTrades', {'symbol': symbol, 'fromId': next_id, 'limit': 500}, HISTORICAL_TRADES_WEIGHT
+                '/fapi/v1/historicalTrades', {'symbol': symbol, 'fromId': next_id, 'limit': 500}, 200
             )
             if not page:
                 raise RuntimeError('Historical-trade paging ended before the minute boundary.')
@@ -207,13 +205,14 @@ class BinancePerpProvisional:
                 if trade_id <= previous_id or instant < previous_time:
                     raise ValueError('Historical trades are unordered or duplicated.')
                 previous_id, previous_time = trade_id, instant
+                parsed = historical_row(value)
                 if instant >= end_ms:
                     complete = True
                     break
                 if instant < start_ms:
                     skipped += 1
                     continue
-                rows.append(historical_row(value))
+                rows.append(parsed)
             if complete:
                 break
             next_id = _int(page[-1], 'id') + 1

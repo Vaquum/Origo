@@ -41,6 +41,13 @@ _NAMES = {
     'binance_futures_klines_latest': 'time_latest',
     'binance_futures_dollar_klines_latest': 'dollar_latest',
 }
+# Legacy tables without a successor and without surviving readers, so no aliases.
+PERP_RETIRED_TABLES = (
+    'binance_daily_futures_trades',
+    'binance_daily_futures_trades_ingestion',
+    'binance_futures_klines',
+    'aligned_1m_exchange',
+)
 _PATTERN = re.compile(r'\b(' + '|'.join(sorted(_NAMES, key=len, reverse=True)) + r')\b')
 
 

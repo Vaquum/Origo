@@ -1,3 +1,7 @@
+# v3.14.1
+
+- Wire `BINANCE_API_KEY` from repo secrets through the deploy workflow into the `dagster` and `provisional-worker` services. The perp provisional adapter requires the key and the backfill's final health check failed without it (`PROVIDER_CREDENTIAL_MISSING` on every provisional tick); the secret existed but no deploy file referenced it.
+
 # v3.14.0
 
 - Add the Binance perp trades revisioned source beside spot: the daily adapter serves the vision futures archives from the 2019 first day, the provisional adapter pages closed minutes through `aggTrades` plus `historicalTrades` (paging back 1,000 ids before the locator because an aggregate's open time can hide in-minute trades, recomputing the cents-rounded `quoteQty` as price times quantity, and normalizing decimals so the API's padded text matches the archive's trimmed text), the perp profile, formulas and consumers mirror spot with CANARY shadow publication, and the REST replay test asserts full row equality against the archive on all 2,325 rows of the captured minute. The legacy futures pipeline is deleted in the same slice: its tables, jobs, schedules and tests are removed and the briefing reads the revisioned source.

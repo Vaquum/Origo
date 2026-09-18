@@ -149,6 +149,10 @@ def test_one_job_prepares_verifies_and_publishes_all_perp_files(
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),
         ) as context:
             assert sensor.evaluate_tick(context).run_requests == []
+    # The LIVE huggingface consumer runs in the job but uploads nothing: the
+    # pre-cutoff fixture day renders an empty manifest. The upload path itself
+    # is pinned by test_perp_huggingface_upload_records_every_rendered_series.
+    assert FakeHfApi.calls == []
     # Re-deployment restores code-owned sensor state without losing its cursor.
     state = instance.all_instigator_state()[0]
     from dagster._core.scheduler.instigation import InstigatorStatus

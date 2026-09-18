@@ -1,6 +1,6 @@
 # v3.14.1
 
-- Scaffold the parameterized vision archive adapter: `BinanceArchiveDaily` owns download, checksum, partition, and row-validation mechanics behind declared per-source parameters (base URL, first day, field count, header policy) and hooks (HTTP seam, table builder, row builder), and the spot and perp daily adapters shrink to those declarations. Error texts are neutralized to `Binance` with every pinned substring preserved; all digests, revision keys, and REST-vs-archive proofs hold with zero test or tool changes.
+- Scaffold the parameterized vision archive adapter: `BinanceArchiveDaily` owns download, checksum, partition, and row-validation mechanics behind declared per-source parameters (base URL, first day, field count, header policy) and hooks (HTTP seam, table builder, row builder), and the spot and perp daily adapters shrink to those declarations. Error texts are neutralized to `Binance` with every pinned substring preserved; all digests, revision keys, and REST-vs-archive proofs hold with zero test changes. The shared consumer factory (`ConsumerDeclaration` plus mount/huggingface renderers) shrinks both consumer modules to their dataset maps, scoping flags, and rollout-state tuples, with staging ownership, series/path/env scoping, and the HfApi and formula patch seams preserved per source; and `tools/fixture_bundle.py` fetches, packs, and verifies daily-archive fixture bundles, reproducing all five existing bundles' digests including the header-inclusive selection hash.
 
 # v3.14.0
 

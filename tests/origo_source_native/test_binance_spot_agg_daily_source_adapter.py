@@ -243,6 +243,17 @@ def test_spot_agg_cleaning_rejects_reused_ids_with_different_rows() -> None:
         adapter.clean_rows(_QUIRK_FIRST + _QUIRK_SECOND + altered, partition)
 
 
+def test_archive_cleaning_defaults_to_identity_for_trades_sources() -> None:
+    from origo.sources.adapters.binance_daily import BinanceSpotDaily
+    from origo.sources.adapters.binance_perp_daily import BinancePerpDaily
+
+    body = b'1,2,3,4,5,6,7,8\n'
+    for adapter in (BinanceSpotDaily(), BinancePerpDaily()):
+        partition = adapter.partition('2024-04-20')
+        cleaned, dropped = adapter.clean_rows(body, partition)
+        assert dropped == {} and cleaned is body
+
+
 def test_spot_agg_cleaning_passes_clean_archives_through_untouched() -> None:
     adapter = daily.BinanceSpotAggDaily()
     partition = adapter.partition('2017-08-17')

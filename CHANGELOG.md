@@ -1,3 +1,7 @@
+# v3.17.2
+
+- Share the aggregate archive quirk cleaner: the sentinel/duplicate-drop machinery moves from the spot agg adapter to `BinanceArchiveDaily.clean_agg_rows`, which the spot agg `clean_rows` hook now delegates to and the futures agg source will reuse. Behavior-preserving port; the four held production days verify identical through the delegated path.
+
 # v3.17.1
 
 - Record `required_approving_review_count: 1` in the `Protect-Main` ruleset snapshot. The live ruleset gained the one-approval requirement as the new standard while `.github/rulesets/main.json` still carried 0, so `pr_checks_ruleset` failed every open PR on drift it had not caused. Protection itself is unchanged; the snapshot now matches live field for field.

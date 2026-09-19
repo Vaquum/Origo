@@ -3,7 +3,8 @@
 Spot and perp declare their archive parameters on subclasses; the base owns
 download, checksum, partition, and row-validation mechanics. Per-source hooks
 stay on the subclasses: the decimal parser (perp normalizes padded API text),
-the columnar table builder, and the row builder.
+the columnar table builder, and the row builder. The quirk-row cleaner is also
+a hook, with a shared aggregate implementation both agg sources reuse.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from itertools import chain
 from typing import TYPE_CHECKING, ClassVar
 
@@ -93,6 +95,21 @@ def parse_archive_rows(
         raise ValueError('An empty archive is not a canonical Binance partition.')
 
 
+# Verification retains one line per out-of-order id; past this many distinct
+# backward ids the archive is systematically disordered, not quirked.
+_MAX_ANOMALY_IDS = 100_000
+
+
+def _sentinel(fields: list[bytes]) -> bool:
+    """A Binance placeholder aggregate: -1 trade ids with zero price and quantity."""
+    if len(fields) < 6 or fields[3] != b'-1' or fields[4] != b'-1':
+        return False
+    try:
+        return Decimal(fields[1].decode('ascii')) == 0 and Decimal(fields[2].decode('ascii')) == 0
+    except (InvalidOperation, UnicodeDecodeError):
+        return False
+
+
 def _checksum(body: bytes, member: str) -> str:
     match = re.fullmatch(rb'([0-9a-f]{64})\s+\*?' + re.escape(member.encode()) + rb'\s*', body)
     if match is None:
@@ -146,6 +163,74 @@ class BinanceArchiveDaily:
         csv_sha256 there always pins the archive as served.
         """
         return csv_body, {}
+
+    def clean_agg_rows(self, csv_body: bytes) -> tuple[bytes, dict[str, int]]:
+        """Drop the two observed Binance-side aggregate quirk rows: -1/zero
+        sentinel aggregates and byte-identical duplicate lines from repackaged
+        chunks. Both agg sources share this; a reused id with different
+        content, a uniquely backward id, or anything else malformed still
+        fails loud in validation. Clean archives return the identical bytes
+        with no counts.
+        """
+        anomalies: set[int] = set()
+        sentinels = 0
+        max_id = -1
+        for line in io.BytesIO(csv_body):
+            fields = line.split(b',', 5)
+            if len(fields) < 6:
+                continue
+            if _sentinel(fields):
+                sentinels += 1
+                continue
+            try:
+                trade_id = int(fields[0])
+            except ValueError:
+                continue
+            if trade_id <= max_id:
+                anomalies.add(trade_id)
+                if len(anomalies) > _MAX_ANOMALY_IDS:
+                    raise ValueError(
+                        'Binance aggregate archive is too disordered to clean.'
+                    )
+            else:
+                max_id = trade_id
+        if not sentinels and not anomalies:
+            return csv_body, {}
+        out = bytearray()
+        firsts: dict[int, bytes] = {}
+        counts: dict[int, int] = {}
+        duplicates = 0
+        for line in io.BytesIO(csv_body):
+            fields = line.split(b',', 5)
+            if len(fields) < 6:
+                out += line
+                continue
+            if _sentinel(fields):
+                continue
+            try:
+                trade_id = int(fields[0])
+            except ValueError:
+                out += line
+                continue
+            if trade_id not in anomalies:
+                out += line
+                continue
+            counts[trade_id] = counts.get(trade_id, 0) + 1
+            flat = line.rstrip(b'\r\n')
+            if trade_id not in firsts:
+                firsts[trade_id] = flat
+                out += line
+                continue
+            if firsts[trade_id] != flat:
+                raise ValueError(
+                    f'Binance aggregate id {trade_id} repeats with different content.'
+                )
+            duplicates += 1
+        backward = sorted(anomaly for anomaly in anomalies if counts.get(anomaly, 0) < 2)
+        if backward:
+            raise ValueError(f'Binance aggregate id {backward[0]} is out of order.')
+        dropped = {'sentinel_rows': sentinels, 'duplicate_rows': duplicates}
+        return bytes(out), {kind: count for kind, count in dropped.items() if count}
 
     def parse_rows(self, body: bytes, partition: Partition) -> Iterator[Row]:
         return parse_archive_rows(

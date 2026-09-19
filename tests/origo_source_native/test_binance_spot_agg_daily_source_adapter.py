@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import zipfile
 from datetime import UTC, datetime
@@ -214,3 +215,63 @@ def test_spot_agg_empty_minute_requires_two_ticks_and_later_boundary_evidence(
     second = adapter.fetch(partition, first.evidence_json)
     assert second.row_count == 0 and second.complete and calls == []
     assert tuple(second.rows()) == ()
+
+
+_QUIRK_FIRST = b'2980094258,64000.10,0.00100,5000000000,5000000000,1713571200005,True,True\n'
+_QUIRK_SENTINEL = b'2980094259,0,0,-1,-1,1713571199005,False,True\n'
+_QUIRK_SECOND = b'2980094260,64001.00,0.00200,5000000001,5000000001,1713571201005,True,True\n'
+
+
+def test_spot_agg_cleaning_drops_sentinels_and_exact_duplicates() -> None:
+    adapter = daily.BinanceSpotAggDaily()
+    partition = adapter.partition('2024-04-20')
+    body = _QUIRK_FIRST + _QUIRK_SENTINEL + _QUIRK_SECOND + _QUIRK_FIRST
+    cleaned, dropped = adapter.clean_rows(body, partition)
+    assert dropped == {'sentinel_rows': 1, 'duplicate_rows': 1}
+    assert cleaned == _QUIRK_FIRST + _QUIRK_SECOND
+    rows = tuple(daily.agg_csv_rows(cleaned, partition))
+    table = columnar.agg_table(cleaned, partition)
+    assert len(rows) == table.num_rows == 2
+    assert [row[0] for row in rows] == [2980094258, 2980094260]
+
+
+def test_spot_agg_cleaning_rejects_reused_ids_with_different_rows() -> None:
+    adapter = daily.BinanceSpotAggDaily()
+    partition = adapter.partition('2024-04-20')
+    altered = _QUIRK_FIRST.replace(b'64000.10', b'64000.20')
+    with pytest.raises(ValueError, match='repeats with different content'):
+        adapter.clean_rows(_QUIRK_FIRST + _QUIRK_SECOND + altered, partition)
+
+
+def test_spot_agg_cleaning_passes_clean_archives_through_untouched() -> None:
+    adapter = daily.BinanceSpotAggDaily()
+    partition = adapter.partition('2017-08-17')
+    body = _day_csv('2017-08-17')
+    cleaned, dropped = adapter.clean_rows(body, partition)
+    assert dropped == {} and cleaned is body
+
+
+def test_spot_agg_fetch_records_dropped_rows_in_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = daily.BinanceSpotAggDaily()
+    partition = adapter.partition('2024-04-20')
+    csv_body = _QUIRK_FIRST + _QUIRK_SENTINEL + _QUIRK_SECOND + _QUIRK_FIRST
+    member = 'BTCUSDT-aggTrades-2024-04-20'
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(member + '.csv', csv_body)
+    zip_body = buffer.getvalue()
+    digest = hashlib.sha256(zip_body).hexdigest()
+
+    def served(url: str) -> Response:
+        if url.endswith('CHECKSUM'):
+            return Response(f'{digest}  {member}.zip\n'.encode(), {}, 200)
+        return Response(zip_body, {}, 200)
+
+    monkeypatch.setattr(daily, 'get_response', served)
+    revision = adapter.fetch(partition)
+    assert revision.key == digest and revision.row_count == 2
+    evidence = json.loads(revision.evidence_json)
+    assert evidence['dropped_rows'] == {'sentinel_rows': 1, 'duplicate_rows': 1}
+    assert evidence['csv_sha256'] == hashlib.sha256(csv_body).hexdigest()

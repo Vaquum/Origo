@@ -136,6 +136,17 @@ class BinanceArchiveDaily:
     ) -> Row:
         raise NotImplementedError('Archive subclasses build their own row shape.')
 
+    def clean_rows(
+        self, csv_body: bytes, partition: Partition
+    ) -> tuple[bytes, dict[str, int]]:
+        """Drop provider-side quirk rows before validation; report drop counts.
+
+        The default is the identity: only adapters with observed, evidenced
+        quirks override this. Counts merge into the revision evidence, while
+        csv_sha256 there always pins the archive as served.
+        """
+        return csv_body, {}
+
     def parse_rows(self, body: bytes, partition: Partition) -> Iterator[Row]:
         return parse_archive_rows(
             body,
@@ -167,20 +178,21 @@ class BinanceArchiveDaily:
                 )
             csv_body = archive.read(name + '.csv')
         try:
-            table = self.build_table(csv_body, partition)
+            rows_body, dropped = self.clean_rows(csv_body, partition)
+            table = self.build_table(rows_body, partition)
             count = table.num_rows
             normalized = table_digest(table)
         except ValueError as error:
             raise SourceError('ARCHIVE_ROWS_INVALID', str(error)) from error
-        evidence = json.dumps(
-            {
-                'object_url': url,
-                'zip_sha256': expected,
-                'csv_sha256': hashlib.sha256(csv_body).hexdigest(),
-                'member': name + '.csv',
-            },
-            sort_keys=True,
-        )
+        checksums: dict[str, object] = {
+            'object_url': url,
+            'zip_sha256': expected,
+            'csv_sha256': hashlib.sha256(csv_body).hexdigest(),
+            'member': name + '.csv',
+        }
+        if dropped:
+            checksums['dropped_rows'] = dropped
+        evidence = json.dumps(checksums, sort_keys=True)
         get_dagster_logger('origo.sources').info(
             'source=%s partition=%s phase=archive_validated rows=%s revision=%s',
             self.SOURCE_KEY,
@@ -193,7 +205,7 @@ class BinanceArchiveDaily:
             normalized,
             evidence,
             count,
-            lambda: self.parse_rows(csv_body, partition),
+            lambda: self.parse_rows(rows_body, partition),
             insert_bulk=lambda destination: insert_arrow(destination, table),
         )
 

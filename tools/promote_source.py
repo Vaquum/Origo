@@ -32,6 +32,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import re
 import sys
@@ -253,58 +254,41 @@ PLAIN_HUGGINGFACE_DEF: Final[str] = (
     'def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:\n'
 )
 
-SHADOW_TEST_DEF_PREFIX: Final[str] = 'def test_{prefix}_huggingface_shadow_renders_locally_without_uploading('
-
-
-_TOP_LEVEL_OPENER: Final[tuple[str, ...]] = ('def ', 'async def ', 'class ', '@')
-
-
 def delete_shadow_test(text: str, prefix: str) -> tuple[str, bool]:
     """Delete the dedicated shadow-render test; no-op when the canary predates it.
 
-    The span is exactly one undecorated top-level ``def``: it starts at the
-    marker on its own column-0 line and ends at the next column-0
-    ``def``/``class``/decorator line, so a decorated following test keeps its
-    marks. Every span line past the ``def`` must be blank or indented,
-    otherwise a smuggled top-level statement fails loud instead of being
-    eaten. The survivors rejoin with exactly two blank lines (or one trailing
-    newline when the shadow test was last), matching the file's own rhythm.
+    The span is the test's own AST node: exactly one undecorated top-level
+    ``def`` located by name, so multi-line signatures, trailing comments,
+    and following decorators, classes, or module statements can neither
+    widen the span nor be eaten by it. A decorated, nested, or
+    assertion-less shadow test fails loud instead of deleting wrong. The
+    survivors rejoin with exactly two blank lines (or one trailing newline
+    when the shadow test was last), matching the file's own rhythm.
     """
-    marker = SHADOW_TEST_DEF_PREFIX.format(prefix=prefix)
-    start = text.find(marker)
-    if start < 0:
+    name = f'test_{prefix}_huggingface_shadow_renders_locally_without_uploading'
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        raise ValueError(f'Cannot parse the backfill test file: {exc}.') from exc
+    target: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            target = node
+            break
+    if target is None:
+        if name in text:
+            raise ValueError(f'Shadow test {name!r} is not a top-level def; refusing to delete.')
         return text, False
-    line_start = text.rfind('\n', 0, start) + 1
-    if line_start != start:
-        raise ValueError(f'Shadow test marker is not at column 0: {marker!r}.')
-    lines = text.split('\n')
-    def_index = text.count('\n', 0, line_start)
-    prev = def_index - 1
-    while prev >= 0 and lines[prev].strip() == '':
-        prev -= 1
-    if prev >= 0 and lines[prev].startswith('@'):
+    if target.decorator_list:
         raise ValueError('Shadow test carries decorators; extend the tool instead of guessing.')
-    sig = def_index
-    while not lines[sig].rstrip().endswith(':'):
-        sig += 1
-        if sig >= len(lines):
-            raise ValueError('Shadow test def never closes its signature; refusing to delete.')
-    end_index = len(lines)
-    for i in range(sig + 1, len(lines)):
-        line = lines[i]
-        if line == '' or line.startswith((' ', '\t')):
-            continue
-        if not line.startswith(_TOP_LEVEL_OPENER):
-            raise ValueError(
-                f'Shadow test span reaches a top-level statement ({line[:40]!r}); refusing to delete.'
-            )
-        end_index = i
-        break
-    span = '\n'.join(lines[def_index:end_index])
+    if target.end_lineno is None:
+        raise ValueError('Shadow test has no end line; refusing to delete.')
+    lines = text.split('\n')
+    span = '\n'.join(lines[target.lineno - 1 : target.end_lineno])
     if 'FakeHfApi.calls == []' not in span or '_huggingface_shadow(' not in span:
         raise ValueError('Shadow test span lacks the expected shadow assertions; refusing to delete.')
-    head = '\n'.join(lines[:def_index]).rstrip('\n')
-    tail = '\n'.join(lines[end_index:]).lstrip('\n')
+    head = '\n'.join(lines[: target.lineno - 1]).rstrip('\n')
+    tail = '\n'.join(lines[target.end_lineno :]).lstrip('\n')
     if not tail:
         return (head + '\n' if head else ''), True
     if not head:

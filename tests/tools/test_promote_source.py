@@ -443,7 +443,7 @@ def test_delete_shadow_test_refuses_an_indented_marker() -> None:
         '        assert FakeHfApi.calls == []\n'
         '        wib_consumers._huggingface_shadow(store, store.snapshot(), destination)\n'
     )
-    with pytest.raises(ValueError, match='not at column 0'):
+    with pytest.raises(ValueError, match='not a top-level def'):
         module.delete_shadow_test(text, 'wib')
 
 
@@ -463,7 +463,7 @@ def test_delete_shadow_test_refuses_a_decorated_shadow() -> None:
         module.delete_shadow_test(text, 'wib')
 
 
-def test_delete_shadow_test_refuses_a_smuggled_top_level_statement() -> None:
+def test_delete_shadow_test_preserves_a_following_module_statement() -> None:
     module = _load()
     text = (
         'def test_wib_huggingface_shadow_renders_locally_without_uploading() -> None:\n'
@@ -477,5 +477,54 @@ def test_delete_shadow_test_refuses_a_smuggled_top_level_statement() -> None:
         'def test_next() -> None:\n'
         '    pass\n'
     )
-    with pytest.raises(ValueError, match='top-level statement'):
+    updated, deleted = module.delete_shadow_test(text, 'wib')
+    assert deleted is True
+    assert updated == (
+        'MARKER = 1\n' '\n' '\n' 'def test_next() -> None:\n' '    pass\n'
+    )
+
+
+def test_delete_shadow_test_tolerates_a_trailing_comment_on_the_def() -> None:
+    module = _load()
+    text = (
+        'def test_before() -> None:\n'
+        '    pass\n'
+        '\n'
+        '\n'
+        'def test_wib_huggingface_shadow_renders_locally_without_uploading() -> None:  # noqa\n'
+        '    assert FakeHfApi.calls == []\n'
+        '    wib_consumers._huggingface_shadow(store, store.snapshot(), destination)\n'
+        '\n'
+        '\n'
+        'def test_next() -> None:\n'
+        '    pass\n'
+    )
+    updated, deleted = module.delete_shadow_test(text, 'wib')
+    assert deleted is True
+    assert updated == (
+        'def test_before() -> None:\n'
+        '    pass\n'
+        '\n'
+        '\n'
+        'def test_next() -> None:\n'
+        '    pass\n'
+    )
+
+
+def test_delete_shadow_test_refuses_a_multiline_decorator() -> None:
+    module = _load()
+    text = (
+        '@pytest.mark.parametrize(\n'
+        '    "x",\n'
+        '    [1, 2],\n'
+        ')\n'
+        'def test_wib_huggingface_shadow_renders_locally_without_uploading() -> None:\n'
+        '    assert FakeHfApi.calls == []\n'
+        '    wib_consumers._huggingface_shadow(store, store.snapshot(), destination)\n'
+        '\n'
+        '\n'
+        'def test_next() -> None:\n'
+        '    pass\n'
+    )
+    with pytest.raises(ValueError, match='carries decorators'):
         module.delete_shadow_test(text, 'wib')

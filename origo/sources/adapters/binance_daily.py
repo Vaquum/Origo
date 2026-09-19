@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from math import isfinite
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 import requests
 
@@ -28,6 +30,15 @@ class Response:
 
 
 WORKER_HEARTBEAT_ENV = 'ORIGO_WORKER_HEARTBEAT'
+
+# Static pacing per Binance host family at 60% of the documented IP allowance,
+# with the header-driven backstop at 80%: spot allows 6000 REQUEST_WEIGHT/min
+# and fapi 2400/min. Unknown hosts keep the previous conservative posture.
+REST_HOST_BUDGETS = {
+    'api.binance.com': (60, 4800),
+    'fapi.binance.com': (24, 1920),
+}
+REST_DEFAULT_BUDGET = (20, 1200)
 
 
 def _beat() -> None:
@@ -56,6 +67,22 @@ def _request(
         ) from error
 
 
+def _budget_host(url: str) -> str:
+    """The budget family of a request URL: spot aliases share api's allowance."""
+    normalized = (urlsplit(url).hostname or '').lower()
+    if re.fullmatch(r'api\d*\.binance\.com', normalized):
+        return 'api.binance.com'
+    return normalized
+
+
+def _budget_state_file(root: Path, url: str) -> Path:
+    host = _budget_host(url)
+    safe = ''.join(char if char.isalnum() else '_' for char in host)
+    if not safe:
+        raise ValueError('Binance request budget requires a URL with a host.')
+    return root / f'binance_rest_budget.{safe}.state'
+
+
 def _weighted_request(
     url: str,
     params: Mapping[str, str | int] | None,
@@ -66,8 +93,10 @@ def _weighted_request(
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
-    # All worker processes and Binance host aliases share one IP request allowance.
-    with (root / 'binance_rest_budget.state').open('a+') as state:
+    # All worker processes share one budget per Binance host: api and fapi
+    # enforce separate IP allowances, so a hot host must not pace a cold one.
+    rate, backstop = REST_HOST_BUDGETS.get(_budget_host(url), REST_DEFAULT_BUDGET)
+    with _budget_state_file(root, url).open('a+') as state:
         fcntl.flock(state.fileno(), fcntl.LOCK_EX)
         state.seek(0)
         saved = state.read().strip()
@@ -86,12 +115,12 @@ def _weighted_request(
         if now < circuit_until:
             raise SourceError('PROVIDER_RATE_CIRCUIT', 'Binance request circuit is open.')
         time.sleep(max(0.0, next_request - now))
-        next_request = time.time() + weight / 20
+        next_request = time.time() + weight / rate
         persist()
         response = _request(url, params, headers)
         _beat()
         used = int(response.headers.get('X-MBX-USED-WEIGHT-1M', '0'))
-        if used >= 1200:
+        if used >= backstop:
             next_request = max(next_request, time.time() + 60)
         if response.status_code in (418, 429):
             retry = response.headers.get('Retry-After')

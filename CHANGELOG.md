@@ -1,3 +1,7 @@
+# v3.17.5
+
+- Split the Binance REST request budget per host family, each paced at 60% of its documented IP allowance with the header-driven backstop at 80%: api at 60 weight/s with backstop 4800 (of 6000/min), fapi at 24 weight/s with backstop 1920 (of 2400/min), unknown hosts at the previous 20/s. Spot aliases (api1-4) share api's budget and circuit. A hot fapi backlog no longer paces spot traffic and a 418 on one host no longer halts the other; prod demand at full catch-up is ~900 weight/min with zero 429/418 in 30h. With the 1000-trade perp pages, a perp minute drops from ~108s toward ~40s, closing the worker's structural deficit.
+
 # v3.17.4
 
 - Fetch perp provisional minutes with 1000-trade REST pages instead of 500. Fapi charges a flat 200 weight per `historicalTrades` request at any limit (verified live at 100/500/1000), so doubling the page halves the paced requests per minute at zero extra weight — roughly halving the ~108s a perp minute cost the single worker and letting the tail backlog drain twice as fast.

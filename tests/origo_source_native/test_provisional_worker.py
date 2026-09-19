@@ -422,7 +422,8 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
     assert reader.backfill_owns_publication(source) is True
     state['active'] = [run('STARTED', 300.0, canonical_job, origo_source_reconciliation='true')]
     assert reader.backfill_owns_publication(source) is False
-    # Another source's native selection is not this source's.
+    # Another source's native selection is not this source's, even when active: the
+    # asset selection scopes the rule, not the status.
     state.clear()
-    state['backfills'] = [{'id': 'x', 'status': 'FAILED', 'timestamp': 1.0, 'assetSelection': [{'path': ['other']}]}]
+    state['backfills'] = [{'id': 'x', 'status': 'REQUESTED', 'timestamp': 1.0, 'assetSelection': [{'path': ['other']}]}]
     assert reader.backfill_owns_publication(source) is False

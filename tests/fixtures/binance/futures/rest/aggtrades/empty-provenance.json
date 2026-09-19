@@ -1,0 +1,50 @@
+{
+  "minute_start": "2026-09-19T06:00:00+00:00",
+  "note": "Synthetic-empty scenario with real provider bytes: fapi has no empty minutes in its 2-day startTime window, so the [] responses are the literal empty-range encoding captured from a future-minute locator, and the boundary row is a real open-ended-locator response. The second tick replays the same empty-range bytes one minute later: completion requires two distinct empty-tick observations.",
+  "requests": [
+    {
+      "file": "empty-first.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1789797600000,
+        "limit": 1,
+        "endTime": 1789797659999
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:12.367478+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "response_headers": {}
+    },
+    {
+      "file": "empty-second.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1789797600000,
+        "limit": 1,
+        "endTime": 1789797659999
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:46:12.367478+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "response_headers": {}
+    },
+    {
+      "file": "empty-later.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1789797660000,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:12.367478+00:00",
+      "sha256": "f32bf36c8f930df1a7dd82fc2fc513539924d017aac83e2d82cc4729e24929c2",
+      "response_headers": {}
+    }
+  ]
+}

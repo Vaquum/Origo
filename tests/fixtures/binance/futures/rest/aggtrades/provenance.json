@@ -1,0 +1,119 @@
+{
+  "minute_start": "2026-09-17T14:28:00+00:00",
+  "minute_end": "2026-09-17T14:29:00+00:00",
+  "requests": [
+    {
+      "file": "locator.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1789655280000,
+        "endTime": 1789655339999,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:27.930640+00:00",
+      "sha256": "8bbc2698f8daca8650ef90c3d89c20f66174a97f3b7a6bdd1fadda329fd631e4",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-00.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454067270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:28.386823+00:00",
+      "sha256": "e485d3e9cc03e96b2956b441d94d7e8ac518c07db579e7adfd4ee1c19a73f34b",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-01.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454068270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:29.257115+00:00",
+      "sha256": "b33041522f106c83551e0211fd5c44dccd8d9925f1526df0e580355f0b9c0f5e",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-02.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454069270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:29.808635+00:00",
+      "sha256": "e631b30e08c3dc72f949b604ee5de50b147ef2a97debad92f439be8ad2c96b78",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-03.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454070270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:30.326378+00:00",
+      "sha256": "9a1c6a19e33988aa287d72b03adfd5113b0e864cce4b476969e1bcc5793e9372",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-04.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454071270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:31.151011+00:00",
+      "sha256": "951850d043978f342219ee9d95863b3f7135434a074f145333eacf71f84402c9",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    },
+    {
+      "file": "page-05.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "fromId": 3454072270,
+        "limit": 1000
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-19T08:45:32.090454+00:00",
+      "sha256": "5fd76f90507497f633c01f63f6497258564994e73f38d73e8c323356f0e52af8",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "?"
+      }
+    }
+  ]
+}

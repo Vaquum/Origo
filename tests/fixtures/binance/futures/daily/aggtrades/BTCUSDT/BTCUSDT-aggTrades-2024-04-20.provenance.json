@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2024-04-20.zip",
+  "date": "2024-04-20",
+  "zip_sha256": "f00b085f8262e0a4d5fd97d4c751344877d4194ac0704724c7d21f15024764ba",
+  "checksum_sidecar": "f00b085f8262e0a4d5fd97d4c751344877d4194ac0704724c7d21f15024764ba  BTCUSDT-aggTrades-2024-04-20.zip",
+  "csv_member": "BTCUSDT-aggTrades-2024-04-20.csv",
+  "csv_header": "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker",
+  "official_row_count": 1257177,
+  "selected_row_start": 0,
+  "selected_row_stop": 1257177,
+  "selected_sha256": "221906f641da0ab0ec1535ec95a589f7fe7ca44f7ed7956224e4959df2af66bd",
+  "captured_at": "2026-09-19T08:53:48.912021+00:00",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

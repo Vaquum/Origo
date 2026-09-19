@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2019-12-31.zip",
+  "date": "2019-12-31",
+  "zip_sha256": "ef24cf54b086fee7ce0e7050db3c91a2bc6d9b18778d5a4bd9668648ac94e5ee",
+  "checksum_sidecar": "ef24cf54b086fee7ce0e7050db3c91a2bc6d9b18778d5a4bd9668648ac94e5ee  BTCUSDT-aggTrades-2019-12-31.zip",
+  "csv_member": "BTCUSDT-aggTrades-2019-12-31.csv",
+  "csv_header": null,
+  "official_row_count": 107365,
+  "selected_row_start": 0,
+  "selected_row_stop": 107365,
+  "selected_sha256": "a8933fa25b7b7d79a9beb0b145f2c7dd6a26b725c7c015c650019099f19aa0d2",
+  "captured_at": "2026-09-19T08:43:09.796039+00:00",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

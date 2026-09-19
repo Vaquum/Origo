@@ -210,7 +210,7 @@ class ProvisionalFeed:
             log.error('backfill state unavailable, publishing anyway: %s', error)
             owned = False
         if owned:
-            log.info('source=%s a native backfill owns publication', spec.key)
+            log.info('source=%s a backfill owns publication', spec.key)
             return [], []
         processed: list[str] = []
         failed: list[str] = []

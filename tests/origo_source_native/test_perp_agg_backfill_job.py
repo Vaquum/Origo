@@ -204,7 +204,7 @@ def test_perp_agg_file_failure_fails_job_and_retry_keeps_verified_generation(
     assert store.snapshot() == before
     assert manifest.read_bytes() == published
     assert instance.get_run_by_id(failed.run_id).status.value == 'FAILURE'
-def test_perp_agg_unavailable_day_blocks_publication_and_preserves_completed_day(
+def test_perp_agg_unavailable_day_requests_publication_and_preserves_completed_day(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:
     store, instance, bundle = ready_job
@@ -243,7 +243,9 @@ def test_perp_agg_unavailable_day_blocks_publication_and_preserves_completed_day
                     assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors
                 ),
             ) as context:
-                assert sensor.evaluate_tick(context).run_requests == []
+                requests = sensor.evaluate_tick(context).run_requests
+                assert len(requests) == 1
+                assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
 def test_perp_agg_new_verified_data_automatically_requests_every_canonical_only_consumer(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:
@@ -438,12 +440,11 @@ def test_perp_agg_canonical_day_retires_failed_provisional_intervals_inside_it(
         (inside, 'RECOVERED', '{"reason": "superseded by the canonical day"}'),
     ]
 @pytest.mark.parametrize('status', ['FAILED', 'COMPLETED_FAILED', 'CANCELED'])
-def test_perp_agg_native_backfill_failure_holds_publication_after_last_range_succeeds(
+def test_perp_agg_native_backfill_failure_releases_publication(
     tmp_path: Path, status: str
 ) -> None:
     from dagster import DagsterRunStatus
     from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
-    from dagster._core.storage.tags import BACKFILL_ID_TAG
 
     from origo.sources.prepare import backfill_active, backfill_owns_publication
 
@@ -451,15 +452,6 @@ def test_perp_agg_native_backfill_failure_holds_publication_after_last_range_suc
     bundle = build_source_bundle(spec)
     job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
     with DagsterInstance.local_temp(str(tmp_path)) as instance:
-        parent = PartitionBackfill(
-            backfill_id='separate-gaps',
-            status=BulkActionStatus[status],
-            from_failure=False,
-            tags={},
-            backfill_timestamp=1.0,
-            asset_selection=[AssetKey(ASSET)],
-        )
-        instance.add_backfill(parent)
         for day, run_status in (
             ('2020-01-02', DagsterRunStatus.FAILURE),
             ('2020-01-01', DagsterRunStatus.SUCCESS),
@@ -468,31 +460,25 @@ def test_perp_agg_native_backfill_failure_holds_publication_after_last_range_suc
                 job,
                 status=run_status,
                 tags={
-                    BACKFILL_ID_TAG: parent.backfill_id,
                     'dagster/asset_partition_range_start': day,
                     'dagster/asset_partition_range_end': day,
                 },
             )
+        # Terminal runs alone never hold publication.
         assert not backfill_active(instance, spec)
-        assert backfill_owns_publication(instance, spec)
-        definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors)
-        for consumer in (item for item in spec.consumers if item.canonical_only):
-            sensor = next(
-                s for s in bundle.sensors if s.name == f'{spec.key}_{consumer.key}_sensor'
-            )
-            with build_sensor_context(instance=instance, definitions=definitions) as context:
-                tick = sensor.evaluate_tick(context)
-                assert tick.run_requests == []
-                assert tick.skip_message is not None
-                assert 'owns publication' in tick.skip_message
-        # A later completed native selection can supersede the failed selection.
+        assert not backfill_owns_publication(instance, spec)
         instance.add_backfill(
-            parent._replace(
-                backfill_id='retried-gaps',
-                status=BulkActionStatus.COMPLETED_SUCCESS,
-                backfill_timestamp=datetime.now(UTC).timestamp() + 1,
+            PartitionBackfill(
+                backfill_id='separate-gaps',
+                status=BulkActionStatus[status],
+                from_failure=False,
+                tags={},
+                backfill_timestamp=1.0,
+                asset_selection=[AssetKey(ASSET)],
             )
         )
+        # A terminal native selection does not hold it either.
+        assert not backfill_active(instance, spec)
         assert not backfill_owns_publication(instance, spec)
 def test_perp_agg_native_job_backfill_waits_for_own_selected_generations(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path

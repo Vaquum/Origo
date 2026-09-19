@@ -1,3 +1,7 @@
+# v3.20.1
+
+- Terminal backfill verdicts release publication: only an active backfill selection holds the consumer sensors and the provisional worker's mount path. A failed or cancelled backfill over a healthy canonical state no longer wedges publication forever (the Sep 18 perp freeze: mount 36h stale, HF never published, silent for a day). Partial canonical state still cannot publish — the callers check canonical readiness next.
+
 # v3.20.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.

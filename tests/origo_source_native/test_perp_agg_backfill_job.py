@@ -149,15 +149,12 @@ def test_one_job_prepares_verifies_and_publishes_all_perp_agg_files(
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),
         ) as context:
             assert sensor.evaluate_tick(context).run_requests == []
-    # The CANARY huggingface_shadow consumer ran and rendered: the pre-cutoff fixture
-    # day yields an empty manifest, so it correctly records no uploads. The
-    # positive path is pinned by
-    # test_perp_agg_huggingface_shadow_renders_locally_without_uploading.
+    # The CANARY shadow consumer renders locally and never uploads.
     assert FakeHfApi.calls == []
-    live = json.loads(
+    shadow = json.loads(
         (tmp_path / 'files' / store.spec.key / 'huggingface_shadow' / 'latest.json').read_text()
     )
-    assert live['kind'] == 'huggingface_shadow' and live['uploads'] == []
+    assert shadow['kind'] == 'huggingface_shadow' and shadow['uploads'] == []
     # Re-deployment restores code-owned sensor state without losing its cursor.
     state = instance.all_instigator_state()[0]
     from dagster._core.scheduler.instigation import InstigatorStatus

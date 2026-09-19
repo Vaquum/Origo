@@ -2,7 +2,7 @@
 
 Declaration over consumer_base: the twelve-series dataset map, the
 perp_agg-scoped series specs, and the CANARY consumer tuple (local mount plus
-huggingface shadow). Series paths carry the perp_agg prefix so the aggregate
+upload-less shadow). Series paths carry the perp_agg prefix so the aggregate
 mirror never collides with the trades sources'.
 """
 

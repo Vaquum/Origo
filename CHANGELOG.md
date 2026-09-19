@@ -1,3 +1,7 @@
+# v3.17.4
+
+- Fetch perp provisional minutes with 1000-trade REST pages instead of 500. Fapi charges a flat 200 weight per `historicalTrades` request at any limit (verified live at 100/500/1000), so doubling the page halves the paced requests per minute at zero extra weight — roughly halving the ~108s a perp minute cost the single worker and letting the tail backlog drain twice as fast.
+
 # v3.17.3
 
 - Close the reconcile blind spot on partition failures: reconcile now blocks on any open `PARTITION`-scoped failure instead of only `canonical`/`component`, so a failed provisional or certification attempt holds the partition until a retry succeeds. A successful canonical build or repair recovers every open failure for the partition at once via `FailureLog.recover_partition`, so one good retry self-heals instead of leaving scars other operations cannot see.

@@ -6,6 +6,7 @@ import zipfile
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -141,6 +142,7 @@ def test_real_perp_closed_minutes_obey_binance_provisional_rules(
     provenance, bodies = _rest_responses('provenance.json')
     assert provenance['minute_start'] == '2026-09-16T20:00:00+00:00'
     calls = list(provenance['requests'])
+    assert len(calls) == 5, 'locator plus four 1000-trade pages'
 
     def captured(
         url: str, *, params: dict[str, object], headers: dict[str, str], weight: int
@@ -221,3 +223,71 @@ def test_perp_provisional_fetch_requires_an_api_key(monkeypatch: pytest.MonkeyPa
     with pytest.raises(SourceError, match='BINANCE_API_KEY is required') as error:
         adapter.fetch(adapter.partition('2026-09-16T20:00:00Z'))
     assert error.value.code == 'PROVIDER_CREDENTIAL_MISSING'
+
+
+def test_perp_paging_uses_thousand_trade_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2325-trade minute completes in one locator plus four 1000-trade pages."""
+    import json as json_module
+
+    monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
+    monkeypatch.setattr(rest, 'now_utc', lambda: datetime(2026, 9, 16, 21, 30, tzinfo=UTC))
+    start_ms = 1789588800000
+    end_ms = 1789588860000
+    first_id = 100000
+    backtrack: list[dict[str, Any]] = [
+        {
+            'id': trade_id,
+            'price': '76043.60',
+            'qty': '0.002',
+            'quoteQty': '152.08',
+            'time': start_ms - 1,
+            'isBuyerMaker': False,
+        }
+        for trade_id in range(first_id - 1000, first_id)
+    ]
+    in_minute: list[dict[str, Any]] = [
+        {
+            'id': trade_id,
+            'price': '76043.60',
+            'qty': '0.002',
+            'quoteQty': '152.08',
+            'time': start_ms + (trade_id - first_id) * 25,
+            'isBuyerMaker': False,
+        }
+        for trade_id in range(first_id, first_id + 2325)
+    ]
+    boundary: list[dict[str, Any]] = [
+        {
+            'id': first_id + 2325,
+            'price': '76043.60',
+            'qty': '0.002',
+            'quoteQty': '152.08',
+            'time': end_ms,
+            'isBuyerMaker': False,
+        }
+    ]
+    ledger = backtrack + in_minute + boundary
+    seen: list[dict[str, object]] = []
+
+    def captured(
+        url: str, *, params: dict[str, object], headers: dict[str, str], weight: int
+    ) -> Response:
+        assert headers == {'X-MBX-APIKEY': '0' * 64}
+        if url.endswith('aggTrades'):
+            assert weight == 20
+            body = json_module.dumps(
+                [{'f': first_id, 'l': first_id, 'T': start_ms}]
+            ).encode()
+            return Response(body, {}, 200)
+        assert weight == 200
+        assert params['limit'] == 1000
+        seen.append(dict(params))
+        from_id = cast(int, params['fromId'])
+        page = [row for row in ledger if from_id <= row['id'] < from_id + 1000]
+        return Response(json_module.dumps(page).encode(), {}, 200)
+
+    monkeypatch.setattr(rest, 'get_response', captured)
+    adapter = rest.BinancePerpProvisional()
+    revision = adapter.fetch(adapter.partition('2026-09-16T20:00:00Z'))
+    assert [call['fromId'] for call in seen] == [99000, 100000, 101000, 102000]
+    assert len(tuple(revision.rows())) == 2325

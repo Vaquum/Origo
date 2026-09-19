@@ -47,7 +47,7 @@ class BinancePerpProvisional(BinanceProvisionalBase):
     WEIGHT_LOCATOR: ClassVar[int] = 20
     WEIGHT_BOUNDARY: ClassVar[int] = 20
     WEIGHT_HISTORICAL: ClassVar[int] = 200
-    PAGE_LIMIT: ClassVar[int] = 500
+    PAGE_LIMIT: ClassVar[int] = 1000
     CREDENTIAL_REQUIRED: ClassVar[bool] = True
     PAGING_BACKTRACK_IDS: ClassVar[int] = 1000
 

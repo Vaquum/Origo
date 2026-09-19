@@ -51,6 +51,21 @@ def parse_archive_boolean(text: str) -> int:
     return int(text.lower() == 'true')
 
 
+def parse_decimal(text: str, *, noun: str) -> Decimal:
+    """One canonical decimal parser for every archive and REST path.
+
+    The API pads decimals ('76043.50') while archives may trim them ('76043.5');
+    normalize so the same value parses to the same Decimal from either channel.
+    """
+    try:
+        value = Decimal(text)
+    except InvalidOperation as error:
+        raise ValueError('Invalid Binance decimal field.') from error
+    if not value.is_finite() or value <= 0:
+        raise ValueError(f'{noun} must be positive.')
+    return value.normalize()
+
+
 def _integer(text: str) -> int:
     if not re.fullmatch(r'\d+', text):
         raise ValueError('Binance trade ID and timestamp must be unsigned integers.')

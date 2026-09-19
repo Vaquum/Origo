@@ -3,12 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import ClassVar
 
 from ..arrow_types import ArrowTable
 from ..contracts import Partition, Row
 from .binance_archive import BinanceArchiveDaily, parse_archive_boolean
+from .binance_archive import parse_decimal as shared_parse_decimal
 from .binance_archive import timestamp_datetime as timestamp_datetime
 from .binance_daily import Response, get_response
 from .binance_perp_columnar import COLUMNS as PERP_COLUMNS
@@ -17,15 +18,7 @@ from .binance_perp_columnar import perp_table
 
 
 def parse_decimal(text: str) -> Decimal:
-    try:
-        value = Decimal(text)
-    except InvalidOperation as error:
-        raise ValueError('Invalid Binance decimal field.') from error
-    if not value.is_finite() or value <= 0:
-        raise ValueError('Perp price, quantity, and quote quantity must be positive.')
-    # The API pads decimals ('76043.50') while the archive trims them ('76043.5');
-    # normalize so the same trade parses to the same Decimal from either source.
-    return value.normalize()
+    return shared_parse_decimal(text, noun='Perp price, quantity, and quote quantity')
 
 
 @dataclass(frozen=True)

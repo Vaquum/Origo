@@ -1,3 +1,7 @@
+# v3.17.6
+
+- Share canonical decimal parsing on the archive base: the three near-identical `parse_decimal` clones (spot, perp, spot-agg) collapse into one `parse_decimal(text, *, noun)` that validates, names the source in errors, and normalizes padded API decimals to trimmed archive form. Each daily adapter keeps a one-line noun-bound wrapper, so module APIs and every existing test hold; spot gains the normalization its siblings already had.
+
 # v3.17.5
 
 - Split the Binance REST request budget per host family, each paced at 60% of its documented IP allowance with the header-driven backstop at 80%: api at 60 weight/s with backstop 4800 (of 6000/min), fapi at 24 weight/s with backstop 1920 (of 2400/min), unknown hosts at the previous 20/s. Spot aliases (api1-4) share api's budget and circuit. A hot fapi backlog no longer paces spot traffic and a 418 on one host no longer halts the other; prod demand at full catch-up is ~900 weight/min with zero 429/418 in 30h. With the 1000-trade perp pages, a perp minute drops from ~108s toward ~40s, closing the worker's structural deficit.

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -255,23 +256,60 @@ PLAIN_HUGGINGFACE_DEF: Final[str] = (
 SHADOW_TEST_DEF_PREFIX: Final[str] = 'def test_{prefix}_huggingface_shadow_renders_locally_without_uploading('
 
 
+_TOP_LEVEL_OPENER: Final[tuple[str, ...]] = ('def ', 'async def ', 'class ', '@')
+
+
 def delete_shadow_test(text: str, prefix: str) -> tuple[str, bool]:
-    """Delete the dedicated shadow-render test; no-op when the canary predates it."""
+    """Delete the dedicated shadow-render test; no-op when the canary predates it.
+
+    The span is exactly one undecorated top-level ``def``: it starts at the
+    marker on its own column-0 line and ends at the next column-0
+    ``def``/``class``/decorator line, so a decorated following test keeps its
+    marks. Every span line past the ``def`` must be blank or indented,
+    otherwise a smuggled top-level statement fails loud instead of being
+    eaten. The survivors rejoin with exactly two blank lines (or one trailing
+    newline when the shadow test was last), matching the file's own rhythm.
+    """
     marker = SHADOW_TEST_DEF_PREFIX.format(prefix=prefix)
     start = text.find(marker)
     if start < 0:
         return text, False
-    if start > 0 and text[start - 1] != '\n':
-        raise ValueError(f'Shadow test marker is not at a line start: {marker!r}.')
-    line_start = text.rfind('\n', 0, start - 1) + 1 if start > 0 else 0
-    rest = text[start:]
-    nxt = rest.find('\ndef ', 1)
-    end = len(text) if nxt < 0 else start + nxt + 1
-    span = text[line_start:end]
+    line_start = text.rfind('\n', 0, start) + 1
+    if line_start != start:
+        raise ValueError(f'Shadow test marker is not at column 0: {marker!r}.')
+    lines = text.split('\n')
+    def_index = text.count('\n', 0, line_start)
+    prev = def_index - 1
+    while prev >= 0 and lines[prev].strip() == '':
+        prev -= 1
+    if prev >= 0 and lines[prev].startswith('@'):
+        raise ValueError('Shadow test carries decorators; extend the tool instead of guessing.')
+    sig = def_index
+    while not lines[sig].rstrip().endswith(':'):
+        sig += 1
+        if sig >= len(lines):
+            raise ValueError('Shadow test def never closes its signature; refusing to delete.')
+    end_index = len(lines)
+    for i in range(sig + 1, len(lines)):
+        line = lines[i]
+        if line == '' or line.startswith((' ', '\t')):
+            continue
+        if not line.startswith(_TOP_LEVEL_OPENER):
+            raise ValueError(
+                f'Shadow test span reaches a top-level statement ({line[:40]!r}); refusing to delete.'
+            )
+        end_index = i
+        break
+    span = '\n'.join(lines[def_index:end_index])
     if 'FakeHfApi.calls == []' not in span or '_huggingface_shadow(' not in span:
         raise ValueError('Shadow test span lacks the expected shadow assertions; refusing to delete.')
-    trimmed = text[:line_start].rstrip('\n') + '\n\n' if line_start else ''
-    return trimmed + text[end:].lstrip('\n'), True
+    head = '\n'.join(lines[:def_index]).rstrip('\n')
+    tail = '\n'.join(lines[end_index:]).lstrip('\n')
+    if not tail:
+        return (head + '\n' if head else ''), True
+    if not head:
+        return tail, True
+    return head + '\n\n\n' + tail, True
 
 
 def promote(repo: Path, naming: Naming) -> dict[str, tuple[str, str]]:
@@ -329,6 +367,11 @@ def promote(repo: Path, naming: Naming) -> dict[str, tuple[str, str]]:
     backfill_rel = f'tests/origo_source_native/test_{naming.prefix}_backfill_job.py'
     updated, _deleted = delete_shadow_test(read(backfill_rel), naming.prefix)
     cache[backfill_rel] = updated
+    leftover = re.search(
+        rf'(?m)^(?:async )?def test_{re.escape(naming.prefix)}_huggingface_shadow', updated
+    )
+    if leftover is not None:
+        raise ValueError(f'{backfill_rel}: shadow test survives promotion: {leftover.group(0)!r}.')
     for rel, after in cache.items():
         before = (repo / rel).read_text(encoding='utf-8')
         if before != after:

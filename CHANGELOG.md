@@ -1,3 +1,7 @@
+# v3.20.0
+
+- Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
 # v3.19.0
 
 - Add the CANARY-to-LIVE promotion generator: `tools/promote_source.py --source` applies the mechanical S395 transform set (spec stage flip, shadow retirement, four test-file mirrors) as exact-snippet replacements that fail loud on any drift, with a dry-run diff by default and `--apply` to write. Proven by replay: running it against the pre-S395 tree reproduces the spot-agg promotion byte-identical on all six files, and the generated perp-agg promotion passes its suites in a trial worktree. Version and CHANGELOG stay human.

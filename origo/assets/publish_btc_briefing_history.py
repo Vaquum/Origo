@@ -4,7 +4,7 @@ The history is one object carrying the two sections in ``HISTORY_SECTIONS``:
 ``HISTORY_15M_DAYS`` days of 15-minute bars and ``HISTORY_1D_DAYS`` days of
 daily bars, both rolled up from the 1m ``binance_spot_trades_time_current`` projection.
 Both spans end where ``through_day`` begins, so the history is the multi-day
-run-up to that day and the day's own ``btc_briefing/1`` feed file continues
+run-up to that day and the day's own ``btc_briefing/2`` feed file continues
 it without overlapping it. The two spans are not round numbers: they are the
 lookbacks the consuming briefing is computed over, and they are here so that
 briefing reads its history from this dataset instead of re-fetching it from

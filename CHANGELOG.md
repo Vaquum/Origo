@@ -1,3 +1,7 @@
+# v3.17.5
+
+- Split the Binance REST request budget per host and pace each at a measured 60 weight/s: api and fapi enforce separate IP allowances, so a hot fapi backlog no longer paces spot traffic and a 418 circuit on one host no longer halts the other. 60/s is 60% of the documented 6000/min allowance with the header-driven backstop moved to 4800 (80%); prod demand at full catch-up is ~900 weight/min with zero 429/418 in 30h. Together with the 1000-trade perp pages, a perp minute drops from ~108s toward ~15s, closing the worker's structural deficit.
+
 # v3.17.3
 
 - Close the reconcile blind spot on partition failures: reconcile now blocks on any open `PARTITION`-scoped failure instead of only `canonical`/`component`, so a failed provisional or certification attempt holds the partition until a retry succeeds. A successful canonical build or repair recovers every open failure for the partition at once via `FailureLog.recover_partition`, so one good retry self-heals instead of leaving scars other operations cannot see.

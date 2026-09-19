@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from math import isfinite
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 import requests
 
@@ -28,6 +29,11 @@ class Response:
 
 
 WORKER_HEARTBEAT_ENV = 'ORIGO_WORKER_HEARTBEAT'
+
+# Static pacing per Binance host: 60 weight/s is 60% of the documented 6000/min
+# IP allowance. The header-driven backstop below stays the adaptive guardrail.
+REST_WEIGHT_RATE_PER_SECOND = 60
+REST_USED_WEIGHT_BACKSTOP = 4800
 
 
 def _beat() -> None:
@@ -56,6 +62,14 @@ def _request(
         ) from error
 
 
+def _budget_state_file(root: Path, url: str) -> Path:
+    host = urlsplit(url).hostname or ''
+    safe = ''.join(char if char.isalnum() else '_' for char in host.lower())
+    if not safe:
+        raise ValueError('Binance request budget requires a URL with a host.')
+    return root / f'binance_rest_budget.{safe}.state'
+
+
 def _weighted_request(
     url: str,
     params: Mapping[str, str | int] | None,
@@ -66,8 +80,9 @@ def _weighted_request(
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
-    # All worker processes and Binance host aliases share one IP request allowance.
-    with (root / 'binance_rest_budget.state').open('a+') as state:
+    # All worker processes share one budget per Binance host: api and fapi
+    # enforce separate IP allowances, so a hot host must not pace a cold one.
+    with _budget_state_file(root, url).open('a+') as state:
         fcntl.flock(state.fileno(), fcntl.LOCK_EX)
         state.seek(0)
         saved = state.read().strip()
@@ -86,12 +101,12 @@ def _weighted_request(
         if now < circuit_until:
             raise SourceError('PROVIDER_RATE_CIRCUIT', 'Binance request circuit is open.')
         time.sleep(max(0.0, next_request - now))
-        next_request = time.time() + weight / 20
+        next_request = time.time() + weight / REST_WEIGHT_RATE_PER_SECOND
         persist()
         response = _request(url, params, headers)
         _beat()
         used = int(response.headers.get('X-MBX-USED-WEIGHT-1M', '0'))
-        if used >= 1200:
+        if used >= REST_USED_WEIGHT_BACKSTOP:
             next_request = max(next_request, time.time() + 60)
         if response.status_code in (418, 429):
             retry = response.headers.get('Retry-After')

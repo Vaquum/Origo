@@ -5,7 +5,6 @@
 # v3.20.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
->>>>>>> origin/main
 
 # v3.19.0
 

@@ -1,3 +1,7 @@
+# v3.19.0
+
+- Add the CANARY-to-LIVE promotion generator: `tools/promote_source.py --source` applies the mechanical S395 transform set (spec stage flip, shadow retirement, four test-file mirrors) as exact-snippet replacements that fail loud on any drift, with a dry-run diff by default and `--apply` to write. Proven by replay: running it against the pre-S395 tree reproduces the spot-agg promotion byte-identical on all six files, and the generated perp-agg promotion passes its suites in a trial worktree. Version and CHANGELOG stay human.
+
 # v3.18.0
 
 - Add the Binance perp aggregate-trades revisioned source (CANARY): canonical adapter over the futures-um vision aggTrades daily zips from 2019-12-31, single-endpoint provisional adapter over the fapi aggTrades REST channel at weight 20 with zero paging backtrack (both proven by capture), ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `perp_agg_`-prefixed series. The futures archives carry seven columns with no best-match flag, and modern days carry a header row the 2019 days lack, so the adapter skips the exact known header when present; timestamps are milliseconds on both channels. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`.

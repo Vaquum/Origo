@@ -1,3 +1,7 @@
+# v3.17.1
+
+- Record `required_approving_review_count: 1` in the `Protect-Main` ruleset snapshot. The live ruleset gained the one-approval requirement as the new standard while `.github/rulesets/main.json` still carried 0, so `pr_checks_ruleset` failed every open PR on drift it had not caused. Protection itself is unchanged; the snapshot now matches live field for field.
+
 # v3.17.0
 
 - Promote the Binance spot aggregate-trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2017-08-17 to 2026-09-18, 3320 days, zero open failures, quirk-cleaned row counts verified) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_spot_agg_*` datasets.

@@ -1,8 +1,8 @@
 """Public spot aggregate publications rendered from a pinned source state.
 
 Declaration over consumer_base: the twelve-series dataset map, the
-spot_agg-scoped series specs, and the CANARY consumer tuple (local mount plus
-upload-less shadow). Series paths carry the spot_agg prefix so the aggregate
+spot_agg-scoped series specs, and the LIVE consumer tuple (local mount plus
+uploading huggingface). Series paths carry the spot_agg prefix so the aggregate
 mirror never collides with the trades sources'.
 """
 
@@ -16,7 +16,6 @@ from huggingface_hub import HfApi
 from ..contracts import ConsumerSpec, Snapshot, SnapshotReader
 from .consumer_base import ConsumerDeclaration
 from .consumer_base import huggingface as _render_huggingface
-from .consumer_base import huggingface_shadow as _render_shadow
 from .consumer_base import mount as _render_mount
 from .formulas import spot_agg_huggingface as agg_snapshot
 from .formulas.spot_agg_series import EXPORT_START_MONTH, EXPORT_START_YEAR, SPECS
@@ -116,33 +115,9 @@ def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None
     _render_mount(reader, snapshot, destination, decl=_DECL)
 
 
-def _huggingface(
-    reader: SnapshotReader,
-    snapshot: Snapshot,
-    destination: str,
-    *,
-    upload: bool = True,
-    kind: str = 'huggingface',
-) -> None:
+def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
     # Snapshot callables resolve through their modules at call time (patch seams).
     _render_huggingface(
-        reader,
-        snapshot,
-        destination,
-        decl=_DECL,
-        hf_api=HfApi,
-        time_klines=agg_snapshot.get_spot_agg_klines_from_1m_projection,
-        dollar_klines=agg_snapshot.get_spot_agg_dollar_klines,
-        time_card=agg_snapshot.build_time_dataset_card,
-        dollar_card=agg_snapshot.build_dollar_dataset_card,
-        upload=upload,
-        kind=kind,
-    )
-
-
-def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
-    """Render the snapshot files locally without uploading; the CANARY shadow publication."""
-    _render_shadow(
         reader,
         snapshot,
         destination,
@@ -158,6 +133,6 @@ def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination:
 Renderer = Callable[[SnapshotReader, Snapshot, str], None]
 
 SPOT_AGG_CONSUMERS = (
-    ConsumerSpec('mount', cast(Renderer, _mount)),
-    ConsumerSpec('huggingface_shadow', cast(Renderer, _huggingface_shadow), canonical_only=True),
+    ConsumerSpec('mount', cast(Renderer, _mount), public=True),
+    ConsumerSpec('huggingface', cast(Renderer, _huggingface), canonical_only=True, public=True),
 )

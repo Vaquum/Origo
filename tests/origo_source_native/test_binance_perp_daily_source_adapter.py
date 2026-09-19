@@ -157,7 +157,7 @@ def test_real_perp_closed_minutes_obey_binance_provisional_rules(
     provenance, bodies = _rest_responses('provenance.json')
     assert provenance['minute_start'] == '2026-09-16T20:00:00+00:00'
     calls = list(provenance['requests'])
-    assert len(calls) == 5, 'locator plus four 1000-trade pages'
+    assert len(calls) == 8, 'locator plus seven 500-trade pages'
 
     def captured(
         url: str, *, params: dict[str, object], headers: dict[str, str], weight: int
@@ -240,8 +240,12 @@ def test_perp_provisional_fetch_requires_an_api_key(monkeypatch: pytest.MonkeyPa
     assert error.value.code == 'PROVIDER_CREDENTIAL_MISSING'
 
 
-def test_perp_paging_uses_thousand_trade_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 2325-trade minute completes in one locator plus four 1000-trade pages."""
+def test_perp_paging_uses_five_hundred_trade_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2325-trade minute completes in one locator plus seven 500-trade pages.
+
+    Fapi rejects limit=1000 on fromId-paged historicalTrades (HTTP 400, code
+    -1130), so 500 is the ceiling, not a tuning knob.
+    """
     import json as json_module
 
     monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
@@ -295,14 +299,22 @@ def test_perp_paging_uses_thousand_trade_pages(monkeypatch: pytest.MonkeyPatch) 
             ).encode()
             return Response(body, {}, 200)
         assert weight == 200
-        assert params['limit'] == 1000
+        assert params['limit'] == 500
         seen.append(dict(params))
         from_id = cast(int, params['fromId'])
-        page = [row for row in ledger if from_id <= row['id'] < from_id + 1000]
+        page = [row for row in ledger if from_id <= row['id'] < from_id + 500]
         return Response(json_module.dumps(page).encode(), {}, 200)
 
     monkeypatch.setattr(rest, 'get_response', captured)
     adapter = rest.BinancePerpProvisional()
     revision = adapter.fetch(adapter.partition('2026-09-16T20:00:00Z'))
-    assert [call['fromId'] for call in seen] == [99000, 100000, 101000, 102000]
+    assert [call['fromId'] for call in seen] == [
+        99000,
+        99500,
+        100000,
+        100500,
+        101000,
+        101500,
+        102000,
+    ]
     assert len(tuple(revision.rows())) == 2325

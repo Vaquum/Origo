@@ -45,9 +45,7 @@ RUNS_QUERY = """query Runs($filter: RunsFilter!, $cursor: String, $limit: Int!) 
     }
   }
 }"""
-BACKFILL_ID_TAG = 'dagster/backfill'
 _ACTIVE_BACKFILL_STATUSES = ('REQUESTED', 'CANCELING', 'FAILING')
-_COMPLETED_BACKFILL_STATUSES = ('COMPLETED_SUCCESS', 'COMPLETED')
 CHECK_EXECUTIONS_QUERY = """query CheckExecutions($assetKey: AssetKeyInput!, $checkName: String!) {
   assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) {
     status evaluation { timestamp }
@@ -274,30 +272,17 @@ class DagsterReader:
 
     def backfill_owns_publication(self, source_key: str) -> bool:
         """The rule of ``origo.sources.prepare.backfill_owns_publication`` read through
-        GraphQL: an active native backfill or backfill run owns publication, and so does the
-        latest one until a later selection completes, so a failed or cancelled backfill never
-        publishes a partial canonical state."""
+        GraphQL: an active native backfill or backfill run owns publication. A terminal
+        verdict never does; the callers check canonical readiness next."""
         asset_key = f'build_{source_key}_canonical_revision_origo'
         canonical_job = f'refresh_{source_key}_canonical_source_job'
         backfill_job = f'backfill_{source_key}_source_job'
         backfills = self._backfills(asset_key)
         if any(backfill.status in _ACTIVE_BACKFILL_STATUSES for backfill in backfills):
             return True
-        # One filter each: the production run storage answers a two-tag filter in eleven
-        # seconds and a single-tag or job-name filter in a fraction of one, so the source
-        # is matched while paging newest first, and no page window is ever the limit.
-        backfill_tag = {'key': 'origo_source_operation', 'value': 'backfill'}
-        by_job = self._run_pages({'pipelineName': backfill_job}, limit=1, until=lambda run: True)
-        by_tags = self._run_pages(
-            {'tags': [backfill_tag]},
-            limit=25,
-            until=lambda run: run.tags.get('origo_source_key') == source_key,
-        )
-        by_tags = [run for run in by_tags[-1:] if run.tags.get('origo_source_key') == source_key]
         active = self._run_pages(
             {'statuses': ['QUEUED', 'NOT_STARTED', 'STARTING', 'STARTED', 'CANCELING']}, limit=200
         )
-        runs = {'byJob': by_job, 'byTags': by_tags, 'active': active}
 
         def is_source_backfill(run: RunRecord) -> bool:
             return run.job_name == backfill_job or (
@@ -310,19 +295,7 @@ class DagsterReader:
                 )
             )
 
-        if any(is_source_backfill(run) for run in runs['active']):
-            return True
-        latest = max(
-            [*runs['byJob'], *runs['byTags']], key=lambda run: run.created_at, default=None
-        )
-        native = backfills[0] if backfills else None
-        if native is not None and (
-            latest is None
-            or latest.tags.get(BACKFILL_ID_TAG) == native.backfill_id
-            or native.timestamp > latest.created_at
-        ):
-            return native.status not in _COMPLETED_BACKFILL_STATUSES
-        return latest is not None and latest.status != 'SUCCESS'
+        return any(is_source_backfill(run) for run in active)
 
     def failed_checks_since(self, since: float, *, exclude_asset: str = '') -> list[CheckFailure]:
         data = self.query('Checks', CHECKS_QUERY)

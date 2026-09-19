@@ -19,7 +19,6 @@ from dagster._core.scheduler.instigation import (
     SensorInstigatorData,
 )
 from dagster._core.storage.dagster_run import DagsterRun
-from dagster._core.storage.tags import BACKFILL_ID_TAG
 from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -179,25 +178,14 @@ def backfill_active(instance: DagsterInstance, spec: RevisionedSourceSpec) -> bo
 
 
 def backfill_owns_publication(instance: DagsterInstance, spec: RevisionedSourceSpec) -> bool:
-    if backfill_active(instance, spec):
-        return True
-    records = [
-        record
-        for filters in (
-            RunsFilter(job_name=f'backfill_{spec.key}_source_job'),
-            RunsFilter(tags={'origo_source_key': spec.key, 'origo_source_operation': 'backfill'}),
-        )
-        for record in instance.get_run_records(filters, limit=1)
-    ]
-    latest = max(records, key=lambda record: record.create_timestamp, default=None)
-    native = next(_native_backfills(instance, spec), None)
-    if native is not None and (
-        latest is None
-        or latest.dagster_run.tags.get(BACKFILL_ID_TAG) == native.backfill_id
-        or native.backfill_timestamp > latest.create_timestamp.timestamp()
-    ):
-        return native.status not in (BulkActionStatus.COMPLETED_SUCCESS, BulkActionStatus.COMPLETED)
-    return latest is not None and latest.dagster_run.status != DagsterRunStatus.SUCCESS
+    """Whether a backfill in flight holds publication: only an active selection does.
+
+    A terminal verdict never holds publication. The consumers that call this gate
+    check canonical readiness next, so a failed backfill that left the canonical
+    state partial still cannot publish; a failed backfill over a healthy canonical
+    state must not wedge publication forever.
+    """
+    return backfill_active(instance, spec)
 
 
 def main() -> None:

@@ -37,9 +37,10 @@ one tick per minute, restarted by the watchdog when a tick hangs:
 - `provisional-worker` (`origo.workers.provisional`) builds each closed minute of every
   source with a provisional adapter through the source runtime, oldest missing minute
   first, then publishes every consumer that pins provisional rows (`mount`) when the
-  pinned state changed, unless a native backfill owns publication (the same rule as the
-  consumer sensors: an active, failed or cancelled backfill holds publication until a later
-  one completes). A failing minute, and a failing publication of one pinned state, is
+  pinned state changed, unless a backfill owns publication (the same rule as the
+  consumer sensors: an active backfill holds publication; a terminal verdict never
+  does, and canonical readiness is checked next). A failing minute, and a failing
+  publication of one pinned state, is
   retried with a doubling delay from one minute up to the source's `retry_delay`, at most
   `retry_count` times, then left to an operator run. Canonical-only consumers
   (`huggingface`) keep their sensors.

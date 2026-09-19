@@ -18,6 +18,7 @@ from dagster import (
 from origo import definitions
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query import binance_spot_kline_rollups as rollups
+from origo.sources.binance_perp_aggtrades import BINANCE_PERP_AGGTRADES_SPEC
 from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
 from origo.sources.binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
@@ -409,6 +410,48 @@ def test_spot_agg_source_identity_contract(origo_test_env: dict[str, str]) -> No
     assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
         ('mount', True),
         ('huggingface', True),
+    ]
+    # No legacy aggregate pipeline is replaced: nothing is aliased or retired.
+    assert dict(spec.aliases) == {}
+    assert spec.retired_tables == ()
+    assert spec.retired_rows == ()
+
+
+def test_perp_agg_source_identity_contract(origo_test_env: dict[str, str]) -> None:
+    assert origo_test_env['CLICKHOUSE_DATABASE'] == 'origo'
+    spec = BINANCE_PERP_AGGTRADES_SPEC
+    assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
+        'binance_perp_aggtrades',
+        RolloutStage.CANARY,
+        date(2019, 12, 31),
+    )
+    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert [component.key for component in spec.components] == [
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
+    ]
+    raw = next(component for component in spec.components if component.key == 'raw')
+    assert [column.name for column in raw.columns] == [
+        'agg_trade_id',
+        'price',
+        'quantity',
+        'first_trade_id',
+        'last_trade_id',
+        'timestamp',
+        'is_buyer_maker',
+        'datetime',
+    ]
+    assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
+        ('mount', False),
+        ('huggingface_shadow', False),
     ]
     # No legacy aggregate pipeline is replaced: nothing is aliased or retired.
     assert dict(spec.aliases) == {}

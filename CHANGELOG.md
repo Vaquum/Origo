@@ -1,3 +1,6 @@
+# v3.18.0
+
+- Add the Binance perp aggregate-trades revisioned source (CANARY): canonical adapter over the futures-um vision aggTrades daily zips from 2019-12-31, single-endpoint provisional adapter over the fapi aggTrades REST channel at weight 20 with zero paging backtrack (both proven by capture), ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `perp_agg_`-prefixed series. The futures archives carry seven columns with no best-match flag, and modern days carry a header row the 2019 days lack, so the adapter skips the exact known header when present; timestamps are milliseconds on both channels. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`.
 # v3.17.8
 
 - Send the Binance API key only where the endpoint requires it: the provisional base now attaches `X-MBX-APIKEY` solely for credential-required adapters (fapi `historicalTrades`, the only one of the four REST endpoints that answers 401 without it — verified live). Spot and spot-agg tails go keyless, spending IP quota only, and a bad key can no longer break public calls.

@@ -86,6 +86,7 @@ def test_existing_publish_sensors_are_unchanged() -> None:
         'binance_spot_trades_huggingface_sensor',
         'binance_perp_trades_huggingface_sensor',
         'binance_spot_aggtrades_huggingface_sensor',
+        'binance_perp_aggtrades_huggingface_shadow_sensor',
     }
     names = {sensor.name for sensor in defs.sensors}
     assert existing <= names

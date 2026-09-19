@@ -93,7 +93,29 @@ SPOT_AGG_CASE: Final = SourceCase(
     row_layout='aggregates',
 )
 
-SOURCE_CASES: Final[tuple[SourceCase, ...]] = (SPOT_CASE, PERP_CASE, SPOT_AGG_CASE)
+PERP_AGG_CASE: Final = SourceCase(
+    spec_key='binance_perp_aggtrades',
+    fixtures_root=Path('tests/fixtures/binance/futures'),
+    inventory=(
+        'perp_agg_time_1m',
+        'perp_agg_time_15m',
+        'perp_agg_time_30m',
+        'perp_agg_time_1h',
+        'perp_agg_time_2h',
+        'perp_agg_time_4h',
+        'perp_agg_dollar_1M',
+        'perp_agg_dollar_15M',
+        'perp_agg_dollar_30M',
+        'perp_agg_dollar_60M',
+        'perp_agg_dollar_120M',
+        'perp_agg_dollar_240M',
+    ),
+    time_carveout='none',
+    quote_carveout='absent',
+    row_layout='aggregates',
+)
+
+SOURCE_CASES: Final[tuple[SourceCase, ...]] = (SPOT_CASE, PERP_CASE, SPOT_AGG_CASE, PERP_AGG_CASE)
 
 
 def assert_archive_rest_equal(

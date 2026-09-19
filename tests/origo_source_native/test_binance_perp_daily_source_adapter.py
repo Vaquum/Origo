@@ -128,8 +128,9 @@ def test_perp_field_parsers_reject_bad_input() -> None:
 def test_shared_decimal_parsing_normalizes_and_names_the_source() -> None:
     from origo.sources.adapters.binance_archive import parse_decimal
 
-    assert parse_decimal('76043.50', noun='Perp price, quantity, and quote quantity') == Decimal(
-        '76043.5'
+    assert (
+        str(parse_decimal('76043.50', noun='Perp price, quantity, and quote quantity'))
+        == '76043.5'
     )
     with pytest.raises(
         ValueError, match='Perp price, quantity, and quote quantity must be positive'

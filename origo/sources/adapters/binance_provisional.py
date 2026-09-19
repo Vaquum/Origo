@@ -154,7 +154,7 @@ class BinanceProvisionalBase:
         def request(
             path: str, params: dict[str, str | int], weight: int
         ) -> tuple[dict[str, object], ...]:
-            api_key = os.environ.get('BINANCE_API_KEY')
+            api_key = os.environ.get('BINANCE_API_KEY') if self.CREDENTIAL_REQUIRED else None
             headers = {'X-MBX-APIKEY': api_key} if api_key else {}
             response = self._get_response(
                 base + path, params=params, headers=headers, weight=weight

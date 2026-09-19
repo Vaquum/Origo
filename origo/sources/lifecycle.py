@@ -173,8 +173,7 @@ class SourceRuntime:
                         self.spec.canonical.revalidate(
                             partition, Revision(current.revision, '', '{}', 0, lambda: iter(()))
                         )
-                        self.failures.recover(operation=operation, partition=key)
-                        self.failures.recover(operation='component', partition=key)
+                        self.failures.recover_partition(partition=key)
                         self._recover_superseded(key)
                         return current
                     revision = adapter.fetch(partition)
@@ -185,19 +184,21 @@ class SourceRuntime:
                 ]
                 if current and current[0].revision == revision.key:
                     self._validate_retained(current[0])
-                    self.failures.recover(operation=operation, partition=key)
-                    self.failures.recover(operation='component', partition=key)
+                    if provisional:
+                        self.failures.recover(operation=operation, partition=key)
+                        self.failures.recover(operation='component', partition=key)
+                    else:
+                        self.failures.recover_partition(partition=key)
                     return current[0]
                 record = self._build_components(partition, revision, build_id, expected)
                 if provisional:
                     self._activate(record, expected)
+                    self.failures.recover(operation=operation, partition=key)
+                    self.failures.recover(operation='component', partition=key)
                 else:
                     self.spec.canonical.revalidate(partition, revision)
                     self._activate(record, expected)
-                self.failures.recover(operation=operation, partition=key)
-                self.failures.recover(operation='component', partition=key)
-                if not provisional:
-                    self.failures.recover(operation='quarantine', partition=key)
+                    self.failures.recover_partition(partition=key)
                     self._recover_superseded(key)
                 return record
         except Exception as error:
@@ -558,15 +559,14 @@ class SourceRuntime:
                         build_id=record.build_id,
                     )
                 else:
-                    self.failures.recover(operation='repair', partition=key)
+                    self.failures.recover_partition(partition=key)
                     return record
                 expected = self.store.generation(partition)
                 revision = self.spec.canonical.fetch(partition)
                 rebuilt = self._build_components(partition, revision, build_id, expected)
                 self.spec.canonical.revalidate(partition, revision)
                 self._activate(rebuilt, expected)
-                self.failures.recover(operation='repair', partition=key)
-                self.failures.recover(operation='component', partition=key)
+                self.failures.recover_partition(partition=key)
                 return rebuilt
         except Exception as error:
             self._record_attempt_failure('repair', key, build_id, error)
@@ -764,7 +764,7 @@ class SourceRuntime:
                 pending = self.store.execute(
                     f"""SELECT failure_key FROM {self.store.table('source_failure_log')}
                     WHERE source_key=%(source)s AND partition_key=%(partition)s
-                      AND operation IN ('canonical', 'component')
+                      AND blocking_scope='PARTITION'
                     GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
                     {'source': self.spec.key, 'partition': key},
                 )

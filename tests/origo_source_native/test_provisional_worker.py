@@ -379,13 +379,14 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
                     'results': state.get('backfills', []),
                 }
             }
-        # A run listing pages newest first: the fake serves the state's list for the
-        # filter's kind (job name, tag, or statuses) from the cursor, ``limit`` at a time.
+        # A run listing pages newest first: the fake serves the state's active list
+        # from the cursor, ``limit`` at a time. The reader asks for active runs only;
+        # terminal verdicts never reach the ownership rule.
         assert isinstance(variables, dict)
         run_filter = variables['filter']
         assert isinstance(run_filter, dict)
-        name = 'byJob' if 'pipelineName' in run_filter else 'byTags' if 'tags' in run_filter else 'active'
-        listed = cast(list[dict[str, object]], state.get(name, []))
+        assert 'statuses' in run_filter
+        listed = cast(list[dict[str, object]], state.get('active', []))
         start = 0
         if variables.get('cursor'):
             start = next(i for i, run in enumerate(listed) if run['runId'] == variables['cursor']) + 1
@@ -405,61 +406,23 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
     for status in ('REQUESTED', 'CANCELING', 'FAILING'):
         state['backfills'] = [backfill(status, 100.0)]
         assert reader.backfill_owns_publication(source) is True
-    # A failed native selection holds publication until a later one completes.
-    state['backfills'] = [backfill('FAILED', 100.0)]
+    # A terminal native selection releases publication.
+    for status in ('FAILED', 'COMPLETED_FAILED', 'CANCELED', 'COMPLETED', 'COMPLETED_SUCCESS'):
+        state['backfills'] = [backfill(status, 100.0)]
+        assert reader.backfill_owns_publication(source) is False
+    # An active backfill run of the source owns publication.
+    state.clear()
+    state['active'] = [run('STARTED', 300.0, backfill_job)]
     assert reader.backfill_owns_publication(source) is True
-    state['backfills'] = [backfill('COMPLETED_SUCCESS', 200.0, 'later'), backfill('FAILED', 100.0)]
-    assert reader.backfill_owns_publication(source) is False
-    # A backfill run newer than the native selection decides instead.
-    state['backfills'] = [backfill('FAILED', 100.0)]
-    state['byJob'] = [run('SUCCESS', 150.0, backfill_job)]
-    assert reader.backfill_owns_publication(source) is False
-    state['byJob'] = [run('FAILURE', 150.0, backfill_job)]
-    assert reader.backfill_owns_publication(source) is True
-    # A run tagged with the native backfill's id defers to that backfill's status.
-    state['backfills'] = [backfill('COMPLETED_SUCCESS', 100.0)]
-    state['byJob'] = [run('FAILURE', 150.0, backfill_job, **{'dagster/backfill': 'bf'})]
-    assert reader.backfill_owns_publication(source) is False
     # An active canonical range run of the source is a backfill in flight; a reconciliation
     # run is not.
-    state.clear()
     state['active'] = [
         run('STARTED', 300.0, canonical_job, **{'dagster/asset_partition_range_start': '2020-01-01'})
     ]
     assert reader.backfill_owns_publication(source) is True
     state['active'] = [run('STARTED', 300.0, canonical_job, origo_source_reconciliation='true')]
     assert reader.backfill_owns_publication(source) is False
-    # Other sources' backfills are not this source's, whether native or tagged runs: the
-    # tagged lookup asks for one tag (a two-tag filter takes eleven seconds on the production
-    # run storage) and keeps only this source's runs.
+    # Another source's native selection is not this source's.
     state.clear()
     state['backfills'] = [{'id': 'x', 'status': 'FAILED', 'timestamp': 1.0, 'assetSelection': [{'path': ['other']}]}]
-    assert reader.backfill_owns_publication(source) is False
-    state['byTags'] = [
-        run('FAILURE', 500.0, 'refresh_other_canonical_source_job', origo_source_key='other', origo_source_operation='backfill'),
-        run('FAILURE', 400.0, canonical_job, origo_source_key=source, origo_source_operation='backfill'),
-    ]
-    assert reader.backfill_owns_publication(source) is True
-    state['byTags'] = [run('FAILURE', 500.0, 'refresh_other_canonical_source_job', origo_source_key='other', origo_source_operation='backfill')]
-    assert reader.backfill_owns_publication(source) is False
-    # More newer tagged runs of other sources than one page holds: paging still reaches
-    # this source's newest tagged run, and the tag filter carries one tag only.
-    state['byTags'] = [
-        run('SUCCESS', 1000.0 - i, 'refresh_other_canonical_source_job', origo_source_key='other', origo_source_operation='backfill')
-        for i in range(60)
-    ] + [run('FAILURE', 400.0, canonical_job, origo_source_key=source, origo_source_operation='backfill')]
-    asked: list[object] = []
-    original = reader.query
-
-    def capture(operation: str, query: str, variables: object = None) -> dict[str, object]:
-        asked.append((operation, variables))
-        return original(operation, query, variables)
-
-    monkeypatch.setattr(reader, 'query', capture)
-    assert reader.backfill_owns_publication(source) is True
-    tag_pages = [v for op, v in asked if op == 'Runs' and isinstance(v, dict) and 'tags' in cast(dict[str, object], v['filter'])]
-    assert len(tag_pages) == 3
-    assert all(cast(dict[str, object], p['filter'])['tags'] == [{'key': 'origo_source_operation', 'value': 'backfill'}] for p in tag_pages)
-    # Without a run of this source among the tagged runs, the listing is read to its end.
-    state['byTags'] = state['byTags'][:-1]
     assert reader.backfill_owns_publication(source) is False

@@ -1,3 +1,7 @@
+# v3.19.1
+
+- Terminal backfill verdicts release publication: only an active backfill selection holds the consumer sensors and the provisional worker's mount path. A failed or cancelled backfill over a healthy canonical state no longer wedges publication forever (the Sep 18 perp freeze: mount 36h stale, HF never published, silent for a day). Partial canonical state still cannot publish — the callers check canonical readiness next.
+
 # v3.19.0
 
 - Add the CANARY-to-LIVE promotion generator: `tools/promote_source.py --source` applies the mechanical S395 transform set (spec stage flip, shadow retirement, four test-file mirrors) as exact-snippet replacements that fail loud on any drift, with a dry-run diff by default and `--apply` to write. Proven by replay: running it against the pre-S395 tree reproduces the spot-agg promotion byte-identical on all six files, and the generated perp-agg promotion passes its suites in a trial worktree. Version and CHANGELOG stay human.

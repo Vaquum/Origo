@@ -271,7 +271,21 @@ def test_weighted_budgets_are_independent_per_host(
     assert (tmp_path / 'binance_rest_budget.fapi_binance_com.state').exists()
     assert (tmp_path / 'binance_rest_budget.api_binance_com.state').exists()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
-    assert sleeps[2] == pytest.approx(10.0, abs=1.0)
+    assert sleeps[2] == pytest.approx(25.0, abs=1.0)
+
+
+def test_spot_aliases_share_one_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps = _paced_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response()
+    )
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
+    assert not (tmp_path / 'binance_rest_budget.api1_binance_com.state').exists()
+    daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=600)
+    assert sleeps == [0.0, pytest.approx(10.0, abs=1.0)]
 
 
 def test_weighted_rate_and_used_weight_backstop(
@@ -287,9 +301,9 @@ def test_weighted_rate_and_used_weight_backstop(
     before = time_module.time()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
     anchor, _ = _budget_state(tmp_path, 'fapi_binance_com')
-    assert anchor - before == pytest.approx(10.0, abs=1.0)
+    assert anchor - before == pytest.approx(25.0, abs=1.0)
     monkeypatch.setattr(
-        daily, '_request', lambda url, params, headers: _canned_response(used='5000')
+        daily, '_request', lambda url, params, headers: _canned_response(used='2000')
     )
     during = time_module.time()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
@@ -297,6 +311,14 @@ def test_weighted_rate_and_used_weight_backstop(
     assert held - during >= 60.0
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
     assert sleeps[-1] >= 55.0
+    # The same used weight is below the spot backstop: no hold on api.
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response(used='2000')
+    )
+    calm = time_module.time()
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
+    api_held, _ = _budget_state(tmp_path, 'api_binance_com')
+    assert api_held - calm == pytest.approx(10.0, abs=1.0)
 
 
 def test_rate_circuit_opens_only_for_the_limited_host(

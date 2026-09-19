@@ -547,6 +547,36 @@ def test_perp_agg_native_job_backfill_waits_for_own_selected_generations(
     assert store.execute('SELECT uniqExact(partition_key) FROM origo.source_backfill_log') == [(2,)]
 
 
+def test_perp_agg_huggingface_upload_records_every_rendered_series(
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import polars as pl
+
+    from origo.sources.profiles import perp_agg_consumers
+    from origo.sources.profiles.formulas import perp_agg_huggingface as agg_snapshot
+
+    store, instance, bundle = ready_job
+    job = next(job for job in bundle.jobs if job.name.startswith('backfill_'))
+    assert job.execute_in_process(instance=instance, tags=_selection()).success
+    columns = [c.name for c in next(c for c in store.spec.components if c.key == 'time').columns]
+    real = store.execute(f'SELECT {", ".join(columns)} FROM {store.component_table("time")} LIMIT 2')
+    assert len(real) == 2
+    frame = pl.DataFrame(real, schema=columns, orient='row')
+    monkeypatch.setattr(agg_snapshot, 'get_perp_agg_klines_from_1m_projection', lambda **kwargs: frame)
+    monkeypatch.setattr(
+        agg_snapshot, 'get_perp_agg_dollar_klines', lambda **kwargs: frame.clear()
+    )
+    destination = str(tmp_path / 'files' / store.spec.key / 'huggingface')
+    perp_agg_consumers._huggingface(store, store.snapshot(), destination)
+    assert [call for call, _ in FakeHfApi.calls] == ['create_repo', 'upload_folder'] * 6
+    manifest = json.loads((Path(destination) / 'latest.json').read_text())
+    assert manifest['kind'] == 'huggingface'
+    assert len(manifest['uploads']) == len(manifest['files']) == 6
+    assert len({entry['repo_id'] for entry in manifest['uploads']}) == 6
+
+
 def test_perp_agg_huggingface_shadow_renders_locally_without_uploading(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle],
     tmp_path: Path,

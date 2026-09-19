@@ -15,6 +15,7 @@ from huggingface_hub import HfApi
 
 from ..contracts import ConsumerSpec, Snapshot, SnapshotReader
 from .consumer_base import ConsumerDeclaration
+from .consumer_base import huggingface as _render_huggingface
 from .consumer_base import huggingface_shadow as _render_shadow
 from .consumer_base import mount as _render_mount
 from .formulas import perp_agg_huggingface as agg_snapshot
@@ -113,6 +114,30 @@ _DECL = ConsumerDeclaration(
 
 def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
     _render_mount(reader, snapshot, destination, decl=_DECL)
+
+
+def _huggingface(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    upload: bool = True,
+    kind: str = 'huggingface',
+) -> None:
+    # Snapshot callables resolve through their modules at call time (patch seams).
+    _render_huggingface(
+        reader,
+        snapshot,
+        destination,
+        decl=_DECL,
+        hf_api=HfApi,
+        time_klines=agg_snapshot.get_perp_agg_klines_from_1m_projection,
+        dollar_klines=agg_snapshot.get_perp_agg_dollar_klines,
+        time_card=agg_snapshot.build_time_dataset_card,
+        dollar_card=agg_snapshot.build_dollar_dataset_card,
+        upload=upload,
+        kind=kind,
+    )
 
 
 def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:

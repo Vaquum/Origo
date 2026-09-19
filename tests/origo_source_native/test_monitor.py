@@ -160,6 +160,9 @@ def _monitor(
     settings: AlertSettings | None = None,
     publication_root: Path | None = None,
 ) -> Monitor:
+    if publication_root is None:
+        publication_root = tmp_path / 'shadow'
+        publication_root.mkdir(parents=True, exist_ok=True)
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -169,7 +172,7 @@ def _monitor(
         settings=settings if settings is not None else _settings(server),
         reporter=Reporter(_url(server), timeout_seconds=2.0),
         cursor_path=tmp_path / 'monitor.cursor.json',
-        publication_root=publication_root or tmp_path / 'shadow',
+        publication_root=publication_root,
     )
 
 
@@ -649,11 +652,59 @@ def test_publication_current_consumers_are_quiet(
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(True))
     assert monitor._publication_findings() == []
     # A source that never published stays quiet while its state is younger than grace.
+    empty = tmp_path / 'empty'
+    empty.mkdir()
     fresh = _monitor(
         recorder,
         tmp_path / 'fresh',
         client=_SpanClient(_perp_span(NOW, timedelta(minutes=10))),
-        publication_root=tmp_path / 'missing',
+        publication_root=empty,
     )
     monkeypatch.setattr(fresh, 'dagster', _HoldReader(False))
     assert fresh._publication_findings() == []
+
+
+def test_publication_unreadable_manifest_is_a_finding_and_skips_only_that_consumer(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'shadow'
+    broken = root / 'binance_perp_trades' / 'mount' / 'latest.json'
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    broken.write_text('{not json')
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
+    monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
+    findings = monitor._publication_findings()
+    assert [finding.key for finding in findings] == [
+        'publication_manifest_unreadable:binance_perp_trades:mount',
+        'publication_stale:binance_perp_trades:huggingface',
+    ]
+    assert all(finding.check == 'publication_current' for finding in findings)
+
+
+def test_publication_missing_root_fails_loud(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monitor = _monitor(
+        recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=tmp_path / 'missing'
+    )
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
+    with pytest.raises(RuntimeError, match='is not mounted'):
+        monitor._publication_findings()
+
+
+def test_publication_unknown_hold_fails_loud(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from origo.workers.dagster_reader import DagsterUnreachable
+
+    class _DownReader(DagsterReader):
+        def backfill_owns_publication(self, source_key: str) -> bool:
+            raise DagsterUnreachable('Backfills: HTTP 502')
+
+    root = tmp_path / 'shadow'
+    root.mkdir()
+    monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
+    monkeypatch.setattr(monitor, 'dagster', _DownReader('http://dagit.invalid'))
+    with pytest.raises(DagsterUnreachable, match='HTTP 502'):
+        monitor._publication_findings()

@@ -38,7 +38,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.sources.contracts import Client, RolloutStage, identifier
 from origo.sources.registry import SOURCE_REGISTRY
 
-from .dagster_reader import DagsterReader, DagsterUnreachable, RunFailure
+from .dagster_reader import DagsterReader, RunFailure
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (
@@ -465,6 +465,8 @@ class Monitor:
 
     def _publication_findings(self) -> list[Finding]:
         """One finding per public consumer whose published end lags the source state."""
+        if not self.publication_root.is_dir():
+            raise RuntimeError(f'Publication root {self.publication_root} is not mounted.')
         spans: dict[str, tuple[datetime, datetime, datetime, datetime, int]] = {}
         for row in self.client.execute(
             f"""SELECT source_key, min(partition_end), max(partition_end),
@@ -487,12 +489,7 @@ class Monitor:
             if span is None:
                 continue
             oldest, current, canonical_oldest, canonical_current, canonical_count = span
-            try:
-                owned = self.dagster.backfill_owns_publication(spec.key)
-            except DagsterUnreachable as error:
-                log.warning('source=%s publication hold state unknown: %s', spec.key, error)
-                continue
-            if owned:
+            if self.dagster.backfill_owns_publication(spec.key):
                 continue
             for consumer in spec.consumers:
                 if not consumer.public:
@@ -512,10 +509,20 @@ class Monitor:
                             str(json.loads(manifest.read_text())['active_through'])
                         )
                     )
-                except (OSError, ValueError, KeyError):
-                    # Never published, or published unreadably: the span of the state
-                    # itself is the lag, so a fresh source stays quiet either way.
+                except FileNotFoundError:
+                    # Never published: the span of the state itself is the lag, so a
+                    # fresh source stays quiet while an old one pages.
                     published = start
+                except (OSError, ValueError, KeyError) as error:
+                    findings.append(
+                        Finding(
+                            f'publication_manifest_unreadable:{spec.key}:{consumer.key}',
+                            'publication_current',
+                            f'{spec.key} {consumer.key} manifest unreadable',
+                            f'{type(error).__name__}: {error}'[:300],
+                        )
+                    )
+                    continue
                 if end - published > grace:
                     findings.append(
                         Finding(

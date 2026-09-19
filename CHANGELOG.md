@@ -1,3 +1,7 @@
+# v3.17.3
+
+- Close the reconcile blind spot on partition failures: reconcile now blocks on any open `PARTITION`-scoped failure instead of only `canonical`/`component`, so a failed provisional or certification attempt holds the partition until a retry succeeds. A successful canonical build or repair recovers every open failure for the partition at once via `FailureLog.recover_partition`, so one good retry self-heals instead of leaving scars other operations cannot see.
+
 # v3.17.2
 
 - Share the aggregate archive quirk cleaner: the sentinel/duplicate-drop machinery moves from the spot agg adapter to `BinanceArchiveDaily.clean_agg_rows`, which the spot agg `clean_rows` hook now delegates to and the futures agg source will reuse. Behavior-preserving port; the four held production days verify identical through the delegated path.

@@ -1,6 +1,8 @@
-"""Relocated verbatim from origo/assets/refresh_aligned_1m_exchange_from_binance_spot_origo.py; the SQL and arithmetic are unchanged."""
+"""Spot aligned-table formula: table names over the generic bar math."""
 
 from clickhouse_driver import Client as ClickhouseClient
+
+from .generic_bars import insert_aligned_partition_rows
 
 ALIGNED_TABLE_NAME = 'aligned_1m_exchange'
 KLINES_TABLE_NAME = 'binance_spot_klines'
@@ -13,32 +15,11 @@ def _insert_partition_rows(
     database: str,
     partition_date: str,
 ) -> None:
-    client.execute(
-        f"""
-        INSERT INTO {database}.{ALIGNED_TABLE_NAME}
-        SELECT
-            '{BINANCE_SPOT_DATASET_SOURCE}' AS dataset_source,
-            datetime,
-            open,
-            high,
-            low,
-            close,
-            mean,
-            std,
-            median,
-            iqr,
-            volume,
-            maker_ratio,
-            no_of_trades,
-            open_liquidity,
-            high_liquidity,
-            low_liquidity,
-            close_liquidity,
-            liquidity_sum,
-            maker_volume,
-            maker_liquidity
-        FROM {database}.{KLINES_TABLE_NAME}
-        WHERE toDate(datetime) = toDate('{partition_date}')
-        ORDER BY datetime
-        """
+    insert_aligned_partition_rows(
+        client,
+        database,
+        partition_date,
+        aligned_table=ALIGNED_TABLE_NAME,
+        klines_table=KLINES_TABLE_NAME,
+        dataset_source=BINANCE_SPOT_DATASET_SOURCE,
     )

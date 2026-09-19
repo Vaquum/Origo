@@ -155,6 +155,33 @@ class FailureLog:
             )
         return len(rows)
 
+    def recover_partition(self, *, partition: str) -> int:
+        """Append RECOVERED to every open PARTITION-scoped failure for one partition."""
+        rows = self.store.execute(
+            f"""SELECT failure_key, argMax(operation, event_time),
+            argMax(error_code, event_time), argMax(component, event_time),
+            argMax(consumer, event_time), argMax(event_id, event_time)
+            FROM {self.store.table('source_failure_log')}
+            WHERE source_key=%(source)s AND blocking_scope='PARTITION'
+              AND ifNull(partition_key, '')=%(partition)s
+            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+            {'source': self.store.spec.key, 'partition': partition},
+        )
+        for row in rows:
+            if not isinstance(row[5], UUID):
+                raise TypeError('Recovery must reference a concrete failure event.')
+            self.record(
+                operation=str(row[1]),
+                error_code=str(row[2]),
+                scope='PARTITION',
+                partition=partition,
+                component=None if row[3] is None else str(row[3]),
+                consumer=None if row[4] is None else str(row[4]),
+                event_type='RECOVERED',
+                related_event=row[5],
+            )
+        return len(rows)
+
     def recover(
         self, *, operation: str, partition: str | None = None, consumer: str | None = None
     ) -> None:

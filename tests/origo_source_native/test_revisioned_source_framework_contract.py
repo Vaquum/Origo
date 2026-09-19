@@ -16,6 +16,9 @@ from dagster import (
 
 from origo import definitions
 from origo.sources import bundle
+from origo.sources.binance_perp_aggtrades import BINANCE_PERP_AGGTRADES_SPEC
+from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+from origo.sources.binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
@@ -26,7 +29,12 @@ ROOT = Path(__file__).resolve().parents[2] / 'origo/sources'
 def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert SOURCE_REGISTRY == (BINANCE_SPOT_TRADES_SPEC,)
+    assert SOURCE_REGISTRY == (
+        BINANCE_SPOT_TRADES_SPEC,
+        BINANCE_PERP_TRADES_SPEC,
+        BINANCE_SPOT_AGGTRADES_SPEC,
+        BINANCE_PERP_AGGTRADES_SPEC,
+    )
     assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
     source = bundle.build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
     assert source.assets and source.jobs and source.schedules and source.sensors
@@ -72,6 +80,72 @@ def test_spot_trades_is_registered_live_without_changing_existing_definitions(
         assert not schedule.evaluate_tick(build_schedule_context()).run_requests
     for sensor in source.sensors[:-1]:
         assert not sensor.evaluate_tick(build_sensor_context()).run_requests
+
+
+def test_perp_trades_is_registered_live_with_its_bundle() -> None:
+    assert BINANCE_PERP_TRADES_SPEC in SOURCE_REGISTRY
+    assert BINANCE_PERP_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
+    source = bundle.build_source_bundle(BINANCE_PERP_TRADES_SPEC)
+    assert source.assets and source.jobs and source.schedules and source.sensors
+    assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
+    assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
+    assert (
+        'backfill_binance_perp_trades_source_job'
+        in {job.name for job in definitions.defs.jobs}
+    )
+    names = {sensor.name for sensor in definitions.defs.sensors or ()}
+    assert {sensor.name for sensor in source.sensors} <= names
+    assert 'binance_perp_trades_mount_sensor' not in names
+    assert 'binance_perp_trades_huggingface_sensor' in names
+    assert 'binance_perp_trades_huggingface_shadow_sensor' not in names
+    repository = definitions.defs.get_repository_def()
+    assert not repository.has_schedule_def('binance_perp_trades_provisional_schedule')
+    feed = repository.asset_graph.get(AssetKey('binance_perp_trades_provisional_feed'))
+    assert feed.freshness_policy_or_from_metadata is not None
+
+
+def test_spot_aggtrades_is_registered_live_with_its_bundle() -> None:
+    assert BINANCE_SPOT_AGGTRADES_SPEC in SOURCE_REGISTRY
+    assert BINANCE_SPOT_AGGTRADES_SPEC.rollout_stage == RolloutStage.LIVE
+    source = bundle.build_source_bundle(BINANCE_SPOT_AGGTRADES_SPEC)
+    assert source.assets and source.jobs and source.schedules and source.sensors
+    assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
+    assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
+    assert (
+        'backfill_binance_spot_aggtrades_source_job'
+        in {job.name for job in definitions.defs.jobs}
+    )
+    names = {sensor.name for sensor in definitions.defs.sensors or ()}
+    assert {sensor.name for sensor in source.sensors} <= names
+    assert 'binance_spot_aggtrades_mount_sensor' not in names
+    assert 'binance_spot_aggtrades_huggingface_sensor' in names
+    assert 'binance_spot_aggtrades_huggingface_shadow_sensor' not in names
+    repository = definitions.defs.get_repository_def()
+    assert not repository.has_schedule_def('binance_spot_aggtrades_provisional_schedule')
+    feed = repository.asset_graph.get(AssetKey('binance_spot_aggtrades_provisional_feed'))
+    assert feed.freshness_policy_or_from_metadata is not None
+
+
+def test_perp_aggtrades_is_registered_canary_with_its_bundle() -> None:
+    assert BINANCE_PERP_AGGTRADES_SPEC in SOURCE_REGISTRY
+    assert BINANCE_PERP_AGGTRADES_SPEC.rollout_stage == RolloutStage.CANARY
+    source = bundle.build_source_bundle(BINANCE_PERP_AGGTRADES_SPEC)
+    assert source.assets and source.jobs and source.schedules and source.sensors
+    assert all(value.default_status == DefaultScheduleStatus.RUNNING for value in source.schedules)
+    assert all(value.default_status == DefaultSensorStatus.RUNNING for value in source.sensors)
+    assert (
+        'backfill_binance_perp_aggtrades_source_job'
+        in {job.name for job in definitions.defs.jobs}
+    )
+    names = {sensor.name for sensor in definitions.defs.sensors or ()}
+    assert {sensor.name for sensor in source.sensors} <= names
+    assert 'binance_perp_aggtrades_mount_sensor' not in names
+    assert 'binance_perp_aggtrades_huggingface_sensor' not in names
+    assert 'binance_perp_aggtrades_huggingface_shadow_sensor' in names
+    repository = definitions.defs.get_repository_def()
+    assert not repository.has_schedule_def('binance_perp_aggtrades_provisional_schedule')
+    feed = repository.asset_graph.get(AssetKey('binance_perp_aggtrades_provisional_feed'))
+    assert feed.freshness_policy_or_from_metadata is not None
 
 
 def test_core_imports_no_exchange_transport_or_parser() -> None:

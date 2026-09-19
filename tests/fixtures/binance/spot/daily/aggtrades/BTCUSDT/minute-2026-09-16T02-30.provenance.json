@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/spot/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-16.zip",
+  "date": "2026-09-16",
+  "zip_sha256": "6f60e7abbef1731f2a52c63d6c486b7088997f5e04d7b3ef1673157ef22085c6",
+  "checksum_sidecar": "6f60e7abbef1731f2a52c63d6c486b7088997f5e04d7b3ef1673157ef22085c6  BTCUSDT-aggTrades-2026-09-16.zip",
+  "csv_member": "BTCUSDT-aggTrades-2026-09-16.csv",
+  "csv_header": null,
+  "official_row_count": 945839,
+  "selected_row_start": 74204,
+  "selected_row_stop": 76643,
+  "selected_sha256": "a712476c0f245eb720cea93af31b72c86552f92856c60e5a62c5834e5b074842",
+  "note": "Contiguous official rows covering exactly the minute 2026-09-16T02:30:00Z (cross-check for the REST replay test).",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

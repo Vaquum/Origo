@@ -1,0 +1,57 @@
+{
+  "minute_start": "2019-09-08T00:00:00+00:00",
+  "minute_end": "2019-09-08T00:01:00+00:00",
+  "note": "The launch-day midnight minute was genuinely empty (first trade 17:57:50 UTC), but fapi restricts history to 2 days so 2019 boundary evidence is unqueryable. The [] bodies are the exchange's real empty response shape; the later trade is a real recent aggTrade proving the boundary check only.",
+  "requests": [
+    {
+      "file": "empty-first.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1567900800000,
+        "endTime": 1567900859999,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T10:06:00+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "20"
+      }
+    },
+    {
+      "file": "empty-second.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1567900800000,
+        "endTime": 1567900859999,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T10:07:00+00:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "20"
+      }
+    },
+    {
+      "file": "empty-later.json",
+      "url": "https://fapi.binance.com/fapi/v1/aggTrades",
+      "params": {
+        "symbol": "BTCUSDT",
+        "startTime": 1567900860000,
+        "limit": 1
+      },
+      "request_headers": {},
+      "status": 200,
+      "captured_at": "2026-09-18T10:07:00+00:00",
+      "sha256": "9d5f17e7fbf41a18f7576e320d8cdc325f7a5eab1689095f34c1ca2d498c3d0f",
+      "response_headers": {
+        "x-mbx-used-weight-1m": "20"
+      }
+    }
+  ]
+}

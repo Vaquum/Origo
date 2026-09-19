@@ -1,45 +1,34 @@
 from __future__ import annotations
 
-import csv
-import hashlib
-import importlib
 import inspect
 import json
 import subprocess
-import zipfile
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from io import BytesIO
 from pathlib import Path
-from types import ModuleType
-from unittest.mock import Mock
 
 import polars as pl
 import pytest
 from dagster import (
     AssetKey,
     AssetsDefinition,
-    DailyPartitionsDefinition,
-    DefaultScheduleStatus,
     DefaultSensorStatus,
-    build_schedule_context,
-    materialize,
 )
 
 from origo import definitions
-from origo.assets import daily_futures_trades_to_origo as futures
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query import binance_spot_kline_rollups as rollups
+from origo.sources.binance_perp_aggtrades import BINANCE_PERP_AGGTRADES_SPEC
+from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+from origo.sources.binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.contracts import OrchestrationSpec, RolloutStage
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.formulas import spot_series
 from origo.sources.storage import SourceStore
 from origo.utils import arrow_store
-from origo.utils import daily_gap_repair as repair
 
 from .conftest import CLICKHOUSE_DOCKERFILE, REPO_ROOT, _make_admin_client
-from .helpers import BINANCE_FIXTURE_ROOT
 
 Query = Callable[[str], list[tuple[object, ...]]]
 _MEASURES = tuple(
@@ -49,26 +38,6 @@ _MEASURES = tuple(
         'open_liquidity high_liquidity low_liquidity close_liquidity liquidity_sum '
         'maker_volume maker_liquidity'
     ).split()
-)
-_TIME_COLUMNS = (('datetime', 'DateTime'), *_MEASURES)
-_RAW_MEASURES = (
-    ('price', 'Float64'),
-    ('quantity', 'Float64'),
-    ('quote_quantity', 'Float64'),
-    ('timestamp', 'UInt64'),
-    ('is_buyer_maker', 'UInt8'),
-)
-_LEDGER_COLUMNS = (
-    ('source_date', 'Date'),
-    ('source_file', 'String'),
-    ('dagster_run_id', 'String'),
-    ('dagster_partition_key', 'String'),
-    ('zip_checksum', 'FixedString(64)'),
-    ('csv_checksum', 'FixedString(64)'),
-    ('source_row_count', 'UInt64'),
-    ('inserted_row_count', 'UInt64'),
-    ('loaded_at', 'DateTime'),
-    ('status', 'LowCardinality(String)'),
 )
 _TIME_SERIES = (('1m', 1), ('15m', 15), ('30m', 30), ('1h', 60), ('2h', 120), ('4h', 240))
 _DOLLAR_SERIES = (('1M', 1), ('15M', 15), ('30M', 30), ('60M', 60), ('120M', 120), ('240M', 240))
@@ -97,29 +66,6 @@ def _bar_columns(kind: str) -> tuple[tuple[str, str], ...]:
     return columns
 
 
-def _assert_table(
-    query: Query,
-    name: str,
-    columns: tuple[tuple[str, str], ...],
-    partition: str,
-    order: str,
-    ttl: str = '',
-) -> None:
-    assert [(row[0], row[1]) for row in query(f'DESCRIBE TABLE origo.{name}')] == list(columns), (
-        name
-    )
-    rows = query(
-        'SELECT engine, partition_key, sorting_key, create_table_query FROM system.tables '
-        f"WHERE database = 'origo' AND name = '{name}'"
-    )
-    assert len(rows) == 1, name
-    assert rows[0][:3] == ('MergeTree', partition, order), name
-    ddl = str(rows[0][3])
-    actual_ttl = ddl.split(' TTL ', 1)[1].split(' SETTINGS ', 1)[0] if ' TTL ' in ddl else ''
-    assert actual_ttl == ttl, name
-    assert query(f'SELECT count() FROM origo.{name}') == [(0,)], name
-
-
 def _assets() -> dict[str, AssetsDefinition]:
     return {
         key.to_user_string(): asset
@@ -127,174 +73,6 @@ def _assets() -> dict[str, AssetsDefinition]:
         if isinstance(asset, AssetsDefinition)
         for key in asset.keys
     }
-
-
-def _assert_asset(name: str, group: str, deps: set[str], first_day: str | None = None) -> None:
-    asset = _assets()[name]
-    assert asset.group_names_by_key[AssetKey(name)] == group, name
-    assert {key.to_user_string() for key in asset.asset_deps[AssetKey(name)]} == deps, name
-    if first_day is None:
-        assert asset.partitions_def is None, name
-    else:
-        assert asset.partitions_def == DailyPartitionsDefinition(start_date=first_day), name
-    expected_retry = (23, 3600, None, None) if name.startswith('insert_daily_') else None
-    assert asset.op.retry_policy == expected_retry, name
-
-
-def _assert_job(name: str, nodes: set[str]) -> None:
-    assert set(definitions.defs.resolve_job_def(name).graph.node_dict) == nodes, name
-
-
-def _assert_schedule(name: str, job: str, cron: str) -> None:
-    schedule = definitions.defs.get_repository_def().get_schedule_def(name)
-    assert (
-        schedule.job_name,
-        schedule.cron_schedule,
-        schedule.execution_timezone,
-        schedule.default_status,
-    ) == (job, cron, 'UTC', DefaultScheduleStatus.RUNNING)
-
-
-def _setup(market: str) -> list[AssetsDefinition]:
-    names = [
-        'create_origo_database',
-        f'create_binance_daily_{market}_trades_table_origo',
-        'create_aligned_1m_exchange_table_origo',
-        f'create_binance_{market}_klines_table_origo',
-    ]
-    assets = _assets()
-    return [assets[name] for name in names]
-
-
-def _assert_daily(
-    market: str,
-    module: ModuleType,
-    first_day: str,
-    hour: int,
-    query: Query,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prefix = f'binance_{market}'
-    raw = f'binance_daily_{market}_trades'
-    group = 'binance_data' if market == 'spot' else 'binance_futures_data'
-    insert = f'insert_daily_{prefix}_trades_to_origo'
-    first = date.fromisoformat(first_day)
-    assert module.daily_partitions == DailyPartitionsDefinition(start_date=first_day)
-    assert module.RAW_TABLE_NAME == raw
-    assert module.LEDGER_TABLE_NAME == f'{raw}_ingestion'
-    _assert_table(
-        query,
-        f'{raw}_ingestion',
-        _LEDGER_COLUMNS,
-        'toYYYYMM(source_date)',
-        'source_date, source_file',
-    )
-    _assert_table(query, f'{prefix}_klines', _TIME_COLUMNS, 'toYYYYMM(datetime)', 'datetime')
-    _assert_table(
-        query,
-        'aligned_1m_exchange',
-        (('dataset_source', 'LowCardinality(String)'), *_TIME_COLUMNS),
-        'toYYYYMM(datetime)',
-        'dataset_source, datetime',
-    )
-    aligned = importlib.import_module(
-        f'origo.assets.refresh_aligned_1m_exchange_from_{prefix}_origo'
-    )
-    assert getattr(aligned, f'BINANCE_{market.upper()}_DATASET_SOURCE') == prefix
-    for asset in _setup(market):
-        name = asset.key.to_user_string()
-        _assert_asset(
-            name,
-            'origo_setup',
-            set() if name == 'create_origo_database' else {'create_origo_database'},
-        )
-        _assert_job(f'{name}_job', {name})
-    _assert_asset(insert, group, {f'create_binance_daily_{market}_trades_table_origo'}, first_day)
-    families = ('klines',)
-    for family in families:
-        _assert_asset(
-            f'refresh_{prefix}_{family}_origo',
-            group,
-            {f'create_{prefix}_{family}_table_origo', insert},
-            first_day,
-        )
-    aligned_name = f'refresh_aligned_1m_exchange_from_{prefix}_origo'
-    _assert_asset(
-        aligned_name,
-        group,
-        {
-            'create_aligned_1m_exchange_table_origo',
-            f'create_{prefix}_klines_table_origo',
-            f'refresh_{prefix}_klines_origo',
-        },
-        first_day,
-    )
-    job = f'refresh_{prefix}_data_source_job'
-    _assert_job(job, {insert, aligned_name, *(f'refresh_{prefix}_{f}_origo' for f in families)})
-    schedule_name = f'daily_{prefix}_pipeline_schedule'
-    _assert_schedule(schedule_name, job, f'0 {hour} * * *')
-    repository = definitions.defs.get_repository_def()
-    result = repository.get_schedule_def(schedule_name).evaluate_tick(
-        build_schedule_context(
-            scheduled_execution_time=datetime(2024, 1, 3, hour, tzinfo=UTC),
-            repository_def=repository,
-        )
-    )
-    assert [(r.partition_key, r.run_key) for r in result.run_requests] == [
-        ('2024-01-02', '2024-01-02')
-    ]
-    _assert_schedule(f'{prefix}_daily_gap_repair_schedule', job, '30 * * * *')
-    spec = getattr(definitions, f'{market.upper()}_DAILY_GAP_REPAIR_SPEC')
-    assert (spec.market, spec.ledger_table, spec.earliest_partition) == (
-        market,
-        f'{raw}_ingestion',
-        first,
-    )
-    path = 'spot' if market == 'spot' else 'futures/um'
-    expected_url = f'https://data.binance.vision/data/{path}/daily/trades/BTCUSDT/'
-    env = f'BINANCE_{market.upper()}_DAILY_TRADES_BASE_URL'
-    monkeypatch.delenv(env, raising=False)
-    getter = getattr(module, f'_get_daily_{market}_trades_base_url')
-    assert getter() == spec.get_base_url() == expected_url
-    monkeypatch.setenv(env, 'https://archive.example/BTCUSDT/')
-    assert getter() == spec.get_base_url() == 'https://archive.example/BTCUSDT/'
-    assert repair.source_filename(date(2024, 1, 1)) == 'BTCUSDT-trades-2024-01-01.zip'
-    with monkeypatch.context() as patch:
-        patch.setattr(repair, 'repairable_gap_days', lambda *args: [date(2024, 1, 1)])
-        requests = repair.gap_repair_run_requests(Mock(), 'origo', spec, date(2024, 1, 3), set())
-    assert isinstance(requests, list)
-    assert [(r.partition_key, r.run_key) for r in requests] == [
-        ('2024-01-01', f'daily_gap_repair:{market}:2024-01-01:2024-01-03')
-    ]
-
-
-def _assert_archives(module: ModuleType, market: str, days: tuple[str, ...]) -> None:
-    for day in days:
-        path = BINANCE_FIXTURE_ROOT / market / 'daily/trades/BTCUSDT' / f'BTCUSDT-trades-{day}.zip'
-        payload = path.read_bytes()
-        assert (
-            hashlib.sha256(payload).hexdigest()
-            == path.with_suffix('.zip.CHECKSUM').read_text().split()[0]
-        )
-        with zipfile.ZipFile(BytesIO(payload)) as archive:
-            data = archive.read(f'BTCUSDT-trades-{day}.csv')
-        source = list(csv.reader(data.decode().splitlines()))
-        if market == 'futures' and day == '2024-04-20':
-            assert source.pop(0) == ['id', 'price', 'qty', 'quote_qty', 'time', 'is_buyer_maker']
-        rows = module._parse_trade_rows(data)
-        assert len(rows) == len(source) > 0
-        for row, original in zip(rows, source, strict=True):
-            expected = (
-                int(original[0]),
-                *(float(v) for v in original[1:4]),
-                int(original[4]),
-                original[5].lower() == 'true',
-            )
-            if market == 'spot':
-                expected += (original[6].lower() == 'true',)
-            unit = 1_000_000 if len(original[4]) == 16 else 1000
-            expected += (datetime.fromtimestamp(int(original[4]) / unit, UTC).replace(tzinfo=None),)
-            assert row == expected
 
 
 def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, str]) -> None:
@@ -484,6 +262,8 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
                 'base_table': 'binance_spot_dollar_klines',
                 'raw_latest_table': 'binance_spot_trades_latest',
                 'database': 'origo',
+                'id_column': 'trade_id',
+                'quote_expr': 'quote_quantity',
             },
         ),
     ):
@@ -524,25 +304,156 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
             assert prefix == f'btcusdt_{label}_{dollar}kline_20200101_to_'
 
 
-def test_futures_source_identity_contract(
+def test_perp_source_identity_contract(
     origo_test_env: dict[str, str],
     query_origo: Query,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     assert origo_test_env['CLICKHOUSE_DATABASE'] == 'origo'
-    assert materialize(_setup('futures')).success
-    _assert_daily('futures', futures, '2019-09-08', 10, query_origo, monkeypatch)
-    columns = (('futures_trade_id', 'UInt64'), *_RAW_MEASURES, ('datetime', 'DateTime64(6)'))
-    assert futures.FUTURES_TRADE_COLUMNS == tuple(name for name, _ in columns)
-    _assert_table(
-        query_origo,
-        'binance_daily_futures_trades',
-        columns,
-        'toYYYYMM(datetime)',
-        'datetime, futures_trade_id',
+    spec = BINANCE_PERP_TRADES_SPEC
+    assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
+        'binance_perp_trades',
+        RolloutStage.LIVE,
+        date(2019, 9, 8),
     )
-    _assert_archives(futures, 'futures', ('2019-09-08', '2024-04-20'))
+    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert [component.key for component in spec.components] == [
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
+    ]
+    raw = next(component for component in spec.components if component.key == 'raw')
+    assert [column.name for column in raw.columns] == [
+        'trade_id',
+        'price',
+        'quantity',
+        'quote_quantity',
+        'timestamp',
+        'is_buyer_maker',
+        'datetime',
+    ]
+    assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
+        ('mount', True),
+        ('huggingface', True),
+    ]
+    # No readers of the legacy futures tables exist, so no aliases: the spec drops them.
+    assert dict(spec.aliases) == {}
+    assert spec.retired_tables == (
+        'binance_daily_futures_trades',
+        'binance_daily_futures_trades_ingestion',
+        'binance_futures_klines',
+        'aligned_1m_exchange',
+    )
+    assert spec.retired_rows == ()
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        client.execute('CREATE DATABASE IF NOT EXISTS origo')
+        for name in spec.retired_tables:
+            client.execute(f'CREATE TABLE origo.{name} (x UInt8) ENGINE=Memory')
+        SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'baseline').setup()
+        assert (
+            query_origo(
+                "SELECT name FROM system.tables WHERE database = 'origo' AND "
+                "name IN ('binance_daily_futures_trades', 'binance_daily_futures_trades_ingestion', "
+                "'binance_futures_klines', 'aligned_1m_exchange')"
+            )
+            == []
+        )
+    finally:
+        client.disconnect()
     assert not any(
-        name.startswith(('publish_binance_futures_trades_', 'sync_binance_futures_trades_'))
+        name.startswith(('insert_daily_binance_futures_', 'refresh_binance_futures_'))
         for name in _assets()
     )
+
+
+def test_spot_agg_source_identity_contract(origo_test_env: dict[str, str]) -> None:
+    assert origo_test_env['CLICKHOUSE_DATABASE'] == 'origo'
+    spec = BINANCE_SPOT_AGGTRADES_SPEC
+    assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
+        'binance_spot_aggtrades',
+        RolloutStage.LIVE,
+        date(2017, 8, 17),
+    )
+    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert [component.key for component in spec.components] == [
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
+    ]
+    raw = next(component for component in spec.components if component.key == 'raw')
+    assert [column.name for column in raw.columns] == [
+        'agg_trade_id',
+        'price',
+        'quantity',
+        'first_trade_id',
+        'last_trade_id',
+        'timestamp',
+        'is_buyer_maker',
+        'is_best_match',
+        'datetime',
+    ]
+    assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
+        ('mount', True),
+        ('huggingface', True),
+    ]
+    # No legacy aggregate pipeline is replaced: nothing is aliased or retired.
+    assert dict(spec.aliases) == {}
+    assert spec.retired_tables == ()
+    assert spec.retired_rows == ()
+
+
+def test_perp_agg_source_identity_contract(origo_test_env: dict[str, str]) -> None:
+    assert origo_test_env['CLICKHOUSE_DATABASE'] == 'origo'
+    spec = BINANCE_PERP_AGGTRADES_SPEC
+    assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
+        'binance_perp_aggtrades',
+        RolloutStage.CANARY,
+        date(2019, 12, 31),
+    )
+    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert [component.key for component in spec.components] == [
+        'raw',
+        'time',
+        'dollar',
+        'volume',
+        'tick',
+        'imbalance',
+        'aligned',
+        'raw_latest',
+        'time_latest',
+        'dollar_latest',
+    ]
+    raw = next(component for component in spec.components if component.key == 'raw')
+    assert [column.name for column in raw.columns] == [
+        'agg_trade_id',
+        'price',
+        'quantity',
+        'first_trade_id',
+        'last_trade_id',
+        'timestamp',
+        'is_buyer_maker',
+        'datetime',
+    ]
+    assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
+        ('mount', False),
+        ('huggingface_shadow', False),
+    ]
+    # No legacy aggregate pipeline is replaced: nothing is aliased or retired.
+    assert dict(spec.aliases) == {}
+    assert spec.retired_tables == ()
+    assert spec.retired_rows == ()

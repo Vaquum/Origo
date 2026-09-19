@@ -10,6 +10,8 @@ import pytest
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters import binance_spot_rest as rest
 
+from .acceptance_cases import SPOT_CASE, assert_archive_rest_equal
+
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures/binance/spot'
 ARCHIVES = FIXTURES / 'daily/trades/revisioned'
 REST = FIXTURES / 'rest/trades'
@@ -76,12 +78,14 @@ def test_real_spot_closed_minutes_obey_binance_provisional_rules(
         expected = remaining.pop(0)
         assert url == expected['url']
         assert params == expected['params']
+        assert headers == {}
         assert weight == (4 if url.endswith('/aggTrades') else 25)
         body = (REST / expected['file']).read_bytes()
         assert hashlib.sha256(body).hexdigest() == expected['sha256']
         return daily.Response(body, expected['response_headers'], expected['status'])
 
     monkeypatch.delenv('BINANCE_SPOT_REST_BASE_URL', raising=False)
+    monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
     monkeypatch.setattr(rest, 'get_response', captured)
     adapter = rest.BinanceSpotProvisional()
     key = datetime.fromisoformat(provenance['minute_start']).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -118,13 +122,11 @@ def test_real_spot_closed_minutes_obey_binance_provisional_rules(
             daily.BinanceSpotDaily().partition('2025-01-01'),
         )
     )
-    expected = {row[0]: row for row in archive_rows if partition.start <= row[-1] < partition.end}
-    assert len(expected) == len(rows)
-    for row in rows:
-        official = expected[row[0]]
-        assert row[:4] == official[:4]
-        assert row[5:7] == official[5:7]
-        assert row[4] == official[4] // 1000
+    assert_archive_rest_equal(
+        tuple(row for row in archive_rows if partition.start <= row[-1] < partition.end),
+        rows,
+        case=SPOT_CASE,
+    )
 
 
 def test_real_empty_minute_requires_two_ticks_and_later_boundary_evidence(
@@ -165,7 +167,12 @@ def test_binance_rate_budget_survives_workers_and_respects_retry_headers(
     clock = [1000.0]
     responses: list[requests.Response] = []
     calls: list[str] = []
-    for status, headers in ((200, {}), (429, {'Retry-After': '3'}), (418, {'Retry-After': '5'})):
+    for status, headers in (
+        (200, {}),
+        (429, {'Retry-After': '3'}),
+        (418, {'Retry-After': '5'}),
+        (200, {}),
+    ):
         response = requests.Response()
         response.status_code = status
         response.headers.update(headers)
@@ -183,16 +190,161 @@ def test_binance_rate_budget_survives_workers_and_respects_retry_headers(
     monkeypatch.setattr(daily.time, 'time', lambda: clock[0])
     monkeypatch.setattr(daily.time, 'sleep', sleep)
     monkeypatch.setattr(daily, '_request', request)
-    daily.get_response('https://api.binance.com/api/v3/historicalTrades', weight=25)
+    daily.get_response('https://api.binance.com/api/v3/historicalTrades', weight=60)
     assert clock[0] == 1000.0
-    assert (tmp_path / 'binance_rest_budget.state').read_text() == '1001.250000 0.000000'
-    # A new call has no process-local counter to reset; another alias uses the same IP budget.
+    state = tmp_path / 'binance_rest_budget.api_binance_com.state'
+    assert state.read_text() == '1001.000000 0.000000'
+    # Another host paces from its own budget: no sleep despite the hot api budget.
     with pytest.raises(RuntimeError, match='HTTP 429'):
-        daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=4)
-    assert clock[0] == 1001.25
+        daily.get_response('https://fapi.binance.com/fapi/v1/aggTrades', weight=4)
+    assert clock[0] == 1000.0
     with pytest.raises(RuntimeError, match='HTTP 418'):
         daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=4)
-    assert clock[0] == 1004.25
-    with pytest.raises(RuntimeError, match='circuit is open'):
-        daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=4)
-    assert len(calls) == 3
+    assert clock[0] == 1001.0
+    # The api 418 circuits only api: fapi waits out its own Retry-After and proceeds.
+    daily.get_response('https://fapi.binance.com/fapi/v1/aggTrades', weight=4)
+    assert clock[0] == 1003.0
+    assert len(calls) == 4
+
+
+def test_weighted_requests_touch_the_worker_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b'[]'
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.setattr(daily, '_request', lambda url, params, headers: response)
+    beat = tmp_path / 'worker.heartbeat'
+    monkeypatch.setenv('ORIGO_WORKER_HEARTBEAT', str(beat))
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=20)
+    assert float(beat.read_text()) > 0
+    # Dagster runs never set the variable: no heartbeat is written.
+    monkeypatch.delenv('ORIGO_WORKER_HEARTBEAT')
+    beat.unlink()
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=20)
+    assert not beat.exists()
+
+
+def _canned_response(
+    *, status: int = 200, used: str = '0', retry: str | None = None
+) -> object:
+    import requests
+
+    response = requests.Response()
+    response.status_code = status
+    response._content = b'[]'
+    response.headers['X-MBX-USED-WEIGHT-1M'] = used
+    if retry is not None:
+        response.headers['Retry-After'] = retry
+    return response
+
+
+def _paced_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[float]:
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.delenv('ORIGO_WORKER_HEARTBEAT', raising=False)
+    sleeps: list[float] = []
+    monkeypatch.setattr(daily.time, 'sleep', sleeps.append)
+    return sleeps
+
+
+def _budget_state(tmp_path: Path, host: str) -> tuple[float, float]:
+    text = (tmp_path / f'binance_rest_budget.{host}.state').read_text().strip()
+    first, second = text.split()
+    return float(first), float(second)
+
+
+def test_weighted_budgets_are_independent_per_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps = _paced_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response()
+    )
+    daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
+    assert sleeps == [0.0, 0.0]
+    assert (tmp_path / 'binance_rest_budget.fapi_binance_com.state').exists()
+    assert (tmp_path / 'binance_rest_budget.api_binance_com.state').exists()
+    daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
+    assert sleeps[2] == pytest.approx(25.0, abs=1.0)
+
+
+def test_spot_aliases_share_one_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps = _paced_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response()
+    )
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
+    assert not (tmp_path / 'binance_rest_budget.api1_binance_com.state').exists()
+    daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=600)
+    assert sleeps == [0.0, pytest.approx(10.0, abs=1.0)]
+
+
+def test_weighted_rate_and_used_weight_backstop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time as time_module
+
+    sleeps = _paced_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response()
+    )
+    before = time_module.time()
+    daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
+    anchor, _ = _budget_state(tmp_path, 'fapi_binance_com')
+    assert anchor - before == pytest.approx(25.0, abs=1.0)
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response(used='2000')
+    )
+    during = time_module.time()
+    daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
+    held, _ = _budget_state(tmp_path, 'fapi_binance_com')
+    assert held - during >= 60.0
+    daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
+    assert sleeps[-1] >= 55.0
+    # The same used weight is below the spot backstop: no hold on api.
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response(used='2000')
+    )
+    calm = time_module.time()
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
+    api_held, _ = _budget_state(tmp_path, 'api_binance_com')
+    assert api_held - calm == pytest.approx(10.0, abs=1.0)
+
+
+def test_rate_circuit_opens_only_for_the_limited_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.contracts import SourceError
+
+    _paced_setup(tmp_path, monkeypatch)
+    calls: list[str] = []
+
+    def limited(url: str, params: object, headers: object) -> object:
+        calls.append(url)
+        return _canned_response(status=418, retry='30')
+
+    monkeypatch.setattr(daily, '_request', limited)
+    with pytest.raises(SourceError) as banned:
+        daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=200)
+    assert banned.value.code == 'PROVIDER_HTTP_418'
+    with pytest.raises(SourceError) as circuited:
+        daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=200)
+    assert circuited.value.code == 'PROVIDER_RATE_CIRCUIT'
+    assert len(calls) == 1
+    monkeypatch.setattr(
+        daily, '_request', lambda url, params, headers: _canned_response()
+    )
+    daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=4)

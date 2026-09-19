@@ -100,7 +100,12 @@ def test_live_feed_assets_carry_the_freshness_policy() -> None:
     graph = defs.get_repository_def().asset_graph
     expected = FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW)
     assert LIVE_FEED_FRESHNESS_WINDOW == timedelta(minutes=5)
-    for key in ('binance_spot_depth_live_feed', 'binance_spot_trades_provisional_feed'):
+    for key in (
+        'binance_spot_depth_live_feed',
+        'binance_spot_trades_provisional_feed',
+        'binance_perp_trades_provisional_feed',
+        'binance_spot_aggtrades_provisional_feed',
+    ):
         node = graph.get(AssetKey(key))
         assert node.freshness_policy_or_from_metadata == expected
         assert not node.is_materializable, f'{key} is materialized by its worker, not by a run'

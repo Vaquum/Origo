@@ -257,6 +257,8 @@ def dollar_month(
     base_table: str = "binance_spot_dollar_klines",
     raw_latest_table: str = "binance_spot_trades_latest",
     database: str = "origo",
+    id_column: str = "trade_id",
+    quote_expr: str = "quote_quantity",
 ) -> pl.DataFrame:
     """Roll the day-scoped 1M dollar base up by ``ratio`` for one calendar month.
 
@@ -269,6 +271,7 @@ def dollar_month(
     base_table = _validate_identifier(base_table, "table name")
     raw_latest_table = _validate_identifier(raw_latest_table, "table name")
     database = _validate_identifier(database, "database name")
+    id_column = _validate_identifier(id_column, "column name")
     month_start, month_end = _month_bounds(year, month)
     columns = ", ".join(DOLLAR_KLINE_COLUMNS)
 
@@ -334,19 +337,19 @@ def dollar_month(
                     min(datetime) AS start_datetime,
                     max(datetime) AS end_datetime,
                     open_dollar_bar_id AS dollar_bar_id,
-                    argMin(price, trade_id) AS open,
+                    argMin(price, {id_column}) AS open,
                     max(price) AS high,
                     min(price) AS low,
-                    argMax(price, trade_id) AS close,
+                    argMax(price, {id_column}) AS close,
                     avg(price) AS mean,
                     stddevPopStable(price) AS std,
                     sumKahan(quantity) AS volume,
                     avg(is_buyer_maker) AS maker_ratio,
                     count() AS no_of_trades,
-                    argMin(price * quantity, trade_id) AS open_liquidity,
+                    argMin(price * quantity, {id_column}) AS open_liquidity,
                     max(price * quantity) AS high_liquidity,
                     min(price * quantity) AS low_liquidity,
-                    argMax(price * quantity, trade_id) AS close_liquidity,
+                    argMax(price * quantity, {id_column}) AS close_liquidity,
                     sum(price * quantity) AS liquidity_sum,
                     sumKahan(is_buyer_maker * quantity) AS maker_volume,
                     sum(is_buyer_maker * price * quantity) AS maker_liquidity
@@ -358,11 +361,11 @@ def dollar_month(
                         SELECT
                             *,
                             greatest(
-                                sum(quote_quantity) OVER (
+                                sum({quote_expr}) OVER (
                                     PARTITION BY toDate(datetime)
-                                    ORDER BY datetime, trade_id
+                                    ORDER BY datetime, {id_column}
                                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                                ) - quote_quantity,
+                                ) - {quote_expr},
                                 0.0
                             ) AS running_quote_before
                         FROM {database}.{raw_latest_table}

@@ -451,3 +451,49 @@ def test_cleanup_failure_after_success_is_not_hidden_by_an_outer_exception_handl
         with pytest.raises(OSError, match='successful work'):
             with preserve_primary_failure('test cleanup', fail_cleanup):
                 assert True
+
+
+def test_reconcile_blocks_on_noncanonical_partition_failure(
+    backfill_env: BackfillEnv,
+) -> None:
+    runtime, _, _ = backfill_env
+    assert backfill._run(backfill_env, probe=True).success
+    runtime.failures.record(
+        operation='provisional',
+        scope='PARTITION',
+        partition=DAY,
+        error_code='PROVIDER_HTTP_503',
+    )
+    with pytest.raises(SourceError) as error:
+        runtime.reconcile(DAY)
+    assert error.value.code == 'INGESTION_FAILURE_UNRESOLVED'
+
+
+def test_successful_build_recovers_all_partition_failures(
+    backfill_env: BackfillEnv,
+) -> None:
+    runtime, _, _ = backfill_env
+    assert backfill._run(backfill_env, probe=True).success
+    runtime.failures.record(
+        operation='repair',
+        scope='PARTITION',
+        partition=DAY,
+        error_code='RETAINED_CONTENT_INVALID',
+    )
+    runtime.failures.record(
+        operation='provisional',
+        scope='PARTITION',
+        partition=DAY,
+        error_code='PROVIDER_HTTP_503',
+    )
+    runtime.build(DAY)
+    assert runtime.store.execute(
+        'SELECT argMax(operation, event_time), argMax(event_type, event_time) '
+        'FROM origo.source_failure_log WHERE partition_key=%(day)s '
+        'GROUP BY failure_key ORDER BY 1',
+        {'day': DAY},
+    ) == [
+        ('provisional', 'RECOVERED'),
+        ('repair', 'RECOVERED'),
+    ]
+    assert runtime.reconcile(DAY) == runtime.store.records(canonical_only=True)[0]

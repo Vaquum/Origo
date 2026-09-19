@@ -1,6 +1,90 @@
-# v3.14.0
+# v3.20.0
 
 - Publish `btc_briefing/2` book percentiles, minute series, and session aggregates from `binance_spot_depth200_1m`, with metric names that identify their 200-level depth.
+
+# v3.19.0
+
+- Add the CANARY-to-LIVE promotion generator: `tools/promote_source.py --source` applies the mechanical S395 transform set (spec stage flip, shadow retirement, four test-file mirrors) as exact-snippet replacements that fail loud on any drift, with a dry-run diff by default and `--apply` to write. Proven by replay: running it against the pre-S395 tree reproduces the spot-agg promotion byte-identical on all six files, and the generated perp-agg promotion passes its suites in a trial worktree. Version and CHANGELOG stay human.
+
+# v3.18.0
+
+- Add the Binance perp aggregate-trades revisioned source (CANARY): canonical adapter over the futures-um vision aggTrades daily zips from 2019-12-31, single-endpoint provisional adapter over the fapi aggTrades REST channel at weight 20 with zero paging backtrack (both proven by capture), ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `perp_agg_`-prefixed series. The futures archives carry seven columns with no best-match flag, and modern days carry a header row the 2019 days lack, so the adapter skips the exact known header when present; timestamps are milliseconds on both channels. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`.
+# v3.17.8
+
+- Send the Binance API key only where the endpoint requires it: the provisional base now attaches `X-MBX-APIKEY` solely for credential-required adapters (fapi `historicalTrades`, the only one of the four REST endpoints that answers 401 without it — verified live). Spot and spot-agg tails go keyless, spending IP quota only, and a bad key can no longer break public calls.
+
+# v3.17.7
+
+- Revert perp provisional pages to 500 trades: fapi answers limit=1000 on fromId-paged `historicalTrades` with HTTP 400 code -1130, which stalled the entire perp tail from the v3.17.4 deploy until this fix. The 500 cap is now recorded on the adapter so it cannot be re-"optimized". The earlier weight measurement was taken on the keyless path, which validates differently — validity must be proven with the authenticated request shape.
+
+# v3.17.6
+
+- Share canonical decimal parsing on the archive base: the three near-identical `parse_decimal` clones (spot, perp, spot-agg) collapse into one `parse_decimal(text, *, noun)` that validates, names the source in errors, and normalizes padded API decimals to trimmed archive form. Each daily adapter keeps a one-line noun-bound wrapper, so module APIs and every existing test hold; spot gains the normalization its siblings already had.
+
+# v3.17.5
+
+- Split the Binance REST request budget per host family, each paced at 60% of its documented IP allowance with the header-driven backstop at 80%: api at 60 weight/s with backstop 4800 (of 6000/min), fapi at 24 weight/s with backstop 1920 (of 2400/min), unknown hosts at the previous 20/s. Spot aliases (api1-4) share api's budget and circuit. A hot fapi backlog no longer paces spot traffic and a 418 on one host no longer halts the other; prod demand at full catch-up is ~900 weight/min with zero 429/418 in 30h. With the 1000-trade perp pages, a perp minute drops from ~108s toward ~40s, closing the worker's structural deficit.
+
+# v3.17.4
+
+- Fetch perp provisional minutes with 1000-trade REST pages instead of 500. Fapi charges a flat 200 weight per `historicalTrades` request at any limit (verified live at 100/500/1000), so doubling the page halves the paced requests per minute at zero extra weight — roughly halving the ~108s a perp minute cost the single worker and letting the tail backlog drain twice as fast.
+
+# v3.17.3
+
+- Close the reconcile blind spot on partition failures: reconcile now blocks on any open `PARTITION`-scoped failure instead of only `canonical`/`component`, so a failed provisional or certification attempt holds the partition until a retry succeeds. A successful canonical build or repair recovers every open failure for the partition at once via `FailureLog.recover_partition`, so one good retry self-heals instead of leaving scars other operations cannot see.
+
+# v3.17.2
+
+- Share the aggregate archive quirk cleaner: the sentinel/duplicate-drop machinery moves from the spot agg adapter to `BinanceArchiveDaily.clean_agg_rows`, which the spot agg `clean_rows` hook now delegates to and the futures agg source will reuse. Behavior-preserving port; the four held production days verify identical through the delegated path.
+
+# v3.17.1
+
+- Record `required_approving_review_count: 1` in the `Protect-Main` ruleset snapshot. The live ruleset gained the one-approval requirement as the new standard while `.github/rulesets/main.json` still carried 0, so `pr_checks_ruleset` failed every open PR on drift it had not caused. Protection itself is unchanged; the snapshot now matches live field for field.
+
+# v3.17.0
+
+- Promote the Binance spot aggregate-trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2017-08-17 to 2026-09-18, 3320 days, zero open failures, quirk-cleaned row counts verified) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_spot_agg_*` datasets.
+
+# v3.16.2
+
+- Drop the two observed Binance-side quirk rows from spot aggregate archives before validation: -1/zero sentinel aggregates and byte-identical duplicate lines from repackaged chunks. A `clean_rows` hook on the archive base (identity by default) lets the agg adapter clean once for both the columnar and streaming consumers; drop counts merge into the revision evidence while `csv_sha256` keeps pinning the archive as served. Anything else malformed still fails loud.
+
+# v3.16.1
+
+- Fix the provisional worker watchdog livelock: each built interval, each publication, and each paced REST request touches the worker heartbeat, so a slow catch-up tick proves liveness instead of tripping the 180s watchdog and retrying the same oldest minute forever. Dagster runs never set `ORIGO_WORKER_HEARTBEAT` and skip the beat.
+
+# v3.16.0
+
+- Promote the Binance perp trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2019-09-08 to present, fresh tail) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_perp_*` datasets.
+
+# v3.15.0
+
+- Add the Binance spot aggregate-trades revisioned source (CANARY): canonical adapter over the vision aggTrades daily zips from 2017-08-17, single-endpoint provisional adapter over the spot aggTrades REST channel, ten components through the profile factory and generic formulas, and mount plus huggingface_shadow consumers with `spot_agg_`-prefixed series. Tick bars count aggregate events and dollar bars accumulate aggregate notional (price times quantity per aggregate); first/last trade ids are `Int64`. The scaffold gains the declared parameters the aggregate layout requires, all default-preserving with existing suites green and unchanged: the archive timestamp index, the provisional single-endpoint mode, the factory/formula/consumer id-column and quote-expression parameters, and the acceptance harness aggregate row layout with a third source case.
+
+# v3.14.5
+
+- Parameterize the acceptance harness and comparison helper: `acceptance_cases` declares one `SourceCase` per source (spec key, fixture root, twelve-product inventory, time and quote carve-outs) with `SOURCE_CASES`, and `assert_archive_rest_equal` owns the archive-vs-REST comparison both provisional suites shared inline. Each backfill suite pins its explicit twelve-series inventory against the literal and the live series declaration; the spot suite keeps its microseconds-to-milliseconds timestamp carve-out and the perp suite its recomputed price-times-quantity quote carve-out. Zero production-code changes.
+
+# v3.14.4
+
+- Scaffold the profile factory and generic formulas: `ProfileDeclaration` plus `build_components` own the measure columns, projection rewrite client, raw loader, and daily/minute/imbalance builders behind per-source declarations (raw columns, rewrite names, formula prefix, imbalance module), and the spot and perp profiles shrink to those declarations with their legacy aliases and retired tables. The sixteen bar-formula modules keep their table-name constants and delegate to `generic_bars`, which holds each SQL statement and the imbalance Arrow math exactly once; the dead ClickHouse wiring the perp imbalance port already dropped is removed from the spot module. Component hashes hold with zero test changes.
+
+# v3.14.3
+
+- Scaffold the parameterized provisional REST base: `BinanceProvisionalBase` owns minute-partition math, the 36h/5 candidate window, the locate+page loop, the 100-page cap, and the empty-minute two-observation evidence behind declared per-source parameters (host, paths, weights, page limit, credential policy, paging backtrack) and hooks (row mapper, HTTP seam, clock seam), and the spot and perp provisional adapters shrink to those declarations. Every request weight is a named field; `get_response` and `now_utc` keep resolving through the subclass modules so all patch seams hold with zero test changes.
+
+# v3.14.2
+
+- Scaffold the parameterized vision archive adapter: `BinanceArchiveDaily` owns download, checksum, partition, and row-validation mechanics behind declared per-source parameters (base URL, first day, field count, header policy) and hooks (HTTP seam, table builder, row builder), and the spot and perp daily adapters shrink to those declarations. Error texts are neutralized to `Binance` with every pinned substring preserved; all digests, revision keys, and REST-vs-archive proofs hold with zero test changes. The shared consumer factory (`ConsumerDeclaration` plus mount/huggingface renderers) shrinks both consumer modules to their dataset maps, scoping flags, and rollout-state tuples, with staging ownership, series/path/env scoping, and the HfApi and formula patch seams preserved per source; and `tools/fixture_bundle.py` fetches, packs, and verifies daily-archive fixture bundles, reproducing all five existing bundles' digests including the header-inclusive selection hash.
+
+# v3.14.1
+
+- Wire `BINANCE_API_KEY` from repo secrets through the deploy workflow into the `dagster` and `provisional-worker` services. The perp provisional adapter requires the key and the backfill's final health check failed without it (`PROVIDER_CREDENTIAL_MISSING` on every provisional tick); the secret existed but no deploy file referenced it.
+
+# v3.14.0
+
+- Add the Binance perp trades revisioned source beside spot: the daily adapter serves the vision futures archives from the 2019 first day, the provisional adapter pages closed minutes through `aggTrades` plus `historicalTrades` (paging back 1,000 ids before the locator because an aggregate's open time can hide in-minute trades, recomputing the cents-rounded `quoteQty` as price times quantity, and normalizing decimals so the API's padded text matches the archive's trimmed text), the perp profile, formulas and consumers mirror spot with CANARY shadow publication, and the REST replay test asserts full row equality against the archive on all 2,325 rows of the captured minute. The legacy futures pipeline is deleted in the same slice: its tables, jobs, schedules and tests are removed and the briefing reads the revisioned source.
+>>>>>>> origin/main
 
 # v3.13.2
 

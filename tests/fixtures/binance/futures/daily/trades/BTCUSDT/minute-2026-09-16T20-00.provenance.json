@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2026-09-16.zip",
+  "date": "2026-09-16",
+  "zip_sha256": "3ac124cc4c27ae9c50af5a40be072a167e226a5fc65520547ab5ccc7dbaab01f",
+  "checksum_sidecar": "3ac124cc4c27ae9c50af5a40be072a167e226a5fc65520547ab5ccc7dbaab01f  BTCUSDT-trades-2026-09-16.zip",
+  "csv_member": "BTCUSDT-trades-2026-09-16.csv",
+  "csv_header": "id,price,qty,quote_qty,time,is_buyer_maker",
+  "official_row_count": 4124224,
+  "selected_row_start": 3718753,
+  "selected_row_stop": 3721078,
+  "selected_sha256": "fb5ea530baae26ce0062483f6aac0c5f0feb17c73d79bc69f417e210e11f5cc9",
+  "note": "Contiguous official rows covering exactly the minute 2026-09-16T20:00:00Z (cross-check for the REST replay test).",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

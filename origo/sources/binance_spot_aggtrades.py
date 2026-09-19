@@ -15,7 +15,7 @@ from .profiles.spot_agg_consumers import SPOT_AGG_CONSUMERS
 
 BINANCE_SPOT_AGGTRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     key='binance_spot_aggtrades',
-    rollout_stage=RolloutStage.CANARY,
+    rollout_stage=RolloutStage.LIVE,
     schema_version=1,
     names=SourceNames('binance_spot_aggtrades'),
     partitions=PartitionPolicy(date(2017, 8, 17)),

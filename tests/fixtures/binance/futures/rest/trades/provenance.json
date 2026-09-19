@@ -25,7 +25,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8086998563,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -41,7 +41,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8086999063,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -57,7 +57,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8086999563,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -73,7 +73,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8087000063,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -89,7 +89,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8087000563,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -105,7 +105,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8087001063,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,
@@ -121,7 +121,7 @@
       "params": {
         "symbol": "BTCUSDT",
         "fromId": 8087001563,
-        "limit": 500
+        "limit": 1000
       },
       "request_headers": {},
       "status": 200,

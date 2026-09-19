@@ -664,13 +664,14 @@ def test_publication_current_consumers_are_quiet(
     assert fresh._publication_findings() == []
 
 
+@pytest.mark.parametrize('payload', ['{not json', '[]', 'null', '"just a string"'])
 def test_publication_unreadable_manifest_is_a_finding_and_skips_only_that_consumer(
-    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str
 ) -> None:
     root = tmp_path / 'shadow'
     broken = root / 'binance_perp_trades' / 'mount' / 'latest.json'
     broken.parent.mkdir(parents=True, exist_ok=True)
-    broken.write_text('{not json')
+    broken.write_text(payload)
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))

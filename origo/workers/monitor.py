@@ -513,7 +513,7 @@ class Monitor:
                     # Never published: the span of the state itself is the lag, so a
                     # fresh source stays quiet while an old one pages.
                     published = start
-                except (OSError, ValueError, KeyError) as error:
+                except (OSError, ValueError, KeyError, TypeError) as error:
                     findings.append(
                         Finding(
                             f'publication_manifest_unreadable:{spec.key}:{consumer.key}',

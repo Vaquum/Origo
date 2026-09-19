@@ -142,6 +142,7 @@ def test_real_perp_closed_minutes_obey_binance_provisional_rules(
     provenance, bodies = _rest_responses('provenance.json')
     assert provenance['minute_start'] == '2026-09-16T20:00:00+00:00'
     calls = list(provenance['requests'])
+    assert len(calls) == 5, 'locator plus four 1000-trade pages'
 
     def captured(
         url: str, *, params: dict[str, object], headers: dict[str, str], weight: int

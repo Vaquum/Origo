@@ -78,12 +78,14 @@ def test_real_spot_closed_minutes_obey_binance_provisional_rules(
         expected = remaining.pop(0)
         assert url == expected['url']
         assert params == expected['params']
+        assert headers == {}
         assert weight == (4 if url.endswith('/aggTrades') else 25)
         body = (REST / expected['file']).read_bytes()
         assert hashlib.sha256(body).hexdigest() == expected['sha256']
         return daily.Response(body, expected['response_headers'], expected['status'])
 
     monkeypatch.delenv('BINANCE_SPOT_REST_BASE_URL', raising=False)
+    monkeypatch.setenv('BINANCE_API_KEY', '0' * 64)
     monkeypatch.setattr(rest, 'get_response', captured)
     adapter = rest.BinanceSpotProvisional()
     key = datetime.fromisoformat(provenance['minute_start']).strftime('%Y-%m-%dT%H:%M:%SZ')

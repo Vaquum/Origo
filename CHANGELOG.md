@@ -1,3 +1,7 @@
+# v3.17.8
+
+- Send the Binance API key only where the endpoint requires it: the provisional base now attaches `X-MBX-APIKEY` solely for credential-required adapters (fapi `historicalTrades`, the only one of the four REST endpoints that answers 401 without it — verified live). Spot and spot-agg tails go keyless, spending IP quota only, and a bad key can no longer break public calls.
+
 # v3.17.7
 
 - Revert perp provisional pages to 500 trades: fapi answers limit=1000 on fromId-paged `historicalTrades` with HTTP 400 code -1130, which stalled the entire perp tail from the v3.17.4 deploy until this fix. The 500 cap is now recorded on the adapter so it cannot be re-"optimized". The earlier weight measurement was taken on the keyless path, which validates differently — validity must be proven with the authenticated request shape.

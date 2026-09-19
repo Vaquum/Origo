@@ -7,7 +7,7 @@ import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from math import isfinite
 from pathlib import Path
 from typing import ClassVar
@@ -18,6 +18,7 @@ import requests
 from ..arrow_types import ArrowTable
 from ..contracts import Partition, Row, SourceError
 from .binance_archive import BinanceArchiveDaily, parse_archive_boolean
+from .binance_archive import parse_decimal as shared_parse_decimal
 from .binance_archive import timestamp_datetime as timestamp_datetime
 from .binance_columnar import spot_table
 
@@ -157,13 +158,7 @@ def get_response(
 
 
 def parse_decimal(text: str) -> Decimal:
-    try:
-        value = Decimal(text)
-    except InvalidOperation as error:
-        raise ValueError('Invalid Binance decimal field.') from error
-    if not value.is_finite() or value <= 0:
-        raise ValueError('Spot price, quantity, and quote quantity must be positive.')
-    return value
+    return shared_parse_decimal(text, noun='Spot price, quantity, and quote quantity')
 
 
 @dataclass(frozen=True)

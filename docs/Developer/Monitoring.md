@@ -13,7 +13,7 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
   (`origo.container_log`). The workers' heartbeat files hold liveness. Nothing is copied
   from one store into another.
 - **One pane.** Dagit is where an operator looks first. The external asset
-  `origo_monitor` carries the five checks the monitor evaluates every minute; the live
+  `origo_monitor` carries the six checks the monitor evaluates every minute; the live
   feed assets (`binance_spot_depth_live_feed`, `<source>_provisional_feed`) carry a
   five-minute freshness policy the daemon evaluates without a run. If a fact is not
   visible in Dagit, it is visible in ClickHouse; the monitor's e-mail says which.
@@ -60,6 +60,7 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 | Did an asset check fail | Dagster event log | The asset's Checks tab; the monitor's `check_failed:<asset>:<check>` finding |
 | Is a worker alive | `/opt/origo/heartbeats/<feed>.heartbeat` | `origo_monitor:workers_alive`; `python -m origo.workers.<feed> --check` |
 | Is a feed current | Dagster event log (the live feed asset's freshness state) | The asset's freshness in Dagit; `origo_monitor:workers_alive` for the worker behind it |
+| Is every public consumer publishing the current state | The consumer manifests under `/opt/origo/shadow` against `origo.source_active_partitions` | `origo_monitor:publication_current`; a stale consumer names its published and state ends |
 | What did a worker do for a minute | `origo.worker_minute_log` | `SELECT * FROM origo.worker_minute_log WHERE minute = ...` |
 | Why did a source build or publication fail | `origo.source_failure_log` | `binance_spot_trades_failure_sensor` output in Dagit; the table itself |
 | What did a container print | `origo.container_log` (14 days) | `SELECT * FROM origo.container_log WHERE service = ... ORDER BY timestamp` |
@@ -68,7 +69,7 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 
 ## Investigation order
 
-1. **Dagit first.** Open the `origo_monitor` asset: its five checks name the failing area
+1. **Dagit first.** Open the `origo_monitor` asset: its six checks name the failing area
    and the finding keys. Open the failed run or the failed check it names. For a source,
    read `binance_spot_trades_failure_sensor` and the source's reconciliation state.
 2. **ClickHouse second.** Read `origo.worker_minute_log` for the minute, then
@@ -93,10 +94,10 @@ watchdog's exit is in `origo.container_log`.
 ## Alerts and the daily digest
 
 - The monitor evaluates `collectors_serving`, `dagster_reachable`, `no_error_logs`,
-  `queue_bounded` and `workers_alive` every minute, writes the five evaluations to Dagit
-  through the webserver's report endpoint, then sends one e-mail through Resend listing
-  every new finding key. A key repeats inside the cooldown (six hours by default)
-  without a second e-mail; a queue backlog is one key.
+  `publication_current`, `queue_bounded` and `workers_alive` every minute, writes the
+  six evaluations to Dagit through the webserver's report endpoint, then sends one
+  e-mail through Resend listing every new finding key. A key repeats inside the
+  cooldown (six hours by default) without a second e-mail; a queue backlog is one key.
 - Delivery: `RESEND_API_KEY` (repository secret), `ORIGO_ALERT_EMAIL_TO` (repository
   variable) and `ORIGO_ALERT_EMAIL_FROM` (a sender on a domain verified in the Resend
   account; the default `onboarding@resend.dev` reaches only the account owner). A

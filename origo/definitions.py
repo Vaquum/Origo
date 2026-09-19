@@ -263,6 +263,7 @@ MONITOR_CHECK_NAMES = (
     'collectors_serving',
     'dagster_reachable',
     'no_error_logs',
+    'publication_current',
     'queue_bounded',
     'workers_alive',
 )
@@ -271,7 +272,7 @@ origo_monitor = AssetsDefinition(
         AssetSpec(
             'origo_monitor',
             group_name='monitoring',
-            description='The monitor worker: five checks evaluated every minute outside Dagster.',
+            description='The monitor worker: six checks evaluated every minute outside Dagster.',
         )
     ]
 )

@@ -158,6 +158,7 @@ def _monitor(
     dagster_url: str | None = None,
     probes: tuple[CollectorProbe, ...] = (),
     settings: AlertSettings | None = None,
+    publication_root: Path | None = None,
 ) -> Monitor:
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
@@ -168,6 +169,7 @@ def _monitor(
         settings=settings if settings is not None else _settings(server),
         reporter=Reporter(_url(server), timeout_seconds=2.0),
         cursor_path=tmp_path / 'monitor.cursor.json',
+        publication_root=publication_root or tmp_path / 'shadow',
     )
 
 
@@ -210,7 +212,7 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
     second = monitor.tick(NOW + timedelta(minutes=1))
     assert set(second.failed) >= expected
     assert len(_emails(recorder)) == 1
-    assert len(_check_posts(recorder)) == 10
+    assert len(_check_posts(recorder)) == 12
     later = monitor.tick(NOW + timedelta(hours=7))
     assert set(later.failed) >= expected
     assert len(_emails(recorder)) == 2
@@ -433,7 +435,12 @@ def test_monitor_checks_are_declared_in_definitions() -> None:
     keys = sorted(key.to_user_string() for checks in defs.asset_checks for key in checks.check_keys)
     assert keys == [f'origo_monitor:{name}' for name in MONITOR_CHECK_NAMES]
     assert sorted(MONITOR_CHECK_NAMES) == [
-        'collectors_serving', 'dagster_reachable', 'no_error_logs', 'queue_bounded', 'workers_alive',
+        'collectors_serving',
+        'dagster_reachable',
+        'no_error_logs',
+        'publication_current',
+        'queue_bounded',
+        'workers_alive',
     ]
     with pytest.raises(Failure, match='evaluated by the monitor worker'):
         list(origo_monitor_checks.op.compute_fn.decorated_fn())
@@ -476,6 +483,7 @@ def test_settings_and_deployment_wiring_are_complete() -> None:
         assert monitor['command'] == 'python -m origo.workers.monitor'
         assert monitor['healthcheck']['test'] == ['CMD', 'python', '-m', 'origo.workers.monitor', '--check']
         assert 'worker-heartbeats:/opt/origo/heartbeats' in monitor['volumes']
+        assert 'source-publications:/opt/origo/shadow:ro' in monitor['volumes']
         assert '/var/run/docker.sock:/var/run/docker.sock:ro' in compose['services']['vector']['volumes']
         assert './deploy/vector.yaml:/etc/vector/vector.yaml:ro' in compose['services']['vector']['volumes']
         # Without this, Vector 0.58 keeps ${CLICKHOUSE_PASSWORD} literal and the sink gets 401.
@@ -558,3 +566,94 @@ def test_late_deliveries_and_malformed_collector_responses_are_still_reported(
     assert not any(key.startswith('detector_failed') for key in outcome.failed)
     serving = [post for post in _check_posts(recorder) if post['check_name'] == 'collectors_serving']
     assert serving[-1]['passed'] is False and serving[-1]['metadata']['findings'] == 1
+
+
+class _SpanClient(_EmptyClient):
+    """A ClickHouse stand-in serving one state-span row per listed source."""
+
+    def __init__(self, rows: list[tuple[object, ...]]) -> None:
+        self._rows = rows
+
+    def execute(
+        self, query: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[tuple[object, ...]]:
+        if 'source_active_partitions' in query:
+            return self._rows
+        return []
+
+
+class _HoldReader(DagsterReader):
+    """A Dagster stand-in with a fixed publication hold."""
+
+    def __init__(self, owned: bool) -> None:
+        super().__init__('http://dagit.invalid')
+        self._owned = owned
+
+    def backfill_owns_publication(self, source_key: str) -> bool:
+        return self._owned
+
+
+def _manifest(root: Path, source: str, consumer: str, end: datetime) -> None:
+    path = root / source / consumer / 'latest.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'active_through': end.isoformat(), 'kind': consumer}))
+
+
+def _perp_span(current: datetime, span: timedelta = timedelta(days=30)) -> list[tuple[object, ...]]:
+    old = current - span
+    return [('binance_perp_trades', old, current, old, current, 100)]
+
+
+def test_publication_stale_mount_is_a_finding(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'shadow'
+    _manifest(root, 'binance_perp_trades', 'mount', NOW - timedelta(hours=4))
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW)
+    monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
+    findings = monitor._publication_findings()
+    assert [finding.key for finding in findings] == ['publication_stale:binance_perp_trades:mount']
+    assert findings[0].check == 'publication_current'
+    assert (NOW - timedelta(hours=4)).isoformat() in findings[0].detail
+    assert NOW.isoformat() in findings[0].detail
+
+
+def test_publication_stale_huggingface_is_a_finding(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'shadow'
+    _manifest(root, 'binance_perp_trades', 'mount', NOW)
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
+    monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
+    findings = monitor._publication_findings()
+    assert [finding.key for finding in findings] == [
+        'publication_stale:binance_perp_trades:huggingface'
+    ]
+    assert findings[0].check == 'publication_current'
+
+
+def test_publication_current_consumers_are_quiet(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'shadow'
+    _manifest(root, 'binance_perp_trades', 'mount', NOW)
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW)
+    monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
+    assert monitor._publication_findings() == []
+    # A held publication is legitimate, however far the state advanced.
+    _manifest(root, 'binance_perp_trades', 'mount', NOW - timedelta(hours=4))
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
+    monkeypatch.setattr(monitor, 'dagster', _HoldReader(True))
+    assert monitor._publication_findings() == []
+    # A source that never published stays quiet while its state is younger than grace.
+    fresh = _monitor(
+        recorder,
+        tmp_path / 'fresh',
+        client=_SpanClient(_perp_span(NOW, timedelta(minutes=10))),
+        publication_root=tmp_path / 'missing',
+    )
+    monkeypatch.setattr(fresh, 'dagster', _HoldReader(False))
+    assert fresh._publication_findings() == []

@@ -1,14 +1,15 @@
 """The monitor: one detector outside Dagster that watches Dagster, the workers, the
 collectors and the container log, writes its verdicts into Dagit and e-mails new findings.
 
-Every minute the tick evaluates five checks on the ``origo_monitor`` asset:
+Every minute the tick evaluates six checks on the ``origo_monitor`` asset:
 
 - ``dagster_reachable``: the webserver answers and every required daemon is healthy;
 - ``queue_bounded``: fewer queued runs than the threshold, and no run failure or failed
   asset check since the last tick;
 - ``workers_alive``: every worker heartbeat is fresh and no worker receipt failed;
 - ``collectors_serving``: each depth collector returns rows for the last completed minute;
-- ``no_error_logs``: the container log holds no ``ERROR`` row since the last tick.
+- ``no_error_logs``: the container log holds no ``ERROR`` row since the last tick;
+- ``publication_current``: every public consumer publishes the current source state.
 
 The evaluations are written to Dagit first, then one e-mail lists every new finding key
 and says whether that write succeeded. A key repeats inside the cooldown without a second
@@ -34,9 +35,10 @@ from typing import Literal, cast
 
 from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources.contracts import Client
+from origo.sources.contracts import Client, RolloutStage, identifier
+from origo.sources.registry import SOURCE_REGISTRY
 
-from .dagster_reader import DagsterReader, RunFailure
+from .dagster_reader import DagsterReader, DagsterUnreachable, RunFailure
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (
@@ -51,12 +53,18 @@ from .runtime import (
 
 MONITOR_ASSET = 'origo_monitor'
 CheckName = Literal[
-    'dagster_reachable', 'queue_bounded', 'workers_alive', 'collectors_serving', 'no_error_logs'
+    'dagster_reachable',
+    'queue_bounded',
+    'workers_alive',
+    'collectors_serving',
+    'no_error_logs',
+    'publication_current',
 ]
 CHECK_NAMES: tuple[CheckName, ...] = (
     'collectors_serving',
     'dagster_reachable',
     'no_error_logs',
+    'publication_current',
     'queue_bounded',
     'workers_alive',
 )
@@ -66,6 +74,13 @@ PROBE_TIMEOUT_SECONDS = 10
 # seconds after its stamp and a worker stamps a receipt before inserting it, so a row
 # stamped just before a read and inserted after it must still fall inside a later window.
 DELIVERY_LAG_SECONDS = 60
+PUBLICATION_ROOT_ENV = 'ORIGO_SOURCE_PUBLICATION_ROOT'
+PUBLICATION_ROOT_DEFAULT = '/opt/origo/shadow'
+# A pinned consumer (mount) renders on every state change, so hours without a render
+# while the state advances is stuck; a canonical-only consumer (huggingface) publishes
+# daily, so a full missed day is the bound. Both yield while a backfill is active.
+PINNED_PUBLICATION_STALE_AFTER = timedelta(hours=3)
+CANONICAL_PUBLICATION_STALE_AFTER = timedelta(hours=24)
 log = logging.getLogger('origo.workers.monitor')
 
 
@@ -128,6 +143,12 @@ class Cursor:
         pending.replace(path)
 
 
+def _utc(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f'Expected a datetime, got {type(value).__name__}.')
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def probe_collector(probe: CollectorProbe, minute: datetime) -> bool:
     """Whether the collector's history endpoint returns rows for ``minute``."""
     base_url = os.environ[probe.base_url_env].rstrip('/')
@@ -157,6 +178,7 @@ class Monitor:
         settings: AlertSettings | None,
         reporter: Reporter,
         cursor_path: Path,
+        publication_root: Path,
         queue_threshold: int = 200,
     ) -> None:
         self.dagster = dagster
@@ -167,6 +189,7 @@ class Monitor:
         self.settings = settings
         self.reporter = reporter
         self.cursor_path = cursor_path
+        self.publication_root = publication_root
         self.queue_threshold = settings.queue_threshold if settings else queue_threshold
 
     def tick(self, now: datetime) -> TickOutcome:
@@ -175,7 +198,7 @@ class Monitor:
         window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
         cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
         # Every detector is isolated: a fault in one becomes its own finding on its check,
-        # the other four still run, the evaluations are still written and the e-mail is still
+        # the other five still run, the evaluations are still written and the e-mail is still
         # sent. A detector that did not complete its read leaves its cursor where it was.
         dagster, dagster_read = self._guarded(
             'queue_bounded', 'dagster', lambda: self._dagster_findings(cursor)
@@ -191,7 +214,12 @@ class Monitor:
         logs, logs_read = self._guarded(
             'no_error_logs', 'logs', lambda: (self._log_findings(cursor, window_end), True)
         )
-        findings: list[Finding] = [*dagster, *workers, *collectors, *logs]
+        publication, _ = self._guarded(
+            'publication_current',
+            'publication',
+            lambda: (self._publication_findings(), True),
+        )
+        findings: list[Finding] = [*dagster, *workers, *collectors, *logs, *publication]
 
         by_check: dict[CheckName, list[Finding]] = {name: [] for name in CHECK_NAMES}
         for finding in findings:
@@ -435,6 +463,71 @@ class Monitor:
             for service, messages in sorted(by_service.items())
         ]
 
+    def _publication_findings(self) -> list[Finding]:
+        """One finding per public consumer whose published end lags the source state."""
+        spans: dict[str, tuple[datetime, datetime, datetime, datetime, int]] = {}
+        for row in self.client.execute(
+            f"""SELECT source_key, min(partition_end), max(partition_end),
+            minIf(partition_end, NOT provisional), maxIf(partition_end, NOT provisional),
+            countIf(NOT provisional)
+            FROM {identifier(self.database)}.source_active_partitions GROUP BY source_key"""
+        ):
+            spans[str(row[0])] = (
+                _utc(row[1]),
+                _utc(row[2]),
+                _utc(row[3]),
+                _utc(row[4]),
+                int(str(row[5])),
+            )
+        findings: list[Finding] = []
+        for spec in SOURCE_REGISTRY:
+            if spec.rollout_stage == RolloutStage.DORMANT:
+                continue
+            span = spans.get(spec.key)
+            if span is None:
+                continue
+            oldest, current, canonical_oldest, canonical_current, canonical_count = span
+            try:
+                owned = self.dagster.backfill_owns_publication(spec.key)
+            except DagsterUnreachable as error:
+                log.warning('source=%s publication hold state unknown: %s', spec.key, error)
+                continue
+            if owned:
+                continue
+            for consumer in spec.consumers:
+                if not consumer.public:
+                    continue
+                if consumer.canonical_only:
+                    if not canonical_count:
+                        continue
+                    start, end = canonical_oldest, canonical_current
+                    grace = CANONICAL_PUBLICATION_STALE_AFTER
+                else:
+                    start, end = oldest, current
+                    grace = PINNED_PUBLICATION_STALE_AFTER
+                manifest = self.publication_root / spec.key / consumer.key / 'latest.json'
+                try:
+                    published = _utc(
+                        datetime.fromisoformat(
+                            str(json.loads(manifest.read_text())['active_through'])
+                        )
+                    )
+                except (OSError, ValueError, KeyError):
+                    # Never published, or published unreadably: the span of the state
+                    # itself is the lag, so a fresh source stays quiet either way.
+                    published = start
+                if end - published > grace:
+                    findings.append(
+                        Finding(
+                            f'publication_stale:{spec.key}:{consumer.key}',
+                            'publication_current',
+                            f'{spec.key} {consumer.key} publication stale',
+                            f'published through {published.isoformat()}, '
+                            f'state through {end.isoformat()}.',
+                        )
+                    )
+        return findings
+
 
 def build_monitor(environ: dict[str, str]) -> Monitor:
     settings = get_clickhouse_settings()
@@ -462,6 +555,7 @@ def build_monitor(environ: dict[str, str]) -> Monitor:
         settings=alert_settings,
         reporter=Reporter(base_url),
         cursor_path=heartbeat_dir / 'monitor.cursor.json',
+        publication_root=Path(environ.get(PUBLICATION_ROOT_ENV, PUBLICATION_ROOT_DEFAULT)),
     )
 
 

@@ -378,7 +378,7 @@ def test_spot_agg_source_identity_contract(origo_test_env: dict[str, str]) -> No
     spec = BINANCE_SPOT_AGGTRADES_SPEC
     assert (spec.key, spec.rollout_stage, spec.partitions.first_day) == (
         'binance_spot_aggtrades',
-        RolloutStage.CANARY,
+        RolloutStage.LIVE,
         date(2017, 8, 17),
     )
     assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
@@ -407,8 +407,8 @@ def test_spot_agg_source_identity_contract(origo_test_env: dict[str, str]) -> No
         'datetime',
     ]
     assert [(consumer.key, consumer.public) for consumer in spec.consumers] == [
-        ('mount', False),
-        ('huggingface_shadow', False),
+        ('mount', True),
+        ('huggingface', True),
     ]
     # No legacy aggregate pipeline is replaced: nothing is aliased or retired.
     assert dict(spec.aliases) == {}

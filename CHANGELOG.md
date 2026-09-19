@@ -1,3 +1,7 @@
+# v3.17.0
+
+- Promote the Binance spot aggregate-trades revisioned source to LIVE: the spec flips from CANARY, and the `mount` and `huggingface` consumers go public with uploads, retiring the `huggingface_shadow` consumer and its sensor. Production history was verified complete (2017-08-17 to 2026-09-18, 3320 days, zero open failures, quirk-cleaned row counts verified) before promotion; the first public publish creates the twelve `vaquum/binance_btcusdt_spot_agg_*` datasets.
+
 # v3.16.2
 
 - Drop the two observed Binance-side quirk rows from spot aggregate archives before validation: -1/zero sentinel aggregates and byte-identical duplicate lines from repackaged chunks. A `clean_rows` hook on the archive base (identity by default) lets the agg adapter clean once for both the columnar and streaming consumers; drop counts merge into the revision evidence while `csv_sha256` keeps pinning the archive as served. Anything else malformed still fails loud.

@@ -47,7 +47,9 @@ class BinancePerpProvisional(BinanceProvisionalBase):
     WEIGHT_LOCATOR: ClassVar[int] = 20
     WEIGHT_BOUNDARY: ClassVar[int] = 20
     WEIGHT_HISTORICAL: ClassVar[int] = 200
-    PAGE_LIMIT: ClassVar[int] = 1000
+    # Fapi caps fromId-paged historicalTrades at 500 rows: limit=1000 answers
+    # HTTP 400 code -1130 (verified live 2026-09-19). Do not raise this again.
+    PAGE_LIMIT: ClassVar[int] = 500
     CREDENTIAL_REQUIRED: ClassVar[bool] = True
     PAGING_BACKTRACK_IDS: ClassVar[int] = 1000
 

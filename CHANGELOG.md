@@ -1,3 +1,7 @@
+# v3.17.7
+
+- Revert perp provisional pages to 500 trades: fapi answers limit=1000 on fromId-paged `historicalTrades` with HTTP 400 code -1130, which stalled the entire perp tail from the v3.17.4 deploy until this fix. The 500 cap is now recorded on the adapter so it cannot be re-"optimized". The earlier weight measurement was taken on the keyless path, which validates differently — validity must be proven with the authenticated request shape.
+
 # v3.17.6
 
 - Share canonical decimal parsing on the archive base: the three near-identical `parse_decimal` clones (spot, perp, spot-agg) collapse into one `parse_decimal(text, *, noun)` that validates, names the source in errors, and normalizes padded API decimals to trimmed archive form. Each daily adapter keeps a one-line noun-bound wrapper, so module APIs and every existing test hold; spot gains the normalization its siblings already had.

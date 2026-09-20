@@ -102,6 +102,7 @@ services:
       - ORIGO_ALERT_DIGEST_HOUR_UTC=${ORIGO_ALERT_DIGEST_HOUR_UTC:-7}
     volumes:
       - worker-heartbeats:/opt/origo/heartbeats
+      - source-publications:/opt/origo/shadow:ro
     depends_on:
       clickhouse:
         condition: service_healthy

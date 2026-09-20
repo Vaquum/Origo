@@ -26,7 +26,8 @@ from .helpers import ORIGO_DATABASE
 Query = Callable[[str], list[tuple[object, ...]]]
 RECEIPTS = (
     "SELECT series, formatDateTime(minute, '%Y-%m-%dT%H:%i:%SZ', 'UTC'), rows, sha256, status, "
-    f"error_code, error FROM {ORIGO_DATABASE}.worker_minute_log WHERE feed = 'depth' ORDER BY minute"
+    f"error_code, error FROM {ORIGO_DATABASE}.worker_minute_log WHERE feed = 'depth' "
+    "ORDER BY minute, recorded_at"
 )
 
 
@@ -162,7 +163,9 @@ def test_depth_tick_completes_the_incomplete_minutes_oldest_first_and_records_re
         ('publish', m34),
     ]
     assert query_origo(RECEIPTS) == [
+        ('depth20_snapshots', '2026-05-14T10:33:00Z', 0, '', 'STARTED', '', ''),
         ('depth20_snapshots', '2026-05-14T10:33:00Z', 60, 'sha-10:33', 'OK', '', ''),
+        ('depth20_snapshots', '2026-05-14T10:34:00Z', 0, '', 'STARTED', '', ''),
         ('depth20_snapshots', '2026-05-14T10:34:00Z', 60, 'sha-10:34', 'OK', '', ''),
     ]
     assert [(key, partition) for key, partition, _ in reporter.materializations] == [
@@ -183,7 +186,7 @@ def test_depth_tick_completes_the_incomplete_minutes_oldest_first_and_records_re
     )
     again = worker.tick(_utc(2026, 5, 14, 10, 35, 50))
     assert again.processed == () and again.failed == ()
-    assert len(query_origo(RECEIPTS)) == 2
+    assert len(query_origo(RECEIPTS)) == 4
     assert reporter.materializations[-1][0] == LIVE_FEED_ASSET
 
 
@@ -219,7 +222,9 @@ def test_depth_tick_records_a_failed_minute_and_continues_with_the_next(
     assert outcome.failed == ('depth20_snapshots:2026-05-14T10:33:00+0000',)
     assert outcome.processed == ('depth20_snapshots:2026-05-14T10:34:00+0000',)
     assert query_origo(RECEIPTS) == [
+        ('depth20_snapshots', '2026-05-14T10:33:00Z', 0, '', 'STARTED', '', ''),
         ('depth20_snapshots', '2026-05-14T10:33:00Z', 0, '', 'FAILED', 'RuntimeError', 'projection failed'),
+        ('depth20_snapshots', '2026-05-14T10:34:00Z', 0, '', 'STARTED', '', ''),
         ('depth20_snapshots', '2026-05-14T10:34:00Z', 60, 'v1', 'OK', '', ''),
     ]
     assert 'depth20_snapshots 2026-05-14T10:33:00+0000 failed' in caplog.text

@@ -115,7 +115,14 @@ def transforms(naming: Naming) -> tuple[Transform, ...]:
             '        upload=upload,\n'
             '        kind=kind,\n'
             '    )\n',
-            'def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:\n'
+            'def _huggingface(\n'
+            '    reader: SnapshotReader,\n'
+            '    snapshot: Snapshot,\n'
+            '    destination: str,\n'
+            '    *,\n'
+            '    allow_full: bool = False,\n'
+            ') -> None:\n'
+            '    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.\n'
             '    # Snapshot callables resolve through their modules at call time (patch seams).\n'
             '    _render_huggingface(\n'
             '        reader,\n'
@@ -131,8 +138,15 @@ def transforms(naming: Naming) -> tuple[Transform, ...]:
         ),
         Transform(
             consumers,
-            'def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:\n'
+            'def _huggingface_shadow(\n'
+            '    reader: SnapshotReader,\n'
+            '    snapshot: Snapshot,\n'
+            '    destination: str,\n'
+            '    *,\n'
+            '    allow_full: bool = False,\n'
+            ') -> None:\n'
             '    """Render the snapshot files locally without uploading; the CANARY shadow publication."""\n'
+            '    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.\n'
             '    _render_shadow(\n'
             '        reader,\n'
             '        snapshot,\n'
@@ -251,7 +265,13 @@ def transforms(naming: Naming) -> tuple[Transform, ...]:
 
 
 PLAIN_HUGGINGFACE_DEF: Final[str] = (
-    'def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:\n'
+    'def _huggingface(\n'
+    '    reader: SnapshotReader,\n'
+    '    snapshot: Snapshot,\n'
+    '    destination: str,\n'
+    '    *,\n'
+    '    allow_full: bool = False,\n'
+    ') -> None:\n'
 )
 
 def delete_shadow_test(text: str, prefix: str) -> tuple[str, bool]:

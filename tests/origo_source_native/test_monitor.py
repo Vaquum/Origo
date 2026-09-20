@@ -709,3 +709,26 @@ def test_publication_unknown_hold_fails_loud(
     monkeypatch.setattr(monitor, 'dagster', _DownReader('http://dagit.invalid'))
     with pytest.raises(DagsterUnreachable, match='HTTP 502'):
         monitor._publication_findings()
+
+
+def test_monitor_flags_runs_queued_past_the_stuck_threshold(recorder: _Recorder, tmp_path: Path) -> None:
+    recorder.graphql['StuckRuns'] = {
+        'data': {
+            'runsOrError': {
+                '__typename': 'Runs',
+                'results': [
+                    {
+                        'runId': '0c2f2b81-e1cc-431d-86d1-17aacbf05d75',
+                        'jobName': 'maintain_operational_metadata_job',
+                        'creationTime': (NOW - timedelta(days=3)).timestamp(),
+                    }
+                ],
+            }
+        }
+    }
+    monitor = _monitor(recorder, tmp_path)
+    outcome = monitor.tick(NOW)
+    assert 'queue_stuck:maintain_operational_metadata_job' in outcome.failed
+    assert all(
+        post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded'
+    )

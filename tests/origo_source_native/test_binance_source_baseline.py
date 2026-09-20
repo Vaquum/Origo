@@ -245,7 +245,7 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
             arrow_store.series_store_dir(name) / arrow_store.LATEST_NAME
             == Path('/opt/arrow') / name / 'latest.arrow'
         )
-    for fn, size, defaults in (
+    for fn, size, defaults, optional in (
         (
             rollups.time_month,
             'interval_minutes',
@@ -254,6 +254,7 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
                 'latest_table': 'binance_spot_klines_latest',
                 'database': 'origo',
             },
+            {'source_after': None, 'source_before': None, 'base_cut': None},
         ),
         (
             rollups.dollar_month,
@@ -265,6 +266,7 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
                 'id_column': 'trade_id',
                 'quote_expr': 'quote_quantity',
             },
+            {'source_after': None, 'source_before': None, 'base_day': None},
         ),
     ):
         signature = inspect.signature(fn)
@@ -275,12 +277,13 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
             'year': int,
             'month': int,
             **{n: str for n in defaults},
+            **{n: str | None for n in optional},
         }
-        assert list(parameters) == [size, 'year', 'month', *defaults]
+        assert list(parameters) == [size, 'year', 'month', *defaults, *optional]
         assert all(p.kind == inspect.Parameter.KEYWORD_ONLY for p in parameters.values())
         assert {
             n: p.default for n, p in parameters.items() if p.default is not inspect.Parameter.empty
-        } == defaults
+        } == {**defaults, **optional}
     from origo.sources.profiles.spot_consumers import HUGGINGFACE_DATASETS
 
     repository = definitions.defs.get_repository_def()

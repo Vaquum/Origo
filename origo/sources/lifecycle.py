@@ -395,7 +395,7 @@ class SourceRuntime:
         self._validate_retained(record)
         self.store.insert_activation(record, self.run_id)
 
-    def publish(self, consumer_key: str, destination: str) -> Snapshot:
+    def publish(self, consumer_key: str, destination: str, *, allow_full: bool = False) -> Snapshot:
         consumer = next(value for value in self.spec.consumers if value.key == consumer_key)
         self.spec.require_enabled('publish', public=consumer.public)
         self.require_shared_mount()
@@ -419,7 +419,7 @@ class SourceRuntime:
                     root=Path(destination).parent.parent,
                     pinned=not consumer.canonical_only,
                 ):
-                    consumer.publish(self.store, pinned, destination)
+                    consumer.publish(self.store, pinned, destination, allow_full=allow_full)
                 self.failures.recover(operation='consumer', consumer=consumer.key)
                 return canonical
         except Exception as error:

@@ -35,7 +35,12 @@ from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
 
 from .dagster_reader import DagsterReader, DagsterUnreachable
-from .receipts import ensure_monitoring_tables, failed_attempts, record_receipt
+from .receipts import (
+    ensure_monitoring_tables,
+    failed_attempts,
+    reconcile_died_receipts,
+    record_receipt,
+)
 from .report import Reporter
 from .runtime import (
     TickOutcome,
@@ -155,6 +160,17 @@ class ProvisionalFeed:
             ):
                 continue
             started = time.monotonic()
+            record_receipt(
+                store.client,
+                store.database,
+                feed=self.name,
+                series=spec.key,
+                minute=partition.start,
+                rows=0,
+                sha256='',
+                duration_ms=0,
+                status='STARTED',
+            )
             try:
                 result = execute_source(
                     spec,
@@ -233,6 +249,17 @@ class ProvisionalFeed:
             ):
                 continue
             started = time.monotonic()
+            record_receipt(
+                store.client,
+                store.database,
+                feed=self.name,
+                series=series,
+                minute=now.replace(second=0, microsecond=0),
+                rows=0,
+                sha256=snapshot.token,
+                duration_ms=0,
+                status='STARTED',
+            )
             try:
                 execute_source(
                     spec,
@@ -282,6 +309,9 @@ class ProvisionalFeed:
         processed: list[str] = []
         failed: list[str] = []
         try:
+            died = reconcile_died_receipts(client, settings.database, feed=self.name, now=now)
+            if died:
+                log.warning('reconciled %d receipts for units the previous process died on', died)
             for spec in self.specs:
                 store = SourceStore(client, settings.database, spec)
                 built, broken = self._build_intervals(store, spec, now)

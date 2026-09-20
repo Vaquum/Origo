@@ -82,8 +82,15 @@ def _huggingface(
     )
 
 
-def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+def _huggingface_shadow(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
     """Render the snapshot files locally without uploading; the CANARY shadow publication."""
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     _render_shadow(
         reader,
         snapshot,
@@ -119,7 +126,14 @@ from .consumer_base import huggingface as _render_huggingface
 from .consumer_base import mount as _render_mount
 
 
-def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+def _huggingface(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     # Snapshot callables resolve through their modules at call time (patch seams).
     _render_huggingface(
         reader,
@@ -331,7 +345,14 @@ def test_promote_spans_the_older_canary_generation(tmp_path: Path) -> None:
         '    upload: bool = True,\n'
         "    kind: str = 'huggingface',\n"
         ') -> None:\n',
-        'def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:\n',
+        'def _huggingface(\n'
+        '    reader: SnapshotReader,\n'
+        '    snapshot: Snapshot,\n'
+        '    destination: str,\n'
+        '    *,\n'
+        '    allow_full: bool = False,\n'
+        ') -> None:\n'
+        '    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.\n',
     ).replace('        upload=upload,\n        kind=kind,\n', '')
     old_backfill = CANARY_BACKFILL.replace(
         '\n\ndef test_wib_huggingface_shadow_renders_locally_without_uploading() -> None:\n'

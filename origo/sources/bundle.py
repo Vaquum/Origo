@@ -117,6 +117,7 @@ class SourceRunConfig(Config):
     reconcile_only: bool = False
     capacity_probe: bool = False
     automatic_capacity: bool = False
+    allow_full_history: bool = False
 
 
 def execute_source(
@@ -338,7 +339,11 @@ def _execute_operation(
             / spec.key
             / consumer
         )
-        return {'state_token': runtime.publish(consumer, destination).token}
+        return {
+            'state_token': runtime.publish(
+                consumer, destination, allow_full=config.allow_full_history
+            ).token
+        }
     raise ValueError(f'Unknown source operation: {operation}')
 
 

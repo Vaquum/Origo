@@ -92,6 +92,7 @@ services:
     volumes:
       - .:/opt/app
       - worker-heartbeats:/opt/origo/heartbeats
+      - source-publications:/opt/origo/shadow:ro
     depends_on:
       clickhouse:
         condition: service_healthy

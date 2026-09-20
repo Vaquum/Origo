@@ -28,6 +28,7 @@ from origo.utils.arrow_store import (  # noqa: E402
     reap_old_versions,
     series_store_dir,
     spec_for_series,
+    stage_series,
 )
 
 # 2024-01-01T00:00:00Z in epoch-milliseconds; the mirror writes Datetime("ms", "UTC").
@@ -352,4 +353,30 @@ def test_retention_keeps_min_versions_and_respects_grace(
     assert paths[2].name in remaining
     assert paths[5].name in remaining  # the live `latest` target
     assert len(remaining) == 4
+
+
+def test_failed_stage_leaves_no_orphan_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ENOSPC mid-stream must not leave a hidden multi-GB orphan behind: stage_series
+    # unlinks its tmp on any failure (the TTL reaper only covers hard kills).
+    monkeypatch.setenv("LOCAL_PARQUET_DIR", str(tmp_path / "parquet"))
+    monkeypatch.setenv("LOCAL_ARROW_DIR", str(tmp_path / "arrow"))
+    spec = spec_for_series("time_1m")
+    _write_month(
+        tmp_path / "parquet",
+        spec,
+        _time_frame([BASE_MS, BASE_MS + 60_000]),
+        2024,
+        1,
+    )
+    build = build_series_frame(spec, tmp_path / "parquet")
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(pl.DataFrame, "write_ipc", _boom)
+    with pytest.raises(OSError, match="No space left on device"):
+        stage_series("time_1m", build)
+    assert list(series_store_dir("time_1m").glob(".*.tmp-stage-*")) == []
 

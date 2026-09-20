@@ -149,7 +149,9 @@ def build_series_frame(
 
     shaped = raw.select(exprs).select(_output_columns(spec.family))
     del raw
-    shaped = shaped.sort('ts')
+    # Stable sort: equal-key (duplicate ts) rows keep their input order, which is
+    # across-file order, so keep='last' below keeps the later file's row.
+    shaped = shaped.sort('ts', maintain_order=True)
     before = shaped.height
     # The input is ascending, so keep='last' with maintain_order=True preserves the
     # ascending order while keeping the last occurrence: one sort, no second pass.
@@ -258,21 +260,27 @@ def stage_series(series: str, build: BarSeriesBuild) -> StagedSeries | None:
     directory = series_store_dir(series)
     directory.mkdir(parents=True, exist_ok=True)
     tmp = directory / f'.{series}.tmp-stage-{os.getpid()}-{uuid.uuid4().hex}'
-    with open(tmp, 'wb') as handle:
-        # record_batch_size >= height forces a single record batch. Without it polars
-        # splits frames past its default (~122k rows) into multiple batches, which a
-        # ``memory_map=True`` reader surfaces as multiple chunks -- breaking the single
-        # batch / zero-copy ``ts`` contract for every non-trivial series. The bytes
-        # stream to disk instead of piling up beside the frame.
-        df.write_ipc(handle, compression='uncompressed', record_batch_size=max(df.height, 1))
-        _fsync_file(handle)
-    version = _sha256_file(tmp)[:VERSION_HEX]
-    target = directory / f'{series}.{version}.arrow'
-    written = not target.exists()
-    if written:
-        os.replace(tmp, target)
-    else:
+    try:
+        with open(tmp, 'wb') as handle:
+            # record_batch_size >= height forces a single record batch. Without it polars
+            # splits frames past its default (~122k rows) into multiple batches, which a
+            # ``memory_map=True`` reader surfaces as multiple chunks -- breaking the single
+            # batch / zero-copy ``ts`` contract for every non-trivial series. The bytes
+            # stream to disk instead of piling up beside the frame.
+            df.write_ipc(handle, compression='uncompressed', record_batch_size=max(df.height, 1))
+            _fsync_file(handle)
+        version = _sha256_file(tmp)[:VERSION_HEX]
+        target = directory / f'{series}.{version}.arrow'
+        written = not target.exists()
+        if written:
+            os.replace(tmp, target)
+        else:
+            tmp.unlink(missing_ok=True)
+    except Exception:
+        # A failed stage (ENOSPC, crash-safe hash/replace error) must not leave a
+        # multi-GB hidden orphan behind; the TTL reaper only covers hard kills.
         tmp.unlink(missing_ok=True)
+        raise
     return StagedSeries(series, version, target, df.height, _series_max_ts(df), written)
 
 

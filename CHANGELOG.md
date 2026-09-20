@@ -1,3 +1,7 @@
+# v3.20.2
+
+- Bound the Arrow series build peak: one sort with keep-last dedupe in maintained order (no second sort pass), chunk-aware rechunk, and file-direct IPC staging with a streaming content hash. Peak drops from ~5x to ~2x the series, so the 2.1GB perp 1M-dollar series renders inside the 16g worker instead of OOM-killing it every tick.
+
 # v3.20.1
 
 - Terminal backfill verdicts release publication: only an active backfill selection holds the consumer sensors and the provisional worker's mount path. A failed or cancelled backfill over a healthy canonical state no longer wedges publication forever (the Sep 18 perp freeze: mount 36h stale, HF never published, silent for a day). Partial canonical state still cannot publish — the callers check canonical readiness next.

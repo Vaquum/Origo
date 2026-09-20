@@ -1,3 +1,7 @@
+# v3.21.1
+
+- Bound the Arrow series build peak: one sort with keep-last dedupe in maintained order (no second sort pass), chunk-aware rechunk, and file-direct IPC staging with a streaming content hash. Peak drops from ~5x to ~2x the series, so the 2.1GB perp 1M-dollar series renders inside the 16g worker instead of OOM-killing it every tick. The sort is stable so keep-last keeps the later file's row across month seams, and a failed stage unlinks its hidden tmp instead of stranding a multi-GB orphan.
+
 # v3.21.0
 
 - Monitor publication freshness per consumer: the sixth `origo_monitor` check `publication_current` raises one finding per public consumer whose published end lags the source state past grace (3h for pinned mount, 24h for canonical-only huggingface), yielding while a backfill is active. A never-published consumer counts its state span as the lag, so the Sep 18 perp freeze (mount 36h stale, HF never published, silent for a day) would have paged instead of hiding behind green heartbeats.

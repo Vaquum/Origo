@@ -28,6 +28,7 @@ from origo.utils.arrow_store import (  # noqa: E402
     reap_old_versions,
     series_store_dir,
     spec_for_series,
+    stage_series,
 )
 
 # 2024-01-01T00:00:00Z in epoch-milliseconds; the mirror writes Datetime("ms", "UTC").
@@ -124,6 +125,32 @@ def test_build_time_frame_shapes_sorts_dedupes(tmp_path: Path) -> None:
     assert df.n_chunks() == 1
 
 
+def test_build_keep_last_wins_across_files(tmp_path: Path) -> None:
+    spec = spec_for_series("time_1m")
+    # The same ts in two month files: the later file's row (no_of_trades 99) must win,
+    # and the output stays ascending without a second sort pass.
+    _write_month(tmp_path, spec, _time_frame([BASE_MS, BASE_MS + 60_000]), 2024, 1)
+    later = _time_frame([BASE_MS + 60_000, BASE_MS + 120_000])
+    later = later.with_columns(
+        pl.when(pl.col("datetime") == pl.lit(BASE_MS + 60_000).cast(pl.Datetime("ms", time_zone="UTC")))
+        .then(pl.lit(99))
+        .otherwise(pl.col("no_of_trades"))
+        .alias("no_of_trades")
+    )
+    _write_month(tmp_path, spec, later, 2024, 2)
+
+    build = build_series_frame(spec, tmp_path)
+    df = build.df
+
+    assert df["ts"].to_list() == sorted(df["ts"].to_list())
+    assert build.source_rows == 4
+    assert build.dropped_duplicate_ts == 1
+    row = df.filter(pl.col("ts") == (BASE_MS + 60_000) * NS_PER_MS)
+    assert row.height == 1
+    assert row["no_of_trades"].to_list() == [99]
+    assert df.n_chunks() == 1
+
+
 def test_build_dollar_frame_uses_end_as_ts(tmp_path: Path) -> None:
     spec = spec_for_series("dollar_1M")
     _write_month(
@@ -201,7 +228,7 @@ def test_large_series_publishes_single_record_batch(
 ) -> None:
     # Far past polars' default ~122k-row IPC batch size: a naive write_ipc splits into
     # several record batches that a memory_map=True reader exposes as multiple chunks,
-    # which breaks the zero-copy ts view. _ipc_payload's record_batch_size forces one
+    # which breaks the zero-copy ts view. stage_series' record_batch_size forces one
     # batch. (The small-frame tests above never crossed the threshold, so they missed
     # this -- it surfaced only in production on million-row series.)
     monkeypatch.setenv("LOCAL_PARQUET_DIR", str(tmp_path / "parquet"))
@@ -326,4 +353,30 @@ def test_retention_keeps_min_versions_and_respects_grace(
     assert paths[2].name in remaining
     assert paths[5].name in remaining  # the live `latest` target
     assert len(remaining) == 4
+
+
+def test_failed_stage_leaves_no_orphan_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ENOSPC mid-stream must not leave a hidden multi-GB orphan behind: stage_series
+    # unlinks its tmp on any failure (the TTL reaper only covers hard kills).
+    monkeypatch.setenv("LOCAL_PARQUET_DIR", str(tmp_path / "parquet"))
+    monkeypatch.setenv("LOCAL_ARROW_DIR", str(tmp_path / "arrow"))
+    spec = spec_for_series("time_1m")
+    _write_month(
+        tmp_path / "parquet",
+        spec,
+        _time_frame([BASE_MS, BASE_MS + 60_000]),
+        2024,
+        1,
+    )
+    build = build_series_frame(spec, tmp_path / "parquet")
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(pl.DataFrame, "write_ipc", _boom)
+    with pytest.raises(OSError, match="No space left on device"):
+        stage_series("time_1m", build)
+    assert list(series_store_dir("time_1m").glob(".*.tmp-stage-*")) == []
 

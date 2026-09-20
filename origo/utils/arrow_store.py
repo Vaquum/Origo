@@ -147,10 +147,18 @@ def build_series_frame(
         exprs.append(pl.col('dollar_bar_id'))
     exprs.extend(pl.col(name) for name in _VALUE_COLUMNS)
 
-    shaped = raw.select(exprs).select(_output_columns(spec.family)).sort('ts')
-    deduped = shaped.unique(subset=['ts'], keep='last').sort('ts')
-    dropped = shaped.height - deduped.height
-    return BarSeriesBuild(deduped.rechunk(), source_rows, dropped)
+    shaped = raw.select(exprs).select(_output_columns(spec.family))
+    del raw
+    # Stable sort: equal-key (duplicate ts) rows keep their input order, which is
+    # across-file order, so keep='last' below keeps the later file's row.
+    shaped = shaped.sort('ts', maintain_order=True)
+    before = shaped.height
+    # The input is ascending, so keep='last' with maintain_order=True preserves the
+    # ascending order while keeping the last occurrence: one sort, no second pass.
+    deduped = shaped.unique(subset=['ts'], keep='last', maintain_order=True)
+    del shaped
+    out = deduped.rechunk() if deduped.n_chunks() > 1 else deduped
+    return BarSeriesBuild(out, source_rows, before - deduped.height)
 
 
 def _series_max_ts(frame: pl.DataFrame) -> int | None:
@@ -183,12 +191,12 @@ def _fsync_file(handle: io.BufferedWriter) -> None:
     os.fsync(handle.fileno())
 
 
-def _atomic_write_bytes(target: Path, payload: bytes) -> None:
-    tmp = target.parent / f'.{target.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}'
-    with open(tmp, 'wb') as handle:
-        handle.write(payload)
-        _fsync_file(handle)
-    os.replace(tmp, target)
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _atomic_swap_symlink(latest: Path, relative_target: str) -> None:
@@ -231,16 +239,6 @@ def reap_old_versions(
     return tuple(reaped)
 
 
-def _ipc_payload(df: pl.DataFrame) -> bytes:
-    sink = io.BytesIO()
-    # record_batch_size >= height forces a single record batch. Without it polars
-    # splits frames past its default (~122k rows) into multiple batches, which a
-    # ``memory_map=True`` reader surfaces as multiple chunks -- breaking the single
-    # batch / zero-copy ``ts`` contract for every non-trivial series.
-    df.write_ipc(sink, compression='uncompressed', record_batch_size=max(df.height, 1))
-    return sink.getvalue()
-
-
 @dataclass(frozen=True)
 class StagedSeries:
     """A version file written (or already present) under the series directory, not yet
@@ -259,14 +257,30 @@ def stage_series(series: str, build: BarSeriesBuild) -> StagedSeries | None:
     df = build.df
     if df.height == 0:
         return None
-    payload = _ipc_payload(df)
-    version = hashlib.sha256(payload).hexdigest()[:VERSION_HEX]
     directory = series_store_dir(series)
     directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f'{series}.{version}.arrow'
-    written = not target.exists()
-    if written:
-        _atomic_write_bytes(target, payload)
+    tmp = directory / f'.{series}.tmp-stage-{os.getpid()}-{uuid.uuid4().hex}'
+    try:
+        with open(tmp, 'wb') as handle:
+            # record_batch_size >= height forces a single record batch. Without it polars
+            # splits frames past its default (~122k rows) into multiple batches, which a
+            # ``memory_map=True`` reader surfaces as multiple chunks -- breaking the single
+            # batch / zero-copy ``ts`` contract for every non-trivial series. The bytes
+            # stream to disk instead of piling up beside the frame.
+            df.write_ipc(handle, compression='uncompressed', record_batch_size=max(df.height, 1))
+            _fsync_file(handle)
+        version = _sha256_file(tmp)[:VERSION_HEX]
+        target = directory / f'{series}.{version}.arrow'
+        written = not target.exists()
+        if written:
+            os.replace(tmp, target)
+        else:
+            tmp.unlink(missing_ok=True)
+    except Exception:
+        # A failed stage (ENOSPC, crash-safe hash/replace error) must not leave a
+        # multi-GB hidden orphan behind; the TTL reaper only covers hard kills.
+        tmp.unlink(missing_ok=True)
+        raise
     return StagedSeries(series, version, target, df.height, _series_max_ts(df), written)
 
 

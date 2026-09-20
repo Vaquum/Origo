@@ -32,6 +32,7 @@ from .policy import (
     WORKER_TAG,
     admission_lock,
     execution_tags,
+    reconcile_stale_concurrency_claims,
 )
 
 
@@ -53,6 +54,9 @@ def outstanding_runs(instance: DagsterInstance) -> Iterator[DagsterRun]:
 def recover_queue(instance: DagsterInstance) -> dict[str, int]:
     kept: set[str] = set()
     counts = {'classified': 0, 'redundant_canceled': 0, 'unique_queued': 0}
+    # Deploy restarts kill pooled steps mid-flight; only terminal runs are freed, so this
+    # cannot race admission and runs outside the lock.
+    counts['stale_slots_freed'] = reconcile_stale_concurrency_claims(instance)
     with admission_lock(instance):
         for run in outstanding_runs(instance):
             tags = execution_tags(run)

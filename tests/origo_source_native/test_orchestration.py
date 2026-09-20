@@ -430,3 +430,69 @@ def test_startup_recovery_completes_outside_captured_logging(origo_test_env, tmp
             assert recorded and recorded[0].status == DagsterRunStatus.SUCCESS
             messages = [entry.user_message for entry in instance.all_logs(recorded[0].run_id)]
             assert any("'redundant_canceled': 1" in message for message in messages)
+
+
+def _claim(instance, pool, run_id, step_key='maintain_operational_metadata'):
+    storage = instance.event_log_storage
+    assert storage.supports_global_concurrency_limits
+    storage.set_concurrency_slots(pool, 1)
+    storage.claim_concurrency_slot(pool, run_id, step_key)
+    return storage
+
+
+def test_reconcile_frees_only_dead_run_pool_claims(instance):
+    from origo.orchestration.policy import reconcile_stale_concurrency_claims
+
+    dead = create_run_for_test(
+        instance,
+        job_name='maintain_operational_metadata_job',
+        status=DagsterRunStatus.STARTED,
+    )
+    live = create_run_for_test(
+        instance,
+        job_name='maintain_operational_metadata_job',
+        status=DagsterRunStatus.STARTED,
+    )
+    storage = _claim(instance, 'dead_pool', dead.run_id)
+    _claim(instance, 'live_pool', live.run_id)
+    instance.report_run_failed(dead)
+    assert reconcile_stale_concurrency_claims(instance) == 1
+    assert storage.get_concurrency_info('dead_pool').pending_steps == []
+    assert [step.run_id for step in storage.get_concurrency_info('live_pool').pending_steps] == [
+        live.run_id
+    ]
+
+
+def test_maintenance_schedule_heals_stale_claim_then_gates(instance):
+    from types import SimpleNamespace
+
+    from origo.maintenance import dagster_metadata
+
+    dead = create_run_for_test(
+        instance,
+        job_name='maintain_operational_metadata_job',
+        status=DagsterRunStatus.STARTED,
+    )
+    storage = _claim(instance, 'operational_metadata', dead.run_id)
+    instance.report_run_failed(dead)
+    context = SimpleNamespace(instance=instance)
+    assert dagster_metadata._should_execute(context) is True
+    assert storage.get_concurrency_info('operational_metadata').pending_steps == []
+    create_run_for_test(
+        instance,
+        job_name='maintain_operational_metadata_job',
+        status=DagsterRunStatus.QUEUED,
+    )
+    assert dagster_metadata._should_execute(context) is False
+
+
+def test_recover_queue_reports_freed_stale_slots(instance):
+    dead = create_run_for_test(
+        instance,
+        job_name='maintain_operational_metadata_job',
+        status=DagsterRunStatus.STARTED,
+    )
+    storage = _claim(instance, 'operational_metadata', dead.run_id)
+    instance.report_run_failed(dead)
+    assert recover_queue(instance)['stale_slots_freed'] == 1
+    assert storage.get_concurrency_info('operational_metadata').pending_steps == []

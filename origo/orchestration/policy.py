@@ -97,6 +97,30 @@ def has_outstanding(instance: DagsterInstance, job_name: str) -> bool:
     return bool(instance.get_runs(RunsFilter(job_name=job_name, statuses=OUTSTANDING), limit=1))
 
 
+def reconcile_stale_concurrency_claims(instance: DagsterInstance) -> int:
+    """Free pool slots held by runs that can no longer release them.
+
+    A step claims its pool slot when it starts and releases it on step end. When the
+    run worker dies in between (kill, crash, deploy), the run goes terminal without
+    step-end events and the claim wedges the pool forever: every later run stays
+    QUEUED behind `blocked by global concurrency limits`, and a schedule gated on
+    `has_outstanding` goes silent. Only claims of runs outside ACTIVE are freed, so
+    a live holder is never evicted. Returns the runs freed.
+    """
+    storage = instance.event_log_storage
+    if not storage.supports_global_concurrency_limits:
+        return 0
+    stale = {
+        pending.run_id
+        for key in storage.get_concurrency_keys()
+        for pending in storage.get_concurrency_info(key).pending_steps
+        if (run := instance.get_run_by_id(pending.run_id)) is None or run.status not in ACTIVE
+    }
+    for run_id in sorted(stale):
+        storage.free_concurrency_slots_for_run(run_id)
+    return len(stale)
+
+
 def outstanding_configs(
     instance: DagsterInstance, job_name: str, op_name: str, config_key: str, *, partition: str
 ) -> set[str]:

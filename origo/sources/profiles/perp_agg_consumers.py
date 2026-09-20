@@ -126,9 +126,9 @@ def _huggingface(
     snapshot: Snapshot,
     destination: str,
     *,
-    upload: bool = True,
-    kind: str = 'huggingface',
+    allow_full: bool = False,
 ) -> None:
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     # Snapshot callables resolve through their modules at call time (patch seams).
     _render_huggingface(
         reader,
@@ -140,8 +140,6 @@ def _huggingface(
         dollar_klines=agg_snapshot.get_perp_agg_dollar_klines,
         time_card=agg_snapshot.build_time_dataset_card,
         dollar_card=agg_snapshot.build_dollar_dataset_card,
-        upload=upload,
-        kind=kind,
     )
 
 

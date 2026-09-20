@@ -328,3 +328,30 @@ def test_prune_bounds_cover_the_month_with_margin() -> None:
     assert _prune_bounds(2020, 2) == ('2020-01-25', '2020-03-08')
     assert _prune_bounds(2020, 12) == ('2020-11-24', '2021-01-08')
     assert PRUNE_MARGIN_DAYS == 7
+
+
+def test_every_consumer_renderer_accepts_allow_full() -> None:
+    import inspect
+
+    from origo.sources.profiles import (
+        perp_agg_consumers,
+        perp_consumers,
+        spot_agg_consumers,
+        spot_consumers,
+    )
+
+    # SourceRuntime.publish always passes allow_full=, so every wired renderer
+    # must accept it or its consumer TypeErrors on every run.
+    specs = (
+        *perp_agg_consumers.PERP_AGG_CONSUMERS,
+        *perp_consumers.PERP_CONSUMERS,
+        *spot_agg_consumers.SPOT_AGG_CONSUMERS,
+        *spot_consumers.SPOT_CONSUMERS,
+    )
+    assert len(specs) == 8
+    for spec in specs:
+        assert 'allow_full' in inspect.signature(spec.publish).parameters, spec.key
+    # The CANARY template for perp-agg's future live huggingface consumer is
+    # unwired today, but it must satisfy the protocol it will be published
+    # through after promotion.
+    assert 'allow_full' in inspect.signature(perp_agg_consumers._huggingface).parameters

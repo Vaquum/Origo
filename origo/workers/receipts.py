@@ -120,31 +120,26 @@ def reconcile_died_receipts(
     older than ``stale_after_seconds`` cannot still be running (see
     ``DIED_RECEIPT_STALE_AFTER_SECONDS``); append one FAILED/WORKER_DIED row per
     such unit. Returns the rows appended.
+
+    The unit key is ``(feed, series, minute)``: a STARTED row is written before
+    the unit's hash exists, so it can never match a terminal row on sha256. One
+    anti-join finds every outstanding unit in a single round trip no matter how
+    many STARTED rows the feed has accumulated, and the appended FAILED row
+    guards the next pass, so each dead unit is marked exactly once.
     """
     cutoff = _utc(now).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
-    started = client.execute(
-        f"""SELECT series, minute, sha256, max(recorded_at)
-        FROM {identifier(database)}.{WORKER_MINUTE_LOG}
-        WHERE feed = %(feed)s AND status = 'STARTED' AND recorded_at < %(cutoff)s
-        GROUP BY series, minute, sha256""",
+    outstanding = client.execute(
+        f"""SELECT s.series, s.minute
+        FROM {identifier(database)}.{WORKER_MINUTE_LOG} AS s
+        LEFT ANTI JOIN {identifier(database)}.{WORKER_MINUTE_LOG} AS t
+          ON t.feed = s.feed AND t.series = s.series AND t.minute = s.minute
+          AND t.status != 'STARTED' AND t.recorded_at >= s.recorded_at
+        WHERE s.feed = %(feed)s AND s.status = 'STARTED' AND s.recorded_at < %(cutoff)s
+        GROUP BY s.series, s.minute""",
         {'feed': feed, 'cutoff': cutoff},
     )
     reconciled = 0
-    for series, minute, sha256, started_at in started:
-        terminal = client.execute(
-            f"""SELECT count() FROM {identifier(database)}.{WORKER_MINUTE_LOG}
-            WHERE feed = %(feed)s AND series = %(series)s AND minute = %(minute)s
-              AND sha256 = %(sha256)s AND status != 'STARTED' AND recorded_at >= %(started)s""",
-            {
-                'feed': feed,
-                'series': str(series),
-                'minute': minute,
-                'sha256': str(sha256),
-                'started': started_at,
-            },
-        )
-        if terminal and int(str(terminal[0][0])) > 0:
-            continue
+    for series, minute in outstanding:
         record_receipt(
             client,
             database,
@@ -152,7 +147,7 @@ def reconcile_died_receipts(
             series=str(series),
             minute=_utc(minute),
             rows=0,
-            sha256=str(sha256),
+            sha256='',
             duration_ms=0,
             status='FAILED',
             error_code='WORKER_DIED',

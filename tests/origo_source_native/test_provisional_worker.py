@@ -442,21 +442,27 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
     assert reader.backfill_owns_publication(source) is False
 
 
-def test_reconcile_converts_died_started_receipts_to_failed(origo_test_env: dict[str, str]) -> None:
+def test_reconcile_converts_died_started_receipts_to_failed(
+    origo_test_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A STARTED row with no terminal row means its process died (watchdog exit,
     # SIGKILL): reconcile appends FAILED/WORKER_DIED so backoff and paging see
-    # the death instead of retrying instantly forever.
+    # the death instead of retrying instantly forever. The terminal match is on
+    # the unit (feed, series, minute), never the hash: STARTED rows are written
+    # before the hash exists, so the OK row below carries a real sha256.
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         ensure_monitoring_tables(client, ORIGO_DATABASE)
         now = datetime.now(UTC)
         old = now - timedelta(hours=1)
         rows = [
-            ('probe', 'died', old, '', 0, 'STARTED', '', old),
             ('probe', 'alive', old, '', 0, 'STARTED', '', now),
             ('probe', 'done', old, '', 0, 'STARTED', '', old),
-            ('probe', 'done', old, '', 5, 'OK', '', old + timedelta(seconds=10)),
+            ('probe', 'done', old, 'sha-done', 5, 'OK', '', old + timedelta(seconds=10)),
         ]
+        rows.extend(
+            ('probe', f'died-{n:02d}', old, '', 0, 'STARTED', '', old) for n in range(25)
+        )
         client.execute(
             f'INSERT INTO {ORIGO_DATABASE}.worker_minute_log '
             '(feed, series, minute, sha256, rows, status, error_code, recorded_at) VALUES',
@@ -465,13 +471,31 @@ def test_reconcile_converts_died_started_receipts_to_failed(origo_test_env: dict
                 for feed, series, minute, sha, n, status, code, at in rows
             ],
         )
-        assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 1
-        # The death counts toward backoff for that unit.
-        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='died', minute=old)
+        selects = 0
+        real_execute = client.execute
+
+        def counting(query: object, *args: object, **kwargs: object) -> object:
+            nonlocal selects
+            if isinstance(query, str) and query.lstrip().upper().startswith('SELECT'):
+                selects += 1
+            return real_execute(query, *args, **kwargs)
+
+        monkeypatch.setattr(client, 'execute', counting)
+        # One scan marks every outstanding unit no matter how many STARTED rows
+        # the feed has accumulated: 25 died units, still a single SELECT.
+        assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 25
+        assert selects == 1
+        # The deaths count toward backoff for those units only: the completed
+        # unit (hash-carrying OK) and the fresh unit get no spurious marker.
+        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='died-00', minute=old)
         assert attempts == 1
+        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='done', minute=old)
+        assert attempts == 0
         attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='alive', minute=old)
         assert attempts == 0
-        # Idempotent: the appended row guards the next pass.
+        # Idempotent: the appended rows guard the next pass.
+        selects = 0
         assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 0
+        assert selects == 1
     finally:
         client.disconnect()

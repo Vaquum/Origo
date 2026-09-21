@@ -55,11 +55,9 @@ REST_HOST_BUDGETS = {
     'fapi.binance.com': (24, 1920),
 }
 REST_DEFAULT_BUDGET = (20, 1200)
-# The shared lane reserves the host line first-come first-served, so a queue of
-# 200-weight repair pages would hold a 5-weight live poll for the length of the
-# queue. The live lane instead paces itself at this share of the host rate and
-# charges the host line without queueing behind it; the total spend still
-# advances the one host line, so the conservative host rate is unchanged.
+# Reserve a fixed share for independent capture; the two lane rates sum to
+# the existing conservative host rate. No lane can spend future reservations
+# in a burst after waiting for a connection, or ignore a subsequent rate hold.
 LIVE_LANE_SHARE = 0.4
 # Outstanding requests per host family across every process; the last slot is
 # kept for the live lane so slow repair pages cannot hold every slot.
@@ -161,22 +159,28 @@ class _Budget:
         if time.time() < circuit_until:
             raise SourceError('PROVIDER_RATE_CIRCUIT', 'Binance request circuit is open.')
 
-    def reserve(self, weight: int, lane: Lane) -> float:
-        """Reserve ``weight`` on the host line and return the instant to fire at."""
+    def reserve(self, weight: int, lane: Lane) -> float | None:
+        """Return None on charged admission, otherwise the next instant to retry."""
         state, lane_state = self._handles()
         next_request, circuit_until = _read_pair(state)
         now = time.time()
         if now < circuit_until:
             raise SourceError('PROVIDER_RATE_CIRCUIT', 'Binance request circuit is open.')
+        lane_next, hold_until = _read_pair(lane_state)
         if lane == 'shared':
-            fire_at = max(now, next_request)
-            _write_pair(state, fire_at + weight / (self.rate * (1.0 - self.live_share)), circuit_until)
+            fire_at = max(now, next_request, hold_until)
+            if fire_at <= now:
+                _write_pair(
+                    state, now + weight / (self.rate * (1.0 - self.live_share)), circuit_until
+                )
+                return None
             return fire_at
         if self.live_share == 0:
             raise ValueError('A live request lane is declared only for the perpetual capture host.')
-        lane_next, hold_until = _read_pair(lane_state)
         fire_at = max(now, lane_next, hold_until)
-        _write_pair(lane_state, fire_at + weight / (self.rate * self.live_share), hold_until)
+        if fire_at <= now:
+            _write_pair(lane_state, now + weight / (self.rate * self.live_share), hold_until)
+            return None
         return fire_at
 
     def settle(self, response: requests.Response) -> int:
@@ -191,7 +195,16 @@ class _Budget:
         if response.status_code in (418, 429):
             retry = response.headers.get('Retry-After')
             if retry is None or not retry.isdigit():
-                raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Binance Retry-After is invalid.')
+                # A malformed rate-limit response cannot reopen admission immediately.
+                blocked_until = time.time() + 60
+                _write_pair(
+                    state, max(next_request, blocked_until), max(circuit_until, blocked_until)
+                )
+                _write_pair(lane_state, lane_next, max(hold_until, blocked_until))
+                raise SourceError(
+                    'PROVIDER_RATE_HEADER_INVALID',
+                    'Binance Retry-After is invalid; admission blocked for 60 seconds.',
+                )
             deadline = time.time() + int(retry)
             hold = max(hold, deadline)
             if response.status_code == 418:
@@ -248,16 +261,21 @@ def _weighted_request(
     # All worker processes share one budget per Binance host: api and fapi
     # enforce separate IP allowances, so a hot host must not pace a cold one.
     budget = _Budget(root, url)
-    with budget:
-        fire_at = budget.reserve(weight, lane)
-    pace_wait = max(0.0, fire_at - time.time())
-    time.sleep(pace_wait)
-    if pace_wait:
-        # A ban raised by another process while this one slept must not be
-        # followed by one more request from a reservation made before it.
-        with budget:
-            budget.check_circuit()
+    pace_wait = 0.0
+    # Obtain the bounded connection slot before spending budget. Otherwise
+    # expired reservations could all fire together when a slow connection frees.
     with _InFlightSlot(root, url, lane):
+        while True:
+            with budget:
+                fire_at = budget.reserve(weight, lane)
+            if fire_at is None:
+                break
+            pause = max(0.0, fire_at - time.time())
+            # Re-read every hold after sleeping: another process may receive
+            # Retry-After, the used-weight backstop, or a ban in the meantime.
+            began = time.monotonic()
+            time.sleep(min(pause, 60.0))
+            pace_wait += time.monotonic() - began
         started = time.monotonic()
         response = _request(url, params, headers)
         latency = time.monotonic() - started
@@ -320,9 +338,7 @@ class BinanceSpotDaily(BinanceArchiveDaily):
     def build_table(self, csv_body: bytes, partition: Partition) -> ArrowTable:
         return spot_table(csv_body, partition)
 
-    def build_row(
-        self, trade_id: int, timestamp: int, instant: datetime, fields: list[str]
-    ) -> Row:
+    def build_row(self, trade_id: int, timestamp: int, instant: datetime, fields: list[str]) -> Row:
         return (
             trade_id,
             parse_decimal(fields[1]),

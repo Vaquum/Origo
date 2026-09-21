@@ -203,13 +203,17 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     assert reporter.materializations[2][2]['failed'] == 0
 
 
-def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
+def test_provisional_minute_failures_back_off_without_an_attempt_limit(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
     tmp_path: Path,
     query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # The frontier minute (here the only hole) never exhausts: a permanently
+    # skipped frontier gap would freeze the current-view readers, so it keeps
+    # retrying on the capped delay until it builds. Non-frontier holes and
+    # pinned publications still stop after retry_count for an operator run.
     spec, _ = spot
     spec = replace(spec, orchestration=replace(spec.orchestration, retry_count=2, retry_delay=3600))
 
@@ -234,15 +238,17 @@ def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
         assert feed.tick(NOW).failed == ()
         offset[0] = timedelta(seconds=200)
         assert feed.tick(NOW).failed == (key,)
-        # retry_count retries are spent: no more attempts, an ERROR line names the minute.
+        # Past retry_count the capped delay still admits the frontier gap: a
+        # fourth attempt runs instead of freezing the readers, and nothing
+        # logs exhaustion for the frontier minute.
         offset[0] = timedelta(hours=10)
-        assert feed.tick(NOW).failed == ()
+        assert feed.tick(NOW).failed == (key,)
 
     assert query_origo(RECEIPTS) == [
         ('binance_spot_trades', 'STARTED', 0, ''),
         ('binance_spot_trades', 'FAILED', 0, 'RuntimeError'),
-    ] * 3
-    assert f'partition={KEY} attempts exhausted after 3 failures' in caplog.text
+    ] * 4
+    assert 'attempts exhausted' not in caplog.text
     assert 'binance unavailable' in caplog.text
 
 
@@ -504,7 +510,7 @@ def test_reconcile_converts_died_started_receipts_to_failed(
 
 
 def test_beat_writes_only_with_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV, beat_worker
+    from origo.sources.contracts import WORKER_HEARTBEAT_ENV, beat_worker
 
     target = tmp_path / 'worker.heartbeat'
     monkeypatch.delenv(WORKER_HEARTBEAT_ENV, raising=False)
@@ -524,7 +530,7 @@ def test_slow_rest_fetch_beats_during_requests(
 ) -> None:
     # Beats land between paged requests, while the fetch is still running: the
     # check before each transport call sees every earlier request's beat.
-    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
+    from origo.sources.contracts import WORKER_HEARTBEAT_ENV
 
     spec, _ = spot
     target = tmp_path / 'worker.heartbeat'
@@ -574,3 +580,116 @@ def test_parallel_builds_complete_all_candidates(
     assert len(outcome.processed) == 6 and outcome.failed == ()
     assert len(threads) > 1
     assert elapsed < 9
+
+
+def test_provisional_build_beats_between_phases(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The REST beats stop at the last paged request; a fat minute then spends
+    # its time in Arrow builds and inserts, so each component beats after its
+    # build and after its insert — no multi-phase stretch can look dead.
+    # Only the lifecycle call sites are counted here; the adapter's own
+    # per-request beats are covered by test_slow_rest_fetch_beats_during_requests.
+    spec, requests = spot
+    beats: list[None] = []
+    monkeypatch.setattr('origo.sources.lifecycle.beat_worker', lambda: beats.append(None))
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        assert spec.provisional is not None
+        expected = len(store.components(spec.provisional.partition(KEY)))
+        assert expected >= 1
+        record = runtime.build(KEY, provisional=True)
+        assert record.partition.key == KEY
+        assert not requests
+        assert len(beats) == 2 * expected
+    finally:
+        client.disconnect()
+
+
+def test_frontier_gap_is_admitted_first_past_the_lookback(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Five in-window holes fill oldest-5 while the current-view frontier gap
+    # sits 40h back, past the 36h lookback. The tick must still admit the
+    # frontier gap first: crowding must never starve the readers' clip minute.
+    tick_at = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    anchor = tick_at - timedelta(hours=40)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        runtime.setup(anchor=anchor)
+        ensure_monitoring_tables(client, ORIGO_DATABASE)
+        minutes: list[datetime] = []
+        cursor = anchor
+        while cursor < anchor + timedelta(minutes=10):
+            if cursor != anchor + timedelta(minutes=3):
+                minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+        last = tick_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
+        cursor = last - timedelta(minutes=70)
+        while cursor < last:
+            if cursor < last - timedelta(minutes=60) or cursor >= last - timedelta(minutes=55):
+                minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+        client.execute(
+            f'INSERT INTO {store.table("source_activation_log")} VALUES',
+            [
+                (
+                    spec.key,
+                    minute.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    1,
+                    minute,
+                    minute + timedelta(minutes=1),
+                    1,
+                    'test-revision',
+                    uuid4(),
+                    '0' * 64,
+                    '[]',
+                    'test-run',
+                    tick_at,
+                )
+                for minute in minutes
+            ],
+        )
+
+        def instant(
+            executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
+        ) -> dict[str, object]:
+            return {'build_id': '00000000-0000-0000-0000-000000000000'}
+
+        monkeypatch.setattr(provisional, 'execute_source', instant)
+        feed = _feed(spec, tmp_path, _Dagster(), _Reporter())
+        outcome = feed.tick(tick_at)
+        frontier = (anchor + timedelta(minutes=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        assert outcome.processed[0] == f'{spec.key}:{frontier}'
+        assert len(outcome.processed) >= 7
+        assert outcome.failed == ()
+    finally:
+        client.disconnect()
+
+
+def test_compose_heartbeat_path_matches_worker_wiring(monkeypatch: pytest.MonkeyPatch) -> None:
+    import yaml
+
+    from origo.workers.runtime import heartbeat_directory, heartbeat_path
+
+    # The compose literal must stay the path the worker computes, or the
+    # watchdog and the REST beats silently split across two files.
+    monkeypatch.delenv('ORIGO_HEARTBEAT_DIR', raising=False)
+    expected = (
+        f'ORIGO_WORKER_HEARTBEAT={heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)}'
+    )
+    root = Path(__file__).resolve().parents[2]
+    for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        environment = yaml.safe_load((root / name).read_text())['services'][
+            'provisional-worker'
+        ]['environment']
+        assert expected in environment, name

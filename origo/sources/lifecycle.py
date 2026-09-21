@@ -19,6 +19,7 @@ from .contracts import (
     Snapshot,
     SourceError,
     StateRecord,
+    beat_worker,
     failure_code,
     failure_message,
 )
@@ -232,6 +233,26 @@ class SourceRuntime:
                 build_id=build_id,
             )
 
+    def _beat_progress(self, partition: Partition, build_id: UUID, component: str) -> None:
+        """Best-effort worker beat between build phases.
+
+        A heartbeat write error is telemetry failing, not the component: it is
+        logged and never recorded, so it cannot misrecord as a component or
+        build failure. A truly unwritable heartbeat still kills the worker via
+        the watchdog within the bound, which pages through workers_alive.
+        """
+        try:
+            beat_worker()
+        except OSError as error:
+            get_dagster_logger('origo.sources').warning(
+                'source=%s partition=%s build=%s component=%s heartbeat write failed: %s',
+                self.spec.key,
+                partition.key,
+                build_id,
+                component,
+                error,
+            )
+
     def _build_components(
         self, partition: Partition, revision: Revision, build_id: UUID, expected: int
     ) -> StateRecord:
@@ -272,6 +293,9 @@ class SourceRuntime:
                         component.key,
                     )
                     component.build(context)
+                    # The Arrow build above is the slow phase; beat before the
+                    # validate-and-insert stretch so neither half can look dead.
+                    self._beat_progress(partition, build_id, component.key)
                     count, digest = self.store.validate_component(
                         component, context.table(component.key), partition
                     )
@@ -342,6 +366,10 @@ class SourceRuntime:
                         component=component.key,
                     )
                     raise
+                # A fat minute spends minutes in Arrow builds and inserts
+                # after its last REST request; each finished component proves
+                # the worker is alive. Dagster runs skip this.
+                self._beat_progress(partition, build_id, component.key)
             return StateRecord(partition, expected + 1, revision.key, build_id, tuple(hashes))
         finally:
             try:

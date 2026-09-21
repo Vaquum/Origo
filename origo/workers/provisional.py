@@ -28,9 +28,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
 from origo.sources.bundle import SourceRunConfig, execute_source
-from origo.sources.contracts import Partition, RevisionedSourceSpec, RolloutStage, failure_code
+from origo.sources.contracts import (
+    Partition,
+    RevisionedSourceSpec,
+    RolloutStage,
+    WORKER_HEARTBEAT_ENV,
+    failure_code,
+)
 from origo.sources.publication import publication_current
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
@@ -110,15 +115,19 @@ class ProvisionalFeed:
         work: str,
         minute: datetime | None = None,
         token: str | None = None,
+        exhaustible: bool = True,
     ) -> bool:
-        """Whether the work's failures allow another attempt now: none so far, or at most
-        ``retry_count`` retries with the doubling delay since the last failure elapsed."""
+        """Whether the work's failures allow another attempt now: none so far, or the
+        doubling delay since the last failure elapsed. Exhaustible work stops after
+        ``retry_count`` for an operator run; the current-view frontier gap is admitted
+        inexhaustible, so the readers can never freeze behind a parked hole — a hole
+        that later becomes the frontier resumes retrying on the capped delay."""
         attempts, last_failed = failed_attempts(
             store.client, store.database, feed=self.name, series=series, minute=minute, token=token
         )
         if attempts == 0 or last_failed is None:
             return True
-        if attempts > spec.orchestration.retry_count:
+        if exhaustible and attempts > spec.orchestration.retry_count:
             log.error(
                 'source=%s %s attempts exhausted after %d failures; an operator run is required',
                 spec.key,
@@ -197,21 +206,61 @@ class ProvisionalFeed:
         self._beat()
         return key, None
 
+    def _frontier_gap_key(
+        self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime
+    ) -> str | None:
+        """The current-view frontier gap: the first minute the readers are missing.
+
+        The readers clip at the first gap, so this minute — not the oldest-5
+        window — is what unfreezes `*_current`. It is admitted first even past
+        the 36h lookback; a past-window gap retries loud on the capped delay
+        until it builds or an operator backfills it.
+        """
+        rows = store.execute(
+            f'SELECT max(partition_end) FROM {store.table("source_current_partitions")} '
+            'WHERE source_key=%(source)s',
+            {'source': spec.key},
+        )
+        end = rows[0][0] if rows else None
+        anchor = store.anchor().replace(second=0, microsecond=0)
+        gap = anchor
+        if isinstance(end, datetime):
+            naive = end.replace(tzinfo=None) if end.tzinfo is not None else end
+            # max() over no rows is the epoch, not NULL; the frontier never
+            # precedes the anchor.
+            gap = max(naive.replace(tzinfo=UTC, second=0, microsecond=0), anchor)
+        last = now.astimezone(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
+        if gap > last:
+            return None
+        return gap.strftime('%Y-%m-%dT%H:%M:%SZ')
+
     def _build_intervals(
         self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime
     ) -> tuple[list[str], list[str]]:
         adapter = spec.provisional
         if adapter is None:
             raise ValueError('No provisional adapter is declared.')
+        covered = store.active_intervals()
         candidates = sorted(
-            adapter.candidates(now, store.anchor(), store.active_intervals()),
+            adapter.candidates(now, store.anchor(), covered),
             key=lambda partition: partition.start,
         )
+        frontier = self._frontier_gap_key(store, spec, now)
+        ordered = list(candidates)
+        if frontier is not None and all(partition.key != frontier for partition in ordered):
+            gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
+            if not any(interval.start <= gap_start < interval.end for interval in covered):
+                ordered.insert(0, adapter.partition(frontier))
         admitted = [
             partition
-            for partition in candidates
+            for partition in ordered
             if self._may_attempt(
-                store, spec, series=spec.key, work=f'partition={partition.key}', minute=partition.start
+                store,
+                spec,
+                series=spec.key,
+                work=f'partition={partition.key}',
+                minute=partition.start,
+                exhaustible=partition.key != frontier,
             )
         ]
         if not admitted:

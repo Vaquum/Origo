@@ -41,9 +41,9 @@ Operator host artifacts (``host/*.json``)::
 from __future__ import annotations
 
 import gzip
+import json
 import math
 import re
-import json
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -143,7 +143,8 @@ def load_bundle(root: Path, period: timedelta) -> Bundle:
     present = {
         path.relative_to(root).as_posix()
         for path in root.rglob('*')
-        if path.is_file() and path.name not in ('manifest.json', 'capture_state.json')
+        if path.is_file()
+        and path.relative_to(root).as_posix() not in ('manifest.json', 'capture_state.json')
     }
     if set(listed) != present:
         missing = sorted(set(listed) - present)[:5]
@@ -166,6 +167,11 @@ def load_bundle(root: Path, period: timedelta) -> Bundle:
                 or document.get('kind') != 'steady_state_identity'
             ):
                 raise EvidenceError(f'{relative} is not a bound identity record.')
+            claimed = {
+                key: value for key, value in document.items() if key != 'runtime_identity_sha256'
+            }
+            if sha256_bytes(canonical_json(claimed)) != digest:
+                raise EvidenceError(f'{relative} identity content does not match its fingerprint.')
             identities[digest] = document
     samples: dict[datetime, dict[str, object]] = {}
     rejected: list[str] = []
@@ -408,9 +414,7 @@ class Evaluator:
                     continue
                 due, frontier = found
                 lags.append((bucket, max(0.0, (due - frontier).total_seconds())))
-                incomplete.append(
-                    (bucket, _number(probe.get('incomplete_partition_count')))
-                )
+                incomplete.append((bucket, _number(probe.get('incomplete_partition_count'))))
             self._series(
                 'SS-01',
                 key,

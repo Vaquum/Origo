@@ -59,7 +59,9 @@ import gzip
 import hashlib
 import json
 import logging
+import math
 import os
+import re
 import resource
 import socket
 import sys
@@ -74,7 +76,7 @@ from typing import Literal, cast
 
 import polars as pl
 
-from origo.sources.contracts import Client, Row
+from origo.sources.contracts import Client, Row, identifier
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
 from origo.workers.dagster_reader import RUNS_QUERY, DagsterReader, DagsterUnreachable
@@ -173,6 +175,43 @@ LATEST_MATERIALIZATION_QUERY = """query Latest($assetKey: AssetKeyInput!) {
 Environment = Literal['production', 'isolated']
 
 
+def _require_read_query(query: str) -> str:
+    # The observer owns a small read-only query vocabulary, not a general SQL console.
+    code = re.sub(
+        r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`[^`]*`|--[^\n]*|/\*.*?\*/", ' ', query, flags=re.S
+    )
+    tokens = re.findall(r'[A-Za-z_]+|;', code.upper())
+    verb = tokens[0] if tokens else ''
+    forbidden = {
+        'INSERT',
+        'UPDATE',
+        'DELETE',
+        'CREATE',
+        'ALTER',
+        'DROP',
+        'TRUNCATE',
+        'ATTACH',
+        'DETACH',
+        'RENAME',
+        'OPTIMIZE',
+        'SYSTEM',
+        'GRANT',
+        'REVOKE',
+        'KILL',
+        'OUTFILE',
+        'SETTINGS',
+    }
+    if verb not in _READ_VERBS or forbidden.intersection(tokens) or ';' in tokens[:-1]:
+        raise PermissionError('The steady-state observer refuses non-read or multi-statement SQL.')
+    if re.search(
+        r'\b(?:file|url|s3|s3Cluster|remote|remoteSecure|mysql|postgresql|jdbc|odbc)\s*\(',
+        code,
+        re.I,
+    ):
+        raise PermissionError('The observer does not read external table functions.')
+    return verb
+
+
 class ReadOnlyClient:
     """Read queries only, always bounded; a write verb or an unbounded read is refused."""
 
@@ -188,19 +227,23 @@ class ReadOnlyClient:
         params: object | None = None,
         settings: Mapping[str, object] | None = None,
     ) -> list[Row]:
-        verb = query.lstrip('( \n\t').split(None, 1)[0].upper() if query.strip() else ''
-        if verb not in _READ_VERBS:
-            raise PermissionError(
-                f'The steady-state observer only reads; refused {verb or "empty"} query.'
-            )
+        verb = _require_read_query(query)
         merged: dict[str, object] = dict(QUERY_SETTINGS)
         for name, value in (settings or {}).items():
-            if name in _CAPPED and isinstance(value, (int, float)) and not isinstance(value, bool):
-                merged[name] = min(float(value), float(cast(float, QUERY_SETTINGS[name])))
-                if isinstance(QUERY_SETTINGS[name], int):
-                    merged[name] = int(cast(float, merged[name]))
-            elif name != 'readonly':
-                merged[name] = value
+            if name in _CAPPED:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value <= 0
+                ):
+                    raise ValueError(f'Observer limit {name} must be a positive finite number.')
+                if name != 'max_execution_time' and not float(value).is_integer():
+                    raise ValueError(f'Observer limit {name} must be an integer.')
+                bounded = min(float(value), float(cast(float, QUERY_SETTINGS[name])))
+                merged[name] = bounded if name == 'max_execution_time' else int(bounded)
+            elif name not in QUERY_SETTINGS or value != QUERY_SETTINGS[name]:
+                raise PermissionError(f'Observer setting {name} cannot be changed.')
         merged['readonly'] = 1
         self.queries += 1
         self.issued.append({'verb': verb, 'settings': merged})
@@ -243,7 +286,7 @@ class CaptureConfig:
         code_sha, source = _code_identity(environ)
         return cls(
             label,
-            environ.get('CLICKHOUSE_DATABASE', 'origo'),
+            identifier(environ.get('CLICKHOUSE_DATABASE', 'origo')),
             Path(environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
             Path(environ.get('LOCAL_PARQUET_DIR', '/opt/parquet')),
             Path(environ.get('LOCAL_ARROW_DIR', '/opt/arrow')),

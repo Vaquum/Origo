@@ -281,7 +281,8 @@ def test_mount_render_defers_past_the_worker_month_cap(
         with pytest.raises(SourceError) as raised:
             runtime.publish('mount', str(mount))
         assert raised.value.code == 'RENDER_DEFERRED'
-        assert 'allow_full_history' in raised.value.safe_message
+        assert 'publish_binance_spot_trades_mount_job' in raised.value.safe_message
+        assert 'allow_full_history' not in raised.value.safe_message
         assert not (mount / 'latest.json').exists()
         assert client.execute(
             "SELECT count() FROM origo.source_failure_log WHERE operation='consumer' "

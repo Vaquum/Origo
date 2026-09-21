@@ -1934,6 +1934,7 @@ def test_deploy_launch_uses_configured_location(
     import shlex
     import subprocess
     import sys
+    from uuid import uuid4
 
     home = tmp_path / 'launch-instance'
     home.mkdir()
@@ -1947,6 +1948,8 @@ def test_deploy_launch_uses_configured_location(
         for line in workflow.splitlines()
         if line.strip().startswith('dagster job launch ')
     )
+    launch_id = str(uuid4())
+    command = command.replace('"$launched_run"', shlex.quote(launch_id))
     result = subprocess.run(
         [sys.executable, '-m', 'dagster', *shlex.split(command)[1:]],
         cwd=ROOT,
@@ -1958,6 +1961,7 @@ def test_deploy_launch_uses_configured_location(
     with DagsterInstance.from_config(str(home)) as instance:
         runs = instance.get_runs(RunsFilter(job_name='maintain_operational_metadata_job'))
         assert len(runs) == 1 and runs[0].status == DagsterRunStatus.QUEUED
+        assert runs[0].run_id == launch_id
         origin = runs[0].remote_job_origin
         assert origin is not None
         assert origin.repository_origin.code_location_origin.location_name == 'origo'

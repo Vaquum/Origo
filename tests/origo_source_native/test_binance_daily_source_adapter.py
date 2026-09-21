@@ -248,8 +248,16 @@ def _paced_setup(
 ) -> list[float]:
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     monkeypatch.delenv('ORIGO_WORKER_HEARTBEAT', raising=False)
+    from types import SimpleNamespace
+
     sleeps: list[float] = []
-    monkeypatch.setattr(daily.time, 'sleep', sleeps.append)
+    clock = [daily.time.time()]
+    def advance(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+    monkeypatch.setattr(daily, 'time', SimpleNamespace(
+        time=lambda: clock[0], monotonic=lambda: clock[0], sleep=advance,
+    ))
     return sleeps
 
 
@@ -269,11 +277,11 @@ def test_weighted_budgets_are_independent_per_host(
     )
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
     daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
-    assert sleeps == [0.0, 0.0]
+    assert sleeps == []
     assert (tmp_path / 'binance_rest_budget.fapi_binance_com.state').exists()
     assert (tmp_path / 'binance_rest_budget.api_binance_com.state').exists()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
-    assert sleeps[2] == pytest.approx(25.0, abs=1.0)
+    assert sum(sleeps) == pytest.approx(600 / (24 * 0.6), abs=1.0)
 
 
 def test_spot_aliases_share_one_budget(
@@ -287,27 +295,25 @@ def test_spot_aliases_share_one_budget(
     daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
     assert not (tmp_path / 'binance_rest_budget.api1_binance_com.state').exists()
     daily.get_response('https://api1.binance.com/api/v3/aggTrades', weight=600)
-    assert sleeps == [0.0, pytest.approx(10.0, abs=1.0)]
+    assert sum(sleeps) == pytest.approx(10.0, abs=1.0)
 
 
 def test_weighted_rate_and_used_weight_backstop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import time as time_module
-
     sleeps = _paced_setup(tmp_path, monkeypatch)
     monkeypatch.setattr(
         daily, '_request', lambda url, params, headers: _canned_response()
     )
-    before = time_module.time()
+    before = daily.time.time()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
     anchor, _ = _budget_state(tmp_path, 'fapi_binance_com')
-    assert anchor - before == pytest.approx(25.0, abs=1.0)
+    assert anchor - before == pytest.approx(600 / (24 * 0.6), abs=1.0)
     monkeypatch.setattr(
         daily, '_request', lambda url, params, headers: _canned_response(used='2000')
     )
-    during = time_module.time()
+    during = daily.time.time()
     daily.get_response('https://fapi.binance.com/fapi/v1/historicalTrades', weight=600)
     held, _ = _budget_state(tmp_path, 'fapi_binance_com')
     assert held - during >= 60.0
@@ -317,7 +323,7 @@ def test_weighted_rate_and_used_weight_backstop(
     monkeypatch.setattr(
         daily, '_request', lambda url, params, headers: _canned_response(used='2000')
     )
-    calm = time_module.time()
+    calm = daily.time.time()
     daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=600)
     api_held, _ = _budget_state(tmp_path, 'api_binance_com')
     assert api_held - calm == pytest.approx(10.0, abs=1.0)

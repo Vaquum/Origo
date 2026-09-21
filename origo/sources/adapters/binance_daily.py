@@ -42,7 +42,7 @@ REST_HOST_BUDGETS = {
 REST_DEFAULT_BUDGET = (20, 1200)
 
 
-def _beat() -> None:
+def beat_worker() -> None:
     """Touch the worker heartbeat when a worker owns this process.
 
     A paced catch-up fetch holds the worker inside one tick for minutes; each
@@ -119,7 +119,7 @@ def _weighted_request(
         next_request = time.time() + weight / rate
         persist()
         response = _request(url, params, headers)
-        _beat()
+        beat_worker()
         used = int(response.headers.get('X-MBX-USED-WEIGHT-1M', '0'))
         if used >= backstop:
             next_request = max(next_request, time.time() + 60)

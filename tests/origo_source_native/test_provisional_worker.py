@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -499,3 +501,76 @@ def test_reconcile_converts_died_started_receipts_to_failed(
         assert selects == 1
     finally:
         client.disconnect()
+
+
+def test_beat_writes_only_with_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV, beat_worker
+
+    target = tmp_path / 'worker.heartbeat'
+    monkeypatch.delenv(WORKER_HEARTBEAT_ENV, raising=False)
+    beat_worker()
+    assert not target.exists()
+    monkeypatch.setenv(WORKER_HEARTBEAT_ENV, str(target))
+    before = time.time()
+    beat_worker()
+    stamped = float(target.read_text())
+    assert stamped >= before - 5
+
+
+def test_slow_rest_fetch_beats_during_requests(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Beats land between paged requests, while the fetch is still running: the
+    # check before each transport call sees every earlier request's beat.
+    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
+
+    spec, _ = spot
+    target = tmp_path / 'worker.heartbeat'
+    monkeypatch.setenv(WORKER_HEARTBEAT_ENV, str(target))
+    previous = rest.get_response
+    seen: list[bool] = []
+
+    def observing(
+        url: str, *, params: dict[str, str | int], headers: dict[str, str], weight: int
+    ) -> daily.Response:
+        seen.append(target.exists())
+        return previous(url, params=params, headers=headers, weight=weight)
+
+    monkeypatch.setattr(rest, 'get_response', observing)
+    adapter = spec.provisional
+    assert adapter is not None
+    adapter.fetch(adapter.partition(KEY))
+    assert len(seen) >= 2
+    assert seen[0] is False and all(seen[1:])
+
+
+def test_parallel_builds_complete_all_candidates(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Six 2s units would take 12s sequentially; the pool overlaps them. Ten
+    # minutes past the anchor yields five backfill holes plus the current minute.
+    spec, _ = spot
+    late = ANCHOR + timedelta(minutes=10, seconds=5)
+    threads: set[int] = set()
+    calls: list[str] = []
+
+    def slow(
+        executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
+    ) -> dict[str, object]:
+        threads.add(threading.get_ident())
+        calls.append(config.partition_key)
+        time.sleep(2)
+        return {'build_id': '00000000-0000-0000-0000-000000000000'}
+
+    monkeypatch.setattr(provisional, 'execute_source', slow)
+    feed = _feed(spec, tmp_path, _Dagster(), _Reporter())
+    started = time.monotonic()
+    outcome = feed.tick(late)
+    elapsed = time.monotonic() - started
+    assert len(outcome.processed) == 6 and outcome.failed == ()
+    assert len(threads) > 1
+    assert elapsed < 9

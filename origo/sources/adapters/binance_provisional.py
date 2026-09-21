@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from ..contracts import Partition, Revision, Row, SourceError
 from ..hashing import content_hash
+from .binance_daily import beat_worker
 
 if TYPE_CHECKING:
     from .binance_daily import Response
@@ -168,6 +169,8 @@ class BinanceProvisionalBase:
                     'completed_at': self._now_utc().isoformat(),
                 }
             )
+            # A slow minute pages for minutes; prove the loop is alive per request.
+            beat_worker()
             return _objects(response.body)
 
         locator = request(

@@ -1,3 +1,7 @@
+# v3.21.3
+
+- Sustain provisional tails under slow providers: minute builds overlap in a bounded pool (4 workers, one ClickHouse connection each) instead of sequentially, so a 2-minute perp minute no longer caps the worker below the 60/hour arrival rate; and every completed REST request touches the worker heartbeat (the worker already exports the path; only the archive path used it), so a 200s+ minute proves liveness instead of looking dead to the 180s watchdog.
+
 # v3.21.2
 
 - Keep bulk mount renders out of the 60s worker loop: a render touching more than 4 months defers with RENDER_DEFERRED (loud receipt, backoff, monitor page) instead of dying to the 180s watchdog every tick with zero progress; an operator Dagster run of the existing mount job with allow_full_history does the full rebuild. Month renders log per-month/per-series progress, prune base scans to a source_date window around the month, and resolve the cut watermarks once per render instead of per month. Worker units record STARTED receipts and each tick reconciles deaths into FAILED/WORKER_DIED so retry backoff sees kills, and the monitor pages runs queued past 12h (a stuck maintenance run wedged its schedule silently for 3 days). The wedge itself is healed: a run worker that dies between pool-slot claim and step end leaves a claim no terminal event releases, so the maintenance schedule now sweeps dead-run claims before its outstanding gate and deploy recovery sweeps all pools, and neither can evict a live holder.

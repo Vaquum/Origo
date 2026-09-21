@@ -201,3 +201,73 @@ def test_repeated_old_provider_page_does_not_refresh_capture_health(tmp_path: Pa
         assert check_spool(spool.path, now=now + timedelta(seconds=181)) == 1
     finally:
         spool.close()
+
+
+def test_absent_ancillary_rpi_metadata_stays_unknown_not_false() -> None:
+    # The archived six-field raw product has no RPI label. Removing only that
+    # ancillary field must not invent a value or change owned native trade values.
+    source = json.loads(base64.b64decode(recordings()[0]['body_base64']))[0]
+    without_rpi = {key: value for key, value in source.items() if key != 'isRPITrade'}
+    (parsed,) = parse_recent_trades(json.dumps([without_rpi]).encode())
+    assert parsed.is_rpi is None
+    assert 'isRPITrade' not in parsed.provider_row()
+    assert historical_row(parsed.provider_row()) == historical_row(source)
+    with pytest.raises(ValueError, match='boolean'):
+        parse_recent_trades(json.dumps([{**source, 'isRPITrade': 'unknown'}]).encode())
+
+
+def test_repair_boundary_survives_acknowledging_the_previous_minute(tmp_path: Path) -> None:
+    records = recordings()
+    target = datetime(2026, 9, 21, 15, 12, tzinfo=UTC)
+    full = TradeSpool.create(tmp_path / 'whole.sqlite', historical_row)
+    partial = TradeSpool.create(tmp_path / 'gapped.sqlite', historical_row)
+    try:
+        replay(full, records)
+        kept = [
+            record
+            for record in records
+            if not (
+                target + timedelta(seconds=10)
+                <= datetime.fromisoformat(record['captured_at'])
+                < target + timedelta(seconds=28)
+            )
+        ]
+        replay(partial, kept)
+        prior = partial.sealed_minute(target - timedelta(minutes=1))
+        assert isinstance(prior, SealedMinute)
+        now = datetime.fromisoformat(records[-1]['completed_at']) + timedelta(seconds=61)
+        partial.acknowledge(
+            target - timedelta(minutes=1),
+            content_hash=prior.content_hash,
+            generation='accepted-before-gap',
+            now=now,
+        )
+        preserved = partial.connection.execute(
+            'SELECT count(*) FROM trades WHERE time >= ? AND time < ?',
+            (
+                int((target - timedelta(minutes=1)).timestamp() * 1000),
+                int(target.timestamp() * 1000),
+            ),
+        ).fetchone()[0]
+        assert preserved == 1
+        rows_by_id = {}
+        for record in records:
+            for row in json.loads(base64.b64decode(record['body_base64'])):
+                rows_by_id[row['id']] = row
+        ordered = [rows_by_id[key] for key in sorted(rows_by_id)]
+
+        def page(from_id: int) -> Response:
+            rows = [row for row in ordered if row['id'] >= from_id][:500]
+            return Response(json.dumps(rows).encode(), {}, 200)
+
+        interval = Partition(
+            target.strftime('%Y-%m-%dT%H:%M:%SZ'), target, target + timedelta(minutes=1), True
+        )
+        repaired = repair_minute(partial, interval, page)
+        expected = full.sealed_minute(target)
+        assert isinstance(expected, SealedMinute)
+        assert repaired is not None and repaired.content_hash == expected.content_hash
+        assert tuple(repaired.rows()) == expected.rows
+    finally:
+        full.close()
+        partial.close()

@@ -513,6 +513,11 @@ class SourceRuntime:
                 self.failures.recover(operation='audit', partition=partition.key)
                 changed.append(partition.key)
             except ArchiveNotPublishedYet:
+                get_dagster_logger('origo.sources').info(
+                    'source=%s partition=%s phase=audit_pending_unpublished',
+                    self.spec.key,
+                    partition.key,
+                )
                 continue
             except (OSError, ValueError, RuntimeError) as error:
                 self.failures.record(

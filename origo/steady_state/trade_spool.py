@@ -119,7 +119,9 @@ class RawTrade:
     quote_qty: str
     time: int
     is_buyer_maker: bool
-    is_rpi: bool
+    # Ancillary provider metadata is not in the frozen raw-trade product schema.
+    # Absence remains unknown, never an invented false flag.
+    is_rpi: bool | None
 
     def provider_row(self) -> dict[str, object]:
         return {
@@ -129,7 +131,7 @@ class RawTrade:
             'quoteQty': self.quote_qty,
             'time': self.time,
             'isBuyerMaker': self.is_buyer_maker,
-            'isRPITrade': self.is_rpi,
+            **({'isRPITrade': self.is_rpi} if self.is_rpi is not None else {}),
         }
 
 
@@ -226,7 +228,7 @@ def parse_recent_trades(body: bytes) -> tuple[RawTrade, ...]:
         if not isinstance(item, dict):
             raise ValueError('Binance recent trades must be objects.')
         row = cast(dict[object, object], item)
-        if not {'id', 'price', 'qty', 'quoteQty', 'time', 'isBuyerMaker', 'isRPITrade'} <= set(row):
+        if not {'id', 'price', 'qty', 'quoteQty', 'time', 'isBuyerMaker'} <= set(row):
             raise ValueError('Binance recent trade lacks a documented field.')
         timestamp = _int(row['time'], 'time')
         if len(str(timestamp)) != 13:
@@ -238,12 +240,18 @@ def parse_recent_trades(body: bytes) -> tuple[RawTrade, ...]:
             _text(row['quoteQty'], 'quoteQty'),
             timestamp,
             _bool(row['isBuyerMaker'], 'isBuyerMaker'),
-            _bool(row['isRPITrade'], 'isRPITrade'),
+            _bool(row['isRPITrade'], 'isRPITrade') if 'isRPITrade' in row else None,
         )
         if trades and (trade.id <= trades[-1].id or trade.time < trades[-1].time):
             raise ValueError('Binance recent trades are unordered or duplicated.')
         trades.append(trade)
     return tuple(trades)
+
+
+def _optional_rpi(value: int) -> bool | None:
+    if value not in (-1, 0, 1):
+        raise ValueError('Spool optional RPI metadata is invalid.')
+    return None if value == -1 else bool(value)
 
 
 def _ms(instant: datetime) -> int:
@@ -420,7 +428,7 @@ class TradeSpool:
                             trade.quote_qty,
                             trade.time,
                             int(trade.is_buyer_maker),
-                            int(trade.is_rpi),
+                            (-1 if trade.is_rpi is None else int(trade.is_rpi)),
                         )
                         for trade in fresh
                     ],
@@ -498,7 +506,7 @@ class TradeSpool:
                 trade.quote_qty,
                 trade.time,
                 int(trade.is_buyer_maker),
-                int(trade.is_rpi),
+                (-1 if trade.is_rpi is None else int(trade.is_rpi)),
             ):
                 return 'conflict'
             seen.add(trade.id)
@@ -547,7 +555,7 @@ class TradeSpool:
                     str(row[3]),
                     _cell(row, 4),
                     bool(_cell(row, 5)),
-                    bool(_cell(row, 6)),
+                    _optional_rpi(_cell(row, 6)),
                 ).provider_row()
             )
             for row in rows

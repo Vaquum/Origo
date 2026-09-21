@@ -32,7 +32,7 @@ def _values(row: tuple[object, ...]) -> dict[str, object]:
         'quoteQty': str(row[4]),
         'time': int(str(row[5])),
         'isBuyerMaker': bool(row[6]),
-        'isRPITrade': bool(row[7]),
+        **({'isRPITrade': bool(row[7])} if row[7] != -1 else {}),
     }
 
 

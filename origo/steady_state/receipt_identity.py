@@ -130,6 +130,13 @@ def _table(database: str) -> str:
 
 
 def ensure_attempt_columns(client: Client, database: str) -> None:
+    # Monitor, depth and source children start concurrently on a new release.
+    # Serialize the check-and-ALTER sequence on their common receipt lock mount.
+    with source_lock(lock_root(), 'worker_receipts', 'schema', wait=True):
+        _ensure_attempt_columns(client, database)
+
+
+def _ensure_attempt_columns(client: Client, database: str) -> None:
     """Add the identity columns once and refuse any other shape, including the
     physical-column layout an earlier draft used, which old writers cannot insert into."""
     expected = {ATTEMPT_COLUMN: ('String', 'EPHEMERAL', "''")}
@@ -161,7 +168,9 @@ def ensure_attempt_columns(client: Client, database: str) -> None:
             + additions
         )
         present = columns()
-    insertable = tuple(name for name, (_, default_kind, _) in present.items() if default_kind in ('', 'DEFAULT'))
+    insertable = tuple(
+        name for name, (_, default_kind, _) in present.items() if default_kind in ('', 'DEFAULT')
+    )
     if insertable != BASE_COLUMNS or {name: present.get(name) for name in expected} != expected:
         raise SourceError('RECEIPT_SCHEMA_PARTIAL', 'Receipt identity schema is inconsistent.')
     keys = client.execute(
@@ -181,7 +190,8 @@ def _recorded_at(existing_max: datetime | None) -> datetime:
         floor = _utc(existing_max) + timedelta(milliseconds=1)
         if floor - now > CLOCK_WAIT_BOUND:
             raise SourceError(
-                'RECEIPT_CLOCK_SKEW', 'A stored receipt is ahead of this clock beyond the collision bound.'
+                'RECEIPT_CLOCK_SKEW',
+                'A stored receipt is ahead of this clock beyond the collision bound.',
             )
         started = time.monotonic()
         while now < floor:
@@ -293,7 +303,9 @@ def outstanding_owner_epochs(client: Client, database: str, feed: str) -> tuple[
         settings=SCAN_LIMITS,
     )
     if len(rows) > OWNER_LIMIT:
-        raise SourceError('OWNER_QUERY_LIMIT', 'Too many unresolved owners; evidence was not truncated.')
+        raise SourceError(
+            'OWNER_QUERY_LIMIT', 'Too many unresolved owners; evidence was not truncated.'
+        )
     return tuple(str(row[0]) for row in rows)
 
 

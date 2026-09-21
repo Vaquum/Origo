@@ -337,13 +337,36 @@ def mount(
         raise RuntimeError('A consumer cannot publish an empty source state.')
     started = time.monotonic()
     previous = _previous_manifest(root)
+    parquet_root = parquet_source_root()
+    arrow_root = series_store_dir(decl.specs[0].name).parent
+    from origo.steady_state.committed_files import pin_files, prune_generations
+
+    old_entries = cast(list[dict[str, object]], previous.get('files') or [])
+    previous_token = str(previous.get('pinned_token') or previous.get('version') or '')
+    if old_entries and any('mirror_path' not in entry for entry in old_entries):
+        # Upgrade the receipt before mutating a legacy mirror. A failed new
+        # commit must not destroy the bytes its previous manifest still names.
+        previous = {
+            **previous,
+            'files': pin_files(
+                old_entries,
+                source=store.spec.key,
+                token=previous_token,
+                parquet_root=parquet_root,
+                arrow_root=arrow_root,
+            ),
+        }
+        _write_manifest(root, previous)
     previous_months = cast(dict[str, str], previous.get('month_tokens') or {})
     previous_files = {
-        str(cast(dict[str, object], entry)['path']): cast(dict[str, object], entry)
+        str(
+            cast(dict[str, object], entry).get(
+                'mirror_path', cast(dict[str, object], entry)['path']
+            )
+        ): cast(dict[str, object], entry)
         for entry in cast(list[object], previous.get('files') or [])
     }
     tokens = month_tokens(store.spec.key, snapshot, export_start_date=decl.export_start_date)
-    parquet_root = parquet_source_root()
     owner = store.spec.key if decl.scope_staging_to_source else None
     journal = CheckpointJournal(parquet_root, owner)
     invalidated = journal.prune(tokens)
@@ -446,7 +469,7 @@ def mount(
             )
             if series.name not in rebuilt and entry is not None and latest.is_symlink():
                 current = latest.resolve()
-                if str(current) == entry['path'] and current.is_file():
+                if str(current) == entry.get('mirror_path', entry['path']) and current.is_file():
                     files.append(entry)
                     continue
             log.info(
@@ -487,6 +510,13 @@ def mount(
         else entry
         for entry in files
     ]
+    files = pin_files(
+        files,
+        source=store.spec.key,
+        token=snapshot.token,
+        parquet_root=parquet_root,
+        arrow_root=arrow_root,
+    )
     manifest: dict[str, object] = {
         'source_key': store.spec.key,
         'state_token': state,
@@ -510,6 +540,12 @@ def mount(
     }
     _write_manifest(root, manifest)
     journal.clear()
+    prune_generations(
+        source=store.spec.key,
+        retained_tokens=(snapshot.token, previous_token),
+        parquet_root=parquet_root,
+        arrow_root=arrow_root,
+    )
 
 
 def huggingface(

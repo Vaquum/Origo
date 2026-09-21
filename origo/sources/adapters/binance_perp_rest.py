@@ -90,6 +90,9 @@ def acknowledge_captured(
     try:
         spool = TradeSpool.attach(path, historical_row)
     except FileNotFoundError:
+        log.warning(
+            'Capture acknowledgement unavailable for %s: durable spool is missing', partition.key
+        )
         return None
     try:
         outcome = spool.acknowledge(
@@ -127,9 +130,12 @@ class BinancePerpProvisional(BinanceProvisionalBase):
 
     def acknowledge(self, partition: Partition, *, content_hash: str, generation: str) -> None:
         from ..contracts import SourceError
+
         outcome = acknowledge_captured(partition, content_hash=content_hash, generation=generation)
         if outcome is not None and outcome.sealed and not outcome.hash_matched:
-            raise SourceError('CAPTURE_CONFLICT', 'Accepted and captured input differ; captured rows retained.')
+            raise SourceError(
+                'CAPTURE_CONFLICT', 'Accepted and captured input differ; captured rows retained.'
+            )
 
     def map_row(self, row: Mapping[str, object]) -> Row:
         return historical_row(row)
@@ -164,9 +170,13 @@ class BinancePerpProvisional(BinanceProvisionalBase):
         _, path = _spool_file()
         if path.is_file() and os.environ.get('BINANCE_API_KEY'):
             from origo.steady_state.capture_repair import repair_minute
+
             spool = TradeSpool.attach(path, historical_row)
             try:
-                base = os.environ.get(self.REST_BASE_URL_ENV, self.REST_BASE_URL_DEFAULT).rstrip('/')
+                base = os.environ.get(self.REST_BASE_URL_ENV, self.REST_BASE_URL_DEFAULT).rstrip(
+                    '/'
+                )
+
                 def fetch_gap(start_id: int) -> Response:
                     return self._get_response(
                         base + '/fapi/v1/historicalTrades',
@@ -174,6 +184,7 @@ class BinancePerpProvisional(BinanceProvisionalBase):
                         {'X-MBX-APIKEY': os.environ['BINANCE_API_KEY']},
                         self.WEIGHT_HISTORICAL,
                     )
+
                 repaired = repair_minute(spool, partition, fetch_gap)
                 if repaired is not None:
                     return repaired

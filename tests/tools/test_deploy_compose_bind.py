@@ -212,7 +212,7 @@ def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None
     end = workflow.index(end_marker, start) + len(end_marker)
     recovery = textwrap.dedent(workflow[start:end])
     # Execute the deployed shell path against Docker responses, including failures.
-    docker = r'''
+    docker = r"""
 set -euo pipefail
 PROJECT_NAME=test
 function docker() {
@@ -223,7 +223,10 @@ function docker() {
         printf '%s\n' 'old-daemon daemon-host' ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
         printf '%s\n' 'old-ui ui-host' ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker')
+      'compose -p test -f docker-compose.deploy.yml stop -t 30 depth-worker provisional-worker')
+        if [ "$RETIREMENT_CASE" = stop-error ]; then return 1; fi
+        return 0 ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector trade-capture depth-worker provisional-worker')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -239,8 +242,8 @@ function docker() {
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
 }
-'''
-    for case in ('removed', 'stopped', 'running', 'inventory-error', 'inspect-error'):
+"""
+    for case in ('removed', 'stopped', 'running', 'stop-error', 'inventory-error', 'inspect-error'):
         invocation = tmp_path / case
         result = subprocess.run(
             ['bash', '-c', docker + recovery],

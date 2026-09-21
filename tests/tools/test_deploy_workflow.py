@@ -47,5 +47,12 @@ def test_post_up_block_is_observable() -> None:
     # future skip fails loud instead of going green silently.
     text = DEPLOY_WORKFLOW.read_text()
     assert text.count("echo 'post-up:") >= 3
-    assert 'maintenance launch produced no run' in text
+    assert (
+        'dagster job launch -j maintain_operational_metadata_job --run-id "$launched_run"' in text
+    )
+    assert 'python -m origo.steady_state.deployment' in text
+    assert '--maintenance-run-id "$launched_run" --ready-at "$compose_ready_at"' in text
+    assert text.index('maintenance launched run') < text.index(
+        'python -m origo.steady_state.deployment'
+    )
     assert 'maintenance launched run' in text

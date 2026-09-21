@@ -24,15 +24,20 @@ services:
     ports:
       - "4000:3000"
     environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager
       - DAGSTER_DEFAULT_IO_MANAGER_ATTRIBUTE=packed_io_manager
       - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
       - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-600}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
+      - ORIGO_TRADE_SPOOL_DIR=/opt/origo/spool
     volumes:
+      - worker-heartbeats:/opt/origo/heartbeats:ro
+      - trade-spool:/opt/origo/spool
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
@@ -50,15 +55,20 @@ services:
     build: .
     image: origo-dagster:latest
     environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager
       - DAGSTER_DEFAULT_IO_MANAGER_ATTRIBUTE=packed_io_manager
       - ORIGO_METADATA_DRY_RUN=${ORIGO_METADATA_DRY_RUN:-true}
       - ORIGO_METADATA_MAX_RUNTIME_SECONDS=${ORIGO_METADATA_MAX_RUNTIME_SECONDS:-600}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
+      - ORIGO_TRADE_SPOOL_DIR=/opt/origo/spool
     volumes:
+      - worker-heartbeats:/opt/origo/heartbeats:ro
+      - trade-spool:/opt/origo/spool
       - .:/opt/app
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
@@ -90,6 +100,10 @@ services:
       - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-}
       - ORIGO_ALERT_EMAIL_TO=${ORIGO_ALERT_EMAIL_TO:-}
     volumes:
+      - source-locks:/opt/origo/locks
+      - ./parquet_data:/opt/parquet:ro
+      - ./arrow_data:/opt/arrow:ro
+      - trade-spool:/opt/origo/spool:ro
       - .:/opt/app
       - worker-heartbeats:/opt/origo/heartbeats
       - source-publications:/opt/origo/shadow:ro
@@ -154,6 +168,7 @@ services:
     build: .
     image: origo-dagster:latest
     environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
       - PYTHONPATH=/opt/app
       - DAGSTER_WEBSERVER_URL=http://dagit:3000
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
@@ -161,7 +176,9 @@ services:
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
       # The REST and component beats land here; the worker main re-exports the same path.
       - ORIGO_WORKER_HEARTBEAT=/opt/origo/heartbeats/provisional.heartbeat
+      - ORIGO_TRADE_SPOOL_DIR=/opt/origo/spool
     volumes:
+      - trade-spool:/opt/origo/spool
       - .:/opt/app
       - ./parquet_data:/opt/parquet
       - ./arrow_data:/opt/arrow
@@ -180,6 +197,28 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  trade-capture:
+    build: .
+    image: origo-dagster:latest
+    environment:
+      - PYTHONPATH=/opt/app
+      - ORIGO_TRADE_SPOOL_DIR=/opt/origo/spool
+      - ORIGO_TRADE_SPOOL_MAX_BYTES=4294967296
+    volumes:
+      - trade-spool:/opt/origo/spool
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+      - .:/opt/app
+    command: python -m origo.workers.trade_capture
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.trade_capture", "--check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
   dagster-instance:
@@ -189,3 +228,5 @@ volumes:
   source-publications:
 
   worker-heartbeats:
+
+  trade-spool:

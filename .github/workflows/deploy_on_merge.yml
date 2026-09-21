@@ -200,7 +200,7 @@ jobs:
           # stays detached so Compose cannot consume the remainder of this script.
           echo 'pre-up: retire positional worker-receipt writers'
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml stop -t 30 depth-worker provisional-worker </dev/null
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector trade-capture depth-worker provisional-worker \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           compose_ready_at=$(date +%s)
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,

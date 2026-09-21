@@ -1,5 +1,7 @@
 # v3.21.7
 
+- Wire the independent perpetual capture service and shared durable spool into both Compose deployments; give the monitor read-only access to the actual Parquet/Arrow products and declare native-job market-data credentials.
+
 - Replace the #440 provisional frontier lookup with bounded, source-scoped component-certified coverage reads; preserve first-gap admission without expanding the current-view join.
 - Isolate source-local worker failures and continue independent sources with explicit failure/recovery evidence. Add authentic metadata replay and real build/publication regressions as S439's first execution gate; full steady-state acceptance remains outstanding.
 

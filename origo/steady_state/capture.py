@@ -194,7 +194,6 @@ def _require_read_query(query: str) -> str:
         'DETACH',
         'RENAME',
         'OPTIMIZE',
-        'SYSTEM',
         'GRANT',
         'REVOKE',
         'KILL',

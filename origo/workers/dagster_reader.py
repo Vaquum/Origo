@@ -45,6 +45,11 @@ RUNS_QUERY = """query Runs($filter: RunsFilter!, $cursor: String, $limit: Int!) 
     }
   }
 }"""
+STUCK_QUERY = """query StuckRuns($before: Float!) {
+  runsOrError(filter: {statuses: [QUEUED], createdBefore: $before}, limit: 50) {
+    __typename ... on Runs { results { runId jobName creationTime } }
+  }
+}"""
 _ACTIVE_BACKFILL_STATUSES = ('REQUESTED', 'CANCELING', 'FAILING')
 CHECK_EXECUTIONS_QUERY = """query CheckExecutions($assetKey: AssetKeyInput!, $checkName: String!) {
   assetCheckExecutions(assetKey: $assetKey, checkName: $checkName, limit: 1) {
@@ -62,6 +67,13 @@ class DagsterHealth:
     reachable: bool
     unhealthy_daemons: tuple[str, ...]
     queued_runs: int
+
+
+@dataclass(frozen=True)
+class StuckRun:
+    run_id: str
+    job_name: str
+    created_at: float
 
 
 @dataclass(frozen=True)
@@ -222,6 +234,24 @@ class DagsterReader:
                 )
             )
         return failures
+
+    def stuck_queued_runs(self, before: float) -> list[StuckRun]:
+        data = self.query('StuckRuns', STUCK_QUERY, {'before': before})
+        runs = _mapping(data.get('runsOrError'), 'runs')
+        if runs.get('__typename') != 'Runs':
+            raise DagsterUnreachable('StuckRuns: runs were not listed.')
+        stuck: list[StuckRun] = []
+        for item in _sequence(runs.get('results'), 'results'):
+            run = _mapping(item, 'run')
+            created = run.get('creationTime')
+            stuck.append(
+                StuckRun(
+                    str(run['runId']),
+                    str(run['jobName']),
+                    float(created) if isinstance(created, (int, float)) else 0.0,
+                )
+            )
+        return stuck
 
     def _backfills(self, asset_key: str) -> list[Backfill]:
         """Native backfills selecting ``asset_key``, newest first."""

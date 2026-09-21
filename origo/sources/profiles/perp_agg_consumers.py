@@ -8,12 +8,11 @@ mirror never collides with the trades sources'.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import cast
 
 from huggingface_hub import HfApi
 
-from ..contracts import ConsumerSpec, Snapshot, SnapshotReader
+from ..contracts import ConsumerRenderer, ConsumerSpec, Snapshot, SnapshotReader
 from .consumer_base import ConsumerDeclaration
 from .consumer_base import huggingface as _render_huggingface
 from .consumer_base import huggingface_shadow as _render_shadow
@@ -112,8 +111,14 @@ _DECL = ConsumerDeclaration(
 )
 
 
-def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
-    _render_mount(reader, snapshot, destination, decl=_DECL)
+def _mount(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
+    _render_mount(reader, snapshot, destination, decl=_DECL, allow_full=allow_full)
 
 
 def _huggingface(
@@ -121,9 +126,9 @@ def _huggingface(
     snapshot: Snapshot,
     destination: str,
     *,
-    upload: bool = True,
-    kind: str = 'huggingface',
+    allow_full: bool = False,
 ) -> None:
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     # Snapshot callables resolve through their modules at call time (patch seams).
     _render_huggingface(
         reader,
@@ -135,13 +140,18 @@ def _huggingface(
         dollar_klines=agg_snapshot.get_perp_agg_dollar_klines,
         time_card=agg_snapshot.build_time_dataset_card,
         dollar_card=agg_snapshot.build_dollar_dataset_card,
-        upload=upload,
-        kind=kind,
     )
 
 
-def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+def _huggingface_shadow(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
     """Render the snapshot files locally without uploading; the CANARY shadow publication."""
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     _render_shadow(
         reader,
         snapshot,
@@ -155,7 +165,7 @@ def _huggingface_shadow(reader: SnapshotReader, snapshot: Snapshot, destination:
     )
 
 
-Renderer = Callable[[SnapshotReader, Snapshot, str], None]
+Renderer = ConsumerRenderer
 
 PERP_AGG_CONSUMERS = (
     ConsumerSpec('mount', cast(Renderer, _mount)),

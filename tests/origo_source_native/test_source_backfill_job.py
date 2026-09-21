@@ -173,7 +173,13 @@ def test_file_failure_fails_job_and_retry_keeps_verified_generation(
     original = store.spec.consumers[1]
     attempts = 0
 
-    def interrupted(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+    def interrupted(
+        reader: SnapshotReader,
+        snapshot: Snapshot,
+        destination: str,
+        *,
+        allow_full: bool = False,
+    ) -> None:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -476,7 +482,13 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
     def overlapping(
         publish: Callable[[SnapshotReader, Snapshot, str], None],
     ) -> Callable[[SnapshotReader, Snapshot, str], None]:
-        def render(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+        def render(
+            reader: SnapshotReader,
+            snapshot: Snapshot,
+            destination: str,
+            *,
+            allow_full: bool = False,
+        ) -> None:
             provisional_refresh()
             publish(reader, snapshot, destination)
 

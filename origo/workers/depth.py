@@ -68,7 +68,7 @@ from origo.assets.sync_binance_spot_depth200_snapshots_to_origo import (
 from origo.sources.contracts import Client
 from origo.utils.arrow_store import series_store_dir
 
-from .receipts import ensure_monitoring_tables, record_receipt
+from .receipts import ensure_monitoring_tables, reconcile_died_receipts, record_receipt
 from .report import Reporter
 from .runtime import TickOutcome, check_heartbeat, heartbeat_directory, heartbeat_path, run_forever
 
@@ -322,10 +322,21 @@ class DepthFeed:
             and arrow_is_complete(status, minute_start)
         ):
             return None
+        if status.snapshot_rows == 0 and not source_has_rows(spec, minute_start):
+            return None
+        record_receipt(
+            self.client,
+            self.database,
+            feed=self.name,
+            series=spec.series,
+            minute=minute_start,
+            rows=0,
+            sha256='',
+            duration_ms=0,
+            status='STARTED',
+        )
         synced = 0
         if status.snapshot_rows == 0:
-            if not source_has_rows(spec, minute_start):
-                return None
             synced = _sync(spec, self.client, self.database, minute_start)
             self.reporter.materialized(
                 spec.sync_asset, partition=partition_key, metadata={'rows_inserted': synced}
@@ -349,6 +360,9 @@ class DepthFeed:
         now = now.astimezone(UTC)
         processed: list[str] = []
         failed: list[str] = []
+        died = reconcile_died_receipts(self.client, self.database, feed=self.name, now=now)
+        if died:
+            log.warning('reconciled %d receipts for units the previous process died on', died)
         for spec in self.specs:
             for minute_start, partition_key in candidate_minutes(spec, now, self.lookback_minutes):
                 started = time.monotonic()

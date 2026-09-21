@@ -193,10 +193,21 @@ class SnapshotReader(Protocol):
     def rows(self, component: str, snapshot: Snapshot) -> list[Row]: ...
 
 
+class ConsumerRenderer(Protocol):
+    def __call__(
+        self,
+        reader: SnapshotReader,
+        snapshot: Snapshot,
+        destination: str,
+        *,
+        allow_full: bool = False,
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class ConsumerSpec:
     key: str
-    publish: Callable[[SnapshotReader, Snapshot, str], None]
+    publish: ConsumerRenderer
     canonical_only: bool = False
     public: bool = False
 

@@ -1,5 +1,6 @@
 """Dagit entry point for operational metadata maintenance."""
 
+import logging
 import os
 import selectors
 import signal
@@ -23,6 +24,7 @@ from dagster import (
     MaterializeResult,
     MetadataValue,
     ScheduleDefinition,
+    ScheduleEvaluationContext,
     asset,
     in_process_executor,
 )
@@ -36,6 +38,8 @@ if TYPE_CHECKING:
     _MaintenanceResult = MaterializeResult[None]
 else:
     _MaintenanceResult = MaterializeResult
+
+log = logging.getLogger(__name__)
 
 
 def deployed_config() -> OperationalMetadataMaintenanceConfig:
@@ -176,12 +180,25 @@ _maintenance_definitions = Definitions(
 maintain_operational_metadata_job = _maintenance_definitions.resolve_job_def(
     'maintain_operational_metadata_job'
 )
-from origo.orchestration.policy import has_outstanding
+from origo.orchestration.policy import has_outstanding, reconcile_stale_concurrency_claims
+
+
+def _should_execute(context: ScheduleEvaluationContext) -> bool:
+    # The pool slot is claimed before this op runs, so a wedged pool blocks the very
+    # job that could heal it. Sweep dead-run claims here, outside the pool, first.
+    try:
+        freed = reconcile_stale_concurrency_claims(context.instance)
+    except Exception:
+        log.exception('Stale concurrency-claim reconcile failed; the schedule gate still applies.')
+    else:
+        if freed:
+            log.warning('Freed %d stale pool claim(s) left by dead runs.', freed)
+    return not has_outstanding(context.instance, 'maintain_operational_metadata_job')
 
 
 operational_metadata_maintenance_schedule = ScheduleDefinition(
     name='operational_metadata_maintenance_schedule',
-    should_execute=lambda context: not has_outstanding(context.instance, 'maintain_operational_metadata_job'),
+    should_execute=_should_execute,
     job=maintain_operational_metadata_job,
     cron_schedule='*/10 * * * *',
     execution_timezone='UTC',

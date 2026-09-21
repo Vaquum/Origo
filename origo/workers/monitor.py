@@ -74,6 +74,9 @@ PROBE_TIMEOUT_SECONDS = 10
 # seconds after its stamp and a worker stamps a receipt before inserting it, so a row
 # stamped just before a read and inserted after it must still fall inside a later window.
 DELIVERY_LAG_SECONDS = 60
+# A run still queued this long after creation never got a slot: backfill waves
+# drain in ~2h, so 12h means stuck, not busy.
+QUEUE_STUCK_AFTER = timedelta(hours=12)
 PUBLICATION_ROOT_ENV = 'ORIGO_SOURCE_PUBLICATION_ROOT'
 PUBLICATION_ROOT_DEFAULT = '/opt/origo/shadow'
 # A pinned consumer (mount) renders on every state change, so hours without a render
@@ -201,7 +204,7 @@ class Monitor:
         # the other five still run, the evaluations are still written and the e-mail is still
         # sent. A detector that did not complete its read leaves its cursor where it was.
         dagster, dagster_read = self._guarded(
-            'queue_bounded', 'dagster', lambda: self._dagster_findings(cursor)
+            'queue_bounded', 'dagster', lambda: self._dagster_findings(cursor, window_end)
         )
         workers, workers_read = self._guarded(
             'workers_alive', 'workers', lambda: (self._worker_findings(cursor, window_end), True)
@@ -320,7 +323,9 @@ class Monitor:
         lines.append('Investigate in this order: Dagit, ClickHouse, Docker, the collectors.')
         return '\n'.join(lines) + '\n'
 
-    def _dagster_findings(self, cursor: Cursor) -> tuple[list[Finding], bool]:
+    def _dagster_findings(
+        self, cursor: Cursor, window_end: datetime
+    ) -> tuple[list[Finding], bool]:
         """Findings from Dagster and whether the failure queries ran, so the failure cursor
         only advances past what was actually read."""
         findings: list[Finding] = []
@@ -350,6 +355,17 @@ class Monitor:
                     'queue_bounded',
                     f'{health.queued_runs} queued runs',
                     f'The threshold is {self.queue_threshold}.',
+                )
+            )
+        stuck_before = (window_end - QUEUE_STUCK_AFTER).timestamp()
+        for stuck in self.dagster.stuck_queued_runs(stuck_before):
+            findings.append(
+                Finding(
+                    f'queue_stuck:{stuck.job_name}',
+                    'queue_bounded',
+                    f'Run of {stuck.job_name} queued since '
+                    f'{datetime.fromtimestamp(stuck.created_at, UTC).isoformat()}',
+                    f'Older than {QUEUE_STUCK_AFTER}; run {stuck.run_id}.',
                 )
             )
         by_job: dict[str, list[RunFailure]] = {}

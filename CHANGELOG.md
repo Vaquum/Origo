@@ -1,3 +1,7 @@
+# v3.21.2
+
+- Keep bulk mount renders out of the 60s worker loop: a render touching more than 4 months defers with RENDER_DEFERRED (loud receipt, backoff, monitor page) instead of dying to the 180s watchdog every tick with zero progress; an operator Dagster run of the existing mount job with allow_full_history does the full rebuild. Month renders log per-month/per-series progress, prune base scans to a source_date window around the month, and resolve the cut watermarks once per render instead of per month. Worker units record STARTED receipts and each tick reconciles deaths into FAILED/WORKER_DIED so retry backoff sees kills, and the monitor pages runs queued past 12h (a stuck maintenance run wedged its schedule silently for 3 days). The wedge itself is healed: a run worker that dies between pool-slot claim and step end leaves a claim no terminal event releases, so the maintenance schedule now sweeps dead-run claims before its outstanding gate and deploy recovery sweeps all pools, and neither can evict a live holder.
+
 # v3.21.1
 
 - Bound the Arrow series build peak: one sort with keep-last dedupe in maintained order (no second sort pass), chunk-aware rechunk, and file-direct IPC staging with a streaming content hash. Peak drops from ~5x to ~2x the series, so the 2.1GB perp 1M-dollar series renders inside the 16g worker instead of OOM-killing it every tick. The sort is stable so keep-last keeps the later file's row across month seams, and a failed stage unlinks its hidden tmp instead of stranding a multi-GB orphan.

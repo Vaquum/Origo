@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -51,14 +52,24 @@ from origo.utils.arrow_store import (
     stage_series,
 )
 
-from ..contracts import Snapshot, SnapshotReader, StateRecord
+from ..contracts import Snapshot, SnapshotReader, SourceError, StateRecord
 from ..hashing import state_token
 from ..storage import SourceStore
 from .formulas import huggingface_time as time_snapshot
 from .formulas.spot_series import MountKlineSpec, month_path
 
+log = logging.getLogger(__name__)
+
 # A staging directory or partial manifest older than this belongs to a render that died.
 ORPHAN_STAGING_MAX_AGE_SECONDS = 3600
+# A mount render touching more months than this does not fit the worker's
+# watchdog budget; the worker defers it to an operator Dagster run instead of
+# dying mid-render every tick. Steady state touches 1-3 months.
+MOUNT_WORKER_MONTH_CAP = 4
+# source_date margin around a rendered month. Rows are written under their own
+# partition day, so a week dwarfs any boundary straddle while the monthly parts
+# still prune the scan to ~3 parts.
+PRUNE_MARGIN_DAYS = 7
 
 DatasetEntry = tuple[str, str | None, str, str]
 """One datasets-map row: (default_repo_id, repo_id_env, file_prefix, resolution_label)."""
@@ -194,7 +205,7 @@ def _pinned(reader: SourceStore, snapshot: Snapshot) -> Iterator[str]:
         for component in reader.spec.components:
             if component.key not in ('time', 'dollar', 'time_latest', 'raw_latest'):
                 continue
-            columns = ', '.join(column.name for column in component.columns)
+            columns = ', '.join(['source_date', *(column.name for column in component.columns)])
             reader.execute(
                 f'CREATE VIEW {database}.{component.key} AS SELECT {columns} '
                 f'FROM {reader.component_table(component.key)} '
@@ -218,6 +229,15 @@ def month_tokens(source: str, snapshot: Snapshot, *, export_start_date: str) -> 
     return {month: state_token(source, tuple(grouped[month])) for month in sorted(grouped)}
 
 
+def _prune_bounds(year: int, month: int) -> tuple[str, str]:
+    """source_date window for one rendered month: the month plus a margin that
+    dwarfs any boundary straddle while still pruning to ~3 monthly parts."""
+    first = date(year, month, 1)
+    last = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    margin = timedelta(days=PRUNE_MARGIN_DAYS)
+    return (first - margin).isoformat(), (last + margin).isoformat()
+
+
 def _month_frame(
     series: MountKlineSpec,
     year: int,
@@ -225,7 +245,10 @@ def _month_frame(
     database: str,
     *,
     decl: ConsumerDeclaration,
+    base_cut: str | None = None,
+    base_day: str | None = None,
 ) -> pl.DataFrame:
+    source_after, source_before = _prune_bounds(year, month)
     if series.family == 'time':
         return time_month(
             interval_minutes=series.size,
@@ -234,6 +257,9 @@ def _month_frame(
             base_table='time',
             latest_table='time_latest',
             database=database,
+            source_after=source_after,
+            source_before=source_before,
+            base_cut=base_cut,
         )
     return dollar_month(
         ratio=series.size,
@@ -244,7 +270,36 @@ def _month_frame(
         database=database,
         id_column=decl.id_column,
         quote_expr=decl.quote_expr,
+        source_after=source_after,
+        source_before=source_before,
+        base_day=base_day,
     )
+
+
+def months_to_render(
+    decl: ConsumerDeclaration,
+    tokens: dict[str, str],
+    previous_months: dict[str, str],
+    previous_files: dict[str, dict[str, object]],
+) -> list[str]:
+    """Months whose mirror files differ from the previous manifest: token drift,
+    a missing month file, or bytes that no longer hash to the recorded digest."""
+    changed: list[str] = []
+    for month, token in tokens.items():
+        year, number = int(month[:4]), int(month[5:7])
+        for series in decl.specs:
+            target = month_path(series.sub_path, year, number)
+            entry = previous_files.get(str(target))
+            if (
+                entry is not None
+                and previous_months.get(month) == token
+                and target.is_file()
+                and entry.get('sha256') == _sha256(target)
+            ):
+                continue
+            changed.append(month)
+            break
+    return changed
 
 
 def _entry(path: Path, row_count: int, **extra: object) -> dict[str, object]:
@@ -252,7 +307,12 @@ def _entry(path: Path, row_count: int, **extra: object) -> dict[str, object]:
 
 
 def mount(
-    reader: SnapshotReader, snapshot: Snapshot, destination: str, *, decl: ConsumerDeclaration
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    decl: ConsumerDeclaration,
+    allow_full: bool = False,
 ) -> None:
     """Refresh the Parquet mirror months whose pinned state changed, then the Arrow series.
 
@@ -263,6 +323,10 @@ def mount(
     moves the months into place and activates the versions, so a discarded render leaves
     the shared roots exactly as the manifest describes them. Staging left by a render that
     died is swept once it is older than the grace window.
+
+    A render touching more than ``MOUNT_WORKER_MONTH_CAP`` months does not fit the
+    worker's watchdog budget; unless ``allow_full`` (an operator Dagster run), it
+    defers with ``RENDER_DEFERRED`` instead of dying mid-render every tick.
     """
     store, root = _root(destination, reader, 'mount', renderer_label=decl.renderer_label)
     if not snapshot.records:
@@ -274,6 +338,17 @@ def mount(
         for entry in cast(list[object], previous.get('files') or [])
     }
     tokens = month_tokens(store.spec.key, snapshot, export_start_date=decl.export_start_date)
+    changed = months_to_render(decl, tokens, previous_months, previous_files)
+    if len(changed) > MOUNT_WORKER_MONTH_CAP and not allow_full:
+        raise SourceError(
+            'RENDER_DEFERRED',
+            f'Mount render touches {len(changed)} months (cap {MOUNT_WORKER_MONTH_CAP}); '
+            f'launch publish_{store.spec.key}_mount_job with allow_full_history instead.',
+        )
+    log.info(
+        'mount render source=%s months=%d changed=%d', store.spec.key, len(tokens), len(changed)
+    )
+    changed_set = set(changed)
     state = store.canonical_token(snapshot)
     parquet_root = parquet_source_root()
     owner = store.spec.key if decl.scope_staging_to_source else None
@@ -285,8 +360,23 @@ def mount(
     staged_series: list[StagedSeries] = []
     try:
         with _pinned(store, snapshot) as database:
-            for month, token in tokens.items():
+            # Watermarks are render-constant: resolve once instead of re-scanning
+            # the pinned base per month. An empty base falls back to the inline
+            # per-query cut with identical semantics.
+            cut_rows = store.execute(f'SELECT max(datetime) FROM {database}.time')
+            base_cut = str(cut_rows[0][0]) if cut_rows and cut_rows[0][0] is not None else None
+            day_rows = store.execute(f'SELECT max(toDate(start_datetime)) FROM {database}.dollar')
+            base_day = str(day_rows[0][0]) if day_rows and day_rows[0][0] is not None else None
+            for index, (month, token) in enumerate(tokens.items()):
                 year, number = int(month[:4]), int(month[5:7])
+                if month in changed_set:
+                    log.info(
+                        'mount render source=%s month=%s progress=%d/%d',
+                        store.spec.key,
+                        month,
+                        index + 1,
+                        len(tokens),
+                    )
                 for series in decl.specs:
                     target = month_path(series.sub_path, year, number)
                     entry = previous_files.get(str(target))
@@ -298,7 +388,15 @@ def mount(
                     ):
                         files.append(entry)
                         continue
-                    frame = _month_frame(series, year, number, database, decl=decl)
+                    frame = _month_frame(
+                        series,
+                        year,
+                        number,
+                        database,
+                        decl=decl,
+                        base_cut=base_cut,
+                        base_day=base_day,
+                    )
                     if frame.height == 0:
                         continue
                     pending = staging / target.relative_to(parquet_root)
@@ -314,7 +412,7 @@ def mount(
                         }
                     )
                     rebuilt.add(series.name)
-        for series in decl.specs:
+        for index, series in enumerate(decl.specs):
             latest = series_store_dir(series.name) / LATEST_NAME
             entry = next(
                 (
@@ -329,6 +427,13 @@ def mount(
                 if str(current) == entry['path'] and current.is_file():
                     files.append(entry)
                     continue
+            log.info(
+                'mount render source=%s series=%s progress=%d/%d',
+                store.spec.key,
+                series.name,
+                index + 1,
+                len(decl.specs),
+            )
             months = {path: path for path in series_source_files(series, parquet_root)}
             months.update(
                 (target, pending)

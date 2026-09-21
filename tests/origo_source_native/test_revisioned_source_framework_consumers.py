@@ -244,3 +244,114 @@ def test_public_consumers_require_the_live_stage() -> None:
     with pytest.raises(RuntimeError, match='LIVE'):
         canary.require_enabled('publish', public=True)
     assert all(consumer.public for consumer in BINANCE_SPOT_TRADES_SPEC.consumers)
+
+
+def _build_one_day(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixture_root_url: str):
+    """Mirror the publish test setup: env, fixture archive, and one built canonical day."""
+    monkeypatch.setenv(
+        'BINANCE_SPOT_DAILY_TRADES_BASE_URL',
+        fixture_root_url + '/spot/daily/trades/revisioned/',
+    )
+    monkeypatch.setattr(daily, 'get_response', archive_response)
+    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(tmp_path / 'parquet'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.LIVE)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    store = SourceStore(client, 'origo', spec)
+    runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+    runtime.setup(anchor=datetime(2020, 1, 1, tzinfo=UTC))
+    runtime.build('2020-01-01')
+    return spec, client, runtime
+
+
+def test_mount_render_defers_past_the_worker_month_cap(
+    origo_test_env: dict[str, str],
+    binance_fixture_server_root_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.contracts import SourceError
+    from origo.sources.profiles import consumer_base
+
+    spec, client, runtime = _build_one_day(tmp_path, monkeypatch, binance_fixture_server_root_url)
+    mount = tmp_path / spec.key / 'mount'
+    try:
+        monkeypatch.setattr(consumer_base, 'MOUNT_WORKER_MONTH_CAP', 0)
+        with pytest.raises(SourceError) as raised:
+            runtime.publish('mount', str(mount))
+        assert raised.value.code == 'RENDER_DEFERRED'
+        assert 'allow_full_history' in raised.value.safe_message
+        assert not (mount / 'latest.json').exists()
+        assert client.execute(
+            "SELECT count() FROM origo.source_failure_log WHERE operation='consumer' "
+            "AND error_code='RENDER_DEFERRED' AND event_type='FAILED'"
+        ) == [(1,)]
+    finally:
+        client.disconnect()
+
+
+def test_mount_allow_full_renders_past_the_cap(
+    origo_test_env: dict[str, str],
+    binance_fixture_server_root_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.bundle import SourceRunConfig, execute_source
+    from origo.sources.profiles import consumer_base
+
+    spec, client, _runtime = _build_one_day(tmp_path, monkeypatch, binance_fixture_server_root_url)
+    try:
+        monkeypatch.setattr(consumer_base, 'MOUNT_WORKER_MONTH_CAP', 0)
+        # Both entry points thread the flag: direct publish and the Dagster op path.
+        mount = tmp_path / spec.key / 'mount'
+        store = SourceStore(client, 'origo', spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        runtime.publish('mount', str(mount), allow_full=True)
+        assert list(json.loads((mount / 'latest.json').read_text())['month_tokens']) == ['2020-01']
+        via_job = tmp_path / 'jobroot' / spec.key / 'mount'
+        execute_source(
+            spec,
+            'consumer_mount',
+            SourceRunConfig(destination=str(via_job), allow_full_history=True),
+            run_id=f'test:{uuid4()}',
+        )
+        assert (via_job / 'latest.json').is_file()
+    finally:
+        client.disconnect()
+
+
+def test_prune_bounds_cover_the_month_with_margin() -> None:
+    from origo.sources.profiles.consumer_base import PRUNE_MARGIN_DAYS, _prune_bounds
+
+    assert _prune_bounds(2020, 1) == ('2019-12-25', '2020-02-08')
+    assert _prune_bounds(2020, 2) == ('2020-01-25', '2020-03-08')
+    assert _prune_bounds(2020, 12) == ('2020-11-24', '2021-01-08')
+    assert PRUNE_MARGIN_DAYS == 7
+
+
+def test_every_consumer_renderer_accepts_allow_full() -> None:
+    import inspect
+
+    from origo.sources.profiles import (
+        perp_agg_consumers,
+        perp_consumers,
+        spot_agg_consumers,
+        spot_consumers,
+    )
+
+    # SourceRuntime.publish always passes allow_full=, so every wired renderer
+    # must accept it or its consumer TypeErrors on every run.
+    specs = (
+        *perp_agg_consumers.PERP_AGG_CONSUMERS,
+        *perp_consumers.PERP_CONSUMERS,
+        *spot_agg_consumers.SPOT_AGG_CONSUMERS,
+        *spot_consumers.SPOT_CONSUMERS,
+    )
+    assert len(specs) == 8
+    for spec in specs:
+        assert 'allow_full' in inspect.signature(spec.publish).parameters, spec.key
+    # The CANARY template for perp-agg's future live huggingface consumer is
+    # unwired today, but it must satisfy the protocol it will be published
+    # through after promotion.
+    assert 'allow_full' in inspect.signature(perp_agg_consumers._huggingface).parameters

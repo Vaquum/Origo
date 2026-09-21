@@ -7,12 +7,11 @@ Series paths carry the perp prefix so the perp mirror never collides with spot's
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import cast
 
 from huggingface_hub import HfApi
 
-from ..contracts import ConsumerSpec, Snapshot, SnapshotReader
+from ..contracts import ConsumerRenderer, ConsumerSpec, Snapshot, SnapshotReader
 from .consumer_base import ConsumerDeclaration
 from .consumer_base import huggingface as _render_huggingface
 from .consumer_base import mount as _render_mount
@@ -109,11 +108,24 @@ _DECL = ConsumerDeclaration(
 )
 
 
-def _mount(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
-    _render_mount(reader, snapshot, destination, decl=_DECL)
+def _mount(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
+    _render_mount(reader, snapshot, destination, decl=_DECL, allow_full=allow_full)
 
 
-def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -> None:
+def _huggingface(
+    reader: SnapshotReader,
+    snapshot: Snapshot,
+    destination: str,
+    *,
+    allow_full: bool = False,
+) -> None:
+    _ = allow_full  # Snapshot renders always run whole; no worker cap applies.
     # Snapshot callables resolve through their modules at call time (patch seams).
     _render_huggingface(
         reader,
@@ -128,7 +140,7 @@ def _huggingface(reader: SnapshotReader, snapshot: Snapshot, destination: str) -
     )
 
 
-Renderer = Callable[[SnapshotReader, Snapshot, str], None]
+Renderer = ConsumerRenderer
 
 PERP_CONSUMERS = (
     ConsumerSpec('mount', cast(Renderer, _mount), public=True),

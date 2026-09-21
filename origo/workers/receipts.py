@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import socket
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from origo.sources.contracts import Client, identifier
@@ -18,6 +18,10 @@ from origo.sources.contracts import Client, identifier
 WORKER_MINUTE_LOG = 'worker_minute_log'
 CONTAINER_LOG = 'container_log'
 _LIMIT = 1000
+# A unit that started longer ago than this without a terminal receipt died with
+# its process: the heartbeat watchdog kills any beat-less unit past 180s, and
+# no worker unit beats mid-flight, so 300s leaves no false positives.
+DIED_RECEIPT_STALE_AFTER_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -77,7 +81,7 @@ def record_receipt(
     rows: int,
     sha256: str,
     duration_ms: int,
-    status: Literal['OK', 'FAILED'],
+    status: Literal['OK', 'FAILED', 'STARTED'],
     error_code: str = '',
     error: str = '',
 ) -> None:
@@ -99,6 +103,58 @@ def record_receipt(
             )
         ],
     )
+
+
+def reconcile_died_receipts(
+    client: Client,
+    database: str,
+    *,
+    feed: str,
+    now: datetime,
+    stale_after_seconds: float = DIED_RECEIPT_STALE_AFTER_SECONDS,
+) -> int:
+    """Mark STARTED units whose process died as FAILED so backoff and paging see them.
+
+    Watchdog exits and SIGKILLs leave no terminal receipt, so without this the
+    next tick retries instantly forever. A unit whose latest receipt is a STARTED
+    older than ``stale_after_seconds`` cannot still be running (see
+    ``DIED_RECEIPT_STALE_AFTER_SECONDS``); append one FAILED/WORKER_DIED row per
+    such unit. Returns the rows appended.
+
+    The unit key is ``(feed, series, minute)``: a STARTED row is written before
+    the unit's hash exists, so it can never match a terminal row on sha256. One
+    anti-join finds every outstanding unit in a single round trip no matter how
+    many STARTED rows the feed has accumulated, and the appended FAILED row
+    guards the next pass, so each dead unit is marked exactly once.
+    """
+    cutoff = _utc(now).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
+    outstanding = client.execute(
+        f"""SELECT s.series, s.minute
+        FROM {identifier(database)}.{WORKER_MINUTE_LOG} AS s
+        LEFT ANTI JOIN {identifier(database)}.{WORKER_MINUTE_LOG} AS t
+          ON t.feed = s.feed AND t.series = s.series AND t.minute = s.minute
+          AND t.status != 'STARTED' AND t.recorded_at >= s.recorded_at
+        WHERE s.feed = %(feed)s AND s.status = 'STARTED' AND s.recorded_at < %(cutoff)s
+        GROUP BY s.series, s.minute""",
+        {'feed': feed, 'cutoff': cutoff},
+    )
+    reconciled = 0
+    for series, minute in outstanding:
+        record_receipt(
+            client,
+            database,
+            feed=feed,
+            series=str(series),
+            minute=_utc(minute),
+            rows=0,
+            sha256='',
+            duration_ms=0,
+            status='FAILED',
+            error_code='WORKER_DIED',
+            error='Started receipt has no terminal row; the process died mid-unit.',
+        )
+        reconciled += 1
+    return reconciled
 
 
 def failed_receipts_since(

@@ -145,20 +145,41 @@ def time_month(
     base_table: str = "binance_spot_klines",
     latest_table: str = "binance_spot_klines_latest",
     database: str = "origo",
+    source_after: str | None = None,
+    source_before: str | None = None,
+    base_cut: str | None = None,
 ) -> pl.DataFrame:
     """Roll the 1-minute base + rolling-latest projection up to ``interval_minutes``
-    bars for one calendar month. ``interval_minutes == 1`` is a passthrough."""
+    bars for one calendar month. ``interval_minutes == 1`` is a passthrough.
+
+    ``source_after``/``source_before`` prune the base scan to a ``source_date``
+    window (a superset of the month keeps boundary rows exact while the monthly
+    parts do the skipping). ``base_cut`` reuses a cut computed once per render
+    instead of re-scanning for it per month."""
     if interval_minutes < 1:
         raise ValueError("interval_minutes must be at least 1.")
+    if (source_after is None) != (source_before is None):
+        raise ValueError("source_after and source_before must be given together.")
     base_table = _validate_identifier(base_table, "table name")
     latest_table = _validate_identifier(latest_table, "table name")
     database = _validate_identifier(database, "database name")
     month_start, month_end = _month_bounds(year, month)
     bucket_seconds = interval_minutes * 60
     columns = ", ".join(TIME_KLINE_COLUMNS)
+    cut_expr = (
+        "toDateTime({cut:String})"
+        if base_cut is not None
+        else f"(SELECT max(datetime) FROM {database}.{base_table})"
+    )
+    prune_expr = (
+        " AND source_date >= toDate({source_after:String})"
+        " AND source_date < toDate({source_before:String})"
+        if source_after is not None and source_before is not None
+        else ""
+    )
 
     query = f"""
-        WITH (SELECT max(datetime) FROM {database}.{base_table}) AS base_cut
+        WITH {cut_expr} AS base_cut
         SELECT
             kline_datetime AS datetime,
             argMin(source_open, source_datetime) AS open,
@@ -212,7 +233,7 @@ def time_month(
                 FROM {database}.{base_table}
                 WHERE datetime >= toDateTime({{start_dt:String}})
                   AND datetime < toDateTime({{end_dt:String}})
-                  AND datetime <= base_cut
+                  AND datetime <= base_cut{prune_expr}
                 UNION ALL
                 SELECT {columns}
                 FROM {database}.{latest_table}
@@ -225,14 +246,17 @@ def time_month(
         ORDER BY kline_datetime ASC
         """
 
-    arrow_table = _run_arrow(
-        query,
-        {
-            "bucket_seconds": bucket_seconds,
-            "start_dt": month_start,
-            "end_dt": month_end,
-        },
-    )
+    parameters: dict[str, object] = {
+        "bucket_seconds": bucket_seconds,
+        "start_dt": month_start,
+        "end_dt": month_end,
+    }
+    if base_cut is not None:
+        parameters["cut"] = base_cut
+    if source_after is not None and source_before is not None:
+        parameters["source_after"] = source_after
+        parameters["source_before"] = source_before
+    arrow_table = _run_arrow(query, parameters)
     data = cast(pl.DataFrame, pl.from_arrow(arrow_table)).select(TIME_KLINE_COLUMNS)
     if data.height == 0:
         return data
@@ -259,24 +283,45 @@ def dollar_month(
     database: str = "origo",
     id_column: str = "trade_id",
     quote_expr: str = "quote_quantity",
+    source_after: str | None = None,
+    source_before: str | None = None,
+    base_day: str | None = None,
 ) -> pl.DataFrame:
     """Roll the day-scoped 1M dollar base up by ``ratio`` for one calendar month.
 
     Finalized days (``toDate(start_datetime) <= base_day``) come from the base;
     still-open day(s) are recomputed from the rolling raw trades with the same
     within-day running-$-sum the base build uses. ``ratio == 1`` is a passthrough.
+
+    ``source_after``/``source_before`` prune the base scan to a ``source_date``
+    window (a superset of the month keeps boundary rows exact while the monthly
+    parts do the skipping). ``base_day`` reuses a watermark computed once per
+    render instead of re-scanning for it per month.
     """
     if ratio < 1:
         raise ValueError("ratio must be at least 1.")
+    if (source_after is None) != (source_before is None):
+        raise ValueError("source_after and source_before must be given together.")
     base_table = _validate_identifier(base_table, "table name")
     raw_latest_table = _validate_identifier(raw_latest_table, "table name")
     database = _validate_identifier(database, "database name")
     id_column = _validate_identifier(id_column, "column name")
     month_start, month_end = _month_bounds(year, month)
     columns = ", ".join(DOLLAR_KLINE_COLUMNS)
+    day_expr = (
+        "toDate({day:String})"
+        if base_day is not None
+        else f"(SELECT max(toDate(start_datetime)) FROM {database}.{base_table})"
+    )
+    prune_expr = (
+        " AND source_date >= toDate({source_after:String})"
+        " AND source_date < toDate({source_before:String})"
+        if source_after is not None and source_before is not None
+        else ""
+    )
 
     query = f"""
-        WITH (SELECT max(toDate(start_datetime)) FROM {database}.{base_table}) AS base_day
+        WITH {day_expr} AS base_day
         SELECT
             toDateTime64(min(source_start_datetime), 3) AS start_datetime,
             toDateTime64(max(source_end_datetime), 3) AS end_datetime,
@@ -331,7 +376,7 @@ def dollar_month(
                 FROM {database}.{base_table}
                 WHERE start_datetime >= toDateTime({{start_dt:String}})
                   AND start_datetime < toDateTime({{end_dt:String}})
-                  AND toDate(start_datetime) <= base_day
+                  AND toDate(start_datetime) <= base_day{prune_expr}
                 UNION ALL
                 SELECT
                     min(datetime) AS start_datetime,
@@ -381,14 +426,17 @@ def dollar_month(
         ORDER BY start_datetime ASC, dollar_bar_id ASC
         """
 
-    arrow_table = _run_arrow(
-        query,
-        {
-            "base_bar_count": ratio,
-            "start_dt": month_start,
-            "end_dt": month_end,
-        },
-    )
+    parameters: dict[str, object] = {
+        "base_bar_count": ratio,
+        "start_dt": month_start,
+        "end_dt": month_end,
+    }
+    if base_day is not None:
+        parameters["day"] = base_day
+    if source_after is not None and source_before is not None:
+        parameters["source_after"] = source_after
+        parameters["source_before"] = source_before
+    arrow_table = _run_arrow(query, parameters)
     data = cast(pl.DataFrame, pl.from_arrow(arrow_table)).select(DOLLAR_KLINE_COLUMNS)
     if data.height == 0:
         return data

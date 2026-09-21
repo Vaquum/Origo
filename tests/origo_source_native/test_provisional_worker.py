@@ -707,3 +707,36 @@ def test_compose_heartbeat_path_matches_worker_wiring(monkeypatch: pytest.Monkey
             'provisional-worker'
         ]['environment']
         assert expected in environment, name
+
+
+def test_incomplete_component_evidence_blocks_admission_and_publication(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, object]]],
+    tmp_path: Path,
+) -> None:
+    spec, requests = spot
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        accepted = runtime.build(KEY, provisional=True)
+        assert not requests
+        component = next(item.key for item in spec.components if item.provisional)
+        # Remove one genuine receipt in the owned test DB, not source rows or production.
+        store.execute(
+            f'ALTER TABLE {store.table("source_component_log")} DELETE '
+            'WHERE source_key=%(source)s AND build_id=%(build)s AND component=%(component)s',
+            {'source': spec.key, 'build': accepted.build_id, 'component': component},
+            settings={'mutations_sync': 2},
+        )
+        reporter = _Reporter()
+        outcome = _feed(spec, tmp_path, _Dagster(), reporter).tick(NOW)
+        assert outcome.processed == ()
+        assert outcome.failed == (f'{spec.key}:tick',)
+        assert reporter.materializations == []
+        assert store.generation(accepted.partition) == accepted.generation
+        assert store.execute(
+            f'SELECT error_code FROM {store.table("source_failure_log")} '
+            "WHERE operation='worker_tick' AND event_type='FAILED'",
+        ) == [('COVERAGE_COMPONENT_EVIDENCE_INVALID',)]
+    finally:
+        client.disconnect()

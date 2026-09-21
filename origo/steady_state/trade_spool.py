@@ -827,9 +827,24 @@ class TradeSpool:
         ):
             start_ms = _cell(row, 0)
             end_ms = start_ms + 60000
+            following = self._one(
+                'SELECT 1 FROM acknowledgements WHERE minute_start = ?', (end_ms,)
+            )
+            # An unaccepted following minute may need this raw left boundary
+            # to repair a capture gap without rereading a whole historical minute.
+            boundary = (
+                self._one(
+                    'SELECT MAX(id) FROM trades WHERE time >= ? AND time < ?',
+                    (start_ms, end_ms),
+                )
+                if following is None
+                else None
+            )
+            keep_id = _optional(boundary or (None,), 0)
             cursor = self.connection.execute(
-                'DELETE FROM trades WHERE time >= ? AND time < ? AND (segment <> ? OR ? <= ?)',
-                (start_ms, end_ms, open_id, end_ms, safe_time),
+                'DELETE FROM trades WHERE time >= ? AND time < ? AND (segment <> ? OR ? <= ?) '
+                'AND (? IS NULL OR id <> ?)',
+                (start_ms, end_ms, open_id, end_ms, safe_time, keep_id, keep_id),
             )
             remaining = self._one(
                 'SELECT COUNT(*) FROM trades WHERE time >= ? AND time < ?', (start_ms, end_ms)

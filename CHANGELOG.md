@@ -1,3 +1,8 @@
+# v3.21.7
+
+- Replace the #440 provisional frontier lookup with bounded, source-scoped component-certified coverage reads; preserve first-gap admission without expanding the current-view join.
+- Isolate source-local worker failures and continue independent sources with explicit failure/recovery evidence. Add authentic metadata replay and real build/publication regressions as S439's first execution gate; full steady-state acceptance remains outstanding.
+
 # v3.21.6
 
 - Unfreeze the current-view frontier: the worker admits the current-view frontier gap first — even past the 36h lookback — and the frontier minute never exhausts its retries, while non-frontier holes and pinned publications keep the attempt cap for an operator run; death-loop-era holes drain oldest-first on the capped delay instead of freezing `*_current` at the first gap, and already-exhausted frontier holes become eligible on deploy with no operator repair.

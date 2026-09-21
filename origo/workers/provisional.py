@@ -30,15 +30,19 @@ from pathlib import Path
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import (
+    WORKER_HEARTBEAT_ENV,
     Partition,
     RevisionedSourceSpec,
     RolloutStage,
-    WORKER_HEARTBEAT_ENV,
+    SourceError,
     failure_code,
+    failure_message,
 )
+from origo.sources.failures import FailureLog
 from origo.sources.publication import publication_current
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
+from origo.steady_state.coverage import Coverage, read_coverage
 
 from .dagster_reader import DagsterReader, DagsterUnreachable
 from .receipts import (
@@ -135,7 +139,7 @@ class ProvisionalFeed:
                 attempts,
             )
             return False
-        delay = min(spec.orchestration.retry_delay, 60 * 2 ** (attempts - 1))
+        delay = min(spec.orchestration.retry_delay, 60 * 2 ** min(attempts - 1, 60))
         return self.clock() >= last_failed + timedelta(seconds=delay)
 
     @staticmethod
@@ -207,30 +211,13 @@ class ProvisionalFeed:
         return key, None
 
     def _frontier_gap_key(
-        self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime
+        self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime,
+        *, coverage: Coverage | None = None,
     ) -> str | None:
-        """The current-view frontier gap: the first minute the readers are missing.
-
-        The readers clip at the first gap, so this minute — not the oldest-5
-        window — is what unfreezes `*_current`. It is admitted first even past
-        the 36h lookback; a past-window gap retries loud on the capped delay
-        until it builds or an operator backfills it.
-        """
-        rows = store.execute(
-            f'SELECT max(partition_end) FROM {store.table("source_current_partitions")} '
-            'WHERE source_key=%(source)s',
-            {'source': spec.key},
-        )
-        end = rows[0][0] if rows else None
-        anchor = store.anchor().replace(second=0, microsecond=0)
-        gap = anchor
-        if isinstance(end, datetime):
-            naive = end.replace(tzinfo=None) if end.tzinfo is not None else end
-            # max() over no rows is the epoch, not NULL; the frontier never
-            # precedes the anchor.
-            gap = max(naive.replace(tzinfo=UTC, second=0, microsecond=0), anchor)
-        last = now.astimezone(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
-        if gap > last:
+        """First uncovered minute, not max(end) retaining later canonical days."""
+        observed = coverage if coverage is not None else read_coverage(store, now)
+        gap = observed.contiguous_end
+        if gap >= observed.due:
             return None
         return gap.strftime('%Y-%m-%dT%H:%M:%SZ')
 
@@ -240,12 +227,18 @@ class ProvisionalFeed:
         adapter = spec.provisional
         if adapter is None:
             raise ValueError('No provisional adapter is declared.')
-        covered = store.active_intervals()
+        coverage = read_coverage(store, now)
+        if coverage.incomplete_partitions:
+            raise SourceError(
+                'COVERAGE_COMPONENT_EVIDENCE_INVALID',
+                f'Active component evidence is incomplete for {len(coverage.incomplete_partitions)} partitions.',
+            )
+        covered = coverage.intervals
         candidates = sorted(
-            adapter.candidates(now, store.anchor(), covered),
+            adapter.candidates(now, coverage.anchor, covered),
             key=lambda partition: partition.start,
         )
-        frontier = self._frontier_gap_key(store, spec, now)
+        frontier = self._frontier_gap_key(store, spec, now, coverage=coverage)
         ordered = list(candidates)
         if frontier is not None and all(partition.key != frontier for partition in ordered):
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
@@ -383,22 +376,49 @@ class ProvisionalFeed:
                 log.warning('reconciled %d receipts for units the previous process died on', died)
             for spec in self.specs:
                 store = SourceStore(client, settings.database, spec)
-                built, broken = self._build_intervals(store, spec, now)
-                published, unpublished = self._publish(store, spec, now)
-                processed.extend([*built, *published])
-                failed.extend([*broken, *unpublished])
-                self.reporter.materialized(
-                    live_feed_asset(spec),
-                    partition=None,
-                    metadata={
-                        'minute': now.replace(second=0, microsecond=0).isoformat(),
-                        'intervals': len(built),
-                        'publications': len(published),
-                        'failed': len(broken) + len(unpublished),
-                        'rss_bytes': _rss_bytes(),
-                        'source_timestamp': now.isoformat(),
-                    },
+                failures = FailureLog(
+                    store, Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
+                    self._run_id(now),
                 )
+                try:
+                    built, broken = self._build_intervals(store, spec, now)
+                    processed.extend(built)
+                    failed.extend(broken)
+                    published, unpublished = self._publish(store, spec, now)
+                    processed.extend(published)
+                    failed.extend(unpublished)
+                    failures.recover(operation='worker_tick')
+                    self.reporter.materialized(
+                        live_feed_asset(spec),
+                        partition=None,
+                        metadata={
+                            'minute': now.replace(second=0, microsecond=0).isoformat(),
+                            'intervals': len(built),
+                            'publications': len(published),
+                            'failed': len(broken) + len(unpublished),
+                            'rss_bytes': _rss_bytes(),
+                            'source_timestamp': now.isoformat(),
+                        },
+                    )
+                except Exception as error:
+                    key = f'{spec.key}:tick'
+                    failed.append(key)
+                    log.exception('source=%s provisional source tick failed', spec.key)
+                    # Shared-store outages keep every source failed; source-local failures
+                    # must not prevent independent work from reaching its own admission.
+                    try:
+                        failures.record(
+                            operation='worker_tick', error_code=failure_code(error),
+                            scope='SOURCE', message=failure_message(error),
+                        )
+                        record_receipt(
+                            store.client, store.database, feed=self.name, series=key,
+                            minute=now.replace(second=0, microsecond=0), rows=0, sha256='',
+                            duration_ms=0, status='FAILED', error_code=failure_code(error),
+                            error=failure_message(error),
+                        )
+                    except Exception:
+                        log.exception('source=%s tick failure evidence could not be persisted', spec.key)
         finally:
             client.disconnect()
         return TickOutcome(

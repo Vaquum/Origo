@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "scope": "S439 R440 isolated lookup regression, not full steady-state acceptance",
+  "environment": {
+    "host": "macOS development host",
+    "docker_context": "desktop-linux",
+    "architecture": "aarch64",
+    "clickhouse_image": "clickhouse/clickhouse-server:25.3.2.39@sha256:8745843b17f92db1765025009772ec1d87dfdcaa95deabca6b802a66cb669d30"
+  },
+  "production_baseline_sha": "1aaaef07eeb08d401684359d5304db9e3cb2865d",
+  "input_manifest": "tests/fixtures/steady_state/provenance.json",
+  "input_manifest_sha256": "a904607a1a257a53350c0d383270f24f8361d4e024b743579a0d9aff09a2661b",
+  "legacy_query_result": {
+    "status": "failed_as_expected",
+    "clickhouse_exception_code": 241,
+    "memory_limit_bytes": 536870912
+  },
+  "candidate_measurements": [
+    {
+      "source": "binance_spot_trades",
+      "elapsed_seconds": 1.1411552079953253,
+      "incremental_python_peak_bytes": 22921322,
+      "query_metrics": [
+        [
+          "s439_4c8f7f1db20c451aba461171c6751eba",
+          12840,
+          1,
+          36
+        ],
+        [
+          "s439_912a7a0b15b94deb8ba1042838f994db",
+          37864846,
+          69975,
+          24295024
+        ]
+      ],
+      "frontier": "2026-09-21T04:22:00+00:00"
+    },
+    {
+      "source": "binance_perp_trades",
+      "elapsed_seconds": 0.6650519999675453,
+      "incremental_python_peak_bytes": 12004369,
+      "query_metrics": [
+        [
+          "s439_32c93b840acb4c44a9f7137dd8658ee8",
+          12840,
+          1,
+          36
+        ],
+        [
+          "s439_dc4db38f80604e0dbf87c910f6ee6b14",
+          22949617,
+          47868,
+          17493266
+        ]
+      ],
+      "frontier": "2026-09-21T02:16:00+00:00"
+    },
+    {
+      "source": "binance_spot_aggtrades",
+      "elapsed_seconds": 0.6511800831649452,
+      "incremental_python_peak_bytes": 12681137,
+      "query_metrics": [
+        [
+          "s439_e6e41eb3163c4a88b4fcec9b350f280d",
+          12840,
+          1,
+          39
+        ],
+        [
+          "s439_74a703eb72364178bea32eced33a80be",
+          23650592,
+          62550,
+          22780759
+        ]
+      ],
+      "frontier": "2026-09-21T04:05:00+00:00"
+    },
+    {
+      "source": "binance_perp_aggtrades",
+      "elapsed_seconds": 0.4620047500357032,
+      "incremental_python_peak_bytes": 8878145,
+      "query_metrics": [
+        [
+          "s439_c280f9eb2c474141902b9ae47d0d19d3",
+          12840,
+          1,
+          39
+        ],
+        [
+          "s439_d2d061dad18b4277b829260295350b79",
+          15629427,
+          39410,
+          15329792
+        ]
+      ],
+      "frontier": "2026-09-21T02:19:00+00:00"
+    }
+  ],
+  "validation": {
+    "lookup_and_existing_worker_suite": "16 passed, 2 warnings in 20.25s",
+    "source_isolation_with_real_builds_and_files": "1 passed in 9.45s",
+    "initial_full_source_suite": "471 passed, 292 warnings in 552.53s"
+  },
+  "not_established": [
+    "Post-deploy 30-tick recovery",
+    "SS-01 through SS-12",
+    "Six-hour mixed workload",
+    "72-hour production acceptance"
+  ]
+}

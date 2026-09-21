@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import json
+import time
+import tracemalloc
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+from clickhouse_driver import Client as NativeClient
+from clickhouse_driver.errors import ServerException
+
+from origo.sources.contracts import Partition, Row
+from origo.sources.storage import SourceStore
+from origo.steady_state.coverage import (
+    COVERAGE_QUERY_SETTINGS,
+    coverage_from_intervals,
+    read_coverage,
+)
+
+from .helpers import ORIGO_DATABASE
+from .steady_state_helpers import metadata_rows, restore_metadata
+from .test_provisional_worker import _Dagster, _feed, _Reporter
+
+
+def test_frontiers_use_complete_coverage_not_newest_timestamp() -> None:
+    # Remove a real canonical day; later real canonical days must not jump the hole.
+    rows = metadata_rows('source_activation_log')
+    selected = [
+        row for row in rows if row['source_key'] == 'binance_spot_trades' and not row['provisional']
+    ]
+    selected.sort(key=lambda row: str(row['partition_start']))
+    intervals = tuple(
+        Partition(
+            str(row['partition_key']),
+            datetime.fromisoformat(str(row['partition_start'])).replace(tzinfo=UTC),
+            datetime.fromisoformat(str(row['partition_end'])).replace(tzinfo=UTC),
+        )
+        for row in selected
+    )
+    anchor = intervals[0].start
+    now = datetime(2026, 9, 21, 13, tzinfo=UTC)
+    missing = intervals[1]
+    result = coverage_from_intervals(anchor, intervals[:1] + intervals[2:], now)
+    assert result.contiguous_end == missing.start
+    assert result.canonical_end == missing.start
+    assert result.oldest_missing == missing.start
+    assert result.newest_end > missing.end
+    assert result.missing_minutes >= 24 * 60
+    # Coverage can only increase when the missing accepted interval is restored.
+    complete = coverage_from_intervals(anchor, intervals, now)
+    assert complete.contiguous_end == intervals[-1].end
+    assert complete.missing_minutes == result.missing_minutes - 24 * 60
+
+
+class _MeasuredClient:
+    def __init__(self, client: NativeClient) -> None:
+        self.client = client
+        self.query_ids: list[str] = []
+
+    def execute(
+        self, query: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[Row]:
+        query_id = 's439_' + uuid4().hex
+        self.query_ids.append(query_id)
+        return self.client.execute(
+            query,
+            params,
+            settings={**(settings or {}), 'log_queries': 1, 'log_queries_min_query_duration_ms': 0},
+            query_id=query_id,
+        )
+
+    def disconnect(self) -> None:
+        self.client.disconnect()
+
+
+def test_frontier_lookup_is_bounded_on_production_metadata(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = origo_test_env
+    assert settings['CLICKHOUSE_HOST'] == '127.0.0.1'
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    client = NativeClient(
+        host=settings['CLICKHOUSE_HOST'],
+        port=int(settings['CLICKHOUSE_PORT']),
+        user=settings['CLICKHOUSE_USER'],
+        password=settings['CLICKHOUSE_PASSWORD'],
+    )
+    try:
+        version = client.execute('SELECT version()')[0][0]
+        assert version.startswith('25.3.'), 'Replay must use the production ClickHouse family'
+        stores = restore_metadata(client, ORIGO_DATABASE, tmp_path / 'locks')
+        count = client.execute(f'SELECT count() FROM {ORIGO_DATABASE}.source_active_partitions')[0][
+            0
+        ]
+        assert count >= 25380
+        old = (
+            f'SELECT max(partition_end) FROM {ORIGO_DATABASE}.source_current_partitions '
+            "WHERE source_key='binance_spot_trades'"
+        )
+        with pytest.raises(ServerException) as raised:
+            client.execute(old, settings=COVERAGE_QUERY_SETTINGS)
+        assert raised.value.code == 241, 'Retain the actual pre-fix memory failure, not any failure'
+        report: list[dict[str, object]] = []
+        now = datetime(2026, 9, 21, 13, tzinfo=UTC)
+        for original in stores:
+            measured = _MeasuredClient(client)
+            store = SourceStore(measured, ORIGO_DATABASE, original.spec)
+            tracemalloc.start()
+            start = time.monotonic()
+            coverage = read_coverage(store, now)
+            elapsed = time.monotonic() - start
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            assert elapsed < 5
+            assert len(measured.query_ids) == 2
+            assert peak < 64 * 1024 * 1024
+            assert not coverage.incomplete_partitions
+            feed = _feed(original.spec, tmp_path, _Dagster(), _Reporter())
+            assert feed._frontier_gap_key(store, original.spec, now, coverage=coverage) == (
+                coverage.contiguous_end.strftime('%Y-%m-%dT%H:%M:%SZ')
+            )
+            # Independently merge the captured activation intervals, not the SQL view.
+            intervals = sorted(coverage.intervals, key=lambda item: item.start)
+            frontier = coverage.anchor
+            for interval in intervals:
+                if interval.start > frontier:
+                    break
+                frontier = max(frontier, interval.end)
+            assert frontier == coverage.contiguous_end < coverage.newest_end
+            client.execute('SYSTEM FLUSH LOGS')
+            metrics = client.execute(
+                'SELECT query_id, memory_usage, read_rows, read_bytes FROM system.query_log '
+                "WHERE query_id IN %(ids)s AND type='QueryFinish'",
+                {'ids': tuple(measured.query_ids)},
+            )
+            assert len(metrics) == 2
+            assert max(row[1] for row in metrics) <= 512 * 1024 * 1024
+            report.append(
+                {
+                    'source': original.spec.key,
+                    'elapsed_seconds': elapsed,
+                    'incremental_python_peak_bytes': peak,
+                    'query_metrics': metrics,
+                    'frontier': frontier.isoformat(),
+                }
+            )
+        (tmp_path / 'r440_measurements.json').write_text(json.dumps(report, indent=2))
+        print('R440_MEASUREMENTS=' + json.dumps(report))
+    finally:
+        tracemalloc.stop()
+        client.disconnect()

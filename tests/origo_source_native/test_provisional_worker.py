@@ -652,13 +652,27 @@ def test_frontier_gap_is_admitted_first_past_the_lookback(
                     'test-revision',
                     uuid4(),
                     '0' * 64,
-                    '[]',
+                    json.dumps([(component.key, 'fixture-digest') for component in spec.components if component.provisional]),
                     'test-run',
                     tick_at,
                 )
                 for minute in minutes
             ],
         )
+
+        # This admission-only fixture seeds matching operational proof, not market rows.
+        # Production-scale, provenance-backed metadata is replayed by S439's M15 test.
+        for partition_key, build_id in client.execute(
+            f'SELECT partition_key, build_id FROM {store.table("source_active_partitions")}'
+        ):
+            client.execute(
+                f'INSERT INTO {store.table("source_component_log")} '
+                '(source_key, partition_key, provisional, revision, build_id, component, '
+                'content_hash, completed_at) VALUES',
+                [(spec.key, partition_key, 1, 'test-revision', build_id,
+                  component.key, 'fixture-digest', tick_at)
+                 for component in spec.components if component.provisional],
+            )
 
         def instant(
             executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str

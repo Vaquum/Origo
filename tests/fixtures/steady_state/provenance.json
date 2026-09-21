@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "purpose": "R440 production metadata replay, no market rows",
+  "source": "Origo production ClickHouse, read-only bounded capture",
+  "observed_at": "2026-09-21 12:59:04Z",
+  "baseline_code_sha": "1aaaef07eeb08d401684359d5304db9e3cb2865d",
+  "tables": {
+    "source_activation_log": {
+      "file": "source_activation_log.jsonl.gz",
+      "query": "SELECT source_key,partition_key,provisional,partition_start,partition_end,generation,revision,build_id,activation_id,component_hashes,dagster_run_id,activated_at FROM origo.source_activation_log WHERE activated_at <= toDateTime('2026-09-21 12:59:04', 'UTC') ORDER BY source_key,partition_key,generation",
+      "rows": 25380,
+      "sha256": "713fd8e0617b18b7edd27fc379772f176a81b0fb1bbb0c1c94548283b5bb39c9",
+      "uncompressed_sha256": "556126fdf3bb578e6fe4a6dc47a0e5d0a378e32b4ecb916f453a7415aec94fb6",
+      "bytes": 8570387,
+      "uncompressed_bytes": 24462384
+    },
+    "source_component_log": {
+      "file": "source_component_log.jsonl.gz",
+      "query": "SELECT source_key,partition_key,provisional,revision,build_id,component,row_count,content_hash,source_content_hash,completed_at FROM origo.source_component_log WHERE completed_at <= toDateTime('2026-09-21 12:59:04', 'UTC') ORDER BY source_key,partition_key,build_id,component",
+      "rows": 123323,
+      "sha256": "eedb40e4fa1bb679a35e19ad1d668218fc0a9f332800135acd803fc6aa4ff9cc",
+      "uncompressed_sha256": "f072dad21d38583bbd12751dab01745a431f14fb51a1470900c8367cd48d3773",
+      "bytes": 8922470,
+      "uncompressed_bytes": 59119585
+    },
+    "source_anchor_log": {
+      "file": "source_anchor_log.jsonl.gz",
+      "query": "SELECT source_key,anchor FROM origo.source_anchor_log ORDER BY source_key",
+      "rows": 4,
+      "sha256": "53e73d36c0cbff1b55b58c6a465f37a30d9370374a49ff47369ea7a9c1693021",
+      "uncompressed_sha256": "b80b5a86407a6b899d9ba53913961b0a9e4bb871c3f3219c006a2908fcc968ed",
+      "bytes": 117,
+      "uncompressed_bytes": 306
+    }
+  }
+}

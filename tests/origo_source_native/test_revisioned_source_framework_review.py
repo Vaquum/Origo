@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,7 +17,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.sources import bundle
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-from origo.sources.contracts import RolloutStage, SourceError
+from origo.sources.contracts import ArchiveNotPublishedYet, RolloutStage, SourceError
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
@@ -264,3 +264,100 @@ def test_spot_canonical_stays_on_early_cron() -> None:
 
     for spec in (BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_AGGTRADES_SPEC):
         assert spec.orchestration.canonical_cron == '0 4 * * *', spec.key
+
+
+def _unavailable(url: str) -> daily.Response:
+    raise SourceError('PROVIDER_HTTP_404', 'Injected pre-publish checksum 404')
+
+
+def test_discover_skips_latest_day_pre_publish_404(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A 404 on the latest day is the normal pre-publish state: it skips
+    # without recording a failure, so a late Vision publish stays green.
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    monkeypatch.setattr(daily, 'get_response', _unavailable)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(
+        spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4())
+    )
+    try:
+        runtime.setup()
+        key = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+        with pytest.raises(ArchiveNotPublishedYet, match='is not published yet'):
+            runtime.discover(spec.canonical.partition(key))
+        assert client.execute(
+            "SELECT count() FROM origo.source_failure_log WHERE operation='discovery'"
+        ) == [(0,)]
+        assert client.execute('SELECT partition_key FROM origo.source_discovery_log') == [(key,)]
+    finally:
+        client.disconnect()
+
+
+def test_discover_still_fails_mid_history_404(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The skip is latest-day only: a 404 for a day that must exist records
+    # a discovery failure and raises, so a real gap still pages.
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    monkeypatch.setattr(daily, 'get_response', _unavailable)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(
+        spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4())
+    )
+    try:
+        runtime.setup()
+        with pytest.raises(SourceError) as caught:
+            runtime.discover(spec.canonical.partition('2017-08-17'))
+        assert caught.value.code == 'PROVIDER_HTTP_404'
+        assert client.execute(
+            'SELECT error_code, argMax(event_type, event_time) FROM origo.source_failure_log '
+            "WHERE operation='discovery' GROUP BY error_code"
+        ) == [('PROVIDER_HTTP_404', 'FAILED')]
+    finally:
+        client.disconnect()
+
+
+def test_canonical_schedule_skips_unpublished_latest_day(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # End to end: the morning tick whose candidate 404s skips the schedule
+    # instead of erroring the evaluation, and the audit leaves the pending
+    # partition alone until Vision publishes.
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    source = bundle.build_source_bundle(spec)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(
+        spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4())
+    )
+    try:
+        runtime.setup()
+        scheduled = next(
+            value for value in source.schedules if value.name.endswith('_canonical_schedule')
+        )
+        (tmp_path / 'dagster').mkdir()
+        with DagsterInstance.local_temp(str(tmp_path / 'dagster')) as instance:
+            _start_monitors(instance)
+            with monkeypatch.context() as patch:
+                patch.setattr(daily, 'get_response', _unavailable)
+                with build_schedule_context(
+                    instance=instance,
+                    scheduled_execution_time=datetime.now(UTC),
+                ) as context:
+                    result = scheduled.evaluate_tick(context)
+                assert not result.run_requests
+                assert result.skip_message is not None
+                assert 'is not published yet' in result.skip_message
+                assert runtime.audit() == ()
+            assert client.execute('SELECT count() FROM origo.source_failure_log') == [(0,)]
+    finally:
+        client.disconnect()

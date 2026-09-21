@@ -49,6 +49,7 @@ from .archive import archive_session
 from .capacity import CapacityMonitor
 from .cleanup import preserve_primary_failure
 from .contracts import (
+    ArchiveNotPublishedYet,
     RevisionedSourceSpec,
     RolloutStage,
     SourceBundle,
@@ -771,6 +772,8 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 f'discovery:{now.isoformat()}',
             )
             revision = runtime.discover(partition)
+        except ArchiveNotPublishedYet:
+            return SkipReason(f'{spec.key} {partition.key} is not published yet.')
         finally:
             client.disconnect()
         return request('canonical', partition.key, context, revision)

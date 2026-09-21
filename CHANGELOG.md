@@ -1,3 +1,7 @@
+# v3.21.5
+
+- Skip the pre-publish 404 instead of failing the morning: when canonical discovery 404s on the latest-day partition, the schedule skips the tick and the audit leaves the pending partition alone, with no failure receipt — a late Vision publish stays green and the half-hourly audit picks the day up once published. The skip is latest-day only: the same 404 on any older partition still records a discovery failure and raises, so a real mid-history gap still pages, as does a day Vision never publishes (it becomes mid-history overnight).
+
 # v3.21.4
 
 - End false-red mornings and silent deploy skips: both perp sources discover at 08:05 UTC instead of 04:00 (UM Vision zips publish ~07:35; spot stays 04:00), so canonical discovery stops buying four hours of red 404s daily. The deploy post-up block detaches stdin on every compose exec (the script arrives on stdin itself, so a bare exec drank the rest of the script and recovery, smoke, and launch silently never ran since Sep 17), brackets each stage with markers, and verifies the maintenance launch produced a run. The runbook now states history loads go through `backfill_<key>_source_job`, whose reconcile switches to the `complete` operation.

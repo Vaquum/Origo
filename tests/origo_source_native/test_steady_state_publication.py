@@ -522,3 +522,47 @@ def test_history_load_preserves_live_currency_and_completion_barrier(
         assert completed['healthy'] is True
     finally:
         prepared.close()
+
+
+def test_failed_manifest_commit_preserves_the_previous_complete_generation(
+    origo_test_env: dict[str, str],
+    binance_fixture_server_root_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+
+    prepared = _Prepared(tmp_path, monkeypatch, binance_fixture_server_root_url)
+    try:
+        prepared.runtime.build(CANONICAL_DAY)
+        previous = prepared.publish_mount(allow_full=True)
+        previous_token = previous['pinned_token']
+        old_paths = [Path(entry['path']) for entry in previous['files']]
+        assert old_paths and all('.committed-' in str(path) for path in old_paths)
+        assert all('mirror_path' in entry for entry in previous['files'])
+        prepared.build_minute()
+        write = consumer_base._write_manifest
+
+        def interrupted(root: Path, document: dict[str, object]) -> None:
+            if document.get('pinned_token') != previous_token:
+                raise OSError('Controlled failure before manifest commit.')
+            write(root, document)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(consumer_base, '_write_manifest', interrupted)
+            with pytest.raises(OSError, match='Controlled failure'):
+                prepared.publish_mount(allow_full=True)
+        retained = prepared.manifest()
+        assert retained['pinned_token'] == previous_token
+        for entry in retained['files']:
+            path = Path(entry['path'])
+            with path.open('rb') as handle:
+                assert hashlib.file_digest(handle, 'sha256').hexdigest() == entry['sha256']
+        current = prepared.publish_mount(allow_full=True)
+        assert current['pinned_token'] != previous_token
+        assert all(path.is_file() for path in old_paths)
+        assert len({entry.get('series') for entry in current['files']}) == 12
+        assert len(list((prepared.parquet_root / ('.committed-' + SPEC.key)).iterdir())) == 2
+        assert len(list((prepared.arrow_root / ('.committed-' + SPEC.key)).iterdir())) == 2
+    finally:
+        prepared.close()

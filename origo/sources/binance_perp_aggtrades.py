@@ -23,7 +23,8 @@ BINANCE_PERP_AGGTRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     provisional=BinancePerpAggProvisional(),
     components=PERP_AGG_COMPONENTS,
     consumers=PERP_AGG_CONSUMERS,
-    orchestration=OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *'),
+    # UM Vision zips publish ~07:35 UTC; asking at 04:00 buys 4h of red 404s.
+    orchestration=OrchestrationSpec('5 8 * * *', '* * * * *', '30 * * * *'),
     retired_tables=(),
     aliases=(),
 )

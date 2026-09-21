@@ -244,3 +244,23 @@ def test_untagged_worker_failures_recover_under_the_operation_context(
                 ) == [('RECOVERED',)]
     finally:
         client.disconnect()
+
+
+def test_perp_canonical_runs_after_vision_publish() -> None:
+    # UM Vision zips publish ~07:35 UTC; asking at 04:00 bought four hours of
+    # red 404s every morning. Both perp sources discover after 08:00.
+    from origo.sources.binance_perp_aggtrades import BINANCE_PERP_AGGTRADES_SPEC
+    from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+
+    for spec in (BINANCE_PERP_TRADES_SPEC, BINANCE_PERP_AGGTRADES_SPEC):
+        minute, hour, *_ = spec.orchestration.canonical_cron.split()
+        assert (int(hour), int(minute)) >= (8, 0), spec.key
+
+
+def test_spot_canonical_stays_on_early_cron() -> None:
+    # Spot Vision zips are up by 04:00; only the perp crons move.
+    from origo.sources.binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
+    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+
+    for spec in (BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_AGGTRADES_SPEC):
+        assert spec.orchestration.canonical_cron == '0 4 * * *', spec.key

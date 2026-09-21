@@ -1,3 +1,7 @@
+# v3.21.4
+
+- End false-red mornings and silent deploy skips: both perp sources discover at 08:05 UTC instead of 04:00 (UM Vision zips publish ~07:35; spot stays 04:00), so canonical discovery stops buying four hours of red 404s daily. The deploy post-up block detaches stdin on every compose exec (the script arrives on stdin itself, so a bare exec drank the rest of the script and recovery, smoke, and launch silently never ran since Sep 17), brackets each stage with markers, and verifies the maintenance launch produced a run. The runbook now states history loads go through `backfill_<key>_source_job`, whose reconcile switches to the `complete` operation.
+
 # v3.21.3
 
 - Sustain provisional tails under slow providers: minute builds overlap in a bounded pool (4 workers, one ClickHouse connection each) instead of sequentially, so a 2-minute perp minute no longer caps the worker below the 60/hour arrival rate; and every completed REST request touches the worker heartbeat (the worker already exports the path; only the archive path used it), so a 200s+ minute proves liveness instead of looking dead to the 180s watchdog.

@@ -29,7 +29,7 @@ jobs:
         run: .venv-ruleset/bin/python -m pip install --upgrade pip pytest 'ruff==0.15.11'
 
       - name: Run CI contract tests
-        run: .venv-ruleset/bin/python -m pytest tests/tools/test_cc_gate.py tests/tools/test_ruleset_gate.py tests/tools/test_ci_contract.py tests/tools/test_lint_ci_contract.py tests/tools/test_tests_ci_contract.py tests/tools/test_agents_contract.py tests/tools/test_privileged_ruleset_audit.py tests/tools/test_budget_source_ratchet.py tests/tools/test_deploy_compose_bind.py tests/tools/test_promote_source.py -q
+        run: .venv-ruleset/bin/python -m pytest tests/tools/test_cc_gate.py tests/tools/test_ruleset_gate.py tests/tools/test_ci_contract.py tests/tools/test_lint_ci_contract.py tests/tools/test_tests_ci_contract.py tests/tools/test_agents_contract.py tests/tools/test_privileged_ruleset_audit.py tests/tools/test_budget_source_ratchet.py tests/tools/test_deploy_compose_bind.py tests/tools/test_deploy_workflow.py tests/tools/test_promote_source.py -q
 
       - name: Compare live ruleset to checked-in snapshot
         env:

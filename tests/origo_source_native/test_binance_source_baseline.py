@@ -319,7 +319,7 @@ def test_perp_source_identity_contract(
         RolloutStage.LIVE,
         date(2019, 9, 8),
     )
-    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert spec.orchestration == OrchestrationSpec('5 8 * * *', '* * * * *', '30 * * * *')
     assert [component.key for component in spec.components] == [
         'raw',
         'time',
@@ -428,7 +428,7 @@ def test_perp_agg_source_identity_contract(origo_test_env: dict[str, str]) -> No
         RolloutStage.CANARY,
         date(2019, 12, 31),
     )
-    assert spec.orchestration == OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *')
+    assert spec.orchestration == OrchestrationSpec('5 8 * * *', '* * * * *', '30 * * * *')
     assert [component.key for component in spec.components] == [
         'raw',
         'time',

@@ -29,6 +29,7 @@ queues or activate automation in Dagit.
   received after the active run read its input. Identical work is serialized by
   the native identity tag limit. Distinct dates, depth chunk minutes, changed
   source revisions and separate backfill receipts remain distinct work.
+- Run history loads as a Dagster backfill of `backfill_<key>_source_job`: only that job name switches reconcile to the `complete` operation, so asset-direct backfills bypass the completion barrier and the source backfill log.
 - The minute feeds are not runs. The depth worker and the provisional worker
   (`origo.workers.depth`, `origo.workers.provisional`) process each minute outside the
   queue, write receipts to `origo.worker_minute_log` and report materializations of

@@ -247,18 +247,21 @@ jobs:
           LAUNCH_TS=$(date -u +%Y-%m-%dT%H:%M:%S)
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
             dagster job launch -j maintain_operational_metadata_job </dev/null
-          launched_run="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
-            -e LAUNCH_TS="$LAUNCH_TS" python -c 'from dagster import DagsterInstance
-            import os
-            instance = DagsterInstance.get()
-            for record in instance.get_run_records(limit=200):
-                run = record.dagster_run
-                if run.job_name != "maintain_operational_metadata_job":
-                    continue
-                tags = run.tags or {}
-                if "dagster/schedule_name" not in tags and record.create_timestamp.strftime("%Y-%m-%dT%H:%M:%S") >= os.environ["LAUNCH_TS"]:
-                    print(run.run_id)
-                    break' </dev/null)"
+          launched_run="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T -e LAUNCH_TS="$LAUNCH_TS" dagster python - <<'PY'
+          from dagster import DagsterInstance
+          import os
+
+          instance = DagsterInstance.get()
+          for record in instance.get_run_records(limit=200):
+              run = record.dagster_run
+              if run.job_name != "maintain_operational_metadata_job":
+                  continue
+              tags = run.tags or {}
+              if "dagster/schedule_name" not in tags and record.create_timestamp.strftime("%Y-%m-%dT%H:%M:%S") >= os.environ["LAUNCH_TS"]:
+                  print(run.run_id)
+                  break
+          PY
+          )"
           if [ -z "$launched_run" ]; then
             echo 'post-up: maintenance launch produced no run' >&2
             exit 1

@@ -3,6 +3,7 @@
 This observer never creates jobs, repairs data or initializes application state.
 The deployment workflow owns launch; this command must observe its terminal result.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,8 +60,12 @@ def _number(value: object) -> float:
 
 
 def verify_observation(
-    document: Mapping[str, object], *, expected_sha: str, maintenance_run_id: str,
-    ready_at: datetime, sources: Sequence[str],
+    document: Mapping[str, object],
+    *,
+    expected_sha: str,
+    maintenance_run_id: str,
+    ready_at: datetime,
+    sources: Sequence[str],
 ) -> tuple[str, ...]:
     """Reasons this observation has not established the requested deployment outcome."""
     problems: list[str] = []
@@ -85,17 +90,23 @@ def verify_observation(
         if _date(source.get('published_end')) < _date(source.get('new_interval_end')):
             problems.append(f'{key}: publication has not caught up to its new accepted interval')
         if source.get('files_verified') is not True:
-            problems.append(f'{key}: declared published files are missing, unreadable or mismatched')
+            problems.append(
+                f'{key}: declared published files are missing, unreadable or mismatched'
+            )
     return tuple(problems)
 
 
 def _files(manifest: Mapping[str, object], expected: set[str], deadline: float) -> bool:
     import polars as pl
+
     rows = manifest.get('files')
-    if not isinstance(rows, list) or not rows or len(rows) > 5000:
+    if not isinstance(rows, list):
+        return False
+    entries = cast(list[object], rows)
+    if not entries or len(entries) > 5000:
         return False
     seen: dict[str, set[str]] = {'parquet': set(), 'arrow': set()}
-    for value in cast(list[object], rows):
+    for value in entries:
         entry = _object(value, 'file')
         path = Path(str(entry.get('path', '')))
         kind = 'arrow' if entry.get('kind') == 'arrow' else 'parquet'
@@ -116,12 +127,22 @@ def _files(manifest: Mapping[str, object], expected: set[str], deadline: float) 
 
 
 def observe(
-    client: Client, dagster: DagsterReader, *, database: str, root: Path,
-    code_sha: str, maintenance_run_id: str, ready_at: datetime, deadline: float,
+    client: Client,
+    dagster: DagsterReader,
+    *,
+    database: str,
+    root: Path,
+    code_sha: str,
+    maintenance_run_id: str,
+    ready_at: datetime,
+    deadline: float,
 ) -> dict[str, object]:
     inventory = load_inventory()
     reader = ReadOnlyClient(client)
-    run = _object(dagster.query('DeploymentRun', RUN_QUERY, {'id': maintenance_run_id}).get('runOrError'), 'run')
+    run = _object(
+        dagster.query('DeploymentRun', RUN_QUERY, {'id': maintenance_run_id}).get('runOrError'),
+        'run',
+    )
     health = dagster.health()
     sources: dict[str, object] = {}
     for spec in SOURCE_REGISTRY:
@@ -134,8 +155,11 @@ def observe(
             "WHERE feed='provisional' AND series=%(source)s AND status='OK' "
             'AND recorded_at > %(ready)s AND minute < %(frontier)s '
             'ORDER BY recorded_at DESC LIMIT 1',
-            {'source': spec.key, 'ready': ready_at.replace(tzinfo=None),
-             'frontier': coverage.contiguous_end.replace(tzinfo=None)},
+            {
+                'source': spec.key,
+                'ready': ready_at.replace(tzinfo=None),
+                'frontier': coverage.contiguous_end.replace(tzinfo=None),
+            },
         )
         if not result:
             raise RuntimeError(f'{spec.key}: no new verified minute has completed since readiness.')
@@ -150,12 +174,16 @@ def observe(
             "WHERE feed='provisional' AND series=%(series)s AND status='OK' "
             'AND recorded_at > %(ready)s AND sha256=%(token)s '
             'ORDER BY recorded_at DESC LIMIT 1',
-            {'series': f'{spec.key}:mount', 'ready': ready_at.replace(tzinfo=None),
-             'token': manifest.get('pinned_token', '')},
+            {
+                'series': f'{spec.key}:mount',
+                'ready': ready_at.replace(tzinfo=None),
+                'token': manifest.get('pinned_token', ''),
+            },
         )
         if not publication or not isinstance(publication[0][0], datetime):
             raise RuntimeError(f'{spec.key}: no matching new publication receipt.')
         from datetime import timedelta
+
         sources[spec.key] = {
             'components_complete': not coverage.incomplete_partitions,
             'new_interval_end': (minute.replace(tzinfo=UTC) + timedelta(minutes=1)).isoformat(),
@@ -163,16 +191,26 @@ def observe(
             'publication_completed_at': publication[0][0].replace(tzinfo=UTC).isoformat(),
             'published_end': committed_end.isoformat(),
             'manifest_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-            'files_verified': _files(manifest, {series.name for series in inventory.sources[spec.key].series}, deadline),
+            'files_verified': _files(
+                manifest, {series.name for series in inventory.sources[spec.key].series}, deadline
+            ),
         }
-    return {'code_sha': code_sha, 'observed_at': datetime.now(UTC).isoformat(),
-            'maintenance': run, 'daemons_healthy': health.reachable and not health.unhealthy_daemons,
-            'sources': sources}
+    return {
+        'code_sha': code_sha,
+        'observed_at': datetime.now(UTC).isoformat(),
+        'maintenance': run,
+        'daemons_healthy': health.reachable and not health.unhealthy_daemons,
+        'sources': sources,
+    }
 
 
 def wait_for_deployment(
-    probe: Callable[[float], dict[str, object]], *, expected_sha: str,
-    maintenance_run_id: str, ready_at: datetime, sources: Sequence[str],
+    probe: Callable[[float], dict[str, object]],
+    *,
+    expected_sha: str,
+    maintenance_run_id: str,
+    ready_at: datetime,
+    sources: Sequence[str],
     timeout_seconds: float = DEFAULT_DEADLINE_SECONDS,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
@@ -188,18 +226,36 @@ def wait_for_deployment(
     while clock() < deadline:
         try:
             observation = probe(deadline)
-            reasons = verify_observation(observation, expected_sha=expected_sha,
-                maintenance_run_id=maintenance_run_id, ready_at=ready_at, sources=sources)
-            attempts.append({'elapsed_seconds': clock() - began,
-                             'observation': observation, 'reasons': list(reasons)})
+            reasons = verify_observation(
+                observation,
+                expected_sha=expected_sha,
+                maintenance_run_id=maintenance_run_id,
+                ready_at=ready_at,
+                sources=sources,
+            )
+            attempts.append(
+                {
+                    'elapsed_seconds': clock() - began,
+                    'observation': observation,
+                    'reasons': list(reasons),
+                }
+            )
             if not reasons and clock() <= deadline:
                 return {'verdict': 'PASS', 'elapsed_seconds': clock() - began, 'attempts': attempts}
         except (OSError, RuntimeError, ValueError, TypeError, KeyError, IndexError) as error:
-            attempts.append({'elapsed_seconds': clock() - began,
-                             'reason': f'{type(error).__name__}: {error}'[:1000]})
+            attempts.append(
+                {
+                    'elapsed_seconds': clock() - began,
+                    'reason': f'{type(error).__name__}: {error}'[:1000],
+                }
+            )
         sleep(max(0.0, min(15.0, deadline - clock())))
-    return {'verdict': 'FAIL', 'elapsed_seconds': clock() - began, 'attempts': attempts,
-            'reason': 'The deployment deadline elapsed without verified new delivery and maintenance success.'}
+    return {
+        'verdict': 'FAIL',
+        'elapsed_seconds': clock() - began,
+        'attempts': attempts,
+        'reason': 'The deployment deadline elapsed without verified new delivery and maintenance success.',
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -216,27 +272,56 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     root = Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
-    reader = DagsterReader(os.environ.get('DAGSTER_WEBSERVER_URL', 'http://dagit:3000'), timeout_seconds=5)
+    reader = DagsterReader(
+        os.environ.get('DAGSTER_WEBSERVER_URL', 'http://dagit:3000'), timeout_seconds=5
+    )
     try:
         result = wait_for_deployment(
-            lambda deadline: observe(client, reader, database=settings.database, root=root,
-                code_sha=os.environ.get('ORIGO_CODE_SHA', ''), maintenance_run_id=args.maintenance_run_id,
-                ready_at=ready, deadline=deadline), expected_sha=args.expected_sha,
-            maintenance_run_id=args.maintenance_run_id, ready_at=ready,
-            sources=tuple(load_inventory().sources), timeout_seconds=available,
+            lambda deadline: observe(
+                client,
+                reader,
+                database=settings.database,
+                root=root,
+                code_sha=os.environ.get('ORIGO_CODE_SHA', ''),
+                maintenance_run_id=args.maintenance_run_id,
+                ready_at=ready,
+                deadline=deadline,
+            ),
+            expected_sha=args.expected_sha,
+            maintenance_run_id=args.maintenance_run_id,
+            ready_at=ready,
+            sources=tuple(load_inventory().sources),
+            timeout_seconds=available,
         )
     finally:
         client.disconnect()
-    result.update({'schema_version': 1, 'kind': 'steady_state_deployment',
-                   'environment': 'production', 'code_sha': args.expected_sha,
-                   'policy_sha256': load_policy().sha256, 'inventory_sha256': load_inventory().sha256,
-                   'ready_at': ready.isoformat(), 'maintenance_run_id': args.maintenance_run_id})
+    result.update(
+        {
+            'schema_version': 1,
+            'kind': 'steady_state_deployment',
+            'environment': 'production',
+            'code_sha': args.expected_sha,
+            'policy_sha256': load_policy().sha256,
+            'inventory_sha256': load_inventory().sha256,
+            'ready_at': ready.isoformat(),
+            'maintenance_run_id': args.maintenance_run_id,
+        }
+    )
     target = args.output or root / 'deployment-evidence' / f'{args.maintenance_run_id}.json'
     target.parent.mkdir(parents=True, exist_ok=True)
     from .publication import write_atomic
+
     write_atomic(target, canonical_json(result))
-    print(json.dumps({'verdict': result['verdict'], 'evidence': str(target),
-                      'elapsed_seconds': result['elapsed_seconds']}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                'verdict': result['verdict'],
+                'evidence': str(target),
+                'elapsed_seconds': result['elapsed_seconds'],
+            },
+            sort_keys=True,
+        )
+    )
     return 0 if result['verdict'] == 'PASS' else 1
 
 

@@ -3,12 +3,12 @@
 Integer ID continuity is never assumed. A historical request must overlap the
 known row on each side of a gap, with exactly matching normalized values.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
-from datetime import datetime
+from collections.abc import Callable
 from typing import cast
 
 from origo.sources.adapters.binance_daily import Response
@@ -25,19 +25,28 @@ FIELDS = 'segment,id,price,qty,quote_qty,time,is_buyer_maker,is_rpi'
 
 
 def _values(row: tuple[object, ...]) -> dict[str, object]:
-    return {'id': int(str(row[1])), 'price': str(row[2]), 'qty': str(row[3]),
-            'quoteQty': str(row[4]), 'time': int(str(row[5])),
-            'isBuyerMaker': bool(row[6]), 'isRPITrade': bool(row[7])}
+    return {
+        'id': int(str(row[1])),
+        'price': str(row[2]),
+        'qty': str(row[3]),
+        'quoteQty': str(row[4]),
+        'time': int(str(row[5])),
+        'isBuyerMaker': bool(row[6]),
+        'isRPITrade': bool(row[7]),
+    }
 
 
 def _page(response: Response) -> list[dict[str, object]]:
     if response.status != 200:
         raise SourceError('CAPTURE_REPAIR_HTTP', 'Historical gap repair did not return HTTP 200.')
     decoded: object = json.loads(response.body)
-    if not isinstance(decoded, list) or not 1 <= len(decoded) <= PAGE_LIMIT:
+    if not isinstance(decoded, list):
+        raise SourceError('CAPTURE_REPAIR_SCHEMA', 'Historical repair response must be a list.')
+    entries = cast(list[object], decoded)
+    if not 1 <= len(entries) <= PAGE_LIMIT:
         raise SourceError('CAPTURE_REPAIR_SCHEMA', 'Historical repair page size is invalid.')
     result: list[dict[str, object]] = []
-    for item in cast(list[object], decoded):
+    for item in entries:
         if not isinstance(item, dict):
             raise SourceError('CAPTURE_REPAIR_SCHEMA', 'Historical repair must return objects.')
         result.append(cast(dict[str, object], item))
@@ -48,10 +57,12 @@ def repair_minute(spool: TradeSpool, partition: Partition, fetch: FetchPage) -> 
     """Return a fully proven minute, or None when capture cannot bracket it cheaply."""
     start, end = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
     connection = spool.connection
-    left = connection.execute(f'SELECT {FIELDS} FROM trades WHERE time < ? '
-                              'ORDER BY time DESC,id DESC LIMIT 1', (start,)).fetchone()
-    right = connection.execute(f'SELECT {FIELDS} FROM trades WHERE time >= ? '
-                               'ORDER BY time,id LIMIT 1', (end,)).fetchone()
+    left = connection.execute(
+        f'SELECT {FIELDS} FROM trades WHERE time < ? ORDER BY time DESC,id DESC LIMIT 1', (start,)
+    ).fetchone()
+    right = connection.execute(
+        f'SELECT {FIELDS} FROM trades WHERE time >= ? ORDER BY time,id LIMIT 1', (end,)
+    ).fetchone()
     if left is None or right is None:
         return None
     if start - left[5] > MAX_EDGE_AGE_MS or right[5] - end > MAX_EDGE_AGE_MS:
@@ -78,7 +89,9 @@ def repair_minute(spool: TradeSpool, partition: Partition, fetch: FetchPage) -> 
         raise SourceError('CAPTURE_REPAIR_BOUND', 'Capture has too many disconnected segments.')
     ranges = connection.execute(
         'SELECT segment,min_id,max_id FROM segments WHERE segment IN ('
-        + ','.join('?' for _ in segments) + ') ORDER BY min_id', segments,
+        + ','.join('?' for _ in segments)
+        + ') ORDER BY min_id',
+        segments,
     ).fetchall()
     merged: list[tuple[int, int]] = []
     for _, lower, upper in ranges:
@@ -104,25 +117,40 @@ def repair_minute(spool: TradeSpool, partition: Partition, fetch: FetchPage) -> 
                 raise SourceError('CAPTURE_REPAIR_BOUND', 'Gap repair exceeded its page bound.')
             response = fetch(next_id)
             page = _page(response)
-            requests.append({'fromId': next_id, 'limit': PAGE_LIMIT, 'status': response.status,
-                             'body_sha256': hashlib.sha256(response.body).hexdigest(),
-                             'weight': 200, 'latency_ms': response.cost.latency_ms,
-                             'pace_wait_ms': response.cost.pace_wait_ms})
+            requests.append(
+                {
+                    'fromId': next_id,
+                    'limit': PAGE_LIMIT,
+                    'status': response.status,
+                    'body_sha256': hashlib.sha256(response.body).hexdigest(),
+                    'weight': 200,
+                    'latency_ms': response.cost.latency_ms,
+                    'pace_wait_ms': response.cost.pace_wait_ms,
+                }
+            )
             for raw in page:
                 mapped = spool.mapper(raw)
                 key, instant = int(str(mapped[0])), int(str(mapped[4]))
                 if key < next_id or key <= previous_id or instant < previous_time:
                     raise SourceError('CAPTURE_REPAIR_ORDER', 'Historical gap page is unordered.')
                 if previous_id == lower - 1 and key != lower:
-                    raise SourceError('CAPTURE_REPAIR_OVERLAP', 'Historical reply omitted the left anchor.')
+                    raise SourceError(
+                        'CAPTURE_REPAIR_OVERLAP', 'Historical reply omitted the left anchor.'
+                    )
                 previous_id, previous_time = key, instant
                 if key in normalized and normalized[key] != mapped:
-                    raise SourceError('CAPTURE_CONFLICT', 'Historical and captured values disagree.')
+                    raise SourceError(
+                        'CAPTURE_CONFLICT', 'Historical and captured values disagree.'
+                    )
                 if key > upper:
-                    raise SourceError('CAPTURE_REPAIR_OVERLAP', 'Historical reply omitted the right anchor.')
+                    raise SourceError(
+                        'CAPTURE_REPAIR_OVERLAP', 'Historical reply omitted the right anchor.'
+                    )
                 normalized[key], provider[key] = mapped, raw
                 if len(normalized) > MAX_ROWS:
-                    raise SourceError('CAPTURE_REPAIR_BOUND', 'Repaired minute exceeds the row bound.')
+                    raise SourceError(
+                        'CAPTURE_REPAIR_BOUND', 'Repaired minute exceeds the row bound.'
+                    )
                 if key == upper:
                     reached = True
                     break
@@ -134,8 +162,17 @@ def repair_minute(spool: TradeSpool, partition: Partition, fetch: FetchPage) -> 
     if not rows:
         return None
     digest = content_hash(rows, schema_version=1)
-    evidence = {'acquisition': 'verified_capture_with_historical_gap_repair',
-                'partition': partition.key, 'segments': [list(item) for item in ranges],
-                'left_id': first, 'right_id': last, 'gaps': [list(gap) for gap in gaps],
-                'requests': requests, 'row_count': len(rows), 'content_hash': digest}
-    return Revision(digest, digest, json.dumps(evidence, sort_keys=True), len(rows), lambda: iter(rows))
+    evidence = {
+        'acquisition': 'verified_capture_with_historical_gap_repair',
+        'partition': partition.key,
+        'segments': [list(item) for item in ranges],
+        'left_id': first,
+        'right_id': last,
+        'gaps': [list(gap) for gap in gaps],
+        'requests': requests,
+        'row_count': len(rows),
+        'content_hash': digest,
+    }
+    return Revision(
+        digest, digest, json.dumps(evidence, sort_keys=True), len(rows), lambda: iter(rows)
+    )

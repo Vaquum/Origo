@@ -1,15 +1,26 @@
 """Observer safety and evidence identity tests; no production connections."""
 
-from collections.abc import Mapping
+import importlib.util
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from origo.steady_state.capture import CaptureConfig, EvidenceWriter, ReadOnlyClient
 from origo.steady_state.policy import canonical_json
 from origo.steady_state.verification import EvidenceError, load_bundle
-from tools.check_steady_state import main
+
+
+def main(args: list[str]) -> int:
+    path = Path(__file__).resolve().parents[2] / 'tools' / 'check_steady_state.py'
+    specification = importlib.util.spec_from_file_location('s439_check_tool', path)
+    if specification is None or specification.loader is None:
+        raise RuntimeError('The checked-in observer CLI could not be loaded.')
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return cast(Callable[[list[str]], int], getattr(module, 'main'))(args)
 
 
 class RecordingClient:

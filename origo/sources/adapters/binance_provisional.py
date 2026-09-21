@@ -243,7 +243,9 @@ class BinanceProvisionalBase:
         skipped = 0
         complete = False
         page_path = (
-            self.AGG_TRADES_PATH if single_endpoint else self.HISTORICAL_TRADES_PATH
+            self.AGG_TRADES_PATH
+            if self.HISTORICAL_TRADES_PATH is None
+            else self.HISTORICAL_TRADES_PATH
         )
         id_field, time_field = ('a', 'T') if single_endpoint else ('id', 'time')
         if single_endpoint:

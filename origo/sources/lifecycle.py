@@ -19,6 +19,7 @@ from .contracts import (
     Snapshot,
     SourceError,
     StateRecord,
+    beat_worker,
     failure_code,
     failure_message,
 )
@@ -330,6 +331,10 @@ class SourceRuntime:
                         count,
                         digest,
                     )
+                    # A fat minute spends minutes in Arrow builds and inserts
+                    # after its last REST request; each finished component
+                    # proves the worker is alive. Dagster runs skip this.
+                    beat_worker()
                 except Exception as error:
                     self.failures.record(
                         operation='component',

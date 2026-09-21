@@ -159,6 +159,8 @@ services:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
+      # The REST and component beats land here; the worker main re-exports the same path.
+      - ORIGO_WORKER_HEARTBEAT=/opt/origo/heartbeats/provisional.heartbeat
     volumes:
       - .:/opt/app
       - ./parquet_data:/opt/parquet

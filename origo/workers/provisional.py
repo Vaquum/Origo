@@ -28,9 +28,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
 from origo.sources.bundle import SourceRunConfig, execute_source
-from origo.sources.contracts import Partition, RevisionedSourceSpec, RolloutStage, failure_code
+from origo.sources.contracts import (
+    Partition,
+    RevisionedSourceSpec,
+    RolloutStage,
+    WORKER_HEARTBEAT_ENV,
+    failure_code,
+)
 from origo.sources.publication import publication_current
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
@@ -110,15 +115,19 @@ class ProvisionalFeed:
         work: str,
         minute: datetime | None = None,
         token: str | None = None,
+        exhaustible: bool = True,
     ) -> bool:
-        """Whether the work's failures allow another attempt now: none so far, or at most
-        ``retry_count`` retries with the doubling delay since the last failure elapsed."""
+        """Whether the work's failures allow another attempt now: none so far, or the
+        doubling delay since the last failure elapsed. Exhaustible work (a pinned
+        publication) stops after ``retry_count`` for an operator run; a minute never
+        exhausts — a permanently skipped hole would freeze the current-view frontier,
+        so holes keep retrying on the capped delay until they build."""
         attempts, last_failed = failed_attempts(
             store.client, store.database, feed=self.name, series=series, minute=minute, token=token
         )
         if attempts == 0 or last_failed is None:
             return True
-        if attempts > spec.orchestration.retry_count:
+        if exhaustible and attempts > spec.orchestration.retry_count:
             log.error(
                 'source=%s %s attempts exhausted after %d failures; an operator run is required',
                 spec.key,
@@ -211,7 +220,12 @@ class ProvisionalFeed:
             partition
             for partition in candidates
             if self._may_attempt(
-                store, spec, series=spec.key, work=f'partition={partition.key}', minute=partition.start
+                store,
+                spec,
+                series=spec.key,
+                work=f'partition={partition.key}',
+                minute=partition.start,
+                exhaustible=False,
             )
         ]
         if not admitted:

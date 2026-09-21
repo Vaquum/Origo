@@ -30,9 +30,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, ClassVar, cast
 
-from ..contracts import Partition, Revision, Row, SourceError
+from ..contracts import Partition, Revision, Row, SourceError, beat_worker
 from ..hashing import content_hash
-from .binance_daily import beat_worker
 
 if TYPE_CHECKING:
     from .binance_daily import Response

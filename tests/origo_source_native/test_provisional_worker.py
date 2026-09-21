@@ -203,13 +203,16 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     assert reporter.materializations[2][2]['failed'] == 0
 
 
-def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
+def test_provisional_minute_failures_back_off_without_an_attempt_limit(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
     tmp_path: Path,
     query_origo: Query,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # A minute never exhausts: a permanently skipped hole would freeze the
+    # current-view frontier, so holes keep retrying on the capped delay until
+    # they build. Only pinned publications stop for an operator run.
     spec, _ = spot
     spec = replace(spec, orchestration=replace(spec.orchestration, retry_count=2, retry_delay=3600))
 
@@ -234,15 +237,17 @@ def test_provisional_failures_back_off_and_stop_at_the_attempt_limit(
         assert feed.tick(NOW).failed == ()
         offset[0] = timedelta(seconds=200)
         assert feed.tick(NOW).failed == (key,)
-        # retry_count retries are spent: no more attempts, an ERROR line names the minute.
+        # Past retry_count the capped delay still admits the hole: a fourth
+        # attempt runs instead of freezing the frontier, and nothing logs
+        # exhaustion for a minute.
         offset[0] = timedelta(hours=10)
-        assert feed.tick(NOW).failed == ()
+        assert feed.tick(NOW).failed == (key,)
 
     assert query_origo(RECEIPTS) == [
         ('binance_spot_trades', 'STARTED', 0, ''),
         ('binance_spot_trades', 'FAILED', 0, 'RuntimeError'),
-    ] * 3
-    assert f'partition={KEY} attempts exhausted after 3 failures' in caplog.text
+    ] * 4
+    assert 'attempts exhausted' not in caplog.text
     assert 'binance unavailable' in caplog.text
 
 
@@ -504,7 +509,7 @@ def test_reconcile_converts_died_started_receipts_to_failed(
 
 
 def test_beat_writes_only_with_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV, beat_worker
+    from origo.sources.contracts import WORKER_HEARTBEAT_ENV, beat_worker
 
     target = tmp_path / 'worker.heartbeat'
     monkeypatch.delenv(WORKER_HEARTBEAT_ENV, raising=False)
@@ -524,7 +529,7 @@ def test_slow_rest_fetch_beats_during_requests(
 ) -> None:
     # Beats land between paged requests, while the fetch is still running: the
     # check before each transport call sees every earlier request's beat.
-    from origo.sources.adapters.binance_daily import WORKER_HEARTBEAT_ENV
+    from origo.sources.contracts import WORKER_HEARTBEAT_ENV
 
     spec, _ = spot
     target = tmp_path / 'worker.heartbeat'
@@ -574,3 +579,30 @@ def test_parallel_builds_complete_all_candidates(
     assert len(outcome.processed) == 6 and outcome.failed == ()
     assert len(threads) > 1
     assert elapsed < 9
+
+
+def test_provisional_build_beats_once_per_component(
+    spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The REST beats stop at the last paged request; a fat minute then spends
+    # its time in Arrow builds and inserts, so each finished component beats.
+    # Only the lifecycle call sites are counted here; the adapter's own
+    # per-request beats are covered by test_slow_rest_fetch_beats_during_requests.
+    spec, requests = spot
+    beats: list[None] = []
+    monkeypatch.setattr('origo.sources.lifecycle.beat_worker', lambda: beats.append(None))
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        assert spec.provisional is not None
+        expected = len(store.components(spec.provisional.partition(KEY)))
+        assert expected >= 1
+        record = runtime.build(KEY, provisional=True)
+        assert record.partition.key == KEY
+        assert not requests
+        assert len(beats) == expected
+    finally:
+        client.disconnect()

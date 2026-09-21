@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
@@ -28,6 +31,25 @@ class ArchiveNotPublishedYet(Exception):
     latest, the same 404 fails loud as a mid-history gap. Deliberately not a
     RuntimeError, so the audit's failure handlers cannot catch it as a fault.
     """
+
+
+WORKER_HEARTBEAT_ENV = 'ORIGO_WORKER_HEARTBEAT'
+
+
+def beat_worker() -> None:
+    """Touch the worker heartbeat when a worker owns this process.
+
+    A slow minute holds the worker inside one tick for minutes; each
+    completed unit of work — a REST request, a built component — proves the
+    loop is alive so the watchdog does not mistake slow progress for a hang.
+    Dagster runs never set the variable and skip this.
+    """
+    beat = os.environ.get(WORKER_HEARTBEAT_ENV, '')
+    if not beat:
+        return
+    path = Path(beat)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'{time.time():.3f}\n')
 
 
 def failure_code(error: Exception) -> str:

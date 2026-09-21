@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import requests
 
 from ..arrow_types import ArrowTable
-from ..contracts import Partition, Row, SourceError
+from ..contracts import Partition, Row, SourceError, beat_worker
 from .binance_archive import BinanceArchiveDaily, parse_archive_boolean
 from .binance_archive import parse_decimal as shared_parse_decimal
 from .binance_archive import timestamp_datetime as timestamp_datetime
@@ -30,8 +30,6 @@ class Response:
     status: int
 
 
-WORKER_HEARTBEAT_ENV = 'ORIGO_WORKER_HEARTBEAT'
-
 # Static pacing per Binance host family at 60% of the documented IP allowance,
 # with the header-driven backstop at 80%: spot allows 6000 REQUEST_WEIGHT/min
 # and fapi 2400/min. Unknown hosts keep the previous conservative posture.
@@ -40,21 +38,6 @@ REST_HOST_BUDGETS = {
     'fapi.binance.com': (24, 1920),
 }
 REST_DEFAULT_BUDGET = (20, 1200)
-
-
-def beat_worker() -> None:
-    """Touch the worker heartbeat when a worker owns this process.
-
-    A paced catch-up fetch holds the worker inside one tick for minutes; each
-    completed request proves the loop is alive so the watchdog does not mistake
-    slow progress for a hang. Dagster runs never set the variable and skip this.
-    """
-    beat = os.environ.get(WORKER_HEARTBEAT_ENV, '')
-    if not beat:
-        return
-    path = Path(beat)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'{time.time():.3f}\n')
 
 
 def _request(

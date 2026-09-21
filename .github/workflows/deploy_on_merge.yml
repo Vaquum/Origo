@@ -245,8 +245,8 @@ jobs:
           PY
           echo 'post-up: maintenance launch starting'
           LAUNCH_TS=$(date -u +%Y-%m-%dT%H:%M:%S)
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
-            dagster job launch -j maintain_operational_metadata_job </dev/null
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster </dev/null \
+            dagster job launch -j maintain_operational_metadata_job
           launched_run="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T -e LAUNCH_TS="$LAUNCH_TS" dagster python - <<'PY'
           from dagster import DagsterInstance
           import os

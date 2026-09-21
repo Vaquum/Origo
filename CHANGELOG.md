@@ -1,5 +1,7 @@
 # v3.21.7
 
+- Poll the latest canonical day every five minutes without duplicating completed runs; retain successful, unavailable and unknown checksum-discovery observations for measured archive-delivery latency.
+
 - Wire the independent perpetual capture service and shared durable spool into both Compose deployments; give the monitor read-only access to the actual Parquet/Arrow products and declare native-job market-data credentials.
 
 - Replace the #440 provisional frontier lookup with bounded, source-scoped component-certified coverage reads; preserve first-gap admission without expanding the current-view join.

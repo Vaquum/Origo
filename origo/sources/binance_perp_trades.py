@@ -23,7 +23,7 @@ BINANCE_PERP_TRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     provisional=BinancePerpProvisional(),
     components=PERP_COMPONENTS,
     consumers=PERP_CONSUMERS,
-    # UM Vision zips publish ~07:35 UTC; asking at 04:00 buys 4h of red 404s.
-    orchestration=OrchestrationSpec('5 8 * * *', '* * * * *', '30 * * * *'),
+    # Bounded availability polling; unchanged revisions do not launch another run.
+    orchestration=OrchestrationSpec('*/5 * * * *', '* * * * *', '30 * * * *'),
     retired_tables=PERP_RETIRED_TABLES,
 )

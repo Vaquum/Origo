@@ -102,9 +102,13 @@ class SourceRuntime:
                 )
         try:
             revision = self.spec.canonical.discover(partition)
-            self.failures.recover(operation='discovery', partition=partition.key)
-            return revision
         except Exception as error:
+            available = (
+                False
+                if isinstance(error, SourceError) and error.code == 'PROVIDER_HTTP_404'
+                else None
+            )
+            self._archive_observation(partition, available, '', failure_code(error))
             if (
                 isinstance(error, SourceError)
                 and error.code == 'PROVIDER_HTTP_404'
@@ -121,6 +125,34 @@ class SourceRuntime:
                 partition=partition.key,
             )
             raise
+
+        self._archive_observation(partition, True, revision, '')
+        self.failures.recover(operation='discovery', partition=partition.key)
+        return revision
+
+    def _archive_observation(
+        self,
+        partition: Partition,
+        available: bool | None,
+        revision: str,
+        error_code: str,
+    ) -> None:
+        # Discovery observes the provider checksum, not its unknowable publication time.
+        # Transport/schema failures are UNKNOWN, never evidence of an unpublished day.
+        evidence = json.dumps(
+            {
+                'operation': 'archive_availability',
+                'probe': 'checksum_discovery',
+                'available': available,
+                'revision': revision,
+                'error_code': error_code,
+            },
+            sort_keys=True,
+        )
+        self.store.execute(
+            f'INSERT INTO {self.store.table("source_observation_log")} VALUES',
+            [(self.spec.key, partition.key, evidence, int(available is True), datetime.now(UTC))],
+        )
 
     def build(self, key: str, *, provisional: bool = False) -> StateRecord:
         get_dagster_logger('origo.sources').info(
@@ -224,8 +256,11 @@ class SourceRuntime:
     def _acknowledge_capture(self, record: StateRecord) -> None:
         adapter = self.spec.provisional
         if record.partition.provisional and isinstance(adapter, CapturedInputAcknowledger):
-            adapter.acknowledge(record.partition, content_hash=record.revision,
-                                generation=f'{record.generation}:{record.build_id}')
+            adapter.acknowledge(
+                record.partition,
+                content_hash=record.revision,
+                generation=f'{record.generation}:{record.build_id}',
+            )
 
     def _record_attempt_failure(
         self, operation: str, key: str, build_id: UUID, error: Exception
@@ -446,7 +481,12 @@ class SourceRuntime:
         self.store.insert_activation(record, self.run_id)
 
     def publish(
-        self, consumer_key: str, destination: str, *, allow_full: bool = False, wait: bool = True,
+        self,
+        consumer_key: str,
+        destination: str,
+        *,
+        allow_full: bool = False,
+        wait: bool = True,
     ) -> Snapshot:
         consumer = next(value for value in self.spec.consumers if value.key == consumer_key)
         self.spec.require_enabled('publish', public=consumer.public)

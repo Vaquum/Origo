@@ -23,7 +23,7 @@ BINANCE_SPOT_AGGTRADES_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     provisional=BinanceSpotAggProvisional(),
     components=SPOT_AGG_COMPONENTS,
     consumers=SPOT_AGG_CONSUMERS,
-    orchestration=OrchestrationSpec('0 4 * * *', '* * * * *', '30 * * * *'),
+    orchestration=OrchestrationSpec('*/5 * * * *', '* * * * *', '30 * * * *'),
     retired_tables=(),
     aliases=(),
 )

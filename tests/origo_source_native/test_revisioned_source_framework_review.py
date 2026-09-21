@@ -320,6 +320,13 @@ def test_discover_still_fails_mid_history_404(
             'SELECT error_code, argMax(event_type, event_time) FROM origo.source_failure_log '
             "WHERE operation='discovery' GROUP BY error_code"
         ) == [('PROVIDER_HTTP_404', 'FAILED')]
+        # The audit path fails the same partition too: the skip never applies
+        # once the day is no longer the candidate.
+        assert runtime.audit() == ()
+        assert client.execute(
+            'SELECT operation, blocking_scope, partition_key FROM origo.source_failure_log '
+            "WHERE operation='audit'"
+        ) == [('audit', 'NONE', '2017-08-17')]
     finally:
         client.disconnect()
 
@@ -331,7 +338,7 @@ def test_canonical_schedule_skips_unpublished_latest_day(
 ) -> None:
     # End to end: the morning tick whose candidate 404s skips the schedule
     # instead of erroring the evaluation, and the audit leaves the pending
-    # partition alone until Vision publishes.
+    # partition alone until Vision publishes — then picks it up.
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
     source = bundle.build_source_bundle(spec)
@@ -341,6 +348,7 @@ def test_canonical_schedule_skips_unpublished_latest_day(
     )
     try:
         runtime.setup()
+        key = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
         scheduled = next(
             value for value in source.schedules if value.name.endswith('_canonical_schedule')
         )
@@ -357,7 +365,20 @@ def test_canonical_schedule_skips_unpublished_latest_day(
                 assert not result.run_requests
                 assert result.skip_message is not None
                 assert 'is not published yet' in result.skip_message
+                assert client.execute(
+                    'SELECT partition_key FROM origo.source_discovery_log'
+                ) == [(key,)]
                 assert runtime.audit() == ()
+                # Once Vision publishes, the same pending partition discovers
+                # through the audit: the empty audit above enumerated it and
+                # skipped, it did not miss it.
+                checksum = f'{"c" * 64}  BTCUSDT-trades-{key}.zip\n'.encode()
+
+                def published(url: str) -> daily.Response:
+                    return daily.Response(checksum, {}, 200)
+
+                patch.setattr(daily, 'get_response', published)
+                assert runtime.audit() == (key,)
             assert client.execute('SELECT count() FROM origo.source_failure_log') == [(0,)]
     finally:
         client.disconnect()

@@ -1797,6 +1797,26 @@
     "monitor": {
       "heartbeat": "monitor.heartbeat",
       "lookback_minutes": 15
+    },
+    "trade-capture": {
+      "heartbeat": "trade-capture.heartbeat",
+      "lookback_minutes": 0
+    },
+    "provisional-binance_spot_trades": {
+      "heartbeat": "provisional-binance_spot_trades.heartbeat",
+      "lookback_minutes": 2160
+    },
+    "provisional-binance_perp_trades": {
+      "heartbeat": "provisional-binance_perp_trades.heartbeat",
+      "lookback_minutes": 2160
+    },
+    "provisional-binance_spot_aggtrades": {
+      "heartbeat": "provisional-binance_spot_aggtrades.heartbeat",
+      "lookback_minutes": 2160
+    },
+    "provisional-binance_perp_aggtrades": {
+      "heartbeat": "provisional-binance_perp_aggtrades.heartbeat",
+      "lookback_minutes": 2160
     }
   },
   "monitor_checks": [

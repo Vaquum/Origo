@@ -3,6 +3,7 @@
 Only verified overlap and boundary evidence seal minutes. Gaps remain explicit
 and use the authenticated historical repair path; no aggregate substitution.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,7 +27,12 @@ from origo.sources.adapters.binance_perp_rest import historical_row
 from origo.sources.contracts import failure_code
 from origo.sources.locking import source_lock
 from origo.steady_state.trade_spool import CaptureOutcome, PageCost, TradeSpool
-from origo.steady_state.trade_spool import parse_recent_trades, spool_directory, spool_max_bytes, spool_path
+from origo.steady_state.trade_spool import (
+    parse_recent_trades,
+    spool_directory,
+    spool_max_bytes,
+    spool_path,
+)
 from .runtime import heartbeat_directory, heartbeat_path, touch_heartbeat
 
 SOURCE_KEY = 'binance_perp_trades'
@@ -41,14 +47,26 @@ log = logging.getLogger('origo.workers.trade_capture')
 
 
 class Transport(Protocol):
-    def __call__(self, url: str, *, params: Mapping[str, str | int],
-                 headers: Mapping[str, str], weight: int, lane: str) -> Response: ...
+    def __call__(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, str | int],
+        headers: Mapping[str, str],
+        weight: int,
+        lane: str,
+    ) -> Response: ...
 
 
 class TradeCapture:
-    def __init__(self, spool: TradeSpool, *, base_url: str,
-                 clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-                 transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        spool: TradeSpool,
+        *,
+        base_url: str,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        transport: Transport | None = None,
+    ) -> None:
         self.spool = spool
         self.base_url = base_url.rstrip('/')
         self.clock = clock
@@ -60,11 +78,23 @@ class TradeCapture:
             raise RuntimeError('Unaccepted trade spool reached its byte cap; capture is blocked.')
         started = self.clock()
         params: dict[str, str | int] = {'symbol': SYMBOL, 'limit': PAGE_ROWS}
-        response = (get_response(self.base_url + RECENT_PATH, params=params,
-                                 headers={}, weight=REQUEST_WEIGHT, lane='live')
-                    if self.transport is None else
-                    self.transport(self.base_url + RECENT_PATH, params=params,
-                                   headers={}, weight=REQUEST_WEIGHT, lane='live'))
+        response = (
+            get_response(
+                self.base_url + RECENT_PATH,
+                params=params,
+                headers={},
+                weight=REQUEST_WEIGHT,
+                lane='live',
+            )
+            if self.transport is None
+            else self.transport(
+                self.base_url + RECENT_PATH,
+                params=params,
+                headers={},
+                weight=REQUEST_WEIGHT,
+                lane='live',
+            )
+        )
         if response.status != 200:
             raise RuntimeError(f'Recent-trade provider returned status {response.status}.')
         trades = parse_recent_trades(response.body)
@@ -74,14 +104,25 @@ class TradeCapture:
             historical_row(trade.provider_row())
         cost = response.cost
         outcome = self.spool.record(
-            trades, captured_at=started, completed_at=self.clock(), status=response.status,
+            trades,
+            captured_at=started,
+            completed_at=self.clock(),
+            status=response.status,
             body_sha256=hashlib.sha256(response.body).hexdigest(),
-            cost=PageCost(REQUEST_WEIGHT, cost.lock_wait_ms, cost.pace_wait_ms,
-                          cost.latency_ms, cost.used_weight_1m),
+            cost=PageCost(
+                REQUEST_WEIGHT,
+                cost.lock_wait_ms,
+                cost.pace_wait_ms,
+                cost.latency_ms,
+                cost.used_weight_1m,
+            ),
         )
         if outcome.closed_reason:
-            log.error('Capture discontinuity segment=%s reason=%s; historical repair required',
-                      outcome.segment, outcome.closed_reason)
+            log.error(
+                'Capture discontinuity segment=%s reason=%s; historical repair required',
+                outcome.segment,
+                outcome.closed_reason,
+            )
         return outcome
 
 
@@ -92,12 +133,13 @@ def check_spool(path: Path, *, now: datetime, max_age_seconds: float = HEALTH_SE
     try:
         with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=2.0) as connection:
             row = connection.execute(
-                'SELECT MAX(completed_at) FROM responses WHERE status=200'
+                'SELECT completed_at,last_time FROM responses WHERE status=200 '
+                'ORDER BY seq DESC LIMIT 1'
             ).fetchone()
-            if row is None or row[0] is None:
+            if row is None or row[0] is None or row[1] is None:
                 return 1
-            age = now.timestamp() - int(row[0]) / 1000
-            return 0 if 0 <= age <= max_age_seconds else 1
+            ages = (now.timestamp() - int(value) / 1000 for value in row)
+            return 0 if all(0 <= age <= max_age_seconds for age in ages) else 1
     except (sqlite3.Error, OSError, ValueError) as error:
         log.error('Trade-capture health evidence unreadable: %s', type(error).__name__)
         return 1
@@ -137,7 +179,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     failures = 0
                     touch_heartbeat(heartbeat)
                     if result.sealed:
-                        log.info('Durably sealed %s minute(s); segment=%s', len(result.sealed), result.segment)
+                        log.info(
+                            'Durably sealed %s minute(s); segment=%s',
+                            len(result.sealed),
+                            result.segment,
+                        )
                     if args.once:
                         print(json.dumps(asdict(result), default=str, sort_keys=True))
                         return 0
@@ -145,7 +191,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     failures += 1
                     log.exception('Recent-trade capture failed; no completeness was inferred')
                     try:
-                        spool.record_fault(datetime.now(UTC), failure_code(error), type(error).__name__)
+                        spool.record_fault(
+                            datetime.now(UTC), failure_code(error), type(error).__name__
+                        )
                     except Exception:
                         log.exception('Capture failure evidence could not be persisted')
                     if args.once:

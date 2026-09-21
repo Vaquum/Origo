@@ -210,9 +210,10 @@ def test_provisional_minute_failures_back_off_without_an_attempt_limit(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # A minute never exhausts: a permanently skipped hole would freeze the
-    # current-view frontier, so holes keep retrying on the capped delay until
-    # they build. Only pinned publications stop for an operator run.
+    # The frontier minute (here the only hole) never exhausts: a permanently
+    # skipped frontier gap would freeze the current-view readers, so it keeps
+    # retrying on the capped delay until it builds. Non-frontier holes and
+    # pinned publications still stop after retry_count for an operator run.
     spec, _ = spot
     spec = replace(spec, orchestration=replace(spec.orchestration, retry_count=2, retry_delay=3600))
 
@@ -237,9 +238,9 @@ def test_provisional_minute_failures_back_off_without_an_attempt_limit(
         assert feed.tick(NOW).failed == ()
         offset[0] = timedelta(seconds=200)
         assert feed.tick(NOW).failed == (key,)
-        # Past retry_count the capped delay still admits the hole: a fourth
-        # attempt runs instead of freezing the frontier, and nothing logs
-        # exhaustion for a minute.
+        # Past retry_count the capped delay still admits the frontier gap: a
+        # fourth attempt runs instead of freezing the readers, and nothing
+        # logs exhaustion for the frontier minute.
         offset[0] = timedelta(hours=10)
         assert feed.tick(NOW).failed == (key,)
 
@@ -581,13 +582,14 @@ def test_parallel_builds_complete_all_candidates(
     assert elapsed < 9
 
 
-def test_provisional_build_beats_once_per_component(
+def test_provisional_build_beats_between_phases(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The REST beats stop at the last paged request; a fat minute then spends
-    # its time in Arrow builds and inserts, so each finished component beats.
+    # its time in Arrow builds and inserts, so each component beats after its
+    # build and after its insert — no multi-phase stretch can look dead.
     # Only the lifecycle call sites are counted here; the adapter's own
     # per-request beats are covered by test_slow_rest_fetch_beats_during_requests.
     spec, requests = spot
@@ -603,6 +605,91 @@ def test_provisional_build_beats_once_per_component(
         record = runtime.build(KEY, provisional=True)
         assert record.partition.key == KEY
         assert not requests
-        assert len(beats) == expected
+        assert len(beats) == 2 * expected
     finally:
         client.disconnect()
+
+
+def test_frontier_gap_is_admitted_first_past_the_lookback(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Five in-window holes fill oldest-5 while the current-view frontier gap
+    # sits 40h back, past the 36h lookback. The tick must still admit the
+    # frontier gap first: crowding must never starve the readers' clip minute.
+    tick_at = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    anchor = tick_at - timedelta(hours=40)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        store = SourceStore(client, ORIGO_DATABASE, spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        runtime.setup(anchor=anchor)
+        ensure_monitoring_tables(client, ORIGO_DATABASE)
+        minutes: list[datetime] = []
+        cursor = anchor
+        while cursor < anchor + timedelta(minutes=10):
+            if cursor != anchor + timedelta(minutes=3):
+                minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+        last = tick_at.replace(second=0, microsecond=0) - timedelta(minutes=1)
+        cursor = last - timedelta(minutes=70)
+        while cursor < last:
+            if cursor < last - timedelta(minutes=60) or cursor >= last - timedelta(minutes=55):
+                minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+        client.execute(
+            f'INSERT INTO {store.table("source_activation_log")} VALUES',
+            [
+                (
+                    spec.key,
+                    minute.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    1,
+                    minute,
+                    minute + timedelta(minutes=1),
+                    1,
+                    'test-revision',
+                    uuid4(),
+                    '0' * 64,
+                    '[]',
+                    'test-run',
+                    tick_at,
+                )
+                for minute in minutes
+            ],
+        )
+
+        def instant(
+            executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
+        ) -> dict[str, object]:
+            return {'build_id': '00000000-0000-0000-0000-000000000000'}
+
+        monkeypatch.setattr(provisional, 'execute_source', instant)
+        feed = _feed(spec, tmp_path, _Dagster(), _Reporter())
+        outcome = feed.tick(tick_at)
+        frontier = (anchor + timedelta(minutes=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        assert outcome.processed[0] == f'{spec.key}:{frontier}'
+        assert len(outcome.processed) >= 7
+        assert outcome.failed == ()
+    finally:
+        client.disconnect()
+
+
+def test_compose_heartbeat_path_matches_worker_wiring(monkeypatch: pytest.MonkeyPatch) -> None:
+    import yaml
+
+    from origo.workers.runtime import heartbeat_directory, heartbeat_path
+
+    # The compose literal must stay the path the worker computes, or the
+    # watchdog and the REST beats silently split across two files.
+    monkeypatch.delenv('ORIGO_HEARTBEAT_DIR', raising=False)
+    expected = (
+        f'ORIGO_WORKER_HEARTBEAT={heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)}'
+    )
+    root = Path(__file__).resolve().parents[2]
+    for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        environment = yaml.safe_load((root / name).read_text())['services'][
+            'provisional-worker'
+        ]['environment']
+        assert expected in environment, name

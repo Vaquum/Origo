@@ -1,7 +1,7 @@
 # v3.21.6
 
-- Unfreeze the current-view frontier: a provisional minute never exhausts its retries (only pinned publications stop for an operator run), so death-loop-era holes with 23+ WORKER_DIED failures drain on the capped hourly delay instead of freezing `*_current` at the first gap forever; already-exhausted holes become eligible on deploy with no operator repair.
-- Close the watchdog gaps around slow minutes: both compose files export `ORIGO_WORKER_HEARTBEAT` for the provisional worker (the Dagster services deliberately do not, so scheduled runs keep skipping beats), and every finished component build beats, so a fat minute's Arrow builds and inserts prove liveness after its last REST request.
+- Unfreeze the current-view frontier: the worker admits the current-view frontier gap first — even past the 36h lookback — and the frontier minute never exhausts its retries, while non-frontier holes and pinned publications keep the attempt cap for an operator run; death-loop-era holes drain oldest-first on the capped delay instead of freezing `*_current` at the first gap, and already-exhausted frontier holes become eligible on deploy with no operator repair.
+- Shrink the watchdog gaps around slow minutes: both compose files export `ORIGO_WORKER_HEARTBEAT` for the provisional worker (the Dagster services deliberately do not, so scheduled runs keep skipping beats), and every component beats after its Arrow build and after its insert, so a fat minute proves liveness through its builds instead of only after its last REST request; only a single statement past 180s could still trip the watchdog. Heartbeat write errors stay telemetry — logged, never recorded as build failures.
 
 # v3.21.5
 

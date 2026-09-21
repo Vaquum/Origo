@@ -1146,8 +1146,8 @@ def _activation_snapshot(
                     'activated_at': _iso(_utc(activated)),
                 }
             )
-        for partition, complete, observed in client.execute(
-            f"""SELECT partition_key, complete, observed_at FROM {config.database}.source_observation_log
+        for partition, complete, observed, evidence in client.execute(
+            f"""SELECT partition_key, complete, observed_at, evidence_json FROM {config.database}.source_observation_log
                 WHERE source_key=%(source)s AND length(partition_key) = 10 AND observed_at > %(since)s
                 ORDER BY observed_at""",
             {'source': key, 'since': since},
@@ -1158,6 +1158,11 @@ def _activation_snapshot(
                     'source_key': key,
                     'partition_key': str(partition),
                     'complete': bool(_int(complete)),
+                    'available': _object(json.loads(str(evidence)), 'availability').get(
+                        'available'
+                    ),
+                    'probe': _object(json.loads(str(evidence)), 'availability').get('probe'),
+                    'revision': _object(json.loads(str(evidence)), 'availability').get('revision'),
                     'observed_at': _iso(_utc(observed)),
                 }
             )

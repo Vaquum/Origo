@@ -709,15 +709,16 @@ class Evaluator:
             missing_observation = 0
             for partition, end, activated_at in activated:
                 seen = sorted(
-                    (_when(row['observed_at'], 'observed_at'), bool(row.get('complete')))
+                    (_when(row['observed_at'], 'observed_at'), row.get('available'))
                     for row in observations
                     if row.get('partition_key') == partition
+                    and row.get('probe') == 'checksum_discovery'
                 )
-                available = next((stamp for stamp, complete in seen if complete), None)
+                available = next((stamp for stamp, known in seen if known is True), None)
                 unavailable = [
                     stamp
-                    for stamp, complete in seen
-                    if not complete and available is not None and stamp < available
+                    for stamp, known in seen
+                    if known is False and available is not None and stamp < available
                 ]
                 if available is None:
                     missing_observation += 1

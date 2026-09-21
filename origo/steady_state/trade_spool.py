@@ -40,6 +40,7 @@ SPOOL_MAX_BYTES_ENV = 'ORIGO_TRADE_SPOOL_MAX_BYTES'
 SPOOL_MAX_BYTES_DEFAULT = 4 * 1024**3
 RELEASED_MINUTE_RETENTION = timedelta(days=14)
 FAULT_RETENTION_ROWS = 1000
+PRUNE_INTERVAL_MS = 60_000
 _SEGMENT_HEAD = 'segment_head'
 _NOT_BRACKETED = 'not_bracketed'
 
@@ -311,11 +312,15 @@ class TradeSpool:
             raise ValueError('The trade spool schema version is not the one this code owns.')
 
     @classmethod
-    def create(cls, path: Path, mapper: Mapper, *, max_bytes: int = SPOOL_MAX_BYTES_DEFAULT) -> TradeSpool:
+    def create(
+        cls, path: Path, mapper: Mapper, *, max_bytes: int = SPOOL_MAX_BYTES_DEFAULT
+    ) -> TradeSpool:
         return cls(path, mapper, max_bytes=max_bytes, create=True)
 
     @classmethod
-    def attach(cls, path: Path, mapper: Mapper, *, max_bytes: int = SPOOL_MAX_BYTES_DEFAULT) -> TradeSpool:
+    def attach(
+        cls, path: Path, mapper: Mapper, *, max_bytes: int = SPOOL_MAX_BYTES_DEFAULT
+    ) -> TradeSpool:
         """Open an existing spool; never creates one (readers and acknowledgers)."""
         return cls(path, mapper, max_bytes=max_bytes, create=False)
 
@@ -408,8 +413,14 @@ class TradeSpool:
                     'INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                     [
                         (
-                            segment, trade.id, trade.price, trade.qty, trade.quote_qty,
-                            trade.time, int(trade.is_buyer_maker), int(trade.is_rpi),
+                            segment,
+                            trade.id,
+                            trade.price,
+                            trade.qty,
+                            trade.quote_qty,
+                            trade.time,
+                            int(trade.is_buyer_maker),
+                            int(trade.is_rpi),
                         )
                         for trade in fresh
                     ],
@@ -422,15 +433,24 @@ class TradeSpool:
             self.connection.execute(
                 'INSERT INTO responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (
-                    seq, segment, _ms(captured_at), _ms(completed_at), status, body_sha256,
+                    seq,
+                    segment,
+                    _ms(captured_at),
+                    _ms(completed_at),
+                    status,
+                    body_sha256,
                     len(trades),
                     trades[0].id if trades else None,
                     trades[-1].id if trades else None,
                     trades[0].time if trades else None,
                     trades[-1].time if trades else None,
                     overlap if chained else None,
-                    new_rows, cost.weight, cost.lock_wait_ms, cost.pace_wait_ms,
-                    cost.latency_ms, cost.used_weight_1m,
+                    new_rows,
+                    cost.weight,
+                    cost.lock_wait_ms,
+                    cost.pace_wait_ms,
+                    cost.latency_ms,
+                    cost.used_weight_1m,
                 ),
             )
             sealed = self._seal(segment, seq, completed_at) if trades else ()
@@ -443,9 +463,7 @@ class TradeSpool:
 
     def _open_new_segment(self, seq: int | None, reason: str | None) -> int:
         opened = seq if seq is not None else self._next_seq()
-        cursor = self.connection.execute(
-            'INSERT INTO segments(opened_seq) VALUES (?)', (opened,)
-        )
+        cursor = self.connection.execute('INSERT INTO segments(opened_seq) VALUES (?)', (opened,))
         if cursor.lastrowid is None:
             raise RuntimeError('SQLite did not assign a segment id.')
         return cursor.lastrowid
@@ -475,8 +493,12 @@ class TradeSpool:
             if expected is None:
                 return 'conflict'
             if expected != (
-                trade.price, trade.qty, trade.quote_qty, trade.time,
-                int(trade.is_buyer_maker), int(trade.is_rpi),
+                trade.price,
+                trade.qty,
+                trade.quote_qty,
+                trade.time,
+                int(trade.is_buyer_maker),
+                int(trade.is_rpi),
             ):
                 return 'conflict'
             seen.add(trade.id)
@@ -519,8 +541,13 @@ class TradeSpool:
         return tuple(
             self.mapper(
                 RawTrade(
-                    _cell(row, 0), str(row[1]), str(row[2]), str(row[3]), _cell(row, 4),
-                    bool(_cell(row, 5)), bool(_cell(row, 6)),
+                    _cell(row, 0),
+                    str(row[1]),
+                    str(row[2]),
+                    str(row[3]),
+                    _cell(row, 4),
+                    bool(_cell(row, 5)),
+                    bool(_cell(row, 6)),
                 ).provider_row()
             )
             for row in rows
@@ -554,8 +581,17 @@ class TradeSpool:
         self.connection.execute(
             'INSERT INTO minutes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)',
             (
-                start_ms, segment, len(rows), _cell(rows[0], 0), _cell(rows[-1], 0), digest,
-                _ms(completed_at), _cell(opened, 0), seq, bracket[0], bracket[1],
+                start_ms,
+                segment,
+                len(rows),
+                _cell(rows[0], 0),
+                _cell(rows[-1], 0),
+                digest,
+                _ms(completed_at),
+                _cell(opened, 0),
+                seq,
+                bracket[0],
+                bracket[1],
             ),
         )
         return True
@@ -653,7 +689,9 @@ class TradeSpool:
                     'SELECT COUNT(DISTINCT id) FROM trades WHERE time >= ? AND time < ?',
                     (cursor, cursor + 60000),
                 )
-                result.append(MinuteCoverage(_minute(cursor), False, reason, _cell(count or (0,), 0)))
+                result.append(
+                    MinuteCoverage(_minute(cursor), False, reason, _cell(count or (0,), 0))
+                )
             cursor += 60000
         return tuple(result)
 
@@ -690,9 +728,7 @@ class TradeSpool:
             'SELECT completed_at, status, row_count, overlap_rows, segment FROM responses '
             'ORDER BY seq DESC LIMIT 1'
         )
-        newest_sealed = self._one(
-            'SELECT MAX(minute_start) FROM minutes WHERE conflict IS NULL'
-        )
+        newest_sealed = self._one('SELECT MAX(minute_start) FROM minutes WHERE conflict IS NULL')
         unacknowledged = self._one(
             'SELECT COUNT(*) FROM minutes WHERE conflict IS NULL AND minute_start NOT IN '
             '(SELECT minute_start FROM acknowledgements)'
@@ -720,7 +756,9 @@ class TradeSpool:
             ),
             'unacknowledged_sealed_minutes': _cell(unacknowledged or (0,), 0),
             'stored_rows': _cell(stored or (0,), 0),
-            'last_fault': None if fault is None else {
+            'last_fault': None
+            if fault is None
+            else {
                 'at': _minute(_cell(fault, 0)).isoformat(),
                 'code': str(fault[1]),
             },
@@ -798,14 +836,20 @@ class TradeSpool:
         return released
 
     def _prune(self, now: datetime) -> None:
-        oldest = self._one('SELECT MIN(time) FROM trades')
-        floor = _optional(oldest or (None,), 0)
-        # A response whose rows are all released is evidence already carried by the
-        # accepted generation; the newest response stays as the overlap anchor.
+        last = self._one("SELECT value FROM meta WHERE key='last_prune_ms'")
+        instant = _ms(now)
+        if last is not None and instant < int(str(last[0])) + PRUNE_INTERVAL_MS:
+            return
+        # Keep receipts that still describe retained input, not every response
+        # newer than the oldest partial head. One unresolved head must not pin
+        # an otherwise acknowledged response history forever.
         self.connection.execute(
             'DELETE FROM responses WHERE seq < (SELECT MAX(seq) FROM responses) '
-            'AND (row_count = 0 OR last_time < ?)',
-            (floor if floor is not None else 2**62,),
+            'AND NOT EXISTS (SELECT 1 FROM trades WHERE trades.segment=responses.segment '
+            'AND trades.id >= responses.first_id AND trades.id <= responses.last_id)'
+        )
+        self.connection.execute(
+            "INSERT OR REPLACE INTO meta VALUES ('last_prune_ms', ?)", (str(instant),)
         )
         self.connection.execute(
             'DELETE FROM segments WHERE closed_seq IS NOT NULL AND segment NOT IN '

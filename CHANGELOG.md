@@ -1,8 +1,11 @@
+# v3.21.6
+
+- Unfreeze the current-view frontier: a provisional minute never exhausts its retries (only pinned publications stop for an operator run), so death-loop-era holes with 23+ WORKER_DIED failures drain on the capped hourly delay instead of freezing `*_current` at the first gap forever; already-exhausted holes become eligible on deploy with no operator repair.
+- Close the watchdog gaps around slow minutes: both compose files export `ORIGO_WORKER_HEARTBEAT` for the provisional worker (the Dagster services deliberately do not, so scheduled runs keep skipping beats), and every finished component build beats, so a fat minute's Arrow builds and inserts prove liveness after its last REST request.
+
 # v3.21.5
 
 - Skip the pre-publish 404 instead of failing the morning: when canonical discovery 404s on the latest-day partition, the schedule skips the tick and the audit leaves the pending partition alone, with no failure receipt — a late Vision publish stays green and the half-hourly audit picks the day up once published. The skip is latest-day only: the same 404 on any older partition still records a discovery failure and raises, so a real mid-history gap still pages, as does a day Vision never publishes (it becomes mid-history overnight).
-- Unfreeze the current-view frontier: a provisional minute never exhausts its retries (only pinned publications stop for an operator run), so death-loop-era holes with 23+ WORKER_DIED failures drain on the capped hourly delay instead of freezing `*_current` at the first gap forever; already-exhausted holes become eligible on deploy with no operator repair.
-- Close the watchdog gaps around slow minutes: both compose files export `ORIGO_WORKER_HEARTBEAT` for the provisional worker (the Dagster services deliberately do not, so scheduled runs keep skipping beats), and every finished component build beats, so a fat minute's Arrow builds and inserts prove liveness after its last REST request.
 
 # v3.21.4
 

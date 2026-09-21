@@ -1,4 +1,5 @@
 """Authentic recorded recent trades; local replay is not a production soak."""
+
 from __future__ import annotations
 
 import base64
@@ -14,7 +15,13 @@ from origo.sources.adapters.binance_daily import Response
 from origo.sources.adapters.binance_perp_rest import historical_row
 from origo.sources.contracts import Partition
 from origo.steady_state.capture_repair import repair_minute
-from origo.steady_state.trade_spool import CaptureMiss, PageCost, SealedMinute, TradeSpool, parse_recent_trades
+from origo.steady_state.trade_spool import (
+    CaptureMiss,
+    PageCost,
+    SealedMinute,
+    TradeSpool,
+    parse_recent_trades,
+)
 from origo.workers.trade_capture import TradeCapture, check_spool
 
 ROOT = Path(__file__).resolve().parents[1] / 'fixtures/steady_state/perp_recent'
@@ -34,14 +41,24 @@ def replay(spool: TradeSpool, records: list[dict]) -> list:
     for record in records:
         body = base64.b64decode(record['body_base64'])
         assert hashlib.sha256(body).hexdigest() == record['body_sha256']
-        times = iter((datetime.fromisoformat(record['captured_at']),
-                      datetime.fromisoformat(record['completed_at'])))
+        times = iter(
+            (
+                datetime.fromisoformat(record['captured_at']),
+                datetime.fromisoformat(record['completed_at']),
+            )
+        )
+
         def transport(url: str, *, params: dict, headers: dict, weight: int, lane: str) -> Response:
             assert url == record['url'] and params == record['params']
             assert headers == {} and weight == 5 and lane == 'live'
             return Response(body, {}, record['status'])
-        capture = TradeCapture(spool, base_url='https://fapi.binance.com',
-                               clock=lambda: next(times), transport=transport)
+
+        capture = TradeCapture(
+            spool,
+            base_url='https://fapi.binance.com',
+            clock=lambda: next(times),
+            transport=transport,
+        )
         outcomes.append(capture.step())
     return outcomes
 
@@ -62,15 +79,21 @@ def test_capture_preserves_real_values_and_only_seals_bracketed_minutes(tmp_path
         first = spool.sealed_minute(sealed[0])
         assert isinstance(first, SealedMinute)
         before = spool.connection.execute('SELECT count(*) FROM trades').fetchone()[0]
-        rejected = spool.acknowledge(sealed[0], content_hash='different-approved-input',
-                                     generation='isolated-review', now=now)
+        rejected = spool.acknowledge(
+            sealed[0],
+            content_hash='different-approved-input',
+            generation='isolated-review',
+            now=now,
+        )
         assert rejected.sealed and not rejected.hash_matched and rejected.rows_released == 0
         assert spool.connection.execute('SELECT count(*) FROM trades').fetchone()[0] == before
     finally:
         spool.close()
 
 
-def test_missing_capture_pages_are_repaired_by_exact_overlapping_native_rows(tmp_path: Path) -> None:
+def test_missing_capture_pages_are_repaired_by_exact_overlapping_native_rows(
+    tmp_path: Path,
+) -> None:
     records = recordings()
     all_rows = {}
     for record in records:
@@ -83,21 +106,31 @@ def test_missing_capture_pages_are_repaired_by_exact_overlapping_native_rows(tmp
     partial = TradeSpool.create(tmp_path / 'partial.sqlite', historical_row)
     try:
         replay(full, records)
-        kept = [r for r in records if not (anchor + timedelta(seconds=10)
-                <= datetime.fromisoformat(r['captured_at']) < anchor + timedelta(seconds=28))]
+        kept = [
+            r
+            for r in records
+            if not (
+                anchor + timedelta(seconds=10)
+                <= datetime.fromisoformat(r['captured_at'])
+                < anchor + timedelta(seconds=28)
+            )
+        ]
         replay(partial, kept)
         expected = full.sealed_minute(anchor)
         assert isinstance(expected, SealedMinute)
         assert isinstance(partial.sealed_minute(anchor), CaptureMiss)
         requests = []
         ordered = [all_rows[key] for key in sorted(all_rows)]
+
         def page(from_id: int) -> Response:
             # Normalized local replay of authentic rows, not claimed HTTP provenance.
             requests.append(from_id)
             rows = [row for row in ordered if row['id'] >= from_id][:500]
             return Response(json.dumps(rows).encode(), {}, 200)
-        minute = Partition(anchor.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                           anchor, anchor + timedelta(minutes=1), True)
+
+        minute = Partition(
+            anchor.strftime('%Y-%m-%dT%H:%M:%SZ'), anchor, anchor + timedelta(minutes=1), True
+        )
         repaired = repair_minute(partial, minute, page)
         assert repaired is not None and repaired.complete
         assert tuple(repaired.rows()) == expected.rows
@@ -110,3 +143,61 @@ def test_missing_capture_pages_are_repaired_by_exact_overlapping_native_rows(tmp
     finally:
         full.close()
         partial.close()
+
+
+def test_acknowledged_responses_prune_without_discarding_an_unaccepted_head(tmp_path: Path) -> None:
+    records = recordings()
+    spool = TradeSpool.create(tmp_path / 'retention.sqlite', historical_row)
+    try:
+        outcomes = replay(spool, records)
+        closed = [minute for outcome in outcomes for minute in outcome.sealed]
+        accepted = spool.sealed_minute(closed[0])
+        assert isinstance(accepted, SealedMinute)
+        cutoff = int(closed[0].timestamp() * 1000)
+        before_head = spool.connection.execute(
+            'SELECT id FROM trades WHERE time < ? ORDER BY id',
+            (cutoff,),
+        ).fetchall()
+        assert before_head, 'The authentic partial capture head must stay unaccepted.'
+        before_responses = spool.connection.execute('SELECT count(*) FROM responses').fetchone()[0]
+        now = datetime.fromisoformat(records[-1]['completed_at']) + timedelta(seconds=61)
+        outcome = spool.acknowledge(
+            closed[0],
+            content_hash=accepted.content_hash,
+            generation='accepted-retention-test',
+            now=now,
+        )
+        assert outcome.hash_matched and outcome.rows_released > 0
+        after_responses = spool.connection.execute('SELECT count(*) FROM responses').fetchone()[0]
+        assert after_responses < before_responses
+        assert (
+            spool.connection.execute(
+                'SELECT id FROM trades WHERE time < ? ORDER BY id',
+                (cutoff,),
+            ).fetchall()
+            == before_head
+        )
+        assert isinstance(spool.sealed_minute(closed[1]), SealedMinute)
+    finally:
+        spool.close()
+
+
+def test_repeated_old_provider_page_does_not_refresh_capture_health(tmp_path: Path) -> None:
+    record = recordings()[-1]
+    body = base64.b64decode(record['body_base64'])
+    rows = parse_recent_trades(body)
+    now = datetime.fromisoformat(record['completed_at'])
+    spool = TradeSpool.create(tmp_path / 'stale.sqlite', historical_row)
+    try:
+        for observed in (now, now + timedelta(seconds=181)):
+            spool.record(
+                rows,
+                captured_at=observed,
+                completed_at=observed,
+                status=200,
+                body_sha256=hashlib.sha256(body).hexdigest(),
+                cost=PageCost(5),
+            )
+        assert check_spool(spool.path, now=now + timedelta(seconds=181)) == 1
+    finally:
+        spool.close()

@@ -331,10 +331,6 @@ class SourceRuntime:
                         count,
                         digest,
                     )
-                    # A fat minute spends minutes in Arrow builds and inserts
-                    # after its last REST request; each finished component
-                    # proves the worker is alive. Dagster runs skip this.
-                    beat_worker()
                 except Exception as error:
                     self.failures.record(
                         operation='component',
@@ -347,6 +343,12 @@ class SourceRuntime:
                         component=component.key,
                     )
                     raise
+                # A fat minute spends minutes in Arrow builds and inserts
+                # after its last REST request; each finished component proves
+                # the worker is alive. Dagster runs skip this. Outside the
+                # try: a telemetry write error must not misrecord as a
+                # failure of the component that just finished.
+                beat_worker()
             return StateRecord(partition, expected + 1, revision.key, build_id, tuple(hashes))
         finally:
             try:

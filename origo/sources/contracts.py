@@ -20,6 +20,16 @@ class SourceError(RuntimeError):
         self.safe_message = message
 
 
+class ArchiveNotPublishedYet(Exception):
+    """The provider has not published this latest-day partition yet.
+
+    A latest-day 404 is the normal pre-publish state, not an outage, so it
+    skips instead of recording a failure. Once the day is no longer the
+    latest, the same 404 fails loud as a mid-history gap. Deliberately not a
+    RuntimeError, so the audit's failure handlers cannot catch it as a fault.
+    """
+
+
 def failure_code(error: Exception) -> str:
     return error.code if isinstance(error, SourceError) else type(error).__name__
 

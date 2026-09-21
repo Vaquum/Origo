@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from dagster import get_dagster_logger
 
 from .contracts import (
+    ArchiveNotPublishedYet,
     BuildContext,
     Partition,
     Revision,
@@ -99,6 +100,14 @@ class SourceRuntime:
             self.failures.recover(operation='discovery', partition=partition.key)
             return revision
         except Exception as error:
+            if (
+                isinstance(error, SourceError)
+                and error.code == 'PROVIDER_HTTP_404'
+                and partition.key == self.spec.canonical.candidate(datetime.now(UTC)).key
+            ):
+                raise ArchiveNotPublishedYet(
+                    f'{self.spec.key} partition {partition.key} is not published yet.'
+                ) from error
             self.failures.record(
                 operation='discovery',
                 error_code=failure_code(error),
@@ -503,6 +512,13 @@ class SourceRuntime:
                 self.discover(partition)
                 self.failures.recover(operation='audit', partition=partition.key)
                 changed.append(partition.key)
+            except ArchiveNotPublishedYet:
+                get_dagster_logger('origo.sources').info(
+                    'source=%s partition=%s phase=audit_pending_unpublished',
+                    self.spec.key,
+                    partition.key,
+                )
+                continue
             except (OSError, ValueError, RuntimeError) as error:
                 self.failures.record(
                     operation='audit',

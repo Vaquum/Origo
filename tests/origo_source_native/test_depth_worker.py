@@ -39,6 +39,12 @@ class _Reporter:
     def __init__(self) -> None:
         self.materializations: list[tuple[str, str | None, dict[str, object]]] = []
 
+    def observed(self, asset_key: str, *, last_updated: datetime, metadata: dict[str, object]) -> bool:
+        if not hasattr(self, 'observations'):
+            self.observations = []
+        self.observations.append((asset_key, last_updated, dict(metadata)))
+        return True
+
     def materialized(
         self, asset_key: str, *, partition: str | None, metadata: dict[str, object]
     ) -> bool:
@@ -172,9 +178,10 @@ def test_depth_tick_completes_the_incomplete_minutes_oldest_first_and_records_re
         ('sync_binance_spot_depth20_snapshots_to_origo', '2026-05-14T10:33:00+0000'),
         ('refresh_binance_spot_depth20_1m_origo', '2026-05-14T10:33:00+0000'),
         ('refresh_binance_spot_depth20_1m_origo', '2026-05-14T10:34:00+0000'),
-        (LIVE_FEED_ASSET, None),
     ]
-    live = reporter.materializations[-1][2]
+    assert reporter.observations[-1][0] == LIVE_FEED_ASSET
+    assert reporter.observations[-1][1] == m32
+    live = reporter.observations[-1][2]
     assert (live['minute'], live['processed'], live['failed']) == ('2026-05-14T10:34:00+00:00', 2, 0)
     assert isinstance(live['rss_bytes'], int) and live['rss_bytes'] > 0
 
@@ -230,7 +237,7 @@ def test_depth_tick_records_a_failed_minute_and_continues_with_the_next(
     assert 'depth20_snapshots 2026-05-14T10:33:00+0000 failed' in caplog.text
     assert 'projection failed' in caplog.text
     assert reporter.materializations[-1][0] == LIVE_FEED_ASSET
-    assert reporter.materializations[-1][2]['failed'] == 1
+    assert reporter.observations[-1][2]['failed'] == 1
 
 
 def test_source_has_rows_is_false_when_the_collector_request_fails(

@@ -66,7 +66,7 @@ def heartbeat_is_fresh(path: Path, *, max_age_seconds: int, now: float) -> bool:
         modified = path.stat().st_mtime
     except FileNotFoundError:
         return False
-    return now - modified <= max_age_seconds
+    return 0 <= now - modified <= max_age_seconds
 
 
 def check_heartbeat(path: Path, *, max_age_seconds: int = HEARTBEAT_MAX_AGE_SECONDS) -> int:

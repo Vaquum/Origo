@@ -77,7 +77,21 @@ def test_feed_worker_check_reports_its_heartbeat(feed: str, tmp_path: Path) -> N
     command = [sys.executable, '-m', f'origo.workers.{feed}', '--check']
     assert subprocess.run(command, env=environment).returncode == 1
     touch_heartbeat(heartbeat_path(tmp_path, feed))
-    assert subprocess.run(command, env=environment).returncode == 0
+    if feed == 'provisional':
+        from origo.sources.registry import SOURCE_REGISTRY
+        from origo.sources.contracts import RolloutStage
+        from origo.workers.provisional import source_heartbeat
+        # A fresh supervisor cannot hide a dead or missing source assignment.
+        assert subprocess.run(command, env=environment).returncode == 1
+        enabled = [spec.key for spec in SOURCE_REGISTRY
+                   if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT]
+        for source in enabled:
+            touch_heartbeat(source_heartbeat(tmp_path, source))
+        assert subprocess.run(command, env=environment).returncode == 0
+        source_heartbeat(tmp_path, enabled[-1]).unlink()
+        assert subprocess.run(command, env=environment).returncode == 1
+    else:
+        assert subprocess.run(command, env=environment).returncode == 0
 
 
 def test_no_per_minute_schedules_or_run_status_feed_sensors_remain() -> None:

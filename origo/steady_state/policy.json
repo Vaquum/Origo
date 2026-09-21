@@ -1,0 +1,187 @@
+{
+ "schema_version": 1,
+ "title": "S439 steady-state acceptance policy (PRD-0017, #438, Success Metrics)",
+ "percentile_method": "nearest_rank",
+ "sample_period_seconds": 60,
+ "delivery_lag_seconds": 60,
+ "production_window": {
+  "minimum_hours": 72,
+  "minimum_buckets_per_entity": 4320,
+  "rolling_window_hours": 24,
+  "fixed_identities": ["code_sha", "runtime_identity_sha256", "policy_sha256", "inventory_sha256"]
+ },
+ "worker_lookback_hours": 36,
+ "metrics": {
+  "SS-01": {
+   "title": "Contiguous source ingestion lag max(0, U-F) per enabled trade/aggregate source",
+   "entity": "source",
+   "profile": "production",
+   "windows": ["full", "rolling_24h"],
+   "statistics": {
+    "lag_seconds_p95": {"bound": 120, "comparison": "<=", "unit": "s"},
+    "lag_seconds_p99": {"bound": 300, "comparison": "<=", "unit": "s"},
+    "lag_seconds_max": {"bound": 600, "comparison": "<=", "unit": "s"},
+    "uncovered_due_minute_age_seconds_max": {"bound": 600, "comparison": "<=", "unit": "s"},
+    "historical_canonical_gap_minutes_max": {"bound": 0, "comparison": "<=", "unit": "minutes"},
+    "incomplete_component_partitions_max": {"bound": 0, "comparison": "<=", "unit": "partitions"}
+   }
+  },
+  "SS-02": {
+   "title": "Delivered mount coverage lag max(0, U-P) per required mount including the CANARY local mount",
+   "entity": "consumer",
+   "profile": "production",
+   "windows": ["full", "rolling_24h"],
+   "statistics": {
+    "lag_seconds_p95": {"bound": 180, "comparison": "<=", "unit": "s"},
+    "lag_seconds_p99": {"bound": 300, "comparison": "<=", "unit": "s"},
+    "lag_seconds_max": {"bound": 600, "comparison": "<=", "unit": "s"},
+    "series_missing_or_unreadable_max": {"bound": 0, "comparison": "<=", "unit": "series"},
+    "required_series_count": {"bound": 12, "comparison": "==", "unit": "series"},
+    "unsupported_forward_claims_max": {"bound": 0, "comparison": "<=", "unit": "buckets"}
+   }
+  },
+  "SS-03": {
+   "title": "Depth minute-close-to-committed-Arrow coverage per depth path",
+   "entity": "depth",
+   "profile": "production",
+   "windows": ["full", "rolling_24h"],
+   "statistics": {
+    "close_to_arrow_seconds_p95": {"bound": 90, "comparison": "<=", "unit": "s"},
+    "close_to_arrow_seconds_max": {"bound": 180, "comparison": "<=", "unit": "s"},
+    "invalid_closed_minutes_max": {"bound": 0, "comparison": "<=", "unit": "minutes"}
+   }
+  },
+  "SS-04": {
+   "title": "Canonical archive detection, activation, consumer completion and delivered age",
+   "entity": "source",
+   "profile": "production",
+   "windows": ["full"],
+   "statistics": {
+    "archive_detection_minutes_max": {"bound": 15, "comparison": "<=", "unit": "minutes"},
+    "activation_minutes_max": {"bound": 60, "comparison": "<=", "unit": "minutes"},
+    "consumer_completion_minutes_max": {"bound": 60, "comparison": "<=", "unit": "minutes"},
+    "delivered_age_hours_max": {"bound": 48, "comparison": "<=", "unit": "hours"},
+    "missing_available_days_max": {"bound": 0, "comparison": "<=", "unit": "days"},
+    "availability_poll_interval_minutes_max": {"bound": 5, "comparison": "<=", "unit": "minutes"}
+   }
+  },
+  "SS-05": {
+   "title": "Six-hour authentic-input mixed-workload capacity trial",
+   "entity": "source",
+   "profile": "isolated",
+   "windows": ["trial"],
+   "statistics": {
+    "trial_hours_min": {"bound": 6, "comparison": ">=", "unit": "hours"},
+    "useful_service_to_arrival_ratio_min": {"bound": 1.5, "comparison": ">=", "unit": "ratio"},
+    "withheld_minutes": {"bound": 60, "comparison": "==", "unit": "minutes"},
+    "drain_minutes_max": {"bound": 120, "comparison": "<=", "unit": "minutes"},
+    "lost_rows_max": {"bound": 0, "comparison": "<=", "unit": "rows"},
+    "duplicate_selected_rows_max": {"bound": 0, "comparison": "<=", "unit": "rows"},
+    "hidden_backlog_minutes_max": {"bound": 0, "comparison": "<=", "unit": "minutes"},
+    "normal_freshness_hours_after_recovery_min": {"bound": 1, "comparison": ">=", "unit": "hours"}
+   }
+  },
+  "SS-06": {
+   "title": "Controlled five-minute interruptions, dead-ownership reconciliation and full-size publication",
+   "entity": "fault_case",
+   "profile": "isolated",
+   "windows": ["trial"],
+   "statistics": {
+    "interruption_minutes": {"bound": 5, "comparison": "==", "unit": "minutes"},
+    "resume_minutes_max": {"bound": 5, "comparison": "<=", "unit": "minutes"},
+    "debt_clear_minutes_max": {"bound": 15, "comparison": "<=", "unit": "minutes"},
+    "dead_owner_reconcile_minutes_max": {"bound": 5, "comparison": "<=", "unit": "minutes"},
+    "false_dead_attempts_max": {"bound": 0, "comparison": "<=", "unit": "attempts"},
+    "unaffected_source_freshness_breaches_max": {"bound": 0, "comparison": "<=", "unit": "buckets"},
+    "unseeded_mount_commit_minutes_max": {"bound": 30, "comparison": "<=", "unit": "minutes"},
+    "interrupted_render_commit_minutes_max": {"bound": 45, "comparison": "<=", "unit": "minutes"},
+    "restarted_from_zero_renders_max": {"bound": 0, "comparison": "<=", "unit": "renders"}
+   }
+  },
+  "SS-07": {
+   "title": "Dispatch delay, maintenance age, queue depth, duplicate identities and routine run budget",
+   "entity": "dagster",
+   "profile": "production",
+   "windows": ["full", "rolling_24h"],
+   "statistics": {
+    "dispatch_delay_seconds_p95": {"bound": 60, "comparison": "<=", "unit": "s"},
+    "dispatch_delay_seconds_max": {"bound": 300, "comparison": "<=", "unit": "s"},
+    "maintenance_success_age_minutes_max": {"bound": 30, "comparison": "<=", "unit": "minutes"},
+    "queued_runs_max": {"bound": 200, "comparison": "<=", "unit": "runs"},
+    "duplicate_queued_identities_max": {"bound": 0, "comparison": "<=", "unit": "runs"},
+    "abandoned_pool_claims_over_5m_max": {"bound": 0, "comparison": "<=", "unit": "claims"},
+    "routine_runs_per_24h_max": {"bound": 500, "comparison": "<", "unit": "runs"}
+   }
+  },
+  "SS-08": {
+   "title": "Semantic deployment verification bound to its own launched maintenance run",
+   "entity": "deployment",
+   "profile": "isolated",
+   "windows": ["trial"],
+   "statistics": {
+    "verification_minutes_max": {"bound": 15, "comparison": "<=", "unit": "minutes"},
+    "required_daemons_ready": {"bound": 1, "comparison": "==", "unit": "boolean"},
+    "credentials_and_mounts_usable": {"bound": 1, "comparison": "==", "unit": "boolean"},
+    "fresh_source_minute_advanced": {"bound": 1, "comparison": "==", "unit": "boolean"},
+    "mount_publication_advanced": {"bound": 1, "comparison": "==", "unit": "boolean"},
+    "launched_maintenance_run_success": {"bound": 1, "comparison": "==", "unit": "boolean"},
+    "skipped_stages_max": {"bound": 0, "comparison": "<=", "unit": "stages"}
+   }
+  },
+  "SS-09": {
+   "title": "Zero OOM/watchdog/data-loss events with measured memory, disk and staging bounds",
+   "entity": "host",
+   "profile": "production",
+   "windows": ["full"],
+   "statistics": {
+    "oom_kills_max": {"bound": 0, "comparison": "<=", "unit": "events"},
+    "unplanned_watchdog_restarts_max": {"bound": 0, "comparison": "<=", "unit": "events"},
+    "data_loss_events_max": {"bound": 0, "comparison": "<=", "unit": "events"},
+    "container_working_set_ratio_max": {"bound": 0.8, "comparison": "<=", "unit": "ratio"},
+    "host_ram_reserve_ratio_min": {"bound": 0.25, "comparison": ">=", "unit": "ratio"},
+    "disk_reserve_ratio_min": {"bound": 0.3, "comparison": ">=", "unit": "ratio"},
+    "staging_orphans_over_60m_surviving_maintenance_max": {"bound": 0, "comparison": "<=", "unit": "directories"}
+   }
+  },
+  "SS-10": {
+   "title": "Data and product contract integrity with idempotent recovery",
+   "entity": "source",
+   "profile": "production",
+   "windows": ["full"],
+   "statistics": {
+    "invalid_selected_generations_max": {"bound": 0, "comparison": "<=", "unit": "generations"},
+    "conflicting_native_identities_max": {"bound": 0, "comparison": "<=", "unit": "identities"},
+    "missing_required_components_max": {"bound": 0, "comparison": "<=", "unit": "components"},
+    "falsely_current_manifests_max": {"bound": 0, "comparison": "<=", "unit": "manifests"},
+    "unverified_expected_products_max": {"bound": 0, "comparison": "<=", "unit": "products"},
+    "inventory_discrepancies_max": {"bound": 0, "comparison": "<=", "unit": "items"}
+   }
+  },
+  "SS-11": {
+   "title": "Every required condition evaluated every 60 s; breaches visible and alerted within 120 s",
+   "entity": "monitor",
+   "profile": "production",
+   "windows": ["full", "rolling_24h"],
+   "statistics": {
+    "evaluation_period_seconds": {"bound": 60, "comparison": "==", "unit": "s"},
+    "missed_evaluation_buckets_max": {"bound": 0, "comparison": "<=", "unit": "buckets"},
+    "evaluation_seconds_max": {"bound": 60, "comparison": "<=", "unit": "s"},
+    "detection_seconds_max": {"bound": 120, "comparison": "<=", "unit": "s"},
+    "checker_elapsed_seconds_max": {"bound": 60, "comparison": "<=", "unit": "s"}
+   }
+  },
+  "SS-12": {
+   "title": "Continuous >=72 h production window on fixed identities with complete denominators",
+   "entity": "window",
+   "profile": "production",
+   "windows": ["full"],
+   "statistics": {
+    "window_hours_min": {"bound": 72, "comparison": ">=", "unit": "hours"},
+    "buckets_per_entity_min": {"bound": 4320, "comparison": ">=", "unit": "buckets"},
+    "missing_or_unknown_buckets_max": {"bound": 0, "comparison": "<=", "unit": "buckets"},
+    "identity_changes_max": {"bound": 0, "comparison": "<=", "unit": "changes"},
+    "unresolved_blocking_work_max": {"bound": 0, "comparison": "<=", "unit": "items"}
+   }
+  }
+ }
+}

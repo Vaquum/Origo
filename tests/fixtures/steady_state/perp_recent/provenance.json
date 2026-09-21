@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "source_key": "binance_perp_trades",
+  "purpose": "authentic supported recent market-trade acquisition/overlap evidence; not observed production steady state",
+  "start": "2026-09-21T15:10:11.789730+00:00",
+  "end": "2026-09-21T15:13:14.161390+00:00",
+  "reference": "https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data",
+  "endpoint": "https://fapi.binance.com/fapi/v1/trades",
+  "params": {
+    "symbol": "BTCUSDT",
+    "limit": 1000
+  },
+  "authentication": "none",
+  "request_weight": 5,
+  "request_count": 181,
+  "overlap_gaps": 0,
+  "response_bundle": "responses.jsonl.gz",
+  "sha256": "09059d1049bd691b6af09df9443460c9c6295479679ea5d7b9e9e5f5cf4fb092"
+}

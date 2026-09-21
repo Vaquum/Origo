@@ -1,5 +1,9 @@
 FROM python:3.11.12
 
+ARG ORIGO_CODE_SHA
+ENV ORIGO_CODE_SHA=${ORIGO_CODE_SHA}
+LABEL org.opencontainers.image.revision=${ORIGO_CODE_SHA}
+
 ENV PIP_DEFAULT_TIMEOUT=100
 
 RUN apt-get update && apt-get install -y git openssh-client libgomp1

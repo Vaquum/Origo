@@ -211,6 +211,7 @@ def origo_test_env(
     for key, value in clickhouse_settings.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(tmp_path / 'source-files'))
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'source-locks'))
     monkeypatch.setenv('BINANCE_SPOT_DAILY_TRADES_BASE_URL', binance_daily_base_url)
     monkeypatch.setenv('BINANCE_SPOT_DEPTH200_BASE_URL', binance_depth200_base_url)
     monkeypatch.setenv('BINANCE_SPOT_DEPTH200_AUTH_TOKEN', 'test-token')

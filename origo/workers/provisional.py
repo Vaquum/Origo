@@ -20,12 +20,16 @@ import json
 import logging
 import os
 import resource
+import signal
+import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import FrameType
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.bundle import SourceRunConfig, execute_source
@@ -43,6 +47,10 @@ from origo.sources.publication import publication_current
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
 from origo.steady_state.coverage import Coverage, read_coverage
+from origo.steady_state.progress import report_data_progress
+from origo.steady_state.ownership import WorkerOwner, fence_retired_owners, worker_execution
+from origo.steady_state.prerequisites import open_prerequisites, render_active
+from origo.steady_state.receipt_identity import outstanding_owner_epochs
 
 from .dagster_reader import DagsterReader, DagsterUnreachable
 from .receipts import (
@@ -53,9 +61,11 @@ from .receipts import (
 )
 from .report import Reporter
 from .runtime import (
+    HEARTBEAT_MAX_AGE_SECONDS,
     TickOutcome,
     check_heartbeat,
     heartbeat_directory,
+    heartbeat_is_fresh,
     heartbeat_path,
     run_forever,
     touch_heartbeat,
@@ -89,18 +99,48 @@ class ProvisionalFeed:
         host: str = '',
         clock: Callable[[], datetime] = utc_now,
         heartbeat: Path | None = None,
+        max_workers: int = 4,
     ) -> None:
         self.specs = tuple(
             spec
             for spec in specs
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
         )
+        self._reported_frontiers: dict[str, datetime] = {}
         self.publication_root = publication_root
         self.reporter = reporter
         self.dagster = dagster
         self.host = host or os.uname().nodename
         self.clock = clock
         self.heartbeat = heartbeat
+        if not 1 <= max_workers <= 4:
+            raise ValueError("A provisional assignment admits one to four builds.")
+        self.max_workers = max_workers
+        self._owner_claim: WorkerOwner | None = None
+        self._owner_mutex = threading.Lock()
+
+    def _owner(self) -> WorkerOwner:
+        with self._owner_mutex:
+            if self._owner_claim is None:
+                self._owner_claim = WorkerOwner(
+                    Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')), self.name,
+                )
+            return self._owner_claim
+
+    def _recover_owners(self, store: SourceStore, now: datetime) -> int:
+        owner = self._owner()
+        try:
+            epochs = outstanding_owner_epochs(store.client, store.database, self.name)
+            probe = fence_retired_owners(owner.root, self.name, epochs)
+            if probe.unknown:
+                log.error('Unresolved owner epochs remain UNKNOWN: %s', probe.unknown)
+            return reconcile_died_receipts(
+                store.client, store.database, feed=self.name, now=now,
+                confirmed_dead_owner_epochs=probe.retired,
+            )
+        except Exception:
+            log.exception('Worker ownership reconciliation failed; no death was inferred')
+            return 0
 
     def _beat(self) -> None:
         """Prove the loop is alive after each unit of work inside a slow tick."""
@@ -161,6 +201,8 @@ class ProvisionalFeed:
         """Build one admitted minute; returns (processed key, failed key), one set."""
         key = f'{spec.key}:{partition.key}'
         started = time.monotonic()
+        owner = self._owner()
+        attempt = owner.attempt(key)
         record_receipt(
             store.client,
             store.database,
@@ -170,15 +212,16 @@ class ProvisionalFeed:
             rows=0,
             sha256='',
             duration_ms=0,
-            status='STARTED',
+            status='STARTED', attempt=attempt,
         )
         try:
-            result = execute_source(
-                spec,
-                'provisional',
-                SourceRunConfig(partition_key=partition.key),
-                run_id=self._run_id(now),
-            )
+            with worker_execution(owner):
+                result = execute_source(
+                    spec,
+                    'provisional',
+                    SourceRunConfig(partition_key=partition.key),
+                    run_id=self._run_id(now),
+                )
         except Exception as error:
             log.exception('source=%s partition=%s provisional build failed', spec.key, partition.key)
             record_receipt(
@@ -190,7 +233,7 @@ class ProvisionalFeed:
                 rows=0,
                 sha256='',
                 duration_ms=int((time.monotonic() - started) * 1000),
-                status='FAILED',
+                status='FAILED', attempt=attempt,
                 error_code=failure_code(error),
                 error=str(error),
             )
@@ -205,7 +248,7 @@ class ProvisionalFeed:
             rows=self._built_rows(store, spec, partition, str(result.get('build_id', ''))),
             sha256='',
             duration_ms=int((time.monotonic() - started) * 1000),
-            status='OK',
+            status='OK', attempt=attempt,
         )
         self._beat()
         return key, None
@@ -267,7 +310,7 @@ class ProvisionalFeed:
             finally:
                 client.disconnect()
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
             outcomes = list(pool.map(build, admitted))
         processed = [key for key, _ in outcomes if key is not None]
         failed = [key for _, key in outcomes if key is not None]
@@ -288,12 +331,18 @@ class ProvisionalFeed:
             log.error('backfill state unavailable, publishing anyway: %s', error)
             owned = False
         if owned:
-            log.info('source=%s a backfill owns publication', spec.key)
-            return [], []
+            log.info('source=%s historical backfill active; publish only already accepted generations', spec.key)
         processed: list[str] = []
         failed: list[str] = []
         for consumer in pinned_consumers:
             series = f'{spec.key}:{consumer.key}'
+            owner = self._owner()
+            if render_active(owner.root, spec.key, consumer.key):
+                log.info('source=%s consumer=%s native render active; ingestion continues', spec.key, consumer.key)
+                continue
+            if open_prerequisites(store, consumer=consumer.key):
+                log.info('source=%s consumer=%s full-render prerequisite belongs to the native bulk sensor', spec.key, consumer.key)
+                continue
             snapshot = store.snapshot(canonical_only=False)
             if not snapshot.records or publication_current(
                 spec, consumer.key, snapshot.token, root=self.publication_root, pinned=True
@@ -311,6 +360,10 @@ class ProvisionalFeed:
             ):
                 continue
             started = time.monotonic()
+            owner = self._owner()
+            attempt = owner.attempt(
+                f'{series}:{snapshot.token}', state_token=snapshot.token, prerequisite_key=series,
+            )
             record_receipt(
                 store.client,
                 store.database,
@@ -320,17 +373,19 @@ class ProvisionalFeed:
                 rows=0,
                 sha256=snapshot.token,
                 duration_ms=0,
-                status='STARTED',
+                status='STARTED', attempt=attempt,
             )
             try:
-                execute_source(
-                    spec,
-                    f'consumer_{consumer.key}',
-                    SourceRunConfig(
-                        destination=str(self.publication_root / spec.key / consumer.key)
-                    ),
-                    run_id=self._run_id(now),
-                )
+                with worker_execution(owner):
+                    execute_source(
+                        spec,
+                        f'consumer_{consumer.key}',
+                        SourceRunConfig(
+                            destination=str(self.publication_root / spec.key / consumer.key),
+                            publication_wait=False,
+                        ),
+                        run_id=self._run_id(now),
+                    )
             except Exception as error:
                 log.exception('source=%s consumer=%s publication failed', spec.key, consumer.key)
                 record_receipt(
@@ -342,7 +397,7 @@ class ProvisionalFeed:
                     rows=0,
                     sha256=snapshot.token,
                     duration_ms=int((time.monotonic() - started) * 1000),
-                    status='FAILED',
+                    status='FAILED', attempt=attempt,
                     error_code=failure_code(error),
                     error=str(error),
                 )
@@ -358,7 +413,7 @@ class ProvisionalFeed:
                 rows=len(snapshot.records),
                 sha256=snapshot.token,
                 duration_ms=int((time.monotonic() - started) * 1000),
-                status='OK',
+                status='OK', attempt=attempt,
             )
             processed.append(series)
             self._beat()
@@ -371,7 +426,8 @@ class ProvisionalFeed:
         processed: list[str] = []
         failed: list[str] = []
         try:
-            died = reconcile_died_receipts(client, settings.database, feed=self.name, now=now)
+            died = (self._recover_owners(SourceStore(client, settings.database, self.specs[0]), now)
+                    if self.specs else 0)
             if died:
                 log.warning('reconciled %d receipts for units the previous process died on', died)
             for spec in self.specs:
@@ -388,18 +444,17 @@ class ProvisionalFeed:
                     processed.extend(published)
                     failed.extend(unpublished)
                     failures.recover(operation='worker_tick')
-                    self.reporter.materialized(
-                        live_feed_asset(spec),
-                        partition=None,
-                        metadata={
-                            'minute': now.replace(second=0, microsecond=0).isoformat(),
-                            'intervals': len(built),
-                            'publications': len(published),
-                            'failed': len(broken) + len(unpublished),
-                            'rss_bytes': _rss_bytes(),
-                            'source_timestamp': now.isoformat(),
-                        },
+                    coverage = read_coverage(store, now)
+                    reported = report_data_progress(
+                        self.reporter, live_feed_asset(spec),
+                        source_end=coverage.contiguous_end, observed_at=self.clock(),
+                        previous_end=self._reported_frontiers.get(spec.key), max_age_seconds=120,
+                        metadata={'minute': now.replace(second=0, microsecond=0).isoformat(),
+                                  'intervals': len(built), 'publications': len(published),
+                                  'failed': len(broken) + len(unpublished), 'rss_bytes': _rss_bytes()},
                     )
+                    if reported is not None:
+                        self._reported_frontiers[spec.key] = reported
                 except Exception as error:
                     key = f'{spec.key}:tick'
                     failed.append(key)
@@ -426,7 +481,9 @@ class ProvisionalFeed:
         )
 
 
-def build_feed(environ: dict[str, str], *, heartbeat: Path | None = None) -> ProvisionalFeed:
+def build_feed(
+    environ: dict[str, str], *, heartbeat: Path | None = None, source_key: str | None = None,
+) -> ProvisionalFeed:
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     try:
@@ -434,13 +491,74 @@ def build_feed(environ: dict[str, str], *, heartbeat: Path | None = None) -> Pro
     finally:
         client.disconnect()
     base_url = environ.get('DAGSTER_WEBSERVER_URL', DEFAULT_WEBSERVER_URL)
+    selected = SOURCE_REGISTRY if source_key is None else tuple(
+        spec for spec in SOURCE_REGISTRY if spec.key == source_key
+    )
+    if not selected:
+        raise ValueError("Unknown provisional source assignment.")
     return ProvisionalFeed(
-        SOURCE_REGISTRY,
+        selected,
         publication_root=Path(environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
         reporter=Reporter(base_url),
         dagster=DagsterReader(base_url),
         heartbeat=heartbeat,
+        max_workers=4 if source_key is None else 1,
     )
+
+
+def source_heartbeat(directory: Path, source_key: str) -> Path:
+    return heartbeat_path(directory, f'provisional-{source_key}')
+
+
+def _enabled_sources() -> tuple[str, ...]:
+    return tuple(spec.key for spec in SOURCE_REGISTRY
+                 if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT)
+
+
+def supervise_sources(heartbeat: Path) -> int:
+    """Four independent minute clocks with one admitted build per source, four total.
+
+    Child processes have separate connections, owner epochs and progress watchdogs.
+    A slow provider does not postpone another source's next tick. The supervisor
+    never submits data work and exits on child loss so Compose owns restart policy.
+    """
+    sources = _enabled_sources()
+    if not sources:
+        raise RuntimeError('The provisional service has no enabled source assignments.')
+    children: list[subprocess.Popen[bytes]] = []
+
+    def stopping(signum: int, frame: FrameType | None) -> None:
+        raise SystemExit(128 + signum)
+
+    old_term = signal.signal(signal.SIGTERM, stopping)
+    old_int = signal.signal(signal.SIGINT, stopping)
+    try:
+        for source in sources:
+            child = subprocess.Popen(
+                [sys.executable, '-m', 'origo.workers.provisional', '--source', source],
+                stdin=subprocess.DEVNULL,
+            )
+            children.append(child)
+        while True:
+            for source, child in zip(sources, children, strict=True):
+                code = child.poll()
+                if code is not None:
+                    raise RuntimeError(f'Provisional source {source} exited with status {code}.')
+            touch_heartbeat(heartbeat)
+            time.sleep(5.0)
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+        for child in children:
+            try:
+                child.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                log.error('Provisional child %s did not stop; terminating its owned process', child.pid)
+                child.kill()
+                child.wait(timeout=5)
+        signal.signal(signal.SIGTERM, old_term)
+        signal.signal(signal.SIGINT, old_int)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -453,18 +571,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         '--check', action='store_true', help='healthcheck: exit 0 when the heartbeat is fresh'
     )
     parser.add_argument('--once', action='store_true', help='run one tick and exit')
+    parser.add_argument('--source', choices=_enabled_sources(), help='code-owned source assignment')
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
-    heartbeat = heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)
+    directory = heartbeat_directory()
+    heartbeat = (source_heartbeat(directory, arguments.source) if arguments.source
+                 else heartbeat_path(directory, ProvisionalFeed.name))
     if arguments.check:
-        return check_heartbeat(heartbeat)
+        result = check_heartbeat(heartbeat)
+        if arguments.source is None:
+            now = time.time()
+            if not all(heartbeat_is_fresh(source_heartbeat(directory, source),
+                       max_age_seconds=HEARTBEAT_MAX_AGE_SECONDS, now=now)
+                       for source in _enabled_sources()):
+                return 1
+        return result
+    if not arguments.once and arguments.source is None:
+        return supervise_sources(heartbeat)
     os.environ[WORKER_HEARTBEAT_ENV] = str(heartbeat)
-    feed = build_feed(dict(os.environ), heartbeat=heartbeat)
+    feed = build_feed(dict(os.environ), heartbeat=heartbeat, source_key=arguments.source)
     if arguments.once:
         outcome = feed.tick(datetime.now(UTC))
         print(json.dumps({'minute': outcome.minute.isoformat(), 'processed': list(outcome.processed), 'failed': list(outcome.failed)}))
         return 0
-    run_forever(feed, heartbeat=heartbeat)
+    from origo.sources.locking import source_lock
+
+    # A duplicated container cannot create a second owner for the same assignment.
+    lock_root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
+    with source_lock(lock_root, arguments.source, 'provisional_assignment'):
+        run_forever(feed, heartbeat=heartbeat)
 
 
 if __name__ == '__main__':

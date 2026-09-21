@@ -262,6 +262,7 @@ def publish_btc_briefing_history_sensor(
 MONITOR_CHECK_NAMES = (
     'collectors_serving',
     'dagster_reachable',
+    'data_current',
     'no_error_logs',
     'publication_current',
     'queue_bounded',
@@ -272,7 +273,7 @@ origo_monitor = AssetsDefinition(
         AssetSpec(
             'origo_monitor',
             group_name='monitoring',
-            description='The monitor worker: six checks evaluated every minute outside Dagster.',
+            description='The monitor worker: seven checks including actual data freshness evaluated outside Dagster.',
         )
     ]
 )

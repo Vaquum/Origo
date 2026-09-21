@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from dagster import AssetsDefinition, JobDefinition, ScheduleDefinition, SensorDefinition
@@ -129,6 +129,11 @@ class CanonicalAdapter(Protocol):
     def fetch(self, partition: Partition) -> Revision: ...
 
     def revalidate(self, partition: Partition, revision: Revision) -> None: ...
+
+
+@runtime_checkable
+class CapturedInputAcknowledger(Protocol):
+    def acknowledge(self, partition: Partition, *, content_hash: str, generation: str) -> None: ...
 
 
 class ProvisionalAdapter(Protocol):

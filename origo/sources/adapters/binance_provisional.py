@@ -89,6 +89,7 @@ class BinanceProvisionalBase:
     WEIGHT_BOUNDARY: ClassVar[int]
     WEIGHT_HISTORICAL: ClassVar[int]
     PAGE_LIMIT: ClassVar[int]
+    MAX_REQUEST_PAGES: ClassVar[int] = 100
     CREDENTIAL_REQUIRED: ClassVar[bool]
     PAGING_BACKTRACK_IDS: ClassVar[int]
 
@@ -166,6 +167,11 @@ class BinanceProvisionalBase:
                     'status': response.status,
                     'body_sha256': hashlib.sha256(response.body).hexdigest(),
                     'completed_at': self._now_utc().isoformat(),
+                    'weight': weight,
+                    'lock_wait_ms': response.cost.lock_wait_ms,
+                    'pace_wait_ms': response.cost.pace_wait_ms,
+                    'latency_ms': response.cost.latency_ms,
+                    'used_weight_1m': response.cost.used_weight_1m,
                 }
             )
             # A slow minute pages for minutes; prove the loop is alive per request.
@@ -248,7 +254,7 @@ class BinanceProvisionalBase:
             ended_message = 'Historical-trade paging ended before the minute boundary.'
             unordered_message = 'Historical trades are unordered or duplicated.'
             precedes_message = 'Historical trade precedes its locator boundary.'
-        for _ in range(100):
+        for _ in range(self.MAX_REQUEST_PAGES):
             page = request(
                 page_path,
                 {'symbol': symbol, 'fromId': next_id, 'limit': self.PAGE_LIMIT},
@@ -276,7 +282,7 @@ class BinanceProvisionalBase:
             next_id = _int(page[-1], id_field) + 1
         if not complete:
             raise RuntimeError(
-                f'{self.SOURCE_NOUN.capitalize()} closed-minute paging exceeded the 100-page cap.'
+                f'{self.SOURCE_NOUN.capitalize()} closed-minute paging exceeded the {self.MAX_REQUEST_PAGES}-page cap.'
             )
         if self.PAGING_BACKTRACK_IDS > 0 and skipped == 0 and first_id > 1:
             raise RuntimeError(

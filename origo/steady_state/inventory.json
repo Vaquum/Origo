@@ -1,0 +1,1847 @@
+{
+  "schema_version": 1,
+  "title": "S439 fixed steady-state inventory (PRD-0017, #438)",
+  "note": "Literal denominators for SS-01..SS-12. A missing product, disabled source or lowered rollout stage cannot shrink these; the registry is compared against this file, never used in its place.",
+  "sources": {
+    "binance_spot_trades": {
+      "rollout_stage": "LIVE",
+      "schema_version": 1,
+      "prefix": "binance_spot_trades",
+      "first_day": "2017-08-17",
+      "canonical_cron": "0 4 * * *",
+      "retry_count": 23,
+      "retry_delay_seconds": 3600,
+      "aliases": {
+        "binance_daily_spot_trades": "raw",
+        "binance_spot_klines": "time",
+        "binance_spot_dollar_klines": "dollar",
+        "binance_spot_volume_klines": "volume",
+        "binance_spot_tick_klines": "tick",
+        "binance_spot_dollar_imbalance_klines": "imbalance",
+        "binance_spot_trades_latest": "raw_latest",
+        "binance_spot_klines_latest": "time_latest",
+        "binance_spot_dollar_klines_latest": "dollar_latest"
+      },
+      "components": [
+        {
+          "key": "raw",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "trade_id"
+          ],
+          "columns": [
+            "trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "quote_quantity:Float64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "is_best_match:UInt8",
+            "datetime:DateTime64(6)"
+          ]
+        },
+        {
+          "key": "time",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "volume",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "volume_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "volume_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "tick",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "tick_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "tick_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "imbalance",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_imbalance_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_imbalance_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64",
+            "taker_buy_liquidity:Float64",
+            "taker_sell_liquidity:Float64",
+            "dollar_imbalance:Float64"
+          ]
+        },
+        {
+          "key": "aligned",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "dataset_source",
+            "datetime"
+          ],
+          "columns": [
+            "dataset_source:LowCardinality(String)",
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "raw_latest",
+          "provisional": true,
+          "current_target": "raw",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "trade_id"
+          ],
+          "columns": [
+            "minute_start:DateTime",
+            "trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "quote_quantity:Float64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "is_best_match:UInt8",
+            "datetime:DateTime64(3)"
+          ]
+        },
+        {
+          "key": "time_latest",
+          "provisional": true,
+          "current_target": "time",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar_latest",
+          "provisional": true,
+          "current_target": "dollar",
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        }
+      ],
+      "consumers": [
+        {
+          "key": "mount",
+          "canonical_only": false,
+          "public": true,
+          "cadence": "minute",
+          "destination": "local"
+        },
+        {
+          "key": "huggingface",
+          "canonical_only": true,
+          "public": true,
+          "cadence": "daily",
+          "destination": "remote"
+        }
+      ],
+      "export_start_date": "2020-01-01",
+      "series": [
+        {
+          "name": "time_1m",
+          "family": "time",
+          "size": 1,
+          "sub_path": "time/1m",
+          "dataset": "vaquum/binance_btcusdt_1m_klines",
+          "repo_id_env": "HUGGINGFACE_DATASET_REPO_ID",
+          "file_prefix": "btcusdt_1m_kline_20200101_to_"
+        },
+        {
+          "name": "time_15m",
+          "family": "time",
+          "size": 15,
+          "sub_path": "time/15m",
+          "dataset": "vaquum/binance_btcusdt_15m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_15m_kline_20200101_to_"
+        },
+        {
+          "name": "time_30m",
+          "family": "time",
+          "size": 30,
+          "sub_path": "time/30m",
+          "dataset": "vaquum/binance_btcusdt_30m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_30m_kline_20200101_to_"
+        },
+        {
+          "name": "time_1h",
+          "family": "time",
+          "size": 60,
+          "sub_path": "time/1h",
+          "dataset": "vaquum/binance_btcusdt_1h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_1h_kline_20200101_to_"
+        },
+        {
+          "name": "time_2h",
+          "family": "time",
+          "size": 120,
+          "sub_path": "time/2h",
+          "dataset": "vaquum/binance_btcusdt_2h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_2h_kline_20200101_to_"
+        },
+        {
+          "name": "time_4h",
+          "family": "time",
+          "size": 240,
+          "sub_path": "time/4h",
+          "dataset": "vaquum/binance_btcusdt_4h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_4h_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_1M",
+          "family": "dollar",
+          "size": 1,
+          "sub_path": "dollar/1M",
+          "dataset": "vaquum/binance_btcusdt_1M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_1M_dollar_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_15M",
+          "family": "dollar",
+          "size": 15,
+          "sub_path": "dollar/15M",
+          "dataset": "vaquum/binance_btcusdt_15M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_15M_dollar_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_30M",
+          "family": "dollar",
+          "size": 30,
+          "sub_path": "dollar/30M",
+          "dataset": "vaquum/binance_btcusdt_30M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_30M_dollar_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_60M",
+          "family": "dollar",
+          "size": 60,
+          "sub_path": "dollar/60M",
+          "dataset": "vaquum/binance_btcusdt_60M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_60M_dollar_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_120M",
+          "family": "dollar",
+          "size": 120,
+          "sub_path": "dollar/120M",
+          "dataset": "vaquum/binance_btcusdt_120M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_120M_dollar_kline_20200101_to_"
+        },
+        {
+          "name": "dollar_240M",
+          "family": "dollar",
+          "size": 240,
+          "sub_path": "dollar/240M",
+          "dataset": "vaquum/binance_btcusdt_240M_dollar_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_240M_dollar_kline_20200101_to_"
+        }
+      ]
+    },
+    "binance_perp_trades": {
+      "rollout_stage": "LIVE",
+      "schema_version": 1,
+      "prefix": "binance_perp_trades",
+      "first_day": "2019-09-08",
+      "canonical_cron": "5 8 * * *",
+      "retry_count": 23,
+      "retry_delay_seconds": 3600,
+      "aliases": {},
+      "components": [
+        {
+          "key": "raw",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "trade_id"
+          ],
+          "columns": [
+            "trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "quote_quantity:Float64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "datetime:DateTime64(6)"
+          ]
+        },
+        {
+          "key": "time",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "volume",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "volume_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "volume_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "tick",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "tick_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "tick_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "imbalance",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_imbalance_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_imbalance_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64",
+            "taker_buy_liquidity:Float64",
+            "taker_sell_liquidity:Float64",
+            "dollar_imbalance:Float64"
+          ]
+        },
+        {
+          "key": "aligned",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "dataset_source",
+            "datetime"
+          ],
+          "columns": [
+            "dataset_source:LowCardinality(String)",
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "raw_latest",
+          "provisional": true,
+          "current_target": "raw",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "trade_id"
+          ],
+          "columns": [
+            "minute_start:DateTime",
+            "trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "quote_quantity:Float64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "datetime:DateTime64(3)"
+          ]
+        },
+        {
+          "key": "time_latest",
+          "provisional": true,
+          "current_target": "time",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar_latest",
+          "provisional": true,
+          "current_target": "dollar",
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        }
+      ],
+      "consumers": [
+        {
+          "key": "mount",
+          "canonical_only": false,
+          "public": true,
+          "cadence": "minute",
+          "destination": "local"
+        },
+        {
+          "key": "huggingface",
+          "canonical_only": true,
+          "public": true,
+          "cadence": "daily",
+          "destination": "remote"
+        }
+      ],
+      "export_start_date": "2020-01-01",
+      "series": [
+        {
+          "name": "perp_time_1m",
+          "family": "time",
+          "size": 1,
+          "sub_path": "perp/time/1m",
+          "dataset": "vaquum/binance_btcusdt_perp_1m_klines",
+          "repo_id_env": "HUGGINGFACE_PERP_DATASET_REPO_ID",
+          "file_prefix": "btcusdt_perp_1m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_time_15m",
+          "family": "time",
+          "size": 15,
+          "sub_path": "perp/time/15m",
+          "dataset": "vaquum/binance_btcusdt_perp_15m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_15m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_time_30m",
+          "family": "time",
+          "size": 30,
+          "sub_path": "perp/time/30m",
+          "dataset": "vaquum/binance_btcusdt_perp_30m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_30m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_time_1h",
+          "family": "time",
+          "size": 60,
+          "sub_path": "perp/time/1h",
+          "dataset": "vaquum/binance_btcusdt_perp_1h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_1h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_time_2h",
+          "family": "time",
+          "size": 120,
+          "sub_path": "perp/time/2h",
+          "dataset": "vaquum/binance_btcusdt_perp_2h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_2h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_time_4h",
+          "family": "time",
+          "size": 240,
+          "sub_path": "perp/time/4h",
+          "dataset": "vaquum/binance_btcusdt_perp_4h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_4h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_1M",
+          "family": "dollar",
+          "size": 1,
+          "sub_path": "perp/dollar/1M",
+          "dataset": "vaquum/binance_btcusdt_perp_1M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_1M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_15M",
+          "family": "dollar",
+          "size": 15,
+          "sub_path": "perp/dollar/15M",
+          "dataset": "vaquum/binance_btcusdt_perp_15M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_15M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_30M",
+          "family": "dollar",
+          "size": 30,
+          "sub_path": "perp/dollar/30M",
+          "dataset": "vaquum/binance_btcusdt_perp_30M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_30M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_60M",
+          "family": "dollar",
+          "size": 60,
+          "sub_path": "perp/dollar/60M",
+          "dataset": "vaquum/binance_btcusdt_perp_60M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_60M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_120M",
+          "family": "dollar",
+          "size": 120,
+          "sub_path": "perp/dollar/120M",
+          "dataset": "vaquum/binance_btcusdt_perp_120M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_120M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_dollar_240M",
+          "family": "dollar",
+          "size": 240,
+          "sub_path": "perp/dollar/240M",
+          "dataset": "vaquum/binance_btcusdt_perp_240M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_240M_kline_20200101_to_"
+        }
+      ]
+    },
+    "binance_spot_aggtrades": {
+      "rollout_stage": "LIVE",
+      "schema_version": 1,
+      "prefix": "binance_spot_aggtrades",
+      "first_day": "2017-08-17",
+      "canonical_cron": "0 4 * * *",
+      "retry_count": 23,
+      "retry_delay_seconds": 3600,
+      "aliases": {},
+      "components": [
+        {
+          "key": "raw",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "agg_trade_id"
+          ],
+          "columns": [
+            "agg_trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "first_trade_id:Int64",
+            "last_trade_id:Int64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "is_best_match:UInt8",
+            "datetime:DateTime64(6)"
+          ]
+        },
+        {
+          "key": "time",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "volume",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "volume_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "volume_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "tick",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "tick_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "tick_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "imbalance",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_imbalance_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_imbalance_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64",
+            "taker_buy_liquidity:Float64",
+            "taker_sell_liquidity:Float64",
+            "dollar_imbalance:Float64"
+          ]
+        },
+        {
+          "key": "aligned",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "dataset_source",
+            "datetime"
+          ],
+          "columns": [
+            "dataset_source:LowCardinality(String)",
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "raw_latest",
+          "provisional": true,
+          "current_target": "raw",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "agg_trade_id"
+          ],
+          "columns": [
+            "minute_start:DateTime",
+            "agg_trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "first_trade_id:Int64",
+            "last_trade_id:Int64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "is_best_match:UInt8",
+            "datetime:DateTime64(3)"
+          ]
+        },
+        {
+          "key": "time_latest",
+          "provisional": true,
+          "current_target": "time",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar_latest",
+          "provisional": true,
+          "current_target": "dollar",
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        }
+      ],
+      "consumers": [
+        {
+          "key": "mount",
+          "canonical_only": false,
+          "public": true,
+          "cadence": "minute",
+          "destination": "local"
+        },
+        {
+          "key": "huggingface",
+          "canonical_only": true,
+          "public": true,
+          "cadence": "daily",
+          "destination": "remote"
+        }
+      ],
+      "export_start_date": "2020-01-01",
+      "series": [
+        {
+          "name": "spot_agg_time_1m",
+          "family": "time",
+          "size": 1,
+          "sub_path": "spot_agg/time/1m",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_1m_klines",
+          "repo_id_env": "HUGGINGFACE_SPOT_AGG_DATASET_REPO_ID",
+          "file_prefix": "btcusdt_spot_agg_1m_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_time_15m",
+          "family": "time",
+          "size": 15,
+          "sub_path": "spot_agg/time/15m",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_15m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_15m_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_time_30m",
+          "family": "time",
+          "size": 30,
+          "sub_path": "spot_agg/time/30m",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_30m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_30m_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_time_1h",
+          "family": "time",
+          "size": 60,
+          "sub_path": "spot_agg/time/1h",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_1h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_1h_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_time_2h",
+          "family": "time",
+          "size": 120,
+          "sub_path": "spot_agg/time/2h",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_2h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_2h_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_time_4h",
+          "family": "time",
+          "size": 240,
+          "sub_path": "spot_agg/time/4h",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_4h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_4h_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_1M",
+          "family": "dollar",
+          "size": 1,
+          "sub_path": "spot_agg/dollar/1M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_1M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_1M_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_15M",
+          "family": "dollar",
+          "size": 15,
+          "sub_path": "spot_agg/dollar/15M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_15M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_15M_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_30M",
+          "family": "dollar",
+          "size": 30,
+          "sub_path": "spot_agg/dollar/30M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_30M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_30M_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_60M",
+          "family": "dollar",
+          "size": 60,
+          "sub_path": "spot_agg/dollar/60M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_60M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_60M_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_120M",
+          "family": "dollar",
+          "size": 120,
+          "sub_path": "spot_agg/dollar/120M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_120M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_120M_kline_20200101_to_"
+        },
+        {
+          "name": "spot_agg_dollar_240M",
+          "family": "dollar",
+          "size": 240,
+          "sub_path": "spot_agg/dollar/240M",
+          "dataset": "vaquum/binance_btcusdt_spot_agg_240M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_spot_agg_240M_kline_20200101_to_"
+        }
+      ]
+    },
+    "binance_perp_aggtrades": {
+      "rollout_stage": "CANARY",
+      "schema_version": 1,
+      "prefix": "binance_perp_aggtrades",
+      "first_day": "2019-12-31",
+      "canonical_cron": "5 8 * * *",
+      "retry_count": 23,
+      "retry_delay_seconds": 3600,
+      "aliases": {},
+      "components": [
+        {
+          "key": "raw",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "agg_trade_id"
+          ],
+          "columns": [
+            "agg_trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "first_trade_id:Int64",
+            "last_trade_id:Int64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "datetime:DateTime64(6)"
+          ]
+        },
+        {
+          "key": "time",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "volume",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "volume_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "volume_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "tick",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "tick_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "tick_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "imbalance",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_imbalance_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_imbalance_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64",
+            "taker_buy_liquidity:Float64",
+            "taker_sell_liquidity:Float64",
+            "dollar_imbalance:Float64"
+          ]
+        },
+        {
+          "key": "aligned",
+          "provisional": false,
+          "current_target": null,
+          "time_column": "datetime",
+          "primary_key": [
+            "dataset_source",
+            "datetime"
+          ],
+          "columns": [
+            "dataset_source:LowCardinality(String)",
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "raw_latest",
+          "provisional": true,
+          "current_target": "raw",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime",
+            "agg_trade_id"
+          ],
+          "columns": [
+            "minute_start:DateTime",
+            "agg_trade_id:UInt64",
+            "price:Float64",
+            "quantity:Float64",
+            "first_trade_id:Int64",
+            "last_trade_id:Int64",
+            "timestamp:UInt64",
+            "is_buyer_maker:UInt8",
+            "datetime:DateTime64(3)"
+          ]
+        },
+        {
+          "key": "time_latest",
+          "provisional": true,
+          "current_target": "time",
+          "time_column": "datetime",
+          "primary_key": [
+            "datetime"
+          ],
+          "columns": [
+            "datetime:DateTime",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        },
+        {
+          "key": "dollar_latest",
+          "provisional": true,
+          "current_target": "dollar",
+          "time_column": "start_datetime",
+          "primary_key": [
+            "dollar_bar_id"
+          ],
+          "columns": [
+            "start_datetime:DateTime",
+            "end_datetime:DateTime",
+            "dollar_bar_id:UInt64",
+            "open:Float64",
+            "high:Float64",
+            "low:Float64",
+            "close:Float64",
+            "mean:Float64",
+            "std:Float64",
+            "median:Float64",
+            "iqr:Float64",
+            "volume:Float64",
+            "maker_ratio:Float64",
+            "no_of_trades:UInt64",
+            "open_liquidity:Float64",
+            "high_liquidity:Float64",
+            "low_liquidity:Float64",
+            "close_liquidity:Float64",
+            "liquidity_sum:Float64",
+            "maker_volume:Float64",
+            "maker_liquidity:Float64"
+          ]
+        }
+      ],
+      "consumers": [
+        {
+          "key": "mount",
+          "canonical_only": false,
+          "public": false,
+          "cadence": "minute",
+          "destination": "local"
+        },
+        {
+          "key": "huggingface_shadow",
+          "canonical_only": true,
+          "public": false,
+          "cadence": "daily",
+          "destination": "local"
+        }
+      ],
+      "export_start_date": "2020-01-01",
+      "series": [
+        {
+          "name": "perp_agg_time_1m",
+          "family": "time",
+          "size": 1,
+          "sub_path": "perp_agg/time/1m",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_1m_klines",
+          "repo_id_env": "HUGGINGFACE_PERP_AGG_DATASET_REPO_ID",
+          "file_prefix": "btcusdt_perp_agg_1m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_time_15m",
+          "family": "time",
+          "size": 15,
+          "sub_path": "perp_agg/time/15m",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_15m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_15m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_time_30m",
+          "family": "time",
+          "size": 30,
+          "sub_path": "perp_agg/time/30m",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_30m_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_30m_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_time_1h",
+          "family": "time",
+          "size": 60,
+          "sub_path": "perp_agg/time/1h",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_1h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_1h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_time_2h",
+          "family": "time",
+          "size": 120,
+          "sub_path": "perp_agg/time/2h",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_2h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_2h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_time_4h",
+          "family": "time",
+          "size": 240,
+          "sub_path": "perp_agg/time/4h",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_4h_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_4h_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_1M",
+          "family": "dollar",
+          "size": 1,
+          "sub_path": "perp_agg/dollar/1M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_1M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_1M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_15M",
+          "family": "dollar",
+          "size": 15,
+          "sub_path": "perp_agg/dollar/15M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_15M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_15M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_30M",
+          "family": "dollar",
+          "size": 30,
+          "sub_path": "perp_agg/dollar/30M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_30M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_30M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_60M",
+          "family": "dollar",
+          "size": 60,
+          "sub_path": "perp_agg/dollar/60M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_60M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_60M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_120M",
+          "family": "dollar",
+          "size": 120,
+          "sub_path": "perp_agg/dollar/120M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_120M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_120M_kline_20200101_to_"
+        },
+        {
+          "name": "perp_agg_dollar_240M",
+          "family": "dollar",
+          "size": 240,
+          "sub_path": "perp_agg/dollar/240M",
+          "dataset": "vaquum/binance_btcusdt_perp_agg_240M_klines",
+          "repo_id_env": null,
+          "file_prefix": "btcusdt_perp_agg_240M_kline_20200101_to_"
+        }
+      ]
+    }
+  },
+  "depth": {
+    "depth20": {
+      "series": "depth20_snapshots",
+      "label": "Depth20",
+      "depth": 20,
+      "snapshot_table": "binance_spot_depth20_snapshots",
+      "projection_table": "binance_spot_depth20_1m",
+      "arrow_manifest": "latest.json",
+      "chunk_pattern": "chunks/%Y/%m/%d/%H/%Y%m%dT%H%M%SZ.arrow",
+      "chunk_retention_minutes": 30,
+      "collector_base_url_env": "BINANCE_SPOT_DEPTH20_BASE_URL",
+      "collector_auth_token_env": "BINANCE_SPOT_DEPTH20_AUTH_TOKEN",
+      "sync_asset": "sync_binance_spot_depth20_snapshots_to_origo",
+      "projection_asset": "refresh_binance_spot_depth20_1m_origo"
+    },
+    "depth200": {
+      "series": "depth200_snapshots",
+      "label": "Depth200",
+      "depth": 200,
+      "snapshot_table": "binance_spot_depth200_snapshots",
+      "projection_table": "binance_spot_depth200_1m",
+      "arrow_manifest": "latest.json",
+      "chunk_pattern": "chunks/%Y/%m/%d/%H/%Y%m%dT%H%M%SZ.arrow",
+      "chunk_retention_minutes": 30,
+      "collector_base_url_env": "BINANCE_SPOT_DEPTH200_BASE_URL",
+      "collector_auth_token_env": "BINANCE_SPOT_DEPTH200_AUTH_TOKEN",
+      "sync_asset": "sync_binance_spot_depth200_snapshots_to_origo",
+      "projection_asset": "refresh_binance_spot_depth200_1m_origo"
+    }
+  },
+  "depth_live_feed_asset": "binance_spot_depth_live_feed",
+  "workers": {
+    "depth": {
+      "heartbeat": "depth.heartbeat",
+      "lookback_minutes": 15
+    },
+    "provisional": {
+      "heartbeat": "provisional.heartbeat",
+      "lookback_minutes": 15
+    },
+    "monitor": {
+      "heartbeat": "monitor.heartbeat",
+      "lookback_minutes": 15
+    }
+  },
+  "monitor_checks": [
+    "collectors_serving",
+    "dagster_reachable",
+    "data_current",
+    "no_error_logs",
+    "publication_current",
+    "queue_bounded",
+    "workers_alive"
+  ],
+  "briefing": {
+    "feed": {
+      "asset": "publish_btc_briefing_feed",
+      "job": "publish_btc_briefing_feed_job",
+      "sensor": "publish_btc_briefing_feed_sensor",
+      "upstream_asset": "build_binance_spot_trades_canonical_revision_origo",
+      "repo_id": "vaquum/btc_briefing_feed",
+      "version": "btc_briefing/2",
+      "sections": [
+        "bars_15m",
+        "bars_1d",
+        "volume_at_price",
+        "book_percentiles",
+        "book_series",
+        "book_sessions"
+      ],
+      "cadence": "daily",
+      "first_day": "2026-05-14"
+    },
+    "history": {
+      "asset": "publish_btc_briefing_history",
+      "job": "publish_btc_briefing_history_job",
+      "sensor": "publish_btc_briefing_history_sensor",
+      "upstream_asset": "publish_btc_briefing_feed",
+      "repo_id": "vaquum/btc_briefing_feed",
+      "version": "btc_briefing_history/1",
+      "file_name": "btc_briefing_history.json",
+      "sections": [
+        "bars_15m",
+        "bars_1d"
+      ],
+      "bars_15m_days": 70,
+      "bars_1d_days": 61,
+      "cadence": "daily"
+    }
+  }
+}

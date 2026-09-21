@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import tracemalloc
@@ -21,7 +22,7 @@ from origo.steady_state.coverage import (
 )
 
 from .helpers import ORIGO_DATABASE
-from .steady_state_helpers import metadata_rows, restore_metadata
+from .steady_state_helpers import ROOT, metadata_rows, restore_metadata
 from .test_provisional_worker import _Dagster, _feed, _Reporter
 
 
@@ -102,9 +103,18 @@ def test_frontier_lookup_is_bounded_on_production_metadata(
             f'SELECT max(partition_end) FROM {ORIGO_DATABASE}.source_current_partitions '
             "WHERE source_key='binance_spot_trades'"
         )
+        # Replay the original view from the pinned pre-fix code, not a candidate view.
+        candidate_view = client.execute(f'SHOW CREATE TABLE {ORIGO_DATABASE}.source_current_partitions')[0][0]
+        entry = json.loads((ROOT / 'provenance.json').read_text())['legacy_view']
+        legacy_view = (ROOT / entry['file']).read_bytes()
+        assert hashlib.sha256(legacy_view).hexdigest() == entry['sha256']
+        client.execute(legacy_view.decode())
         with pytest.raises(ServerException) as raised:
             client.execute(old, settings=COVERAGE_QUERY_SETTINGS)
         assert raised.value.code == 241, 'Retain the actual pre-fix memory failure, not any failure'
+        client.execute(candidate_view.replace('CREATE VIEW', 'CREATE OR REPLACE VIEW', 1))
+        # Actual SQL readers also get bounded metadata selection, not only the worker.
+        assert client.execute(old, settings=COVERAGE_QUERY_SETTINGS)[0][0] is not None
         report: list[dict[str, object]] = []
         now = datetime(2026, 9, 21, 13, tzinfo=UTC)
         for original in stores:

@@ -15,23 +15,28 @@ Scoping conventions this scaffold enforces (rows 8, 14):
   (``HUGGINGFACE_PERP_DATASET_REPO_ID``, never a bare shared name); the datasets
   map carries the env slot per series. The upload credential (``HF_TOKEN``) stays
   shared.
-- Staging directories are owner-scoped (``.{key}-staging-*``); new sources pass
-  ``scope_staging_to_source=True``. Spot's unscoped ``.staging-*`` form is legacy
-  and preserved byte-identical, pinned by the framework consumer tests.
+- Checkpoint directories are owner-scoped the same way (``.checkpoints-{key}``; spot's
+  legacy ``.checkpoints``); new sources pass ``scope_staging_to_source=True``. The
+  unscoped ``.staging-*`` sweep is legacy and preserved byte-identical, pinned by the
+  framework consumer tests.
+
+Mount renders are resumable (S439): each rendered month is checkpointed under the
+mirror keyed by its state token, a retry after process death queries only the months
+without a verified checkpoint, and the commit links checkpoints into the mirror before
+the manifest records the generation. The manifest claims ``delivered_through`` as
+certified contiguous coverage, never the newest partition end.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import os
 import shutil
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -40,6 +45,15 @@ import polars as pl
 from huggingface_hub import HfApi
 
 from origo.query.binance_spot_kline_rollups import dollar_month, time_month
+from origo.steady_state.ownership import assert_execution_owner
+from origo.steady_state.publication import (
+    CheckpointJournal,
+    MonthCheckpoint,
+    delivered_coverage,
+    file_identity,
+    file_sha256,
+    write_atomic,
+)
 from origo.utils.arrow_store import (
     LATEST_NAME,
     StagedSeries,
@@ -52,7 +66,7 @@ from origo.utils.arrow_store import (
     stage_series,
 )
 
-from ..contracts import Snapshot, SnapshotReader, SourceError, StateRecord
+from ..contracts import Snapshot, SnapshotReader, SourceError, StateRecord, beat_worker
 from ..hashing import state_token
 from ..storage import SourceStore
 from .formulas import huggingface_time as time_snapshot
@@ -62,9 +76,11 @@ log = logging.getLogger(__name__)
 
 # A staging directory or partial manifest older than this belongs to a render that died.
 ORPHAN_STAGING_MAX_AGE_SECONDS = 3600
-# A mount render touching more months than this does not fit the worker's
-# watchdog budget; the worker defers it to an operator Dagster run instead of
-# dying mid-render every tick. Steady state touches 1-3 months.
+# A mount render that must query more months than this does not fit the worker's
+# watchdog budget; the worker defers it to the native full-history publisher instead
+# of dying mid-render every tick. Months already checkpointed by an interrupted full
+# render do not count: finishing them is links, not queries. Steady state touches
+# 1-3 months.
 MOUNT_WORKER_MONTH_CAP = 4
 # source_date margin around a rendered month. Rows are written under their own
 # partition day, so a week dwarfs any boundary straddle while the monthly parts
@@ -88,32 +104,6 @@ class ConsumerDeclaration:
     commit_infix: str
     id_column: str = 'trade_id'
     quote_expr: str = 'quote_quantity'
-
-
-def _fsync(path: Path) -> None:
-    with path.open('rb') as handle:
-        os.fsync(handle.fileno())
-
-
-def _sha256(path: Path) -> str:
-    with path.open('rb') as handle:
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
-
-
-def _write_atomic(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    pending = path.parent / f'.{path.name}.partial-{uuid4().hex}'
-    pending.write_bytes(payload)
-    _fsync(pending)
-    os.replace(pending, path)
-
-
-def _write_parquet(frame: pl.DataFrame, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    pending = target.parent / f'.{target.name}.partial-{uuid4().hex}'
-    frame.write_parquet(pending, compression='zstd')
-    _fsync(pending)
-    os.replace(pending, target)
 
 
 def _staging_prefix(owner: str | None) -> str:
@@ -162,6 +152,7 @@ def _previous_manifest(root: Path) -> dict[str, object]:
 
 
 def _require_canonical(reader: SourceStore, token: object) -> None:
+    assert_execution_owner()
     if reader.snapshot(canonical_only=True).token != token:
         raise RuntimeError(
             'Canonical state changed while rendering; staged output remains unpublished.'
@@ -169,8 +160,9 @@ def _require_canonical(reader: SourceStore, token: object) -> None:
 
 
 def _write_manifest(root: Path, manifest: dict[str, object]) -> None:
+    assert_execution_owner()
     root.mkdir(parents=True, exist_ok=True)
-    _write_atomic(
+    write_atomic(
         root / 'latest.json', (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     )
 
@@ -276,6 +268,22 @@ def _month_frame(
     )
 
 
+def _reusable(
+    entry: dict[str, object] | None, same_token: bool, target: Path
+) -> dict[str, object] | None:
+    """The previous manifest entry when its month token is unchanged and the mirror file
+    still holds the recorded bytes: an unchanged stat identity proves it without reading
+    the file; a moved identity is re-hashed once and the entry re-stamped."""
+    if entry is None or not same_token or not target.is_file():
+        return None
+    identity = file_identity(target)
+    if entry.get('identity') == identity:
+        return entry
+    if entry.get('sha256') != file_sha256(target):
+        return None
+    return {**entry, 'identity': identity}
+
+
 def months_to_render(
     decl: ConsumerDeclaration,
     tokens: dict[str, str],
@@ -290,20 +298,14 @@ def months_to_render(
         for series in decl.specs:
             target = month_path(series.sub_path, year, number)
             entry = previous_files.get(str(target))
-            if (
-                entry is not None
-                and previous_months.get(month) == token
-                and target.is_file()
-                and entry.get('sha256') == _sha256(target)
-            ):
-                continue
-            changed.append(month)
-            break
+            if _reusable(entry, previous_months.get(month) == token, target) is None:
+                changed.append(month)
+                break
     return changed
 
 
 def _entry(path: Path, row_count: int, **extra: object) -> dict[str, object]:
-    return {'path': str(path), 'row_count': row_count, 'sha256': _sha256(path), **extra}
+    return {'path': str(path), 'row_count': row_count, 'sha256': file_sha256(path), **extra}
 
 
 def mount(
@@ -318,19 +320,22 @@ def mount(
 
     Month files and Arrow versions live under the shared mirror roots (``LOCAL_PARQUET_DIR``
     and ``LOCAL_ARROW_DIR``); the manifest under ``destination`` records which state they
-    hold. Months render into a staging directory beside the mirror and Arrow versions are
-    written without flipping ``latest``; only a render whose canonical state is unchanged
-    moves the months into place and activates the versions, so a discarded render leaves
-    the shared roots exactly as the manifest describes them. Staging left by a render that
-    died is swept once it is older than the grace window.
+    hold. Each rendered month is checkpointed beside the mirror under its month token and
+    Arrow versions are written without flipping ``latest``; only a render whose canonical
+    state is unchanged links the checkpoints into place and activates the versions, so a
+    discarded render leaves the shared roots exactly as the manifest describes them. A
+    retry after process death reuses every verified checkpoint and queries only the rest;
+    a month whose token changed is invalidated alone. Checkpoints are cleared once the
+    manifest records them.
 
-    A render touching more than ``MOUNT_WORKER_MONTH_CAP`` months does not fit the
-    worker's watchdog budget; unless ``allow_full`` (an operator Dagster run), it
-    defers with ``RENDER_DEFERRED`` instead of dying mid-render every tick.
+    A render that must query more than ``MOUNT_WORKER_MONTH_CAP`` months does not fit
+    the worker's watchdog budget; unless ``allow_full`` (the native full-history
+    publisher), it defers with ``RENDER_DEFERRED`` instead of dying mid-render every tick.
     """
     store, root = _root(destination, reader, 'mount', renderer_label=decl.renderer_label)
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
+    started = time.monotonic()
     previous = _previous_manifest(root)
     previous_months = cast(dict[str, str], previous.get('month_tokens') or {})
     previous_files = {
@@ -338,26 +343,38 @@ def mount(
         for entry in cast(list[object], previous.get('files') or [])
     }
     tokens = month_tokens(store.spec.key, snapshot, export_start_date=decl.export_start_date)
+    parquet_root = parquet_source_root()
+    owner = store.spec.key if decl.scope_staging_to_source else None
+    journal = CheckpointJournal(parquet_root, owner)
+    invalidated = journal.prune(tokens)
     changed = months_to_render(decl, tokens, previous_months, previous_files)
-    if len(changed) > MOUNT_WORKER_MONTH_CAP and not allow_full:
+    pending = [month for month in changed if not journal.covered(decl.specs, month, tokens[month])]
+    if len(pending) > MOUNT_WORKER_MONTH_CAP and not allow_full:
         raise SourceError(
             'RENDER_DEFERRED',
-            f'Mount render touches {len(changed)} months (cap {MOUNT_WORKER_MONTH_CAP}); '
-            f'launch publish_{store.spec.key}_mount_job with allow_full_history instead.',
+            f'Mount render must query {len(pending)} months (cap {MOUNT_WORKER_MONTH_CAP}; '
+            f'{len(changed) - len(pending)} already checkpointed); '
+            f'native publish_{store.spec.key}_mount_job will resume the durable bulk prerequisite.',
         )
     log.info(
-        'mount render source=%s months=%d changed=%d', store.spec.key, len(tokens), len(changed)
+        'mount render source=%s months=%d changed=%d pending=%d invalidated=%d',
+        store.spec.key,
+        len(tokens),
+        len(changed),
+        len(pending),
+        invalidated,
     )
     changed_set = set(changed)
     state = store.canonical_token(snapshot)
-    parquet_root = parquet_source_root()
-    owner = store.spec.key if decl.scope_staging_to_source else None
-    _clear_orphan_staging(parquet_root, root, time.time(), staging_owner=owner)
-    staging = parquet_root / f'{_staging_prefix(owner)}{uuid4().hex}'
+    coverage = delivered_coverage(store.anchor(), snapshot, decl.specs)
+    now = time.time()
+    _clear_orphan_staging(parquet_root, root, now, staging_owner=owner)
+    journal.sweep_partials(now)
     files: list[dict[str, object]] = []
-    staged_months: dict[Path, Path] = {}
+    staged_months: dict[Path, MonthCheckpoint] = {}
     rebuilt: set[str] = set()
     staged_series: list[StagedSeries] = []
+    queries = reused = 0
     try:
         with _pinned(store, snapshot) as database:
             # Watermarks are render-constant: resolve once instead of re-scanning
@@ -379,34 +396,39 @@ def mount(
                     )
                 for series in decl.specs:
                     target = month_path(series.sub_path, year, number)
-                    entry = previous_files.get(str(target))
-                    if (
-                        entry is not None
-                        and previous_months.get(month) == token
-                        and target.is_file()
-                        and entry.get('sha256') == _sha256(target)
-                    ):
+                    entry = _reusable(
+                        previous_files.get(str(target)), previous_months.get(month) == token, target
+                    )
+                    if entry is not None:
                         files.append(entry)
                         continue
-                    frame = _month_frame(
-                        series,
-                        year,
-                        number,
-                        database,
-                        decl=decl,
-                        base_cut=base_cut,
-                        base_day=base_day,
-                    )
-                    if frame.height == 0:
+                    checkpoint = journal.find_month(series, month, token)
+                    if checkpoint is None:
+                        began = time.monotonic()
+                        frame = _month_frame(
+                            series,
+                            year,
+                            number,
+                            database,
+                            decl=decl,
+                            base_cut=base_cut,
+                            base_day=base_day,
+                        )
+                        checkpoint = journal.write_month(
+                            series, month, token, frame, render_seconds=time.monotonic() - began
+                        )
+                        queries += 1
+                        beat_worker()
+                    else:
+                        reused += 1
+                    if checkpoint.row_count == 0:
                         continue
-                    pending = staging / target.relative_to(parquet_root)
-                    _write_parquet(frame, pending)
-                    staged_months[target] = pending
+                    staged_months[target] = checkpoint
                     files.append(
                         {
                             'path': str(target),
-                            'row_count': frame.height,
-                            'sha256': _sha256(pending),
+                            'row_count': checkpoint.row_count,
+                            'sha256': checkpoint.sha256,
                             'series': series.name,
                             'month': month,
                         }
@@ -436,8 +458,8 @@ def mount(
             )
             months = {path: path for path in series_source_files(series, parquet_root)}
             months.update(
-                (target, pending)
-                for target, pending in staged_months.items()
+                (target, checkpoint.path)
+                for target, checkpoint in staged_months.items()
                 if target.is_relative_to(parquet_root / series.sub_path)
             )
             build = build_series_frame(
@@ -447,9 +469,8 @@ def mount(
             if staged is not None:
                 staged_series.append(staged)
         _require_canonical(store, state)
-        for target, pending in staged_months.items():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(pending, target)
+        for target, checkpoint in staged_months.items():
+            journal.install(checkpoint, target)
         for staged in staged_series:
             if activate_series(staged).status == 'skipped_not_newer':
                 discard_series(staged)
@@ -459,19 +480,36 @@ def mount(
         for staged in staged_series:
             discard_series(staged)
         raise
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    installed = {str(target) for target in staged_months}
+    files = [
+        {**entry, 'identity': file_identity(Path(str(entry['path'])))}
+        if str(entry['path']) in installed
+        else entry
+        for entry in files
+    ]
     manifest: dict[str, object] = {
         'source_key': store.spec.key,
         'state_token': state,
         'pinned_token': snapshot.token,
         'active_through': max(record.partition.end for record in snapshot.records).isoformat(),
+        'delivered_through': coverage.delivered_through.isoformat(),
+        'coverage': coverage.manifest(),
         'kind': 'mount',
         'month_tokens': tokens,
         'files': files,
         'version': snapshot.token,
+        'generation': int(str(previous.get('generation', 0))) + 1,
+        'committed_at': datetime.now(UTC).isoformat(),
+        'render': {
+            'month_queries': queries,
+            'checkpoints_reused': reused,
+            'checkpoints_invalidated': invalidated,
+            'months_changed': len(changed),
+            'seconds': round(time.monotonic() - started, 3),
+        },
     }
     _write_manifest(root, manifest)
+    journal.clear()
 
 
 def huggingface(
@@ -501,6 +539,7 @@ def huggingface(
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
     end = max(record.partition.end for record in snapshot.records)
+    coverage = delivered_coverage(store.anchor(), snapshot, decl.specs)
     export_end_date = (end - timedelta(days=1)).strftime('%Y-%m-%d')
     end_limit = end.strftime('%Y-%m-%d %H:%M:%S')
     build = root / 'versions' / (snapshot.token + '-' + uuid4().hex)
@@ -534,7 +573,7 @@ def huggingface(
             folder.mkdir()
             parquet = folder / file_name
             frame.write_parquet(parquet, compression='zstd')
-            digest = _sha256(parquet)
+            digest = file_sha256(parquet)
             label = decl.label_of(series.name)
             if series.family == 'time':
                 card = time_card(
@@ -600,6 +639,8 @@ def huggingface(
         'state_token': store.canonical_token(snapshot),
         'pinned_token': snapshot.token,
         'active_through': end.isoformat(),
+        'delivered_through': coverage.delivered_through.isoformat(),
+        'coverage': coverage.manifest(),
         'kind': kind,
         'export_end_date': export_end_date,
         'uploads': uploads,

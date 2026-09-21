@@ -8,19 +8,28 @@ every container's stdout and stderr shipped by Vector, with daily partitions and
 
 from __future__ import annotations
 
-import socket
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from origo.sources.contracts import Client, identifier
+from origo.steady_state.contracts import AttemptIdentity
+from origo.steady_state.receipt_identity import (
+    ensure_attempt_columns,
+    legacy_unresolved_count,
+    recover_confirmed_dead,
+    write_receipt,
+)
+
+log = logging.getLogger(__name__)
 
 WORKER_MINUTE_LOG = 'worker_minute_log'
 CONTAINER_LOG = 'container_log'
 _LIMIT = 1000
-# A unit that started longer ago than this without a terminal receipt died with
-# its process: the heartbeat watchdog kills any beat-less unit past 180s, and
-# no worker unit beats mid-flight, so 300s leaves no false positives.
+# Only the horizon behind which an identity-less STARTED row is reported as UNKNOWN.
+# Elapsed time is not evidence of death: units beat mid-request and may run past it.
 DIED_RECEIPT_STALE_AFTER_SECONDS = 300.0
 
 
@@ -62,6 +71,7 @@ def ensure_monitoring_tables(client: Client, database: str) -> None:
             recorded_at DateTime64(3, 'UTC')
         ) ENGINE = ReplacingMergeTree ORDER BY (feed, series, minute, recorded_at)"""
     )
+    ensure_attempt_columns(client, database)
     client.execute(
         f"""CREATE TABLE IF NOT EXISTS {prefix}.{CONTAINER_LOG} (
             timestamp DateTime64(3, 'UTC'), service LowCardinality(String), container String,
@@ -84,24 +94,24 @@ def record_receipt(
     status: Literal['OK', 'FAILED', 'STARTED'],
     error_code: str = '',
     error: str = '',
+    attempt: AttemptIdentity | None = None,
 ) -> None:
-    client.execute(
-        f'INSERT INTO {identifier(database)}.{WORKER_MINUTE_LOG} VALUES',
-        [
-            (
-                feed,
-                series,
-                _utc(minute).replace(tzinfo=None),
-                rows,
-                sha256,
-                duration_ms,
-                status,
-                error_code,
-                error[:2000],
-                socket.gethostname(),
-                datetime.now(UTC),
-            )
-        ],
+    """Append one receipt. With ``attempt`` the row carries the work, attempt, owner,
+    intended token and prerequisite identity and the write is idempotent per
+    ``(attempt, status)``; without it the row is a legacy-shaped receipt."""
+    write_receipt(
+        client,
+        database,
+        feed=feed,
+        series=series,
+        minute=_utc(minute),
+        rows=rows,
+        sha256=sha256,
+        duration_ms=duration_ms,
+        status=status,
+        error_code=error_code,
+        error=error,
+        attempt=attempt,
     )
 
 
@@ -112,49 +122,27 @@ def reconcile_died_receipts(
     feed: str,
     now: datetime,
     stale_after_seconds: float = DIED_RECEIPT_STALE_AFTER_SECONDS,
+    confirmed_dead_owner_epochs: Sequence[str] = (),
 ) -> int:
-    """Mark STARTED units whose process died as FAILED so backoff and paging see them.
-
-    Watchdog exits and SIGKILLs leave no terminal receipt, so without this the
-    next tick retries instantly forever. A unit whose latest receipt is a STARTED
-    older than ``stale_after_seconds`` cannot still be running (see
-    ``DIED_RECEIPT_STALE_AFTER_SECONDS``); append one FAILED/WORKER_DIED row per
-    such unit. Returns the rows appended.
-
-    The unit key is ``(feed, series, minute)``: a STARTED row is written before
-    the unit's hash exists, so it can never match a terminal row on sha256. One
-    anti-join finds every outstanding unit in a single round trip no matter how
-    many STARTED rows the feed has accumulated, and the appended FAILED row
-    guards the next pass, so each dead unit is marked exactly once.
-    """
-    cutoff = _utc(now).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
-    outstanding = client.execute(
-        f"""SELECT s.series, s.minute
-        FROM {identifier(database)}.{WORKER_MINUTE_LOG} AS s
-        LEFT ANTI JOIN {identifier(database)}.{WORKER_MINUTE_LOG} AS t
-          ON t.feed = s.feed AND t.series = s.series AND t.minute = s.minute
-          AND t.status != 'STARTED' AND t.recorded_at >= s.recorded_at
-        WHERE s.feed = %(feed)s AND s.status = 'STARTED' AND s.recorded_at < %(cutoff)s
-        GROUP BY s.series, s.minute""",
-        {'feed': feed, 'cutoff': cutoff},
-    )
-    reconciled = 0
-    for series, minute in outstanding:
-        record_receipt(
-            client,
-            database,
-            feed=feed,
-            series=str(series),
-            minute=_utc(minute),
-            rows=0,
-            sha256='',
-            duration_ms=0,
-            status='FAILED',
-            error_code='WORKER_DIED',
-            error='Started receipt has no terminal row; the process died mid-unit.',
+    """Append one FAILED/WORKER_DIED event per open attempt of each positively retired
+    owner and return how many. Only epochs whose retirement fence exists are recovered;
+    an empty sequence recovers nothing. Identity-less STARTED rows older than
+    ``stale_after_seconds`` without a later terminal row are counted and reported as
+    UNKNOWN ownership, never failed by inference."""
+    cutoff = _utc(now) - timedelta(seconds=stale_after_seconds)
+    if stale_after_seconds < 0:
+        raise ValueError('The legacy stale-after argument cannot be negative.')
+    legacy = legacy_unresolved_count(client, database, feed, cutoff)
+    if legacy.count:
+        log.error(
+            '%s: %s%d unpaired legacy receipts retain UNKNOWN ownership; no death was inferred',
+            feed,
+            '' if legacy.exhausted else 'at least ',
+            legacy.count,
         )
-        reconciled += 1
-    return reconciled
+    return recover_confirmed_dead(
+        client, database, feed=feed, owner_epochs=confirmed_dead_owner_epochs
+    )
 
 
 def failed_receipts_since(

@@ -234,15 +234,16 @@ class SourceStore:
                 argMax(a.component_hashes, a.generation) AS component_hashes
             FROM {self.table('source_activation_log')} a
             GROUP BY source_key, partition_key, provisional""")
-        self.execute(f"""CREATE VIEW IF NOT EXISTS {self.table('source_current_partitions')} AS
+        self.execute(f"""CREATE OR REPLACE VIEW {self.table('source_current_partitions')} AS
             WITH eligible AS (
                 SELECT a.* FROM {self.table('source_active_partitions')} a
-                LEFT JOIN (
-                    SELECT source_key, groupArray((partition_start, partition_end)) AS intervals
-                    FROM {self.table('source_active_partitions')} WHERE NOT provisional GROUP BY source_key
-                ) c ON a.source_key=c.source_key
-                WHERE NOT a.provisional OR NOT arrayExists(
-                    interval -> interval.1<=a.partition_start AND interval.2>a.partition_start, c.intervals)
+                ASOF LEFT JOIN (
+                    SELECT source_key AS canonical_source,
+                        partition_start AS canonical_start, partition_end AS canonical_end
+                    FROM {self.table('source_active_partitions')} WHERE NOT provisional
+                    ORDER BY canonical_source, canonical_start
+                ) c ON a.source_key=c.canonical_source AND a.partition_start>=c.canonical_start
+                WHERE NOT a.provisional OR c.canonical_source='' OR a.partition_start>=c.canonical_end
             ), ranked AS (
                 SELECT e.*, anchor,
                     max(partition_end) OVER (PARTITION BY e.source_key ORDER BY partition_start, partition_end
@@ -251,7 +252,7 @@ class SourceStore:
             ), frontiers AS (
                 SELECT source_key,
                     if(countIf(partition_start>greatest(prior_end, anchor))=0,
-                       max(partition_end), minIf(partition_start, partition_start>greatest(prior_end, anchor))) AS frontier
+                       max(partition_end), minIf(greatest(prior_end, anchor), partition_start>greatest(prior_end, anchor))) AS frontier
                 FROM ranked GROUP BY source_key
             )
             SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key

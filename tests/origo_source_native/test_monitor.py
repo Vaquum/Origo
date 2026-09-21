@@ -19,7 +19,7 @@ from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.workers.dagster_reader import DagsterReader
-from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
+from origo.workers.monitor import CHECK_NAMES, DELIVERY_LAG_SECONDS, CollectorProbe, Cursor, Monitor
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
@@ -215,7 +215,7 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
     second = monitor.tick(NOW + timedelta(minutes=1))
     assert set(second.failed) >= expected
     assert len(_emails(recorder)) == 1
-    assert len(_check_posts(recorder)) == 12
+    assert len(_check_posts(recorder)) == 2 * len(CHECK_NAMES)
     later = monitor.tick(NOW + timedelta(hours=7))
     assert set(later.failed) >= expected
     assert len(_emails(recorder)) == 2
@@ -267,8 +267,11 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         }
     }
     quiet = _monitor(recorder, tmp_path / 'quiet').tick(NOW)
-    assert quiet.failed == ()
-    assert len(_emails(recorder)) == 1
+    # Dagster is quiet; the empty environment is still missing its required workers,
+    # sources and products, which stay red on their own checks.
+    assert not {key for key in quiet.failed if key.startswith(('queue_', 'run_failure:', 'check_failed:'))}
+    assert {'heartbeat_missing:depth', 'heartbeat_missing:provisional'} <= set(quiet.failed)
+    assert len(_emails(recorder)) == 2
 
 
 def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Path) -> None:
@@ -280,7 +283,7 @@ def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Pa
     assert 'dagster_unreachable' in outcome.failed
     # The other sources are still evaluated in the same tick and every check is written.
     assert 'heartbeat_stale:depth' in outcome.failed
-    assert {post['check_name'] for post in _check_posts(recorder)} == set(MONITOR_CHECK_NAMES)
+    assert {post['check_name'] for post in _check_posts(recorder)} == set(CHECK_NAMES)
     assert 'dagster_unreachable' in _emails(recorder)[0]['text']
     # The failure cursor did not move while Dagit was down: the same cursor file, a
     # reachable Dagit, and every fixture failure is reported.
@@ -379,10 +382,10 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert outcome.failed
     paths = [path for path, _ in recorder.posts]
     assert paths.count('/emails') == 1
-    assert paths[:5] == ['/report_asset_check/origo_monitor'] * 5
-    assert paths.index('/emails') > 4
+    assert paths[: len(CHECK_NAMES)] == ['/report_asset_check/origo_monitor'] * len(CHECK_NAMES)
+    assert paths.index('/emails') == len(CHECK_NAMES)
     checks = _check_posts(recorder)
-    assert sorted(post['check_name'] for post in checks) == sorted(MONITOR_CHECK_NAMES)
+    assert sorted(post['check_name'] for post in checks) == sorted(CHECK_NAMES)
     assert all(post['metadata']['evaluated_at'] == NOW.isoformat() for post in checks)
     email = _emails(recorder)[0]
     assert email['_authorization'] == 'Bearer test-key'
@@ -440,6 +443,7 @@ def test_monitor_checks_are_declared_in_definitions() -> None:
     assert sorted(MONITOR_CHECK_NAMES) == [
         'collectors_serving',
         'dagster_reachable',
+        'data_current',
         'no_error_logs',
         'publication_current',
         'queue_bounded',
@@ -516,7 +520,7 @@ def test_a_failing_detector_is_a_finding_and_the_tick_still_reports(
     assert {'detector_failed:workers', 'detector_failed:logs'} <= set(outcome.failed)
     assert _failure_keys() <= set(outcome.failed)
     checks = _check_posts(recorder)
-    assert sorted(post['check_name'] for post in checks) == sorted(MONITOR_CHECK_NAMES)
+    assert sorted(post['check_name'] for post in checks) == sorted(CHECK_NAMES)
     assert {post['check_name']: post['passed'] for post in checks}['workers_alive'] is False
     assert {post['check_name']: post['passed'] for post in checks}['no_error_logs'] is False
     email = _emails(recorder)[0]
@@ -551,7 +555,8 @@ def test_late_deliveries_and_malformed_collector_responses_are_still_reported(
             [(late, 'dagster', 'origo-dagster-1', 'stderr', 'ERROR', 'late Traceback')],
         )
         client.execute(
-            'INSERT INTO origo.worker_minute_log VALUES',
+            'INSERT INTO origo.worker_minute_log '
+            '(feed,series,minute,rows,sha256,duration_ms,status,error_code,error,worker_host,recorded_at) VALUES',
             [('depth', 'depth20_snapshots', late.replace(second=0, microsecond=0), 0, '', 5, 'FAILED', 'LATE', 'late receipt', 'host', late)],
         )
         second = monitor.tick(first + timedelta(seconds=2 * DELIVERY_LAG_SECONDS))
@@ -599,12 +604,34 @@ class _HoldReader(DagsterReader):
 def _manifest(root: Path, source: str, consumer: str, end: datetime) -> None:
     path = root / source / consumer / 'latest.json'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'active_through': end.isoformat(), 'kind': consumer}))
+    path.write_text(json.dumps({
+        'source_key': source, 'active_through': end.isoformat(), 'kind': consumer,
+        'version': 'clock-fixture', 'pinned_token': 'clock-fixture',
+        'state_token': 'clock-fixture', 'files': [], 'month_tokens': {}, 'uploads': [],
+    }))
 
 
 def _perp_span(current: datetime, span: timedelta = timedelta(days=30)) -> list[tuple[object, ...]]:
     old = current - span
     return [('binance_perp_trades', old, current, old, current, 100)]
+
+
+def _clock_findings(monitor: Monitor, now: datetime = NOW) -> list:
+    """Clock-only operational fixture. Empty file inventory still fails independently;
+    these tests no longer permit a timestamp-only manifest to certify healthy delivery."""
+    from dataclasses import replace
+    from origo.sources.contracts import Partition
+    from origo.steady_state.coverage import coverage_from_intervals
+    from origo.steady_state.monitoring import source_age
+    from origo.workers.monitor import Cursor
+    source = 'binance_perp_trades'
+    monitor.inventory = replace(monitor.inventory, sources={source: monitor.inventory.sources[source]})
+    anchor = NOW - timedelta(days=30)
+    coverage = coverage_from_intervals(anchor, (Partition('clock-fixture', anchor, NOW),), now)
+    monitor._ages[source] = source_age(source, coverage)
+    cursor = Cursor.load(monitor.cursor_path, now, monitor.lookback_minutes)
+    cursor.canonical_seen[source] = [coverage.canonical_end.isoformat(), (NOW - timedelta(hours=2)).timestamp()]
+    return monitor._publication_findings(cursor, {source: coverage}, now)
 
 
 def test_publication_stale_mount_is_a_finding(
@@ -615,7 +642,8 @@ def test_publication_stale_mount_is_a_finding(
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW)
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
-    findings = monitor._publication_findings()
+    findings = _clock_findings(monitor)
+    findings = [f for f in findings if f.key.startswith('publication_stale:')]
     assert [finding.key for finding in findings] == ['publication_stale:binance_perp_trades:mount']
     assert findings[0].check == 'publication_current'
     assert (NOW - timedelta(hours=4)).isoformat() in findings[0].detail
@@ -630,14 +658,15 @@ def test_publication_stale_huggingface_is_a_finding(
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
-    findings = monitor._publication_findings()
+    findings = _clock_findings(monitor)
+    findings = [f for f in findings if f.key.startswith('publication_stale:')]
     assert [finding.key for finding in findings] == [
         'publication_stale:binance_perp_trades:huggingface'
     ]
     assert findings[0].check == 'publication_current'
 
 
-def test_publication_current_consumers_are_quiet(
+def test_publication_current_end_does_not_hide_missing_files_or_holds(
     recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / 'shadow'
@@ -645,23 +674,23 @@ def test_publication_current_consumers_are_quiet(
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW)
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
-    assert monitor._publication_findings() == []
-    # A held publication is legitimate, however far the state advanced.
+    findings = _clock_findings(monitor)
+    assert not any(f.key.startswith('publication_stale:') for f in findings)
+    assert any(f.key.startswith('publication_series_missing:') for f in findings)
+    # Backfill ownership is disclosed, never an exemption from delivered-data freshness.
     _manifest(root, 'binance_perp_trades', 'mount', NOW - timedelta(hours=4))
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(True))
-    assert monitor._publication_findings() == []
-    # A source that never published stays quiet while its state is younger than grace.
+    keys = {f.key for f in _clock_findings(monitor)}
+    assert 'publication_stale:binance_perp_trades:mount' in keys
+    assert 'publication_stale:binance_perp_trades:huggingface' in keys
+    # A newly declared required consumer without outputs is not silently healthy.
     empty = tmp_path / 'empty'
     empty.mkdir()
-    fresh = _monitor(
-        recorder,
-        tmp_path / 'fresh',
-        client=_SpanClient(_perp_span(NOW, timedelta(minutes=10))),
-        publication_root=empty,
-    )
-    monkeypatch.setattr(fresh, 'dagster', _HoldReader(False))
-    assert fresh._publication_findings() == []
+    monitor.publication_root = empty
+    keys = {f.key for f in _clock_findings(monitor)}
+    assert 'publication_missing:binance_perp_trades:mount' in keys
+    assert 'publication_missing:binance_perp_trades:huggingface' in keys
 
 
 @pytest.mark.parametrize('payload', ['{not json', '[]', 'null', '"just a string"'])
@@ -675,11 +704,12 @@ def test_publication_unreadable_manifest_is_a_finding_and_skips_only_that_consum
     _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=30))
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
-    findings = monitor._publication_findings()
-    assert [finding.key for finding in findings] == [
+    findings = _clock_findings(monitor)
+    keys = {finding.key for finding in findings}
+    assert {
         'publication_manifest_unreadable:binance_perp_trades:mount',
         'publication_stale:binance_perp_trades:huggingface',
-    ]
+    } <= keys
     assert all(finding.check == 'publication_current' for finding in findings)
 
 
@@ -691,7 +721,7 @@ def test_publication_missing_root_fails_loud(
     )
     monkeypatch.setattr(monitor, 'dagster', _HoldReader(False))
     with pytest.raises(RuntimeError, match='is not mounted'):
-        monitor._publication_findings()
+        _clock_findings(monitor)
 
 
 def test_publication_unknown_hold_fails_loud(
@@ -707,8 +737,9 @@ def test_publication_unknown_hold_fails_loud(
     root.mkdir()
     monitor = _monitor(recorder, tmp_path, client=_SpanClient(_perp_span(NOW)), publication_root=root)
     monkeypatch.setattr(monitor, 'dagster', _DownReader('http://dagit.invalid'))
-    with pytest.raises(DagsterUnreachable, match='HTTP 502'):
-        monitor._publication_findings()
+    # Unknown ownership cannot mask missing or stale products.
+    findings = _clock_findings(monitor)
+    assert any(f.key.startswith('publication_missing:') for f in findings)
 
 
 def test_monitor_flags_runs_queued_past_the_stuck_threshold(recorder: _Recorder, tmp_path: Path) -> None:

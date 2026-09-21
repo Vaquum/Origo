@@ -10,9 +10,12 @@ from uuid import UUID, uuid4
 
 from dagster import get_dagster_logger
 
+from origo.steady_state.ownership import assert_execution_owner
+
 from .contracts import (
     ArchiveNotPublishedYet,
     BuildContext,
+    CapturedInputAcknowledger,
     Partition,
     Revision,
     RevisionedSourceSpec,
@@ -69,6 +72,7 @@ class SourceRuntime:
             self.require_shared_mount()
 
     def require_shared_mount(self) -> None:
+        assert_execution_owner()
         marker = self.lock_root / self.spec.key / 'domain_id'
         domain_id = UUID(marker.read_text())
         existing = self.store.execute(
@@ -194,6 +198,7 @@ class SourceRuntime:
                 ]
                 if current and current[0].revision == revision.key:
                     self._validate_retained(current[0])
+                    self._acknowledge_capture(current[0])
                     if provisional:
                         self.failures.recover(operation=operation, partition=key)
                         self.failures.recover(operation='component', partition=key)
@@ -203,6 +208,7 @@ class SourceRuntime:
                 record = self._build_components(partition, revision, build_id, expected)
                 if provisional:
                     self._activate(record, expected)
+                    self._acknowledge_capture(record)
                     self.failures.recover(operation=operation, partition=key)
                     self.failures.recover(operation='component', partition=key)
                 else:
@@ -214,6 +220,12 @@ class SourceRuntime:
         except Exception as error:
             self._record_attempt_failure(operation, key, build_id, error)
             raise
+
+    def _acknowledge_capture(self, record: StateRecord) -> None:
+        adapter = self.spec.provisional
+        if record.partition.provisional and isinstance(adapter, CapturedInputAcknowledger):
+            adapter.acknowledge(record.partition, content_hash=record.revision,
+                                generation=f'{record.generation}:{record.build_id}')
 
     def _record_attempt_failure(
         self, operation: str, key: str, build_id: UUID, error: Exception
@@ -430,14 +442,17 @@ class SourceRuntime:
         if self.store.generation(record.partition) != expected:
             raise RuntimeError('Stale expected generation; the build cannot activate.')
         self._validate_retained(record)
+        assert_execution_owner()
         self.store.insert_activation(record, self.run_id)
 
-    def publish(self, consumer_key: str, destination: str, *, allow_full: bool = False) -> Snapshot:
+    def publish(
+        self, consumer_key: str, destination: str, *, allow_full: bool = False, wait: bool = True,
+    ) -> Snapshot:
         consumer = next(value for value in self.spec.consumers if value.key == consumer_key)
         self.spec.require_enabled('publish', public=consumer.public)
         self.require_shared_mount()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=True):
+            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=wait):
                 from .publication import publication_current
 
                 # A canonical-only consumer publishes the canonical state. A consumer that

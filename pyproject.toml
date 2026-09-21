@@ -36,6 +36,7 @@ include = ["origo*"]
 [tool.setuptools.package-data]
 "origo.assets" = ["sql/*.sql"]
 "origo.sources" = ["README.md"]
+"origo.steady_state" = ["*.json"]
 
 [tool.dagster]
 module_name = "origo.definitions"

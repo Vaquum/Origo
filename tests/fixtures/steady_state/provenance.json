@@ -32,5 +32,11 @@
       "bytes": 117,
       "uncompressed_bytes": 306
     }
+  },
+  "legacy_view": {
+    "file": "legacy_current_view.sql",
+    "sha256": "803de58ae6bfc8bb96900821c13306392a33faaa39af2505cc630efe3f05e547",
+    "origin": "Generated verbatim from SourceStore.setup in git 1aaaef07eeb08d401684359d5304db9e3cb2865d; CREATE OR REPLACE used for isolated replay only",
+    "kind": "code-derived original view, not fabricated operational data"
   }
 }

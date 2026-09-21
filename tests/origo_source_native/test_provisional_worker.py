@@ -54,6 +54,12 @@ class _Reporter:
     def __init__(self) -> None:
         self.materializations: list[tuple[str, str | None, dict[str, object]]] = []
 
+    def observed(self, asset_key: str, *, last_updated: datetime, metadata: dict[str, object]) -> bool:
+        if not hasattr(self, 'observations'):
+            self.observations = []
+        self.observations.append((asset_key, last_updated, dict(metadata)))
+        return True
+
     def materialized(
         self, asset_key: str, *, partition: str | None, metadata: dict[str, object]
     ) -> bool:
@@ -89,7 +95,7 @@ def _feed(
         dagster=cast(DagsterReader, dagster),
         host='test-host',
         heartbeat=heartbeat,
-        **({'clock': clock} if clock is not None else {}),
+        clock=clock if clock is not None else lambda: NOW,
     )
 
 
@@ -97,6 +103,8 @@ def _feed(
 def spot(
     origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[RevisionedSourceSpec, list[dict[str, Any]]]]:
+    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(tmp_path / 'parquet'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     monkeypatch.delenv('BINANCE_SPOT_REST_BASE_URL', raising=False)
     requests: list[dict[str, Any]] = list(PROVENANCE['requests'])
@@ -109,7 +117,8 @@ def spot(
         return daily.Response((REST / item['file']).read_bytes(), {}, 200)
 
     monkeypatch.setattr(rest, 'get_response', captured)
-    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY,
+                   consumers=tuple(replace(c, public=False) for c in BINANCE_SPOT_TRADES_SPEC.consumers))
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         runtime = SourceRuntime(
@@ -132,75 +141,48 @@ def test_provisional_cron_must_be_one_minute() -> None:
 
 def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumers_once(
     spot: tuple[RevisionedSourceSpec, list[dict[str, Any]]],
-    tmp_path: Path,
-    query_origo: Query,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, query_origo: Query, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec, requests = spot
     dagster, reporter = _Dagster(), _Reporter()
     real_execute = provisional.execute_source
-    operations: list[tuple[str, str, str]] = []
-
-    def recording(
-        executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
-    ) -> dict[str, object]:
-        assert executed.key == spec.key
-        assert run_id.startswith('worker:provisional:test-host:')
+    operations = []
+    def recording(executed: RevisionedSourceSpec, operation: str, config: SourceRunConfig,
+                  *, run_id: str) -> dict[str, object]:
         operations.append((operation, config.partition_key, config.destination))
-        if operation == 'provisional':
-            return real_execute(executed, operation, config, run_id=run_id)
-        return {}
-
+        return real_execute(executed, operation, config, run_id=run_id)
     monkeypatch.setattr(provisional, 'execute_source', recording)
     feed = _feed(spec, tmp_path, dagster, reporter)
-
-    # A native backfill owns publication: the minute is still built, nothing is published.
+    # Accepted live generations continue publishing even during a history backfill.
     dagster.owned = True
     first = feed.tick(NOW)
-    assert first.feed == 'provisional'
-    assert first.processed == (f'binance_spot_trades:{KEY}',) and first.failed == ()
-    assert not requests, 'the closed minute was fetched through the source runtime'
-    raw = query_origo(f'SELECT count() FROM {ORIGO_DATABASE}.binance_spot_trades_raw_current')
-    assert raw[0][0] > 1000
-    assert operations == [('provisional', KEY, '')]
-    assert dagster.asked == [spec.key]
-
-    # The minute is covered now, so the next tick builds nothing and publishes the mount
-    # consumer, which pins provisional rows. huggingface is canonical-only: its sensor
-    # publishes it, never the worker.
+    assert first.processed == (f'{spec.key}:{KEY}', f'{spec.key}:mount')
+    assert first.failed == () and not requests
+    manifest = json.loads((tmp_path / 'source-files' / spec.key / 'mount' / 'latest.json').read_text())
+    assert datetime.fromisoformat(manifest['coverage']['delivered_through']) == ANCHOR + timedelta(minutes=1)
+    assert all(Path(entry['path']).is_file() for entry in manifest['files'])
     dagster.owned = False
-    second = feed.tick(NOW)
-    assert second.processed == ('binance_spot_trades:mount',) and second.failed == ()
-    assert operations[1:] == [
-        ('consumer_mount', '', str(tmp_path / 'source-files' / 'binance_spot_trades' / 'mount'))
-    ]
-
-    # Publication follows the pinned state: current files mean no publication, and an
-    # unreadable Dagster does not stop the decision.
-    monkeypatch.setattr(provisional, 'publication_current', lambda *args, **kwargs: True)
+    assert feed.tick(NOW).processed == ()
     dagster.unreachable = True
-    third = feed.tick(NOW)
-    assert third.processed == () and third.failed == ()
-    assert len(operations) == 2
-
+    assert feed.tick(NOW).processed == ()
+    assert operations == [('provisional', KEY, ''),
+        ('consumer_mount', '', str(tmp_path / 'source-files' / spec.key / 'mount'))]
     receipts = query_origo(RECEIPTS)
     assert [(series, status, error) for series, status, _, error in receipts] == [
-        ('binance_spot_trades', 'STARTED', ''),
-        ('binance_spot_trades', 'OK', ''),
-        ('binance_spot_trades:mount', 'STARTED', ''),
-        ('binance_spot_trades:mount', 'OK', ''),
-    ]
-    # The build receipt counts the interval's own raw rows (the component log of that
-    # build), the publication receipt the pinned partitions.
-    raw_rows = query_origo(
-        f"SELECT max(row_count) FROM {ORIGO_DATABASE}.source_component_log "
-        f"WHERE partition_key = '{KEY}' AND provisional = 1"
-    )[0][0]
+        (spec.key, 'STARTED', ''), (spec.key, 'OK', ''),
+        (f'{spec.key}:mount', 'STARTED', ''), (f'{spec.key}:mount', 'OK', '')]
+    raw_rows = query_origo(f"SELECT max(row_count) FROM {ORIGO_DATABASE}.source_component_log "
+                          f"WHERE partition_key='{KEY}' AND provisional=1")[0][0]
     assert receipts[1][2] == raw_rows > 1000 and receipts[3][2] == 1
-    assert [key for key, _, _ in reporter.materializations] == [live_feed_asset(spec)] * 3
-    assert reporter.materializations[0][2]['intervals'] == 1
-    assert reporter.materializations[1][2]['publications'] == 1
-    assert reporter.materializations[2][2]['failed'] == 0
+    # Tick observations remain visible, but unchanged data does not refresh freshness.
+    assert len(reporter.materializations) == 1 and len(reporter.observations) == 3
+    assert reporter.materializations[0][2]['source_timestamp'] == (ANCHOR + timedelta(minutes=1)).isoformat()
+    assert reporter.observations[1][2]['intervals'] == 0
+    assert reporter.observations[1][2]['publications'] == 0
+    feed.clock = lambda: NOW + timedelta(hours=1)
+    feed.tick(NOW)
+    assert len(reporter.materializations) == 1
+    assert reporter.observations[-1][2]['lag_seconds'] > 3600
 
 
 def test_provisional_minute_failures_back_off_without_an_attempt_limit(
@@ -273,14 +255,14 @@ def test_provisional_tick_touches_the_heartbeat_per_unit_of_work(
     dagster = _Dagster()
     heartbeat = tmp_path / 'worker.heartbeat'
     feed = _feed(spec, tmp_path, dagster, _Reporter(), heartbeat=heartbeat)
-    # The owned backfill still builds the minute: one beat for the interval.
+    # A held historical backfill still permits the accepted minute and its publication.
     dagster.owned = True
-    assert feed.tick(NOW).processed == (f'binance_spot_trades:{KEY}',)
-    assert beats == [heartbeat]
+    assert feed.tick(NOW).processed == (f'binance_spot_trades:{KEY}', 'binance_spot_trades:mount')
+    assert beats == [heartbeat, heartbeat]
     # The next tick publishes the mount consumer: one beat for the publication.
     dagster.owned = False
     assert feed.tick(NOW).processed == ('binance_spot_trades:mount',)
-    assert beats == [heartbeat, heartbeat]
+    assert beats == [heartbeat, heartbeat, heartbeat]
 
 
 def test_dormant_sources_are_skipped_and_the_bundle_declares_the_feed_not_a_schedule() -> None:
@@ -450,14 +432,11 @@ def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPa
     assert reader.backfill_owns_publication(source) is False
 
 
-def test_reconcile_converts_died_started_receipts_to_failed(
+def test_reconcile_does_not_invent_death_for_legacy_started_receipts(
     origo_test_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A STARTED row with no terminal row means its process died (watchdog exit,
-    # SIGKILL): reconcile appends FAILED/WORKER_DIED so backoff and paging see
-    # the death instead of retrying instantly forever. The terminal match is on
-    # the unit (feed, series, minute), never the hash: STARTED rows are written
-    # before the hash exists, so the OK row below carries a real sha256.
+    # Legacy rows have no owner/attempt identity. Age and absence of a terminal
+    # receipt cannot establish death; preserve this unknown history unchanged.
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         ensure_monitoring_tables(client, ORIGO_DATABASE)
@@ -489,19 +468,13 @@ def test_reconcile_converts_died_started_receipts_to_failed(
             return real_execute(query, *args, **kwargs)
 
         monkeypatch.setattr(client, 'execute', counting)
-        # One scan marks every outstanding unit no matter how many STARTED rows
-        # the feed has accumulated: 25 died units, still a single SELECT.
-        assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 25
+        assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 0
         assert selects == 1
-        # The deaths count toward backoff for those units only: the completed
-        # unit (hash-carrying OK) and the fresh unit get no spurious marker.
-        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='died-00', minute=old)
-        assert attempts == 1
-        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='done', minute=old)
-        assert attempts == 0
-        attempts, _ = failed_attempts(client, ORIGO_DATABASE, feed='probe', series='alive', minute=old)
-        assert attempts == 0
-        # Idempotent: the appended rows guard the next pass.
+        for series in ('died-00', 'done', 'alive'):
+            attempts, _ = failed_attempts(
+                client, ORIGO_DATABASE, feed='probe', series=series, minute=old,
+            )
+            assert attempts == 0
         selects = 0
         assert reconcile_died_receipts(client, ORIGO_DATABASE, feed='probe', now=now) == 0
         assert selects == 1

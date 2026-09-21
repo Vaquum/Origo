@@ -172,3 +172,104 @@ def test_frontier_failure_does_not_starve_other_sources(
         assert latest == [('RECOVERED',)]
     finally:
         client.disconnect()
+
+
+def test_exact_provider_shape_budget_and_source_fairness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real recorded payloads through the shared limiter; slow I/O cannot hold its lock."""
+    import base64
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    import requests as http
+    from origo.sources.adapters import binance_daily as daily
+    from .test_trade_capture import recordings
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'budget'))
+    monkeypatch.delenv('ORIGO_WORKER_HEARTBEAT', raising=False)
+    recent = recordings()[0]
+    root = Path(__file__).resolve().parents[1] / 'fixtures/binance/futures/rest/trades'
+    manifest = json.loads((root / 'provenance.json').read_text())
+    historic = next(row for row in manifest['requests'] if row['url'].endswith('historicalTrades'))
+    historical_body = (root / historic['file']).read_bytes()
+    assert hashlib.sha256(historical_body).hexdigest() == historic['sha256']
+    recent_body = base64.b64decode(recent['body_base64'])
+    assert hashlib.sha256(recent_body).hexdigest() == recent['body_sha256']
+    entered = threading.Event()
+    release = threading.Event()
+    observed = []
+    def transport(url: str, params: dict, headers: dict) -> http.Response:
+        observed.append((url, dict(params), dict(headers)))
+        response = http.Response()
+        response.status_code = 200
+        response.headers['X-MBX-USED-WEIGHT-1M'] = '205'
+        if url.endswith('historicalTrades'):
+            assert params == historic['params'] and params['limit'] == 500
+            assert headers == {'X-MBX-APIKEY': 'isolated-test-key'}
+            response._content = historical_body
+            entered.set()
+            assert release.wait(4), 'Test release must not leave a transport running'
+        else:
+            assert url == recent['url'] and params == recent['params']
+            assert headers == {} and params['limit'] == 1000
+            response._content = recent_body
+        return response
+    monkeypatch.setattr(daily, '_request', transport)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        slow = pool.submit(daily.get_response, historic['url'], params=historic['params'],
+                           headers={'X-MBX-APIKEY': 'isolated-test-key'}, weight=200)
+        assert entered.wait(3)
+        started = time.monotonic()
+        fast = pool.submit(daily.get_response, recent['url'], params=recent['params'],
+                           headers={}, weight=5, lane='live')
+        try:
+            result = fast.result(timeout=2)
+            assert time.monotonic() - started < 2
+            assert result.body == recent_body and result.cost.weight == 5
+        finally:
+            release.set()
+        assert slow.result(timeout=2).body == historical_body
+    assert len(observed) == 2
+    # Host aliases share one reservation file; a separate market keeps its own budget.
+    assert daily._budget_host('https://api1.binance.com/api/v3/trades') == daily._budget_host(
+        'https://api.binance.com/api/v3/trades')
+    assert daily._budget_host(recent['url']) != daily._budget_host('https://api.binance.com')
+
+
+def test_useful_capacity_counts_real_work_and_conserves_backlog(tmp_path: Path) -> None:
+    from origo.sources.adapters.binance_perp_rest import historical_row
+    from origo.steady_state.trade_spool import TradeSpool, SealedMinute
+    from .test_trade_capture import recordings, replay
+    records = recordings()
+    spool = TradeSpool.create(tmp_path / 'work.sqlite', historical_row)
+    try:
+        outcomes = replay(spool, records)
+        start = datetime.fromisoformat(records[0]['captured_at'])
+        end = datetime.fromisoformat(records[-1]['completed_at']) + timedelta(seconds=1)
+        work = spool.useful_work(start, end)
+        sealed = [minute for outcome in outcomes for minute in outcome.sealed]
+        actual = [spool.sealed_minute(minute) for minute in sealed]
+        assert all(isinstance(minute, SealedMinute) for minute in actual)
+        assert work.sealed_minutes == 2
+        assert work.sealed_rows == sum(len(minute.rows) for minute in actual)
+        assert work.requests == len(records) and work.request_weight == 5 * len(records)
+        assert work.stored_rows == sum(outcome.new_rows for outcome in outcomes)
+        assert work.stored_rows > work.sealed_rows
+        duplicate = replay(spool, [records[-1]])[0]
+        assert duplicate.new_rows == 0 and duplicate.sealed == ()
+        after = spool.useful_work(start, end)
+        assert after.sealed_minutes == work.sealed_minutes
+        assert after.sealed_rows == work.sealed_rows
+        assert after.stored_rows == work.stored_rows
+        assert after.requests == work.requests + 1
+        assert after.request_weight == work.request_weight + 5
+        # One acknowledged, verified minute releases only its own retained raw rows.
+        first = actual[0]
+        released = spool.acknowledge(sealed[0], content_hash=first.content_hash,
+                                     generation='verified-fixture-generation', now=end)
+        assert released.hash_matched and released.rows_released > 0
+        second = spool.sealed_minute(sealed[1])
+        assert isinstance(second, SealedMinute) and second.rows == actual[1].rows
+        assert spool.health(end)['unacknowledged_sealed_minutes'] == 1
+    finally:
+        spool.close()

@@ -119,6 +119,7 @@ class SourceRunConfig(Config):
     capacity_probe: bool = False
     automatic_capacity: bool = False
     allow_full_history: bool = False
+    publication_wait: bool = True
 
 
 def execute_source(
@@ -342,7 +343,7 @@ def _execute_operation(
         )
         return {
             'state_token': runtime.publish(
-                consumer, destination, allow_full=config.allow_full_history
+                consumer, destination, allow_full=config.allow_full_history, wait=config.publication_wait
             ).token
         }
     raise ValueError(f'Unknown source operation: {operation}')
@@ -453,6 +454,9 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     capacity_probe=config.capacity_probe,
                     automatic_capacity=not config.reconcile_only,
                 )
+            if operation.startswith('consumer_'):
+                # Native jobs own full-history permission, including backfill children.
+                config = SourceRunConfig(destination=config.destination, allow_full_history=True)
             selected_operation = (
                 'complete'
                 if operation == 'reconcile'
@@ -527,7 +531,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
 
 
 def live_feed_asset(spec: RevisionedSourceSpec) -> str:
-    """The external asset the provisional worker materializes each tick for ``spec``."""
+    """The external asset reporting certified provisional data progress for ``spec``."""
     return f'{spec.key}_provisional_feed'
 
 
@@ -558,8 +562,8 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                     AssetSpec(
                         live_feed_asset(spec),
                         group_name=spec.key,
-                        description='The provisional worker materializes this every tick; '
-                        'its freshness policy is the feed\'s liveness in Dagit.',
+                        description='Certified complete source coverage; only timely data advancement '
+                        'emits a freshness materialization. Heartbeats are separate.',
                         freshness_policy=None
                         if spec.rollout_stage == RolloutStage.DORMANT
                         else FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW),
@@ -610,12 +614,13 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         key: str,
         context: ScheduleEvaluationContext | SensorEvaluationContext,
         revision: str = '',
+        work_identity: str | None = None,
     ) -> RunRequest | SkipReason:
         spec.require_enabled('request')
         consumer_key = (
             operation.removeprefix('consumer_') if operation.startswith('consumer_') else None
         )
-        identity = (
+        identity = work_identity or (
             f'{spec.key}:consumer:{consumer_key}:{key}'
             if consumer_key
             else f'{spec.key}:{operation}:{key}' + (f':{revision}' if revision else '')
@@ -851,6 +856,50 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             return publish
 
         sensors.append(make_consumer_sensor(consumer.key, consumer.canonical_only))
+
+    # Minute updates remain worker work. Only an unresolved full-render
+    # prerequisite enters the existing native publication queue.
+    for mount_consumer in (item for item in spec.consumers if not item.canonical_only):
+        def make_bulk_sensor(consumer_key: str) -> SensorDefinition:
+            @_sensor(
+                name=f'{spec.key}_{consumer_key}_bulk_sensor',
+                job=definitions.resolve_job_def(job_names['consumer_' + consumer_key]),
+                default_status=DefaultSensorStatus.STOPPED
+                if spec.rollout_stage == RolloutStage.DORMANT
+                else DefaultSensorStatus.RUNNING,
+            )
+            def publish_bulk(context: SensorEvaluationContext) -> RunRequest | SkipReason:
+                from origo.orchestration.policy import has_outstanding
+                from origo.steady_state.prerequisites import open_prerequisites
+
+                if spec.rollout_stage == RolloutStage.DORMANT:
+                    return SkipReason(f'{spec.key} is DORMANT.')
+                if has_outstanding(context.instance, job_names['consumer_' + consumer_key]):
+                    return SkipReason('The native consumer execution already owns the bulk demand.')
+                settings = get_clickhouse_settings()
+                client = make_clickhouse_client(settings)
+                try:
+                    store = SourceStore(client, settings.database, spec)
+                    blockers = open_prerequisites(store, consumer=consumer_key)
+                    if not blockers:
+                        return SkipReason('No unresolved full-render prerequisite.')
+                    if not store.canonical_ready():
+                        return SkipReason('Accepted canonical state is not ready for publication.')
+                    snapshot = store.snapshot(canonical_only=False)
+                    if not snapshot.records:
+                        return SkipReason('The source has no accepted publication input.')
+                    first = min(blocker.first_failed_at for blocker in blockers)
+                    identity = f'{spec.key}:bulk:{consumer_key}:{first.isoformat()}'
+                    return request(
+                        'consumer_' + consumer_key, snapshot.token, context,
+                        work_identity=identity,
+                    )
+                finally:
+                    client.disconnect()
+
+            return publish_bulk
+
+        sensors.append(make_bulk_sensor(mount_consumer.key))
 
     @_failure_sensor(
         name=f'{spec.key}_failure_sensor',

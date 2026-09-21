@@ -20,6 +20,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
 import requests
@@ -66,6 +67,9 @@ from origo.assets.sync_binance_spot_depth200_snapshots_to_origo import (
     sync_minute as sync_depth200,
 )
 from origo.sources.contracts import Client
+from origo.steady_state.contracts import AttemptIdentity
+from origo.steady_state.ownership import WorkerOwner, fence_retired_owners, worker_execution
+from origo.steady_state.receipt_identity import outstanding_owner_epochs
 from origo.utils.arrow_store import series_store_dir
 
 from .receipts import ensure_monitoring_tables, reconcile_died_receipts, record_receipt
@@ -293,6 +297,9 @@ def _rss_bytes() -> int:
     return usage if sys.platform == 'darwin' else usage * 1024
 
 
+from origo.steady_state.progress import report_data_progress
+
+
 class DepthFeed:
     name = 'depth'
     lookback_minutes = DEPTH_SOURCE_LOOKBACK_MINUTES
@@ -308,6 +315,17 @@ class DepthFeed:
         self.database = database
         self.specs = tuple(specs)
         self.reporter = reporter
+        self._completed: dict[str, set[datetime]] = {}
+        self._reported_end: datetime | None = None
+        self._owner_claim: WorkerOwner | None = None
+        self._attempts: dict[tuple[str, datetime], AttemptIdentity] = {}
+
+    def _owner(self) -> WorkerOwner:
+        if self._owner_claim is None:
+            self._owner_claim = WorkerOwner(
+                Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')), self.name,
+            )
+        return self._owner_claim
 
     def process_minute(
         self, spec: DepthLiveReconciliationSpec, minute_start: datetime, partition_key: str
@@ -321,9 +339,12 @@ class DepthFeed:
             and status.projection_rows > 0
             and arrow_is_complete(status, minute_start)
         ):
+            self._completed.setdefault(spec.series, set()).add(minute_start)
             return None
         if status.snapshot_rows == 0 and not source_has_rows(spec, minute_start):
             return None
+        attempt = self._owner().attempt(f'{spec.series}:{partition_key}')
+        self._attempts[(spec.series, minute_start)] = attempt
         record_receipt(
             self.client,
             self.database,
@@ -333,7 +354,7 @@ class DepthFeed:
             rows=0,
             sha256='',
             duration_ms=0,
-            status='STARTED',
+            status='STARTED', attempt=attempt,
         )
         synced = 0
         if status.snapshot_rows == 0:
@@ -352,15 +373,31 @@ class DepthFeed:
             build = build_depth_snapshot_frame(
                 _asset_client(self.client), self.database, spec_for_depth_snapshot_series(spec.series), minute_start
             )
+            self._owner().assert_active()
             outcome = publish_depth_snapshot_chunk(spec.series, partition_key, build)
             version = outcome.version or ''
+        self._completed.setdefault(spec.series, set()).add(minute_start)
         return {'rows': synced or status.snapshot_rows, 'projected': projected, 'sha256': version}
 
     def tick(self, now: datetime) -> TickOutcome:
         now = now.astimezone(UTC)
+        self._completed = {}
         processed: list[str] = []
         failed: list[str] = []
-        died = reconcile_died_receipts(self.client, self.database, feed=self.name, now=now)
+        owner = self._owner()
+        try:
+            probe = fence_retired_owners(
+                owner.root, self.name, outstanding_owner_epochs(self.client, self.database, self.name),
+            )
+            if probe.unknown:
+                log.error('Unresolved depth owners remain UNKNOWN: %s', probe.unknown)
+            died = reconcile_died_receipts(
+                self.client, self.database, feed=self.name, now=now,
+                confirmed_dead_owner_epochs=probe.retired,
+            )
+        except Exception:
+            log.exception('Depth ownership reconciliation failed; no death was inferred')
+            died = 0
         if died:
             log.warning('reconciled %d receipts for units the previous process died on', died)
         for spec in self.specs:
@@ -368,7 +405,8 @@ class DepthFeed:
                 started = time.monotonic()
                 key = f'{spec.series}:{partition_key}'
                 try:
-                    result = self.process_minute(spec, minute_start, partition_key)
+                    with worker_execution(owner):
+                        result = self.process_minute(spec, minute_start, partition_key)
                 except Exception as error:
                     # The minute stays a candidate for the rest of the lookback; the receipt
                     # and the ERROR line make the failure visible now.
@@ -383,6 +421,7 @@ class DepthFeed:
                         sha256='',
                         duration_ms=int((time.monotonic() - started) * 1000),
                         status='FAILED',
+                        attempt=self._attempts.pop((spec.series, minute_start), None),
                         error_code=type(error).__name__,
                         error=str(error),
                     )
@@ -400,20 +439,25 @@ class DepthFeed:
                     sha256=str(result['sha256']),
                     duration_ms=int((time.monotonic() - started) * 1000),
                     status='OK',
+                    attempt=self._attempts.pop((spec.series, minute_start), None),
                 )
                 processed.append(key)
         minute = last_completed_minute(now)
-        self.reporter.materialized(
-            LIVE_FEED_ASSET,
-            partition=None,
-            metadata={
-                'minute': minute.isoformat(),
-                'processed': len(processed),
-                'failed': len(failed),
-                'rss_bytes': _rss_bytes(),
-                'source_timestamp': now.isoformat(),
-            },
-        )
+        if self.specs:
+            due = now.replace(second=0, microsecond=0)
+            ends: list[datetime] = []
+            for spec in self.specs:
+                cursor = due - timedelta(minutes=self.lookback_minutes)
+                complete = self._completed.get(spec.series, set())
+                while cursor < due and cursor in complete:
+                    cursor += timedelta(minutes=1)
+                ends.append(cursor)
+            self._reported_end = report_data_progress(
+                self.reporter, LIVE_FEED_ASSET, source_end=min(ends), observed_at=now,
+                previous_end=self._reported_end, max_age_seconds=180,
+                metadata={'minute': minute.isoformat(), 'processed': len(processed),
+                          'failed': len(failed), 'rss_bytes': _rss_bytes()},
+            )
         return TickOutcome(self.name, minute, tuple(processed), tuple(failed))
 
 

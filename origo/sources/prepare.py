@@ -73,6 +73,10 @@ def prepare_source(
     names.extend(
         f'{spec.key}_{consumer.key}_sensor' for consumer in spec.consumers if consumer.canonical_only
     )
+    names.extend(
+        f'{spec.key}_{consumer.key}_bulk_sensor'
+        for consumer in spec.consumers if not consumer.canonical_only
+    )
     managed: list[
         tuple[str, InstigatorType, InstigatorStatus, SensorInstigatorData | ScheduleInstigatorData]
     ] = [

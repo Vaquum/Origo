@@ -23,6 +23,7 @@ import resource
 import sys
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -141,6 +142,61 @@ class ProvisionalFeed:
         )
         return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
 
+    def _build_one(
+        self, store: SourceStore, spec: RevisionedSourceSpec, partition: Partition, now: datetime
+    ) -> tuple[str | None, str | None]:
+        """Build one admitted minute; returns (processed key, failed key), one set."""
+        key = f'{spec.key}:{partition.key}'
+        started = time.monotonic()
+        record_receipt(
+            store.client,
+            store.database,
+            feed=self.name,
+            series=spec.key,
+            minute=partition.start,
+            rows=0,
+            sha256='',
+            duration_ms=0,
+            status='STARTED',
+        )
+        try:
+            result = execute_source(
+                spec,
+                'provisional',
+                SourceRunConfig(partition_key=partition.key),
+                run_id=self._run_id(now),
+            )
+        except Exception as error:
+            log.exception('source=%s partition=%s provisional build failed', spec.key, partition.key)
+            record_receipt(
+                store.client,
+                store.database,
+                feed=self.name,
+                series=spec.key,
+                minute=partition.start,
+                rows=0,
+                sha256='',
+                duration_ms=int((time.monotonic() - started) * 1000),
+                status='FAILED',
+                error_code=failure_code(error),
+                error=str(error),
+            )
+            self._beat()
+            return None, key
+        record_receipt(
+            store.client,
+            store.database,
+            feed=self.name,
+            series=spec.key,
+            minute=partition.start,
+            rows=self._built_rows(store, spec, partition, str(result.get('build_id', ''))),
+            sha256='',
+            duration_ms=int((time.monotonic() - started) * 1000),
+            status='OK',
+        )
+        self._beat()
+        return key, None
+
     def _build_intervals(
         self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime
     ) -> tuple[list[str], list[str]]:
@@ -151,64 +207,28 @@ class ProvisionalFeed:
             adapter.candidates(now, store.anchor(), store.active_intervals()),
             key=lambda partition: partition.start,
         )
-        processed: list[str] = []
-        failed: list[str] = []
-        for partition in candidates:
-            key = f'{spec.key}:{partition.key}'
-            if not self._may_attempt(
+        admitted = [
+            partition
+            for partition in candidates
+            if self._may_attempt(
                 store, spec, series=spec.key, work=f'partition={partition.key}', minute=partition.start
-            ):
-                continue
-            started = time.monotonic()
-            record_receipt(
-                store.client,
-                store.database,
-                feed=self.name,
-                series=spec.key,
-                minute=partition.start,
-                rows=0,
-                sha256='',
-                duration_ms=0,
-                status='STARTED',
             )
+        ]
+        if not admitted:
+            return [], []
+
+        def build(partition: Partition) -> tuple[str | None, str | None]:
+            # Connections are not shared across threads: each unit gets its own.
+            client = make_clickhouse_client(get_clickhouse_settings())
             try:
-                result = execute_source(
-                    spec,
-                    'provisional',
-                    SourceRunConfig(partition_key=partition.key),
-                    run_id=self._run_id(now),
-                )
-            except Exception as error:
-                log.exception('source=%s partition=%s provisional build failed', spec.key, partition.key)
-                record_receipt(
-                    store.client,
-                    store.database,
-                    feed=self.name,
-                    series=spec.key,
-                    minute=partition.start,
-                    rows=0,
-                    sha256='',
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                    status='FAILED',
-                    error_code=failure_code(error),
-                    error=str(error),
-                )
-                failed.append(key)
-                self._beat()
-                continue
-            record_receipt(
-                store.client,
-                store.database,
-                feed=self.name,
-                series=spec.key,
-                minute=partition.start,
-                rows=self._built_rows(store, spec, partition, str(result.get('build_id', ''))),
-                sha256='',
-                duration_ms=int((time.monotonic() - started) * 1000),
-                status='OK',
-            )
-            processed.append(key)
-            self._beat()
+                return self._build_one(SourceStore(client, store.database, spec), spec, partition, now)
+            finally:
+                client.disconnect()
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            outcomes = list(pool.map(build, admitted))
+        processed = [key for key, _ in outcomes if key is not None]
+        failed = [key for _, key in outcomes if key is not None]
         return processed, failed
 
     def _publish(

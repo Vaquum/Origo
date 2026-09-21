@@ -488,11 +488,16 @@ class SourceRuntime:
         allow_full: bool = False,
         wait: bool = True,
     ) -> Snapshot:
+        from origo.steady_state.render_admission import render_admission
+
         consumer = next(value for value in self.spec.consumers if value.key == consumer_key)
         self.spec.require_enabled('publish', public=consumer.public)
         self.require_shared_mount()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=wait):
+            with (
+                source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=wait),
+                render_admission(self.lock_root, bulk=allow_full),
+            ):
                 from .publication import publication_current
 
                 # A canonical-only consumer publishes the canonical state. A consumer that

@@ -150,6 +150,7 @@ def derive_capacity(
         last_bad = 0.0
         request_weight = 0.0
         rows_completed = 0
+        expected_due = origin.replace(second=0, microsecond=0)
         for index, sample in enumerate(samples):
             elapsed = finite(sample['elapsed_seconds'], 'elapsed_seconds')
             state = object_value(object_value(sample['sources'], 'sources')[key], key)
@@ -174,7 +175,7 @@ def derive_capacity(
             if not expected <= set(oracle):
                 raise TrialEvidenceError('The oracle does not cover all arriving source minutes.')
             for minute, row in current.items():
-                if minute not in oracle:
+                if minute not in expected:
                     raise TrialEvidenceError('Unrequested input cannot increase useful service.')
                 target = oracle[minute]
                 if row['raw_sha256'] != target['raw_sha256']:

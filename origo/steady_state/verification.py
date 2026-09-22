@@ -68,6 +68,7 @@ from .policy import (
     rolling_extremes,
     sha256_bytes,
 )
+from .trial_evidence import TrialEvidenceError, derive_capacity
 
 REPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({'SUCCESS', 'FAILURE', 'CANCELED'})
@@ -1346,21 +1347,29 @@ class Evaluator:
                 'blocking-work probe unknown at closeout',
             )
         else:
-            failures = sum(
-                _number(_object(item, 'failure').get('count')) or 0.0
-                for item in cast(list[object], blocking.get('open_failures') or [])
-            )
-            outstanding = sum(
-                _number(value) or 0.0
-                for value in _object(blocking.get('outstanding_attempts'), 'outstanding').values()
+            failures_raw = blocking.get('open_failures')
+            attempts_raw = blocking.get('outstanding_attempts')
+            values: list[float | None] = []
+            if not isinstance(failures_raw, list) or not isinstance(attempts_raw, dict):
+                values.append(None)
+            else:
+                values.extend(
+                    _number(_object(item, 'failure').get('count'))
+                    for item in cast(list[object], failures_raw)
+                )
+                values.extend(_number(value) for value in attempts_raw.values())
+            total = (
+                None
+                if any(value is None or value < 0 or not value.is_integer() for value in values)
+                else sum(cast(float, value) for value in values)
             )
             self._record(
                 'SS-12',
                 'window',
                 'unresolved_blocking_work_max',
-                failures + outstanding,
+                total,
                 refs[-1:],
-                f'{failures:.0f} open blocking failures, {outstanding:.0f} outstanding attempts at closeout',
+                'complete nonnegative blocking/attempt counts at closeout; absent counts are unknown',
             )
         self.denominators['SS-12:window'] = {
             'expected_buckets': self._expected(),
@@ -1400,6 +1409,12 @@ class Evaluator:
         identity = self._identity()
         expected_code = str(identity.get('code_sha')) if identity else str(document.get('code_sha'))
         problems: list[str] = []
+        if identity is None:
+            problems.append('no single measured runtime identity is bound to this trial')
+        if document.get('schema_version') != 1:
+            problems.append('trial schema_version is not 1')
+        if not re.fullmatch(r'[0-9a-f]{40}', expected_code):
+            problems.append('the measured code identity is absent or malformed')
         if document.get('environment') != 'isolated' and metric_id != 'SS-08':
             problems.append('environment is not isolated')
         if str(document.get('code_sha') or '') != expected_code or not expected_code:
@@ -1423,6 +1438,31 @@ class Evaluator:
             return
         if not self._bind_trial('SS-05', 'trial', trial, ref):
             return
+        progress_ref = trial.get('progress_path')
+        try:
+            if (
+                not isinstance(progress_ref, str)
+                or not progress_ref.startswith('trials/raw/')
+                or not progress_ref.endswith('.json')
+                or progress_ref not in self.bundle.files
+            ):
+                raise TrialEvidenceError('The trial has no manifest-bound raw progress artifact.')
+            progress = _object(
+                json.loads((self.bundle.root / progress_ref).read_bytes()), progress_ref
+            )
+            for field in ('code_sha', 'policy_sha256', 'inventory_sha256', 'environment'):
+                if progress.get(field) != trial.get(field):
+                    raise TrialEvidenceError(
+                        f'Raw progress {field} differs from its trial identity.'
+                    )
+            measured = derive_capacity(progress, source_keys=self.entities['source'])
+        except (TrialEvidenceError, EvidenceError, OSError, ValueError) as error:
+            for statistic in self.policy.metrics['SS-05'].statistics:
+                self._record('SS-05', 'trial', statistic, None, [ref], str(error))
+            return
+        # The summaries supplied by an author are never the acceptance oracle.
+        trial = {**trial, **measured}
+        ref = progress_ref
         hours = (
             _when(trial.get('trial_end'), 'trial_end')
             - _when(trial.get('trial_start'), 'trial_start')
@@ -1434,7 +1474,7 @@ class Evaluator:
             'normal_freshness_hours_after_recovery_min',
             _number(trial.get('normal_freshness_hours_after_recovery')),
             [ref],
-            'declared by the trial runner',
+            'recomputed from complete minute observations',
         )
         sources = _object(trial.get('sources'), 'sources')
         for key in self.entities['source']:
@@ -1463,7 +1503,7 @@ class Evaluator:
                     statistic,
                     _number(entry.get(name)),
                     [ref],
-                    f'{name} from the trial record',
+                    f'{name} recomputed from raw trial progress',
                 )
 
     def evaluate_ss06(self) -> None:

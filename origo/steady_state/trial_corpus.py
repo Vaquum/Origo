@@ -121,3 +121,67 @@ def canonical_rows(reference: ArchiveReference) -> tuple[bytes, dict[str, int]]:
     # The source's own archive cleaning rules, not a benchmark-specific row filter.
     cleaned, dropped = adapter.clean_rows(archive_csv(reference), partition)
     return cleaned, dropped
+
+
+def prepare_tape(reference: ArchiveReference, target: Path) -> dict[str, object]:
+    import io
+
+    import polars as pl
+
+    cleaned, dropped = canonical_rows(reference)
+    aggregate = reference.source_key.endswith('aggtrades')
+    spot = '_spot_' in reference.source_key
+    columns = (
+        ['a', 'p', 'q', 'f', 'l', 'T', 'm']
+        if aggregate
+        else ['id', 'price', 'qty', 'quoteQty', 'time', 'isBuyerMaker']
+    )
+    if spot:
+        columns.append('M' if aggregate else 'isBestMatch')
+    first = cleaned.split(b'\n', 1)[0].split(b',', 1)[0]
+    frame = pl.read_csv(
+        io.BytesIO(cleaned), has_header=not first.isdigit(), new_columns=columns, infer_schema=False
+    )
+    if frame.width != len(columns):
+        raise ValueError('Archive tape columns differ from the source contract.')
+    identity, timestamp = ('a', 'T') if aggregate else ('id', 'time')
+    integer_columns = [identity, timestamp] + (['f', 'l'] if aggregate else [])
+    frame = frame.with_columns(pl.col(name).cast(pl.Int64) for name in integer_columns)
+    if spot:
+        frame = frame.with_columns(
+            pl.when(pl.col(timestamp) >= 10**15)
+            .then(pl.col(timestamp) // 1000)
+            .otherwise(pl.col(timestamp))
+            .alias(timestamp)
+        )
+    booleans = ['m' if aggregate else 'isBuyerMaker']
+    if spot:
+        booleans.append('M' if aggregate else 'isBestMatch')
+    for name in booleans:
+        values = frame.get_column(name).str.to_lowercase()
+        if not values.is_in(['true', 'false']).all():
+            raise ValueError('An archive flag cannot be normalized without inventing a value.')
+        frame = frame.with_columns((pl.col(name).str.to_lowercase() == 'true').alias(name))
+    if not frame.height or frame.null_count().select(pl.sum_horizontal(pl.all())).item():
+        raise ValueError('The trial input must contain complete, non-null native rows.')
+    if (frame.get_column(identity).diff().drop_nulls() <= 0).any():
+        raise ValueError('The trial archive IDs are duplicated or unordered.')
+    if (frame.get_column(timestamp).diff().drop_nulls() < 0).any():
+        raise ValueError('The trial archive timestamps regress.')
+    start = int(datetime.combine(reference.day, datetime.min.time(), UTC).timestamp() * 1000)
+    if frame.filter((pl.col(timestamp) < start) | (pl.col(timestamp) >= start + 86_400_000)).height:
+        raise ValueError('The archive contains rows outside its declared day.')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame.write_ipc(target, compression='zstd')
+    return {
+        **reference.document(),
+        'kind': 'derived_official_archive_replay',
+        'tape_path': str(target),
+        'tape_sha256': _hash(target),
+        'rows': frame.height,
+        'columns': list(frame.columns),
+        'dropped': dropped,
+        'timestamp_rule': 'existing_spot_rest_milliseconds' if spot else 'unchanged_milliseconds',
+        'http_capture': False,
+        'rpi_label': 'not_present_in_official_archive',
+    }

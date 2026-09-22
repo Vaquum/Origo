@@ -65,7 +65,7 @@ def _native_outcomes(tmp_path: Path, monkeypatch) -> None:
             if item.run_id == run_id
         )
         assert completed_claims >= 1
-        assert reconcile_stale_concurrency_claims(instance) == completed_claims
+        assert reconcile_stale_concurrency_claims(instance) == 1  # one terminal owner, not step count
         assert storage.get_concurrency_info('steady_state_done').pending_steps == []
         assert [item.run_id for item in storage.get_concurrency_info('steady_state_pending').pending_steps] == [pending]
         assert native.wait(pending)['status'] == 'SUCCESS'

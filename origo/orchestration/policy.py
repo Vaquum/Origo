@@ -104,8 +104,8 @@ def reconcile_stale_concurrency_claims(instance: DagsterInstance) -> int:
     run worker dies in between (kill, crash, deploy), the run goes terminal without
     step-end events and the claim wedges the pool forever: every later run stays
     QUEUED behind `blocked by global concurrency limits`, and a schedule gated on
-    `has_outstanding` goes silent. Only claims of runs outside ACTIVE are freed, so
-    a live holder is never evicted. Returns the runs freed.
+    `has_outstanding` goes silent. Only positively terminal runs are freed. Queued,
+    not-yet-started and unknown owners are not proof of death. Returns the runs freed.
     """
     storage = instance.event_log_storage
     if not storage.supports_global_concurrency_limits:
@@ -114,7 +114,7 @@ def reconcile_stale_concurrency_claims(instance: DagsterInstance) -> int:
         pending.run_id
         for key in storage.get_concurrency_keys()
         for pending in storage.get_concurrency_info(key).pending_steps
-        if (run := instance.get_run_by_id(pending.run_id)) is None or run.status not in ACTIVE
+        if (run := instance.get_run_by_id(pending.run_id)) is not None and run.is_finished
     }
     for run_id in sorted(stale):
         storage.free_concurrency_slots_for_run(run_id)

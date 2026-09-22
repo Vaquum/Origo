@@ -496,3 +496,19 @@ def test_recover_queue_reports_freed_stale_slots(instance):
     instance.report_run_failed(dead)
     assert recover_queue(instance)['stale_slots_freed'] == 1
     assert storage.get_concurrency_info('operational_metadata').pending_steps == []
+
+
+
+def test_reconcile_preserves_queued_and_unconfirmed_pool_claims(instance):
+    from origo.orchestration.policy import reconcile_stale_concurrency_claims
+    queued = create_run_for_test(instance, job_name='maintain_operational_metadata_job',
+                                 status=DagsterRunStatus.QUEUED)
+    not_started = create_run_for_test(instance, job_name='maintain_operational_metadata_job',
+                                      status=DagsterRunStatus.NOT_STARTED)
+    storage = _claim(instance, 'queued_pool', queued.run_id)
+    _claim(instance, 'not_started_pool', not_started.run_id)
+    _claim(instance, 'unknown_pool', 'unconfirmed-owner')
+    assert reconcile_stale_concurrency_claims(instance) == 0
+    assert [item.run_id for item in storage.get_concurrency_info('queued_pool').pending_steps] == [queued.run_id]
+    assert [item.run_id for item in storage.get_concurrency_info('not_started_pool').pending_steps] == [not_started.run_id]
+    assert [item.run_id for item in storage.get_concurrency_info('unknown_pool').pending_steps] == ['unconfirmed-owner']

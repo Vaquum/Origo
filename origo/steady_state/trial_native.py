@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
 from typing import cast
@@ -83,7 +84,7 @@ class NativeMaintenance:
             value = configuration[key]
             if not isinstance(value, dict):
                 raise ValueError('Native storage declarations must be mappings.')
-            selected = dict(value)
+            selected = dict(cast(dict[str, object], value))
             selected['config'] = {
                 'base_dir': str(self.root / 'compute_logs' if key == 'compute_logs' else self.root)
             }
@@ -142,7 +143,11 @@ class NativeMaintenance:
 
     def step(self) -> None:
         _instance, workspace = self._state()
-        for error in self.daemon.run_iteration(workspace):
+        iterate = cast(
+            Callable[[WorkspaceProcessContext], Iterator[object]],
+            getattr(self.daemon, 'run_iteration'),
+        )
+        for error in iterate(workspace):
             if error is not None:
                 raise RuntimeError(f'The actual native queue iteration failed: {error}')
 

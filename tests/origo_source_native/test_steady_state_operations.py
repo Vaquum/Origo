@@ -8,15 +8,34 @@ from origo.steady_state.deployment import MAINTENANCE_JOB, verify_observation, w
 from origo.steady_state.trial_native import NativeMaintenance
 
 
-def test_maintenance_resource_and_deploy_outcomes_are_observed(
-    tmp_path: Path, origo_test_env: dict[str, str],
-) -> None:
-    assert origo_test_env['CLICKHOUSE_HOST'] == '127.0.0.1'
+def test_maintenance_resource_and_deploy_outcomes_are_observed(tmp_path: Path, monkeypatch) -> None:
+    from origo.steady_state.trial_resources import OwnedClickHouse
+    with OwnedClickHouse(tmp_path / 'owned-database') as owned:
+        for key, value in owned.environment.items():
+            monkeypatch.setenv(key, value)
+        _native_outcomes(tmp_path, monkeypatch)
+
+
+def _native_outcomes(tmp_path: Path, monkeypatch) -> None:
+    import os
     from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
     from origo.workers.receipts import ensure_monitoring_tables
+    from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+    from origo.sources.lifecycle import SourceRuntime
+    from origo.sources.storage import SourceStore
+    from .test_binance_perp_daily_source_adapter import daily, archive_response
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        ensure_monitoring_tables(client, origo_test_env['CLICKHOUSE_DATABASE'])
+        database = get_clickhouse_settings().database
+        ensure_monitoring_tables(client, database)
+        # Native metadata health retains its existing fraction bound. Load one
+        # authentic complete archive rather than falsifying business volume.
+        monkeypatch.setattr(daily, 'get_response', archive_response)
+        runtime = SourceRuntime(BINANCE_PERP_TRADES_SPEC,
+            SourceStore(client, database, BINANCE_PERP_TRADES_SPEC),
+            Path(os.environ['ORIGO_SOURCE_LOCK_DIR']), 'native-maintenance-fixture')
+        runtime.setup(anchor=datetime(2024, 4, 20, tzinfo=UTC))
+        runtime.build('2024-04-20')
     finally:
         client.disconnect()
     ready_at = datetime.now(UTC) - timedelta(seconds=1)

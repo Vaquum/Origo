@@ -1357,7 +1357,9 @@ class Evaluator:
                     _number(_object(item, 'failure').get('count'))
                     for item in cast(list[object], failures_raw)
                 )
-                values.extend(_number(value) for value in attempts_raw.values())
+                values.extend(
+                    _number(value) for value in cast(dict[str, object], attempts_raw).values()
+                )
             total = (
                 None
                 if any(value is None or value < 0 or not value.is_integer() for value in values)

@@ -167,7 +167,7 @@ def derive_capacity(
                 )
             if any(minute >= due for minute in current):
                 raise TrialEvidenceError('An unclosed minute was counted as useful service.')
-            expected = set()
+            expected: set[datetime] = set()
             minute = withheld[0]
             while minute < due:
                 expected.add(minute)

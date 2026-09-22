@@ -109,7 +109,7 @@ class OwnedClickHouse:
         if not self.container_id:
             raise PermissionError('No owned trial container was created.')
         found: object = json.loads(self._command('inspect', self.container_id))
-        if not isinstance(found, list) or len(found) != 1:
+        if not isinstance(found, list) or len(cast(list[object], found)) != 1:
             raise PermissionError('The owned container identity could not be verified.')
         item = cast(list[dict[str, object]], found)[0]
         config = cast(dict[str, object], item['Config'])
@@ -127,6 +127,8 @@ class OwnedClickHouse:
         if not endpoint.startswith('unix:///'):
             raise PermissionError('Fault trials require a local Unix-socket Docker context.')
         self.output.mkdir(parents=True, exist_ok=True)
+        data_root = self.output / 'runtime' / 'clickhouse'
+        data_root.mkdir(parents=True, exist_ok=True)
         self.image = self._command(
             'build', '--quiet', '-f', 'Dockerfile.clickhouse', '.', timeout=300
         )
@@ -147,6 +149,7 @@ class OwnedClickHouse:
             'ORIGO_TRADE_SPOOL_DIR': str(self.output / 'runtime' / 'spool'),
             'ORIGO_HEARTBEAT_DIR': str(self.output / 'runtime' / 'heartbeats'),
             'DAGSTER_HOME': str(self.output / 'runtime' / 'dagster'),
+            'ORIGO_CLICKHOUSE_DATA_ROOT': str(data_root),
         }
         self.container_id = self._command(
             'run',
@@ -155,6 +158,8 @@ class OwnedClickHouse:
             self.name,
             '--label',
             f'{LABEL}={self.identity}',
+            '--mount',
+            f'type=bind,source={data_root},target=/var/lib/clickhouse',
             '--memory',
             f'{self.memory_gib}g',
             '--cpus',

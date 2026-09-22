@@ -183,6 +183,9 @@ def test_controlled_faults_preserve_data_and_native_recovery(
         rest,
     )
 
+    from .steady_state_evidence_cases import clear_inherited_test_connections
+    clear_inherited_test_connections(monkeypatch)
+
     with OwnedClickHouse(tmp_path / 'owned-fault-case', memory_gib=3) as owned:
         for key, value in owned.environment.items():
             monkeypatch.setenv(key, value)

@@ -10,6 +10,8 @@ from origo.steady_state.trial_native import NativeMaintenance
 
 def test_maintenance_resource_and_deploy_outcomes_are_observed(tmp_path: Path, monkeypatch) -> None:
     from origo.steady_state.trial_resources import OwnedClickHouse
+    from .steady_state_evidence_cases import clear_inherited_test_connections
+    clear_inherited_test_connections(monkeypatch)
     with OwnedClickHouse(tmp_path / 'owned-database') as owned:
         for key, value in owned.environment.items():
             monkeypatch.setenv(key, value)

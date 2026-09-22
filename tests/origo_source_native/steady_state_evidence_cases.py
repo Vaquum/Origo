@@ -47,3 +47,19 @@ def evaluator(writer: EvidenceWriter) -> Evaluator:
     writer.write_manifest()
     bundle = load_bundle(writer.root, timedelta(minutes=1))
     return Evaluator(bundle, load_policy(), load_inventory(), 'production')
+
+
+
+def clear_inherited_test_connections(monkeypatch) -> None:
+    """Discard collection-time test defaults before creating a distinct owned stack.
+
+    The runtime guard remains strict. Tests must not feed another fixture's
+    connection or credentials into an independently owned fault environment.
+    """
+    import os
+    for key in tuple(os.environ):
+        if key.startswith(('CLICKHOUSE_', 'ORIGO_', 'BINANCE_', 'HF_', 'HUGGINGFACE_')) or key in (
+            'DAGSTER_HOME', 'DAGSTER_WEBSERVER_URL', 'LOCAL_PARQUET_DIR',
+            'LOCAL_ARROW_DIR', 'RESEND_API_KEY', 'DOCKER_HOST', 'DOCKER_CONTEXT',
+        ):
+            monkeypatch.delenv(key)

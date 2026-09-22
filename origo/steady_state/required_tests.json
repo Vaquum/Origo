@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "parent_issue": 438,
+  "slice_issue": 439,
+  "tests": {
+    "M01": "tests/origo_source_native/test_steady_state_metrics.py::test_frontiers_use_complete_coverage_not_newest_timestamp",
+    "M02": "tests/origo_source_native/test_steady_state_metrics.py::test_inventory_and_wall_clock_prevent_false_green",
+    "M03": "tests/origo_source_native/test_steady_state_capacity.py::test_exact_provider_shape_budget_and_source_fairness",
+    "M04": "tests/origo_source_native/test_steady_state_capacity.py::test_useful_capacity_counts_real_work_and_conserves_backlog",
+    "M05": "tests/origo_source_native/test_steady_state_recovery.py::test_dead_attempt_preserves_token_and_fences_its_owner",
+    "M06": "tests/origo_source_native/test_steady_state_recovery.py::test_prerequisite_backoff_survives_token_changes_and_redrives",
+    "M07": "tests/origo_source_native/test_steady_state_publication.py::test_bulk_render_resumes_without_blocking_minute_work",
+    "M08": "tests/origo_source_native/test_steady_state_publication.py::test_history_load_preserves_live_currency_and_completion_barrier",
+    "M09": "tests/origo_source_native/test_steady_state_acceptance.py::test_controlled_faults_preserve_data_and_native_recovery",
+    "M10": "tests/origo_source_native/test_steady_state_monitor.py::test_durable_findings_missing_evidence_and_cursor_pagination",
+    "M11": "tests/origo_source_native/test_steady_state_operations.py::test_maintenance_resource_and_deploy_outcomes_are_observed",
+    "M12": "tests/origo_source_native/test_steady_state_contract.py::test_real_data_inventory_and_consumers_keep_their_contract",
+    "M13": "tests/origo_source_native/test_steady_state_acceptance.py::test_verifier_requires_complete_frozen_production_window",
+    "M14": "tests/origo_source_native/test_steady_state_acceptance.py::test_observer_is_read_only_and_benchmark_refuses_production",
+    "M15": "tests/origo_source_native/test_steady_state_metrics.py::test_frontier_lookup_is_bounded_on_production_metadata",
+    "M16": "tests/origo_source_native/test_steady_state_capacity.py::test_frontier_failure_does_not_starve_other_sources"
+  }
+}

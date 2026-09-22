@@ -316,3 +316,52 @@ def origo_definitions_module(
     origo_test_env: dict[str, str],
 ) -> Any:
     return _reload_module('origo.definitions')
+
+
+# The required CI suite must collect and actually pass every S439 assertion.
+# Local focused runs opt out by not setting this workflow-owned variable.
+_STEADY_STATE_PASSED: set[str] = set()
+_STEADY_STATE_INVALID: set[str] = set()
+
+
+def _required_steady_state_tests() -> set[str]:
+    import json
+    import os
+    if os.environ.get('ORIGO_REQUIRE_STEADY_STATE_TESTS') != '1':
+        return set()
+    document = json.loads((REPO_ROOT / 'origo/steady_state/required_tests.json').read_text())
+    if document.get('schema_version') != 1 or set(document['tests']) != {
+        f'M{index:02d}' for index in range(1, 17)
+    }:
+        raise pytest.UsageError('The complete M01-M16 regression inventory is required.')
+    return set(document['tests'].values())
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    required = _required_steady_state_tests()
+    missing = required - {item.nodeid for item in items}
+    if missing:
+        raise pytest.UsageError('Required steady-state tests were not collected: ' + ', '.join(sorted(missing)))
+    _STEADY_STATE_PASSED.clear()
+    _STEADY_STATE_INVALID.clear()
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if report.nodeid not in _required_steady_state_tests():
+        return
+    if report.skipped or report.failed or hasattr(report, 'wasxfail'):
+        _STEADY_STATE_INVALID.add(report.nodeid)
+    if report.when == 'call' and report.passed and not hasattr(report, 'wasxfail'):
+        _STEADY_STATE_PASSED.add(report.nodeid)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if exitstatus != 0:
+        return
+    required = _required_steady_state_tests()
+    if (required - _STEADY_STATE_PASSED) or _STEADY_STATE_INVALID:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        terminal = session.config.pluginmanager.get_plugin('terminalreporter')
+        if terminal is not None:
+            terminal.write_line('Required S439 tests were skipped, xfailed, or did not pass: ' +
+                ', '.join(sorted((required - _STEADY_STATE_PASSED) | _STEADY_STATE_INVALID)))

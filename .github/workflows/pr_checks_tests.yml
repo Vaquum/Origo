@@ -26,10 +26,15 @@ jobs:
         run: python -m pip install --upgrade pip '.[dev]'
 
       - name: Run Origo source-native runtime tests
+        env:
+          ORIGO_REQUIRE_STEADY_STATE_TESTS: "1"
         run: pytest tests/origo_source_native -q --maxfail=1
 
       - name: Verify receipt-migration deployment sequencing
         run: pytest tests/tools/test_deploy_receipt_migration.py -q
+
+      - name: Verify read-only evidence, trial safety and deployment tooling
+        run: pytest tests/tools/test_check_steady_state.py tests/tools/test_benchmark_steady_state.py tests/tools/test_deploy*.py -q
 
       - name: Verify daily-archive fixture bundles
         run: |

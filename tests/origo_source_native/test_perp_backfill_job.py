@@ -250,8 +250,11 @@ def test_perp_unavailable_day_requests_publication_and_preserves_completed_day(
                 ),
             ) as context:
                 requests = sensor.evaluate_tick(context).run_requests
-                assert len(requests) == 1
-                assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
+                if sensor.name == f'{store.spec.key}_mount_sensor':
+                    assert requests == []
+                else:
+                    assert len(requests) == 1
+                    assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
 def test_perp_new_verified_data_automatically_requests_every_canonical_only_consumer(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
 ) -> None:

@@ -71,7 +71,7 @@ def prepare_source(
     )
     names = [f'{spec.key}_{role}_sensor' for role in ('reconciliation', 'failure')]
     names.extend(
-        f'{spec.key}_{consumer.key}_sensor' for consumer in spec.consumers if consumer.canonical_only
+        f'{spec.key}_{consumer.key}_sensor' for consumer in spec.consumers if consumer.canonical_only or consumer.key == 'mount'
     )
     managed: list[
         tuple[str, InstigatorType, InstigatorStatus, SensorInstigatorData | ScheduleInstigatorData]

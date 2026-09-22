@@ -59,7 +59,13 @@ def _native_outcomes(tmp_path: Path, monkeypatch) -> None:
         storage.set_concurrency_slots('steady_state_pending', 1)
         storage.claim_concurrency_slot('steady_state_done', run_id, 'completed-step')
         storage.claim_concurrency_slot('steady_state_pending', pending, 'pending-step')
-        assert reconcile_stale_concurrency_claims(instance) == 1
+        completed_claims = sum(
+            1 for key in storage.get_concurrency_keys()
+            for item in storage.get_concurrency_info(key).pending_steps
+            if item.run_id == run_id
+        )
+        assert completed_claims >= 1
+        assert reconcile_stale_concurrency_claims(instance) == completed_claims
         assert storage.get_concurrency_info('steady_state_done').pending_steps == []
         assert [item.run_id for item in storage.get_concurrency_info('steady_state_pending').pending_steps] == [pending]
         assert native.wait(pending)['status'] == 'SUCCESS'

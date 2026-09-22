@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run an owned local archive-replay diagnostic or six-hour measured trial."""
+
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return run_trial(args.fixture_manifest, args.output.absolute(), args.duration_seconds)
-    except Exception as error:
+    except (OSError, ValueError, RuntimeError) as error:
         print(json.dumps({'status': 'UNKNOWN', 'error': str(error)}), file=sys.stderr)
         return 2
 

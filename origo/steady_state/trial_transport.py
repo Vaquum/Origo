@@ -1,9 +1,10 @@
 """Local archive replay boundary; these responses are never HTTP-capture provenance."""
+
 from __future__ import annotations
 
 import hashlib
 import json
-import socket
+import logging
 import sys
 import threading
 import time
@@ -18,7 +19,6 @@ import polars as pl
 import requests
 
 from origo.sources.adapters import binance_daily
-from origo.steady_state.trial_evidence import object_value
 
 
 def digest(path: Path) -> str:
@@ -41,16 +41,21 @@ def write_json(path: Path, value: object) -> None:
 
 def restrict_network(ports: set[int]) -> None:
     """Install a process-lifetime socket fence before importing application setup."""
+
     def audit(event: str, arguments: tuple[object, ...]) -> None:
         if event in ('socket.connect', 'socket.sendto'):
             address = arguments[-1]
-            if not isinstance(address, tuple) or len(address) < 2:
+            if not isinstance(address, tuple):
+                raise PermissionError('Trial refuses non-owned socket destinations.')
+            address = cast(tuple[object, ...], address)
+            if len(address) < 2:
                 raise PermissionError('Trial refuses non-owned socket destinations.')
             host, port = address[:2]
             if host != '127.0.0.1' or port not in ports:
                 raise PermissionError(f'Trial refuses socket destination {address!r}.')
         if event == 'socket.getaddrinfo' and arguments[0] != '127.0.0.1':
             raise PermissionError('Trial refuses external DNS resolution.')
+
     sys.addaudithook(audit)
 
 
@@ -73,8 +78,10 @@ class Tape:
             stop = int(self.times.search_sorted(int(now.timestamp() * 1000), side='right'))
             start = max(0, stop - limit)
         else:
-            start = int(self.ids.search_sorted(int(params['fromId']))) if 'fromId' in params else int(
-                self.times.search_sorted(int(params['startTime']))
+            start = (
+                int(self.ids.search_sorted(int(params['fromId'])))
+                if 'fromId' in params
+                else int(self.times.search_sorted(int(params['startTime'])))
             )
             stop = min(start + limit, self.frame.height)
         frame = self.frame.slice(start, stop - start)
@@ -105,7 +112,11 @@ class ReplayServer(ThreadingHTTPServer):
             raise ValueError('Only the original BTCUSDT request shape is supported.')
         prefix = '/api/v3/' if '_spot_' in source else '/fapi/v1/'
         endpoint = path.removeprefix(prefix)
-        if not path.startswith(prefix) or endpoint not in ('aggTrades', 'historicalTrades', 'trades'):
+        if not path.startswith(prefix) or endpoint not in (
+            'aggTrades',
+            'historicalTrades',
+            'trades',
+        ):
             raise ValueError('Unsupported provider endpoint.')
         limit = int(params.get('limit', '0'))
         maximum = 500 if endpoint == 'historicalTrades' and '_perp_' in source else 1000
@@ -118,15 +129,20 @@ class ReplayServer(ThreadingHTTPServer):
         elif endpoint == 'historicalTrades':
             if fields != {'symbol', 'limit', 'fromId'}:
                 raise ValueError('Unsupported historical-trade shape.')
-        elif fields not in ({'symbol', 'limit', 'fromId'}, {'symbol', 'limit', 'startTime'},
-                            {'symbol', 'limit', 'startTime', 'endTime'}):
+        elif fields not in (
+            {'symbol', 'limit', 'fromId'},
+            {'symbol', 'limit', 'startTime'},
+            {'symbol', 'limit', 'startTime', 'endTime'},
+        ):
             raise ValueError('Unsupported aggregate-trade shape.')
         tape = self.tapes[source]
         if endpoint == 'aggTrades' and not tape.aggregate:
             candidate = source.removesuffix('trades') + 'aggtrades'
             locator = self.tapes.get(candidate)
             if locator is None or locator.document['day'] != tape.document['day']:
-                raise LookupError('Missing authentic aggregate locator archive for this raw-trade day.')
+                raise LookupError(
+                    'Missing authentic aggregate locator archive for this raw-trade day.'
+                )
             tape = locator
         if endpoint != 'aggTrades' and tape.aggregate:
             raise ValueError('Aggregate events cannot substitute for raw trades.')
@@ -151,11 +167,22 @@ class ReplayHandler(BaseHTTPRequestHandler):
             status = 422
             body = json.dumps({'error': str(error)}).encode()
         with server.mutex, server.log.open('a') as log:
-            log.write(json.dumps({'observed_at': datetime.now(UTC).isoformat(),
-                'path': self.path, 'status': status, 'body_sha256': hashlib.sha256(body).hexdigest(),
-                'response_bytes': len(body), 'elapsed_seconds': time.monotonic() - began,
-                'kind': 'derived_official_archive_replay', 'http_capture': False,
-                'error': body.decode() if status != 200 else None}) + '\n')
+            log.write(
+                json.dumps(
+                    {
+                        'observed_at': datetime.now(UTC).isoformat(),
+                        'path': self.path,
+                        'status': status,
+                        'body_sha256': hashlib.sha256(body).hexdigest(),
+                        'response_bytes': len(body),
+                        'elapsed_seconds': time.monotonic() - began,
+                        'kind': 'derived_official_archive_replay',
+                        'http_capture': False,
+                        'error': body.decode() if status != 200 else None,
+                    }
+                )
+                + '\n'
+            )
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
@@ -168,7 +195,6 @@ class ReplayHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         # HTTP facts are retained above, without BaseHTTPRequestHandler stderr noise.
-        logging = __import__('logging')
         logging.getLogger(__name__).debug(format, *args)
 
 
@@ -179,25 +205,41 @@ def install_transport(source: str, port: int, costs: Path) -> None:
     mutex = threading.Lock()
     original = binance_daily.get_response
 
-    def request(url: str, params: Mapping[str, str | int] | None,
-                headers: Mapping[str, str] | None) -> requests.Response:
+    def request(
+        url: str, params: Mapping[str, str | int] | None, headers: Mapping[str, str] | None
+    ) -> requests.Response:
         parsed = urlsplit(url)
         expected = 'api.binance.com' if '_spot_' in source else 'fapi.binance.com'
         if parsed.scheme != 'https' or parsed.netloc != expected or parsed.query:
             raise PermissionError('Only declared production request identities can be replayed.')
-        return session.get(f'http://127.0.0.1:{port}/{source}{parsed.path}',
-                           params=params, headers=headers, timeout=(5, 30), allow_redirects=False)
+        return session.get(
+            f'http://127.0.0.1:{port}/{source}{parsed.path}',
+            params=params,
+            headers=headers,
+            timeout=(5, 30),
+            allow_redirects=False,
+        )
 
-    def measured(url: str, *, params: Mapping[str, str | int] | None = None,
-                 headers: Mapping[str, str] | None = None, weight: int = 0,
-                 lane: binance_daily.Lane = 'shared') -> binance_daily.Response:
+    def measured(
+        url: str,
+        *,
+        params: Mapping[str, str | int] | None = None,
+        headers: Mapping[str, str] | None = None,
+        weight: int = 0,
+        lane: binance_daily.Lane = 'shared',
+    ) -> binance_daily.Response:
         from dataclasses import asdict
 
         began = time.monotonic()
-        document: dict[str, object] = {'url': url, 'params': params, 'weight': weight,
-            'lane': lane, 'observed_at': datetime.now(UTC).isoformat(),
+        document: dict[str, object] = {
+            'url': url,
+            'params': params,
+            'weight': weight,
+            'lane': lane,
+            'observed_at': datetime.now(UTC).isoformat(),
             'authenticated_shape': bool(headers and headers.get('X-MBX-APIKEY')),
-            'http_capture': False}
+            'http_capture': False,
+        }
         try:
             response = original(url, params=params, headers=headers, weight=weight, lane=lane)
             document.update(asdict(response.cost))
@@ -211,13 +253,21 @@ def install_transport(source: str, port: int, costs: Path) -> None:
             with mutex, costs.open('a') as stream:
                 stream.write(json.dumps(document) + '\n')
 
-    binance_daily._request = request
+    setattr(binance_daily, '_request', request)
     # Modules import get_response by value; replace all four adapter seams plus capture.
     from origo.sources.adapters import (
-        binance_perp_agg_rest, binance_perp_rest, binance_spot_agg_rest, binance_spot_rest,
+        binance_perp_agg_rest,
+        binance_perp_rest,
+        binance_spot_agg_rest,
+        binance_spot_rest,
     )
     from origo.workers import trade_capture
 
-    for module in (binance_perp_agg_rest, binance_perp_rest, binance_spot_agg_rest,
-                   binance_spot_rest, trade_capture):
-        module.get_response = measured
+    for module in (
+        binance_perp_agg_rest,
+        binance_perp_rest,
+        binance_spot_agg_rest,
+        binance_spot_rest,
+        trade_capture,
+    ):
+        setattr(module, 'get_response', measured)

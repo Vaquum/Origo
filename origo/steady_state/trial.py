@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import csv
+import importlib.metadata
 import io
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import traceback
@@ -48,8 +50,22 @@ def validate_request(manifest: Path, output: Path, duration: float) -> list[dict
         SOURCES
     ):
         raise ValueError('Exactly one complete authentic day per required source is required.')
+    pinned = object_value(
+        json.loads((ROOT / 'tests/fixtures/steady_state/archive_corpus.json').read_text()),
+        'pinned corpus',
+    )
+    identities = {
+        str(row['source_key']): row
+        for value in list_value(pinned['archives'], 'pinned archives')
+        for row in [object_value(value, 'pinned archive')]
+    }
     for item in archives:
         source = str(item['source_key'])
+        if any(
+            item.get(key) != identities[source].get(key)
+            for key in ('date', 'url', 'sha256', 'captured_at', 'busy_hour')
+        ):
+            raise ValueError('Input provenance differs from the pinned authentic corpus.')
         day = date.fromisoformat(str(item['date']))
         if item.get('url') != archive_url(source, day):
             raise ValueError('Archive URL differs from the official source/day identity.')
@@ -69,7 +85,41 @@ def validate_request(manifest: Path, output: Path, duration: float) -> list[dict
                 'Complete arrival window and boundary rows must fit the authentic day.'
             )
         instant(item.get('captured_at'), 'checksum capture time')
+    volume_analysis(archives)
     return archives
+
+
+def volume_analysis(archives: list[dict[str, object]]) -> dict[str, object]:
+    path = ROOT / 'tests/fixtures/steady_state/volume_inventory.json'
+    volume = object_value(json.loads(path.read_text()), 'volume inventory')
+    start = instant(volume['window_start'], 'volume window start')
+    end = instant(volume['window_end'], 'volume window end')
+    if end - start != timedelta(days=30):
+        raise ValueError('Thirty complete days of source-volume evidence are required.')
+    expected = {start + timedelta(hours=index) for index in range(720)}
+    sources = object_value(volume['sources'], 'volume sources')
+    result: dict[str, object] = {}
+    for item in archives:
+        source = str(item['source_key'])
+        recorded = object_value(sources[source], 'source volume')
+        hours = [object_value(row, 'volume hour') for row in list_value(recorded['hours'], 'hours')]
+        stamps = [datetime.fromisoformat(str(row['hour'])).replace(tzinfo=UTC) for row in hours]
+        if (
+            len(stamps) != 720
+            or set(stamps) != expected
+            or any(int(str(row['represented_minutes'])) != 60 for row in hours)
+        ):
+            raise ValueError(f'{source}: source-volume inventory has missing hour/minute evidence.')
+        busiest = max(hours, key=lambda row: int(str(row['event_rows'])))
+        busy = object_value(item['busy_hour'], 'archive busy hour')
+        if (
+            datetime.fromisoformat(str(busiest['hour'])).replace(tzinfo=UTC)
+            != instant(busy['start'], 'busy start')
+            or int(str(busiest['event_rows'])) != busy['rows']
+        ):
+            raise ValueError(f'{source}: input does not include the recorded busiest hour.')
+        result[source] = {'represented_hours': len(hours), 'busiest_hour': busiest}
+    return {'sha256': digest(path), 'method': volume['method'], 'sources': result}
 
 
 def source_origin(item: dict[str, object]) -> datetime:
@@ -173,6 +223,7 @@ def code_identity() -> dict[str, object]:
     paths = sorted(
         {
             *ROOT.joinpath('origo').rglob('*.py'),
+            *ROOT.joinpath('origo').rglob('*.sql'),
             *ROOT.joinpath('origo/steady_state').glob('*.json'),
             ROOT / 'tools/benchmark_steady_state.py',
             ROOT / 'pyproject.toml',
@@ -185,9 +236,22 @@ def code_identity() -> dict[str, object]:
     files = {str(path.relative_to(ROOT)): digest(path) for path in paths if path.is_file()}
     import hashlib
 
+    packages = {
+        distribution.metadata['Name']: distribution.version
+        for distribution in importlib.metadata.distributions()
+    }
+    commit = subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
     return {
+        'git_commit': commit,
+        'packages': packages,
         'files': files,
-        'sha256': hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest(),
+        'sha256': hashlib.sha256(
+            json.dumps(
+                {'files': files, 'packages': packages, 'python': sys.version}, sort_keys=True
+            ).encode()
+        ).hexdigest(),
         'python': sys.version,
         'executable': sys.executable,
     }
@@ -256,9 +320,21 @@ def run_trial(manifest: Path, output: Path, duration: float) -> int:
     try:
         plan = prepare_inputs(archives, output, duration)
         write_json(output / 'plan.json', plan)
+        write_json(output / 'volume-analysis.json', volume_analysis(archives))
+        write_json(output / 'fixture-manifest.json', json.loads(manifest.read_text()))
         volume = ROOT / 'tests/fixtures/steady_state/volume_inventory.json'
         write_json(output / 'volume_inventory.json', json.loads(volume.read_text()))
         with owned:
+            for name, directory in (
+                ('HOME', 'home'),
+                ('TMPDIR', 'tmp'),
+                ('XDG_CACHE_HOME', 'cache'),
+            ):
+                path = output / 'runtime' / directory
+                path.mkdir(parents=True, exist_ok=True)
+                owned.environment[name] = str(path)
+            owned.environment['HF_HUB_OFFLINE'] = '1'
+            owned.environment['HF_HUB_DISABLE_TELEMETRY'] = '1'
             write_json(
                 output / 'resources.json',
                 {
@@ -290,16 +366,17 @@ def run_trial(manifest: Path, output: Path, duration: float) -> int:
                     env=owned.environment,
                     stdout=log,
                     stderr=subprocess.STDOUT,
+                    start_new_session=True,
                 )
                 try:
                     status = process.wait()
                 finally:
                     if process.poll() is None:
-                        process.terminate()
+                        os.killpg(process.pid, signal.SIGTERM)
                         try:
                             process.wait(timeout=15)
                         except subprocess.TimeoutExpired:
-                            process.kill()
+                            os.killpg(process.pid, signal.SIGKILL)
                             process.wait(timeout=5)
             if code_identity()['sha256'] != initial['sha256']:
                 raise RuntimeError('Relevant code changed during trial; evidence cannot qualify.')

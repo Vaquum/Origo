@@ -7,6 +7,7 @@ import gzip
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -293,6 +294,11 @@ class Observer:
         anchor = origin - timedelta(hours=1)
         due = (origin + timedelta(seconds=elapsed)).replace(second=0, microsecond=0)
         accepted = self.accepted[source]
+        oracle = {
+            str(row['minute']): row
+            for value in list_value(declaration['oracle'], 'oracle')
+            for row in [object_value(value, 'oracle minute')]
+        }
         canonical: list[str] = []
         for record in store.records():
             if record.partition.provisional and record.partition.end <= due:
@@ -320,6 +326,15 @@ class Observer:
                     with gzip.open(target / (str(record.build_id) + '.jsonl.gz'), 'wt') as stream:
                         for row in rows:
                             stream.write(json.dumps(row, default=str) + '\n')
+                    expected_input = oracle.get(key)
+                    if expected_input is None or any(
+                        document[field] != expected_input[field] for field in ('rows', 'raw_sha256')
+                    ):
+                        raise ValueError(
+                            'Accepted raw rows differ from the independent CSV oracle.'
+                        )
+                    if record.revision != expected_input['native_revision_sha256']:
+                        raise ValueError('Accepted revision differs from the native CSV oracle.')
                     accepted[key] = document
             elif not record.partition.provisional:
                 cursor = max(anchor, record.partition.start)
@@ -353,8 +368,15 @@ class Observer:
     def sample(self, elapsed: float, observed_at: datetime) -> dict[str, object]:
         states: dict[str, object] = {}
         for source in SOURCES:
+            began = time.monotonic()
+            started = datetime.now(UTC)
             try:
-                states[source] = self.state(source, elapsed)
+                states[source] = {
+                    **self.state(source, elapsed),
+                    'observation_started_at': started.isoformat(),
+                    'observation_finished_at': datetime.now(UTC).isoformat(),
+                    'observation_elapsed_seconds': time.monotonic() - began,
+                }
             except Exception as error:
                 log.exception('Independent observation failed for %s', source)
                 states[source] = {'status': 'UNKNOWN', 'error': repr(error)}
@@ -535,6 +557,14 @@ def coordinate(output: Path, duration: float) -> int:
             if any(process.poll() is not None for process in processes):
                 raise RuntimeError('An admitted source/capture process exited; see retained logs.')
             time.sleep(min(0.25, max(0, next_sample - (time.monotonic() - began))))
+        write_json(
+            output / 'clock-end.json',
+            {
+                'utc_end': datetime.now(UTC).isoformat(),
+                'monotonic_end': time.monotonic(),
+                'elapsed_seconds': time.monotonic() - began,
+            },
+        )
         report = evaluate(progress, duration, missing)
         write_json(output / 'report.json', report)
         return 0 if report['acceptance'] == 'PASS' else (1 if report['acceptance'] == 'FAIL' else 2)
@@ -580,6 +610,12 @@ def main() -> int:
     parser.add_argument('--port', type=int)
     parser.add_argument('--capture', action='store_true')
     args = parser.parse_args()
+
+    def stopping(signum: int, frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    if args.source is None:
+        signal.signal(signal.SIGTERM, stopping)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
     if args.source:
         if args.port is None or (args.capture and args.source != 'binance_perp_trades'):

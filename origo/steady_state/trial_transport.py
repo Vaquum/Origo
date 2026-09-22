@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from collections.abc import Mapping
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -94,11 +95,18 @@ class Tape:
 class ReplayServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, tapes: dict[str, Tape], origins: dict[str, datetime], log: Path) -> None:
+    def __init__(
+        self,
+        tapes: dict[str, Tape],
+        origins: dict[str, datetime],
+        log: Path,
+        *,
+        bind_and_activate: bool = True,
+    ) -> None:
         self.tapes, self.origins, self.log = tapes, origins, log
         self.started: float | None = None
         self.mutex = threading.Lock()
-        super().__init__(('127.0.0.1', 0), ReplayHandler)
+        super().__init__(('127.0.0.1', 0), ReplayHandler, bind_and_activate=bind_and_activate)
 
     def source_now(self, source: str) -> datetime:
         if self.started is None:
@@ -204,6 +212,7 @@ def install_transport(source: str, port: int, costs: Path) -> None:
     session.trust_env = False
     mutex = threading.Lock()
     original = binance_daily.get_response
+    admitted: ContextVar[bool] = ContextVar('trial_request_admitted', default=False)
 
     def request(
         url: str, params: Mapping[str, str | int] | None, headers: Mapping[str, str] | None
@@ -212,6 +221,7 @@ def install_transport(source: str, port: int, costs: Path) -> None:
         expected = 'api.binance.com' if '_spot_' in source else 'fapi.binance.com'
         if parsed.scheme != 'https' or parsed.netloc != expected or parsed.query:
             raise PermissionError('Only declared production request identities can be replayed.')
+        admitted.set(True)
         return session.get(
             f'http://127.0.0.1:{port}/{source}{parsed.path}',
             params=params,
@@ -231,6 +241,7 @@ def install_transport(source: str, port: int, costs: Path) -> None:
         from dataclasses import asdict
 
         began = time.monotonic()
+        token = admitted.set(False)
         document: dict[str, object] = {
             'url': url,
             'params': params,
@@ -249,6 +260,10 @@ def install_transport(source: str, port: int, costs: Path) -> None:
             document['error'] = repr(error)
             raise
         finally:
+            document['admitted'] = admitted.get()
+            document['requested_weight'] = weight
+            document['weight'] = weight if admitted.get() else 0
+            admitted.reset(token)
             document['elapsed_seconds'] = time.monotonic() - began
             with mutex, costs.open('a') as stream:
                 stream.write(json.dumps(document) + '\n')

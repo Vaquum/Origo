@@ -8,7 +8,17 @@ from origo.steady_state.deployment import MAINTENANCE_JOB, verify_observation, w
 from origo.steady_state.trial_native import NativeMaintenance
 
 
-def test_maintenance_resource_and_deploy_outcomes_are_observed(tmp_path: Path) -> None:
+def test_maintenance_resource_and_deploy_outcomes_are_observed(
+    tmp_path: Path, origo_test_env: dict[str, str],
+) -> None:
+    assert origo_test_env['CLICKHOUSE_HOST'] == '127.0.0.1'
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.workers.receipts import ensure_monitoring_tables
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        ensure_monitoring_tables(client, origo_test_env['CLICKHOUSE_DATABASE'])
+    finally:
+        client.disconnect()
     ready_at = datetime.now(UTC) - timedelta(seconds=1)
     with NativeMaintenance(tmp_path / 'native-maintenance') as native:
         run_id = native.submit()

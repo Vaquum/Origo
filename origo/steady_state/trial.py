@@ -85,6 +85,23 @@ def validate_request(manifest: Path, output: Path, duration: float) -> list[dict
                 'Complete arrival window and boundary rows must fit the authentic day.'
             )
         instant(item.get('captured_at'), 'checksum capture time')
+    supplied_locators = object_value(document.get('locators'), 'locators')
+    pinned_locators = object_value(pinned.get('locators'), 'pinned locators')
+    if set(supplied_locators) != {'binance_spot_trades', 'binance_perp_trades'}:
+        raise ValueError('Both raw sources require their authentic same-day aggregate locator.')
+    for source, raw in supplied_locators.items():
+        supplied = object_value(raw, source + ' locator')
+        expected = object_value(pinned_locators[source], 'pinned locator')
+        if any(
+            supplied.get(key) != expected.get(key)
+            for key in ('source_key', 'date', 'url', 'sha256', 'captured_at')
+        ):
+            raise ValueError('Locator provenance differs from the pinned authentic corpus.')
+        path = Path(str(supplied['cache_path']))
+        if not path.resolve().is_relative_to(CACHE) or not path.is_file():
+            raise PermissionError('Locator archive is not present in the declared cache.')
+        if digest(path) != supplied['sha256']:
+            raise ValueError('Locator archive does not match its retained official digest.')
     volume_analysis(archives)
     return archives
 

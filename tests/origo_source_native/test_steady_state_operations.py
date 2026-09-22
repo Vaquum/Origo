@@ -40,6 +40,16 @@ def _native_outcomes(tmp_path: Path, monkeypatch) -> None:
         client.disconnect()
     ready_at = datetime.now(UTC) - timedelta(seconds=1)
     with NativeMaintenance(tmp_path / 'native-maintenance') as native:
+        from origo.steady_state.trial_http import NativeHTTP
+        from origo.workers.dagster_reader import DagsterReader
+        from origo.workers.report import Reporter
+        with NativeHTTP(native) as http:
+            url = f'http://127.0.0.1:{http.port}'
+            assert DagsterReader(url).backfill_owns_publication('binance_spot_trades') is False
+            assert Reporter(url).materialized('binance_spot_trades_provisional_feed',
+                partition=None, metadata={'test_observation': True})
+            ports, sockets = http.allowed_endpoints()
+            assert http.port in ports and (len(ports) == 2 or len(sockets) == 1)
         run_id = native.submit()
         # This is a real queued run launched through the repository's gRPC launcher.
         before = next(item for item in native.records() if item['run_id'] == run_id)

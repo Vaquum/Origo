@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from dagster import DagsterInstance, Definitions
+from dagster import AssetSpec, DagsterInstance, Definitions
 from dagster._core.workspace.context import WorkspaceProcessContext
 from dagster._core.workspace.load_target import ModuleTarget
 from dagster._daemon.run_coordinator.queued_run_coordinator_daemon import QueuedRunCoordinatorDaemon
@@ -26,7 +26,21 @@ from origo.maintenance.dagster_metadata import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-defs = Definitions(assets=[maintain_operational_metadata], jobs=[maintain_operational_metadata_job])
+defs = Definitions(
+    assets=[
+        maintain_operational_metadata,
+        *[
+            AssetSpec(key + '_provisional_feed')
+            for key in (
+                'binance_spot_trades',
+                'binance_perp_trades',
+                'binance_spot_aggtrades',
+                'binance_perp_aggtrades',
+            )
+        ],
+    ],
+    jobs=[maintain_operational_metadata_job],
+)
 
 
 class NativeMaintenance:

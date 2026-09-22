@@ -40,21 +40,23 @@ def write_json(path: Path, value: object) -> None:
     pending.replace(path)
 
 
-def restrict_network(ports: set[int]) -> None:
+def restrict_network(ports: set[int], *, unix_paths: set[str] | None = None) -> None:
     """Install a process-lifetime socket fence before importing application setup."""
 
     def audit(event: str, arguments: tuple[object, ...]) -> None:
         if event in ('socket.connect', 'socket.sendto'):
             address = arguments[-1]
+            if isinstance(address, str) and address in (unix_paths or set()):
+                return
             if not isinstance(address, tuple):
                 raise PermissionError('Trial refuses non-owned socket destinations.')
             address = cast(tuple[object, ...], address)
             if len(address) < 2:
                 raise PermissionError('Trial refuses non-owned socket destinations.')
             host, port = address[:2]
-            if host != '127.0.0.1' or port not in ports:
+            if host not in ('127.0.0.1', '::1') or port not in ports:
                 raise PermissionError(f'Trial refuses socket destination {address!r}.')
-        if event == 'socket.getaddrinfo' and arguments[0] != '127.0.0.1':
+        if event == 'socket.getaddrinfo' and arguments[0] not in ('127.0.0.1', 'localhost', '::1'):
             raise PermissionError('Trial refuses external DNS resolution.')
 
     sys.addaudithook(audit)

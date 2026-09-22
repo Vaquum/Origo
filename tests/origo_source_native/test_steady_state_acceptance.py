@@ -186,7 +186,9 @@ def test_controlled_faults_preserve_data_and_native_recovery(
     from .steady_state_evidence_cases import clear_inherited_test_connections
     clear_inherited_test_connections(monkeypatch)
 
-    with OwnedClickHouse(tmp_path / 'owned-fault-case', memory_gib=3) as owned:
+    # Database crash recovery uses the Linux container filesystem, not macOS
+    # file sharing. Host-visible diagnostic blocks are exercised separately by M11.
+    with OwnedClickHouse(tmp_path / 'owned-fault-case', memory_gib=3, share_data_with_host=False) as owned:
         for key, value in owned.environment.items():
             monkeypatch.setenv(key, value)
         monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')

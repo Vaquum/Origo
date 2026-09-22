@@ -78,7 +78,9 @@ def _free_port() -> int:
 class OwnedClickHouse:
     """A label-checked container with local ports and no production volume mounts."""
 
-    def __init__(self, output: Path, *, memory_gib: int = 3) -> None:
+    def __init__(
+        self, output: Path, *, memory_gib: int = 3, share_data_with_host: bool = True
+    ) -> None:
         validate_isolated_environment(os.environ, output)
         if isinstance(memory_gib, bool) or not 1 <= memory_gib <= 4:
             raise ValueError('The local trial admits one to four GiB of ClickHouse memory.')
@@ -88,6 +90,7 @@ class OwnedClickHouse:
         self.context = ''
         self.container_id = ''
         self.memory_gib = memory_gib
+        self.share_data_with_host = share_data_with_host
         self.environment: dict[str, str] = {}
         self.image = ''
 
@@ -158,8 +161,11 @@ class OwnedClickHouse:
             self.name,
             '--label',
             f'{LABEL}={self.identity}',
-            '--mount',
-            f'type=bind,source={data_root},target=/var/lib/clickhouse',
+            *(
+                ['--mount', f'type=bind,source={data_root},target=/var/lib/clickhouse']
+                if self.share_data_with_host
+                else []
+            ),
             '--memory',
             f'{self.memory_gib}g',
             '--cpus',

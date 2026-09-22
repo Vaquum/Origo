@@ -80,7 +80,7 @@ def test_missing_blocking_counts_are_unknown_not_zero(
 
 
 def test_a_claimed_capacity_summary_without_raw_progress_is_not_acceptance(tmp_path: Path) -> None:
-    writer, identity = evidence_writer(tmp_path, environment='isolated')
+    writer, _identity = evidence_writer(tmp_path, environment='isolated')
     policy, inventory = load_policy(), load_inventory()
     writer.write_artifact(
         'trials/capacity_trial.json',

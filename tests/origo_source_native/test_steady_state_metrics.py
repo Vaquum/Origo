@@ -195,6 +195,17 @@ def test_inventory_and_wall_clock_prevent_false_green(tmp_path: Path) -> None:
     }}
     writer.append_sample(entry)
     checked = evaluator(writer)
+    from origo.steady_state.verification import EvidenceError
+    with pytest.raises(EvidenceError, match='not reproducible'):
+        checked.evaluate_ss01()
+    # Honest but stale coverage must also fail, even when both endpoints agree.
+    sources = entry['sources']
+    assert isinstance(sources, dict)
+    sources['binance_spot_trades']['contiguous_end'] = end.isoformat()
+    honest, honest_identity = evidence_writer(tmp_path / 'honest')
+    assert honest_identity == identity
+    honest.append_sample(entry)
+    checked = evaluator(honest)
     checked.evaluate_ss01()
     checked.evaluate_ss02()
     assert any(item.entity == 'binance_spot_trades' and item.verdict == 'FAIL' for item in checked.results)

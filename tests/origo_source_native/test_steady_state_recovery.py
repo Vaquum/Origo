@@ -727,3 +727,61 @@ def test_concurrent_worker_startup_installs_one_compatible_receipt_schema(
         assert ('_attempt', 'EPHEMERAL') in schema
     finally:
         client.disconnect()
+
+
+def test_prerequisite_backoff_survives_token_changes_and_redrives(
+    origo_test_env: dict[str, str], binance_fixture_server_root_url: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+    from dagster import Definitions
+    from origo.sources.bundle import build_source_bundle
+    from origo.sources.profiles import consumer_base
+    from origo.sources.storage import SourceStore
+    from origo.steady_state.prerequisites import may_attempt_prerequisite, open_prerequisites
+    from .test_steady_state_publication import _Prepared, SPEC, CANONICAL_DAY
+
+    prepared = _Prepared(tmp_path, monkeypatch, binance_fixture_server_root_url)
+    limited = replace(SPEC, orchestration=replace(SPEC.orchestration, retry_count=1))
+    try:
+        prepared.build_minute()
+        record = prepared.runtime.build(CANONICAL_DAY)
+        before = prepared.store.snapshot().token
+        monkeypatch.setattr(consumer_base, 'MOUNT_WORKER_MONTH_CAP', 0)
+        with pytest.raises(SourceError, match='months'):
+            prepared.worker_publish()
+        (first,) = open_prerequisites(prepared.store)
+        prepared.runtime.rollback(record, operator='test', reason='Retain genuine rows, change selected generation')
+        assert prepared.store.snapshot().token != before
+        with pytest.raises(SourceError, match='months'):
+            prepared.worker_publish()
+        # Reconstruct the reader as a new process would; no in-memory retry state survives.
+        resumed = SourceStore(prepared.client, ORIGO_DATABASE, SPEC)
+        (second,) = open_prerequisites(resumed)
+        assert second.failure_key == first.failure_key and second.attempts == 2
+        assert not may_attempt_prerequisite(
+            resumed, limited, consumer='mount', error_code='RENDER_DEFERRED',
+            now=second.last_failed_at + timedelta(hours=24),
+        )
+        prepared.runtime.failures.record(
+            operation='consumer', consumer='unrelated', scope='CONSUMER',
+            error_code='UNRELATED_TEST_FAULT', message='An independently scoped controlled fault.',
+        )
+        # Native publisher owns full-history admission; there is no typed allow_full flag.
+        bundle = build_source_bundle(SPEC)
+        definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs)
+        job = definitions.resolve_job_def(f'publish_{SPEC.key}_mount_job')
+        result = job.execute_in_process()
+        assert result.success
+        assert open_prerequisites(resumed) == ()
+        assert may_attempt_prerequisite(
+            resumed, limited, consumer='mount', error_code='RENDER_DEFERRED', now=datetime.now(UTC),
+        )
+        remaining = prepared.client.execute(
+            f'SELECT argMax(event_type,event_time) FROM {ORIGO_DATABASE}.source_failure_log '
+            "WHERE error_code='UNRELATED_TEST_FAULT' GROUP BY failure_key",
+        )
+        assert remaining == [('FAILED',)]
+        assert prepared.manifest()['pinned_token'] == prepared.store.snapshot().token
+    finally:
+        prepared.close()

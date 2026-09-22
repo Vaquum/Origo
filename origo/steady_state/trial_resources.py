@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -177,7 +178,7 @@ class OwnedClickHouse:
             deadline = time.monotonic() + 60
             while True:
                 result = subprocess.run(
-                    [str(ROOT / '.venv/bin/python'), '-c', script],
+                    [sys.executable, '-c', script],
                     cwd=ROOT,
                     env=self.environment,
                     capture_output=True,

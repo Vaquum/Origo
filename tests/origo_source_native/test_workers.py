@@ -87,7 +87,7 @@ def test_no_per_minute_schedules_or_run_status_feed_sensors_remain() -> None:
     assert all(schedule.cron_schedule != '* * * * *' for schedule in repository.schedule_defs)
     names = {sensor.name for sensor in defs.sensors}
     assert 'depth_snapshot_store_source_sensor' not in names
-    assert 'binance_spot_trades_mount_sensor' not in names
+    assert 'binance_spot_trades_mount_sensor' in names
     assert not [name for name in names if name.endswith('_freshness_sensor')]
     assert 'binance_spot_trades_huggingface_sensor' in names
 

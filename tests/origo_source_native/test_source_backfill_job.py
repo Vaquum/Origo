@@ -143,11 +143,8 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
             ),
             None,
         )
-        # A consumer that pins provisional rows is published by the provisional worker,
-        # not by a sensor; canonical-only consumers keep theirs.
-        assert (sensor is not None) == consumer.canonical_only
-        if sensor is None:
-            continue
+        # Mount sensors only admit deferred bulk renders; current backfill files stay idle.
+        assert sensor is not None
         with build_sensor_context(
             instance=instance,
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),

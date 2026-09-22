@@ -610,13 +610,16 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         key: str,
         context: ScheduleEvaluationContext | SensorEvaluationContext,
         revision: str = '',
+        *,
+        allow_full_history: bool = False,
     ) -> RunRequest | SkipReason:
         spec.require_enabled('request')
         consumer_key = (
             operation.removeprefix('consumer_') if operation.startswith('consumer_') else None
         )
         identity = (
-            f'{spec.key}:consumer:{consumer_key}:{key}'
+            f'{spec.key}:consumer:{consumer_key}:'
+            f'{"bulk:" if allow_full_history else ""}{key}'
             if consumer_key
             else f'{spec.key}:{operation}:{key}' + (f':{revision}' if revision else '')
         )
@@ -726,7 +729,10 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                     run_config={
                         'ops': {
                             names[operation]: {
-                                'config': {'partition_key': '' if consumer_key else key}
+                                'config': {
+                                    'partition_key': '' if consumer_key else key,
+                                    **({'allow_full_history': True} if allow_full_history else {}),
+                                }
                             }
                         }
                     },
@@ -798,13 +804,11 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         return RunRequest(run_key=f'{spec.key}:audit:{tick.isoformat()}')
 
     schedules: list[ScheduleDefinition] = [canonical, audit]
-    # Provisional tails and the consumers that pin them run in origo.workers.provisional every
-    # minute; the bundle declares the live feed asset that worker materializes each tick, with
-    # the freshness policy the daemon evaluates, and keeps a sensor only for canonical-only
-    # consumers.
+    # Minute publications stay in the worker. Only deferred bulk mounts enter Dagster,
+    # alongside canonical-only consumers, with bounded retries per canonical state.
 
     sensors: list[SensorDefinition] = []
-    for consumer in (item for item in spec.consumers if item.canonical_only):
+    for consumer in (item for item in spec.consumers if item.canonical_only or item.key == 'mount'):
 
         def make_consumer_sensor(consumer_key: str, canonical_only: bool) -> SensorDefinition:
             @_sensor(
@@ -831,20 +835,29 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 client = make_clickhouse_client(settings)
                 try:
                     store = SourceStore(client, settings.database, spec)
-                    if not store.snapshot(canonical_only=True).records:
+                    if not canonical_only and not store.execute(
+                        f"SELECT failure_key FROM {store.table('source_failure_log')} "
+                        "WHERE source_key=%(source)s AND operation='consumer' "
+                        "AND consumer=%(consumer)s AND error_code='RENDER_DEFERRED' "
+                        "GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' LIMIT 1",
+                        {'source': spec.key, 'consumer': consumer_key},
+                    ):
+                        return SkipReason('Minute publication remains owned by the worker.')
+                    snapshot = store.snapshot(canonical_only=True)
+                    if not snapshot.records:
                         return SkipReason('Source has no eligible active partitions.')
                     if not store.canonical_ready():
                         return SkipReason(
                             'Canonical state has incomplete evidence or unresolved failures.'
                         )
-                    snapshot = store.snapshot(canonical_only=canonical_only)
-                    if publication_current(
-                        spec, consumer_key, snapshot.token, pinned=not canonical_only
-                    ):
+                    if publication_current(spec, consumer_key, snapshot.token):
                         return SkipReason(
                             'Declared files already publish the current source state.'
                         )
-                    return request('consumer_' + consumer_key, snapshot.token, context)
+                    return request(
+                        'consumer_' + consumer_key, snapshot.token, context,
+                        allow_full_history=not canonical_only,
+                    )
                 finally:
                     client.disconnect()
 

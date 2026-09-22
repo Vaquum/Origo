@@ -43,7 +43,10 @@ one tick per minute, restarted by the watchdog when a tick hangs:
   publication of one pinned state, is
   retried with a doubling delay from one minute up to the source's `retry_delay`, at most
   `retry_count` times, then left to an operator run. Canonical-only consumers
-  (`huggingface`) keep their sensors.
+  (`huggingface`) keep their sensors. Mount sensors admit only an open `RENDER_DEFERRED`
+  failure through the dedicated publication job, with full-history permission and the
+  existing retry budget keyed to canonical state. The worker yields that consumer while
+  its job is outstanding and never waits on a held consumer lock.
 
 Each processed minute and each publication writes one row to `origo.worker_minute_log`
 (`feed`, `series`, `minute`, `rows`, `sha256`, `duration_ms`, `status`, `error_code`,
@@ -86,7 +89,9 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 The live feed asset is materialized at the end of every tick whatever the minutes did,
 so its freshness is the worker's tick and its path to the webserver, not the minutes'
 success: failing or skipped minutes keep the feed fresh and show as `FAILED` receipts,
-which `origo_monitor:workers_alive` reports. A stale feed with a fresh heartbeat means
+which `origo_monitor:workers_alive` reports. A source-level tick exception writes a
+`<source>:tick` FAILED receipt and leaves that source's feed stale; the later sources still
+run. A stale feed with a fresh heartbeat means
 the tick raised outside the per-minute handler (the ERROR line is in
 `origo.container_log`) or the webserver refused the report. A stale heartbeat means the
 container is down or stuck: `docker compose ps` shows the healthcheck, and the

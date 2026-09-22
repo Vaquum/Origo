@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,9 +20,9 @@ from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters import binance_spot_rest as rest
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import SourceRunConfig
-from origo.sources.contracts import OrchestrationSpec, RevisionedSourceSpec, RolloutStage
+from origo.sources.contracts import OrchestrationSpec, RevisionedSourceSpec, RolloutStage, Row
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.storage import SourceStore
+from origo.sources.storage import SourceStore, StorageError
 from origo.workers import provisional
 from origo.workers.dagster_reader import DagsterReader, DagsterUnreachable
 from origo.workers.provisional import ProvisionalFeed, live_feed_asset
@@ -65,6 +65,7 @@ class _Dagster:
     def __init__(self) -> None:
         self.owned = False
         self.unreachable = False
+        self.publication_owned = False
         self.asked: list[str] = []
 
     def backfill_owns_publication(self, source_key: str) -> bool:
@@ -72,6 +73,9 @@ class _Dagster:
         if self.unreachable:
             raise DagsterUnreachable('Backfills: HTTP 502')
         return self.owned
+
+    def publication_owns_consumer(self, source_key: str, consumer_key: str) -> bool:
+        return self.publication_owned
 
 
 def _feed(
@@ -299,7 +303,7 @@ def test_dormant_sources_are_skipped_and_the_bundle_declares_the_feed_not_a_sche
         assert not [name for name in schedules if name.endswith('_provisional_schedule')]
         assert '* * * * *' not in schedules.values()
         sensors = {sensor.name for sensor in built.sensors}
-        assert 'binance_spot_trades_mount_sensor' not in sensors
+        assert 'binance_spot_trades_mount_sensor' in sensors
         assert 'binance_spot_trades_huggingface_sensor' in sensors
         live_key = AssetKey(live_feed_asset(spec))
         live_spec = next(
@@ -693,3 +697,93 @@ def test_compose_heartbeat_path_matches_worker_wiring(monkeypatch: pytest.Monkey
             'provisional-worker'
         ]['environment']
         assert expected in environment, name
+
+
+def test_frontier_uses_records_when_current_view_query_is_unavailable(
+    spot: tuple[RevisionedSourceSpec, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec, requests = spot
+    execute = SourceStore.execute
+
+    def without_current_view(
+        self: SourceStore, query: str, params: object | None = None,
+        settings: Mapping[str, object] | None = None,
+    ) -> list[Row]:
+        if 'source_current_partitions' in query:
+            raise StorageError('Storage operation failed: ServerException')
+        return execute(self, query, params, settings)
+
+    monkeypatch.setattr(SourceStore, 'execute', without_current_view)
+    dagster = _Dagster()
+    dagster.owned = True
+    outcome = _feed(spec, tmp_path, dagster, _Reporter()).tick(NOW)
+    assert outcome.processed == (f'{spec.key}:{KEY}',)
+    assert outcome.failed == ()
+    assert not requests
+
+
+def test_source_tick_failure_does_not_stop_later_sources(
+    spot: tuple[RevisionedSourceSpec, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    query_origo: Query,
+) -> None:
+    from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+    from origo.workers.monitor import Cursor, Monitor
+
+    spec, requests = spot
+    build_intervals = ProvisionalFeed._build_intervals
+
+    def first_source_fails(
+        self: ProvisionalFeed, store: SourceStore, source: RevisionedSourceSpec, now: datetime,
+    ) -> tuple[list[str], list[str]]:
+        if source.key == BINANCE_PERP_TRADES_SPEC.key:
+            raise StorageError('Storage operation failed: ServerException')
+        return build_intervals(self, store, source, now)
+
+    monkeypatch.setattr(ProvisionalFeed, '_build_intervals', first_source_fails)
+    dagster, reporter = _Dagster(), _Reporter()
+    dagster.owned = True
+    feed = _feed(spec, tmp_path, dagster, reporter)
+    feed.specs = (BINANCE_PERP_TRADES_SPEC, spec)
+    before = datetime.now(UTC)
+    outcome = feed.tick(NOW)
+    assert outcome.processed == (f'{spec.key}:{KEY}',)
+    assert outcome.failed == ('binance_perp_trades:tick',)
+    assert [key for key, _, _ in reporter.materializations] == [live_feed_asset(spec)]
+    assert not requests
+    assert query_origo(RECEIPTS)[0] == ('binance_perp_trades:tick', 'FAILED', 0, 'StorageError')
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        monitor = Monitor(
+            dagster=cast(DagsterReader, dagster), client=client, database=ORIGO_DATABASE,
+            heartbeat_dir=tmp_path, probes=(), settings=None, reporter=cast(Reporter, reporter),
+            cursor_path=tmp_path / 'cursor.json', publication_root=tmp_path,
+        )
+        findings = monitor._worker_findings(
+            Cursor.load(tmp_path / 'cursor.json', before, 15), datetime.now(UTC),
+        )
+        assert any(
+            finding.key == 'receipt_failed:provisional:binance_perp_trades:tick'
+            and finding.check == 'workers_alive' for finding in findings
+        )
+    finally:
+        client.disconnect()
+
+
+def test_dedicated_publication_does_not_block_minute_ingestion(
+    spot: tuple[RevisionedSourceSpec, object],
+    tmp_path: Path,
+    query_origo: Query,
+) -> None:
+    spec, requests = spot
+    dagster, reporter = _Dagster(), _Reporter()
+    dagster.publication_owned = True
+    outcome = _feed(spec, tmp_path, dagster, reporter).tick(NOW)
+    assert outcome.processed == (f'{spec.key}:{KEY}',)
+    assert outcome.failed == ()
+    assert not requests
+    assert all(series == spec.key for series, _, _, _ in query_origo(RECEIPTS))
+    assert reporter.materializations[0][2]['publications'] == 0

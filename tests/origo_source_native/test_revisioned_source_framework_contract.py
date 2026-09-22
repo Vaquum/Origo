@@ -45,7 +45,7 @@ def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     # The provisional tail and the depth feeds run in workers: no per-minute schedule, no
     # run-status sensor, one live feed asset per source with a freshness policy.
     assert 'depth_snapshot_store_source_sensor' not in names
-    assert 'binance_spot_trades_mount_sensor' not in names
+    assert 'binance_spot_trades_mount_sensor' in names
     repository = definitions.defs.get_repository_def()
     assert not repository.has_schedule_def('binance_spot_trades_provisional_schedule')
     feed = repository.asset_graph.get(AssetKey('binance_spot_trades_provisional_feed'))
@@ -95,7 +95,7 @@ def test_perp_trades_is_registered_live_with_its_bundle() -> None:
     )
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
-    assert 'binance_perp_trades_mount_sensor' not in names
+    assert 'binance_perp_trades_mount_sensor' in names
     assert 'binance_perp_trades_huggingface_sensor' in names
     assert 'binance_perp_trades_huggingface_shadow_sensor' not in names
     repository = definitions.defs.get_repository_def()
@@ -117,7 +117,7 @@ def test_spot_aggtrades_is_registered_live_with_its_bundle() -> None:
     )
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
-    assert 'binance_spot_aggtrades_mount_sensor' not in names
+    assert 'binance_spot_aggtrades_mount_sensor' in names
     assert 'binance_spot_aggtrades_huggingface_sensor' in names
     assert 'binance_spot_aggtrades_huggingface_shadow_sensor' not in names
     repository = definitions.defs.get_repository_def()
@@ -139,7 +139,7 @@ def test_perp_aggtrades_is_registered_canary_with_its_bundle() -> None:
     )
     names = {sensor.name for sensor in definitions.defs.sensors or ()}
     assert {sensor.name for sensor in source.sensors} <= names
-    assert 'binance_perp_aggtrades_mount_sensor' not in names
+    assert 'binance_perp_aggtrades_mount_sensor' in names
     assert 'binance_perp_aggtrades_huggingface_sensor' not in names
     assert 'binance_perp_aggtrades_huggingface_shadow_sensor' in names
     repository = definitions.defs.get_repository_def()

@@ -90,8 +90,9 @@ def test_existing_publish_sensors_are_unchanged() -> None:
     }
     names = {sensor.name for sensor in defs.sensors}
     assert existing <= names
-    # The depth Arrow chunks and the mount publication moved to the feed workers.
-    assert not names & {'depth_snapshot_store_source_sensor', 'binance_spot_trades_mount_sensor'}
+    # Minute publication stays in workers; the mount sensor only admits deferred bulk work.
+    assert 'depth_snapshot_store_source_sensor' not in names
+    assert 'binance_spot_trades_mount_sensor' in names
     assert not any(
         'to_huggingface_sensor' in name or name == 'bar_store_source_sensor' for name in names
     )

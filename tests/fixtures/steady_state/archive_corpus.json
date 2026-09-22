@@ -14486,5 +14486,33 @@
         ]
       }
     }
-  ]
+  ],
+  "locators": {
+    "binance_spot_trades": {
+      "source_key": "binance_spot_aggtrades",
+      "date": "2026-08-28",
+      "url": "https://data.binance.vision/data/spot/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-08-28.zip",
+      "sha256": "47dd5854fbf1629cf3701f1ecceb80606b2f2d42b900f36e57e2a4610ad2fd08",
+      "checksum_url": "https://data.binance.vision/data/spot/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-08-28.zip.CHECKSUM",
+      "checksum_body": "47dd5854fbf1629cf3701f1ecceb80606b2f2d42b900f36e57e2a4610ad2fd08  BTCUSDT-aggTrades-2026-08-28.zip",
+      "captured_at": "2026-09-22T06:08:44.126508+00:00",
+      "capture_finished_at": "2026-09-22T06:08:47.640388+00:00",
+      "bytes": 18778187,
+      "cache_path": "/tmp/origo-s439-corpus/binance_spot_aggtrades/BTCUSDT-aggTrades-2026-08-28.zip",
+      "purpose": "authentic same-day aggregate locator for individual trade paging"
+    },
+    "binance_perp_trades": {
+      "source_key": "binance_perp_aggtrades",
+      "date": "2026-09-16",
+      "url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-16.zip",
+      "sha256": "7913ca54ac75492ba4e812d0ff02ac74f1d44b8fbdcd557efb314504ddbac25c",
+      "checksum_url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-16.zip.CHECKSUM",
+      "checksum_body": "7913ca54ac75492ba4e812d0ff02ac74f1d44b8fbdcd557efb314504ddbac25c  BTCUSDT-aggTrades-2026-09-16.zip\n",
+      "captured_at": "2026-09-22T06:08:47.640465+00:00",
+      "capture_finished_at": "2026-09-22T06:08:51.761060+00:00",
+      "bytes": 19195902,
+      "cache_path": "/tmp/origo-s439-corpus/binance_perp_aggtrades/BTCUSDT-aggTrades-2026-09-16.zip",
+      "purpose": "authentic same-day aggregate locator for individual trade paging"
+    }
+  }
 }

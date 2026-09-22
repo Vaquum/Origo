@@ -356,7 +356,7 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    if exitstatus != 0:
+    if exitstatus != 0 or session.config.option.collectonly:
         return
     required = _required_steady_state_tests()
     if (required - _STEADY_STATE_PASSED) or _STEADY_STATE_INVALID:

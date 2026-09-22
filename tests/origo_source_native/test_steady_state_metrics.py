@@ -184,7 +184,7 @@ def test_inventory_and_wall_clock_prevent_false_green(tmp_path: Path) -> None:
     # The source and consumer are equally frozen. Relative lag is zero; wall age is not.
     entry['sources'] = {'binance_spot_trades': {
         'status': 'observed', 'anchor': anchor.isoformat(), 'due': START.isoformat(),
-        'canonical_end': end.isoformat(), 'prefix_end': end.isoformat(),
+        'canonical_end': end.isoformat(), 'prefix_end': end.isoformat(), 'newest_end': end.isoformat(),
         'contiguous_end': START.isoformat(),  # An incorrect supplied summary is not the oracle.
         'tail_start': (START - timedelta(hours=2)).isoformat(), 'tail_intervals': [],
         'incomplete_partition_count': 0,

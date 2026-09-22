@@ -768,7 +768,12 @@ def test_prerequisite_backoff_survives_token_changes_and_redrives(
             error_code='UNRELATED_TEST_FAULT', message='An independently scoped controlled fault.',
         )
         # Native publisher owns full-history admission; there is no typed allow_full flag.
-        bundle = build_source_bundle(SPEC)
+        # This isolated fixture declared a shortened coverage anchor at setup.
+        # Native preparation must repeat that same declaration, not mutate its anchor.
+        fixture_spec = replace(SPEC, partitions=replace(
+            SPEC.partitions, first_day=prepared.store.anchor().date(),
+        ))
+        bundle = build_source_bundle(fixture_spec)
         definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs)
         job = definitions.resolve_job_def(f'publish_{SPEC.key}_mount_job')
         result = job.execute_in_process()

@@ -75,6 +75,8 @@ class _Dagster:
         return self.owned
 
     def publication_owns_consumer(self, source_key: str, consumer_key: str) -> bool:
+        if self.unreachable:
+            raise DagsterUnreachable('Runs: HTTP 502')
         return self.publication_owned
 
 
@@ -173,6 +175,8 @@ def test_provisional_tick_builds_the_closed_minute_and_publishes_pinned_consumer
     # consumer, which pins provisional rows. huggingface is canonical-only: its sensor
     # publishes it, never the worker.
     dagster.owned = False
+    # Both ownership queries can be unavailable; the nonblocking lock still protects publication.
+    dagster.unreachable = True
     second = feed.tick(NOW)
     assert second.processed == ('binance_spot_trades:mount',) and second.failed == ()
     assert operations[1:] == [

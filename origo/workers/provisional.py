@@ -304,7 +304,12 @@ class ProvisionalFeed:
             if not store.canonical_ready():
                 log.info('source=%s canonical state not ready for publication', spec.key)
                 continue
-            if self.dagster.publication_owns_consumer(spec.key, consumer.key):
+            try:
+                owned = self.dagster.publication_owns_consumer(spec.key, consumer.key)
+            except DagsterUnreachable as error:
+                log.error('publication state unavailable, trying nonblocking publication: %s', error)
+                owned = False
+            if owned:
                 log.info('source=%s consumer=%s a publication run owns the render', spec.key, consumer.key)
                 continue
             if not self._may_attempt(

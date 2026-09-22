@@ -365,7 +365,7 @@ def test_worker_publication_does_not_wait_for_consumer_lock(
     from origo.sources.contracts import SourceError
     from origo.sources.locking import source_lock
 
-    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.LIVE)
     client = make_clickhouse_client(get_clickhouse_settings())
     runtime = SourceRuntime(
         spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'worker:provisional:lock-test',

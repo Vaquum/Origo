@@ -610,6 +610,8 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         key: str,
         context: ScheduleEvaluationContext | SensorEvaluationContext,
         revision: str = '',
+        *,
+        bulk_episode: str | None = None,
     ) -> RunRequest | SkipReason:
         spec.require_enabled('request')
         consumer_key = (
@@ -620,6 +622,8 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             if consumer_key
             else f'{spec.key}:{operation}:{key}' + (f':{revision}' if revision else '')
         )
+        if bulk_episode is not None:
+            identity = f'{spec.key}:consumer:{consumer_key}:bulk:{key}:{bulk_episode}'
         settings = get_clickhouse_settings()
         client = make_clickhouse_client(settings)
         runtime = SourceRuntime(
@@ -726,7 +730,10 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                     run_config={
                         'ops': {
                             names[operation]: {
-                                'config': {'partition_key': '' if consumer_key else key}
+                                'config': {
+                                    'partition_key': '' if consumer_key else key,
+                                    **({'allow_full_history': True} if bulk_episode is not None else {}),
+                                }
                             }
                         }
                     },
@@ -798,13 +805,11 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         return RunRequest(run_key=f'{spec.key}:audit:{tick.isoformat()}')
 
     schedules: list[ScheduleDefinition] = [canonical, audit]
-    # Provisional tails and the consumers that pin them run in origo.workers.provisional every
-    # minute; the bundle declares the live feed asset that worker materializes each tick, with
-    # the freshness policy the daemon evaluates, and keeps a sensor only for canonical-only
-    # consumers.
+    # Minute publications stay in the worker. Only deferred bulk mounts enter Dagster,
+    # alongside canonical-only consumers, with bounded retries per canonical state and recovery.
 
     sensors: list[SensorDefinition] = []
-    for consumer in (item for item in spec.consumers if item.canonical_only):
+    for consumer in (item for item in spec.consumers if item.canonical_only or item.key == 'mount'):
 
         def make_consumer_sensor(consumer_key: str, canonical_only: bool) -> SensorDefinition:
             @_sensor(
@@ -831,20 +836,35 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 client = make_clickhouse_client(settings)
                 try:
                     store = SourceStore(client, settings.database, spec)
-                    if not store.snapshot(canonical_only=True).records:
+                    bulk_episode = None
+                    if not canonical_only:
+                        deferred = store.execute(
+                            "SELECT argMaxIf(event_id, event_time, event_type='RECOVERED') "
+                            f"FROM {store.table('source_failure_log')} "
+                            "WHERE source_key=%(source)s AND operation='consumer' "
+                            "AND consumer=%(consumer)s AND error_code='RENDER_DEFERRED' "
+                            "AND partition_key IS NULL AND component IS NULL "
+                            "GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' LIMIT 1",
+                            {'source': spec.key, 'consumer': consumer_key},
+                        )
+                        if not deferred:
+                            return SkipReason('Minute publication remains owned by the worker.')
+                        bulk_episode = str(deferred[0][0])
+                    snapshot = store.snapshot(canonical_only=True)
+                    if not snapshot.records:
                         return SkipReason('Source has no eligible active partitions.')
                     if not store.canonical_ready():
                         return SkipReason(
                             'Canonical state has incomplete evidence or unresolved failures.'
                         )
-                    snapshot = store.snapshot(canonical_only=canonical_only)
-                    if publication_current(
-                        spec, consumer_key, snapshot.token, pinned=not canonical_only
-                    ):
+                    if publication_current(spec, consumer_key, snapshot.token):
                         return SkipReason(
                             'Declared files already publish the current source state.'
                         )
-                    return request('consumer_' + consumer_key, snapshot.token, context)
+                    return request(
+                        'consumer_' + consumer_key, snapshot.token, context,
+                        bulk_episode=bulk_episode,
+                    )
                 finally:
                     client.disconnect()
 

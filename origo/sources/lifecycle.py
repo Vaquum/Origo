@@ -437,7 +437,10 @@ class SourceRuntime:
         self.spec.require_enabled('publish', public=consumer.public)
         self.require_shared_mount()
         try:
-            with source_lock(self.lock_root, self.spec.key, 'consumer_' + consumer.key, wait=True):
+            with source_lock(
+                self.lock_root, self.spec.key, 'consumer_' + consumer.key,
+                wait=not self.run_id.startswith('worker:'),
+            ):
                 from .publication import publication_current
 
                 # A canonical-only consumer publishes the canonical state. A consumer that

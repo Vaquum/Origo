@@ -143,11 +143,8 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
             ),
             None,
         )
-        # A consumer that pins provisional rows is published by the provisional worker,
-        # not by a sensor; canonical-only consumers keep theirs.
-        assert (sensor is not None) == consumer.canonical_only
-        if sensor is None:
-            continue
+        # Mount sensors only admit deferred bulk renders; current backfill files stay idle.
+        assert sensor is not None
         with build_sensor_context(
             instance=instance,
             definitions=Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors),
@@ -252,8 +249,11 @@ def test_unavailable_day_requests_publication_and_preserves_completed_day(
                 ),
             ) as context:
                 requests = sensor.evaluate_tick(context).run_requests
-                assert len(requests) == 1
-                assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
+                if sensor.name == f'{store.spec.key}_mount_sensor':
+                    assert requests == []
+                else:
+                    assert len(requests) == 1
+                    assert requests[0].tags['origo_source_state_token'] == store.snapshot().token
 
 
 def test_period_defaults_and_boundaries_are_shared_across_sources() -> None:
@@ -538,6 +538,9 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
 
     class _NoBackfill:
         def backfill_owns_publication(self, source_key: str) -> bool:
+            return False
+
+        def publication_owns_consumer(self, source_key: str, consumer_key: str) -> bool:
             return False
 
     worker = ProvisionalFeed(

@@ -355,3 +355,28 @@ def test_every_consumer_renderer_accepts_allow_full() -> None:
     # unwired today, but it must satisfy the protocol it will be published
     # through after promotion.
     assert 'allow_full' in inspect.signature(perp_agg_consumers._huggingface).parameters
+
+
+def test_worker_publication_does_not_wait_for_consumer_lock(
+    origo_test_env: dict[str, str], tmp_path: Path,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from origo.sources.contracts import SourceError
+    from origo.sources.locking import source_lock
+
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.LIVE)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(
+        spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'worker:provisional:lock-test',
+    )
+    try:
+        runtime.setup(anchor=datetime(2020, 1, 1, tzinfo=UTC))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with source_lock(runtime.lock_root, spec.key, 'consumer_mount'):
+                attempt = pool.submit(runtime.publish, 'mount', str(tmp_path / 'mount'))
+                with pytest.raises(SourceError) as raised:
+                    attempt.result(timeout=2)
+                assert raised.value.code == 'SOURCE_LOCK_BUSY'
+    finally:
+        client.disconnect()

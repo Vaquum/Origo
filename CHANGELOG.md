@@ -1,3 +1,8 @@
+# v3.21.7
+
+- Restore provisional frontier lookup without the memory-heavy current-view join; isolate source tick failures and record them for the existing monitor.
+- Admit deferred bulk mounts through native Dagster publication jobs with bounded retries per recovery episode while minute workers yield publication ownership and never wait on a held consumer lock.
+
 # v3.21.6
 
 - Unfreeze the current-view frontier: the worker admits the current-view frontier gap first — even past the 36h lookback — and the frontier minute never exhausts its retries, while non-frontier holes and pinned publications keep the attempt cap for an operator run; death-loop-era holes drain oldest-first on the capped delay instead of freezing `*_current` at the first gap, and already-exhausted frontier holes become eligible on deploy with no operator repair.

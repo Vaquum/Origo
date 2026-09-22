@@ -290,8 +290,8 @@ def _assert_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
     for consumer in ('mount', 'huggingface'):
         assert repository.has_job(f'publish_binance_spot_trades_{consumer}_job')
     # mount pins provisional rows, so the provisional worker publishes it; huggingface is
-    # canonical-only and keeps its sensor.
-    assert not repository.has_sensor_def('binance_spot_trades_mount_sensor')
+    # canonical-only and keeps its sensor; mount only admits deferred bulk work.
+    assert repository.has_sensor_def('binance_spot_trades_mount_sensor')
     sensor = repository.get_sensor_def('binance_spot_trades_huggingface_sensor')
     assert sensor.default_status == DefaultSensorStatus.RUNNING
     assert not any(

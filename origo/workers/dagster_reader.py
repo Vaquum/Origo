@@ -300,6 +300,16 @@ class DagsterReader:
                 return found
             cursor = page[-1].run_id
 
+    def publication_owns_consumer(self, source_key: str, consumer_key: str) -> bool:
+        data = self.query('Runs', RUNS_QUERY, {
+            'filter': {
+                'pipelineName': f'publish_{source_key}_{consumer_key}_job',
+                'statuses': ['QUEUED', 'NOT_STARTED', 'STARTING', 'STARTED', 'CANCELING'],
+            },
+            'limit': 1,
+        })
+        return bool(_runs(data.get('runsOrError'), 'publication runs'))
+
     def backfill_owns_publication(self, source_key: str) -> bool:
         """The rule of ``origo.sources.prepare.backfill_owns_publication`` read through
         GraphQL: an active native backfill or backfill run owns publication. A terminal

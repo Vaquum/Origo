@@ -216,12 +216,7 @@ class ProvisionalFeed:
         the 36h lookback; a past-window gap retries loud on the capped delay
         until it builds or an operator backfills it.
         """
-        rows = store.execute(
-            f'SELECT max(partition_end) FROM {store.table("source_current_partitions")} '
-            'WHERE source_key=%(source)s',
-            {'source': spec.key},
-        )
-        end = rows[0][0] if rows else None
+        end = max((record.partition.end for record in store.records()), default=None)
         anchor = store.anchor().replace(second=0, microsecond=0)
         gap = anchor
         if isinstance(end, datetime):
@@ -309,6 +304,14 @@ class ProvisionalFeed:
             if not store.canonical_ready():
                 log.info('source=%s canonical state not ready for publication', spec.key)
                 continue
+            try:
+                owned = self.dagster.publication_owns_consumer(spec.key, consumer.key)
+            except DagsterUnreachable as error:
+                log.error('publication state unavailable, trying nonblocking publication: %s', error)
+                owned = False
+            if owned:
+                log.info('source=%s consumer=%s a publication run owns the render', spec.key, consumer.key)
+                continue
             if not self._may_attempt(
                 store,
                 spec,
@@ -383,22 +386,35 @@ class ProvisionalFeed:
                 log.warning('reconciled %d receipts for units the previous process died on', died)
             for spec in self.specs:
                 store = SourceStore(client, settings.database, spec)
-                built, broken = self._build_intervals(store, spec, now)
-                published, unpublished = self._publish(store, spec, now)
-                processed.extend([*built, *published])
-                failed.extend([*broken, *unpublished])
-                self.reporter.materialized(
-                    live_feed_asset(spec),
-                    partition=None,
-                    metadata={
-                        'minute': now.replace(second=0, microsecond=0).isoformat(),
-                        'intervals': len(built),
-                        'publications': len(published),
-                        'failed': len(broken) + len(unpublished),
-                        'rss_bytes': _rss_bytes(),
-                        'source_timestamp': now.isoformat(),
-                    },
-                )
+                started = time.monotonic()
+                try:
+                    built, broken = self._build_intervals(store, spec, now)
+                    published, unpublished = self._publish(store, spec, now)
+                    processed.extend([*built, *published])
+                    failed.extend([*broken, *unpublished])
+                    self.reporter.materialized(
+                        live_feed_asset(spec),
+                        partition=None,
+                        metadata={
+                            'minute': now.replace(second=0, microsecond=0).isoformat(),
+                            'intervals': len(built),
+                            'publications': len(published),
+                            'failed': len(broken) + len(unpublished),
+                            'rss_bytes': _rss_bytes(),
+                            'source_timestamp': now.isoformat(),
+                        },
+                    )
+                except Exception as error:
+                    series = f'{spec.key}:tick'
+                    log.exception('source=%s provisional tick failed', spec.key)
+                    record_receipt(
+                        client, settings.database, feed=self.name, series=series,
+                        minute=now.replace(second=0, microsecond=0), rows=0, sha256='',
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        status='FAILED', error_code=failure_code(error), error=str(error),
+                    )
+                    failed.append(series)
+                    self._beat()
         finally:
             client.disconnect()
         return TickOutcome(

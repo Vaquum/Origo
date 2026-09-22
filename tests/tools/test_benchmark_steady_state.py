@@ -359,3 +359,53 @@ def test_atomic_checkpoint_preserves_previous_on_serialization_failure(tmp_path:
     with pytest.raises(ValueError, match='Circular reference'):
         write_json(target, invalid)
     assert json.loads(target.read_text()) == {'last_good': True}
+
+
+def test_real_oracle_keeps_canonical_credit_out_of_provisional_capacity(
+    official_day: tuple[ArchiveReference, Tape],
+) -> None:
+    reference, _ = official_day
+    source = reference.source_key
+    origin = datetime(2017, 8, 17, 12, tzinfo=UTC)
+    start = origin - timedelta(hours=1)
+    oracle = trial.input_oracle(reference, start, origin + timedelta(minutes=1))
+    withheld = [(start + timedelta(minutes=index)).isoformat() for index in range(60)]
+    observed = datetime(2026, 9, 22, tzinfo=UTC)
+    samples = []
+    for index in range(2):
+        samples.append(
+            {
+                'observed_at': (observed + timedelta(minutes=index)).isoformat(),
+                'elapsed_seconds': index * 60,
+                'sources': {
+                    source: {
+                        'due': (origin + timedelta(minutes=index)).isoformat(),
+                        'accepted_minutes': [],
+                        'canonical_minutes': withheld if index else [],
+                        'missing_minutes': [*withheld, *([origin.isoformat()] if index else [])],
+                        'request_weight': 0,
+                        'published_through': start.isoformat(),
+                    }
+                },
+            }
+        )
+    progress = {
+        'kind': 'steady_state_trial_progress',
+        'schema_version': 1,
+        'environment': 'isolated',
+        'clock_rate': 1,
+        'source_plan': {
+            source: {
+                'source_time_at_start': origin.isoformat(),
+                'withheld': withheld,
+                'oracle': oracle,
+            }
+        },
+        'samples': samples,
+    }
+    derived = derive_capacity(progress, source_keys=[source])
+    measured = cast(dict[str, dict[str, object]], derived['sources'])[source]
+    assert measured['canonical_replacement_minutes'] == 60
+    assert measured['useful_minutes'] == 0
+    assert measured['drain_minutes'] is None
+    assert derived['normal_freshness_hours_after_recovery'] == 0

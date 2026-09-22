@@ -102,8 +102,10 @@ class ReplayServer(ThreadingHTTPServer):
         log: Path,
         *,
         bind_and_activate: bool = True,
+        locators: dict[str, Tape] | None = None,
     ) -> None:
         self.tapes, self.origins, self.log = tapes, origins, log
+        self.locators = dict(locators or {})
         self.started: float | None = None
         self.mutex = threading.Lock()
         super().__init__(('127.0.0.1', 0), ReplayHandler, bind_and_activate=bind_and_activate)
@@ -146,7 +148,7 @@ class ReplayServer(ThreadingHTTPServer):
         tape = self.tapes[source]
         if endpoint == 'aggTrades' and not tape.aggregate:
             candidate = source.removesuffix('trades') + 'aggtrades'
-            locator = self.tapes.get(candidate)
+            locator = self.locators.get(source, self.tapes.get(candidate))
             if locator is None or locator.document['day'] != tape.document['day']:
                 raise LookupError(
                     'Missing authentic aggregate locator archive for this raw-trade day.'

@@ -452,7 +452,14 @@ def coordinate(output: Path, duration: float) -> int:
         source: Tape(object_value(object_value(plan[source], source)['tape'], 'tape'))
         for source in SOURCES
     }
-    server = ReplayServer(tapes, origins, output / 'transport.jsonl')
+    locators = {
+        source: Tape(
+            object_value(object_value(plan[source], source)['locator_tape'], 'locator_tape')
+        )
+        for source in SOURCES
+        if 'locator_tape' in object_value(plan[source], source)
+    }
+    server = ReplayServer(tapes, origins, output / 'transport.jsonl', locators=locators)
     port = server.server_port
     restrict_network(ports | {port})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -482,7 +489,7 @@ def coordinate(output: Path, duration: float) -> int:
     ]
     for source in SOURCES:
         if not source.endswith('aggtrades'):
-            locator = tapes[source.removesuffix('trades') + 'aggtrades']
+            locator = locators.get(source, tapes[source.removesuffix('trades') + 'aggtrades'])
             if locator.document['day'] != tapes[source].document['day']:
                 missing.append(source + ':matching_day_aggregate_locator_archive')
     write_json(

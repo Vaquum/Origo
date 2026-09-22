@@ -101,11 +101,62 @@ def test_invalid_duration_precedes_resource_creation(
 def test_real_cached_manifest_validates_without_network_or_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import csv
+    import io
+    import shutil
+    import zipfile
+    from collections import Counter
+
+    from origo.steady_state.trial_corpus import archive_url
+
     clean_environment(monkeypatch)
-    archives = trial.validate_request(
-        ROOT / 'tests/fixtures/steady_state/archive_corpus.json', tmp_path / 'new', 21600
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    monkeypatch.setattr(trial, 'CACHE', cache)
+    cases = (
+        ('binance_spot_trades', 'spot/daily/trades/revisioned/BTCUSDT-trades-2017-08-17.zip'),
+        ('binance_perp_trades', 'futures/daily/trades/BTCUSDT/BTCUSDT-trades-2019-09-08.zip'),
+        ('binance_spot_aggtrades', 'spot/daily/aggtrades/BTCUSDT/BTCUSDT-aggTrades-2017-08-17.zip'),
+        (
+            'binance_perp_aggtrades',
+            'futures/daily/aggtrades/BTCUSDT/BTCUSDT-aggTrades-2019-12-31.zip',
+        ),
     )
-    assert len(archives) == 4
+    archives = []
+    for source, relative in cases:
+        original = FIXTURES / relative
+        target = cache / original.name
+        shutil.copyfile(original, target)
+        day = date.fromisoformat(original.name[-14:-4])
+        hours: Counter[int] = Counter()
+        with zipfile.ZipFile(target) as zipped:
+            with zipped.open(zipped.namelist()[0]) as stream:
+                for fields in csv.reader(io.TextIOWrapper(stream)):
+                    if not fields[0].isdigit():
+                        continue
+                    stamp = int(fields[5 if source.endswith('aggtrades') else 4])
+                    if stamp >= 10**15:
+                        stamp //= 1000
+                    hour = stamp // 3_600_000
+                    if 2 <= datetime.fromtimestamp(hour * 3600, UTC).hour <= 22:
+                        hours[hour] += 1
+        # A measured busy hour within the admitted short diagnostic window.
+        selected = max(hours, key=lambda hour: hours[hour])
+        archives.append(
+            {
+                'source_key': source,
+                'date': day.isoformat(),
+                'url': archive_url(source, day),
+                'cache_path': str(target),
+                'sha256': digest(target),
+                'captured_at': datetime.now(UTC).isoformat(),
+                'capture_kind': 'retained_fixture_copy',
+                'busy_hour': {'start': datetime.fromtimestamp(selected * 3600, UTC).isoformat()},
+            }
+        )
+    manifest = tmp_path / 'fixture-manifest.json'
+    manifest.write_text(json.dumps({'schema_version': 1, 'archives': archives}))
+    assert len(trial.validate_request(manifest, tmp_path / 'new', 1)) == 4
     assert not (tmp_path / 'new').exists()
 
 

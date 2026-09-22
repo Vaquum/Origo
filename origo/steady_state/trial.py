@@ -258,7 +258,11 @@ def code_identity() -> dict[str, object]:
 
 
 def prepare_inputs(
-    archives: list[dict[str, object]], output: Path, duration: float
+    archives: list[dict[str, object]],
+    output: Path,
+    duration: float,
+    *,
+    locators: dict[str, object] | None = None,
 ) -> dict[str, object]:
     plan: dict[str, object] = {}
     for item in archives:
@@ -282,6 +286,34 @@ def prepare_inputs(
             'tape': tape,
             'busy_hour': item['busy_hour'],
         }
+        if locators is not None and source in locators:
+            entry = object_value(locators[source], 'locator')
+            locator_source = source.removesuffix('trades') + 'aggtrades'
+            day = date.fromisoformat(str(entry['date']))
+            if (
+                source.endswith('aggtrades')
+                or entry['source_key'] != locator_source
+                or day != reference.day
+            ):
+                raise ValueError(
+                    'A raw-trade locator must be the same market and actual calendar day.'
+                )
+            path = Path(str(entry['cache_path']))
+            if not path.resolve().is_relative_to(CACHE) or not path.is_file():
+                raise PermissionError('Locator input is outside the declared local cache.')
+            locator = ArchiveReference(
+                locator_source,
+                day,
+                path,
+                str(entry['sha256']),
+                str(entry['url']),
+                instant(entry['captured_at'], 'locator capture time'),
+            )
+            if locator.url != archive_url(locator_source, day):
+                raise ValueError('Locator input must retain its official archive URL.')
+            object_value(plan[source], source)['locator_tape'] = prepare_tape(
+                locator, output / 'inputs' / (source + '-locator.arrow')
+            )
         write_json(output / 'input-checkpoint.json', plan)
     return plan
 
@@ -318,7 +350,9 @@ def run_trial(manifest: Path, output: Path, duration: float) -> int:
         },
     )
     try:
-        plan = prepare_inputs(archives, output, duration)
+        document = object_value(json.loads(manifest.read_text()), 'manifest')
+        locators = object_value(document.get('locators', {}), 'locators')
+        plan = prepare_inputs(archives, output, duration, locators=locators)
         write_json(output / 'plan.json', plan)
         write_json(output / 'volume-analysis.json', volume_analysis(archives))
         write_json(output / 'fixture-manifest.json', json.loads(manifest.read_text()))

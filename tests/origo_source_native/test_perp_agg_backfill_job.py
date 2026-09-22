@@ -376,6 +376,9 @@ def test_perp_agg_publication_follows_canonical_state_across_provisional_refresh
         def backfill_owns_publication(self, source_key: str) -> bool:
             return False
 
+        def publication_owns_consumer(self, source_key: str, consumer_key: str) -> bool:
+            return False
+
     worker = ProvisionalFeed(
         [spec],
         publication_root=tmp_path / 'files',

@@ -45,7 +45,8 @@ one tick per minute, restarted by the watchdog when a tick hangs:
   `retry_count` times, then left to an operator run. Canonical-only consumers
   (`huggingface`) keep their sensors. Mount sensors admit only an open `RENDER_DEFERRED`
   failure through the dedicated publication job, with full-history permission and the
-  existing retry budget keyed to canonical state. The worker yields that consumer while
+  existing retry budget keyed to canonical state and the last recovered failure event.
+  Repeated failures retain that budget; a new deferral after recovery gets a new budget. The worker yields that consumer while
   its job is outstanding and never waits on a held consumer lock.
 
 Each processed minute and each publication writes one row to `origo.worker_minute_log`

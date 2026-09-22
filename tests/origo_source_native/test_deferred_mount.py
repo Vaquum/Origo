@@ -76,7 +76,9 @@ def test_only_deferred_mounts_enter_dagster_and_success_disarms_them(
     _defer(ready_job, monkeypatch)
     first = _evaluate(ready_job).run_requests[0]
     repeated = _evaluate(ready_job).run_requests[0]
-    assert first.run_key == repeated.run_key == f'{store.spec.key}:consumer:mount:bulk:{token}'
+    assert first.run_key == repeated.run_key
+    assert first.run_key is not None
+    assert first.run_key.startswith(f'{store.spec.key}:consumer:mount:bulk:{token}:')
     assert first.tags['origo_source_state_token'] == token
     assert first.run_config == {
         'ops': {
@@ -85,9 +87,10 @@ def test_only_deferred_mounts_enter_dagster_and_success_disarms_them(
             }
         }
     }
-    assert publisher.execute_in_process(
+    completed = publisher.execute_in_process(
         instance=instance, tags=first.tags, run_config=first.run_config
-    ).success
+    )
+    assert completed.success
     manifest = json.loads(manifest_path.read_text())
     assert manifest['state_token'] == token
     assert manifest['files']
@@ -96,11 +99,33 @@ def test_only_deferred_mounts_enter_dagster_and_success_disarms_them(
         "SELECT failure_key FROM origo.source_failure_log WHERE error_code='RENDER_DEFERRED' "
         "GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED'"
     ) == []
+    # A second outage of the same files is new work even after the successful
+    # Dagster run is retired and only its durable receipt remains.
+    identity = first.tags['origo_source_event']
+    store.record_run_receipt(identity, 0, 'SUCCESS', completed.run_id)
+    instance.delete_run(completed.run_id)
+    Path(manifest['files'][0]['path']).unlink()
+    _defer(ready_job, monkeypatch)
+    second = _evaluate(ready_job).run_requests[0]
+    _defer(ready_job, monkeypatch)
+    assert _evaluate(ready_job).run_requests[0].run_key == second.run_key
+    assert second.tags['origo_source_event'] != identity
+    assert second.tags['origo_source_state_token'] == token
+    assert second.tags['origo_source_attempt'] == '0'
+    assert store.run_receipt(identity) == (0, 'SUCCESS', completed.run_id)
+    assert publisher.execute_in_process(
+        instance=instance, tags=second.tags, run_config=second.run_config
+    ).success
+    assert Path(manifest['files'][0]['path']).is_file()
+    assert _evaluate(ready_job).run_requests == []
 
 
+@pytest.mark.parametrize('prior_success', [False, True])
 def test_deferred_mount_reuses_outstanding_guard_and_durable_retry_budget(
     ready_job: ReadyJob,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    prior_success: bool,
 ) -> None:
     store, instance, _ = ready_job
     _canonical(ready_job)
@@ -112,6 +137,20 @@ def test_deferred_mount_reuses_outstanding_guard_and_durable_retry_budget(
     env = store, instance, source
     request = _evaluate(env).run_requests[0]
     publisher = next(job for job in source.jobs if job.name == f'publish_{store.spec.key}_mount_job')
+    if prior_success:
+        completed = publisher.execute_in_process(
+            instance=instance, tags=request.tags, run_config=request.run_config
+        )
+        assert completed.success
+        identity = request.tags['origo_source_event']
+        store.record_run_receipt(identity, 0, 'SUCCESS', completed.run_id)
+        instance.delete_run(completed.run_id)
+        manifest = json.loads((tmp_path / 'files' / store.spec.key / 'mount/latest.json').read_text())
+        Path(manifest['files'][0]['path']).unlink()
+        _defer(env, monkeypatch)
+        request = _evaluate(env).run_requests[0]
+        assert request.tags['origo_source_event'] != identity
+        assert request.tags['origo_source_attempt'] == '0'
     run = instance.create_run_for_job(
         publisher, status=DagsterRunStatus.STARTED, tags=request.tags, run_config=request.run_config
     )
@@ -120,6 +159,7 @@ def test_deferred_mount_reuses_outstanding_guard_and_durable_retry_budget(
     identity = request.tags['origo_source_event']
     store.record_run_receipt(identity, 0, 'FAILURE', run.run_id)
     instance.delete_run(run.run_id)
+    _defer(env, monkeypatch)
     assert _evaluate(env).skip_message == 'Source retry delay has not elapsed.'
     elapsed = build_source_bundle(replace(spec, orchestration=replace(spec.orchestration, retry_delay=0)))
     env = store, instance, elapsed
@@ -131,6 +171,7 @@ def test_deferred_mount_reuses_outstanding_guard_and_durable_retry_budget(
     instance.report_run_failed(retry_run, message='Deferred publication retry budget fault injection.')
     store.record_run_receipt(identity, 1, 'FAILURE', retry_run.run_id)
     instance.delete_run(retry_run.run_id)
+    _defer(env, monkeypatch)
     exhausted = _evaluate(env)
     assert exhausted.run_requests == []
     assert exhausted.skip_message is not None

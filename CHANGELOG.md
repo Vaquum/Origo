@@ -1,7 +1,7 @@
 # v3.21.7
 
 - Restore provisional frontier lookup without the memory-heavy current-view join; isolate source tick failures and record them for the existing monitor.
-- Admit deferred bulk mounts through bounded native Dagster publication jobs while minute workers yield publication ownership and never wait on a held consumer lock.
+- Admit deferred bulk mounts through native Dagster publication jobs with bounded retries per recovery episode while minute workers yield publication ownership and never wait on a held consumer lock.
 
 # v3.21.6
 

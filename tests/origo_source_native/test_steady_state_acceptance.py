@@ -151,3 +151,109 @@ def test_observer_is_read_only_and_benchmark_refuses_production(tmp_path: Path) 
             validate_isolated_environment({}, destination)
     validate_isolated_environment({}, tmp_path / 'not-created')
     assert not (tmp_path / 'not-created').exists()
+
+
+def test_controlled_faults_preserve_data_and_native_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binance_fixture_server_root_url: str,
+) -> None:
+    """Real local provider failure, database restart, render death and native retry.
+
+    This is a bounded regression, not a claim of a five-minute or six-hour trial.
+    The sole database that may be stopped is the label-checked owned test container.
+    """
+    import time
+    from dataclasses import replace
+
+    from dagster import Definitions
+    from dagster._core.test_utils import instance_for_test
+
+    from origo.sources.bundle import build_source_bundle
+    from origo.sources.storage import StorageError
+    from origo.steady_state.trial_resources import OwnedClickHouse
+
+    from .test_steady_state_publication import (
+        CANONICAL_DAY,
+        MINUTE_KEY,
+        PROVENANCE,
+        SPEC,
+        _kill_full_render_after,
+        _Prepared,
+        rest,
+    )
+
+    with OwnedClickHouse(tmp_path / 'owned-fault-case', memory_gib=3) as owned:
+        for key, value in owned.environment.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setenv('CLICKHOUSE_DATABASE', 'origo')
+        prepared = _Prepared(tmp_path / 'files', monkeypatch, binance_fixture_server_root_url)
+        try:
+            prepared.build_minute()
+            before = prepared.publish_mount(allow_full=False)
+            token = prepared.store.snapshot().token
+            previous = prepared.mirror_identities()
+            arrow = prepared.arrow_targets()
+            captured_provider = rest.get_response
+
+            def unavailable(*args: object, **kwargs: object) -> object:
+                raise RuntimeError(
+                    'Controlled provider interruption at the recorded transport boundary.'
+                )
+
+            monkeypatch.setattr(rest, 'get_response', unavailable)
+            with pytest.raises(RuntimeError, match='Controlled provider interruption'):
+                prepared.runtime.build(MINUTE_KEY, provisional=True)
+            assert prepared.store.snapshot().token == token
+            assert prepared.manifest()['pinned_token'] == before['pinned_token']
+            assert prepared.mirror_identities() == previous and prepared.arrow_targets() == arrow
+
+            prepared.client.disconnect()
+            owned.stop()
+            with pytest.raises(StorageError):
+                prepared.store.snapshot()
+            # Readers retain the last committed files while the source store is unavailable.
+            assert prepared.mirror_identities() == previous and prepared.arrow_targets() == arrow
+            owned.start()
+            deadline = time.monotonic() + 45
+            while True:
+                try:
+                    assert prepared.store.snapshot().token == token
+                    break
+                except StorageError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.25)
+            monkeypatch.setattr(rest, 'get_response', captured_provider)
+            prepared.requests[:] = list(PROVENANCE['requests'])
+            prepared.runtime.build(MINUTE_KEY, provisional=True)
+            assert prepared.store.snapshot().token == token
+            assert prepared.publish_mount(allow_full=False)['pinned_token'] == token
+
+            # A real rendering process dies with incomplete historical files private.
+            prepared.runtime.build(CANONICAL_DAY)
+            _kill_full_render_after(prepared.environment, prepared.mount, die_after=6)
+            assert prepared.mirror_identities() == previous and prepared.arrow_targets() == arrow
+            fixture_spec = replace(
+                SPEC,
+                partitions=replace(
+                    SPEC.partitions,
+                    first_day=prepared.store.anchor().date(),
+                ),
+            )
+            bundle = build_source_bundle(fixture_spec)
+            definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs)
+            native_root = tmp_path / 'native-recovery'
+            native_root.mkdir()
+            with instance_for_test(temp_dir=str(native_root)) as instance:
+                result = definitions.resolve_job_def(
+                    f'publish_{SPEC.key}_mount_job'
+                ).execute_in_process(instance=instance)
+                assert result.success
+                run = instance.get_run_by_id(result.run_id)
+                assert run is not None and run.status.value == 'SUCCESS'
+            assert prepared.manifest()['pinned_token'] == prepared.store.snapshot().token
+            assert prepared.manifest()['render']['checkpoints_reused'] >= 6
+            prepared.assert_reader_contents(((2020, 1), (2025, 1)))
+        finally:
+            prepared.close()

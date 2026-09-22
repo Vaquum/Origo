@@ -164,3 +164,39 @@ def test_frontier_lookup_is_bounded_on_production_metadata(
     finally:
         tracemalloc.stop()
         client.disconnect()
+
+
+def test_inventory_and_wall_clock_prevent_false_green(tmp_path: Path) -> None:
+    from datetime import timedelta
+    from origo.steady_state.policy import load_inventory, registry_discrepancies
+    from origo.sources.registry import SOURCE_REGISTRY
+    from .steady_state_evidence_cases import START, evaluator, evidence_writer, sample
+
+    inventory = load_inventory()
+    assert registry_discrepancies(inventory, SOURCE_REGISTRY) == ()
+    assert registry_discrepancies(inventory, SOURCE_REGISTRY[:-1])
+    rows = metadata_rows('source_activation_log')
+    canonical = [row for row in rows if row['source_key'] == 'binance_spot_trades' and not row['provisional']]
+    anchor = min(datetime.fromisoformat(str(row['partition_start'])).replace(tzinfo=UTC) for row in canonical)
+    end = max(datetime.fromisoformat(str(row['partition_end'])).replace(tzinfo=UTC) for row in canonical)
+    writer, identity = evidence_writer(tmp_path)
+    entry = sample(START, identity)
+    # The source and consumer are equally frozen. Relative lag is zero; wall age is not.
+    entry['sources'] = {'binance_spot_trades': {
+        'status': 'observed', 'anchor': anchor.isoformat(), 'due': START.isoformat(),
+        'canonical_end': end.isoformat(), 'prefix_end': end.isoformat(),
+        'contiguous_end': START.isoformat(),  # An incorrect supplied summary is not the oracle.
+        'tail_start': (START - timedelta(hours=2)).isoformat(), 'tail_intervals': [],
+        'incomplete_partition_count': 0,
+    }}
+    entry['consumers'] = {'binance_spot_trades:mount': {
+        'status': 'observed', 'manifest': {'exists': True, 'active_through': end.isoformat()},
+        'series': {},
+    }}
+    writer.append_sample(entry)
+    checked = evaluator(writer)
+    checked.evaluate_ss01()
+    checked.evaluate_ss02()
+    assert any(item.entity == 'binance_spot_trades' and item.verdict == 'FAIL' for item in checked.results)
+    assert any(item.verdict == 'UNKNOWN' and 'binance_perp_trades' in item.entity for item in checked.results)
+    assert not all(item.verdict == 'PASS' for item in checked.results if item.metric_id == 'SS-02')

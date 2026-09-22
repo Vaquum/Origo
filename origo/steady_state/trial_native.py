@@ -71,6 +71,24 @@ class NativeMaintenance:
             )
             if key in configuration
         }
+        # Keep the actual Origo maintenance storage adapters, but replace every
+        # production path with this trial's isolated directory before constructing.
+        for key in (
+            'local_artifact_storage',
+            'run_storage',
+            'event_log_storage',
+            'schedule_storage',
+            'compute_logs',
+        ):
+            value = configuration[key]
+            if not isinstance(value, dict):
+                raise ValueError('Native storage declarations must be mappings.')
+            selected = dict(value)
+            selected['config'] = {
+                'base_dir': str(self.root / 'compute_logs' if key == 'compute_logs' else self.root)
+            }
+            overrides[key] = selected
+        (self.root / 'dagster.yaml').write_text(yaml.safe_dump(overrides))
         self._old_home = os.environ.get('DAGSTER_HOME')
         os.environ['DAGSTER_HOME'] = str(self.root)
         try:

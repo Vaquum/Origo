@@ -779,6 +779,7 @@ def test_prerequisite_backoff_survives_token_changes_and_redrives(
         from dagster._core.test_utils import instance_for_test
         # Preparation persists schedules/sensors; an ephemeral instance has no
         # schedule storage and is not the native operator environment.
+        (tmp_path / 'native-instance').mkdir()
         with instance_for_test(temp_dir=str(tmp_path / 'native-instance')) as instance:
             result = job.execute_in_process(instance=instance)
             assert result.success

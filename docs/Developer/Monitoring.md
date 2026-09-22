@@ -34,20 +34,31 @@ one tick per minute, restarted by the watchdog when a tick hangs:
   not serve yet is left for the next tick; a minute that fails stays a candidate for the
   rest of the lookback and its receipt names the error. The per-minute Dagster jobs stay
   for operators (backfills, repairs) and nothing schedules them.
-- `provisional-worker` (`origo.workers.provisional`) builds each closed minute of every
-  source with a provisional adapter through the source runtime, oldest missing minute
-  first, then publishes every consumer that pins provisional rows (`mount`) when the
+- Each enabled source has its own provisional worker (`origo.workers.provisional`),
+  selected by the deployment's `ORIGO_PROVISIONAL_SOURCE`. Each process has its own
+  watchdog and `provisional_<source>.heartbeat`, so slow work in one source cannot
+  prevent another source's next tick. The worker admits the newest closed minute
+  before historical catch-up and continues repairing the first coverage gap. It then
+  publishes every consumer that pins provisional rows (`mount`) when the
   pinned state changed, unless a backfill owns publication (the same rule as the
   consumer sensors: an active backfill holds publication; a terminal verdict never
   does, and canonical readiness is checked next). A failing minute, and a failing
   publication of one pinned state, is
-  retried with a doubling delay from one minute up to the source's `retry_delay`, at most
-  `retry_count` times, then left to an operator run. Canonical-only consumers
+  retried with a doubling delay from one minute up to the source's `retry_delay`.
+  Required minute and worker mount work remains automatically retryable after repeated
+  failures; failures stay visible in receipts. Late daily archives do not stop
+  provisional coverage across midnight; canonical activation replaces those minutes.
+  Canonical-only consumers
   (`huggingface`) keep their sensors. Mount sensors admit only an open `RENDER_DEFERRED`
   failure through the dedicated publication job, with full-history permission and the
   existing retry budget keyed to canonical state and the last recovered failure event.
   Repeated failures retain that budget; a new deferral after recovery gets a new budget. The worker yields that consumer while
   its job is outstanding and never waits on a held consumer lock.
+
+The monitor expects a heartbeat for every enabled provisional source, including one
+that has never started, and ignores the retired shared `provisional.heartbeat`.
+Receipt reconciliation is scoped to the source: another source's long-running attempt
+cannot be marked dead by a faster worker.
 
 Each processed minute and each publication writes one row to `origo.worker_minute_log`
 (`feed`, `series`, `minute`, `rows`, `sha256`, `duration_ms`, `status`, `error_code`,
@@ -91,8 +102,8 @@ The live feed asset is materialized at the end of every tick whatever the minute
 so its freshness is the worker's tick and its path to the webserver, not the minutes'
 success: failing or skipped minutes keep the feed fresh and show as `FAILED` receipts,
 which `origo_monitor:workers_alive` reports. A source-level tick exception writes a
-`<source>:tick` FAILED receipt and leaves that source's feed stale; the later sources still
-run. A stale feed with a fresh heartbeat means
+`<source>:tick` FAILED receipt and leaves that source's feed stale; other source workers
+continue independently. A stale feed with a fresh heartbeat means
 the tick raised outside the per-minute handler (the ERROR line is in
 `origo.container_log`) or the webserver refused the report. A stale heartbeat means the
 container is down or stuck: `docker compose ps` shows the healthcheck, and the

@@ -402,8 +402,13 @@ class Monitor:
         return findings, True
 
     def _heartbeats(self) -> list[Path]:
-        own = heartbeat_path(self.heartbeat_dir, self.name)
-        return sorted(path for path in self.heartbeat_dir.glob('*.heartbeat') if path != own)
+        ignored = {heartbeat_path(self.heartbeat_dir, name) for name in (self.name, 'provisional')}
+        expected = {
+            heartbeat_path(self.heartbeat_dir, f'provisional_{spec.key}')
+            for spec in SOURCE_REGISTRY
+            if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
+        }
+        return sorted((set(self.heartbeat_dir.glob('*.heartbeat')) - ignored) | expected)
 
     def _worker_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:
         findings: list[Finding] = []

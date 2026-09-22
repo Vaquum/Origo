@@ -193,7 +193,7 @@ jobs:
             prior_workers+=("$(docker inspect --format '{{.Id}} {{.Config.Hostname}}' "$worker")")
           done
           retirement_boundary=$(date +%s)
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
           # so wait for the exec into dagster-daemon before recovery contends for the queue lock.

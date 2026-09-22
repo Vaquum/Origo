@@ -234,15 +234,15 @@ class SourceStore:
                 argMax(a.component_hashes, a.generation) AS component_hashes
             FROM {self.table('source_activation_log')} a
             GROUP BY source_key, partition_key, provisional""")
-        self.execute(f"""CREATE VIEW IF NOT EXISTS {self.table('source_current_partitions')} AS
-            WITH eligible AS (
-                SELECT a.* FROM {self.table('source_active_partitions')} a
-                LEFT JOIN (
-                    SELECT source_key, groupArray((partition_start, partition_end)) AS intervals
-                    FROM {self.table('source_active_partitions')} WHERE NOT provisional GROUP BY source_key
-                ) c ON a.source_key=c.source_key
-                WHERE NOT a.provisional OR NOT arrayExists(
-                    interval -> interval.1<=a.partition_start AND interval.2>a.partition_start, c.intervals)
+        self.execute(f"""CREATE OR REPLACE VIEW {self.table('source_current_partitions')} AS
+            WITH covered AS (
+                SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
+                    PARTITION BY source_key ORDER BY partition_start, provisional
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS canonical_end
+                FROM {self.table('source_active_partitions')} a
+            ), eligible AS (
+                SELECT * EXCEPT canonical_end FROM covered
+                WHERE NOT provisional OR partition_start>=canonical_end
             ), ranked AS (
                 SELECT e.*, anchor,
                     max(partition_end) OVER (PARTITION BY e.source_key ORDER BY partition_start, partition_end

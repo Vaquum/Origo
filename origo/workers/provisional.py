@@ -3,12 +3,12 @@ provisional adapter.
 
 One tick builds each eligible closed interval once through the source runtime (the
 adapter's candidates: the last completed minute plus the missing minutes inside its
-window, oldest first), then publishes every consumer that pins provisional rows when the
-pinned state changed, unless a native backfill of the source owns publication. Each
+window, newest minute first), then publishes every consumer that pins provisional rows
+when the pinned state changed, unless a native backfill owns publication. Each
 interval and each publication writes one receipt; every tick reports the source's live
 feed asset so its freshness check sees the worker. A failing interval or publication is
-retried with a doubling delay from one minute up to the source's ``retry_delay``, at most
-``retry_count`` times, then left to the operator. Each built interval, each
+retried until it succeeds, with a doubling delay from one minute up to the source's
+``retry_delay``. Each built interval, each
 publication, and each paced REST request touches the worker heartbeat, so a slow
 catch-up tick proves liveness instead of tripping the watchdog.
 """
@@ -30,10 +30,10 @@ from pathlib import Path
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import (
+    WORKER_HEARTBEAT_ENV,
     Partition,
     RevisionedSourceSpec,
     RolloutStage,
-    WORKER_HEARTBEAT_ENV,
     failure_code,
 )
 from origo.sources.publication import publication_current
@@ -64,6 +64,18 @@ log = logging.getLogger('origo.workers.provisional')
 
 def live_feed_asset(spec: RevisionedSourceSpec) -> str:
     return f'{spec.key}_provisional_feed'
+
+
+def selected_specs(environ: dict[str, str]) -> tuple[RevisionedSourceSpec, ...]:
+    source = environ.get('ORIGO_PROVISIONAL_SOURCE')
+    specs = tuple(
+        spec for spec in SOURCE_REGISTRY
+        if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
+        and (source is None or spec.key == source)
+    )
+    if source is not None and not specs:
+        raise ValueError(f'Unknown or disabled provisional source: {source}')
+    return specs
 
 
 def _rss_bytes() -> int:
@@ -112,30 +124,17 @@ class ProvisionalFeed:
         spec: RevisionedSourceSpec,
         *,
         series: str,
-        work: str,
         minute: datetime | None = None,
         token: str | None = None,
-        exhaustible: bool = True,
     ) -> bool:
-        """Whether the work's failures allow another attempt now: none so far, or the
-        doubling delay since the last failure elapsed. Exhaustible work stops after
-        ``retry_count`` for an operator run; the current-view frontier gap is admitted
-        inexhaustible, so the readers can never freeze behind a parked hole — a hole
-        that later becomes the frontier resumes retrying on the capped delay."""
+        """Retry required work indefinitely, after a bounded exponential delay."""
         attempts, last_failed = failed_attempts(
             store.client, store.database, feed=self.name, series=series, minute=minute, token=token
         )
         if attempts == 0 or last_failed is None:
             return True
-        if exhaustible and attempts > spec.orchestration.retry_count:
-            log.error(
-                'source=%s %s attempts exhausted after %d failures; an operator run is required',
-                spec.key,
-                work,
-                attempts,
-            )
-            return False
-        delay = min(spec.orchestration.retry_delay, 60 * 2 ** (attempts - 1))
+        cap = spec.orchestration.retry_delay
+        delay = min(cap, 60 * 2 ** min(attempts - 1, cap.bit_length()))
         return self.clock() >= last_failed + timedelta(seconds=delay)
 
     @staticmethod
@@ -236,16 +235,12 @@ class ProvisionalFeed:
         if adapter is None:
             raise ValueError('No provisional adapter is declared.')
         covered = store.active_intervals()
-        candidates = sorted(
-            adapter.candidates(now, store.anchor(), covered),
-            key=lambda partition: partition.start,
-        )
+        ordered = list(adapter.candidates(now, store.anchor(), covered))
         frontier = self._frontier_gap_key(store, spec, now)
-        ordered = list(candidates)
         if frontier is not None and all(partition.key != frontier for partition in ordered):
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
             if not any(interval.start <= gap_start < interval.end for interval in covered):
-                ordered.insert(0, adapter.partition(frontier))
+                ordered.insert(1, adapter.partition(frontier))
         admitted = [
             partition
             for partition in ordered
@@ -253,9 +248,7 @@ class ProvisionalFeed:
                 store,
                 spec,
                 series=spec.key,
-                work=f'partition={partition.key}',
                 minute=partition.start,
-                exhaustible=partition.key != frontier,
             )
         ]
         if not admitted:
@@ -316,7 +309,6 @@ class ProvisionalFeed:
                 store,
                 spec,
                 series=series,
-                work=f'consumer={consumer.key} state={snapshot.token[:12]}',
                 token=snapshot.token,
             ):
                 continue
@@ -381,7 +373,10 @@ class ProvisionalFeed:
         processed: list[str] = []
         failed: list[str] = []
         try:
-            died = reconcile_died_receipts(client, settings.database, feed=self.name, now=now)
+            died = reconcile_died_receipts(
+                client, settings.database, feed=self.name, now=now,
+                source_keys=tuple(spec.key for spec in self.specs),
+            )
             if died:
                 log.warning('reconciled %d receipts for units the previous process died on', died)
             for spec in self.specs:
@@ -423,6 +418,7 @@ class ProvisionalFeed:
 
 
 def build_feed(environ: dict[str, str], *, heartbeat: Path | None = None) -> ProvisionalFeed:
+    specs = selected_specs(environ)
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     try:
@@ -431,7 +427,7 @@ def build_feed(environ: dict[str, str], *, heartbeat: Path | None = None) -> Pro
         client.disconnect()
     base_url = environ.get('DAGSTER_WEBSERVER_URL', DEFAULT_WEBSERVER_URL)
     return ProvisionalFeed(
-        SOURCE_REGISTRY,
+        specs,
         publication_root=Path(environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
         reporter=Reporter(base_url),
         dagster=DagsterReader(base_url),
@@ -451,7 +447,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--once', action='store_true', help='run one tick and exit')
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
-    heartbeat = heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)
+    specs = selected_specs(dict(os.environ))
+    name = (
+        f'provisional_{specs[0].key}'
+        if 'ORIGO_PROVISIONAL_SOURCE' in os.environ else ProvisionalFeed.name
+    )
+    heartbeat = heartbeat_path(heartbeat_directory(), name)
     if arguments.check:
         return check_heartbeat(heartbeat)
     os.environ[WORKER_HEARTBEAT_ENV] = str(heartbeat)

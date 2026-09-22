@@ -146,59 +146,11 @@ def test_dagit_bound_to_loopback() -> None:
     assert (dagit[0].host_ip, dagit[0].published, dagit[0].target) == (LOOPBACK, '4000', '3000')
 
 
-HEARTBEAT_ENV: Final[str] = 'ORIGO_WORKER_HEARTBEAT=/opt/origo/heartbeats/provisional.heartbeat'
-
-
-def _service_environment(compose: Path, service: str) -> list[str]:
-    """The `environment:` list items of one compose service, hand-parsed."""
-    lines = compose.read_text(encoding='utf-8').splitlines()
-    in_service = False
-    in_environment = False
-    items: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        indent = _indent(line)
-        if indent == 0 and stripped != 'services:':
-            in_service = False
-        if indent == 2 and stripped.endswith(':'):
-            in_service = stripped[:-1] == service
-            in_environment = False
-            continue
-        if not in_service:
-            continue
-        if indent == 4 and stripped.endswith(':'):
-            in_environment = stripped[:-1] == 'environment'
-            continue
-        if in_environment:
-            if indent <= 4:
-                break
-            if stripped.startswith('- '):
-                items.append(stripped[2:].strip())
-    return items
-
-
-def test_provisional_worker_exports_heartbeat_path() -> None:
-    # The REST and component beats land where the watchdog and the monitor
-    # look; Dagster services must not set it, or scheduled runs would beat
-    # a worker heartbeat they do not own.
+def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() -> None:
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
-        compose = REPO_ROOT / name
-        assert HEARTBEAT_ENV in _service_environment(compose, 'provisional-worker'), name
-        for service in (
-            'clickhouse',
-            'dagit',
-            'dagster',
-            'monitor',
-            'vector',
-            'depth-worker',
-        ):
-            assert not [
-                item
-                for item in _service_environment(compose, service)
-                if item.startswith('ORIGO_WORKER_HEARTBEAT')
-            ], (name, service)
+        compose = (REPO_ROOT / name).read_text()
+        assert 'ORIGO_WORKER_HEARTBEAT' not in compose
+        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == 4
 
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
@@ -223,7 +175,7 @@ function docker() {
         printf '%s\n' 'old-daemon daemon-host' ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
         printf '%s\n' 'old-ui ui-host' ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi

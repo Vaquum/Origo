@@ -18,9 +18,8 @@ from origo.sources.contracts import Client, identifier
 WORKER_MINUTE_LOG = 'worker_minute_log'
 CONTAINER_LOG = 'container_log'
 _LIMIT = 1000
-# A unit that started longer ago than this without a terminal receipt died with
-# its process: the heartbeat watchdog kills any beat-less unit past 180s, and
-# no worker unit beats mid-flight, so 300s leaves no false positives.
+# Reconciliation runs between ticks of the source's sole worker, after all of its
+# in-flight units finish. The grace period covers receipts from a prior process.
 DIED_RECEIPT_STALE_AFTER_SECONDS = 300.0
 
 
@@ -112,14 +111,14 @@ def reconcile_died_receipts(
     feed: str,
     now: datetime,
     stale_after_seconds: float = DIED_RECEIPT_STALE_AFTER_SECONDS,
+    source_keys: tuple[str, ...] | None = None,
 ) -> int:
     """Mark STARTED units whose process died as FAILED so backoff and paging see them.
 
     Watchdog exits and SIGKILLs leave no terminal receipt, so without this the
-    next tick retries instantly forever. A unit whose latest receipt is a STARTED
-    older than ``stale_after_seconds`` cannot still be running (see
-    ``DIED_RECEIPT_STALE_AFTER_SECONDS``); append one FAILED/WORKER_DIED row per
-    such unit. Returns the rows appended.
+    next tick retries instantly forever. Scope reconciliation to the caller's
+    sources: another source's worker may still be progressing on an older unit.
+    Returns the FAILED/WORKER_DIED rows appended for abandoned units.
 
     The unit key is ``(feed, series, minute)``: a STARTED row is written before
     the unit's hash exists, so it can never match a terminal row on sha256. One
@@ -135,8 +134,12 @@ def reconcile_died_receipts(
           ON t.feed = s.feed AND t.series = s.series AND t.minute = s.minute
           AND t.status != 'STARTED' AND t.recorded_at >= s.recorded_at
         WHERE s.feed = %(feed)s AND s.status = 'STARTED' AND s.recorded_at < %(cutoff)s
+          AND (%(all_sources)s OR splitByChar(':', s.series)[1] IN %(source_keys)s)
         GROUP BY s.series, s.minute""",
-        {'feed': feed, 'cutoff': cutoff},
+        {
+            'feed': feed, 'cutoff': cutoff, 'all_sources': source_keys is None,
+            'source_keys': source_keys or ('',),
+        },
     )
     reconciled = 0
     for series, minute in outstanding:

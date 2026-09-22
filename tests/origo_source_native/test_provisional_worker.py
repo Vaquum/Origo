@@ -752,13 +752,19 @@ def test_source_tick_failure_does_not_stop_later_sources(
     dagster.owned = True
     feed = _feed(spec, tmp_path, dagster, reporter)
     feed.specs = (BINANCE_PERP_TRADES_SPEC, spec)
-    before = datetime.now(UTC)
     outcome = feed.tick(NOW)
     assert outcome.processed == (f'{spec.key}:{KEY}',)
     assert outcome.failed == ('binance_perp_trades:tick',)
     assert [key for key, _, _ in reporter.materializations] == [live_feed_asset(spec)]
     assert not requests
     assert query_origo(RECEIPTS)[0] == ('binance_perp_trades:tick', 'FAILED', 0, 'StorageError')
+    # Datetime query parameters lose subsecond precision; close the receipt's full second.
+    window_end = query_origo(
+        'SELECT toStartOfSecond(max(recorded_at)) + INTERVAL 1 SECOND '
+        f'FROM {ORIGO_DATABASE}.worker_minute_log '
+        "WHERE feed='provisional' AND series='binance_perp_trades:tick'"
+    )[0][0]
+    assert isinstance(window_end, datetime)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         monitor = Monitor(
@@ -767,7 +773,7 @@ def test_source_tick_failure_does_not_stop_later_sources(
             cursor_path=tmp_path / 'cursor.json', publication_root=tmp_path,
         )
         findings = monitor._worker_findings(
-            Cursor.load(tmp_path / 'cursor.json', before, 15), datetime.now(UTC),
+            Cursor.load(tmp_path / 'cursor.json', window_end, 15), window_end,
         )
         assert any(
             finding.key == 'receipt_failed:provisional:binance_perp_trades:tick'

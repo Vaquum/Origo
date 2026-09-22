@@ -150,17 +150,16 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  provisional-worker:
+  provisional-worker: &provisional-worker
     build: .
     image: origo-dagster:latest
-    environment:
-      - PYTHONPATH=/opt/app
-      - DAGSTER_WEBSERVER_URL=http://dagit:3000
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
-      # The REST and component beats land here; the worker main re-exports the same path.
-      - ORIGO_WORKER_HEARTBEAT=/opt/origo/heartbeats/provisional.heartbeat
+    environment: &provisional-environment
+      PYTHONPATH: /opt/app
+      DAGSTER_WEBSERVER_URL: http://dagit:3000
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_DATASET_REPO_ID: ${HUGGINGFACE_DATASET_REPO_ID:-vaquum/binance_btcusdt_1m_klines}
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_trades
     volumes:
       - .:/opt/app
       - ./parquet_data:/opt/parquet
@@ -179,6 +178,24 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+
+  provisional-binance-perp-trades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+
+  provisional-binance-spot-aggtrades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_aggtrades
+
+  provisional-binance-perp-aggtrades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
 
 volumes:
   clickhouse-data:

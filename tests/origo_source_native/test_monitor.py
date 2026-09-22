@@ -18,6 +18,7 @@ from dagster import Failure
 from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
+from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
@@ -163,6 +164,11 @@ def _monitor(
     if publication_root is None:
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
+    for spec in SOURCE_REGISTRY:
+        if spec.provisional is not None:
+            heartbeat = heartbeat_path(tmp_path / 'heartbeats', f'provisional_{spec.key}')
+            if not heartbeat.exists():
+                touch_heartbeat(heartbeat)
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -305,7 +311,7 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
             minute=datetime(2026, 9, 17, 14, 28, tzinfo=UTC), rows=40, sha256='ab', duration_ms=9,
             status='OK',
         )
-        fresh = heartbeat_path(tmp_path / 'heartbeats', 'provisional')
+        fresh = heartbeat_path(tmp_path / 'heartbeats', 'provisional_binance_spot_trades')
         touch_heartbeat(fresh)
         stale = heartbeat_path(tmp_path / 'heartbeats', 'depth')
         touch_heartbeat(stale)
@@ -314,7 +320,7 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         tick_time = datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS + 30)
         outcome = _monitor(recorder, tmp_path, client=client).tick(tick_time)
         assert 'heartbeat_stale:depth' in outcome.failed
-        assert 'heartbeat_stale:provisional' not in outcome.failed
+        assert 'heartbeat_stale:provisional_binance_spot_trades' not in outcome.failed
         assert 'receipt_failed:depth:depth20_snapshots' in outcome.failed
         assert 'receipt_failed:depth:depth200_snapshots' not in outcome.failed
         alive = [post for post in _check_posts(recorder) if post['check_name'] == 'workers_alive']
@@ -322,6 +328,26 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         assert 'PROVIDER_HTTP_503' in _emails(recorder)[0]['text']
     finally:
         client.disconnect()
+
+
+def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worker(
+    recorder: _Recorder, tmp_path: Path
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    directory = tmp_path / 'heartbeats'
+    missing = 'provisional_binance_perp_trades'
+    stale = 'provisional_binance_spot_trades'
+    heartbeat_path(directory, missing).unlink()
+    retired = heartbeat_path(directory, 'provisional')
+    touch_heartbeat(retired)
+    old = NOW.timestamp() - 181
+    for path in (retired, heartbeat_path(directory, stale)):
+        os.utime(path, (old, old))
+    outcome = monitor.tick(NOW)
+    assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
+        f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
+    }
+    assert len(monitor._heartbeats()) == 4
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(

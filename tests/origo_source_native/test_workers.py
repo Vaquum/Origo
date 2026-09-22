@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from origo.sources.contracts import RolloutStage
+from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.report import Reporter
 from origo.workers.runtime import (
     HEARTBEAT_MAX_AGE_SECONDS,
@@ -71,12 +73,22 @@ def test_reporter_outage_does_not_block_a_tick() -> None:
     assert time.monotonic() - started < 5
 
 
-@pytest.mark.parametrize('feed', ['depth', 'provisional'])
-def test_feed_worker_check_reports_its_heartbeat(feed: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ('feed', 'source'),
+    [('depth', None), ('provisional', None)]
+    + [('provisional', spec.key) for spec in SOURCE_REGISTRY if spec.provisional is not None],
+)
+def test_feed_worker_check_reports_its_heartbeat(
+    feed: str, source: str | None, tmp_path: Path
+) -> None:
     environment = {**os.environ, 'ORIGO_HEARTBEAT_DIR': str(tmp_path), 'PYTHONPATH': str(REPO_ROOT)}
+    environment.pop('ORIGO_PROVISIONAL_SOURCE', None)
+    if source is not None:
+        environment['ORIGO_PROVISIONAL_SOURCE'] = source
+        touch_heartbeat(heartbeat_path(tmp_path, 'provisional'))
     command = [sys.executable, '-m', f'origo.workers.{feed}', '--check']
     assert subprocess.run(command, env=environment).returncode == 1
-    touch_heartbeat(heartbeat_path(tmp_path, feed))
+    touch_heartbeat(heartbeat_path(tmp_path, feed if source is None else f'{feed}_{source}'))
     assert subprocess.run(command, env=environment).returncode == 0
 
 
@@ -112,23 +124,35 @@ def test_live_feed_assets_carry_the_freshness_policy() -> None:
     assert not [check for check in graph.asset_check_keys if check.name == 'freshness_check']
 
 
-def test_compose_and_deploy_declare_the_two_feed_workers() -> None:
+def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
+    sources = {
+        spec.key for spec in SOURCE_REGISTRY
+        if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
+    }
     for path in (REPO_ROOT / 'docker-compose.yml', REPO_ROOT / 'docker-compose.deploy.yml'):
         services = yaml.safe_load(path.read_text())['services']
-        for feed in ('depth', 'provisional'):
-            service = services[f'{feed}-worker']
-            assert service['command'] == f'python -m origo.workers.{feed}', path
+        provisional = {
+            name: service for name, service in services.items()
+            if service.get('command') == 'python -m origo.workers.provisional'
+        }
+        assigned = [service['environment']['ORIGO_PROVISIONAL_SOURCE'] for service in provisional.values()]
+        assert set(assigned) == sources and len(assigned) == len(sources)
+        assert services['provisional-worker']['environment']['ORIGO_PROVISIONAL_SOURCE'] == 'binance_spot_trades'
+        for name, service in {'depth-worker': services['depth-worker'], **provisional}.items():
+            feed = 'depth' if name == 'depth-worker' else 'provisional'
             assert service['healthcheck']['test'] == [
                 'CMD', 'python', '-m', f'origo.workers.{feed}', '--check'
             ], path
             assert 'worker-heartbeats:/opt/origo/heartbeats' in service['volumes'], path
             assert service['restart'] == 'unless-stopped', path
             assert service['depends_on']['clickhouse'] == {'condition': 'service_healthy'}, path
-        if path.name == 'docker-compose.deploy.yml':
-            # The mount render peaks above 5 GiB of RSS; 3 GiB killed the worker every tick.
-            assert services['provisional-worker']['mem_limit'] == '16g'
-    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert (
-        'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector '
-        'depth-worker provisional-worker'
-    ) in workflow
+            if feed == 'provisional':
+                assert 'ORIGO_WORKER_HEARTBEAT' not in service['environment']
+                assert 'source-locks:/opt/origo/locks' in service['volumes']
+                assert 'source-publications:/opt/origo/shadow' in service['volumes']
+                if path.name == 'docker-compose.deploy.yml':
+                    assert service['mem_limit'] == '16g'
+        workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+        launch = next(line for line in workflow.splitlines() if 'up -d --wait' in line).split()
+        assert set(provisional) <= set(launch)
+        assert 'depth-worker' in launch and 'provisional-worker' in launch

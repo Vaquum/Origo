@@ -160,17 +160,16 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  provisional-worker:
+  provisional-worker: &provisional-worker
     image: ${APP_IMAGE:?APP_IMAGE is required}
-    environment:
-      - PYTHONPATH=/opt/app
-      - DAGSTER_WEBSERVER_URL=http://dagit:3000
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
-      - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
-      - BINANCE_API_KEY=${BINANCE_API_KEY:?BINANCE_API_KEY is required}
-      - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
-      # The REST and component beats land here; the worker main re-exports the same path.
-      - ORIGO_WORKER_HEARTBEAT=/opt/origo/heartbeats/provisional.heartbeat
+    environment: &provisional-environment
+      PYTHONPATH: /opt/app
+      DAGSTER_WEBSERVER_URL: http://dagit:3000
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN is required}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:?BINANCE_API_KEY is required}
+      HUGGINGFACE_DATASET_REPO_ID: ${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_trades
     volumes:
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
@@ -191,6 +190,24 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+
+  provisional-binance-perp-trades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+
+  provisional-binance-spot-aggtrades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_aggtrades
+
+  provisional-binance-perp-aggtrades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
 
 volumes:
   clickhouse-data:

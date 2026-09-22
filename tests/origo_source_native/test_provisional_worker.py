@@ -30,7 +30,6 @@ from origo.workers.receipts import (
     ensure_monitoring_tables,
     failed_attempts,
     reconcile_died_receipts,
-    record_receipt,
 )
 from origo.workers.report import Reporter
 from origo.workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
@@ -220,8 +219,7 @@ def test_provisional_minute_failures_back_off_without_an_attempt_limit(
 ) -> None:
     # The frontier minute (here the only hole) never exhausts: a permanently
     # skipped frontier gap would freeze the current-view readers, so it keeps
-    # retrying on the capped delay until it builds. Non-frontier holes and
-    # pinned publications still stop after retry_count for an operator run.
+    # retrying on the capped delay until it builds, like other required work.
     spec, _ = spot
     spec = replace(spec, orchestration=replace(spec.orchestration, retry_count=2, retry_delay=3600))
 
@@ -359,14 +357,14 @@ def test_provisional_publication_failures_back_off_per_pinned_state(
         # Inside the delay the same pinned state is not rendered again.
         assert feed.tick(NOW).failed == ()
         assert renders == ['consumer_mount']
-        # After the delay the single retry runs and fails.
+        # After the delay the retry runs and fails.
         offset[0] = timedelta(minutes=2)
         assert feed.tick(NOW).failed == (series,)
         assert renders == ['consumer_mount', 'consumer_mount']
-        # The retry budget for this pinned state is spent: no more renders, an ERROR line.
+        # Required publication continues retrying beyond the orchestration retry count.
         offset[0] = timedelta(hours=10)
-        assert feed.tick(NOW).failed == ()
-        assert renders == ['consumer_mount', 'consumer_mount']
+        assert feed.tick(NOW).failed == (series,)
+        assert renders == ['consumer_mount'] * 3
 
     token = query_origo(
         f"SELECT sha256 FROM {ORIGO_DATABASE}.worker_minute_log "
@@ -380,8 +378,11 @@ def test_provisional_publication_failures_back_off_per_pinned_state(
         (series, 'FAILED', 0, 'RuntimeError'),
         (series, 'STARTED', 0, ''),
         (series, 'FAILED', 0, 'RuntimeError'),
+        (series, 'STARTED', 0, ''),
+        (series, 'FAILED', 0, 'RuntimeError'),
     ]
-    assert f'consumer=mount state={token[:12]} attempts exhausted after 2 failures' in caplog.text
+    assert 'attempts exhausted' not in caplog.text
+    assert 'render failed' in caplog.text
 
 
 def test_reader_mirrors_the_backfill_ownership_rule(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -618,14 +619,14 @@ def test_provisional_build_beats_between_phases(
         client.disconnect()
 
 
-def test_frontier_gap_is_admitted_first_past_the_lookback(
+def test_frontier_gap_follows_newest_minute_past_the_lookback(
     origo_test_env: dict[str, str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Five in-window holes fill oldest-5 while the current-view frontier gap
     # sits 40h back, past the 36h lookback. The tick must still admit the
-    # frontier gap first: crowding must never starve the readers' clip minute.
+    # frontier gap beside the newest minute: neither may wait behind catch-up.
     tick_at = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
     anchor = tick_at - timedelta(hours=40)
     spec = replace(BINANCE_SPOT_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
@@ -677,7 +678,9 @@ def test_frontier_gap_is_admitted_first_past_the_lookback(
         feed = _feed(spec, tmp_path, _Dagster(), _Reporter())
         outcome = feed.tick(tick_at)
         frontier = (anchor + timedelta(minutes=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        assert outcome.processed[0] == f'{spec.key}:{frontier}'
+        assert outcome.processed[:2] == (
+            f'{spec.key}:{last.strftime("%Y-%m-%dT%H:%M:%SZ")}', f'{spec.key}:{frontier}',
+        )
         assert len(outcome.processed) >= 7
         assert outcome.failed == ()
     finally:
@@ -689,18 +692,28 @@ def test_compose_heartbeat_path_matches_worker_wiring(monkeypatch: pytest.Monkey
 
     from origo.workers.runtime import heartbeat_directory, heartbeat_path
 
-    # The compose literal must stay the path the worker computes, or the
-    # watchdog and the REST beats silently split across two files.
     monkeypatch.delenv('ORIGO_HEARTBEAT_DIR', raising=False)
-    expected = (
-        f'ORIGO_WORKER_HEARTBEAT={heartbeat_path(heartbeat_directory(), ProvisionalFeed.name)}'
-    )
+    checked: list[Path] = []
+
+    def check(path: Path) -> int:
+        checked.append(path)
+        return 0
+
+    monkeypatch.setattr(provisional, 'check_heartbeat', check)
     root = Path(__file__).resolve().parents[2]
+    expected_sources = {spec.key for spec in provisional.selected_specs({})}
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
-        environment = yaml.safe_load((root / name).read_text())['services'][
-            'provisional-worker'
-        ]['environment']
-        assert expected in environment, name
+        services = yaml.safe_load((root / name).read_text())['services']
+        workers = [service for service in services.values()
+                   if service.get('command') == 'python -m origo.workers.provisional']
+        assert {worker['environment']['ORIGO_PROVISIONAL_SOURCE'] for worker in workers} == expected_sources
+        checked.clear()
+        for worker in workers:
+            source = worker['environment']['ORIGO_PROVISIONAL_SOURCE']
+            monkeypatch.setenv('ORIGO_PROVISIONAL_SOURCE', source)
+            assert provisional.main(['--check']) == 0
+            assert checked[-1] == heartbeat_path(heartbeat_directory(), f'provisional_{source}')
+        assert len(set(checked)) == len(workers)
 
 
 def test_frontier_uses_records_when_current_view_query_is_unavailable(

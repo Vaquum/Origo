@@ -1,3 +1,9 @@
+# v3.21.8
+
+- Replace the current-partition interval-array join with a canonical coverage window; source preparation updates existing views while retaining canonical precedence and continuous provisional coverage.
+- Run each enabled provisional source in its own worker service with separate healthchecks, heartbeats and receipt reconciliation; admit the newest closed minute before historical catch-up.
+- Keep required minute and worker mount recovery retryable after repeated failures, with capped backoff; report missing source workers through the existing monitor.
+
 # v3.21.7
 
 - Restore provisional frontier lookup without the memory-heavy current-view join; isolate source tick failures and record them for the existing monitor.

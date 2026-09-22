@@ -776,8 +776,12 @@ def test_prerequisite_backoff_survives_token_changes_and_redrives(
         bundle = build_source_bundle(fixture_spec)
         definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs)
         job = definitions.resolve_job_def(f'publish_{SPEC.key}_mount_job')
-        result = job.execute_in_process()
-        assert result.success
+        from dagster._core.test_utils import instance_for_test
+        # Preparation persists schedules/sensors; an ephemeral instance has no
+        # schedule storage and is not the native operator environment.
+        with instance_for_test(temp_dir=str(tmp_path / 'native-instance')) as instance:
+            result = job.execute_in_process(instance=instance)
+            assert result.success
         assert open_prerequisites(resumed) == ()
         assert may_attempt_prerequisite(
             resumed, limited, consumer='mount', error_code='RENDER_DEFERRED', now=datetime.now(UTC),

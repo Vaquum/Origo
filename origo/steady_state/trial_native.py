@@ -19,10 +19,13 @@ from dagster._core.workspace.context import WorkspaceProcessContext
 from dagster._core.workspace.load_target import ModuleTarget
 from dagster._daemon.run_coordinator.queued_run_coordinator_daemon import QueuedRunCoordinatorDaemon
 
-from origo.maintenance.dagster_metadata import maintain_operational_metadata_job
+from origo.maintenance.dagster_metadata import (
+    maintain_operational_metadata,
+    maintain_operational_metadata_job,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
-defs = Definitions(jobs=[maintain_operational_metadata_job])
+defs = Definitions(assets=[maintain_operational_metadata], jobs=[maintain_operational_metadata_job])
 
 
 class NativeMaintenance:

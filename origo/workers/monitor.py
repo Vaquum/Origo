@@ -332,11 +332,6 @@ class LawTape:
 
     def append(self, report: LawReport, catalog: LawCatalog) -> None:
         self.write_catalog(catalog)
-        self._append(
-            self.root / datetime.fromisoformat(report['sampling_slot']).strftime(LAW_SAMPLE_NAME),
-            report,
-        )
-        self.last = report
         before = datetime.fromisoformat(report['sampling_slot']).date() - timedelta(days=30)
         for pattern, prefix in (
             ('samples-*.jsonl', 'samples-'),
@@ -346,6 +341,11 @@ class LawTape:
                 if date.fromisoformat(path.stem.removeprefix(prefix)) < before:
                     path.unlink()
         # Catalogs are small and immutable; retain versions even if older than the tape.
+        self._append(
+            self.root / datetime.fromisoformat(report['sampling_slot']).strftime(LAW_SAMPLE_NAME),
+            report,
+        )
+        self.last = report
 
     def append_events(
         self, events: Sequence[GateEvaluation], *, deadline: float | None = None
@@ -756,24 +756,7 @@ class Monitor:
             evidence={'finding_count': count},
             reason='finding_present' if count else 'check_passed',
         )
-        if not faults:
-            try:
-                self.law_tape.append_events([own], deadline=deadline)
-            except Exception:
-                log.exception('Final monitor evaluation could not be retained')
-                faults.append(
-                    Finding(
-                        'law:gate_events:UNKNOWN',
-                        'data_current',
-                        'Gate history unavailable',
-                        'gate_event_append_failed',
-                    )
-                )
-                own.update(
-                    outcome='FAIL',
-                    evidence={'finding_count': count + 1},
-                    reason='gate_event_append_failed',
-                )
+        # The committed sample is the sole store for this verdict; history reads it there.
         self.law_tape.append(report, self.catalog)
         self.pending_report = None
         return faults

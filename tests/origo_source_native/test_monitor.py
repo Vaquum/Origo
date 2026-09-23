@@ -909,6 +909,86 @@ def test_law_tape_failure_keeps_other_checks_and_delivery_running(
     assert _failure_keys() <= set(outcome.failed)
 
 
+
+@pytest.mark.parametrize('fault', ['sample', 'partial_sample', 'gate_events', 'retention'])
+def test_law_commit_failure_never_leaves_a_durable_data_current_pass(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    observe = monitor._law_findings
+
+    def protocol_observation(now: datetime, existing: list[Finding]) -> list[Finding]:
+        # Exercise a previously clear check's write protocol; keep all empty-store data evidence intact.
+        observe(now, existing)
+        return []
+
+    monkeypatch.setattr(monitor, '_law_findings', protocol_observation)
+    append = monitor.law_tape._append
+
+    def failing_append(path: Path, value: object) -> None:
+        if path.name.startswith('samples-') and fault in ('sample', 'partial_sample'):
+            if fault == 'partial_sample':
+                path.write_bytes(b'{"sampling_slot":')
+            raise OSError('injected sample append failure')
+        if path.name.startswith('gate-events-') and fault == 'gate_events':
+            raise OSError('injected gate append failure')
+        append(path, value)
+
+    monkeypatch.setattr(monitor.law_tape, '_append', failing_append)
+    if fault == 'retention':
+        old = NOW - timedelta(days=31)
+        old_path = monitor.law_tape.root / old.strftime('samples-%Y-%m-%d.jsonl')
+        old_path.parent.mkdir(parents=True)
+        old_path.write_text(json.dumps(_protocol_report(old)) + '\n')
+        unlink = Path.unlink
+
+        def failing_unlink(path: Path, missing_ok: bool = False) -> None:
+            if path == old_path:
+                raise OSError('injected retention failure')
+            unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, 'unlink', failing_unlink)
+    outcome = monitor.tick(NOW)
+    assert any(key in outcome.failed for key in ('detector_failed:law', 'law:gate_events:UNKNOWN'))
+    own_check = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert own_check['passed'] is False
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*')
+              for line in path.read_text().splitlines()]
+    assert not any(event['gate_id'] == 'monitor.data_current' for event in events)
+    saved = LawTape(monitor.law_tape.root).latest(NOW)
+    if fault == 'gate_events':
+        assert saved is not None
+        own = next(event for event in saved['gates'] if event['gate_id'] == 'monitor.data_current')
+        assert own['outcome'] == 'FAIL' and own['evidence']['finding_count'] == 1
+    else:
+        assert saved is None and monitor.law_tape.last is None
+
+
+def test_data_current_has_no_second_verdict_append(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import Sequence
+
+    from origo.law_catalog import GateEvaluation
+
+    monitor = _monitor(recorder, tmp_path)
+    append_events = monitor.law_tape.append_events
+
+    def reject_duplicate(events: Sequence[GateEvaluation], *, deadline: float | None = None) -> None:
+        assert all(event['gate_id'] != 'monitor.data_current' for event in events)
+        append_events(events, deadline=deadline)
+
+    monkeypatch.setattr(monitor.law_tape, 'append_events', reject_duplicate)
+    outcome = monitor.tick(NOW)
+    assert 'law:gate_events:UNKNOWN' not in outcome.failed
+    assert 'detector_failed:law' not in outcome.failed
+    saved = monitor.law_tape.last
+    assert saved is not None
+    own = next(event for event in saved['gates'] if event['gate_id'] == 'monitor.data_current')
+    own_check = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert (own['outcome'] == 'PASS') == own_check['passed']
+
+
 def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
     recorder: _Recorder, tmp_path: Path,
 ) -> None:

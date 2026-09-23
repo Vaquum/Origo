@@ -36,6 +36,7 @@ MAX_SAMPLE_BYTES = 96 * MAX_RECORD
 MAX_CATALOG_BYTES = 16 * MAX_RECORD
 MAX_EVENT_IDENTITIES = 3_000_000
 MAX_GATE_DAYS = 20_000
+OWN_GATE = 'monitor.data_current'
 CORE_SOURCES = (
     'binance_spot_trades', 'binance_spot_aggtrades', 'binance_perp_trades',
     'binance_perp_aggtrades', 'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
@@ -106,6 +107,14 @@ def _valid_report(report: Document) -> bool:
         return report.get('status') == expected
     except (ValueError, TypeError):
         return False
+
+
+def _sample_event(record: Document) -> Document:
+    events = [event for event in _objects(record.get('gates')) if event.get('gate_id') == OWN_GATE]
+    if (not _valid_report(record) or len(events) != 1 or not all(_identity(events[0]))
+            or _instant(events[0].get('evaluated_at')).date() != _instant(record.get('sampling_slot')).date()):
+        raise ValueError('invalid_sample_event')
+    return events[0]
 
 
 def _weight(value: Json) -> int:
@@ -282,20 +291,27 @@ class TapeCache:
                 self.latest_error = 'malformed_report'
                 log.warning('Law report unreadable: %s', type(error).__name__)
 
-    def _sample(self, record: Document) -> None:
+    def _sample(self, record: Document, offset: int | None = None) -> None:
         slot = str(record.get('sampling_slot', ''))
         if not slot:
+            self.history_limited = True
             return
         if slot in self.samples:
+            self.history_limited = True
             self.samples[slot]['status'] = 'UNKNOWN'
             return
-        brief: Document = _sample_brief(record) if _valid_report(record) else {'slot': slot, 'status': 'UNKNOWN'}
+        valid = _valid_report(record)
+        if not valid:
+            self.history_limited = True
+        brief: Document = _sample_brief(record) if valid else {'slot': slot, 'status': 'UNKNOWN'}
         weight = _weight(brief) + sys.getsizeof(slot) + 128
         if self.sample_bytes + weight > MAX_SAMPLE_BYTES:
             self.history_limited = True
             return
         self.samples[slot] = brief
         self.sample_bytes += weight
+        if valid and offset is not None and any(event.get('gate_id') == OWN_GATE for event in _objects(record.get('gates'))):
+            self._event(_sample_event(record), offset)
 
     def _last_event(self, event: Document) -> None:
         gate, version, evidence = _identity(event)
@@ -307,6 +323,7 @@ class TapeCache:
     def _event(self, event: Document, offset: int | None = None) -> None:
         identity = _identity(event)
         if not all(identity):
+            self.history_limited = True
             return
         if identity[0] not in self.definitions or self.event_count >= MAX_EVENT_IDENTITIES:
             self.history_limited = True
@@ -372,10 +389,11 @@ class TapeCache:
                                     raise ValueError('oversized_record')
                                 record = _decode(raw)
                                 if path.name.startswith('samples-'):
-                                    self._sample(record)
-                                else:
+                                    self._sample(record, position - len(raw))
+                                elif record.get('gate_id') != OWN_GATE:
                                     self._event(record, position - len(raw))
                             except (ValueError, TypeError) as error:
+                                self.history_limited = True
                                 log.warning('Law history record unreadable: %s', type(error).__name__)
                         self.positions[path.name] = position
                 except OSError as error:
@@ -468,6 +486,7 @@ class TapeCache:
         if set(query) - {'gate_id', 'from', 'to', 'cursor'} or any(len(values) != 1 for values in query.values()):
             raise ValueError('invalid_history_query')
         gate = query.get('gate_id', [''])[0]
+        prefix = 'samples' if gate == OWN_GATE else 'gate-events'
         start, end = _instant(query.get('from', [''])[0]), _instant(query.get('to', [''])[0])
         if start >= end or end - start > timedelta(days=30) or end > now + timedelta(minutes=1):
             raise ValueError('invalid_history_range')
@@ -492,7 +511,7 @@ class TapeCache:
             packed = self.index[(gate, day)]
             bound = struct.pack('>QQ', before[1], before[2]) if day == before[0] else struct.pack('>QQ', _micros(end), 0)
             position = _packed_position(packed, bound) - 16
-            with (self.root / f'gate-events-{day}.jsonl').open('rb') as stream:
+            with (self.root / f'{prefix}-{day}.jsonl').open('rb') as stream:
                 while position >= 0:
                     stamp, offset = cast(tuple[int, int], struct.unpack('>QQ', packed[position:position + 16]))
                     if stamp < _micros(start):
@@ -509,10 +528,13 @@ class TapeCache:
                         if len(raw) > MAX_RECORD or not raw.endswith(b'\n'):
                             raise ValueError('invalid_indexed_record')
                         record = _decode(raw)
+                        if gate == OWN_GATE:
+                            record = _sample_event(record)
                         if record.get('gate_id') != gate or _micros(_instant(record.get('evaluated_at'))) != stamp:
                             raise ValueError('history_index_mismatch')
                         events.append(record)
                     except (ValueError, TypeError) as error:
+                        self.history_limited = True
                         log.warning('Law history record unreadable: %s', type(error).__name__)
             if more:
                 break
@@ -523,7 +545,7 @@ class TapeCache:
             while len(self.cursors) > 8:
                 del self.cursors[next(iter(self.cursors))]
         loading = any(self.positions.get(path.name, 0) < path.stat().st_size
-            for path in self._paths(now) if path.name.startswith('gate-events-')
+            for path in self._paths(now) if path.name.startswith(prefix + '-')
             and start.date().isoformat() <= path.name[-16:-6] <= end.date().isoformat())
         provenances = {(str(event.get('definition_version')), str(event.get('deployed_sha')), str(event.get('catalog_version', ''))) for event in events}
         originals: list[Json] = []
@@ -720,7 +742,12 @@ function interval(){const end=state.to||data?.checked_at||new Date().toISOString
 function storeHistory(key,value){histories.delete(key);histories.set(key,value);while(histories.size>8)histories.delete(histories.keys().next().value)}
 function getHistory(key){const value=histories.get(key);if(value){histories.delete(key);histories.set(key,value)}return value}
 function historyKey(id){const {start,end}=interval();return id+'|'+start+'|'+end}
-async function loadHistory(id,more=false){const key=historyKey(id);if(requests.has(key)||histories.has(key)&&!more)return;requests.add(key);const {start,end}=interval(),old=getHistory(key),q=new URLSearchParams({gate_id:id,from:start,to:end});if(more&&old?.next_cursor)q.set('cursor',old.next_cursor);try{const response=await fetch('/law/history.json?'+q);if(!response.ok)throw Error('History unavailable');const value=await response.json();value.events=[...(more?old.events:[]),...value.events];if(value.loading)value.error='History is still indexing; these observations are incomplete.';if(value.events.length>5000){value.events=value.events.slice(0,5000);value.limited=true;value.next_cursor=null}if(value.limited)value.error='History coverage is incomplete: a record or cache limit prevented a complete replay.';storeHistory(key,value);renderDetail();if(state.view==='recovery')renderContent()}catch{storeHistory(key,{error:'History unavailable. The current observation remains visible.',events:[]});renderDetail()}finally{requests.delete(key)}}
+function mergeDefinitions(events,definitions){
+const key=(id,version,catalog,sha)=>JSON.stringify([id,version,catalog||'',sha||'']);
+const wanted=new Set(events.map(e=>key(e.gate_id,e.definition_version,e.catalog_version,e.deployed_sha))),unique=new Map();
+for(const d of definitions){const id=key(d.id,d.definition_version,d.catalog_version,d.code?.deployed_sha);if(wanted.has(id)||wanted.has(key(d.id,d.definition_version,null,d.code?.deployed_sha)))unique.set(id,d)}
+return [...unique.values()]}
+async function loadHistory(id,more=false){const key=historyKey(id);if(requests.has(key)||histories.has(key)&&!more)return;requests.add(key);const {start,end}=interval(),old=getHistory(key),q=new URLSearchParams({gate_id:id,from:start,to:end});if(more&&old?.next_cursor)q.set('cursor',old.next_cursor);try{const response=await fetch('/law/history.json?'+q);if(!response.ok)throw Error('History unavailable');const value=await response.json();value.events=[...(more?old.events:[]),...value.events];if(value.loading)value.error='History is still indexing; these observations are incomplete.';if(value.events.length>5000){value.events=value.events.slice(0,5000);value.limited=true;value.next_cursor=null}value.definitions=mergeDefinitions(value.events,[...(more?old.definitions||[]:[]),...(value.definitions||[])]);if(value.limited)value.error='History coverage is incomplete: a record or cache limit prevented a complete replay.';storeHistory(key,value);renderDetail();if(state.view==='recovery')renderContent()}catch{storeHistory(key,{error:'History unavailable. The current observation remains visible.',events:[]});renderDetail()}finally{requests.delete(key)}}
 function trend(events,key='age_seconds',width=710){const unit=key.includes('seconds')?'s':'';const pts=events.map(e=>({x:Date.parse(e.evaluated_at),y:e.evidence?.[key]})).filter(p=>typeof p.y==='number'&&Number.isFinite(p.y)).sort((a,b)=>a.x-b.x);if(!pts.length)return '<div class="trend-empty">No numeric observations in this interval.</div>';const lo=pts[0].x,hi=pts.at(-1).x,max=Math.max(1,...pts.map(p=>p.y));let d='';pts.forEach((p,i)=>{const x=42+(p.x-lo)/Math.max(1,hi-lo)*(width-70),y=107-p.y/max*85;d+=(i&&p.x-pts[i-1].x<=120000?'L':'M')+x+','+y+' ';if(pts.length===1)d+='l1,0 '});return `<svg class="spark" viewBox="0 0 ${width} 130" role="img" aria-label="Observed ${esc(label(key))}; gaps are not interpolated"><line x1="42" y1="107" x2="${width-28}" y2="107"/><text x="2" y="22">${Math.round(max)}${unit}</text><text x="12" y="110">0${unit}</text><path d="${d}"/><text x="42" y="128">${esc(new Date(lo).toISOString().slice(11,16))} UTC</text><text x="${width-95}" y="128">${esc(new Date(hi).toISOString().slice(11,16))} UTC</text></svg>`}
 function numericChart(h){if(!h?.events?.length)return '';const keys=[...new Set(h.events.flatMap(e=>Object.entries(e.evidence||{}).filter(([,v])=>typeof v==='number').map(([k])=>k)))];if(!keys.length)return '';const metric=keys.includes(state.metric)?state.metric:keys.includes('age_seconds')?'age_seconds':keys[0];return `<label class="eyebrow" for="history-metric">Observed values</label><select id="history-metric" style="max-width:100%;margin-top:7px">${keys.map(k=>`<option value="${esc(k)}" ${k===metric?'selected':''}>${esc(label(k))}</option>`).join('')}</select>${trend(h.events,metric,260)}`}
 function renderDetail(){const box=$('#detail'),g=descriptor(state.gate),p=projection(state.projection),s=source(state.source)||source(p?.source_key);box.hidden=!g&&!p&&!s;$('#layout').classList.toggle('has-detail',!box.hidden);if(box.hidden)return;let body='<button class="close" aria-label="Close details" data-close>&times;</button><div class="eyebrow">Evidence, in context</div>';if(g){const h=getHistory(historyKey(g.id));body+=`<h2>${esc(g.name)}</h2>${badge(event(g.id)?.outcome||'NOT_EVALUATED')}${event(g.id)?.last_recorded?`<p class="muted">Last recorded ${esc(utc(event(g.id).evaluated_at))} · current blocking unknown</p>`:''}<div class="note">${esc(g.governed_action)}</div><dl><dt>Fails / waits when</dt><dd>${esc(g.condition)}</dd><dt>Thresholds</dt><dd>${esc(JSON.stringify(g.thresholds))}</dd><dt>Deployed definition</dt><dd>${codeLink(g.code)}</dd></dl><button class="link-button" data-range="24">Past 24 hours</button><button class="link-button" data-range="720">Past 30 days</button><p class="eyebrow">${esc(interval().start.slice(0,16))} → ${esc(interval().end.slice(0,16))} UTC</p>${numericChart(h)}${h?esc(h.error||'')+(h.events.length?eventList(h.events,h.definitions):'<p class="muted">No attributable evaluations in this interval.</p>'):'<p class="muted">Loading original evaluations…</p>'}${h?.next_cursor?'<button class="link-button" data-more>Load next observations</button>':''}`;loadHistory(g.id)}else if(p){const o=observation(p.id);body+=`<h2>${esc(label(p.name))}</h2><p class="muted">${esc(s?.name)} / ${esc(p.lane)}</p>${badge(o?.status||'UNKNOWN')}<dl><dt>Evidence</dt><dd>${p.lane==='consumer'?'Published artifact':p.lane==='depth'?'Depth store observation':'Active build / component proof'} · ${esc(o?.evidence_id||'Not observed')}</dd><dt>Data through</dt><dd>${esc(utc(o?.data_through))}</dd><dt>Evidence time</dt><dd>${esc(utc(o?.evidence_at))}</dd><dt>Reason</dt><dd>${esc(label(o?.reason||'unknown'))}</dd><dt>Definition</dt><dd>${codeLink(p.code)}</dd></dl>${o?.dagit_url&&safeLink(o.dagit_url)?`<a class="link-button" href="${safeLink(o.dagit_url)}" target="_blank" rel="noopener">Open in Dagit ↗</a>`:''}<p class="eyebrow">Relevant gates</p>${relevant(p,o).map(id=>`<button class="link-button" data-gate="${esc(id)}">${esc(descriptor(id)?.name||id)} →</button>`).join('')||'<p class="muted">No attributable gate evaluation.</p>'}`;}else if(s){const f=feed(s.id);body+=`<h2>${esc(label(s.name))}</h2><p class="muted">${esc(s.rollout_stage)} · ${s.projections.length} stages</p>${Object.entries(f?.predicates||{}).map(([k,v])=>`<p><strong>${esc(k)}</strong> ${badge(v.status)}</p><dl>${fields(v.evidence)}</dl>`).join('')}<button class="link-button" data-source-gates="${esc(s.id)}">Explore related gates →</button>`}box.innerHTML=body}

@@ -816,3 +816,123 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
         assert tab.locator('.day').count() == len(new_catalog['gates']) * 30
         assert tab.evaluate('data.status') == report['status']
         browser.close()
+
+
+
+@pytest.mark.parametrize('corruption', ['invalid_json', 'invalid_timestamp', 'indexed_record', 'missing_identity', 'missing_slot', 'duplicate_sample'])
+def test_corrupt_history_records_remain_visibly_incomplete(
+    tape: tuple[Path, page.Document, datetime], corruption: str,
+) -> None:
+    root, report, now = tape
+    original = page._objects(report['gates'])[0]
+    path = next(root.glob('gate-events-*'))
+    good = json.dumps(original).encode() + b'\n'
+    broken = good[:-2] + b'!\n' if corruption == 'invalid_json' else json.dumps({**original, 'evaluated_at': 'damaged-timestamp'}).encode() + b'\n'
+    if corruption == 'missing_identity':
+        broken = json.dumps({key: value for key, value in original.items() if key != 'evidence_id'}).encode() + b'\n'
+    if corruption in ('missing_slot', 'duplicate_sample'):
+        path = next(root.glob('samples-*'))
+        good = json.dumps(report).encode() + b'\n'
+        broken = json.dumps({key: value for key, value in report.items() if key != 'sampling_slot'}).encode() + b'\n' if corruption == 'missing_slot' else good
+    path.write_bytes(good if corruption == 'indexed_record' else broken + good)
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    cache.advance(now, budget_seconds=2)
+    assert cache.positions[path.name] == path.stat().st_size and not cache.loading
+    if corruption == 'indexed_record':
+        path.write_bytes(b'!' + good[1:])  # Damage a previously indexed real event without changing byte positions.
+    query = {'gate_id': [str(original['gate_id'])], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
+    result = cache.history(query, now)
+    assert result['limited'] is True and cache.current(now)['history_limited'] is True
+    assert cache.current(now)['last_report'] == report
+    assert result['events'] == ([] if corruption == 'indexed_record' else [original])
+
+
+def test_paginated_history_retains_each_original_catalog_definition(
+    serving: tuple[str, page.TapeCache, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url, cache, report, now = serving
+    catalogs = []
+    events: list[page.Document] = []
+    # Actual configured catalogs; UNKNOWN events claim no unobserved queue measurement.
+    for index, threshold in enumerate((200, 201)):
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', str(threshold))
+        catalog = build_catalog(SHA)
+        catalogs.append(catalog)
+        (cache.root / f'catalog-{catalog["version"]}.json').write_text(json.dumps(catalog))
+        cache._load_catalog(catalog['version'])
+        descriptor = next(gate for gate in catalog['gates'] if gate['id'] == 'monitor.queue_bounded')
+        stamp = page._instant(report['evaluation_start']) - timedelta(seconds=30 if index == 0 else 0)
+        event = gate_evaluation(descriptor, evidence_id=f'configuration-envelope:{index}',
+            evaluated_at=stamp.isoformat(), outcome='UNKNOWN', evidence={}, reason='not_observed', catalog_version=catalog['version'])
+        events.append(cast(page.Document, json.loads(json.dumps(event))))
+    with next(cache.root.glob('gate-events-*')).open('a') as stream:
+        stream.write(json.dumps(events[0])+'\n')
+        for index in range(page.PAGE_SIZE):
+            stream.write(json.dumps({**events[1], 'evidence_id': f'configuration-delivery:{index}'})+'\n')
+    cache.advance(now, budget_seconds=2)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
+        more = tab.locator('[data-more]')
+        more.wait_for()
+        assert tab.evaluate("getHistory(historyKey('monitor.queue_bounded')).definitions.length") == 1
+        more.click()
+        more.wait_for(state='hidden')
+        loaded = tab.evaluate("getHistory(historyKey('monitor.queue_bounded'))")
+        assert len(loaded['events']) == page.PAGE_SIZE + 1
+        assert {item['catalog_version'] for item in loaded['definitions']} == {catalog['version'] for catalog in catalogs}
+        for position, threshold in ((0, 201), (-1, 200)):
+            item = tab.locator('#detail .event').nth(position)
+            item.locator('summary').click()
+            assert f'queue threshold: {threshold}' in item.inner_text()
+            assert f'/blob/{SHA}/' in str(item.locator('details a').get_attribute('href'))
+        # Definition retention follows retained events, including the browser's existing 5,000-event cap.
+        pruned = tab.evaluate("()=>{const h=getHistory(historyKey('monitor.queue_bounded'));return mergeDefinitions([h.events[0]],h.definitions)}")
+        assert len(pruned) == 1 and pruned[0]['catalog_version'] == catalogs[1]['version']
+        browser.close()
+
+
+
+def test_monitor_verdict_history_uses_only_committed_valid_samples(
+    tape: tuple[Path, page.Document, datetime],
+) -> None:
+    from origo.workers.monitor import law_findings
+
+    root, report, now = tape
+    catalog = build_catalog(SHA)
+    descriptor = next(gate for gate in catalog['gates'] if gate['id'] == page.OWN_GATE)
+    findings = law_findings(cast(law.LawReport, report))
+    assert findings  # The captured fixture truthfully has incomplete source coverage.
+    verdict = gate_evaluation(descriptor, evidence_id=f'{page.OWN_GATE}:{report["sampling_slot"]}',
+        evaluated_at=str(report['evaluation_start']), outcome='FAIL', evidence={'finding_count': len(findings)},
+        reason='finding_present', catalog_version=catalog['version'])
+    event = cast(page.Document, json.loads(json.dumps(verdict)))
+    committed = {**report, 'gates': [*page._objects(report['gates']), event]}
+    sample_path = next(root.glob('samples-*'))
+    _write(sample_path, [committed])
+    # Inject the previously possible orphan PASS; this protocol corruption must never become evidence.
+    _write(next(root.glob('gate-events-*')), [{**event, 'outcome': 'PASS'}])
+    query = {'gate_id': [page.OWN_GATE], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
+    for _ in range(2):  # Restart must choose the committed sample again, independent of file scan order.
+        cache = page.TapeCache(root)
+        cache.refresh_latest(now)
+        assert cache.history(query, now)['loading'] is True
+        cache.advance(now, budget_seconds=2)
+        history = cache.history(query, now)
+        assert history['events'] == [event] and history['loading'] is False
+        assert sum(int(str(day['fail_count'])) for day in page._objects(history['days'])) == 1
+        assert sum(int(str(day['pass_count'])) for day in page._objects(history['days'])) == 0
+        assert page._objects(history['definitions'])[0]['catalog_version'] == catalog['version']
+    with sample_path.open('ab') as stream:
+        stream.write(json.dumps(committed).encode()[:-1])
+    assert cache.history(query, now)['loading'] is True  # Sample tail controls loading, not the event-stream tail.
+    invalid = {**committed, 'schema_version': 999, 'gates': [{**event, 'outcome': 'PASS'}]}
+    _write(sample_path, [invalid])
+    restarted = page.TapeCache(root)
+    restarted.refresh_latest(now)
+    restarted.advance(now, budget_seconds=2)
+    assert restarted.history(query, now)['events'] == []
+    assert restarted.history(query, now)['limited'] is True
+    assert restarted.current(now)['status'] == 'UNKNOWN'

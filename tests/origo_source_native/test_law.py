@@ -263,6 +263,8 @@ def captured_depth_minute(law_case: LawCase) -> tuple[str, datetime]:
 def test_depth_counts_distinct_closed_slots(
     law_case: LawCase, captured_depth_minute: tuple[str, datetime], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from origo.law_catalog import build_catalog, gate_evaluation
+
     source, minute = captured_depth_minute
     due = minute + timedelta(minutes=1, seconds=law.D1_DELIVERY_GRACE_SECONDS)
     law_case.client.execute(f'INSERT INTO origo.{source} SELECT * FROM origo.{source}')
@@ -272,6 +274,7 @@ def test_depth_counts_distinct_closed_slots(
     # Exercise the tolerance boundary using a smaller test window over the same real minute.
     monkeypatch.setattr(law, 'D1_EXPECTED_SLOTS', 3)
     before = law_case.report(due)
+    before_catalog = build_catalog('')
     assert predicate(before, 'D1', source)['status'] == 'PASS'
     assert predicate(law_case.report(due + timedelta(minutes=3)), 'D1', source)['status'] == 'FAIL'
     assert predicate(before, 'D1', source)['evidence']['max_missing'] == 2
@@ -280,7 +283,25 @@ def test_depth_counts_distinct_closed_slots(
     assert predicate(after, 'D1', source)['evidence']['max_missing'] == 3
     from origo.workers import law_page as page
 
+    for record, catalog in ((before, before_catalog), (after, build_catalog(''))):
+        record['catalog_version'] = catalog['version']
+        descriptors = {gate['id']: gate for gate in catalog['gates']}
+        for feed in record['feeds']:
+            for name, result in feed['predicates'].items():
+                identity = f"law.{name}:{feed['source_key']}"
+                record['gates'].append(gate_evaluation(
+                    descriptors[identity], evidence_id=f"{identity}:{record['sampling_slot']}",
+                    evaluated_at=record['evaluation_start'],
+                    outcome='EXPECTED_WAIT' if result['status'] == 'NOT_DUE' else result['status'],
+                    evidence=result['evidence'], reason=result['reason'],
+                ))
+        record['gates'].append(gate_evaluation(
+            descriptors['law.inventory'], evidence_id=record['sampling_slot'] + ':inventory',
+            evaluated_at=record['evaluation_start'], outcome='PASS',
+            evidence={'live': len(record['inventory'])}, reason='all_live_sources_evaluated',
+        ))
     briefs = [page._sample_brief(page._decode(json.dumps(record).encode())) for record in (before, after)]
+    assert all(brief['policy'] is not None for brief in briefs)
     assert briefs[0]['policy'] != briefs[1]['policy']
     # Protocol-only PASS envelopes test the window; actual incomplete-system reports remain FAIL.
     assert before['status'] == after['status'] == 'FAIL'

@@ -766,3 +766,53 @@ def test_recovery_delta_retains_direction_without_changing_duration(
             assert tab.locator('.recovery-metrics>div').nth(1).locator('strong').inner_text() == expected
         assert tab.evaluate('duration', magnitude) == normal
         browser.close()
+
+
+def test_catalog_report_interleaving_never_displays_mixed_definitions(
+    serving: tuple[str, page.TapeCache, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url, cache, report, now = serving
+    old_version = str(report['catalog_version'])
+    old_overview = cache.overview(now)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=gates')
+        tab.locator('.day').first.wait_for()
+        tab.wait_for_function('() => !overviewLoading')
+        # A genuine configured catalog changes between the two HTTP reads. Source evidence is unchanged.
+        old_catalog = page._object(cache.current(now)['catalog'])
+        old_gate = next(gate for gate in page._objects(old_catalog['gates']) if gate['id'] == 'monitor.queue_bounded')
+        threshold = int(str(page._object(old_gate['thresholds'])['queue_threshold'])) + 1
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', str(threshold))
+        new_catalog = build_catalog(SHA)
+        (cache.root / f'catalog-{new_catalog["version"]}.json').write_text(json.dumps(new_catalog))
+        cache._load_catalog(new_catalog['version'])
+        next_report = {**report, 'catalog_version': new_catalog['version']}
+
+        def arrive_before_catalog_response() -> None:
+            _write(next(cache.root.glob('samples-*')), [next_report])
+            cache.refresh_latest(now)
+
+        tab.route('**/law/catalog.json', lambda route: (arrive_before_catalog_response(), route.continue_()))
+        tab.evaluate('refresh()')
+        tab.wait_for_function('() => !overviewLoading')
+        assert tab.evaluate('data.status') == 'UNKNOWN'
+        assert tab.evaluate('data.last_report.catalog_version') == old_version
+        assert tab.evaluate('data.catalog.version') == old_version
+        assert tab.evaluate('cachedCatalog.version') == old_version
+        assert tab.evaluate("descriptor('monitor.queue_bounded').thresholds.queue_threshold") == threshold - 1
+        tab.unroute('**/law/catalog.json')
+        # A delayed old overview must not repopulate the heatmap after adopting the new report/catalog pair.
+        tab.route('**/law/gates.json', lambda route: route.fulfill(json=old_overview))
+        tab.evaluate('refresh()')
+        tab.wait_for_function('() => !overviewLoading')
+        assert tab.evaluate('data.last_report.catalog_version') == new_catalog['version']
+        assert tab.evaluate('data.catalog.version') == new_catalog['version']
+        assert tab.evaluate('data.gate_days === undefined') is True
+        assert tab.evaluate("descriptor('monitor.queue_bounded').thresholds.queue_threshold") == threshold
+        tab.unroute('**/law/gates.json')
+        tab.evaluate('loadOverview()')
+        assert tab.locator('.day').count() == len(new_catalog['gates']) * 30
+        assert tab.evaluate('data.status') == report['status']
+        browser.close()

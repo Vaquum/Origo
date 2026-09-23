@@ -184,7 +184,7 @@ PRD #442 remains open until a genuine production window and three contemporaneou
 SQL cross-checks are attached; CI and historical reconstruction cannot substitute.
 
 Current JSON excludes the 30-day grid and repeated catalog. The browser fetches the
-catalog once per version and loads compact gate history when Gates is shown. Minute
+catalog once per version and loads compact gate history when Gates is shown. Report and catalog versions must match; a refresh race remains UNKNOWN until a consistent refresh. Minute
 samples omit unobserved gate placeholders; the catalog supplies their explicit
 UNKNOWN/NOT_EVALUATED display. Event-driven gates retain the last original outcome
 and timestamp separately from current blocking state. Corrupt oversized history

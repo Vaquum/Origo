@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["dagster-webserver==1.13.21", "pytest", "playwright"]
+dev = ["dagster-webserver==1.13.21", "pytest", "playwright==1.63.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -1,6 +1,6 @@
 # v3.22.0
 
-Expose reader coverage, source projections and production gate history through a read-only public dashboard, using bounded monitoring and the existing alert path.
+Expose reader coverage, source projections and production gate history through a read-only public dashboard, using bounded monitoring and the existing alert path. Health probes have isolated capacity; sparse observations and semantic gate versions keep history inexpensive and deployment-independent.
 
 # v3.21.9
 

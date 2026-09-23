@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import gzip
 import json
 import logging
 import math
@@ -132,10 +133,13 @@ def _micros(stamp: datetime) -> int:
 
 def _sample_brief(report: Document) -> Document:
     feeds = _objects(report.get('feeds'))
+    core = sorted((str(event.get('gate_id')), str(event.get('definition_version', ''))) for event in _objects(report.get('gates')) if str(event.get('gate_id')).startswith('law.'))
+    expected = {f"law.{name}:{feed.get('source_key')}" for feed in feeds for name in _object(feed.get('predicates'))} | {'law.inventory'}
+    complete = {key for key, version in core if version} == expected and len(core) == len(expected)
     return {
         'slot': report.get('sampling_slot'), 'start': report.get('evaluation_start'),
         'status': report.get('status'), 'version': report.get('schema_version'),
-        'policy': hashlib.sha256(json.dumps([report.get('schema_version'), report.get('inventory'), [(feed.get('source_key'), _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('budget_seconds'), _object(_object(_object(feed.get('predicates')).get('C2')).get('evidence')).get('anchor'), str(_object(_object(_object(feed.get('predicates')).get('C1')).get('evidence')).get('deadline'))[11:16], _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('expected_slots'), _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('max_missing')) for feed in feeds]], sort_keys=True).encode()).hexdigest(),
+        'policy': hashlib.sha256(json.dumps([core, report.get('schema_version'), report.get('inventory'), [(feed.get('source_key'), _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('budget_seconds'), _object(_object(_object(feed.get('predicates')).get('C2')).get('evidence')).get('anchor'), str(_object(_object(_object(feed.get('predicates')).get('C1')).get('evidence')).get('deadline'))[11:16], _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('expected_slots'), _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('max_missing')) for feed in feeds]], sort_keys=True).encode()).hexdigest() if complete else None,
         'ages': {str(feed.get('source_key')): _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('age_seconds') for feed in feeds},
         'not_due': any(_object(_object(feed.get('predicates')).get('C1')).get('status') == 'NOT_DUE' for feed in feeds),
     }
@@ -144,7 +148,7 @@ def _sample_brief(report: Document) -> Document:
 def consecutive_window(samples: list[Document], terminal: str) -> list[Document]:
     clear: list[Document] = []
     for sample in reversed(sorted(samples, key=lambda item: str(item.get('slot')))):
-        if sample.get('status') != 'PASS':
+        if sample.get('status') != 'PASS' or not sample.get('policy'):
             break
         if clear and (_instant(clear[-1].get('slot')) - _instant(sample.get('slot')) != timedelta(minutes=1)
                       or sample.get('policy') != clear[-1].get('policy')):
@@ -160,9 +164,15 @@ class TapeCache:
         self.latest: Document | None = None
         self.latest_error = 'missing_report'
         self.catalogs: dict[str, Document] = {}
+        self.catalog_versions: dict[str, str] = {}
+        self.catalog_files: dict[str, str] = {}
+        self.definition_bytes = 0
         self.definitions: dict[str, dict[str, Document]] = {}
         self.sample_bytes = self.catalog_bytes = self.event_count = 0
         self.history_limited = False
+        self.discarding: set[str] = set()
+        self.last_events: dict[str, Document] = {}
+        self.active_definitions: dict[str, str] = {}
         self.positions: dict[str, int] = {}
         self.samples: dict[str, Document] = {}
         self.days: dict[tuple[str, str], Document] = {}
@@ -181,7 +191,7 @@ class TapeCache:
                       for path in self.root.glob(pattern) if path.name[-16:-6] >= floor and not path.is_symlink())
 
     def _load_catalog(self, version: str, *, current: bool = False) -> None:
-        if version in self.catalogs or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', version):
+        if version in self.catalogs or (version in self.catalog_versions and not current) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', version):
             return
         path = self.root / f'catalog-{version}.json'
         try:
@@ -189,18 +199,35 @@ class TapeCache:
                 raise ValueError('invalid_catalog')
             record = _decode(path.read_bytes())
             if record.get('schema_version') == 1 and record.get('version') == version:
-                weight = _weight(record)
-                if self.catalog_bytes + weight > MAX_CATALOG_BYTES:
-                    self.history_limited = True
-                    if not current or weight > MAX_CATALOG_BYTES:
-                        return
-                    self.catalogs.clear()
-                    self.definitions.clear()
-                    self.catalog_bytes = 0
-                self.catalog_bytes += weight
-                self.catalogs[version] = record
                 for descriptor in _objects(record.get('gates')):
-                    self.definitions.setdefault(str(descriptor.get('id')), {})[str(descriptor.get('definition_version'))] = descriptor
+                    gate, definition = str(descriptor.get('id')), str(descriptor.get('definition_version'))
+                    if definition not in self.definitions.get(gate, {}):
+                        semantic = {**descriptor, 'code': None}
+                        weight = _weight(semantic) + 256
+                        if self.definition_bytes + weight > MAX_CATALOG_BYTES // 2:
+                            self.history_limited = True
+                        else:
+                            self.definitions.setdefault(gate, {})[definition] = semantic
+                            self.definition_bytes += weight
+                sha = str(record.get('deployed_sha'))
+                if len(self.catalog_versions) < 10_000:
+                    self.catalog_versions[version] = sha
+                    self.catalog_files[sha] = version
+                else:
+                    self.history_limited = True
+                self.catalogs[version] = record
+                active = str(self.latest.get('catalog_version')) if self.latest else version
+                if active in self.catalogs and active != version:
+                    self.catalogs[active] = self.catalogs.pop(active)
+                def cache_weight() -> int:
+                    return self.definition_bytes + sum(_weight(item) for item in self.catalogs.values()) + sum(sys.getsizeof(key) + sys.getsizeof(value) + 128 for key, value in self.catalog_versions.items())
+                while len(self.catalogs) > 2 or (cache_weight() > MAX_CATALOG_BYTES and len(self.catalogs) > 1):
+                    del self.catalogs[next(iter(self.catalogs))]
+                self.catalog_bytes = cache_weight()
+                if self.catalog_bytes > MAX_CATALOG_BYTES:
+                    self.history_limited = True
+                    self.catalogs.pop(version)
+                    self.catalog_bytes = cache_weight()
         except (OSError, ValueError) as error:
             log.warning('Law catalog unreadable: %s', type(error).__name__)
 
@@ -246,6 +273,10 @@ class TapeCache:
                     raise ValueError('invalid_record')
                 self.latest, self.latest_error = record, ''
                 self._load_catalog(str(record.get('catalog_version')), current=True)
+                self.active_definitions = {str(gate.get('id')): str(gate.get('definition_version')) for gate in _objects(self.catalogs.get(str(record.get('catalog_version')), {}).get('gates'))}
+                self.last_events = {key: event for key, event in self.last_events.items() if self.active_definitions.get(key) == event.get('definition_version')}
+                for event in _objects(record.get('gates')):
+                    self._last_event(event)
             except (OSError, ValueError) as error:
                 self.latest_error = 'malformed_report'
                 log.warning('Law report unreadable: %s', type(error).__name__)
@@ -265,6 +296,13 @@ class TapeCache:
         self.samples[slot] = brief
         self.sample_bytes += weight
 
+    def _last_event(self, event: Document) -> None:
+        gate, version, evidence = _identity(event)
+        if evidence and self.active_definitions.get(gate) == version:
+            prior = self.last_events.get(gate)
+            if prior is None or _instant(event.get('evaluated_at')) > _instant(prior.get('evaluated_at')):
+                self.last_events[gate] = event
+
     def _event(self, event: Document, offset: int | None = None) -> None:
         identity = _identity(event)
         if not all(identity):
@@ -283,6 +321,7 @@ class TapeCache:
         if bytes(packed[position:position + 16]) == digest:
             return
         packed[position:position] = digest
+        self._last_event(event)
         self.event_count += 1
         if offset is not None:
             indexed = self.index.setdefault(key, bytearray())
@@ -313,9 +352,19 @@ class TapeCache:
                         stream.seek(position)
                         while time.monotonic() < deadline and read < READ_BUDGET:
                             raw = stream.readline(MAX_RECORD + 1)
-                            if not raw or not raw.endswith(b'\n'):
+                            if not raw:
                                 break
                             read += len(raw)
+                            if path.name in self.discarding or len(raw) > MAX_RECORD:
+                                self.history_limited = True
+                                position = stream.tell()
+                                if raw.endswith(b'\n'):
+                                    self.discarding.discard(path.name)
+                                else:
+                                    self.discarding.add(path.name)
+                                continue
+                            if not raw.endswith(b'\n'):
+                                break
                             position = stream.tell()
                             try:
                                 if len(raw) > MAX_RECORD:
@@ -333,6 +382,7 @@ class TapeCache:
             self.bytes_read += read
             self.loading = any(self.positions.get(path.name, 0) < path.stat().st_size for path in paths)
             floor = (now - timedelta(days=30)).isoformat()
+            self.last_events = {gate: event for gate, event in self.last_events.items() if str(event.get('evaluated_at')) >= floor}
             for slot in tuple(self.samples):
                 if slot < floor:
                     self.sample_bytes -= _weight(self.samples.pop(slot)) + sys.getsizeof(slot) + 128
@@ -384,22 +434,30 @@ class TapeCache:
                     previous = _number(_object(prior.get('ages')).get(key)) if prior else None
                     delays[key] = current - previous if current is not None and previous is not None else None
             all_gates: dict[str, Document] = {}
-            for old in self.catalogs.values():
-                for gate in _objects(old.get('gates')):
-                    all_gates[str(gate.get('id'))] = {**gate, 'retired': True}
+            for key, versions in self.definitions.items():
+                all_gates[key] = {**next(reversed(versions.values())), 'retired': True}
             if catalog:
                 for gate in _objects(catalog.get('gates')):
                     all_gates[str(gate.get('id'))] = gate
                 catalog = {**catalog, 'gates': list[Json](all_gates.values())}
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
             return {
                 'status': status, 'reason': reason, 'checked_at': record.get('evaluation_end') if record else None,
                 'age_seconds': age, 'last_report': record, 'catalog': catalog, 'history_loading': self.loading, 'history_limited': self.history_limited,
                 'delay_change_1h_seconds': delays, 'consecutive_clear_slots': len(clear),
                 'consecutive_clear_seconds': (_instant(clear[0].get('start')) - _instant(clear[-1].get('start'))).total_seconds() if clear else 0,
                 'not_due_slots': sum(sample.get('not_due') is True for sample in clear),
-                'gate_days': {gate: self._daily(gate, start, now) for gate in all_gates},
+                'catalog_key': f'{record.get("catalog_version")}:{len(self.catalog_versions)}' if record else None,
+                'last_gate_events': dict(self.last_events),
             }
+
+    def overview(self, now: datetime) -> Document:
+        with self.lock:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
+            dates = [(start + timedelta(days=index)).date().isoformat() for index in range(30)]
+            return {'days': list[Json](dates), 'end': now.isoformat(), 'loading': self.loading, 'limited': self.history_limited,
+                'gates': {gate: [[row.get(key) for key in ('day', 'pass_count', 'fail_count', 'wait_count', 'unknown_count', 'evaluation_count', 'observed_slots', 'expected_slots')]
+                    for row in _objects(self._daily(gate, start, now)) if row.get('evaluation_count')]
+                    for gate in self.definitions}}
 
     def history(self, query: dict[str, list[str]], now: datetime) -> Document:
         with self.lock:
@@ -466,8 +524,23 @@ class TapeCache:
         loading = any(self.positions.get(path.name, 0) < path.stat().st_size
             for path in self._paths(now) if path.name.startswith('gate-events-')
             and start.date().isoformat() <= path.name[-16:-6] <= end.date().isoformat())
+        provenances = {(str(event.get('definition_version')), str(event.get('deployed_sha'))) for event in events}
+        originals: list[Json] = []
+        metadata_read = 0
+        metadata_deadline = time.monotonic() + 0.05
+        for version, sha in sorted(provenances):
+            catalog_version = self.catalog_files.get(sha)
+            if catalog_version and metadata_read < READ_BUDGET and time.monotonic() < metadata_deadline:
+                path = self.root / f'catalog-{catalog_version}.json'
+                if path.is_symlink() or path.stat().st_size > MAX_RECORD:
+                    raise ValueError('invalid_catalog')
+                raw = path.read_bytes()
+                metadata_read += len(raw)
+                originals.extend(descriptor for descriptor in _objects(_decode(raw).get('gates'))
+                    if descriptor.get('id') == gate and descriptor.get('definition_version') == version
+                    and _object(descriptor.get('code')).get('deployed_sha') == sha)
         return {'gate_id': gate, 'start': start.isoformat(), 'end': end.isoformat(), 'loading': loading,
-                'days': self._daily(gate, start, end), 'definitions': list[Json](definitions),
+                'days': self._daily(gate, start, end), 'definitions': originals,
                 'events': list[Json](events), 'next_cursor': continuation, 'limited': self.history_limited}
 
 
@@ -487,20 +560,9 @@ class LawServer(ThreadingMixIn, HTTPServer):
         super().process_request(request, client_address)
 
     def process_request_thread(self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]) -> None:
-        def expire() -> None:
-            try:
-                connection = request if isinstance(request, socket.socket) else request[1]
-                connection.shutdown(socket.SHUT_RDWR)
-            except OSError as error:
-                log.debug('Law request already closed: %s', type(error).__name__)
-
-        timer = threading.Timer(REQUEST_TIMEOUT, expire)
-        timer.daemon = True
-        timer.start()
         try:
             super().process_request_thread(request, client_address)
         finally:
-            timer.cancel()
             self.slots.release()
 
 
@@ -509,9 +571,29 @@ class LawHandler(BaseHTTPRequestHandler):
     def law_server(self) -> LawServer:
         return cast(LawServer, self.server)
 
-    def setup(self) -> None:
-        self.request.settimeout(1)
-        super().setup()
+    def handle(self) -> None:
+        def expire() -> None:
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError as error:
+                log.debug('Law request already closed: %s', type(error).__name__)
+        self.connection.settimeout(REQUEST_TIMEOUT)
+        self.header_timer = threading.Timer(REQUEST_TIMEOUT, expire)
+        self.header_timer.daemon = True
+        self.header_timer.start()
+        try:
+            super().handle()
+        except OSError as error:
+            self.close_connection = True
+            log.debug('Law client disconnected: %s', type(error).__name__)
+        finally:
+            self.header_timer.cancel()
+
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        self.header_timer.cancel()
+        self.connection.settimeout(10)
+        return parsed
 
     def do_GET(self) -> None:
         if len(self.path) > 2048:
@@ -522,7 +604,13 @@ class LawHandler(BaseHTTPRequestHandler):
             if request.path == '/law':
                 self._send(200, PAGE.encode(), 'text/html; charset=utf-8')
             elif request.path == '/law.json':
-                self._send(200, json.dumps(self.law_server.cache.current(self.law_server.clock()), allow_nan=False).encode(), 'application/json')
+                data = self.law_server.cache.current(self.law_server.clock())
+                data.pop('catalog', None)
+                self._send(200, json.dumps(data, allow_nan=False, separators=(',', ':')).encode(), 'application/json')
+            elif request.path == '/law/catalog.json':
+                self._send(200, json.dumps(self.law_server.cache.current(self.law_server.clock()).get('catalog'), separators=(',', ':')).encode(), 'application/json')
+            elif request.path == '/law/gates.json':
+                self._send(200, json.dumps(self.law_server.cache.overview(self.law_server.clock()), separators=(',', ':')).encode(), 'application/json')
             elif request.path == '/law/history.json':
                 data = self.law_server.cache.history(urllib.parse.parse_qs(request.query), self.law_server.clock())
                 self._send(200, json.dumps(data, allow_nan=False).encode(), 'application/json')
@@ -532,17 +620,32 @@ class LawHandler(BaseHTTPRequestHandler):
             self._send(400, b'{"reason":"invalid_or_unavailable_history"}', 'application/json')
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
-        self.end_headers()
-        self.wfile.write(body)
+        compressed = 'gzip' in self.headers.get('Accept-Encoding', '') and len(body) > 1024
+        if compressed:
+            body = gzip.compress(body, compresslevel=1)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            if compressed:
+                self.send_header('Content-Encoding', 'gzip')
+                self.send_header('Vary', 'Accept-Encoding')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+            self.end_headers()
+            self.wfile.write(body)
+        except OSError as error:
+            self.close_connection = True
+            log.debug('Law client disconnected: %s', type(error).__name__)
 
     def log_message(self, format: str, *args: object) -> None:
         log.debug(format, *args)
+
+
+class HealthHandler(LawHandler):
+    def do_GET(self) -> None:
+        self._send(200 if self.path == '/healthz' else 404, b'ok\n' if self.path == '/healthz' else b'not found\n', 'text/plain')
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -550,11 +653,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--port', type=int, default=8484)
+    parser.add_argument('--health-port', type=int, default=8485)
     args = parser.parse_args(argv)
     if args.check:
         try:
-            with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/law', timeout=3) as response:
-                return 0 if response.status == 200 else 1
+            with urllib.request.urlopen(f'http://127.0.0.1:{args.health_port}/healthz', timeout=3) as response:
+                return 0 if response.status == 200 and response.read(16) == b'ok\n' else 1
         except (OSError, urllib.error.URLError):
             return 1
     cache = TapeCache(args.root)
@@ -573,11 +677,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     thread = threading.Thread(target=refresh, daemon=True)
     thread.start()
     server = LawServer(('0.0.0.0', args.port), cache, lambda: datetime.now(UTC))
+    health = HTTPServer(('0.0.0.0', args.health_port), HealthHandler)
+    health_thread = threading.Thread(target=health.serve_forever, daemon=True)
+    health_thread.start()
     try:
         server.serve_forever()
     finally:
         stop.set()
         server.server_close()
+        health.shutdown()
+        health.server_close()
+        health_thread.join(timeout=1)
         thread.join(timeout=1)
     return 0
 
@@ -587,21 +697,23 @@ PAGE = r'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name
 'use strict';
 const $=s=>document.querySelector(s), esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state=Object.fromEntries(new URLSearchParams(location.search));state.view=['sources','gates','recovery'].includes(state.view)?state.view:'sources';
-let data=null, selectionError='', histories=new Map(), requests=new Set(), receivedAt=0, receivedAge=0, refreshing=false;
+let data=null, selectionError='', histories=new Map(), requests=new Set(), receivedAt=0, receivedAge=0, refreshing=false, catalogKey=null, cachedCatalog=null, overviewKey=null, overviewLoading=false;
 const badge=s=>`<span class="badge ${['PASS','CURRENT','FAIL','FAILED','STALE','EXPECTED_WAIT','WAITING','NOT_DUE','UNKNOWN','NOT_EVALUATED','INACTIVE'].includes(s)?s:'UNKNOWN'}">${['PASS','CURRENT'].includes(s)?'●':['FAIL','FAILED','STALE'].includes(s)?'!':'◌'} ${esc((s||'UNKNOWN').replaceAll('_',' ').toLowerCase())}</span>`;
 const duration=s=>typeof s!=='number'?'—':Math.abs(s)<60?`${Math.round(s)}s`:Math.abs(s)<3600?`${Math.round(s/60)}m`:`${(s/3600).toFixed(1)}h`;
 const utc=s=>s?new Date(s).toISOString().replace('T',' ').replace(/\.\d+Z$/,' UTC'):'Not observed';
 const label=s=>String(s||'').replaceAll('_',' '), safeLink=s=>{try{const u=new URL(s,location.origin);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password?esc(u.href):''}catch{return ''}};
-const sources=()=>data?.catalog?.sources||[], gates=()=>data?.catalog?.gates||[], report=()=>data?.last_report||{}, feed=id=>(report().feeds||[]).find(x=>x.source_key===id), observation=id=>{const o=(report().projections||[]).find(x=>x.id===id);return o&&data.reason?{...o,status:'UNKNOWN',reason:data.reason}:o}, event=id=>{const e=(report().gates||[]).find(x=>x.gate_id===id);return e&&data.reason&&descriptor(id)?.cadence==='periodic'?{...e,outcome:'UNKNOWN'}:e}, descriptor=id=>gates().find(x=>x.id===id), source=id=>sources().find(x=>x.id===id), projection=id=>sources().flatMap(s=>s.projections).find(p=>p.id===id);
+const sources=()=>data?.catalog?.sources||[], gates=()=>data?.catalog?.gates||[], report=()=>data?.last_report||{}, feed=id=>(report().feeds||[]).find(x=>x.source_key===id), observation=id=>{const o=(report().projections||[]).find(x=>x.id===id);return o&&data.reason?{...o,status:'UNKNOWN',reason:data.reason}:o}, event=id=>{const g=descriptor(id),current=(report().gates||[]).find(x=>x.gate_id===id),last=data?.last_gate_events?.[id];if(g?.cadence==='event-driven'&&last?.definition_version===g.definition_version)return {...last,last_recorded:true};return current&&!data.reason?current:{outcome:g?.cadence==='event-driven'?'NOT_EVALUATED':'UNKNOWN'}}, descriptor=id=>gates().find(x=>x.id===id), source=id=>sources().find(x=>x.id===id), projection=id=>sources().flatMap(s=>s.projections).find(p=>p.id===id);
 function select(values){Object.assign(state,values);for(const k of Object.keys(state))if(!state[k])delete state[k];history.replaceState(null,'',location.pathname+'?'+new URLSearchParams(state));render()}
 function codeLink(code){return code&&/^[a-f0-9]{40}$/.test(code.deployed_sha)&&safeLink(code.url)?`<a href="${safeLink(code.url)}" target="_blank" rel="noopener">${esc(code.path)}:${esc(code.line)} ↗</a>`:'Code location unavailable · UNKNOWN'}
 function tooltip(g){return `<strong>What this gate is</strong>${esc(g.purpose)}<strong>Governs · ${esc(g.role)}</strong>${esc(g.governed_action)}<strong>Fails or waits when</strong>${esc(g.condition)}<strong>Configured thresholds</strong>${Object.entries(g.thresholds||{}).map(([k,v])=>`${esc(label(k))}: ${esc(v)}`).join('<br>')||'No numeric threshold'}<strong>Evidence · ${esc(g.cadence)}</strong>${esc(g.evidence_source)}<strong>Deployed code</strong>${codeLink(g.code)}`}
 function sourceCard(s){const f=feed(s.id),r=f?.predicates?.R1,e=r?.evidence||{},obs=s.projections.map(p=>observation(p.id)),problems=obs.filter(o=>!o||['FAILED','STALE','UNKNOWN'].includes(o.status)).length;return `<article class="source" data-source-card="${esc(s.id)}"><div class="source-head"><div><button class="source-title" data-source="${esc(s.id)}">${esc(label(s.name))}</button><div class="source-sub">${esc(s.rollout_stage)} · ${s.projections.length} declared stages</div></div>${badge(data.reason?'UNKNOWN':Object.values(f?.predicates||{}).some(p=>p.status==='FAIL')?'FAIL':obs.some(o=>o&&['FAILED','STALE'].includes(o.status))?'FAIL':problems?'UNKNOWN':'CURRENT')}</div><div class="diagram"><svg class="wires" aria-hidden="true"></svg><button class="hub" data-source="${esc(s.id)}"><span>◈ Source</span><small>${esc(s.rollout_stage)}</small></button><div class="lanes">${['canonical','provisional','depth','consumer'].map(l=>{const nodes=s.projections.filter(p=>p.lane===l);return nodes.length?`<div class="lane"><div class="lane-label">${l==='consumer'?'Published outputs':esc(l)}</div><div class="nodes">${nodes.map(p=>`<button class="node ${state.projection===p.id?'selected':''} ${p.current_target?'target':''}" data-projection="${esc(p.id)}" data-target="${esc(p.current_target||'')}" aria-label="${esc(s.name+' '+p.name+' '+(observation(p.id)?.status||'UNKNOWN'))}"><span class="node-name">${esc(label(p.name))}</span>${badge(observation(p.id)?.status||'UNKNOWN')}</button>`).join('')}</div></div>`:''}).join('')}</div></div><div class="source-foot"><span>${f?.predicates?.C2?.status==='PASS'&&f?.predicates?.C1?.status==='PASS'?'Readable through':'Latest readable end'} <strong>${e.reader_end?esc(utc(e.reader_end)):'Not observed'}</strong></span><span>Delay <strong>${duration(e.age_seconds)}</strong>${e.budget_seconds!=null?' / '+duration(e.budget_seconds)+' budget':''}</span>${f?.predicates?.C2?`<span>Older history ${badge(f.predicates.C2.status)}</span>`:''}${f?.predicates?.D1?`<span>Depth gaps <strong>${esc(f.predicates.D1.evidence?.missing_slots)}</strong> / 1,440 slots</span>`:''}</div></article>`}
 function drawWires(){document.querySelectorAll('.diagram').forEach(d=>{const svg=d.querySelector('svg'),hub=d.querySelector('.hub').getBoundingClientRect(),box=d.getBoundingClientRect();let paths='';d.querySelectorAll('.node').forEach(n=>{const rect=n.getBoundingClientRect(),x=hub.right-box.left,y=hub.top+hub.height/2-box.top,ex=rect.left-box.left,ey=rect.top+rect.height/2-box.top;paths+=`<path d="M${x},${y} H${x+9} V${ey} H${ex}"/>`;const target=n.dataset.target;if(target){const t=[...d.querySelectorAll('.node')].find(o=>o.dataset.projection===target||o.dataset.projection.endsWith(':'+target));if(t){const b=t.getBoundingClientRect();paths+=`<path class="target-edge" d="M${rect.left+rect.width/2-box.left},${rect.top-box.top} V${b.bottom-box.top}"/>`}}});svg.innerHTML=paths})}
-function gateCard(g){const days=data.gate_days?.[g.id]||[],ev=event(g.id),filtered=state.source&&!g.scope?.some(id=>id===state.source||id.startsWith(state.source+':'));if(filtered||(state.family&&!g.id.startsWith(state.family))||(state.search&&!JSON.stringify([g.name,g.purpose,g.condition,g.scope]).toLowerCase().includes(state.search.toLowerCase()))||(state.attention==='1'&&!['FAIL','UNKNOWN'].includes(ev?.outcome)))return '';return `<article class="gate"><div class="gate-heading"><button data-gate="${esc(g.id)}">${esc(g.name)}${g.retired?' · retired':''}</button><span class="info-wrap"><button class="info" aria-label="About ${esc(g.name)}" aria-expanded="false" data-info>i</button><span class="tooltip" role="tooltip">${tooltip(g)}</span></span>${badge(ev?.outcome||'NOT_EVALUATED')}</div><div class="gate-meta" style="margin:0 0 7px">${esc((g.scope||[]).map(label).join(' · '))}</div><div class="heatmap" aria-label="30-day observations for ${esc(g.name)}">${days.map(d=>{const gap=d.not_observed||(d.expected_slots!=null&&d.observed_slots<d.expected_slots),kind=d.fail_count?'fail':d.unknown_count||gap?'gap':d.wait_count?'wait':'pass';return `<button class="day ${kind}" data-day="${d.day}" data-gate-day="${esc(g.id)}" title="${d.day} UTC day totals · ${d.evaluation_count} evaluations · ${d.fail_count} failed${gap?' · observation gaps':''}" aria-label="${d.day}: ${d.fail_count} failed, ${d.evaluation_count} evaluations${gap?', observation gaps':''}"></button>`}).join('')}</div><div class="gate-meta"><span>${esc(days[0]?.day||'History loading')} → today · ${esc(g.role)}</span><span>${g.cadence==='event-driven'?'Event-driven · no event ≠ pass':'Periodic · gaps remain visible'}${ev?.evaluated_at?' · '+esc(utc(ev.evaluated_at)):''}</span></div></article>`}
+function blankDays(g,days,end){return days.map(day=>({day,pass_count:0,fail_count:0,wait_count:0,unknown_count:0,evaluation_count:0,not_observed:true,observed_slots:g.cadence==='periodic'?0:null,expected_slots:g.cadence==='periodic'?Math.ceil(Math.min(86400000,Date.parse(end)-Date.parse(day+'T00:00:00Z'))/60000):null}))}
+async function loadOverview(){const key=data?.checked_at+'|'+data?.history_loading;if(overviewLoading||overviewKey===key)return;overviewLoading=true;try{const response=await fetch('/law/gates.json',{signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error();const overview=await response.json(),rows={};for(const gate of gates()){const days=blankDays(gate,overview.days,overview.end),indexed=new Map(days.map(d=>[d.day,d]));for(const row of overview.gates[gate.id]||[]){const day=indexed.get(row[0]);if(day)Object.assign(day,{pass_count:row[1],fail_count:row[2],wait_count:row[3],unknown_count:row[4],evaluation_count:row[5],observed_slots:row[6],expected_slots:row[7],not_observed:false})}rows[gate.id]=days}data.gate_days=rows;overviewKey=key;if(state.view==='gates')renderContent()}catch{$('#message').textContent='Gate history unavailable. Current source observations remain visible.'}finally{overviewLoading=false}}
+function gateCard(g){const days=data.gate_days?.[g.id]||[],ev=event(g.id),filtered=state.source&&!g.scope?.some(id=>id===state.source||id.startsWith(state.source+':'));if(filtered||(state.family&&!g.id.startsWith(state.family))||(state.search&&!JSON.stringify([g.name,g.purpose,g.condition,g.scope]).toLowerCase().includes(state.search.toLowerCase()))||(state.attention==='1'&&!['FAIL','UNKNOWN'].includes(ev?.outcome)))return '';return `<article class="gate"><div class="gate-heading"><button data-gate="${esc(g.id)}">${esc(g.name)}${g.retired?' · retired':''}</button><span class="info-wrap"><button class="info" aria-label="About ${esc(g.name)}" aria-expanded="false" data-info>i</button><span class="tooltip" role="tooltip">${tooltip(g)}</span></span>${badge(ev?.outcome||'NOT_EVALUATED')}</div><div class="gate-meta" style="margin:0 0 7px">${esc((g.scope||[]).map(label).join(' · '))}</div><div class="heatmap" aria-label="30-day observations for ${esc(g.name)}">${days.map(d=>{const gap=d.not_observed||(d.expected_slots!=null&&d.observed_slots<d.expected_slots),kind=d.fail_count?'fail':d.unknown_count||gap?'gap':d.wait_count?'wait':'pass';return `<button class="day ${kind}" data-day="${d.day}" data-gate-day="${esc(g.id)}" title="${d.day} UTC day totals · ${d.evaluation_count} evaluations · ${d.fail_count} failed${gap?' · observation gaps':''}" aria-label="${d.day}: ${d.fail_count} failed, ${d.evaluation_count} evaluations${gap?', observation gaps':''}"></button>`}).join('')}</div><div class="gate-meta"><span>${esc(days[0]?.day||'History loading')} → today · ${esc(g.role)}</span><span>${ev?.last_recorded?'Last recorded · current blocking unknown':g.cadence==='event-driven'?'Event-driven · no event ≠ pass':'Periodic · gaps remain visible'}${ev?.evaluated_at?' · '+esc(utc(ev.evaluated_at)):''}</span></div></article>`}
 function relevant(p,o){return [...new Set([...(o?.gate_ids||[]),...gates().filter(g=>(g.scope||[]).includes(p.id)||g.id.startsWith('law.')&&(g.scope||[]).includes(p.source_key)).map(g=>g.id)])].sort((a,b)=>gateRank(descriptor(a)||{})-gateRank(descriptor(b)||{}))}
 function fields(values){return Object.entries(values||{}).filter(([,v])=>v!==null&&typeof v!=='object').map(([k,v])=>`<dt>${esc(label(k))}</dt><dd>${esc(v)}</dd>`).join('')}
-function eventList(events,definitions=[]){return events.map(e=>`<div class="event">${badge(e.outcome)} <time>${esc(utc(e.evaluated_at))}</time><p>${esc(e.effect)} · ${esc(label(e.reason))}</p><dl>${fields(e.evidence)}</dl><details><summary>Definition at evaluation</summary>${definitions.find(d=>d.definition_version===e.definition_version)?tooltip(definitions.find(d=>d.definition_version===e.definition_version)):'Original definition unavailable · UNKNOWN'}</details>${e.dagit_url&&safeLink(e.dagit_url)?`<a href="${safeLink(e.dagit_url)}" target="_blank" rel="noopener">Dagit evidence ↗</a>`:''}</div>`).join('')}
+function eventList(events,definitions=[]){return events.map(e=>`<div class="event">${badge(e.outcome)} <time>${esc(utc(e.evaluated_at))}</time><p>${esc(e.effect)} · ${esc(label(e.reason))}</p><dl>${fields(e.evidence)}</dl><details><summary>Definition at evaluation</summary>${definitions.find(d=>e.deployed_sha&&d.definition_version===e.definition_version&&d.code?.deployed_sha===e.deployed_sha)?tooltip(definitions.find(d=>e.deployed_sha&&d.definition_version===e.definition_version&&d.code?.deployed_sha===e.deployed_sha)):'Original deployed code unavailable · UNKNOWN'}</details>${e.dagit_url&&safeLink(e.dagit_url)?`<a href="${safeLink(e.dagit_url)}" target="_blank" rel="noopener">Dagit evidence ↗</a>`:''}</div>`).join('')}
 function interval(){const end=state.to||data?.checked_at||new Date().toISOString(),start=state.from||new Date(new Date(end)-86400000).toISOString();return {start,end}}
 function storeHistory(key,value){histories.delete(key);histories.set(key,value);while(histories.size>8)histories.delete(histories.keys().next().value)}
 function getHistory(key){const value=histories.get(key);if(value){histories.delete(key);histories.set(key,value)}return value}
@@ -609,13 +721,13 @@ function historyKey(id){const {start,end}=interval();return id+'|'+start+'|'+end
 async function loadHistory(id,more=false){const key=historyKey(id);if(requests.has(key)||histories.has(key)&&!more)return;requests.add(key);const {start,end}=interval(),old=getHistory(key),q=new URLSearchParams({gate_id:id,from:start,to:end});if(more&&old?.next_cursor)q.set('cursor',old.next_cursor);try{const response=await fetch('/law/history.json?'+q);if(!response.ok)throw Error('History unavailable');const value=await response.json();value.events=[...(more?old.events:[]),...value.events];if(value.loading)value.error='History is still indexing; these observations are incomplete.';if(value.events.length>5000){value.events=value.events.slice(0,5000);value.limited=true;value.next_cursor=null}if(value.limited)value.error='History query reached its memory budget; narrow the selected interval.';storeHistory(key,value);renderDetail();if(state.view==='recovery')renderContent()}catch{storeHistory(key,{error:'History unavailable. The current observation remains visible.',events:[]});renderDetail()}finally{requests.delete(key)}}
 function trend(events,key='age_seconds',width=710){const unit=key.includes('seconds')?'s':'';const pts=events.map(e=>({x:Date.parse(e.evaluated_at),y:e.evidence?.[key]})).filter(p=>typeof p.y==='number'&&Number.isFinite(p.y)).sort((a,b)=>a.x-b.x);if(!pts.length)return '<div class="trend-empty">No numeric observations in this interval.</div>';const lo=pts[0].x,hi=pts.at(-1).x,max=Math.max(1,...pts.map(p=>p.y));let d='';pts.forEach((p,i)=>{const x=42+(p.x-lo)/Math.max(1,hi-lo)*(width-70),y=107-p.y/max*85;d+=(i&&p.x-pts[i-1].x<=120000?'L':'M')+x+','+y+' ';if(pts.length===1)d+='l1,0 '});return `<svg class="spark" viewBox="0 0 ${width} 130" role="img" aria-label="Observed ${esc(label(key))}; gaps are not interpolated"><line x1="42" y1="107" x2="${width-28}" y2="107"/><text x="2" y="22">${Math.round(max)}${unit}</text><text x="12" y="110">0${unit}</text><path d="${d}"/><text x="42" y="128">${esc(new Date(lo).toISOString().slice(11,16))} UTC</text><text x="${width-95}" y="128">${esc(new Date(hi).toISOString().slice(11,16))} UTC</text></svg>`}
 function numericChart(h){if(!h?.events?.length)return '';const keys=[...new Set(h.events.flatMap(e=>Object.entries(e.evidence||{}).filter(([,v])=>typeof v==='number').map(([k])=>k)))];if(!keys.length)return '';const metric=keys.includes(state.metric)?state.metric:keys.includes('age_seconds')?'age_seconds':keys[0];return `<label class="eyebrow" for="history-metric">Observed values</label><select id="history-metric" style="max-width:100%;margin-top:7px">${keys.map(k=>`<option value="${esc(k)}" ${k===metric?'selected':''}>${esc(label(k))}</option>`).join('')}</select>${trend(h.events,metric,260)}`}
-function renderDetail(){const box=$('#detail'),g=descriptor(state.gate),p=projection(state.projection),s=source(state.source)||source(p?.source_key);box.hidden=!g&&!p&&!s;$('#layout').classList.toggle('has-detail',!box.hidden);if(box.hidden)return;let body='<button class="close" aria-label="Close details" data-close>&times;</button><div class="eyebrow">Evidence, in context</div>';if(g){const h=getHistory(historyKey(g.id));body+=`<h2>${esc(g.name)}</h2>${badge(event(g.id)?.outcome||'NOT_EVALUATED')}<div class="note">${esc(g.governed_action)}</div><dl><dt>Fails / waits when</dt><dd>${esc(g.condition)}</dd><dt>Thresholds</dt><dd>${esc(JSON.stringify(g.thresholds))}</dd><dt>Deployed definition</dt><dd>${codeLink(g.code)}</dd></dl><button class="link-button" data-range="24">Past 24 hours</button><button class="link-button" data-range="720">Past 30 days</button><p class="eyebrow">${esc(interval().start.slice(0,16))} → ${esc(interval().end.slice(0,16))} UTC</p>${numericChart(h)}${h?esc(h.error||'')+(h.events.length?eventList(h.events,h.definitions):'<p class="muted">No attributable evaluations in this interval.</p>'):'<p class="muted">Loading original evaluations…</p>'}${h?.next_cursor?'<button class="link-button" data-more>Load next observations</button>':''}`;loadHistory(g.id)}else if(p){const o=observation(p.id);body+=`<h2>${esc(label(p.name))}</h2><p class="muted">${esc(s?.name)} / ${esc(p.lane)}</p>${badge(o?.status||'UNKNOWN')}<dl><dt>Evidence</dt><dd>${p.lane==='consumer'?'Published artifact':p.lane==='depth'?'Depth store observation':'Active build / component proof'} · ${esc(o?.evidence_id||'Not observed')}</dd><dt>Data through</dt><dd>${esc(utc(o?.data_through))}</dd><dt>Evidence time</dt><dd>${esc(utc(o?.evidence_at))}</dd><dt>Reason</dt><dd>${esc(label(o?.reason||'unknown'))}</dd><dt>Definition</dt><dd>${codeLink(p.code)}</dd></dl>${o?.dagit_url&&safeLink(o.dagit_url)?`<a class="link-button" href="${safeLink(o.dagit_url)}" target="_blank" rel="noopener">Open in Dagit ↗</a>`:''}<p class="eyebrow">Relevant gates</p>${relevant(p,o).map(id=>`<button class="link-button" data-gate="${esc(id)}">${esc(descriptor(id)?.name||id)} →</button>`).join('')||'<p class="muted">No attributable gate evaluation.</p>'}`;}else if(s){const f=feed(s.id);body+=`<h2>${esc(label(s.name))}</h2><p class="muted">${esc(s.rollout_stage)} · ${s.projections.length} stages</p>${Object.entries(f?.predicates||{}).map(([k,v])=>`<p><strong>${esc(k)}</strong> ${badge(v.status)}</p><dl>${fields(v.evidence)}</dl>`).join('')}<button class="link-button" data-source-gates="${esc(s.id)}">Explore related gates →</button>`}box.innerHTML=body}
-function attention(s){const states=Object.values(feed(s.id)?.predicates||{}).map(p=>p.status);return states.includes('FAIL')?0:states.includes('UNKNOWN')?1:2}function gateRank(g){return {FAIL:0,UNKNOWN:1,EXPECTED_WAIT:2}[event(g.id)?.outcome]??3}function renderContent(){let html='';if(state.view==='sources')html=[...sources()].sort((a,b)=>attention(a)-attention(b)).map(sourceCard).join('');else if(state.view==='gates')html=[...gates()].sort((a,b)=>gateRank(a)-gateRank(b)).map(gateCard).join('');else html=sources().filter(s=>!state.source||s.id===state.source).map(s=>{const f=feed(s.id),r=f?.predicates?.R1,e=r?.evidence||{},id=gates().find(g=>g.scope?.includes(s.id)&&(g.id.includes('R1')||g.id.toLowerCase().includes('r1')))?.id,h=id?getHistory(historyKey(id)):null;if(id)loadHistory(id);return `<article class="chart-card"><h3><button class="source-title" data-source="${esc(s.id)}">${esc(label(s.name))}</button></h3><div class="recovery-metrics"><div><strong>${duration(e.age_seconds)}</strong><small>Reader delay · ${duration(e.budget_seconds)} budget</small></div><div><strong>${duration(data.delay_change_1h_seconds?.[s.id])}</strong><small>Change versus one hour ago</small></div><div><strong>${badge(f?.predicates?.C1?.status||f?.predicates?.D1?.status||'UNKNOWN')}</strong><small>${f?.predicates?.C1?'Daily archive':'Depth continuity'}</small></div></div>${h?.next_cursor?`<p class="notice">Incomplete chart · ${h.events.length} observations loaded. <button class="link-button" data-history-more="${esc(id)}">Load next observations</button></p>`:''}${h?.error?`<p class="notice">${esc(h.error)}</p>`:''}${h?trend(h.events):'<div class="trend-empty">'+(id?'Loading original numeric observations…':'No mapped delay observations.')+'</div>'}<div class="source-foot"><span>Older history ${badge(f?.predicates?.C2?.status||'UNKNOWN')}</span>${f?.predicates?.C1?.evidence?.deadline?`<span>Archive deadline ${esc(utc(f.predicates.C1.evidence.deadline))}</span>`:''}</div></article>`}).join('');$('#content').innerHTML=html||'<div class="empty">No catalog is available yet. Current status remains unknown until the monitor records a complete observation.</div>';$('#content').setAttribute('aria-label',state.view);$('#content').dataset.view=state.view;requestAnimationFrame(drawWires)}
+function renderDetail(){const box=$('#detail'),g=descriptor(state.gate),p=projection(state.projection),s=source(state.source)||source(p?.source_key);box.hidden=!g&&!p&&!s;$('#layout').classList.toggle('has-detail',!box.hidden);if(box.hidden)return;let body='<button class="close" aria-label="Close details" data-close>&times;</button><div class="eyebrow">Evidence, in context</div>';if(g){const h=getHistory(historyKey(g.id));body+=`<h2>${esc(g.name)}</h2>${badge(event(g.id)?.outcome||'NOT_EVALUATED')}${event(g.id)?.last_recorded?`<p class="muted">Last recorded ${esc(utc(event(g.id).evaluated_at))} · current blocking unknown</p>`:''}<div class="note">${esc(g.governed_action)}</div><dl><dt>Fails / waits when</dt><dd>${esc(g.condition)}</dd><dt>Thresholds</dt><dd>${esc(JSON.stringify(g.thresholds))}</dd><dt>Deployed definition</dt><dd>${codeLink(g.code)}</dd></dl><button class="link-button" data-range="24">Past 24 hours</button><button class="link-button" data-range="720">Past 30 days</button><p class="eyebrow">${esc(interval().start.slice(0,16))} → ${esc(interval().end.slice(0,16))} UTC</p>${numericChart(h)}${h?esc(h.error||'')+(h.events.length?eventList(h.events,h.definitions):'<p class="muted">No attributable evaluations in this interval.</p>'):'<p class="muted">Loading original evaluations…</p>'}${h?.next_cursor?'<button class="link-button" data-more>Load next observations</button>':''}`;loadHistory(g.id)}else if(p){const o=observation(p.id);body+=`<h2>${esc(label(p.name))}</h2><p class="muted">${esc(s?.name)} / ${esc(p.lane)}</p>${badge(o?.status||'UNKNOWN')}<dl><dt>Evidence</dt><dd>${p.lane==='consumer'?'Published artifact':p.lane==='depth'?'Depth store observation':'Active build / component proof'} · ${esc(o?.evidence_id||'Not observed')}</dd><dt>Data through</dt><dd>${esc(utc(o?.data_through))}</dd><dt>Evidence time</dt><dd>${esc(utc(o?.evidence_at))}</dd><dt>Reason</dt><dd>${esc(label(o?.reason||'unknown'))}</dd><dt>Definition</dt><dd>${codeLink(p.code)}</dd></dl>${o?.dagit_url&&safeLink(o.dagit_url)?`<a class="link-button" href="${safeLink(o.dagit_url)}" target="_blank" rel="noopener">Open in Dagit ↗</a>`:''}<p class="eyebrow">Relevant gates</p>${relevant(p,o).map(id=>`<button class="link-button" data-gate="${esc(id)}">${esc(descriptor(id)?.name||id)} →</button>`).join('')||'<p class="muted">No attributable gate evaluation.</p>'}`;}else if(s){const f=feed(s.id);body+=`<h2>${esc(label(s.name))}</h2><p class="muted">${esc(s.rollout_stage)} · ${s.projections.length} stages</p>${Object.entries(f?.predicates||{}).map(([k,v])=>`<p><strong>${esc(k)}</strong> ${badge(v.status)}</p><dl>${fields(v.evidence)}</dl>`).join('')}<button class="link-button" data-source-gates="${esc(s.id)}">Explore related gates →</button>`}box.innerHTML=body}
+function attention(s){const states=Object.values(feed(s.id)?.predicates||{}).map(p=>p.status);return states.includes('FAIL')?0:states.includes('UNKNOWN')?1:2}function gateRank(g){return {FAIL:0,UNKNOWN:1,EXPECTED_WAIT:2}[event(g.id)?.outcome]??3}function renderContent(){if(state.view==='gates')loadOverview();let html='';if(state.view==='sources')html=[...sources()].sort((a,b)=>attention(a)-attention(b)).map(sourceCard).join('');else if(state.view==='gates')html=[...gates()].sort((a,b)=>gateRank(a)-gateRank(b)).map(gateCard).join('');else html=sources().filter(s=>!state.source||s.id===state.source).map(s=>{const f=feed(s.id),r=f?.predicates?.R1,e=r?.evidence||{},id=gates().find(g=>g.scope?.includes(s.id)&&(g.id.includes('R1')||g.id.toLowerCase().includes('r1')))?.id,h=id?getHistory(historyKey(id)):null;if(id)loadHistory(id);return `<article class="chart-card"><h3><button class="source-title" data-source="${esc(s.id)}">${esc(label(s.name))}</button></h3><div class="recovery-metrics"><div><strong>${duration(e.age_seconds)}</strong><small>Reader delay · ${duration(e.budget_seconds)} budget</small></div><div><strong>${duration(data.delay_change_1h_seconds?.[s.id])}</strong><small>Change versus one hour ago</small></div><div><strong>${badge(f?.predicates?.C1?.status||f?.predicates?.D1?.status||'UNKNOWN')}</strong><small>${f?.predicates?.C1?'Daily archive':'Depth continuity'}</small></div></div>${h?.next_cursor?`<p class="notice">Incomplete chart · ${h.events.length} observations loaded. <button class="link-button" data-history-more="${esc(id)}">Load next observations</button></p>`:''}${h?.error?`<p class="notice">${esc(h.error)}</p>`:''}${h?trend(h.events):'<div class="trend-empty">'+(id?'Loading original numeric observations…':'No mapped delay observations.')+'</div>'}<div class="source-foot"><span>Older history ${badge(f?.predicates?.C2?.status||'UNKNOWN')}</span>${f?.predicates?.C1?.evidence?.deadline?`<span>Archive deadline ${esc(utc(f.predicates.C1.evidence.deadline))}</span>`:''}</div></article>`}).join('');$('#content').innerHTML=html||'<div class="empty">No catalog is available yet. Current status remains unknown until the monitor records a complete observation.</div>';$('#content').setAttribute('aria-label',state.view);$('#content').dataset.view=state.view;requestAnimationFrame(drawWires)}
 function render(){if(!data)return;const age=data.age_seconds,obs=(report().projections||[]).map(o=>observation(o.id)),needs=(report().feeds||[]).filter(f=>Object.values(f.predicates||{}).some(p=>p.status==='FAIL')).length;$('#health').outerHTML=`<span id="health" class="badge ${data.status}">Core law · ${esc(data.status.toLowerCase())}</span>`;$('#summary').textContent=needs?`${needs} sources need attention. Select a source or stage to see its evidence and blocker.`:'Follow every declared stage from its source to its published output.';$('#metrics').innerHTML=`<div class="metric"><strong>${sources().length}</strong><span>authoritative sources</span></div><div class="metric"><strong>${obs.filter(o=>o.status==='CURRENT').length} / ${sources().reduce((n,s)=>n+s.projections.length,0)}</strong><span>stages verified current</span></div><div class="metric"><strong>${duration(age)}</strong><span>since latest report</span></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-selected',b.dataset.view===state.view));$('#context').innerHTML=`<span class="eyebrow">${state.view==='sources'?'Source → projections → outputs':state.view==='gates'?'30 days of gate evidence':'Reader recovery'}</span>`+['source','projection','gate'].filter(k=>state[k]).map(k=>`<button data-clear="${k}" title="Clear ${k}">${esc(k==='source'?source(state[k])?.name||state[k]:k==='gate'?descriptor(state[k])?.name||state[k]:projection(state[k])?.name||state[k])} &times;</button>`).join('');$('#filters').innerHTML=state.view==='gates'?`<input id="gate-search" type="search" aria-label="Find a gate" placeholder="Find a gate or condition…" value="${esc(state.search||'')}"><select id="gate-family" aria-label="Gate family"><option value="">All gate families</option>${[...new Set(gates().map(g=>g.id.split(':')[0].split('.').slice(0,2).join('.')))].sort().map(f=>`<option value="${esc(f)}" ${state.family===f?'selected':''}>${esc(label(f))}</option>`).join('')}</select><select id="gate-source" aria-label="Gate source"><option value="">All sources</option>${sources().map(s=>`<option value="${esc(s.id)}" ${state.source===s.id?'selected':''}>${esc(label(s.name))}</option>`).join('')}</select><button class="link-button" data-attention aria-pressed="${state.attention==='1'}">${state.attention==='1'?'✓ ':''}Needs attention</button>`:'';$('#message').innerHTML=(selectionError?`<div class="notice">${esc(selectionError)}</div>`:'')+(data.reason?`<div class="notice">Current status cannot be verified: ${esc(label(data.reason))}. Last checked ${esc(utc(data.checked_at))}.</div>`:'')+(data.history_limited?'<div class="notice">History cache reached its memory budget. Coverage is incomplete; the current observation remains available.</div>':'')+(data.history_loading?'<div class="muted" style="font-size:11px;margin-bottom:10px">Current observation is ready. Earlier history is loading independently.</div>':'')+(state.view==='recovery'?`<div class="note">Core-law consecutive clear window: ${duration(data.consecutive_clear_seconds)} / 72h · ${data.consecutive_clear_slots} distinct slots. ${data.not_due_slots} slots include an archive not yet due.</div>`:'');renderContent();renderDetail()}
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.view)select({view:b.dataset.view});else if(b.dataset.source)select({source:b.dataset.source,projection:null,gate:null});else if(b.dataset.projection){const p=projection(b.dataset.projection);select({source:p?.source_key,projection:p?.id,gate:null})}else if(b.dataset.gate)select({gate:b.dataset.gate,view:'gates'});else if(b.dataset.gateDay){const start=b.dataset.day+'T00:00:00Z',end=new Date(Math.min(Date.parse(data.checked_at)||Date.now(),Date.parse(start)+86400000)).toISOString();select({gate:b.dataset.gateDay,from:start,to:end})}else if(b.hasAttribute('data-info')){const on=b.parentElement.classList.toggle('open');b.setAttribute('aria-expanded',String(on))}else if(b.hasAttribute('data-close'))select({projection:null,gate:null,source:null});else if(b.dataset.clear)select({[b.dataset.clear]:null});else if(b.dataset.sourceGates)select({view:'gates',source:b.dataset.sourceGates});else if(b.dataset.range){const end=new Date(data.checked_at||Date.now());select({from:new Date(end-Number(b.dataset.range)*3600000).toISOString(),to:end.toISOString()})}else if(b.hasAttribute('data-attention'))select({attention:state.attention==='1'?null:'1'});else if(b.dataset.historyMore)loadHistory(b.dataset.historyMore,true);else if(b.hasAttribute('data-more')&&state.gate)loadHistory(state.gate,true)});
 document.addEventListener('input',e=>{if(e.target.id==='gate-search'){state.search=e.target.value;history.replaceState(null,'',location.pathname+'?'+new URLSearchParams(state));renderContent()}});document.addEventListener('change',e=>{if(e.target.id==='history-metric')select({metric:e.target.value});if(e.target.id==='gate-family')select({family:e.target.value});if(e.target.id==='gate-source')select({source:e.target.value,projection:null})});
 window.addEventListener('resize',()=>requestAnimationFrame(drawWires));window.addEventListener('popstate',()=>{for(const k of Object.keys(state))delete state[k];Object.assign(state,Object.fromEntries(new URLSearchParams(location.search)));state.view=state.view||'sources';render()});
-async function refresh(){if(refreshing)return;refreshing=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch('/law.json',{signal:controller.signal});if(!response.ok)throw Error();data=await response.json();receivedAt=performance.now();receivedAge=data.age_seconds;for(const [key,value] of histories)if(value.loading)histories.delete(key);const invalidTime=(state.from||state.to)&&(!state.from||!state.to||!Number.isFinite(Date.parse(state.from))||!Number.isFinite(Date.parse(state.to))||Date.parse(state.from)>=Date.parse(state.to)||Date.parse(state.to)-Date.parse(state.from)>30*86400000);if(invalidTime){selectionError='Invalid UTC interval in this URL.';delete state.from;delete state.to}const invalid=(state.source&&!source(state.source))||(state.projection&&!projection(state.projection))||(state.gate&&!descriptor(state.gate));if(invalid){selectionError='Unknown catalog selection in this URL.';for(const k of ['source','projection','gate'])delete state[k]}render()}catch{if(data){data={...data,status:'UNKNOWN',reason:'observation_service_unavailable'};render()}else{$('#message').textContent='Observation service unavailable. No current status can be verified.';$('#health').textContent='Core law · unknown'}}finally{clearTimeout(timeout);refreshing=false}}
+async function refresh(){if(refreshing)return;refreshing=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch('/law.json',{signal:controller.signal});if(!response.ok)throw Error();const latest=await response.json();if(catalogKey!==latest.catalog_key){const catalogResponse=await fetch('/law/catalog.json',{signal:controller.signal});if(!catalogResponse.ok)throw Error();cachedCatalog=await catalogResponse.json();catalogKey=latest.catalog_key}data={...latest,catalog:cachedCatalog,gate_days:data?.gate_days};overviewKey=null;receivedAt=performance.now();receivedAge=data.age_seconds;for(const [key,value] of histories)if(value.loading)histories.delete(key);const invalidTime=(state.from||state.to)&&(!state.from||!state.to||!Number.isFinite(Date.parse(state.from))||!Number.isFinite(Date.parse(state.to))||Date.parse(state.from)>=Date.parse(state.to)||Date.parse(state.to)-Date.parse(state.from)>30*86400000);if(invalidTime){selectionError='Invalid UTC interval in this URL.';delete state.from;delete state.to}const invalid=(state.source&&!source(state.source))||(state.projection&&!projection(state.projection))||(state.gate&&!descriptor(state.gate));if(invalid){selectionError='Unknown catalog selection in this URL.';for(const k of ['source','projection','gate'])delete state[k]}render()}catch{if(data){data={...data,status:'UNKNOWN',reason:'observation_service_unavailable'};render()}else{$('#message').textContent='Observation service unavailable. No current status can be verified.';$('#health').textContent='Core law · unknown'}}finally{clearTimeout(timeout);refreshing=false}}
 refresh();setInterval(()=>{if(data&&typeof receivedAge==='number'&&receivedAge+(performance.now()-receivedAt)/1000>120&&data.reason!=='stale_report'){data={...data,status:'UNKNOWN',reason:'stale_report',age_seconds:receivedAge+(performance.now()-receivedAt)/1000};render()}},1000);setInterval(refresh,30000);
 </script></body></html>'''
 

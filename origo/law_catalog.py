@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib
 import inspect
@@ -14,7 +15,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import Literal, Protocol, TypedDict, cast
+from typing import Literal, NotRequired, Protocol, TypedDict, cast
 
 Scalar = str | int | float | bool | None
 Threshold = str | int | float | bool
@@ -84,6 +85,7 @@ class ProjectionObservation(TypedDict):
 
 class GateEvaluation(TypedDict):
     gate_id: str
+    deployed_sha: NotRequired[str]
     definition_version: str
     evidence_id: str
     evaluated_at: str
@@ -151,6 +153,24 @@ def _hash(value: object) -> str:
     ).hexdigest()
 
 
+def _implementation(module_name: str) -> str:
+    module = _resolve(module_name)
+    if not isinstance(module, ModuleType):
+        raise TypeError('Gate implementation owner must be a module.')
+    tree = ast.parse(inspect.getsource(module))
+    # Include local helpers and SQL, excluding documentation and source locations.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                del node.body[0]
+    return _hash(ast.dump(tree, include_attributes=False))
+
+
 def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
     if not re.fullmatch(r'[0-9a-f]{40}', deployed_sha):
         return None
@@ -185,6 +205,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
 
     gates: list[GateDescriptor] = []
     sources: list[SourceDescriptor] = []
+    implementations: dict[str, str] = {}
 
     def add(
         identity: str,
@@ -212,7 +233,20 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             'evidence_source': evidence,
             'code': code_location(_resolve(owner), deployed_sha),
         }
-        descriptor['definition_version'] = _hash(descriptor)
+        module = owner.partition(':')[0]
+        if module not in implementations:
+            implementations[module] = _implementation(module)
+        descriptor['definition_version'] = _hash(
+            {
+                **{
+                    key: value
+                    for key, value in descriptor.items()
+                    if key not in ('definition_version', 'code')
+                },
+                'owner': owner,
+                'implementation': implementations[module],
+            }
+        )
         gates.append(descriptor)
 
     for spec in SOURCE_REGISTRY:
@@ -328,7 +362,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             [key],
             'sources.dagit:observe_source',
             'Source health observation',
-            'Unresolved source, partition or consumer failures produce an unhealthy source result.',
+            'Unresolved non-reconciliation source, partition or consumer failures produce an unhealthy source result.',
             role='observe',
             evidence='source_failure_log; Dagit source_health evaluation',
         )
@@ -340,7 +374,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ),
             (
                 'volume_identity',
-                'Mounted UUID and supported local disk must match the ClickHouse server.',
+                'The volume path must be absolute; its mounted UUID and supported local disk must match the ClickHouse server.',
                 {},
             ),
             (
@@ -443,6 +477,15 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 evidence='source_observation_log archive evidence; source_failure_log',
             )
         add(
+            f'sensor.retry.terminal_state:{key}',
+            [key],
+            'sources.bundle:build_source_bundle',
+            'Source run retry',
+            'An existing nonterminal or successful run suppresses another attempt; after run retirement the durable receipt must be failed or canceled before retry.',
+            role='defer',
+            evidence='Dagster runs; source_run_log',
+        )
+        add(
             f'sensor.retry.budget:{key}',
             [key],
             'sources.bundle:build_source_bundle',
@@ -463,7 +506,30 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             evidence='Dagster runs; source_run_log',
         )
         for condition, description, limits in (
-            ('active_run', 'An active reconciliation run prevents another health run.', {}),
+            ('active_run', 'An active health run prevents another health run.', {}),
+            (
+                'native_run',
+                'An active reconciliation batch, native source backfill or run for the selected partition defers canonical reconciliation.',
+                {},
+            ),
+            (
+                'backoff',
+                'An unchanged failed or canceled reconciliation without a terminal failure verdict waits for the delay indexed by its capped attempt.',
+                {
+                    f'attempt_{index + 1}_seconds': delay
+                    for index, delay in enumerate(
+                        cast(
+                            tuple[int, ...],
+                            _resolve('sources.dagit:HEALTH_RECONCILIATION_RETRY_DELAYS'),
+                        )
+                    )
+                },
+            ),
+            (
+                'terminal_verdict',
+                'An unchanged authority with a terminal automatic failure verdict waits for operator retry or a state change; removed parity verdicts are excluded.',
+                {},
+            ),
             (
                 'batch',
                 'Reconciliation rotates only changed or urgent partitions up to the batch limit.',
@@ -483,8 +549,10 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 [key],
                 'sources.dagit:_reconciliation_selection'
                 if condition == 'batch'
+                else 'sources.dagit:build_reconciliation_sensor'
+                if condition in ('native_run', 'terminal_verdict', 'backoff')
                 else 'sources.dagit:_health_due',
-                'Health reconciliation',
+                'Source reconciliation',
                 description,
                 limits,
                 role='defer',
@@ -520,12 +588,17 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 (
                     'canonical_readiness',
                     'sources.storage:SourceStore.canonical_ready',
-                    'The complete canonical calendar must be ready before publication.',
+                    'Every active canonical generation must have complete component evidence and no unresolved partition failure; this does not certify absent calendar days.',
                 ),
                 (
                     'backfill_completion',
                     'sources.backfill:publication_ready',
                     'Every selected native backfill day must complete before publication.',
+                ),
+                (
+                    'current.canonical_drift',
+                    'sources.profiles.consumer_base:_require_canonical',
+                    'The canonical state token must still match the render snapshot when the local publication manifest is committed.',
                 ),
                 (
                     'current',
@@ -568,6 +641,15 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     evidence='source_failure_log RENDER_DEFERRED',
                 )
         if spec.provisional is not None:
+            add(
+                f'provider.response_completeness.request_contract:{key}',
+                [key],
+                'sources.adapters.binance_provisional:BinanceProvisionalBase.fetch',
+                'Minute request admission',
+                'Only closed provisional BTCUSDT minutes are accepted; the declared API credential must be present when required.',
+                {'credential_required': bool(getattr(spec.provisional, 'CREDENTIAL_REQUIRED'))},
+                evidence='source_failure_log; worker_minute_log',
+            )
             for condition, description, limits in (
                 (
                     'closed',
@@ -629,13 +711,17 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             for condition, description in (
                 (
                     'boundary',
-                    'A response must prove the minute boundary; empty or exhausted paging is rejected.',
+                    'A nonempty response must prove both required minute boundaries; exhausted paging is rejected.',
                 ),
                 (
                     'ordering',
                     'Trade identifiers and timestamps must retain their declared ordering.',
                 ),
                 ('row_shape', 'Every row must satisfy the adapter field and value contract.'),
+                (
+                    'empty_minute',
+                    'An empty minute requires locator observations on two different clock minutes for that partition and a later trade proving the end boundary.',
+                ),
             ):
                 add(
                     f'provider.response_completeness.{condition}:{key}',
@@ -685,7 +771,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             (
                 'source_rows',
                 'workers.depth:source_has_rows',
-                'Collector raw snapshots must exist for the selected minute.',
+                'When stored raw snapshots are absent, the collector must serve a nonempty history response for the selected minute.',
             ),
         ):
             add(
@@ -704,7 +790,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 [node['id']],
                 'workers.depth:DepthFeed.process_minute',
                 'Depth minute completion',
-                'The raw snapshots, minute projection and Arrow chunk must each exist for the selected minute.',
+                'Raw snapshots, the minute projection and Arrow chunk must exist; the Arrow manifest must cover the selected minute.',
                 evidence='worker_minute_log; depth projection/chunk/manifest evidence',
             )
 
@@ -863,10 +949,11 @@ def _operational_gates(add: _AddGate) -> None:
             [spec.projection_table_name],
             'law:evaluate',
             'Core depth coverage observation',
-            'Distinct timestamps in the preceding closed minute slots may miss at most the configured allowance.',
+            'Distinct timestamps in the closed minute slots ending before the delivery grace may miss at most the configured allowance.',
             {
                 'expected_slots': _threshold('law:D1_EXPECTED_SLOTS'),
                 'max_missing': _threshold('law:D1_MAX_MISSING_SLOTS'),
+                'delivery_grace_seconds': _threshold('law:D1_DELIVERY_GRACE_SECONDS'),
             },
             role='observe',
             cadence='periodic',
@@ -1032,6 +1119,15 @@ def _operational_gates(add: _AddGate) -> None:
         evidence='Dagster execution tags',
     )
     add(
+        'orchestration.admission.redundant_launch',
+        [],
+        'orchestration.launcher:OrigoRunLauncher.launch_run',
+        'Run worker launch',
+        'A run whose redundancy tag names that run is canceled before worker launch.',
+        role='defer',
+        evidence='Dagster run tags and cancellation events',
+    )
+    add(
         'orchestration.runtime.launch_health',
         [],
         'orchestration.launcher:OrigoRunLauncher.check_run_worker_health',
@@ -1070,7 +1166,7 @@ def gate_evaluation(
     affected_ids: list[str] | None = None,
     dagit_url: str | None = None,
 ) -> GateEvaluation:
-    return {
+    event: GateEvaluation = {
         'gate_id': descriptor['id'],
         'definition_version': descriptor['definition_version'],
         'evidence_id': evidence_id,
@@ -1082,10 +1178,15 @@ def gate_evaluation(
         'reason': reason,
         'dagit_url': dagit_url,
     }
+    if descriptor['code'] is not None:
+        event['deployed_sha'] = descriptor['code']['deployed_sha']
+    return event
 
 
 # Map only unambiguous persisted codes. A generic RuntimeError/ValueError cannot identify a guard.
 _FAILURE_GATES = {
+    'PROVIDER_CREDENTIAL_MISSING': ('provider.response_completeness.request_contract',),
+    'CAPACITY_VOLUME_INVALID': ('source.capacity.volume_identity',),
     'ARCHIVE_CHECKSUM_MISMATCH': ('provider.response_completeness.archive_checksum',),
     'ARCHIVE_MEMBER_INVALID': ('provider.response_completeness.archive_member',),
     'ARCHIVE_ROWS_INVALID': ('provider.response_completeness.archive_rows',),

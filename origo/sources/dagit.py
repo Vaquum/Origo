@@ -129,6 +129,7 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
 
 
 HEALTH_RECONCILIATION_BATCH_SIZE = 4
+HEALTH_RECONCILIATION_RETRY_DELAYS = (60, 300, 1800, 3600)
 
 
 def _reconciliation_selection(urgent: list[str], offset: int) -> list[str]:
@@ -340,8 +341,8 @@ def build_reconciliation_sensor(
                             authority,
                         )
                         continue
-                    attempt = min(int(latest.tags.get('origo_source_retry_attempt', '1')), 4)
-                    delay = (60, 300, 1800, 3600)[attempt - 1]
+                    attempt = min(int(latest.tags.get('origo_source_retry_attempt', '1')), len(HEALTH_RECONCILIATION_RETRY_DELAYS))
+                    delay = HEALTH_RECONCILIATION_RETRY_DELAYS[attempt - 1]
                     ended = latest_record.end_time or latest_record.update_timestamp.timestamp()
                     if now - ended < delay:
                         continue
@@ -357,7 +358,7 @@ def build_reconciliation_sensor(
                             'origo_source_partition': key,
                             'origo_source_reconciliation': 'true',
                             'origo_source_authority': authority,
-                            'origo_source_retry_attempt': str(min(attempt + 1, 4)),
+                            'origo_source_retry_attempt': str(min(attempt + 1, len(HEALTH_RECONCILIATION_RETRY_DELAYS))),
                             'dagster/priority': '10',
                         },
                     )

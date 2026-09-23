@@ -684,19 +684,7 @@ class Monitor:
                     reason='finding_present' if items else 'check_passed',
                 )
             )
-        by_gate = {event['gate_id']: event for event in events}
-        report['gates'] = [
-            by_gate.get(gate['id'])
-            or gate_evaluation(
-                gate,
-                evidence_id='',
-                evaluated_at=now.isoformat(),
-                outcome='NOT_EVALUATED' if gate['cadence'] == 'event-driven' else 'UNKNOWN',
-                evidence={},
-                reason='not_observed',
-            )
-            for gate in self.catalog['gates']
-        ]
+        report['gates'] = events
         for observation in report['projections']:
             observation['gate_ids'] = sorted(
                 set(observation['gate_ids'])
@@ -919,7 +907,7 @@ class Monitor:
             return []
         try:
             with urllib.request.urlopen(self.page_url, timeout=2) as response:
-                serving = response.status == 200
+                serving = response.status == 200 and response.read(16) == b'ok\n'
         except (OSError, http.client.HTTPException):
             serving = False
         return (

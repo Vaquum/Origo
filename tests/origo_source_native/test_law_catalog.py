@@ -10,6 +10,7 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -38,6 +39,7 @@ from origo.sources.dagit import (
     HEALTH_IDLE_INTERVAL_SECONDS,
     HEALTH_MIN_INTERVAL_SECONDS,
     HEALTH_RECONCILIATION_BATCH_SIZE,
+    HEALTH_RECONCILIATION_RETRY_DELAYS,
 )
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.locking import source_lock
@@ -146,6 +148,10 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             'minimum_seconds': HEALTH_MIN_INTERVAL_SECONDS,
             'idle_seconds': HEALTH_IDLE_INTERVAL_SECONDS,
         }
+        assert gates[f'sensor.reconciliation.backoff:{key}']['thresholds'] == {
+            f'attempt_{index + 1}_seconds': delay
+            for index, delay in enumerate(HEALTH_RECONCILIATION_RETRY_DELAYS)
+        }
         assert gates[f'sensor.reconciliation.batch:{key}']['thresholds'] == {
             'partitions': HEALTH_RECONCILIATION_BATCH_SIZE,
         }
@@ -156,6 +162,31 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             gates[f'sensor.retry.budget:{key}']['thresholds']['retry_count']
             == spec.orchestration.retry_count
         )
+    for spec in registry.SOURCE_REGISTRY:
+        for family in (
+            'provider.response_completeness.empty_minute',
+            'provider.response_completeness.request_contract',
+            'sensor.retry.terminal_state',
+            'sensor.reconciliation.native_run',
+            'sensor.reconciliation.terminal_verdict',
+        ):
+            assert f'{family}:{spec.key}' in gates
+        for consumer in spec.consumers:
+            identity = f'publication.current.canonical_drift:{spec.key}:consumer:{consumer.key}'
+            location = gates[identity]['code']
+            assert location is not None
+            assert location['path'] == 'origo/sources/profiles/consumer_base.py'
+            ready = gates[f'publication.canonical_readiness:{spec.key}:consumer:{consumer.key}']
+            assert 'unresolved partition failure' in ready['condition']
+    location = gates['orchestration.admission.redundant_launch']['code']
+    assert location is not None and location['path'] == 'origo/orchestration/launcher.py'
+    for spec in DEPTH_SPECS:
+        from origo.law import D1_DELIVERY_GRACE_SECONDS
+
+        assert (
+            gates[f'law.D1:{spec.projection_table_name}']['thresholds']['delivery_grace_seconds']
+            == D1_DELIVERY_GRACE_SECONDS
+        )
     assert gates['orchestration.admission.global']['thresholds']['limit'] == 19
     assert len([key for key in gates if key.startswith('orchestration.admission.tag:')]) == 5
     assert build_catalog(SHA)['version'] == catalog['version']
@@ -163,6 +194,79 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
     assert code_location(source_lock, SHA)['line'] == inspect.getsourcelines(source_lock)[1]
     assert code_location(source_lock, 'latest') is None
     assert code_location(object(), SHA) is None
+
+
+def test_definition_versions_ignore_deployment_and_source_locations(
+    catalog: LawCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo import law_catalog
+
+    versions = {gate['id']: gate['definition_version'] for gate in catalog['gates']}
+    deployed = build_catalog('f' * 40)
+    assert {gate['id']: gate['definition_version'] for gate in deployed['gates']} == versions
+    assert deployed['version'] != catalog['version']
+    assert all(
+        gate['code'] is not None and gate['code']['deployed_sha'] == 'f' * 40
+        for gate in deployed['gates']
+    )
+    original = law_catalog.code_location
+
+    def moved(owner: object, sha: str) -> law_catalog.CodeLocation | None:
+        location = original(owner, sha)
+        if location is not None:
+            location['line'] += 1
+            location['url'] = location['url'].partition('#L')[0] + f'#L{location["line"]}'
+        return location
+
+    monkeypatch.setattr(law_catalog, 'code_location', moved)
+    shifted = build_catalog(SHA)
+    assert {gate['id']: gate['definition_version'] for gate in shifted['gates']} == versions
+    assert shifted['version'] != catalog['version']
+
+
+def test_core_definition_versions_include_predicate_helpers_and_ignore_unrelated_code(
+    catalog: LawCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo import law
+
+    original = inspect.getsource
+    core = {
+        gate['id']: gate['definition_version']
+        for gate in catalog['gates']
+        if gate['id'].startswith('law.')
+    }
+    owner_source = original(law)
+    changed = owner_source.replace("'status': status", "'status': 'UNKNOWN'", 1)
+    assert changed != owner_source  # Change the real helper's predicate logic, not market data.
+
+    def source(owner: ModuleType) -> str:
+        if owner is law:
+            return changed
+        return original(owner)
+
+    monkeypatch.setattr(inspect, 'getsource', source)
+    revised = build_catalog(SHA)
+    assert all(
+        gate['definition_version'] != core[gate['id']]
+        for gate in revised['gates']
+        if gate['id'].startswith('law.')
+    )
+
+    def unrelated(owner: ModuleType) -> str:
+        value = original(owner)
+        if isinstance(owner, ModuleType) and owner.__name__ == 'origo.workers.monitor':
+            return value + '\nUNRELATED_DESCRIPTOR_TEST = True\n'
+        return '\n# Location/comment changes carry no predicate meaning.\n' + value
+
+    monkeypatch.setattr(inspect, 'getsource', unrelated)
+    redeployed = build_catalog(SHA)
+    assert {
+        gate['id']: gate['definition_version']
+        for gate in redeployed['gates']
+        if gate['id'].startswith('law.')
+    } == core
 
 
 def test_unrecorded_guards_and_projection_nodes_never_invent_health(catalog: LawCatalog) -> None:
@@ -253,6 +357,11 @@ def test_failure_protocol_maps_only_attributable_guards(catalog: LawCatalog) -> 
     assert len(events) == 1
     assert events[0]['outcome'] == 'EXPECTED_WAIT'
     assert events[0]['evidence_id'] == 'recorded-event'
+    assert events[0].get('deployed_sha') == SHA
+    unversioned = source_failure_evaluations(
+        build_catalog(''), **values, error_code='RENDER_DEFERRED', event_type='FAILED'
+    )
+    assert 'deployed_sha' not in unversioned[0]
     assert events[0]['gate_id'].endswith(':consumer:mount')
     assert (
         source_failure_evaluations(
@@ -280,6 +389,13 @@ def test_failure_protocol_maps_only_attributable_guards(catalog: LawCatalog) -> 
     )
     assert len(archive) == 1 and archive[0]['outcome'] == 'FAIL'
     assert '.archive_rows:' in archive[0]['gate_id']
+    credential = source_failure_evaluations(
+        catalog,
+        **{**values, 'consumer': None},
+        error_code='PROVIDER_CREDENTIAL_MISSING',
+        event_type='FAILED',
+    )
+    assert len(credential) == 1 and '.request_contract:' in credential[0]['gate_id']
     circuit = source_failure_evaluations(
         catalog,
         **values,
@@ -393,6 +509,7 @@ def test_component_gate_events_retain_real_proof_identity(
     by_id = {item['evidence_id']: item for item in observations}
     for event in events:
         assert event['outcome'] == 'PASS'
+        assert event.get('deployed_sha') == SHA
         assert event['evaluated_at'] == by_id[event['evidence_id']]['evidence_at']
         assert event['evaluated_at'] != by_id[event['evidence_id']]['observed_at']
         assert event['gate_id'].startswith('source.component_integrity.')

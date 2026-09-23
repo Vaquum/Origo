@@ -98,6 +98,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         server = cast(_Recorder, self.server)
+        if self.path == '/healthz':
+            self._respond(200, b'ok\n')
+            return
         if self.path.startswith('/history'):
             server.history_calls.append(self.path)
             if server.history_malformed:
@@ -802,6 +805,9 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert checked == list(MONITOR_CHECK_NAMES)
     report = json.loads((tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')).read_text())
     assert report['status'] in ('FAIL', 'UNKNOWN')
+    assert len(report['gates']) < len(monitor.catalog['gates'])
+    assert all(event['reason'] != 'not_observed' for event in report['gates'])
+    assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     assert 'law:' in _emails(recorder)[0]['text']
 
@@ -902,7 +908,11 @@ def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
     recorder: _Recorder, tmp_path: Path,
 ) -> None:
     monitor = _monitor(recorder, tmp_path)
-    monitor.page_url = 'http://127.0.0.1:1/law.json'
+    monitor.page_url = _url(recorder) + '/healthz'
+    assert monitor._page_findings() == []
+    monitor.page_url = _url(recorder) + '/history'
+    assert monitor._page_findings()[0].key == 'law_page_unreachable'
+    monitor.page_url = 'http://127.0.0.1:1/healthz'
     started = time.monotonic()
     outcome = monitor.tick(NOW)
     assert time.monotonic() - started < 5
@@ -955,6 +965,18 @@ def test_historical_gate_import_is_bounded_resumable_and_attributable(
         assert monitor._history_findings(restarted, observed) == []
         assert segment.read_bytes() == original
         assert restarted.law_history == cursor.law_history
+        # A later minute sample does not erase an actual imported event or renew its time.
+        from origo.workers.law_page import TapeCache, _object
+
+        findings = monitor._law_findings(observed, [])
+        assert monitor._commit_law(observed, findings) == []
+        cache = TapeCache(monitor.law_tape.root)
+        cache.refresh_latest(observed)
+        cache.advance(observed, budget_seconds=2)
+        recorded = _object(cache.current(observed)['last_gate_events'])
+        assert recorded['locks.contention.source'] == events[0]
+        assert not any(event['gate_id'] == 'locks.contention.source'
+                       for event in monitor.law_tape.last['gates'])
     finally:
         client.disconnect()
 

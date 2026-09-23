@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -46,6 +47,8 @@ def tape(tmp_path: Path, real_law_report: law.LawReport) -> tuple[Path, page.Doc
                     evaluated_at=report['evaluation_start'],
                     outcome='EXPECTED_WAIT' if status == 'NOT_DUE' else status,
                     evidence=predicate['evidence'], reason=predicate['reason']))
+    inventory_gate = next(gate for gate in catalog['gates'] if gate['id'] == 'law.inventory')
+    report['gates'].append(gate_evaluation(inventory_gate, evidence_id=report['sampling_slot'] + ':inventory', evaluated_at=report['evaluation_start'], outcome='PASS', evidence={'live': len(report['inventory'])}, reason='all_live_sources_evaluated'))
     # The association comes from the real catalog, not an invented failing gate.
     for observation in report['projections']:
         source = observation['id'].split(':')[0]
@@ -71,6 +74,19 @@ def serving(tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, p
     thread.start()
     try:
         yield f'http://127.0.0.1:{server.server_port}', cache, report, now
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.fixture()
+def health_server() -> Iterator[int]:
+    server = page.HTTPServer(('127.0.0.1', 0), page.HealthHandler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield server.server_port
     finally:
         server.shutdown()
         server.server_close()
@@ -183,21 +199,21 @@ def test_recovery_and_clear_duration_require_consecutive_observations(tape: tupl
 
 
 def test_page_reads_incrementally_and_health_ignores_data_verdict(
-    serving: tuple[str, page.TapeCache, page.Document, datetime],
+    serving: tuple[str, page.TapeCache, page.Document, datetime], health_server: int,
 ) -> None:
     url, cache, report, now = serving
     before = cache.bytes_read
     for _ in range(3):
         assert _get(url + '/law.json')['status'] == report['status']
     assert cache.bytes_read == before
-    port = url.rsplit(':', 1)[1]
-    check = subprocess.run([sys.executable, '-m', 'origo.workers.law_page', '--check', '--port', port], capture_output=True)
+    port = str(health_server)
+    check = subprocess.run([sys.executable, '-m', 'origo.workers.law_page', '--check', '--health-port', port], capture_output=True)
     assert check.returncode == 0
     for path in cache.root.glob('samples-*'):
         path.unlink()
     assert cache.current(now)['status'] == 'UNKNOWN'
-    assert page.main(['--check', '--port', port]) == 0
-    assert page.main(['--check', '--port', '1']) == 1
+    assert page.main(['--check', '--health-port', port]) == 0
+    assert page.main(['--check', '--health-port', '1']) == 1
 
 
 def test_gate_history_api_is_catalog_only_paginated_and_gap_honest(tape: tuple[Path, page.Document, datetime]) -> None:
@@ -314,7 +330,7 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
 
 
 def test_slow_headers_have_absolute_deadline_and_bounded_capacity(
-    serving: tuple[str, page.TapeCache, page.Document, datetime],
+    serving: tuple[str, page.TapeCache, page.Document, datetime], health_server: int,
 ) -> None:
     url, _, _, _ = serving
     address = ('127.0.0.1', int(url.rsplit(':', 1)[1]))
@@ -342,7 +358,7 @@ def test_slow_headers_have_absolute_deadline_and_bounded_capacity(
         worker.start()
         workers.append(worker)
         # A live trickling client cannot hold up unrelated health or current-data GETs.
-        assert _get(url + '/law.json')['catalog']
+        assert _get(url + '/law.json')['catalog_key']
         with urllib.request.urlopen(url + '/law', timeout=1) as response:
             assert response.status == 200
         for _ in range(page.REQUEST_SLOTS - 1):
@@ -358,6 +374,9 @@ def test_slow_headers_have_absolute_deadline_and_bounded_capacity(
             assert extra.recv(1) == b''
         except ConnectionResetError:
             assert time.monotonic() - started < page.REQUEST_TIMEOUT
+        with urllib.request.urlopen(f'http://127.0.0.1:{health_server}/healthz', timeout=1) as response:
+            assert response.read() == b'ok\n'
+        assert page.main(['--check', '--health-port', str(health_server)]) == 0
         assert closed.wait(page.REQUEST_TIMEOUT + 1)
         for worker in workers:
             worker.join(timeout=page.REQUEST_TIMEOUT + 1)
@@ -532,3 +551,145 @@ def test_browser_age_expires_during_held_fetch(
         tab.clock.run_for(4000)
         assert tab.evaluate('refreshing') is False
         browser.close()
+
+
+def test_oversized_records_advance_without_accepting_fragments(tape: tuple[Path, page.Document, datetime]) -> None:
+    root, report, now = tape
+    event = page._objects(report['gates'])[0]
+    path = next(root.glob('gate-events-*'))
+    path.write_bytes(b'x' * (page.READ_BUDGET * 2 + 7) + b'\n' + json.dumps(event).encode() + b'\n')
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    for _ in range(5):
+        before = cache.positions.get(path.name, 0)
+        cache.advance(now, budget_seconds=2)
+        assert cache.positions[path.name] > before or not cache.loading
+        if not cache.loading:
+            break
+    assert not cache.loading and cache.history_limited
+    assert cache.event_count == 1 and cache.positions[path.name] == path.stat().st_size
+    assert cache.current(now)['status'] == report['status']
+
+
+def test_core_definition_changes_break_streak_but_deployment_metadata_does_not(
+    tape: tuple[Path, page.Document, datetime],
+) -> None:
+    _, report, _ = tape
+    original = page._sample_brief(report)
+    assert original['policy']
+    moved = copy.deepcopy(report)
+    moved['deployed_sha'] = '0' * 40
+    moved['catalog_version'] = 'different-deployment'
+    for event in page._objects(moved['gates']):
+        event['deployed_sha'] = '0' * 40
+    assert page._sample_brief(moved)['policy'] == original['policy']
+    core = next(event for event in page._objects(moved['gates']) if str(event['gate_id']).startswith('law.'))
+    core['definition_version'] = 'predicate-change'
+    assert page._sample_brief(moved)['policy'] != original['policy']
+    moved['gates'] = []
+    assert page._sample_brief(moved)['policy'] is None
+    assert not page.consecutive_window([{**original, 'status': 'PASS', 'policy': None}], str(original['slot']))
+
+
+def test_current_wire_is_small_and_complete_overview_is_separate(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, cache, _, now = serving
+    current = _get(url+'/law.json')
+    assert 'catalog' not in current and 'gate_days' not in current
+    catalog = _get(url+'/law/catalog.json')
+    overview = _get(url+'/law/gates.json')
+    assert set(page._object(overview['gates'])) == {str(gate['id']) for gate in page._objects(catalog['gates'])}
+    assert len(cast(list[page.Json], overview['days'])) == 30
+    sizes = {route: len(json.dumps(_get(url+route)).encode()) for route in ('/law.json', '/law/catalog.json', '/law/gates.json')}
+    assert sizes['/law.json'] < 100_000 and sizes['/law/gates.json'] < 100_000
+    request = urllib.request.Request(url+'/law.json', headers={'Accept-Encoding': 'gzip'})
+    with urllib.request.urlopen(request) as response:
+        assert response.headers['Content-Encoding'] == 'gzip'
+        sizes['compressed_current'] = len(response.read())
+    Path('/tmp/origo-law-wire-size.json').write_text(json.dumps(sizes))
+    assert cache.current(now)['catalog']
+
+
+def test_slow_response_and_disconnected_clients_leave_service_available(
+    tape: tuple[Path, page.Document, datetime], capsys: pytest.CaptureFixture[str],
+) -> None:
+    root, _, now = tape
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+
+    class SmallSendBuffer(page.LawServer):
+        def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
+            connection, address = super().get_request()
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024)
+            return connection, address
+
+    server = SmallSendBuffer(('127.0.0.1', 0), cache, lambda: now)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    address = ('127.0.0.1', server.server_port)
+    try:
+        client = socket.socket()
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        client.settimeout(10)
+        client.connect(address)
+        with client:
+            client.sendall(b'GET /law/catalog.json HTTP/1.0\r\nHost: localhost\r\n\r\n')
+            time.sleep(page.REQUEST_TIMEOUT + 0.3)
+            with client.makefile('rb') as stream:
+                assert b'200' in stream.readline()
+                headers: dict[bytes, bytes] = {}
+                while (line := stream.readline()) != b'\r\n':
+                    key, value = line.split(b':', 1)
+                    headers[key.lower()] = value.strip()
+                body = stream.read()
+            assert len(body) == int(headers[b'content-length'])
+            assert page._decode(body)['gates']
+        for _ in range(5):
+            with socket.create_connection(address, timeout=2) as reset:
+                reset.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                reset.sendall(b'GET /law/catalog.json HTTP/1.0\r\nHost: localhost\r\n\r\n')
+            time.sleep(0.03)
+        assert _get(f'http://127.0.0.1:{server.server_port}/law.json')['catalog_key']
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    assert 'Traceback' not in capsys.readouterr().err
+
+
+def test_many_deployments_keep_bounded_catalogs_and_original_event_code(
+    tape: tuple[Path, page.Document, datetime],
+) -> None:
+    root, report, now = tape
+    original_path = next(root.glob('catalog-*'))
+    template = original_path.read_text()
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    event = page._objects(report['gates'])[0]
+    # Deployment envelopes replay identical genuine definitions; no source evidence is invented.
+    for index in range(420):
+        sha = f'{index + 1:040x}'
+        record = page._decode(template.replace(SHA, sha).encode())
+        version = f'deployment-envelope-{index}'
+        record['version'] = version
+        (root / f'catalog-{version}.json').write_text(json.dumps(record))
+        cache._load_catalog(version)
+    assert len(cache.catalogs) == 2 and len(cache.catalog_versions) == 421
+    assert cache.catalog_bytes < page.MAX_CATALOG_BYTES and not cache.history_limited
+    assert all(len(versions) == 1 for versions in cache.definitions.values())
+    cache.advance(now, budget_seconds=2)
+    query = {'gate_id': [str(event['gate_id'])], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
+    result = cache.history(query, now)
+    definition = page._objects(result['definitions'])[0]
+    assert page._object(definition['code'])['deployed_sha'] == SHA
+    assert SHA in str(page._object(definition['code'])['url'])
+    legacy = {key: value for key, value in event.items() if key != 'deployed_sha'}
+    legacy['evidence_id'] = 'legacy-delivery-of-original-evidence'
+    _write(next(root.glob('gate-events-*')), [legacy])
+    restarted = page.TapeCache(root)
+    restarted.refresh_latest(now)
+    restarted.advance(now, budget_seconds=2)
+    legacy_result = restarted.history(query, now)
+    assert legacy_result['events'] == [legacy] and legacy_result['definitions'] == []
+    Path('/tmp/origo-law-catalog-memory.json').write_text(json.dumps({'snapshots': len(cache.catalog_versions), 'resident_full': len(cache.catalogs), 'accounted_bytes': cache.catalog_bytes}))

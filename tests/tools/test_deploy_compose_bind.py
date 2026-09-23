@@ -445,6 +445,9 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
         assert 'law-samples:/var/lib/origo-law:ro' in law
         assert 'read_only: true' in law and 'cpus: 0.5' in law and 'mem_limit: 256m' in law
         assert '"--check"' in law
+        assert 'user: "65534:65534"' in law
+        assert 'cap_drop: [ALL]' in law
+        assert 'security_opt: ["no-new-privileges:true"]' in law
         for forbidden in (
             'environment:',
             'env_file:',
@@ -455,7 +458,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
             assert forbidden not in law
         monitor = text.split('  monitor:\n', 1)[1].split('  law:\n', 1)[0]
         assert 'law-samples:/var/lib/origo-law\n' in monitor
-        assert 'ORIGO_LAW_PAGE_URL=http://law:8484/law.json' in monitor
+        assert 'ORIGO_LAW_PAGE_URL=http://law:8485/healthz' in monitor
         assert text.count('law-samples:/var/lib/origo-law') == 2
     test_all_published_ports_bind_loopback()
 
@@ -468,3 +471,17 @@ def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
     assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')
     assert '</dev/null' in workflow
     test_only_raw_perp_uses_host_network_with_deployment_identity()
+
+
+def test_deployed_clickhouse_image_includes_law_reader_profile() -> None:
+    # Production ships configuration in its SHA-tagged image, not a host bind mount.
+    dockerfile = (REPO_ROOT / 'Dockerfile.clickhouse').read_text()
+    assert 'COPY clickhouse-users.xml /etc/clickhouse-server/users.d/clickhouse-users.xml' in dockerfile
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    build = workflow.split('      - name: Build and push ClickHouse image', 1)[1].split('      - name:', 1)[0]
+    assert 'context: .' in build and 'file: ./Dockerfile.clickhouse' in build
+    assert '${{ env.CLICKHOUSE_IMAGE }}' in build
+    assert 'origo-clickhouse:${GITHUB_SHA}' in workflow
+    clickhouse = DEPLOY_COMPOSE.read_text().split('  clickhouse:', 1)[1].split('  dagit:', 1)[0]
+    assert 'image: ${CLICKHOUSE_IMAGE:?CLICKHOUSE_IMAGE is required}' in clickhouse
+    assert 'CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}' in clickhouse

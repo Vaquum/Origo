@@ -38,6 +38,7 @@ C1_SPOT_DEADLINE = (4, 30)
 C1_PERP_DEADLINE = (10, 30)
 D1_EXPECTED_SLOTS = 1440
 D1_MAX_MISSING_SLOTS = 2
+D1_DELIVERY_GRACE_SECONDS = 60
 CANONICAL_COMPONENTS = ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
 PROVISIONAL_COMPONENTS = ('raw_latest', 'time_latest', 'dollar_latest')
 LAW_QUERY_SETTINGS = {
@@ -331,7 +332,7 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
 
 
 def _depth(query: _Queries, database: str, source: str, now: datetime) -> FeedReport:
-    end = now.replace(second=0, microsecond=0)
+    end = (now - timedelta(seconds=D1_DELIVERY_GRACE_SECONDS)).replace(second=0, microsecond=0)
     rows = query(f"""SELECT uniqExact(datetime), maxOrNull(datetime) FROM {database}.{identifier(source)}
         WHERE datetime>=%(start)s AND datetime<%(end)s AND toStartOfMinute(datetime)=datetime""",
         {'start': end - timedelta(minutes=D1_EXPECTED_SLOTS), 'end': end})
@@ -341,7 +342,8 @@ def _depth(query: _Queries, database: str, source: str, now: datetime) -> FeedRe
         'PASS' if missing <= D1_MAX_MISSING_SLOTS else 'FAIL',
         'depth_complete' if missing <= D1_MAX_MISSING_SLOTS else 'depth_minutes_missing',
         newest_minute=newest, expected_slots=D1_EXPECTED_SLOTS, missing_slots=missing,
-        max_missing=D1_MAX_MISSING_SLOTS)}}
+        max_missing=D1_MAX_MISSING_SLOTS, delivery_grace_seconds=D1_DELIVERY_GRACE_SECONDS,
+        window_end=end.isoformat())}}
 
 
 def evaluate(client: Client, database: str, now: datetime) -> LawReport:

@@ -147,7 +147,7 @@ Source/projection inventory comes from source and depth declarations, never UI l
 
 `data_current` evaluates R1 (readable selected minute and reader end), C1 (yesterday's
 canonical activation after its market deadline), C2 (older canonical calendar) and D1
-(distinct depth minutes). Worker liveness cannot make missing reader data green.
+(distinct depth minutes with a 60-second delivery grace). Worker liveness cannot make missing reader data green.
 Spot/perp freshness budgets are initially 180/300 seconds. Missing daily archives are
 NOT_DUE before 04:30/10:30 UTC respectively; arrivals are validated immediately.
 Projection activation is not formal certification approval or a physical full-history audit.
@@ -164,7 +164,9 @@ mount, no database/exchange/mail credentials and no backend query path. Page req
 read bounded caches/tape only; API history is catalog-ID restricted, at most 30 days
 and 1,000 original events per page. Missing, corrupt or older-than-120-second evidence
 is UNKNOWN. HTTP health means the page serves, independently of its data verdict;
-red data never blocks deployment or recovery. Historical gaps remain not observed.
+red data never blocks deployment or recovery. Health probes use an unpublished internal
+port (8485), independently of public request slots. The page runs without root privileges.
+Historical gaps remain not observed.
 
 The dedicated `law_reader` profile permits only reads, one concurrent single-threaded
 query, 512 MiB and five seconds per statement. Transport has a wall deadline; the core
@@ -177,6 +179,13 @@ UTC-day tape segments retain 30 days and retained catalog definitions; selected
 72-hour closeout evidence is retained separately under `closeout/`, outside segment pruning. A clear window requires 4,321
 consecutive distinct minute slots spanning at least 72 hours, with every applicable
 core predicate PASS (C1 NOT_DUE identified separately). Missing/corrupt slots or
-incompatible definitions break the window. Display-only inactive nodes do not affect it.
+incompatible predicate definitions break the window; deployment SHA or line changes alone do not. Display-only inactive nodes do not affect it.
 PRD #442 remains open until a genuine production window and three contemporaneous
 SQL cross-checks are attached; CI and historical reconstruction cannot substitute.
+
+Current JSON excludes the 30-day grid and repeated catalog. The browser fetches the
+catalog once per version and loads compact gate history when Gates is shown. Minute
+samples omit unobserved gate placeholders; the catalog supplies their explicit
+UNKNOWN/NOT_EVALUATED display. Event-driven gates retain the last original outcome
+and timestamp separately from current blocking state. Corrupt oversized history
+records mark the history limited while later valid evidence remains readable.

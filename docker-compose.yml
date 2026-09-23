@@ -85,7 +85,7 @@ services:
     environment:
       - PYTHONPATH=/opt/app
       - DAGSTER_WEBSERVER_URL=http://dagit:3000
-      - ORIGO_LAW_PAGE_URL=http://law:8484/law.json
+      - ORIGO_LAW_PAGE_URL=http://law:8485/healthz
       - ORIGO_LAW_APP_IMAGE=${APP_IMAGE:-local}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       # Alerts stay disabled locally: the monitor logs findings when ORIGO_ALERT_* is unset.
@@ -122,6 +122,9 @@ services:
     cpus: 0.5
     mem_limit: 256m
     read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "python", "-m", "origo.workers.law_page", "--check"]
       interval: 60s

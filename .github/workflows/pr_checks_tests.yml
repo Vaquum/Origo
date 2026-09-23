@@ -31,9 +31,6 @@ jobs:
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
 
-      - name: Verify reader-law contract files
-        run: pytest tests/origo_source_native/test_law.py tests/origo_source_native/test_law_catalog.py tests/origo_source_native/test_law_page.py tests/origo_source_native/test_monitor.py -q
-
       - name: Verify daily-archive fixture bundles
         run: |
           for stem in BTCUSDT-trades-2019-09-08 BTCUSDT-trades-2019-09-09 BTCUSDT-trades-2024-04-20; do

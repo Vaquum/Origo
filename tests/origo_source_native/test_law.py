@@ -115,10 +115,24 @@ def test_real_reader_gap_ignores_later_stored_minutes(law_case: LawCase) -> None
     law_case.minute(2)
     assert law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_raw_latest_revisions') == [(3726,)]
     assert law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [(2631,)]
-    r1 = predicate(law_case.report(START + timedelta(minutes=4, seconds=1)), 'R1')
+    now = START + timedelta(minutes=4, seconds=1)
+    report = law_case.report(now)
+    r1 = predicate(report, 'R1')
     assert r1['status'] == 'FAIL' and r1['reason'] == 'reader_stale'
     assert r1['evidence']['reader_end'] == (START + timedelta(minutes=1)).isoformat()
     assert r1['evidence']['row_count'] == 2631
+    for component in law.PROVISIONAL_COMPONENTS:
+        observation = next(p for p in report['projections'] if p['id'] == f'{SOURCE}:{component}')
+        assert observation['status'] == 'STALE'
+        assert observation['data_through'] == r1['evidence']['reader_end']
+        assert str(observation['evidence_id']).startswith(str(r1['evidence']['build_id']) + ':')
+    law_case.minute(1)
+    repaired = law_case.report(now)
+    assert predicate(repaired, 'R1')['status'] == 'PASS'
+    for component in law.PROVISIONAL_COMPONENTS:
+        observation = next(p for p in repaired['projections'] if p['id'] == f'{SOURCE}:{component}')
+        assert observation['status'] == 'CURRENT'
+        assert observation['data_through'] == (START + timedelta(minutes=3)).isoformat()
 
 
 def test_real_canonical_hole_remains_failed_with_fresh_reader_tail(canonical_case: LawCase) -> None:
@@ -131,6 +145,26 @@ def test_real_canonical_hole_remains_failed_with_fresh_reader_tail(canonical_cas
     assert c2['evidence']['first_invalid_day'] == '2017-08-18'
     assert c2['evidence']['valid_days'] == 1
     assert predicate(report, 'C1')['status'] == 'PASS'
+
+
+@pytest.mark.parametrize('component', ['time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned'])
+def test_canonical_law_rejects_empty_required_component_proofs(canonical_case: LawCase, component: str) -> None:
+    canonical_case.runtime.build('2017-08-17')
+    yesterday = datetime(2017, 8, 18, 5, tzinfo=UTC)
+    older = yesterday + timedelta(days=1)
+    assert predicate(canonical_case.report(yesterday), 'C1')['status'] == 'PASS'
+    assert predicate(canonical_case.report(older), 'C2')['status'] == 'PASS'
+    canonical_case.client.execute(
+        'ALTER TABLE origo.source_component_log UPDATE row_count=0 WHERE component=%(component)s',
+        {'component': component}, settings={'mutations_sync': 2},
+    )
+    c1 = predicate(canonical_case.report(yesterday), 'C1')
+    assert c1['status'] == 'FAIL' and c1['reason'] == 'component_proof_empty'
+    assert c1['evidence']['empty_component'] == component
+    assert c1['evidence']['raw_proof_rows'] == 3427
+    c2 = predicate(canonical_case.report(older), 'C2')
+    assert c2['status'] == 'FAIL' and c2['reason'] == 'component_proof_empty'
+    assert c2['evidence']['first_invalid_day'] == '2017-08-17'
 
 
 @pytest.mark.parametrize('damage', ['duplicate', 'inactive_identity', 'wrong_hash', 'missing_component'])

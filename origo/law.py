@@ -153,6 +153,9 @@ class _Proof:
         raw = self.component('raw_latest' if self.provisional else 'raw')
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
+        empty = next((item[0] for item in self.components if item[1] == 0), None)
+        if raw[1] > 0 and empty is not None:
+            return _result('FAIL', 'component_proof_empty', empty_component=empty, raw_proof_rows=raw[1])
         return _result('PASS' if raw[1] > 0 else 'FAIL', 'active_proof' if raw[1] else 'raw_proof_empty',
                        raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items()})
 

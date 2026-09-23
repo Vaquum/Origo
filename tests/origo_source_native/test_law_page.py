@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Iterator
+from contextlib import ExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -231,6 +232,9 @@ def test_gate_history_api_is_catalog_only_paginated_and_gap_honest(tape: tuple[P
     # Genuine predicate payload, repeated transport envelopes only; these IDs are test events, not market data.
     records = [{**original, 'evidence_id': f'protocol-delivery-{index}'} for index in range(1001)]
     _write(event_path, records + [records[0]])
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    cache.advance(now, budget_seconds=2)
     result = cache.history(query, now)
     assert len(page._objects(result['events'])) <= 1000 and result['next_cursor']
     received = page._objects(result['events'])
@@ -284,10 +288,12 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         info.tap()
         assert info.get_attribute('aria-expanded') == 'true'
         assert tab.locator('.heatmap').first.locator('button').count() == 30
+        tab.screenshot(path='/tmp/origo-law-gates.png', full_page=True)
         tab.locator('[data-view="recovery"]').click()
         assert 'projection=' in tab.url and 'source=' in tab.url
         assert tab.locator('.chart-card').count() == 1
         assert 'Core-law consecutive clear window' in tab.locator('#message').inner_text()
+        tab.screenshot(path='/tmp/origo-law-recovery.png', full_page=True)
         tab.set_viewport_size({'width': 390, 'height': 844})
         tab.locator('[data-view="sources"]').click()
         assert tab.evaluate('document.documentElement.scrollWidth <= innerWidth')
@@ -402,19 +408,21 @@ for n in range(43201):
 # Normal production volume: 58 gate envelopes per minute. Original evidence is unchanged.
 events = report['gates']
 for n in range(43200):
-    stamp = (now - timedelta(minutes=n)).isoformat()
+    stamp = (now - timedelta(minutes=43200-n)).isoformat()
     for index in range(58):
         cache._event({**events[index % len(events)], 'evaluated_at': stamp,
-            'evidence_id': f'protocol:{n}:{index}'})
+            'evidence_id': f'protocol:{n}:{index}'}, offset=(n*58+index)*1024)
 started = time.monotonic()
 current = cache.current(now)
-rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1048576 if sys.platform == 'darwin' else 1024)
-print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache.event_count,
+rss = (next(int(line.split()[1]) for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('VmHWM:')) / 1024
+    if sys.platform.startswith('linux') else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576)
+print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache.event_count, 'index_bytes': sum(len(value) for value in cache.index.values()),
     'current_seconds': time.monotonic()-started, 'limited': current['history_limited']}))
 """
     measured = subprocess.run([sys.executable, '-c', script, str(root)], check=True, capture_output=True, text=True)
     result = json.loads(measured.stdout)
     assert result['samples'] == 43201 and result['events'] == 2_505_600
+    assert result['index_bytes'] == 2_505_600 * 16
     assert result['rss_mib'] < 256 and result['current_seconds'] < 1
     assert result['limited'] is False
     Path('/tmp/origo-law-cache-memory.json').write_text(json.dumps(result, indent=2))
@@ -423,11 +431,12 @@ print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache
 def test_browser_recovery_pagination_and_history_lru(
     serving: tuple[str, page.TapeCache, page.Document, datetime],
 ) -> None:
-    url, cache, report, _ = serving
+    url, cache, report, now = serving
     gate = 'law.R1:binance_spot_trades'
     original = next(item for item in page._objects(report['gates']) if item['gate_id'] == gate)
-    _write(next(cache.root.glob('gate-events-*')),
-        [{**original, 'evidence_id': f'protocol-delivery-{index}'} for index in range(1001)])
+    with next(cache.root.glob('gate-events-*')).open('a') as stream:
+        stream.write(''.join(json.dumps({**original, 'evidence_id': f'protocol-delivery-{index}'})+'\n' for index in range(1000)))
+    cache.advance(now, budget_seconds=2)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()
@@ -447,4 +456,78 @@ def test_browser_recovery_pagination_and_history_lru(
         }''')
         assert tab.evaluate('histories.size') == 8
         assert tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades')).events.length") == 1000
+        browser.close()
+
+
+def test_gate_index_latest_first_two_pages_and_partial_startup(tape: tuple[Path, page.Document, datetime]) -> None:
+    root, report, now = tape
+    gate = 'law.R1:binance_spot_trades'
+    original = next(event for event in page._objects(report['gates']) if event['gate_id'] == gate)
+    others = [event for event in page._objects(report['gates']) if event['gate_id'] != gate]
+    end = now.replace(second=0, microsecond=0)
+    start = end - timedelta(days=1)
+    # One genuine selected-gate observation and 57 unrelated evidence envelopes per minute.
+    with ExitStack() as stack:
+        streams = {day: stack.enter_context((root / f'gate-events-{day}.jsonl').open('w'))
+            for day in (start.date().isoformat(), end.date().isoformat())}
+        for minute in range(1440):
+            stamp = start + timedelta(minutes=minute, seconds=5)
+            for index in range(58):
+                event = original if index == 0 else others[(index-1) % len(others)]
+                streams[stamp.date().isoformat()].write(json.dumps({**event,
+                    'evaluated_at': stamp.isoformat(), 'evidence_id': f'protocol:{minute}:{index}'})+'\n')
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    query = {'gate_id': [gate], 'from': [start.isoformat()], 'to': [end.isoformat()]}
+    partial = cache.history(query, now)
+    assert partial['events'] == [] and partial['loading'] is True
+    while cache.loading:
+        cache.advance(now, budget_seconds=1)
+    first = cache.history(query, now)
+    events = page._objects(first['events'])
+    assert len(events) == 1000 and first['loading'] is False
+    assert events[0]['evaluated_at'] == (end-timedelta(seconds=55)).isoformat()
+    second = cache.history({**query, 'cursor': [str(first['next_cursor'])]}, now)
+    assert len(page._objects(second['events'])) == 440 and second['next_cursor'] is None
+    assert len({str(event['evidence_id']) for event in events+page._objects(second['events'])}) == 1440
+    # A late original-time import and a repeated delivery do not shift or duplicate the cursor.
+    late = {**original, 'evaluated_at': (start+timedelta(minutes=10, seconds=5)).isoformat(),
+        'evidence_id': 'late-protocol-envelope'}
+    with (root / f'gate-events-{start.date().isoformat()}.jsonl').open('a') as stream:
+        stream.write(json.dumps(late)+'\n'+json.dumps(late)+'\n')
+    cache.advance(now, budget_seconds=1)
+    resumed = cache.history({**query, 'cursor': [str(first['next_cursor'])]}, now)
+    assert len(page._objects(resumed['events'])) == 441
+    assert sum(event['evidence_id'] == late['evidence_id'] for event in page._objects(resumed['events'])) == 1
+    restarted = page.TapeCache(root)
+    restarted.refresh_latest(now)
+    while restarted.loading:
+        restarted.advance(now, budget_seconds=1)
+    assert restarted.history(query, now)['events'] == events
+
+
+def test_browser_age_expires_during_held_fetch(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, cache, _, now = serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.clock.install()
+        # A genuine report at 119 seconds old is still within its contractual freshness window.
+        tab.route('**/law.json', lambda route: route.fulfill(json=cache.current(now+timedelta(seconds=118))))
+        tab.goto(url+'/law')
+        tab.locator('.node .CURRENT').first.wait_for()
+        tab.unroute('**/law.json')
+        held: list[object] = []
+        tab.route('**/law.json', lambda route: held.append(route))
+        tab.evaluate('void refresh()')
+        tab.evaluate('void refresh()')
+        tab.clock.run_for(2200)
+        assert len(held) == 1
+        assert tab.evaluate('refreshing') is True
+        assert tab.evaluate('data.reason') == 'stale_report'
+        assert tab.locator('.node .CURRENT').count() == 0
+        tab.clock.run_for(4000)
+        assert tab.evaluate('refreshing') is False
         browser.close()

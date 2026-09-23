@@ -28,6 +28,8 @@ from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
 
+from .test_law import LawCase, law_case as law_case
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / 'tests/fixtures/dagster/graphql'
 NOW = datetime(2026, 9, 17, 14, 30, tzinfo=UTC)
@@ -832,6 +834,48 @@ def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
     assert len(lines) == 3 and lines[1] == b'{"sampling_slot": [incomplete]'
     assert json.loads(lines[2])['sampling_slot'] == report['sampling_slot']
     assert LawTape(tmp_path / 'law').latest(NOW)['sampling_slot'] == report['sampling_slot']
+
+
+
+def test_pre_catalog_component_proofs_remain_visible_without_historical_pass(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase,
+) -> None:
+    law_case.minute(0)
+    monitor = _monitor(recorder, tmp_path)
+    monitor.law_client = law_case.client
+    monitor.deployed_sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    now = datetime.now(UTC)
+    findings = monitor._law_findings(now, [])
+    report = monitor.pending_report
+    assert report is not None
+    proofs = [dict(item) for item in report['projections'] if item['reason'] == 'validated_activation']
+    assert proofs
+    old_ids = {item['evidence_id'] for item in proofs}
+    before = [event for event in report['gates'] if event['evidence_id'] in old_ids]
+    assert before and all(event['outcome'] == 'PASS' for event in before)
+    assert monitor._commit_law(now, findings) == []
+    saved = json.loads((monitor.law_tape.root / now.strftime('samples-%Y-%m-%d.jsonl')).read_text())
+    assert [item for item in saved['projections'] if item['evidence_id'] in old_ids] == proofs
+    assert all(event['outcome'] == 'NOT_EVALUATED' and event['evidence_id'] == ''
+               and event['reason'] == 'historical_definition_unavailable' for event in before)
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*.jsonl')
+              for line in path.read_text().splitlines()]
+    assert not any(event['evidence_id'] in old_ids for event in events)
+    # Actual validation after the catalog exists remains attributable to its definition.
+    law_case.minute(1)
+    later = now + timedelta(minutes=1)
+    findings = monitor._law_findings(later, [])
+    current = monitor.pending_report
+    assert current is not None
+    new_ids = {item['evidence_id'] for item in current['projections']
+               if item['reason'] == 'validated_activation'} - old_ids
+    assert new_ids
+    assert monitor._commit_law(later, findings) == []
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*.jsonl')
+              for line in path.read_text().splitlines()]
+    assert all(any(event['evidence_id'] == identity and event['outcome'] == 'PASS'
+                   for event in events) for identity in new_ids)
+    assert not any(event['evidence_id'] in old_ids for event in events)
 
 
 def test_law_tape_failure_keeps_other_checks_and_delivery_running(

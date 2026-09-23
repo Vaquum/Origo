@@ -317,18 +317,21 @@ class LawTape:
             if stream.tell():
                 stream.seek(-1, os.SEEK_END)
                 if stream.read(1) != b'\n':
-                    stream.write(b'\n')
+                    stream.write(b' [incomplete]\n')
             stream.write(json.dumps(value, separators=(',', ':'), allow_nan=False).encode() + b'\n')
             stream.flush()
             os.fsync(stream.fileno())
 
-    def append(self, report: LawReport, catalog: LawCatalog) -> None:
+    def write_catalog(self, catalog: LawCatalog) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         catalog_path = self.root / f'catalog-{catalog["version"]}.json'
         if not catalog_path.exists():
             partial = catalog_path.with_suffix('.partial')
             partial.write_text(json.dumps(catalog, separators=(',', ':'), allow_nan=False))
             partial.replace(catalog_path)
+
+    def append(self, report: LawReport, catalog: LawCatalog) -> None:
+        self.write_catalog(catalog)
         self._append(
             self.root / datetime.fromisoformat(report['sampling_slot']).strftime(LAW_SAMPLE_NAME),
             report,
@@ -474,6 +477,7 @@ class Monitor:
         self.law_client = law_client
         self.law_tape = LawTape(law_root)
         self.catalog: LawCatalog | None = None
+        self.pending_report: LawReport | None = None
         self.deployed_sha = deployed_sha
         self.page_url = page_url
         self.arrow_root = arrow_root
@@ -493,6 +497,7 @@ class Monitor:
         minute = now.replace(second=0, microsecond=0)
         window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
         cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
+        self.pending_report = None
         # Every detector is isolated: a fault in one becomes its own finding on its check,
         # the other checks still run, the evaluations are still written and the e-mail is still
         # sent. A detector that did not complete its read leaves its cursor where it was.
@@ -534,6 +539,10 @@ class Monitor:
             )
             findings.extend(history)
 
+        saved, _ = self._guarded(
+            'data_current', 'law', lambda: (self._commit_law(now, findings), True)
+        )
+        findings.extend(saved)
         by_check: dict[CheckName, list[Finding]] = {name: [] for name in CHECK_NAMES}
         for finding in findings:
             by_check[finding.check].append(finding)
@@ -697,26 +706,6 @@ class Monitor:
                     if observation['id'] in gate['scope']
                 }
             )
-        self.law_tape.append(report, self.catalog)
-        cutoff = now - timedelta(days=30)
-        try:
-            self.law_tape.append_events(
-                [
-                    event
-                    for event in report['gates']
-                    if datetime.fromisoformat(event['evaluated_at']) >= cutoff
-                ]
-            )
-        except Exception:
-            log.exception('Gate evidence append failed after current sample was saved')
-            observation_findings.append(
-                Finding(
-                    'law:gate_events:UNKNOWN',
-                    'data_current',
-                    'Gate history unavailable',
-                    'gate_event_append_failed',
-                )
-            )
         if self.law_tape.corrupt_tail:
             observation_findings.append(
                 Finding(
@@ -727,7 +716,77 @@ class Monitor:
                 )
             )
             self.law_tape.corrupt_tail = False
+        self.pending_report = report
         return law_findings(report) + observation_findings
+
+    def _commit_law(self, now: datetime, findings: Sequence[Finding]) -> list[Finding]:
+        report = self.pending_report
+        if report is None or self.catalog is None:
+            return []
+        self.law_tape.write_catalog(self.catalog)
+        catalog_path = self.law_tape.root / f'catalog-{self.catalog["version"]}.json'
+        known_since = datetime.fromtimestamp(catalog_path.stat().st_mtime, UTC)
+        for event in report['gates']:
+            if (
+                event['gate_id'].startswith('source.component_integrity.')
+                and datetime.fromisoformat(event['evaluated_at']) < known_since
+            ):
+                event.update(
+                    outcome='NOT_EVALUATED',
+                    evidence_id='',
+                    reason='historical_definition_unavailable',
+                )
+        faults: list[Finding] = []
+        cutoff = now - timedelta(days=30)
+        deadline = time.monotonic() + 5
+        try:
+            self.law_tape.append_events(
+                [
+                    event
+                    for event in report['gates']
+                    if event['gate_id'] != 'monitor.data_current'
+                    and datetime.fromisoformat(event['evaluated_at']) >= cutoff
+                ],
+                deadline=deadline,
+            )
+        except Exception:
+            log.exception('Gate evidence append failed; current sample will record the fault')
+            faults.append(
+                Finding(
+                    'law:gate_events:UNKNOWN',
+                    'data_current',
+                    'Gate history unavailable',
+                    'gate_event_append_failed',
+                )
+            )
+        own = next(event for event in report['gates'] if event['gate_id'] == 'monitor.data_current')
+        count = sum(item.check == 'data_current' for item in [*findings, *faults])
+        own.update(
+            outcome='FAIL' if count else 'PASS',
+            evidence={'finding_count': count},
+            reason='finding_present' if count else 'check_passed',
+        )
+        if not faults:
+            try:
+                self.law_tape.append_events([own], deadline=deadline)
+            except Exception:
+                log.exception('Final monitor evaluation could not be retained')
+                faults.append(
+                    Finding(
+                        'law:gate_events:UNKNOWN',
+                        'data_current',
+                        'Gate history unavailable',
+                        'gate_event_append_failed',
+                    )
+                )
+                own.update(
+                    outcome='FAIL',
+                    evidence={'finding_count': count + 1},
+                    reason='gate_event_append_failed',
+                )
+        self.law_tape.append(report, self.catalog)
+        self.pending_report = None
+        return faults
 
     def _output_observations(self, report: LawReport, now: datetime) -> list[ProjectionObservation]:
         deadline = time.monotonic() + 5

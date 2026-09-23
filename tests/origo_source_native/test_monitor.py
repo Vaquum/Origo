@@ -829,7 +829,7 @@ def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
     report = _protocol_report(NOW + timedelta(minutes=1))
     tape.append(report, build_catalog(''))
     lines = segment.read_bytes().splitlines()
-    assert len(lines) == 3 and lines[1] == b'{"sampling_slot":'
+    assert len(lines) == 3 and lines[1] == b'{"sampling_slot": [incomplete]'
     assert json.loads(lines[2])['sampling_slot'] == report['sampling_slot']
     assert LawTape(tmp_path / 'law').latest(NOW)['sampling_slot'] == report['sampling_slot']
 
@@ -856,3 +856,112 @@ def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
     assert time.monotonic() - started < 5
     assert 'law_page_unreachable' in outcome.failed
     assert 'law_page_unreachable' in _emails(recorder)[0]['text']
+    report = monitor.law_tape.last
+    assert report is not None
+    event = next(event for event in report['gates'] if event['gate_id'] == 'monitor.data_current')
+    assert event['outcome'] == 'FAIL'
+    assert event['evidence']['finding_count'] == sum(item.startswith(('law:', 'detector_failed:law')) or item == 'law_page_unreachable' for item in outcome.failed)
+
+
+def test_historical_gate_import_is_bounded_resumable_and_attributable(
+    recorder: _Recorder, tmp_path: Path, origo_test_env: dict[str, str],
+) -> None:
+    from origo.sources.contracts import SourceError
+    from origo.sources.lifecycle import SourceRuntime
+    from origo.sources.locking import source_lock
+    from origo.sources.storage import SourceStore
+    from origo.workers.monitor import LawClient
+
+    client = make_clickhouse_client(get_clickhouse_settings())
+    spec = SOURCE_REGISTRY[0]
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'worker:law-history')
+    try:
+        runtime.setup()
+        start = datetime.now(UTC)
+        monitor = _monitor(recorder, tmp_path, client=client)
+        monitor.law_client = LawClient(get_clickhouse_settings())
+        monitor.catalog = build_catalog('')
+        monitor.law_tape.append(_protocol_report(start), monitor.catalog)
+        with source_lock(runtime.lock_root, spec.key, 'consumer_mount'):
+            with pytest.raises(SourceError):
+                runtime.publish('mount', str(tmp_path / 'mount'))
+        observed = datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS)
+        cursor = Cursor.load(tmp_path / 'cursor.json', observed, 15)
+        begun = time.monotonic()
+        assert monitor._history_findings(cursor, observed) == []
+        assert time.monotonic() - begun < 5
+        segment = next(monitor.law_tape.root.glob('gate-events-*'))
+        events = [json.loads(line) for line in segment.read_text().splitlines()]
+        assert len(events) == 1
+        assert events[0]['gate_id'] == 'locks.contention.source'
+        assert events[0]['outcome'] == 'EXPECTED_WAIT'
+        assert datetime.fromisoformat(events[0]['evaluated_at']) < observed
+        cursor.save(tmp_path / 'cursor.json')
+        restarted = Cursor.load(tmp_path / 'cursor.json', observed, 15)
+        original = segment.read_bytes()
+        monitor.law_tape = LawTape(monitor.law_tape.root)
+        assert monitor._history_findings(restarted, observed) == []
+        assert segment.read_bytes() == original
+        assert restarted.law_history == cursor.law_history
+    finally:
+        client.disconnect()
+
+
+def test_segment_retention_preserves_30_days_and_closeout_evidence(tmp_path: Path) -> None:
+    tape = LawTape(tmp_path / 'law')
+    catalog = build_catalog('')
+    old = NOW - timedelta(days=31)
+    report = _protocol_report(old)
+    tape.append(report, catalog)
+    old_path = tape.root / old.strftime('samples-%Y-%m-%d.jsonl')
+    # A selected evidence copy is outside rotating day segments; contents remain original.
+    selected = tape.root / 'closeout' / old_path.name
+    selected.parent.mkdir()
+    selected.write_bytes(old_path.read_bytes())
+    for days in range(30, 0, -1):
+        stamp = NOW - timedelta(days=days)
+        tape._append(tape.root / stamp.strftime('samples-%Y-%m-%d.jsonl'), _protocol_report(stamp))
+    tape.append(_protocol_report(NOW), catalog)
+    assert not old_path.exists()
+    assert len(list(tape.root.glob('samples-*'))) == 31
+    assert json.loads(selected.read_text())['sampling_slot'] == report['sampling_slot']
+    assert (tape.root / f'catalog-{catalog["version"]}.json').exists()
+
+
+def test_complete_json_without_newline_is_not_a_committed_observation(tmp_path: Path) -> None:
+    tape = LawTape(tmp_path)
+    report = _protocol_report(NOW)
+    segment = tmp_path / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    segment.write_text(json.dumps(report))
+    assert tape.latest(NOW) is None and tape.corrupt_tail
+    tape.append(_protocol_report(NOW + timedelta(minutes=1)), build_catalog(''))
+    assert len(segment.read_text().splitlines()) == 2
+    with pytest.raises(ValueError):
+        json.loads(segment.read_text().splitlines()[0])
+
+
+def test_gate_event_index_resumes_without_rescanning_days(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.tick(NOW)
+    report = monitor.law_tape.last
+    assert report is not None
+    events = [event for event in report['gates'] if event['evidence_id']]
+    restarted = LawTape(monitor.law_tape.root)
+    with pytest.raises(TimeoutError):
+        restarted.append_events(events, deadline=time.monotonic() - 1)
+    restarted.append_events(events)
+    saved = {path.name: path.read_bytes() for path in restarted.root.glob('gate-events-*')}
+    original = Path.open
+    reads: list[str] = []
+
+    def opened(path: Path, mode: str = 'r', *args: object, **kwargs: object):
+        if path.name.startswith('gate-events-') and mode == 'rb':
+            reads.append(path.name)
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', opened)
+    restarted.append_events(events)
+    assert reads == []
+    assert saved == {path.name: path.read_bytes() for path in restarted.root.glob('gate-events-*')}

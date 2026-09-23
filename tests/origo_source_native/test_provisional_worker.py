@@ -784,6 +784,7 @@ def test_source_tick_failure_does_not_stop_later_sources(
             dagster=cast(DagsterReader, dagster), client=client, database=ORIGO_DATABASE,
             heartbeat_dir=tmp_path, probes=(), settings=None, reporter=cast(Reporter, reporter),
             cursor_path=tmp_path / 'cursor.json', publication_root=tmp_path,
+            law_client=client, law_root=tmp_path / 'law',
         )
         findings = monitor._worker_findings(
             Cursor.load(tmp_path / 'cursor.json', window_end, 15), window_end,

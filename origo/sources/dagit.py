@@ -128,14 +128,17 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
     }
 
 
+HEALTH_RECONCILIATION_BATCH_SIZE = 4
+
+
 def _reconciliation_selection(urgent: list[str], offset: int) -> list[str]:
     """Up to four of the partitions whose version or status differs, rotating the start
     with the tick so a failing batch cannot starve the rest. Nothing else is selected: a
     canonical day whose Dagster record matches the store is not re-materialized, because
     every build and repair re-checks its retained content and an operator can launch the
     canonical job for any day."""
-    start = offset * 4 % max(1, len(urgent))
-    return (urgent[start:] + urgent[:start])[:4]
+    start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(urgent))
+    return (urgent[start:] + urgent[:start])[:HEALTH_RECONCILIATION_BATCH_SIZE]
 
 
 def _partition_runs(

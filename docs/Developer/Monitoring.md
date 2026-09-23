@@ -174,7 +174,7 @@ No retries, ingestion locks or new exchange calls are allowed. Page CPU/memory a
 capped independently. Timeout/cap failures become UNKNOWN on the ordinary next tick.
 
 UTC-day tape segments retain 30 days and retained catalog definitions; selected
-72-hour closeout evidence is retained separately. A clear window requires 4,321
+72-hour closeout evidence is retained separately under `closeout/`, outside segment pruning. A clear window requires 4,321
 consecutive distinct minute slots spanning at least 72 hours, with every applicable
 core predicate PASS (C1 NOT_DUE identified separately). Missing/corrupt slots or
 incompatible definitions break the window. Display-only inactive nodes do not affect it.

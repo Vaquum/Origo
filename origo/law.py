@@ -337,7 +337,8 @@ def _depth(query: _Queries, database: str, source: str, now: datetime) -> FeedRe
     return {'source_key': source, 'predicates': {'D1': _result(
         'PASS' if missing <= D1_MAX_MISSING_SLOTS else 'FAIL',
         'depth_complete' if missing <= D1_MAX_MISSING_SLOTS else 'depth_minutes_missing',
-        newest_minute=newest, expected_slots=D1_EXPECTED_SLOTS, missing_slots=missing)}}
+        newest_minute=newest, expected_slots=D1_EXPECTED_SLOTS, missing_slots=missing,
+        max_missing=D1_MAX_MISSING_SLOTS)}}
 
 
 def evaluate(client: Client, database: str, now: datetime) -> LawReport:
@@ -345,9 +346,9 @@ def evaluate(client: Client, database: str, now: datetime) -> LawReport:
     database = identifier(database)
     query = _Queries(client)
     specs = {spec.key: spec for spec in SOURCE_REGISTRY}
-    inventory = list(LAW_INVENTORY) + sorted(spec.key for spec in SOURCE_REGISTRY
-        if spec.rollout_stage == RolloutStage.LIVE and spec.key not in LAW_INVENTORY)
     depths = {spec.projection_table_name for spec in DEPTH_SPECS}
+    enabled = {spec.key for spec in SOURCE_REGISTRY if spec.rollout_stage == RolloutStage.LIVE} | depths
+    inventory = list(LAW_INVENTORY) + sorted(enabled - set(LAW_INVENTORY))
     feeds: list[FeedReport] = []
     projections: list[ProjectionObservation] = []
     feed: FeedReport

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import socket
 import subprocess
 import sys
 import threading
@@ -109,7 +110,10 @@ def test_missing_malformed_or_stale_report_is_unknown(tape: tuple[Path, page.Doc
     assert cache.current(now + timedelta(seconds=121))['status'] == 'UNKNOWN'
     path = next(root.glob('samples-*'))
     with path.open('a') as stream:
-        stream.write('{"corrupt":true}\n')
+        stream.write('{')
+    assert cache.current(now)['status'] == original['status']  # Unfinished append is not a report.
+    with path.open('a') as stream:
+        stream.write('\n')
     assert cache.current(now)['status'] == 'UNKNOWN'
     assert cache.current(now)['reason'] == 'malformed_report'
     for mutation in ('inventory', 'schema_version'):
@@ -117,6 +121,30 @@ def test_missing_malformed_or_stale_report_is_unknown(tape: tuple[Path, page.Doc
         record[mutation] = [] if mutation == 'inventory' else 999
         _write(path, [record])
         assert cache.current(now)['status'] == 'UNKNOWN'
+    for mutation in ('future_end', 'wrong_slot', 'missing_inventory_feed', 'unsupported_live_unknown'):
+        record = copy.deepcopy(original)
+        if mutation == 'future_end':
+            record['evaluation_end'] = (now + timedelta(days=1)).isoformat()
+        elif mutation == 'wrong_slot':
+            record['sampling_slot'] = (page._instant(original['sampling_slot']) - timedelta(minutes=1)).isoformat()
+        elif mutation == 'missing_inventory_feed':
+            record['feeds'] = page._objects(record['feeds'])[1:]
+        else:
+            # Corrupt protocol envelopes use genuine UNKNOWN predicate evidence; no market rows change.
+            unknown = next(predicate for feed in page._objects(original['feeds'])
+                for predicate in page._objects(list(page._object(feed['predicates']).values()))
+                if predicate['status'] == 'UNKNOWN')
+            # A falsely green floor must not conceal the additional UNKNOWN inventory member.
+            for feed in page._objects(record['feeds']):
+                for predicate in page._object(feed['predicates']).values():
+                    page._object(predicate)['status'] = 'PASS'
+            record['inventory'] = [*cast(list[page.Json], record['inventory']), 'unsupported_live']
+            record['feeds'] = [*page._objects(record['feeds']),
+                {'source_key': 'unsupported_live', 'predicates': {'inventory': unknown}}]
+            record['status'] = 'PASS'
+        _write(path, [record])
+        assert cache.current(now)['status'] == 'UNKNOWN'
+        assert cache.current(now)['reason'] == 'malformed_report'
     path.unlink()
     assert cache.current(now)['reason'] == 'missing_report'
 
@@ -187,6 +215,15 @@ def test_gate_history_api_is_catalog_only_paginated_and_gap_honest(tape: tuple[P
     assert any(day['not_observed'] is True for day in days)
     assert sum(int(str(day['evaluation_count'])) for day in days) == 1
     assert page._objects(result['definitions'])[0]['definition_version'] == original['definition_version']
+    observed_minute = page._instant(original['evaluated_at']).replace(second=0, microsecond=0)
+    outside = cache.history({**query, 'from': [(observed_minute - timedelta(minutes=1)).isoformat()],
+        'to': [observed_minute.isoformat()]}, now)
+    assert outside['events'] == []
+    assert sum(int(str(day['observed_slots'])) for day in page._objects(outside['days'])) == 0
+    inside = cache.history({**query, 'from': [observed_minute.isoformat()],
+        'to': [now.isoformat()]}, now)
+    assert sum(int(str(day['observed_slots'])) for day in page._objects(inside['days'])) == 1
+    assert sum(int(str(day['expected_slots'])) for day in page._objects(inside['days'])) == 1
     for changes in ({'gate_id': ['../../etc/passwd']}, {'sql': ['SELECT 1']}, {'cursor': ['invented']},
                     {'from': [(now - timedelta(days=31)).isoformat()]}):
         with pytest.raises(ValueError):
@@ -258,5 +295,156 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         tab.screenshot(path='/tmp/origo-law-mobile.png', full_page=True)
         tab.set_viewport_size({'width': 1440, 'height': 1050})
         tab.screenshot(path='/tmp/origo-law-desktop.png', full_page=True)
+        assert tab.locator('.node .CURRENT').count() > 0
+        tab.route('**/law.json', lambda route: route.abort('failed'))
+        tab.evaluate('refresh()')
+        assert 'unknown' in tab.locator('#health').inner_text()
+        assert tab.locator('.node .CURRENT').count() == 0
+        assert tab.locator('.node .UNKNOWN').count() == tab.locator('.node').count()
+        assert 'observation service unavailable' in tab.locator('#message').inner_text().lower()
         assert not errors
+        browser.close()
+
+
+def test_slow_headers_have_absolute_deadline_and_bounded_capacity(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, _, _, _ = serving
+    address = ('127.0.0.1', int(url.rsplit(':', 1)[1]))
+    clients: list[socket.socket] = []
+    closed = threading.Event()
+    stop = threading.Event()
+    finished: list[float] = []
+
+    def trickle(client: socket.socket) -> None:
+        while not stop.wait(0.05):
+            try:
+                client.sendall(b'x')
+            except OSError:
+                finished.append(time.monotonic())
+                closed.set()
+                break
+
+    workers: list[threading.Thread] = []
+    started = time.monotonic()
+    try:
+        first = socket.create_connection(address, timeout=1)
+        first.sendall(b'GET /law HTTP/1.1\r\nHost: localhost\r\nX-Slow: ')
+        clients.append(first)
+        worker = threading.Thread(target=trickle, args=(first,))
+        worker.start()
+        workers.append(worker)
+        # A live trickling client cannot hold up unrelated health or current-data GETs.
+        assert _get(url + '/law.json')['catalog']
+        with urllib.request.urlopen(url + '/law', timeout=1) as response:
+            assert response.status == 200
+        for _ in range(page.REQUEST_SLOTS - 1):
+            client = socket.create_connection(address, timeout=1)
+            client.sendall(b'GET /law HTTP/1.1\r\nHost: localhost\r\nX-Slow: ')
+            clients.append(client)
+            worker = threading.Thread(target=trickle, args=(client,))
+            worker.start()
+            workers.append(worker)
+        extra = socket.create_connection(address, timeout=1)
+        clients.append(extra)
+        try:
+            assert extra.recv(1) == b''
+        except ConnectionResetError:
+            assert time.monotonic() - started < page.REQUEST_TIMEOUT
+        assert closed.wait(page.REQUEST_TIMEOUT + 1)
+        for worker in workers:
+            worker.join(timeout=page.REQUEST_TIMEOUT + 1)
+        assert len(finished) == page.REQUEST_SLOTS
+        assert max(finished) - started < page.REQUEST_TIMEOUT + 1
+        with urllib.request.urlopen(url + '/law', timeout=1) as response:
+            assert response.status == 200
+    finally:
+        stop.set()
+        for client in clients:
+            client.close()
+        for worker in workers:
+            worker.join(timeout=1)
+
+
+def test_history_cache_limits_preserve_current_report(
+    tape: tuple[Path, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, report, now = tape
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    original = page._objects(report['gates'])[0]
+    monkeypatch.setattr(page, 'MAX_SAMPLE_BYTES', 1)
+    monkeypatch.setattr(page, 'MAX_EVENT_IDENTITIES', 1)
+    cache._sample(report)
+    cache._event(original)
+    cache._event({**original, 'evidence_id': 'repeated-protocol-envelope'})
+    assert cache.samples == {} and cache.event_count == 1
+    assert cache.current(now)['history_limited'] is True
+    assert cache.current(now)['last_report'] == report
+    assert cache._definitions(str(original['gate_id']))
+
+
+def test_thirty_day_replay_cache_fits_page_memory_budget(tape: tuple[Path, page.Document, datetime]) -> None:
+    root, _, _ = tape
+    script = r"""
+import json, resource, sys, time
+from datetime import datetime, timedelta
+from pathlib import Path
+from origo.workers.law_page import TapeCache
+root = Path(sys.argv[1])
+report = json.loads(next(root.glob('samples-*')).read_text().splitlines()[-1])
+now = datetime.fromisoformat(report['evaluation_end']) + timedelta(seconds=1)
+cache = TapeCache(root)
+cache.refresh_latest(now)
+for n in range(43201):
+    stamp = (now - timedelta(minutes=n)).replace(second=0, microsecond=0).isoformat()
+    cache._sample({**report, 'sampling_slot': stamp, 'evaluation_start': stamp})
+# Normal production volume: 58 gate envelopes per minute. Original evidence is unchanged.
+events = report['gates']
+for n in range(43200):
+    stamp = (now - timedelta(minutes=n)).isoformat()
+    for index in range(58):
+        cache._event({**events[index % len(events)], 'evaluated_at': stamp,
+            'evidence_id': f'protocol:{n}:{index}'})
+started = time.monotonic()
+current = cache.current(now)
+rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1048576 if sys.platform == 'darwin' else 1024)
+print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache.event_count,
+    'current_seconds': time.monotonic()-started, 'limited': current['history_limited']}))
+"""
+    measured = subprocess.run([sys.executable, '-c', script, str(root)], check=True, capture_output=True, text=True)
+    result = json.loads(measured.stdout)
+    assert result['samples'] == 43201 and result['events'] == 2_505_600
+    assert result['rss_mib'] < 256 and result['current_seconds'] < 1
+    assert result['limited'] is False
+    Path('/tmp/origo-law-cache-memory.json').write_text(json.dumps(result, indent=2))
+
+
+def test_browser_recovery_pagination_and_history_lru(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, cache, report, _ = serving
+    gate = 'law.R1:binance_spot_trades'
+    original = next(item for item in page._objects(report['gates']) if item['gate_id'] == gate)
+    _write(next(cache.root.glob('gate-events-*')),
+        [{**original, 'evidence_id': f'protocol-delivery-{index}'} for index in range(1001)])
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url + '/law?view=recovery&source=binance_spot_trades')
+        more = tab.locator('[data-history-more]')
+        more.wait_for()
+        assert 'Incomplete chart' in tab.locator('.chart-card').inner_text()
+        more.click()
+        more.wait_for(state='hidden')
+        assert tab.evaluate(f'getHistory(historyKey("{gate}")).events.length') == 1001
+        tab.evaluate('''async () => {
+            const end = data.checked_at;
+            for (let hours=1; hours<=12; hours++) {
+                state.from=new Date(Date.parse(end)-hours*3600000).toISOString();state.to=end;
+                await loadHistory('law.R1:binance_spot_trades');
+            }
+        }''')
+        assert tab.evaluate('histories.size') == 8
+        assert tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades')).events.length") == 1000
         browser.close()

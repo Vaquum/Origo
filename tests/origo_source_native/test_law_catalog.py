@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import shutil
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,6 +21,7 @@ from origo.law_catalog import (
     certification_evaluations,
     code_location,
     import_gate_events,
+    observe_publications,
     projection_gate_evaluations,
     source_failure_evaluations,
     unknown_observations,
@@ -26,10 +30,15 @@ from origo.sources import registry
 from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
+    PROVISIONAL_PAGE_CAP,
 )
 from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_TOTAL_RESERVE_TENTHS
 from origo.sources.contracts import RolloutStage, Row, SourceError
-from origo.sources.dagit import HEALTH_IDLE_INTERVAL_SECONDS, HEALTH_MIN_INTERVAL_SECONDS
+from origo.sources.dagit import (
+    HEALTH_IDLE_INTERVAL_SECONDS,
+    HEALTH_MIN_INTERVAL_SECONDS,
+    HEALTH_RECONCILIATION_BATCH_SIZE,
+)
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.locking import source_lock
 from origo.workers.depth import DEPTH_SPECS
@@ -137,6 +146,12 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             'minimum_seconds': HEALTH_MIN_INTERVAL_SECONDS,
             'idle_seconds': HEALTH_IDLE_INTERVAL_SECONDS,
         }
+        assert gates[f'sensor.reconciliation.batch:{key}']['thresholds'] == {
+            'partitions': HEALTH_RECONCILIATION_BATCH_SIZE,
+        }
+        assert gates[f'provider.response_completeness.page_cap:{key}']['thresholds'] == {
+            'pages': PROVISIONAL_PAGE_CAP,
+        }
         assert (
             gates[f'sensor.retry.budget:{key}']['thresholds']['retry_count']
             == spec.orchestration.retry_count
@@ -179,6 +194,51 @@ def test_schema_import_does_not_load_source_configuration() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize('configured_home', [False, True])
+def test_installed_package_uses_instance_config_and_package_relative_code(
+    tmp_path: Path,
+    configured_home: bool,
+) -> None:
+    from origo import law_catalog
+
+    installed = tmp_path / 'site-packages'
+    package = installed / 'origo'
+    shutil.copytree(
+        Path(law_catalog.__file__).parent, package, ignore=shutil.ignore_patterns('__pycache__')
+    )
+    environment = dict(os.environ)
+    environment.pop('DAGSTER_HOME', None)
+    working_directory = ROOT
+    if configured_home:
+        instance = tmp_path / 'instance'
+        instance.mkdir()
+        shutil.copyfile(ROOT / 'dagster.yaml', instance / 'dagster.yaml')
+        environment['DAGSTER_HOME'] = str(instance)
+        working_directory = tmp_path
+    result = subprocess.run(
+        [
+            sys.executable,
+            '-c',
+            'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); '
+            'from origo import law_catalog; from origo.sources.locking import source_lock; '
+            'import yaml; '
+            "assert Path(law_catalog.__file__).parent == Path(sys.argv[1]) / 'origo'; "
+            'catalog = law_catalog.build_catalog(sys.argv[2]); '
+            "gate = next(g for g in catalog['gates'] if g['id'] == 'orchestration.admission.global'); "
+            "assert gate['thresholds']['limit'] == 19; "
+            "assert law_catalog.code_location(source_lock, sys.argv[2])['path'] == 'origo/sources/locking.py'; "
+            'assert law_catalog.code_location(yaml.safe_load, sys.argv[2]) is None',
+            str(installed),
+            SHA,
+        ],
+        cwd=working_directory,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_failure_protocol_maps_only_attributable_guards(catalog: LawCatalog) -> None:
     # Isolated failure-protocol inputs, never market rows or production health history.
     values = dict(
@@ -212,6 +272,14 @@ def test_failure_protocol_maps_only_attributable_guards(catalog: LawCatalog) -> 
         )
         == []
     )
+    archive = source_failure_evaluations(
+        catalog,
+        **{**values, 'consumer': None},
+        error_code='ARCHIVE_ROWS_INVALID',
+        event_type='FAILED',
+    )
+    assert len(archive) == 1 and archive[0]['outcome'] == 'FAIL'
+    assert '.archive_rows:' in archive[0]['gate_id']
     circuit = source_failure_evaluations(
         catalog,
         **values,
@@ -330,3 +398,70 @@ def test_component_gate_events_retain_real_proof_identity(
         assert event['gate_id'].startswith('source.component_integrity.')
     observations[0]['reason'] = 'component_proof_missing'
     assert len(projection_gate_evaluations(catalog, observations)) == len(events) - 3
+
+
+def test_publication_observation_checks_real_token_and_artifacts(
+    real_minutes: tuple[SourceRuntime, tuple[str, ...], dict[str, tuple[Row, ...]], int],
+    catalog: LawCatalog,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.storage import SourceStore
+
+    runtime, keys, _, _ = real_minutes
+    live_spec = replace(runtime.spec, rollout_stage=RolloutStage.LIVE)
+    runtime = replace(
+        runtime,
+        spec=live_spec,
+        store=SourceStore(runtime.store.client, runtime.store.database, live_spec),
+    )
+    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(tmp_path / 'parquet'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
+    root = tmp_path / 'publications'
+    record = runtime.build(keys[0][:10])
+    runtime.publish('mount', str(root / live_spec.key / 'mount'))
+    manifest = root / live_spec.key / 'mount' / 'latest.json'
+    published = json.loads(manifest.read_text())
+
+    def observe() -> dict[str, ProjectionObservation]:
+        return {
+            item['id']: item
+            for item in observe_publications(
+                runtime.store.client,
+                runtime.store.database,
+                catalog,
+                datetime.now(UTC),
+                root,
+                deadline=time.monotonic() + 5,
+            )
+        }
+
+    node = f'{live_spec.key}:consumer:mount'
+    actual = observe()[node]
+    if not published['files']:
+        # The genuine 2017 day precedes this consumer's 2020 export floor.
+        assert actual['status'] == 'UNKNOWN'
+        assert actual['reason'] == 'publication_evidence_invalid'
+        return
+    assert actual['status'] == 'CURRENT'
+    assert actual['reason'] == 'publication_state_and_files'
+    assert actual['evidence_id'] == published['version']
+    # Real activation-generation change preserves the data/end, but invalidates pinned currency.
+    runtime._activate(replace(record, generation=record.generation + 1), record.generation)
+    changed = observe()[node]
+    assert changed['data_through'] == actual['data_through']
+    assert changed['status'] == 'STALE' and changed['reason'] == 'publication_state_changed'
+    artifact = Path(published['files'][0]['path'])
+    artifact.unlink()
+    missing = observe()[node]
+    assert missing['status'] == 'FAILED' and missing['reason'] == 'publication_artifact_missing'
+    assert observe()[f'{live_spec.key}:consumer:huggingface']['status'] == 'UNKNOWN'
+    with pytest.raises(TimeoutError, match='budget'):
+        observe_publications(
+            runtime.store.client,
+            runtime.store.database,
+            catalog,
+            datetime.now(UTC),
+            root,
+            deadline=time.monotonic() - 1,
+        )

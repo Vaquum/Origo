@@ -7,6 +7,7 @@ import importlib
 import inspect
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -125,7 +126,7 @@ GATE_FAMILIES = (
     'orchestration.admission',
     'orchestration.runtime',
 )
-ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('origo.law_catalog')
 
 
@@ -166,10 +167,10 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
     if filename is None:
         return None
     path = Path(filename).resolve()
-    if not path.is_file() or not path.is_relative_to(ROOT):
+    if not path.is_file() or not path.is_relative_to(PACKAGE_ROOT):
         return None
     line = inspect.getsourcelines(owner)[1] or 1
-    relative = path.relative_to(ROOT).as_posix()
+    relative = (Path('origo') / path.relative_to(PACKAGE_ROOT)).as_posix()
     return {
         'deployed_sha': deployed_sha,
         'path': relative,
@@ -400,6 +401,47 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             role='defer',
             evidence='source_observation_log; source_failure_log',
         )
+        for condition, owner, description, limits in (
+            (
+                'archive_checksum',
+                'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
+                'Archive bytes must match the official SHA-256 sidecar.',
+                {},
+            ),
+            (
+                'archive_member',
+                'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
+                'The ZIP must contain exactly the expected dated CSV member.',
+                {},
+            ),
+            (
+                'archive_rows',
+                'sources.adapters.binance_archive:parse_archive_rows',
+                'The archive must be nonempty, have its declared field count, unique increasing IDs, ordered timestamps and rows inside its UTC day.',
+                {'field_count': int(str(getattr(spec.canonical, 'FIELD_COUNT')))},
+            ),
+            (
+                'aggregate_anomalies',
+                'sources.adapters.binance_archive:BinanceArchiveDaily.clean_agg_rows',
+                'Only identical duplicate aggregate rows and declared sentinel rows may be removed; conflicting or unmatched backward IDs fail.',
+                {
+                    'max_anomaly_ids': _threshold(
+                        'sources.adapters.binance_archive:_MAX_ANOMALY_IDS'
+                    )
+                },
+            ),
+        ):
+            if condition == 'aggregate_anomalies' and 'aggtrades' not in key:
+                continue
+            add(
+                f'provider.response_completeness.{condition}:{key}',
+                [key],
+                owner,
+                'Canonical archive validation',
+                description,
+                limits,
+                evidence='source_observation_log archive evidence; source_failure_log',
+            )
         add(
             f'sensor.retry.budget:{key}',
             [key],
@@ -423,6 +465,11 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         for condition, description, limits in (
             ('active_run', 'An active reconciliation run prevents another health run.', {}),
             (
+                'batch',
+                'Reconciliation rotates only changed or urgent partitions up to the batch limit.',
+                {'partitions': _threshold('sources.dagit:HEALTH_RECONCILIATION_BATCH_SIZE')},
+            ),
+            (
                 'cadence',
                 'Health runs wait for minimum interval; at idle interval they run even without new failures.',
                 {
@@ -434,7 +481,9 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             add(
                 f'sensor.reconciliation.{condition}:{key}',
                 [key],
-                'sources.dagit:_health_due',
+                'sources.dagit:_reconciliation_selection'
+                if condition == 'batch'
+                else 'sources.dagit:_health_due',
                 'Health reconciliation',
                 description,
                 limits,
@@ -568,6 +617,15 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     role='defer',
                     evidence='worker_minute_log; attributable worker attempt',
                 )
+            add(
+                f'provider.response_completeness.page_cap:{key}',
+                [key],
+                'sources.adapters.binance_provisional:BinanceProvisionalBase.fetch',
+                'Minute activation',
+                'A closed minute must reach its end boundary within the page request cap, including a discarded initial page.',
+                {'pages': _threshold('sources.adapters.binance_provisional:PROVISIONAL_PAGE_CAP')},
+                evidence='source_observation_log; source_failure_log; worker_minute_log',
+            )
             for condition, description in (
                 (
                     'boundary',
@@ -732,8 +790,6 @@ def _operational_gates(add: _AddGate) -> None:
         elif name == 'collectors_serving':
             limits['timeout_seconds'] = _threshold('workers.monitor:PROBE_TIMEOUT_SECONDS')
         elif name == 'queue_bounded':
-            import os
-
             default = (
                 inspect.signature(
                     cast(Callable[..., object], _resolve('workers.monitor:Monitor.__init__'))
@@ -880,6 +936,7 @@ def _operational_gates(add: _AddGate) -> None:
         'workers.receipts:reconcile_died_receipts',
         'Abandoned minute reconciliation',
         'An old host STARTED attempt without a terminal receipt is recorded WORKER_DIED.',
+        {'stale_after_seconds': _threshold('workers.receipts:DIED_RECEIPT_STALE_AFTER_SECONDS')},
         evidence='worker_minute_log',
     )
     add(
@@ -901,7 +958,8 @@ def _operational_gates(add: _AddGate) -> None:
         evidence='attributable admission lock acquisition/wait evidence',
     )
     loader = cast(Callable[[str], object], getattr(importlib.import_module('yaml'), 'safe_load'))
-    config = _mapping(loader((ROOT / 'dagster.yaml').read_text()))
+    config_path = Path(os.environ.get('DAGSTER_HOME', str(Path.cwd()))) / 'dagster.yaml'
+    config = _mapping(loader(config_path.read_text()))
     coordinator = _mapping(_mapping(config['run_coordinator'])['config'])
     add(
         'orchestration.admission.global',
@@ -1028,6 +1086,9 @@ def gate_evaluation(
 
 # Map only unambiguous persisted codes. A generic RuntimeError/ValueError cannot identify a guard.
 _FAILURE_GATES = {
+    'ARCHIVE_CHECKSUM_MISMATCH': ('provider.response_completeness.archive_checksum',),
+    'ARCHIVE_MEMBER_INVALID': ('provider.response_completeness.archive_member',),
+    'ARCHIVE_ROWS_INVALID': ('provider.response_completeness.archive_rows',),
     'RETAINED_CONTENT_INVALID': ('source.retained_integrity',),
     'SOURCE_HEALTH_BLOCKED': ('source.capacity.unresolved_failure',),
     'CAPACITY_VOLUME_MISMATCH': ('source.capacity.volume_identity',),
@@ -1066,9 +1127,9 @@ def source_failure_evaluations(
         if family not in families or (gate['scope'] and affected not in gate['scope']):
             continue
         # A provider circuit receipt without host attribution cannot select a host gate.
-        if family.startswith('provider.') and gate['id'].partition(':')[2] != (evidence or {}).get(
-            'host'
-        ):
+        if family.startswith('provider.rate_circuit.') and gate['id'].partition(':')[2] != (
+            evidence or {}
+        ).get('host'):
             continue
         result.append(
             gate_evaluation(
@@ -1390,7 +1451,7 @@ def observe_publications(
                     or not version
                     or not isinstance(files, list)
                     or not files
-                    or len(files) > 10000
+                    or len(cast(list[object], files)) > 10000
                 ):
                     raise ValueError('Publication manifest lacks bounded version/file evidence.')
                 through = datetime.fromisoformat(str(data['active_through']))

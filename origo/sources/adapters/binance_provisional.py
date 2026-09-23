@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 PROVISIONAL_CATCHUP_LOOKBACK_HOURS = 36
 PROVISIONAL_CATCHUP_MINUTES = 5
+PROVISIONAL_PAGE_CAP = 100
 
 
 def _objects(body: bytes) -> tuple[dict[str, object], ...]:
@@ -258,7 +259,7 @@ class BinanceProvisionalBase:
             ended_message = 'Historical-trade paging ended before the minute boundary.'
             unordered_message = 'Historical trades are unordered or duplicated.'
             precedes_message = 'Historical trade precedes its locator boundary.'
-        for _ in range(100):
+        for _ in range(PROVISIONAL_PAGE_CAP):
             page = request(
                 page_path,
                 {'symbol': symbol, 'fromId': next_id, 'limit': self.PAGE_LIMIT},

@@ -21,7 +21,8 @@ from origo import law
 from origo.law_catalog import build_catalog, gate_evaluation
 from origo.workers import law_page as page
 
-from .test_law import law_case as law_case, real_law_report as real_law_report
+from .test_law import law_case as law_case
+from .test_law import real_law_report as real_law_report
 
 SHA = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
 
@@ -231,7 +232,7 @@ def test_gate_history_api_is_catalog_only_paginated_and_gap_honest(tape: tuple[P
             cache.history({**query, **changes}, now)
     # Genuine predicate payload, repeated transport envelopes only; these IDs are test events, not market data.
     records = [{**original, 'evidence_id': f'protocol-delivery-{index}'} for index in range(1001)]
-    _write(event_path, records + [records[0]])
+    _write(event_path, [*records, records[0]])
     cache = page.TapeCache(root)
     cache.refresh_latest(now)
     cache.advance(now, budget_seconds=2)

@@ -40,6 +40,10 @@ from types import FrameType
 from typing import Literal, cast
 
 from origo.alerts.email import AlertSettings, send_alert
+from origo.assets.build_depth_snapshot_store_arrow import (
+    depth_snapshot_chunk_relative_path,
+    minute_start_from_partition_key,
+)
 from origo.assets.create_origo_database import (
     ClickHouseSettings,
     get_clickhouse_settings,
@@ -53,19 +57,15 @@ from origo.law_catalog import (
     build_catalog,
     gate_evaluation,
     import_gate_events,
-    projection_gate_evaluations,
     observe_publications,
+    projection_gate_evaluations,
     unknown_observations,
 )
 from origo.sources.contracts import Client, RolloutStage, identifier
 from origo.sources.registry import SOURCE_REGISTRY
 
-from origo.assets.build_depth_snapshot_store_arrow import (
-    depth_snapshot_chunk_relative_path,
-    minute_start_from_partition_key,
-)
-from .depth import DEPTH_SPECS
 from .dagster_reader import DagsterReader, RunFailure
+from .depth import DEPTH_SPECS
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (

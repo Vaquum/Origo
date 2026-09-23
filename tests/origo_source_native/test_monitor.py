@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import Any, cast
+from typing import IO, Any, cast
 
 import pytest
 import yaml
@@ -18,17 +18,25 @@ from dagster import Failure
 from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
-from origo.sources.registry import SOURCE_REGISTRY
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
-from origo.workers.monitor import Cursor, Finding, LawTape, held_law_keys
+from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
-from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
+from origo.workers.monitor import (
+    DELIVERY_LAG_SECONDS,
+    CollectorProbe,
+    Cursor,
+    Finding,
+    LawTape,
+    Monitor,
+    held_law_keys,
+)
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
 
-from .test_law import LawCase, law_case as law_case
+from .test_law import LawCase
+from .test_law import law_case as law_case
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / 'tests/fixtures/dagster/graphql'
@@ -1000,7 +1008,7 @@ def test_gate_event_index_resumes_without_rescanning_days(
     original = Path.open
     reads: list[str] = []
 
-    def opened(path: Path, mode: str = 'r', *args: object, **kwargs: object):
+    def opened(path: Path, mode: str = 'r', *args: object, **kwargs: object) -> IO[bytes] | IO[str]:
         if path.name.startswith('gate-events-') and mode == 'rb':
             reads.append(path.name)
         return original(path, mode, *args, **kwargs)

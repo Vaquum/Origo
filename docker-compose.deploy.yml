@@ -193,9 +193,14 @@ services:
 
   provisional-binance-perp-trades:
     <<: *provisional-worker
+    network_mode: host
+    hostname: ${ORIGO_PERP_WORKER_HOSTNAME:?deployment identity required}
     environment:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+      CLICKHOUSE_HOST: 127.0.0.1
+      DAGSTER_WEBSERVER_URL: http://127.0.0.1:4000
+      ORIGO_BINANCE_PERP_EGRESS_IPS: 37.27.112.140,37.27.112.144
 
   provisional-binance-spot-aggtrades:
     <<: *provisional-worker

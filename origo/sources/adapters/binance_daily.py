@@ -8,12 +8,14 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from ipaddress import IPv4Address
 from math import isfinite
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlsplit
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from ..arrow_types import ArrowTable
 from ..contracts import Partition, Row, SourceError, beat_worker
@@ -28,6 +30,7 @@ class Response:
     body: bytes
     headers: Mapping[str, str]
     status: int
+    egress_ip: str | None = None
 
 
 # Static pacing per Binance host family at 60% of the documented IP allowance,
@@ -41,9 +44,20 @@ REST_DEFAULT_BUDGET = (20, 1200)
 
 
 def _request(
-    url: str, params: Mapping[str, str | int] | None, headers: Mapping[str, str] | None
+    url: str,
+    params: Mapping[str, str | int] | None,
+    headers: Mapping[str, str] | None,
+    egress_ip: str | None = None,
 ) -> requests.Response:
     try:
+        if egress_ip is not None:
+            with requests.Session() as session:
+                session.trust_env = False
+                adapter = HTTPAdapter()
+                adapter.poolmanager.connection_pool_kw['source_address'] = (egress_ip, 0)
+                session.mount('https://', adapter)
+                session.mount('http://', adapter)
+                return session.get(url, params=params, headers=headers, timeout=(5, 30))
         return requests.get(url, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
         raise SourceError(
@@ -59,12 +73,13 @@ def _budget_host(url: str) -> str:
     return normalized
 
 
-def _budget_state_file(root: Path, url: str) -> Path:
+def _budget_state_file(root: Path, url: str, egress_ip: str | None = None) -> Path:
     host = _budget_host(url)
     safe = ''.join(char if char.isalnum() else '_' for char in host)
     if not safe:
         raise ValueError('Binance request budget requires a URL with a host.')
-    return root / f'binance_rest_budget.{safe}.state'
+    suffix = f'.{egress_ip}' if egress_ip is not None else ''
+    return root / f'binance_rest_budget.{safe}{suffix}.state'
 
 
 def _weighted_request(
@@ -72,15 +87,15 @@ def _weighted_request(
     params: Mapping[str, str | int] | None,
     headers: Mapping[str, str] | None,
     weight: int,
+    egress_ip: str | None = None,
 ) -> requests.Response:
     root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
-    # All worker processes share one budget per Binance host: api and fapi
-    # enforce separate IP allowances, so a hot host must not pace a cold one.
+    # Processes share each host/address allowance; unbound callers keep the legacy file.
     rate, backstop = REST_HOST_BUDGETS.get(_budget_host(url), REST_DEFAULT_BUDGET)
-    with _budget_state_file(root, url).open('a+') as state:
+    with _budget_state_file(root, url, egress_ip).open('a+') as state:
         fcntl.flock(state.fileno(), fcntl.LOCK_EX)
         state.seek(0)
         saved = state.read().strip()
@@ -101,7 +116,11 @@ def _weighted_request(
         time.sleep(max(0.0, next_request - now))
         next_request = time.time() + weight / rate
         persist()
-        response = _request(url, params, headers)
+        response = (
+            _request(url, params, headers, egress_ip)
+            if egress_ip is not None
+            else _request(url, params, headers)
+        )
         beat_worker()
         used = int(response.headers.get('X-MBX-USED-WEIGHT-1M', '0'))
         if used >= backstop:
@@ -124,20 +143,30 @@ def get_response(
     params: Mapping[str, str | int] | None = None,
     headers: Mapping[str, str] | None = None,
     weight: int = 0,
+    egress_ip: str | None = None,
 ) -> Response:
     if weight < 0:
         raise ValueError('Binance request weight cannot be negative.')
-    response = (
-        _weighted_request(url, params, headers, weight)
-        if weight
-        else _request(url, params, headers)
-    )
-    if not 200 <= response.status_code < 300:
-        raise SourceError(
-            f'PROVIDER_HTTP_{response.status_code}',
-            f'Provider returned HTTP {response.status_code}.',
+    if egress_ip is not None:
+        egress_ip = str(IPv4Address(egress_ip))
+    try:
+        response = (
+            _weighted_request(url, params, headers, weight, egress_ip)
+            if weight
+            else _request(url, params, headers, egress_ip)
+            if egress_ip is not None
+            else _request(url, params, headers)
         )
-    return Response(response.content, dict(response.headers), response.status_code)
+        if not 200 <= response.status_code < 300:
+            raise SourceError(
+                f'PROVIDER_HTTP_{response.status_code}',
+                f'Provider returned HTTP {response.status_code}.',
+            )
+    except SourceError as error:
+        if egress_ip is None:
+            raise
+        raise SourceError(error.code, f'{error} (egress {egress_ip}).') from error
+    return Response(response.content, dict(response.headers), response.status_code, egress_ip)
 
 
 def parse_decimal(text: str) -> Decimal:

@@ -29,13 +29,12 @@ def _logical_commands(lines: list[str]) -> list[str]:
 def test_compose_execs_do_not_consume_stdin() -> None:
     # The remote deploy script arrives on stdin itself, and compose exec
     # forwards stdin into the container: a bare exec drinks the rest of the
-    # script and the block silently never runs. Every post-up exec detaches
+    # script and the block silently never runs. Every exec/run detaches
     # stdin except the smoke test, which feeds python through a heredoc.
     text = DEPLOY_WORKFLOW.read_text()
-    post_up = text.split('up -d --wait', 1)[1]
-    commands = _logical_commands(post_up.splitlines())
-    execs = [command for command in commands if 'exec -T' in command]
-    assert len(execs) >= 4, execs
+    commands = _logical_commands(text.splitlines())
+    execs = [command for command in commands if 'exec -T' in command or 'run --rm --no-deps -T' in command]
+    assert len(execs) >= 5, execs
     for command in execs:
         if 'python - <<' in command:
             continue

@@ -1,3 +1,9 @@
+# v3.21.9
+
+- Reduce raw-perp minute paging with a nearer start and a bounded return to the existing start when boundary proof is absent; preserve complete rows and request evidence.
+- Bind automatic raw-perp minutes to dedicated IP budgets with explicit single-IP recovery, unchanged pacing and persistent provider backoff.
+- Configure secondary addresses through validated deployment code; keep candidate checks local and detach container stdin so preflight cannot consume the remaining deployment script.
+
 # v3.21.8
 
 - Replace the current-partition interval-array join with a canonical coverage window; source preparation updates existing views while retaining canonical precedence and continuous provisional coverage.

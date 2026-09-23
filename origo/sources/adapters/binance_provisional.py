@@ -168,6 +168,11 @@ class BinanceProvisionalBase:
                     'completed_at': self._now_utc().isoformat(),
                 }
             )
+            if response.egress_ip is not None:
+                requests[-1]['egress_ip'] = response.egress_ip
+            for name, value in response.headers.items():
+                if name.lower() == 'x-mbx-used-weight-1m':
+                    requests[-1]['used_weight_1m'] = int(value)
             # A slow minute pages for minutes; prove the loop is alive per request.
             beat_worker()
             return _objects(response.body)
@@ -228,7 +233,8 @@ class BinanceProvisionalBase:
         if self.PAGING_BACKTRACK_IDS == 0:
             first_id = next_id
         else:
-            first_id = max(1, next_id - self.PAGING_BACKTRACK_IDS)
+            first_id = max(1, next_id - min(self.PAGE_LIMIT, self.PAGING_BACKTRACK_IDS))
+        fallback_id = max(1, next_id - self.PAGING_BACKTRACK_IDS)
         next_id = first_id
         previous_id, previous_time = (
             next_id - 1,
@@ -271,6 +277,12 @@ class BinanceProvisionalBase:
                     skipped += 1
                     continue
                 rows.append(parsed)
+            if next_id == first_id and skipped == 0 and first_id > fallback_id:
+                rows.clear()
+                complete = False
+                first_id = next_id = fallback_id
+                previous_id, previous_time = next_id - 1, 0
+                continue
             if complete:
                 break
             next_id = _int(page[-1], id_field) + 1

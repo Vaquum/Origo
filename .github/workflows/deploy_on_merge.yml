@@ -24,6 +24,7 @@ jobs:
       ORIGO_USER: ${{ vars.ORIGO_USER }}
       DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
       PROJECT_NAME: ${{ vars.ORIGO_PROJECT_NAME }}
+      ORIGO_PERP_WORKER_HOSTNAME: perp-${{ github.run_id }}-${{ github.run_attempt }}
       HUGGINGFACE_DATASET_REPO_ID: ${{ vars.HUGGINGFACE_DATASET_REPO_ID }}
       ORIGO_KNOWN_HOSTS: ${{ vars.ORIGO_KNOWN_HOSTS }}
       ORIGO_METADATA_DRY_RUN: ${{ vars.ORIGO_METADATA_DRY_RUN || 'true' }}
@@ -118,6 +119,7 @@ jobs:
           ssh "$ORIGO_USER@$ORIGO_HOST" "mkdir -p '$DEPLOY_DIR/deploy'"
           scp docker-compose.deploy.yml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/docker-compose.deploy.yml"
           scp deploy/vector.yaml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/vector.yaml"
+          scp deploy/60-origo-egress.yaml deploy/prepare_binance_egress.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
 
       - name: Deploy updated images
         env:
@@ -152,6 +154,7 @@ jobs:
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
+              "ORIGO_PERP_WORKER_HOSTNAME": os.environ["ORIGO_PERP_WORKER_HOSTNAME"],
               "ORIGO_METADATA_DRY_RUN": os.environ["ORIGO_METADATA_DRY_RUN"],
               "ORIGO_METADATA_MAX_RUNTIME_SECONDS": os.environ["ORIGO_METADATA_MAX_RUNTIME_SECONDS"],
               "RESEND_API_KEY": os.environ["RESEND_API_KEY"],
@@ -187,6 +190,14 @@ jobs:
 
           cd "$DEPLOY_DIR"
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
+          bash deploy/prepare_binance_egress.sh
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '
+          import os, socket
+          for ip in os.environ["ORIGO_BINANCE_PERP_EGRESS_IPS"].split(","):
+              with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                  connection.bind((ip, 0))
+                  print(connection.getsockname()[0])
+          ' </dev/null
           # Save only worker identity; never serialize container environments.
           prior_workers=()
           for worker in $(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit); do

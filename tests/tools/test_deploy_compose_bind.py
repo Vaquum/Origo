@@ -214,3 +214,192 @@ function docker() {
                 assert arguments.count('--retired-worker') == 2
                 assert 'daemon-host' in arguments and 'ui-host' in arguments
                 assert int(arguments[arguments.index('--legacy-before') + 1]) > 0
+
+
+def test_egress_preflight_detaches_stdin_and_precedes_replacement(tmp_path: Path) -> None:
+    import os
+    import subprocess
+    import textwrap
+
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    start = workflow.index('          bash deploy/prepare_binance_egress.sh')
+    end = workflow.index('          # Bootstrap runs', start)
+    invocation = textwrap.dedent(workflow[start:end])
+    deploy = tmp_path / 'deploy'
+    deploy.mkdir()
+    (deploy / 'prepare_binance_egress.sh').write_text(
+        'printf "setup\\n" >> "$CALLS"\nexit "$SETUP_EXIT"\n'
+    )
+    stub = r'''
+set -euo pipefail
+PROJECT_NAME=test
+function docker() {
+    case "$*" in
+      'compose -p test -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '*)
+        printf 'preflight\n' >> "$CALLS"
+        if read -r swallowed; then
+            printf 'Preflight consumed deployment stdin: %s\n' "$swallowed" >&2
+            return 2
+        fi
+        case "$*" in
+          *'socket.AF_INET'*'connection.bind((ip, 0))'*) ;;
+          *) return 3 ;;
+        esac
+        return "$PREFLIGHT_EXIT" ;;
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
+        return 0 ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades')
+        printf 'up\n' >> "$CALLS" ;;
+      *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
+    esac
+}
+'''
+    for setup_exit, preflight_exit, expected in (
+        ('0', '0', ['setup', 'preflight', 'up', 'after-up']),
+        ('1', '0', ['setup']),
+        ('0', '1', ['setup', 'preflight']),
+    ):
+        calls = tmp_path / f'calls-{setup_exit}-{preflight_exit}'
+        result = subprocess.run(
+            ['bash', '-s'],
+            input=stub + invocation + '\nprintf "after-up\\n" >> "$CALLS"\n',
+            cwd=tmp_path,
+            env={**os.environ, 'CALLS': str(calls), 'SETUP_EXIT': setup_exit,
+                 'PREFLIGHT_EXIT': preflight_exit},
+            capture_output=True,
+            text=True,
+        )
+        assert (result.returncode == 0) == (setup_exit == preflight_exit == '0'), result.stderr
+        assert calls.read_text().splitlines() == expected
+
+
+def test_egress_setup_validates_before_install_and_preserves_primary(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    # Generated networkd shape from the production eno1 contract; no market data.
+    network = '''[Match]
+Name=eno1
+
+[Network]
+Address=37.27.112.167/32
+Address=2a01:4f9:3070:2304::2/64
+DNS=185.12.64.1
+DNS=2a01:4ff:ff00::add:2
+DNS=185.12.64.2
+DNS=2a01:4ff:ff00::add:1
+
+[Route]
+Destination=0.0.0.0/0
+Gateway=37.27.112.129
+GatewayOnLink=true
+
+[Route]
+Destination=::/0
+Gateway=fe80::1
+GatewayOnLink=true
+'''
+    fixture = tmp_path / 'eno1.network'
+    fixture.write_text(network)
+    # Redirect only host-side commands: execute the actual setup/validation script.
+    stub = r'''
+set -euo pipefail
+function cp() {
+    if [ "$1" = -a ] && [ "$2" = /etc/netplan ]; then
+        mkdir -p "$3/netplan"
+        if [ -f "$INSTALLED" ]; then
+            command cp "$INSTALLED" "$3/netplan/60-origo-egress.yaml"
+        fi
+    else command cp "$@"; fi
+}
+function netplan() {
+    test "$1" = generate && test "$2" = --root-dir
+    printf 'generate\n' >> "$CALLS"
+    mkdir -p "$3/run/systemd/network"
+    local generated="$3/run/systemd/network/10-netplan-eno1.network"
+    command cp "$BASE_NETWORK" "$generated"
+    if [ -f "$3/etc/netplan/60-origo-egress.yaml" ]; then
+        if [ "$SETUP_CASE" = generate-fails ] || [ "$SETUP_CASE" = initial-failure ]; then return 1; fi
+        printf 'Address=37.27.112.140/32\nAddress=37.27.112.144/32\n' >> "$generated"
+        if [ "$SETUP_CASE" = changed-dns ] && [ "$(grep -c generate "$CALLS")" = 2 ]; then printf 'DNS=1.1.1.1\n' >> "$generated"; fi
+        if [ "$SETUP_CASE" = changed-primary ]; then
+            python3 - "$generated" <<'UPDATE'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text().replace('Address=37.27.112.167/32', 'Address=37.27.112.140/32'))
+UPDATE
+        fi
+    fi
+}
+function install() {
+    if [ "$4" = /etc/netplan/60-origo-egress.yaml ]; then
+        printf 'install\n' >> "$CALLS"
+        command install -m 600 "$3" "$INSTALLED"
+    else command install "$@"; fi
+}
+function ip() {
+    case "$*" in
+      '-o -4 addr show dev eno1')
+        awk '{print "2: eno1 inet " $1 " scope global eno1"}' "$ADDRESSES" ;;
+      'addr add '*'/32 dev eno1')
+        printf 'add %s\n' "$3" >> "$CALLS"
+        printf '%s\n' "$3" >> "$ADDRESSES" ;;
+      '-4 route get 1.1.1.1')
+        printf 'route\n' >> "$CALLS"
+        if [ "$SETUP_CASE" = changed-route ]; then
+            printf '1.1.1.1 via 37.27.112.129 dev eno1 src 37.27.112.140\n'
+        else printf '1.1.1.1 via 37.27.112.129 dev eno1 src 37.27.112.167\n'; fi ;;
+      *) return 2 ;;
+    esac
+}
+source "$SETUP_SCRIPT"
+'''
+    installed = tmp_path / '60-origo-egress.yaml'
+    addresses = tmp_path / 'addresses'
+    addresses.write_text('37.27.112.167/32\n')
+    for case in ('initial-failure', 'first', 'repeat', 'generate-fails', 'changed-dns', 'changed-primary', 'changed-route'):
+        calls = tmp_path / f'calls-{case}'
+        before = installed.read_bytes() if installed.exists() else None
+        result = subprocess.run(
+            ['bash', '-c', stub],
+            env={**os.environ, 'SETUP_SCRIPT': str(REPO_ROOT / 'deploy/prepare_binance_egress.sh'),
+                 'BASE_NETWORK': str(fixture), 'INSTALLED': str(installed),
+                 'ADDRESSES': str(addresses), 'CALLS': str(calls), 'SETUP_CASE': case},
+            capture_output=True,
+            text=True,
+        )
+        observed = calls.read_text().splitlines()
+        if case in ('first', 'repeat'):
+            assert result.returncode == 0, result.stderr
+            assert observed[:3] == ['generate', 'generate', 'install']
+            assert observed[-1] == 'route'
+            assert installed.stat().st_mode & 0o777 == 0o600
+            assert installed.read_bytes() == (REPO_ROOT / 'deploy/60-origo-egress.yaml').read_bytes()
+            additions = [call for call in observed if call.startswith('add ')]
+            assert additions == (['add 37.27.112.140/32', 'add 37.27.112.144/32'] if case == 'first' else [])
+        else:
+            assert result.returncode != 0, case
+            assert (installed.read_bytes() if installed.exists() else None) == before
+            if case != 'changed-route':
+                assert 'install' not in observed and not any(call.startswith('add ') for call in observed)
+
+
+def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
+    compose = DEPLOY_COMPOSE.read_text()
+    raw_perp = compose.split('  provisional-binance-perp-trades:\n', 1)[1].split(
+        '  provisional-binance-spot-aggtrades:', 1
+    )[0]
+    assert compose.count('network_mode: host') == 1
+    for declaration in (
+        'network_mode: host',
+        'hostname: ${ORIGO_PERP_WORKER_HOSTNAME:?deployment identity required}',
+        'CLICKHOUSE_HOST: 127.0.0.1',
+        'DAGSTER_WEBSERVER_URL: http://127.0.0.1:4000',
+        'ORIGO_PROVISIONAL_SOURCE: binance_perp_trades',
+        'ORIGO_BINANCE_PERP_EGRESS_IPS: 37.27.112.140,37.27.112.144',
+    ):
+        assert declaration in raw_perp
+    assert 'ports:' not in raw_perp
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    assert 'ORIGO_PERP_WORKER_HOSTNAME: perp-${{ github.run_id }}-${{ github.run_attempt }}' in workflow
+    assert '"ORIGO_PERP_WORKER_HOSTNAME": os.environ["ORIGO_PERP_WORKER_HOSTNAME"]' in workflow

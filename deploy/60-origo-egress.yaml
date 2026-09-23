@@ -1,0 +1,5 @@
+network:
+  version: 2
+  ethernets:
+    eno1:
+      addresses: [37.27.112.140/32, 37.27.112.144/32]

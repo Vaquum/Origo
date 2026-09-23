@@ -855,10 +855,14 @@ def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
 def test_pre_catalog_component_proofs_remain_visible_without_historical_pass(
     recorder: _Recorder, tmp_path: Path, law_case: LawCase,
 ) -> None:
+    sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    catalog = build_catalog(sha)
+    # Reusing an older catalog must not attribute intervening validation to this activation.
+    LawTape(tmp_path / 'law').write_catalog(catalog)
     law_case.minute(0)
     monitor = _monitor(recorder, tmp_path)
     monitor.law_client = law_case.client
-    monitor.deployed_sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    monitor.deployed_sha = sha
     now = datetime.now(UTC)
     findings = monitor._law_findings(now, [])
     report = monitor.pending_report
@@ -981,6 +985,83 @@ def test_historical_gate_import_is_bounded_resumable_and_attributable(
                        for event in monitor.law_tape.last['gates'])
     finally:
         client.disconnect()
+
+
+@pytest.mark.parametrize('configuration_only', [False, True])
+def test_gate_history_activation_excludes_intervening_receipts_after_reversion_and_restart(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase,
+    monkeypatch: pytest.MonkeyPatch, configuration_only: bool,
+) -> None:
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from origo.sources.contracts import SourceError
+    from origo.sources.locking import source_lock
+
+    sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '200')
+    catalog_a = build_catalog(sha)
+    if configuration_only:
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '201')
+        catalog_b = build_catalog(sha)
+    else:
+        catalog_b = build_catalog('ffbdeb9ae1f03c30dffc3daa2d2de81041adfcc7')
+    assert catalog_a['version'] != catalog_b['version']
+
+    def receipt() -> None:
+        runtime = replace(law_case.runtime, run_id=f'worker:law-reversion:{uuid4()}')
+        with source_lock(runtime.lock_root, runtime.spec.key, 'consumer_mount'):
+            with pytest.raises(SourceError, match='Source lock is already held'):
+                runtime.publish('mount', str(tmp_path / 'mount'))
+
+    def observed() -> datetime:
+        return datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS)
+
+    first = _monitor(recorder, tmp_path, client=law_case.client)
+    first.law_client, first.catalog = law_case.client, catalog_a
+    first.law_tape.write_catalog(catalog_a)
+    receipt()
+    cursor = Cursor.load(first.cursor_path, observed(), 15)
+    assert first._history_findings(cursor, observed()) == []
+    cursor.save(first.cursor_path)
+    segment = next(first.law_tape.root.glob('gate-events-*'))
+    original = segment.read_bytes()
+    assert len(original.splitlines()) == 1
+
+    # B leaves a real receipt unimported; A's retained catalog predates it.
+    first.law_tape.write_catalog(catalog_b)
+    receipt()
+    monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '200')
+    returned = _monitor(recorder, tmp_path, client=law_case.client)
+    returned.law_client, returned.catalog = law_case.client, build_catalog(sha)
+    assert returned.catalog['version'] == catalog_a['version']
+    cursor = Cursor.load(returned.cursor_path, observed(), 15)
+    assert returned._history_findings(cursor, observed()) == []
+    assert segment.read_bytes() == original
+    receipt()
+    assert returned._history_findings(cursor, observed()) == []
+    cursor.save(returned.cursor_path)
+    after_return = segment.read_bytes()
+    events = [json.loads(line) for line in after_return.splitlines()]
+    assert len(events) == 2 and after_return.startswith(original)
+    assert events[-1]['catalog_version'] == catalog_a['version']
+    assert datetime.fromisoformat(events[-1]['evaluated_at']) >= returned.law_known_since
+
+    # Same-version restart also cannot claim missed pre-activation receipts.
+    receipt()
+    restarted = _monitor(recorder, tmp_path, client=law_case.client)
+    restarted.law_client, restarted.catalog = law_case.client, catalog_a
+    cursor = Cursor.load(restarted.cursor_path, observed(), 15)
+    assert restarted._history_findings(cursor, observed()) == []
+    assert segment.read_bytes() == after_return
+    receipt()
+    assert restarted._history_findings(cursor, observed()) == []
+    events = [json.loads(line) for line in segment.read_bytes().splitlines()]
+    assert len(events) == 3
+    assert datetime.fromisoformat(events[-1]['evaluated_at']) >= restarted.law_known_since
+    assert events[-1]['catalog_version'] == catalog_a['version']
+    assert restarted._history_findings(cursor, observed()) == []
+    assert len(segment.read_bytes().splitlines()) == 3
 
 
 def test_segment_retention_preserves_30_days_and_closeout_evidence(tmp_path: Path) -> None:

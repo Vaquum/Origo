@@ -475,6 +475,8 @@ class Monitor:
         queue_threshold: int = 200,
     ) -> None:
         self.law_client = law_client
+        # A retained catalog may precede an intervening deployment or configuration.
+        self.law_known_since = datetime.now(UTC)
         self.law_tape = LawTape(law_root)
         self.catalog: LawCatalog | None = None
         self.pending_report: LawReport | None = None
@@ -714,12 +716,10 @@ class Monitor:
         if report is None or self.catalog is None:
             return []
         self.law_tape.write_catalog(self.catalog)
-        catalog_path = self.law_tape.root / f'catalog-{self.catalog["version"]}.json'
-        known_since = datetime.fromtimestamp(catalog_path.stat().st_mtime, UTC)
         for event in report['gates']:
             if (
                 event['gate_id'].startswith('source.component_integrity.')
-                and datetime.fromisoformat(event['evaluated_at']) < known_since
+                and datetime.fromisoformat(event['evaluated_at']) < self.law_known_since
             ):
                 event.update(
                     outcome='NOT_EVALUATED',
@@ -896,7 +896,7 @@ class Monitor:
             self.database,
             self.catalog,
             now - timedelta(seconds=DELIVERY_LAG_SECONDS),
-            known_since=datetime.fromtimestamp(catalog_path.stat().st_mtime, UTC),
+            known_since=self.law_known_since,
             cursor=cursor.law_history.get(version),
         )
         self.law_tape.append_events(events, deadline=deadline)

@@ -189,3 +189,8 @@ samples omit unobserved gate placeholders; the catalog supplies their explicit
 UNKNOWN/NOT_EVALUATED display. Event-driven gates retain the last original outcome
 and timestamp separately from current blocking state. Corrupt oversized history
 records mark the history limited while later valid evidence remains readable.
+
+Historical receipt/proof attribution starts at the current monitor activation.
+Restart or rollback never reuses a catalog file's old creation time as deployment
+evidence; earlier unimported events remain unobserved. Already taped events retain
+their original catalog, identity and timestamp.

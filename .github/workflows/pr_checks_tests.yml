@@ -25,8 +25,14 @@ jobs:
       - name: Install package and test dependencies
         run: python -m pip install --upgrade pip '.[dev]'
 
+      - name: Install browser for dashboard acceptance
+        run: python -m playwright install --with-deps chromium
+
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
+
+      - name: Verify reader-law contract files
+        run: pytest tests/origo_source_native/test_law.py tests/origo_source_native/test_law_catalog.py tests/origo_source_native/test_law_page.py tests/origo_source_native/test_monitor.py -q
 
       - name: Verify daily-archive fixture bundles
         run: |

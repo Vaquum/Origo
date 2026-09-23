@@ -7,7 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_FILE = REPO_ROOT / 'AGENTS.md'
 RULESET_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_ruleset.yml'
-EXPECTED_SHA256 = '8cde97475e1f9fd1a0cb9341f2b40026e166e541ac11a1c52518b9983160f853'
+EXPECTED_SHA256 = '908930fe6affee9b200b736c684fba6e0a60e3e08b28d4a07e2059524fbf6014'
 
 
 def test_repo_agents_file_exists_and_has_expected_sha256() -> None:
@@ -31,3 +31,12 @@ def test_pr_checks_ruleset_runs_agents_contract() -> None:
 
     assert 'tests/tools/test_agents_contract.py' in workflow
     assert 'continue-on-error' not in workflow
+
+
+def test_law_exception_preserves_ten_laws_and_monitor_authority() -> None:
+    text = AGENTS_FILE.read_text()
+    assert 'The monitor worker is the sole detector and alert sender' in text
+    assert 'public read-only summary' in text
+    assert 'Do not add another dashboard, alert path' in text
+    test_repo_agents_file_contains_zero_bang_authority_and_ten_laws()
+    test_repo_agents_file_exists_and_has_expected_sha256()

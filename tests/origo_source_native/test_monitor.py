@@ -19,6 +19,9 @@ from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.sources.registry import SOURCE_REGISTRY
+from origo.law import LawReport, evaluate
+from origo.law_catalog import build_catalog
+from origo.workers.monitor import Cursor, Finding, LawTape, held_law_keys
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
@@ -173,6 +176,8 @@ def _monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
         database='origo',
+        law_client=_EmptyClient(),
+        law_root=tmp_path / 'law',
         heartbeat_dir=tmp_path / 'heartbeats',
         probes=probes,
         settings=settings if settings is not None else _settings(server),
@@ -221,7 +226,7 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
     second = monitor.tick(NOW + timedelta(minutes=1))
     assert set(second.failed) >= expected
     assert len(_emails(recorder)) == 1
-    assert len(_check_posts(recorder)) == 12
+    assert len(_check_posts(recorder)) == 14
     later = monitor.tick(NOW + timedelta(hours=7))
     assert set(later.failed) >= expected
     assert len(_emails(recorder)) == 2
@@ -273,8 +278,8 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         }
     }
     quiet = _monitor(recorder, tmp_path / 'quiet').tick(NOW)
-    assert quiet.failed == ()
-    assert len(_emails(recorder)) == 1
+    assert quiet.failed and all(key.startswith('law:') for key in quiet.failed)
+    assert len(_emails(recorder)) == 2
 
 
 def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Path) -> None:
@@ -415,7 +420,8 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert email['to'] == ['operator@example.test']
     assert 'Dagit check evaluations: written.' in email['text']
     for key in outcome.failed:
-        assert key in email['text']
+        if not (key.startswith(('law:R1:', 'law:C1:', 'law:D1:')) and ':FAIL:' in key):
+            assert key in email['text']
 
     # A Dagit that refuses the write is reported in the same e-mail.
     second = _monitor(recorder, tmp_path / 'refused', dagster_url=_url(recorder))
@@ -466,6 +472,7 @@ def test_monitor_checks_are_declared_in_definitions() -> None:
     assert sorted(MONITOR_CHECK_NAMES) == [
         'collectors_serving',
         'dagster_reachable',
+        'data_current',
         'no_error_logs',
         'publication_current',
         'queue_bounded',
@@ -758,3 +765,94 @@ def test_monitor_flags_runs_queued_past_the_stuck_threshold(recorder: _Recorder,
     assert all(
         post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded'
     )
+
+
+def _protocol_report(now: datetime) -> LawReport:
+    # Alert/tape protocol only: empty-store UNKNOWN evidence, not invented market rows.
+    report = evaluate(_EmptyClient(), 'origo', now)
+    catalog = build_catalog('')
+    report['catalog_version'] = catalog['version']
+    return report
+
+
+def test_law_tape_precedes_unheld_dagit_and_held_mail(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    original = monitor.reporter.check
+    checked: list[str] = []
+
+    def check(asset: str, name: str, *, passed: bool, metadata: Mapping[str, object]) -> bool:
+        assert (tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')).exists()
+        checked.append(name)
+        return original(asset, name, passed=passed, metadata=metadata)
+
+    monkeypatch.setattr(monitor.reporter, 'check', check)
+    monitor.tick(NOW)
+    assert checked == list(MONITOR_CHECK_NAMES)
+    report = json.loads((tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')).read_text())
+    assert report['status'] in ('FAIL', 'UNKNOWN')
+    assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
+    assert 'law:' in _emails(recorder)[0]['text']
+
+
+def test_data_current_hold_uses_consecutive_slots_and_cooldown(tmp_path: Path) -> None:
+    cursor = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
+    finding = Finding('law:R1:binance_perp_trades:FAIL:reader_stale', 'data_current', 'lag', 'lag')
+    for minute in range(5):
+        held = held_law_keys(cursor, [finding], (NOW + timedelta(minutes=minute)).isoformat())
+        assert (finding.key in held) == (minute < 4)
+        again = held_law_keys(cursor, [finding], (NOW + timedelta(minutes=minute)).isoformat())
+        assert again == held
+    cursor.save(tmp_path / 'cursor.json')
+    restarted = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
+    assert not held_law_keys(restarted, [finding], (NOW + timedelta(minutes=5)).isoformat())
+    assert held_law_keys(restarted, [finding], (NOW + timedelta(minutes=7)).isoformat())
+    held_law_keys(restarted, [], (NOW + timedelta(minutes=8)).isoformat())
+    assert held_law_keys(restarted, [finding], (NOW + timedelta(minutes=9)).isoformat())
+    immediate = Finding('law:C2:binance_perp_trades:FAIL:calendar_gap', 'data_current', 'gap', 'gap')
+    assert not held_law_keys(restarted, [immediate], NOW.isoformat())
+
+
+def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    first = _monitor(recorder, tmp_path)
+    first.tick(NOW)
+    segment = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    original = segment.read_bytes()
+    _monitor(recorder, tmp_path).tick(NOW)
+    assert segment.read_bytes() == original
+    with segment.open('ab') as stream:
+        stream.write(b'{"sampling_slot":')
+    tape = LawTape(tmp_path / 'law')
+    report = _protocol_report(NOW + timedelta(minutes=1))
+    tape.append(report, build_catalog(''))
+    lines = segment.read_bytes().splitlines()
+    assert len(lines) == 3 and lines[1] == b'{"sampling_slot":'
+    assert json.loads(lines[2])['sampling_slot'] == report['sampling_slot']
+    assert LawTape(tmp_path / 'law').latest(NOW)['sampling_slot'] == report['sampling_slot']
+
+
+def test_law_tape_failure_keeps_other_checks_and_delivery_running(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.law_tape.root.write_text('not a directory')
+    outcome = monitor.tick(NOW)
+    assert 'detector_failed:law' in outcome.failed
+    assert set(post['check_name'] for post in _check_posts(recorder)) == set(MONITOR_CHECK_NAMES)
+    assert 'detector_failed:law' in _emails(recorder)[0]['text']
+    assert _failure_keys() <= set(outcome.failed)
+
+
+def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.page_url = 'http://127.0.0.1:1/law.json'
+    started = time.monotonic()
+    outcome = monitor.tick(NOW)
+    assert time.monotonic() - started < 5
+    assert 'law_page_unreachable' in outcome.failed
+    assert 'law_page_unreachable' in _emails(recorder)[0]['text']

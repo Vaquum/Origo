@@ -10,18 +10,18 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
   own storage holds runs, materializations, observations, sensor and schedule state and
   asset check evaluations. ClickHouse holds worker receipts (`origo.worker_minute_log`),
   source failures (`origo.source_failure_log`) and the container log
-  (`origo.container_log`). The workers' heartbeat files hold liveness. Nothing is copied
-  from one store into another.
+  (`origo.container_log`). The workers' heartbeat files hold liveness. The monitor's append-only law tape records its evaluated evidence,
+  with original identities and times; it does not replace those authoritative stores.
 - **One pane.** Dagit is where an operator looks first. The external asset
-  `origo_monitor` carries the six checks the monitor evaluates every minute; the live
+  `origo_monitor` carries the seven checks the monitor evaluates every minute; the live
   feed assets (`binance_spot_depth_live_feed`, `<source>_provisional_feed`) carry a
   five-minute freshness policy the daemon evaluates without a run. If a fact is not
   visible in Dagit, it is visible in ClickHouse; the monitor's e-mail says which.
 - **One detector.** The monitor runs outside the Dagster process, as its own Compose
   service with its own heartbeat, so it keeps working when the daemon, the queue or the
-  webserver is the failure. It stores only a cursor file. It writes every finding into
+  webserver is the failure. Its operational state is a cursor for notification and historical-import positions. It writes every finding into
   Dagit as a check evaluation before it sends an e-mail, and the e-mail says whether that
-  write succeeded. No second dashboard, no second alert path.
+  write succeeded. The authorized `/law` summary reads only the monitor tape; there is no second detector or alert path.
 
 ## The feed workers
 
@@ -85,7 +85,7 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 
 ## Investigation order
 
-1. **Dagit first.** Open the `origo_monitor` asset: its six checks name the failing area
+1. **Dagit first.** Open the `origo_monitor` asset: its seven checks name the failing area
    and the finding keys. Open the failed run or the failed check it names. For a source,
    read `binance_spot_trades_failure_sensor` and the source's reconciliation state.
 2. **ClickHouse second.** Read `origo.worker_minute_log` for the minute, then
@@ -112,8 +112,8 @@ watchdog's exit is in `origo.container_log`.
 ## Alerts and the daily digest
 
 - The monitor evaluates `collectors_serving`, `dagster_reachable`, `no_error_logs`,
-  `publication_current`, `queue_bounded` and `workers_alive` every minute, writes the
-  six evaluations to Dagit through the webserver's report endpoint, then sends one
+  `publication_current`, `queue_bounded`, `workers_alive` and `data_current` every minute, writes the
+  seven evaluations to Dagit through the webserver's report endpoint, then sends one
   e-mail through Resend listing every new finding key. A key repeats inside the
   cooldown (six hours by default) without a second e-mail; a queue backlog is one key.
 - Delivery: `RESEND_API_KEY` (repository secret), `ORIGO_ALERT_EMAIL_TO` (repository
@@ -128,10 +128,55 @@ watchdog's exit is in `origo.container_log`.
 
 ## Rules that must not change
 
-- Dagit is the pane. Do not add a second dashboard or a second alert path.
-- The monitor keeps only a cursor. Do not make it a store of truth.
+- Dagit is the investigation pane. `/law` is the authorized read-only summary; no other dashboard or alert path.
+- The monitor keeps notification/import cursors and the law observation tape. Authoritative facts stay in their existing stores.
 - Every finding is written to Dagit before it is e-mailed, and the e-mail states whether
   the write succeeded.
 - Per-minute work is provenance in `origo.worker_minute_log` and observations in Dagit,
   never one Dagster run per minute.
 - Investigate in the order above. Do not start from `docker logs`.
+
+
+## Public reader law
+
+`/law` defaults to Sources: each declared source and projection, its own evidence and
+consumer outputs. Gates shows production/runtime decisions over 30 UTC days, with
+exact meaning, threshold and deployed-code links. Recovery separates reader lag,
+late daily archives, older calendar holes and the consecutive core-law clear window.
+Source/projection inventory comes from source and depth declarations, never UI lists.
+
+`data_current` evaluates R1 (readable selected minute and reader end), C1 (yesterday's
+canonical activation after its market deadline), C2 (older canonical calendar) and D1
+(distinct depth minutes). Worker liveness cannot make missing reader data green.
+Spot/perp freshness budgets are initially 180/300 seconds. Missing daily archives are
+NOT_DUE before 04:30/10:30 UTC respectively; arrivals are validated immediately.
+Projection activation is not formal certification approval or a physical full-history audit.
+
+The monitor appends one unheld whole-inventory report per distinct minute before Dagit
+or Resend. R1/C1/D1 mail waits for five consecutive failing slots with the same key;
+C2, UNKNOWN and evidence/tape/page faults notify immediately under the existing cooldown.
+Gaps, UNKNOWN and recovery reset holds. The target is Resend acceptance within eight
+minutes of a predicate breach while monitor, ClickHouse and Resend are reachable.
+This is not a guarantee of recipient inbox delivery.
+
+Only the monitor mounts `/var/lib/origo-law` writable. The public page has a read-only
+mount, no database/exchange/mail credentials and no backend query path. Page requests
+read bounded caches/tape only; API history is catalog-ID restricted, at most 30 days
+and 1,000 original events per page. Missing, corrupt or older-than-120-second evidence
+is UNKNOWN. HTTP health means the page serves, independently of its data verdict;
+red data never blocks deployment or recovery. Historical gaps remain not observed.
+
+The dedicated `law_reader` profile permits only reads, one concurrent single-threaded
+query, 512 MiB and five seconds per statement. Transport has a wall deadline; the core
+pass has 20 seconds total. Additional catalog observations and one historical import
+page each have five seconds, yield to current checks and stop on pressure/timeouts.
+No retries, ingestion locks or new exchange calls are allowed. Page CPU/memory are
+capped independently. Timeout/cap failures become UNKNOWN on the ordinary next tick.
+
+UTC-day tape segments retain 30 days and retained catalog definitions; selected
+72-hour closeout evidence is retained separately. A clear window requires 4,321
+consecutive distinct minute slots spanning at least 72 hours, with every applicable
+core predicate PASS (C1 NOT_DUE identified separately). Missing/corrupt slots or
+incompatible definitions break the window. Display-only inactive nodes do not affect it.
+PRD #442 remains open until a genuine production window and three contemporaneous
+SQL cross-checks are attached; CI and historical reconstruction cannot substitute.

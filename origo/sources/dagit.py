@@ -181,16 +181,20 @@ def _partition_runs(
     )
 
 
+HEALTH_MIN_INTERVAL_SECONDS = 300
+HEALTH_IDLE_INTERVAL_SECONDS = 3600
+
+
 def _health_due(
     context: SensorEvaluationContext, runtime: SourceRuntime, job: JobDefinition, now: float
 ) -> bool:
     if context.instance.get_runs(RunsFilter(job_name=job.name, statuses=_ACTIVE), limit=1):
         return False
     last = context.instance.get_run_records(RunsFilter(job_name=job.name), limit=1)
-    age = now - (last[0].end_time or last[0].update_timestamp.timestamp()) if last else 3600
-    if age < 300:
+    age = now - (last[0].end_time or last[0].update_timestamp.timestamp()) if last else HEALTH_IDLE_INTERVAL_SECONDS
+    if age < HEALTH_MIN_INTERVAL_SECONDS:
         return False
-    if age >= 3600:
+    if age >= HEALTH_IDLE_INTERVAL_SECONDS:
         return True
     return bool(
         runtime.store.execute(

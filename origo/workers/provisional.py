@@ -58,6 +58,7 @@ from .runtime import (
     utc_now,
 )
 
+PROVISIONAL_MAX_WORKERS = 4
 DEFAULT_WEBSERVER_URL = 'http://dagit:3000'
 log = logging.getLogger('origo.workers.provisional')
 
@@ -262,7 +263,7 @@ class ProvisionalFeed:
             finally:
                 client.disconnect()
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=PROVISIONAL_MAX_WORKERS) as pool:
             outcomes = list(pool.map(build, admitted))
         processed = [key for key, _ in outcomes if key is not None]
         failed = [key for _, key in outcomes if key is not None]

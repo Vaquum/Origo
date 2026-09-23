@@ -13,6 +13,11 @@ from .contracts import SourceError
 from .lifecycle import SourceRuntime
 
 
+CAPACITY_TOTAL_RESERVE_TENTHS = 3
+CAPACITY_WORKING_SET_FACTOR = 2
+CAPACITY_FREE_INODE_DENOMINATOR = 10
+
+
 @dataclass(frozen=True)
 class _Volume:
     identity: str
@@ -95,10 +100,10 @@ class CapacityMonitor:
                     'Launch one representative day with capacity_probe enabled before a range backfill.',
                 )
             reserve = max(
-                (total * 3 + 9) // 10,
-                measured * 2 * runtime.spec.orchestration.canonical_concurrency,
+                (total * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10,
+                measured * CAPACITY_WORKING_SET_FACTOR * runtime.spec.orchestration.canonical_concurrency,
             )
-            if total <= 0 or free < reserve or inodes <= 0 or available * 10 < inodes:
+            if total <= 0 or free < reserve or inodes <= 0 or available * CAPACITY_FREE_INODE_DENOMINATOR < inodes:
                 raise SourceError(
                     'CAPACITY_RESERVE_BREACHED', f'Storage reserve breached on {volume.path}.'
                 )

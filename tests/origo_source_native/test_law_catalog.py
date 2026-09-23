@@ -358,6 +358,7 @@ def test_failure_protocol_maps_only_attributable_guards(catalog: LawCatalog) -> 
     assert events[0]['outcome'] == 'EXPECTED_WAIT'
     assert events[0]['evidence_id'] == 'recorded-event'
     assert events[0].get('deployed_sha') == SHA
+    assert events[0].get('catalog_version') == catalog['version']
     unversioned = source_failure_evaluations(
         build_catalog(''), **values, error_code='RENDER_DEFERRED', event_type='FAILED'
     )
@@ -422,6 +423,7 @@ def test_certification_protocol_never_calls_pending_approved(catalog: LawCatalog
         == 'EXPECTED_WAIT'
     )
     assert all(event['evaluated_at'] == values['recorded_at'] for event in events)
+    assert all(event.get('catalog_version') == catalog['version'] for event in events)
     approved = certification_evaluations(catalog, **values, review_state='APPROVED')
     assert (
         next(event for event in approved if '.review_state:' in event['gate_id'])['outcome']
@@ -437,6 +439,7 @@ def test_historical_import_executes_real_bounded_query(
     origo_test_env: dict[str, str],
     tmp_path: Path,
     catalog: LawCatalog,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
     from origo.sources.lifecycle import SourceRuntime
@@ -463,6 +466,20 @@ def test_historical_import_executes_real_bounded_query(
         events, cursor = import_gate_events(client, 'origo', catalog, later, known_since=now)
         assert len(events) == 1 and events[0]['gate_id'] == 'locks.contention.source'
         assert events[0]['outcome'] == 'EXPECTED_WAIT'
+        assert events[0].get('catalog_version') == catalog['version']
+        threshold = next(
+            gate['thresholds']['queue_threshold']
+            for gate in catalog['gates']
+            if gate['id'] == 'monitor.queue_bounded'
+        )
+        assert isinstance(threshold, int)
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', str(threshold + 1))
+        configured = build_catalog(SHA)
+        assert configured['version'] != catalog['version']
+        reimported, _ = import_gate_events(client, 'origo', configured, later, known_since=now)
+        assert reimported[0].get('catalog_version') == configured['version']
+        assert reimported[0]['evidence_id'] == events[0]['evidence_id']
+        assert reimported[0]['definition_version'] == events[0]['definition_version']
         assert datetime.fromisoformat(events[0]['evaluated_at']) <= later
         repeated, next_cursor = import_gate_events(
             client, 'origo', catalog, later, known_since=now, cursor=cursor
@@ -510,6 +527,7 @@ def test_component_gate_events_retain_real_proof_identity(
     for event in events:
         assert event['outcome'] == 'PASS'
         assert event.get('deployed_sha') == SHA
+        assert event.get('catalog_version') == catalog['version']
         assert event['evaluated_at'] == by_id[event['evidence_id']]['evidence_at']
         assert event['evaluated_at'] != by_id[event['evidence_id']]['observed_at']
         assert event['gate_id'].startswith('source.component_integrity.')

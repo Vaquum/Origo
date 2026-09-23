@@ -49,6 +49,8 @@ def tape(tmp_path: Path, real_law_report: law.LawReport) -> tuple[Path, page.Doc
                     evidence=predicate['evidence'], reason=predicate['reason']))
     inventory_gate = next(gate for gate in catalog['gates'] if gate['id'] == 'law.inventory')
     report['gates'].append(gate_evaluation(inventory_gate, evidence_id=report['sampling_slot'] + ':inventory', evaluated_at=report['evaluation_start'], outcome='PASS', evidence={'live': len(report['inventory'])}, reason='all_live_sources_evaluated'))
+    for event in report['gates']:
+        event['catalog_version'] = catalog['version']
     # The association comes from the real catalog, not an invented failing gate.
     for observation in report['projections']:
         source = observation['id'].split(':')[0]
@@ -693,3 +695,74 @@ def test_many_deployments_keep_bounded_catalogs_and_original_event_code(
     legacy_result = restarted.history(query, now)
     assert legacy_result['events'] == [legacy] and legacy_result['definitions'] == []
     Path('/tmp/origo-law-catalog-memory.json').write_text(json.dumps({'snapshots': len(cache.catalog_versions), 'resident_full': len(cache.catalogs), 'accounted_bytes': cache.catalog_bytes}))
+
+
+
+def test_same_sha_configuration_regimes_preserve_exact_original_definitions(
+    tape: tuple[Path, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, report, now = tape
+    records: list[page.Document] = []
+    versions: list[str] = []
+    # These are real catalog builds with changed operator configuration, not invented queue measurements.
+    for threshold in (200, 201):
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', str(threshold))
+        catalog = build_catalog(SHA)
+        versions.append(catalog['version'])
+        descriptor = next(gate for gate in catalog['gates'] if gate['id'] == 'monitor.queue_bounded')
+        event = gate_evaluation(descriptor, evidence_id=f'configuration-envelope:{catalog["version"]}',
+            evaluated_at=str(report['evaluation_start']), outcome='UNKNOWN', evidence={}, reason='not_observed')
+        event['catalog_version'] = catalog['version']
+        records.append(cast(page.Document, json.loads(json.dumps(event))))
+        (root / f'catalog-{catalog["version"]}.json').write_text(json.dumps(catalog))
+    assert versions[0] != versions[1]
+    _write(next(root.glob('gate-events-*')), records)
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    for version in versions:
+        cache._load_catalog(version)
+    cache.advance(now, budget_seconds=2)
+    query = {'gate_id': ['monitor.queue_bounded'], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
+    result = cache.history(query, now)
+    definitions = {str(item['catalog_version']): item for item in page._objects(result['definitions'])}
+    assert set(definitions) == set(versions)
+    for version, threshold in zip(versions, (200, 201), strict=True):
+        assert page._object(definitions[version]['thresholds'])['queue_threshold'] == threshold
+        code = page._object(definitions[version]['code'])
+        assert code['deployed_sha'] == SHA and f'/blob/{SHA}/' in str(code['url'])
+    # A SHA-only legacy event is ambiguous here; never guess the last-loaded configuration.
+    _write(next(root.glob('gate-events-*')), [{key: value for key, value in records[0].items() if key != 'catalog_version'}])
+    restarted = page.TapeCache(root)
+    restarted.refresh_latest(now)
+    for version in reversed(versions):
+        restarted._load_catalog(version)
+    restarted.advance(now, budget_seconds=2)
+    assert restarted.history(query, now)['definitions'] == []
+    # Explicit unknown catalog metadata must not silently fall back to the SHA either.
+    _write(next(root.glob('gate-events-*')), [{**records[0], 'catalog_version': '../unknown'}])
+    restarted = page.TapeCache(root)
+    restarted.refresh_latest(now)
+    restarted.advance(now, budget_seconds=2)
+    assert restarted.history(query, now)['definitions'] == []
+
+
+
+def test_recovery_delta_retains_direction_without_changing_duration(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, _, report, _ = serving
+    feed = next(item for item in page._objects(report['feeds']) if item['source_key'] == 'binance_spot_trades')
+    magnitude = page._number(page._object(page._object(page._object(feed['predicates'])['R1'])['evidence'])['age_seconds'])
+    assert magnitude is not None and magnitude > 0
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=recovery&source=binance_spot_trades')
+        tab.locator('.chart-card').wait_for()
+        normal = tab.evaluate('duration', magnitude)
+        # Signed formatting vectors use a captured age magnitude, not claimed historical market deltas.
+        for value, expected in ((-magnitude, f'-{normal} · less lag'), (magnitude, f'+{normal} · more lag'), (0, '0s · unchanged'), (None, '—')):
+            tab.evaluate("value=>{data.delay_change_1h_seconds.binance_spot_trades=value;renderContent()}", value)
+            assert tab.locator('.recovery-metrics>div').nth(1).locator('strong').inner_text() == expected
+        assert tab.evaluate('duration', magnitude) == normal
+        browser.close()

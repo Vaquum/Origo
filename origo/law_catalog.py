@@ -86,6 +86,7 @@ class ProjectionObservation(TypedDict):
 class GateEvaluation(TypedDict):
     gate_id: str
     deployed_sha: NotRequired[str]
+    catalog_version: NotRequired[str]
     definition_version: str
     evidence_id: str
     evaluated_at: str
@@ -1165,6 +1166,7 @@ def gate_evaluation(
     reason: str,
     affected_ids: list[str] | None = None,
     dagit_url: str | None = None,
+    catalog_version: str | None = None,
 ) -> GateEvaluation:
     event: GateEvaluation = {
         'gate_id': descriptor['id'],
@@ -1180,6 +1182,8 @@ def gate_evaluation(
     }
     if descriptor['code'] is not None:
         event['deployed_sha'] = descriptor['code']['deployed_sha']
+    if catalog_version is not None:
+        event['catalog_version'] = catalog_version
     return event
 
 
@@ -1235,6 +1239,7 @@ def source_failure_evaluations(
         result.append(
             gate_evaluation(
                 gate,
+                catalog_version=catalog['version'],
                 evidence_id=event_id,
                 evaluated_at=event_time,
                 outcome='EXPECTED_WAIT' if gate['role'] == 'defer' else 'FAIL',
@@ -1291,6 +1296,7 @@ def certification_evaluations(
         result.append(
             gate_evaluation(
                 gate,
+                catalog_version=catalog['version'],
                 evidence_id=event_id,
                 evaluated_at=recorded_at,
                 outcome=outcome,
@@ -1441,6 +1447,7 @@ def projection_gate_evaluations(
                 result.append(
                     gate_evaluation(
                         gate,
+                        catalog_version=catalog['version'],
                         evidence_id=event_id,
                         evaluated_at=stamp,
                         outcome='PASS' if gate['code'] is not None else 'UNKNOWN',

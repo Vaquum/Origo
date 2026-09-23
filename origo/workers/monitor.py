@@ -684,6 +684,8 @@ class Monitor:
                     reason='finding_present' if items else 'check_passed',
                 )
             )
+        for event in events:
+            event['catalog_version'] = self.catalog['version']
         report['gates'] = events
         for observation in report['projections']:
             observation['gate_ids'] = sorted(

@@ -807,6 +807,7 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert report['status'] in ('FAIL', 'UNKNOWN')
     assert len(report['gates']) < len(monitor.catalog['gates'])
     assert all(event['reason'] != 'not_observed' for event in report['gates'])
+    assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
     assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     assert 'law:' in _emails(recorder)[0]['text']
@@ -957,6 +958,7 @@ def test_historical_gate_import_is_bounded_resumable_and_attributable(
         assert len(events) == 1
         assert events[0]['gate_id'] == 'locks.contention.source'
         assert events[0]['outcome'] == 'EXPECTED_WAIT'
+        assert events[0]['catalog_version'] == monitor.catalog['version']
         assert datetime.fromisoformat(events[0]['evaluated_at']) < observed
         cursor.save(tmp_path / 'cursor.json')
         restarted = Cursor.load(tmp_path / 'cursor.json', observed, 15)

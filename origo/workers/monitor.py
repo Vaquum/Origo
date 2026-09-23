@@ -49,7 +49,15 @@ from origo.assets.create_origo_database import (
     get_clickhouse_settings,
     make_clickhouse_client,
 )
-from origo.law import LAW_QUERY_SETTINGS, LAW_SAMPLE_NAME, LAW_TAPE_ROOT, LawReport, evaluate
+from origo.law import (
+    LAW_INVENTORY,
+    LAW_QUERY_SETTINGS,
+    LAW_SAMPLE_NAME,
+    LAW_SCHEMA_VERSION,
+    LAW_TAPE_ROOT,
+    LawReport,
+    evaluate,
+)
 from origo.law_catalog import (
     GateEvaluation,
     LawCatalog,
@@ -497,6 +505,27 @@ class Monitor:
     def tick(self, now: datetime) -> TickOutcome:
         now = now.astimezone(UTC)
         minute = now.replace(second=0, microsecond=0)
+        lookup_faults: list[Finding] = []
+        try:
+            previous = self.law_tape.latest(now)
+            if previous is not None and previous['sampling_slot'] == minute.isoformat():
+                own = [event for event in previous['gates'] if event['gate_id'] == 'monitor.data_current']
+                if (previous['schema_version'] != LAW_SCHEMA_VERSION
+                    or not set(LAW_INVENTORY) <= set(previous['inventory'])
+                    or set(previous['inventory']) != {feed['source_key'] for feed in previous['feeds']}
+                    or not previous['catalog_version'] or len(own) != 1
+                    or own[0]['outcome'] not in ('PASS', 'FAIL')
+                    or not own[0]['definition_version']
+                    or own[0]['evidence_id'] != f'monitor.data_current:{minute.isoformat()}'
+                    or own[0]['evaluated_at'] != previous['evaluation_start']):
+                    raise ValueError('Invalid committed monitor sample')
+                law_findings(previous)
+                log.info('Skipping already committed monitor minute %s', minute.isoformat())
+                return TickOutcome(self.name, minute, (), ())
+        except Exception as error:
+            log.exception('Law sample lookup failed; independent detectors will still run')
+            lookup_faults.append(Finding('detector_failed:law', 'data_current',
+                'Committed law sample unavailable', f'{type(error).__name__}: {error}'[:300]))
         window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
         cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
         self.pending_report = None
@@ -523,9 +552,11 @@ class Monitor:
             lambda: (self._publication_findings(), True),
         )
         findings: list[Finding] = [*dagster, *workers, *collectors, *logs, *publication]
-        law, _ = self._guarded(
-            'data_current', 'law', lambda: (self._law_findings(now, findings), True)
-        )
+        law = lookup_faults
+        if not law:
+            law, _ = self._guarded(
+                'data_current', 'law', lambda: (self._law_findings(now, findings), True)
+            )
         findings.extend(law)
         page, _ = self._guarded('data_current', 'law_page', lambda: (self._page_findings(), True))
         findings.extend(page)
@@ -609,10 +640,7 @@ class Monitor:
         )
 
     def _law_findings(self, now: datetime, existing: Sequence[Finding]) -> list[Finding]:
-        previous = self.law_tape.latest(now)
         slot = now.replace(second=0, microsecond=0).isoformat()
-        if previous is not None and previous['sampling_slot'] == slot:
-            return law_findings(previous)
         if self.catalog is None:
             self.catalog = build_catalog(self.deployed_sha)
         report = evaluate(self.law_client, self.database, now)

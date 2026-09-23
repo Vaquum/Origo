@@ -852,6 +852,124 @@ def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
 
 
 
+
+@pytest.mark.parametrize('page_failed_first', [False, True])
+@pytest.mark.parametrize('restart', [False, True])
+def test_committed_minute_skips_changed_page_state_until_next_slot(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    page_failed_first: bool, restart: bool,
+) -> None:
+    def setup() -> Monitor:
+        instance = _monitor(recorder, tmp_path)
+        observe = instance._law_findings
+
+        def protocol_observation(now: datetime, existing: list[Finding]) -> list[Finding]:
+            # Isolate page/check delivery; the empty-store law evidence stays unchanged.
+            observe(now, existing)
+            return []
+
+        monkeypatch.setattr(instance, '_law_findings', protocol_observation)
+        return instance
+
+    monitor = setup()
+    monitor.page_url = _url(recorder) + ('/history' if page_failed_first else '/healthz')
+    monitor.tick(NOW)
+    samples = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    original = samples.read_bytes()
+    first = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert first['passed'] is not page_failed_first
+    if restart:
+        monitor = setup()
+    monitor.page_url = _url(recorder) + ('/healthz' if page_failed_first else '/history')
+    posts = list(recorder.posts)
+    observations: list[str] = []
+    dagster_findings, page_findings = monitor._dagster_findings, monitor._page_findings
+
+    def dagster(cursor: Cursor, window_end: datetime) -> tuple[list[Finding], bool]:
+        observations.append('dagster')
+        return dagster_findings(cursor, window_end)
+
+    def page() -> list[Finding]:
+        observations.append('page')
+        return page_findings()
+
+    monkeypatch.setattr(monitor, '_dagster_findings', dagster)
+    monkeypatch.setattr(monitor, '_page_findings', page)
+    skipped = monitor.tick(NOW + timedelta(seconds=30))
+    assert skipped.processed == () and skipped.failed == ()
+    assert not observations and recorder.posts == posts and samples.read_bytes() == original
+    monitor.tick(NOW + timedelta(minutes=1))
+    assert observations == ['dagster', 'page']
+    checks = [item for item in _check_posts(recorder) if item['check_name'] == 'data_current']
+    assert len(checks) == 2 and checks[-1]['passed'] is page_failed_first
+    rows = [json.loads(line) for line in samples.read_bytes().splitlines()]
+    assert len(rows) == 2
+    verdicts = [next(event['outcome'] for event in row['gates']
+                     if event['gate_id'] == 'monitor.data_current') for row in rows]
+    assert verdicts == (['FAIL', 'PASS'] if page_failed_first else ['PASS', 'FAIL'])
+
+
+def test_failed_sample_commit_can_retry_in_same_minute(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    append = monitor.law_tape.append
+
+    def failed_append(report: LawReport, catalog: object) -> None:
+        raise OSError('injected uncommitted sample')
+
+    monkeypatch.setattr(monitor.law_tape, 'append', failed_append)
+    assert 'detector_failed:law' in monitor.tick(NOW).failed
+    assert monitor.law_tape.last is None
+    monkeypatch.setattr(monitor.law_tape, 'append', append)
+    assert monitor.tick(NOW + timedelta(seconds=30)).processed == tuple(MONITOR_CHECK_NAMES)
+    samples = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    assert len(samples.read_bytes().splitlines()) == 1
+    assert len(_check_posts(recorder)) == 2 * len(MONITOR_CHECK_NAMES)
+
+
+def test_sample_lookup_failure_does_not_skip_independent_detectors(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+
+    latest = monitor.law_tape.latest
+    reads: list[datetime] = []
+
+    def failed_latest(now: datetime) -> LawReport | None:
+        reads.append(now)
+        if len(reads) == 1:
+            raise OSError('injected transient tape read failure')
+        return latest(now)
+
+    monkeypatch.setattr(monitor.law_tape, 'latest', failed_latest)
+    outcome = monitor.tick(NOW)
+    assert 'detector_failed:law' in outcome.failed
+    assert _failure_keys() <= set(outcome.failed)
+    assert len(_check_posts(recorder)) == len(MONITOR_CHECK_NAMES)
+    assert reads == [NOW] and monitor.law_tape.last is None
+    retry = monitor.tick(NOW + timedelta(seconds=30))
+    assert retry.processed == tuple(MONITOR_CHECK_NAMES) and monitor.law_tape.last is not None
+    assert reads == [NOW, NOW + timedelta(seconds=30)]
+
+
+@pytest.mark.parametrize('missing_own', [False, True])
+def test_corrupt_complete_current_slot_cannot_suppress_monitor(
+    recorder: _Recorder, tmp_path: Path, missing_own: bool,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    report = _protocol_report(NOW) if missing_own else {'sampling_slot': NOW.isoformat()}
+    samples = monitor.law_tape.root / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    samples.parent.mkdir(parents=True)
+    samples.write_text(json.dumps(report) + '\n')
+    original = samples.read_bytes()
+    outcome = monitor.tick(NOW)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert 'detector_failed:law' in outcome.failed and _failure_keys() <= set(outcome.failed)
+    assert len(_check_posts(recorder)) == len(MONITOR_CHECK_NAMES)
+    assert samples.read_bytes() == original
+
+
 def test_pre_catalog_component_proofs_remain_visible_without_historical_pass(
     recorder: _Recorder, tmp_path: Path, law_case: LawCase,
 ) -> None:

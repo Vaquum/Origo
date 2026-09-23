@@ -13,10 +13,11 @@ from collections.abc import Iterator
 from contextlib import ExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Route, sync_playwright
 
 from origo import law
 from origo.law_catalog import build_catalog, gate_evaluation
@@ -898,6 +899,23 @@ def test_paginated_history_retains_each_original_catalog_definition(
         # Definition retention follows retained events, including the browser's existing 5,000-event cap.
         pruned = tab.evaluate("()=>{const h=getHistory(historyKey('monitor.queue_bounded'));return mergeDefinitions([h.events[0]],h.definitions)}")
         assert len(pruned) == 1 and pruned[0]['catalog_version'] == catalogs[1]['version']
+        # Replay an actual first response with metadata-budget omission, followed by a complete older page.
+        def omit_first_definitions(route: Route) -> None:
+            response = route.fetch()
+            limited = cast(page.Document, response.json())
+            limited.update(definitions=[], definitions_limited=True, limited=True)
+            route.fulfill(json=limited)
+        tab.route('**/law/history.json?*', omit_first_definitions)
+        tab.evaluate("async()=>{histories.clear();await loadHistory('monitor.queue_bounded')}")
+        tab.unroute('**/law/history.json?*')
+        more.click()
+        more.wait_for(state='hidden')
+        retained = tab.evaluate("getHistory(historyKey('monitor.queue_bounded'))")
+        assert retained['definitions_limited'] is True and retained['limited'] is True
+        assert len(retained['events']) == page.PAGE_SIZE + 1 and len(retained['definitions']) == 1
+        assert 'lookup budget reached' in tab.locator('#detail').inner_text()
+        tab.evaluate("async()=>{histories.clear();await loadHistory('monitor.queue_bounded')}")
+        assert tab.evaluate("getHistory(historyKey('monitor.queue_bounded')).limited") is False
         browser.close()
 
 
@@ -960,3 +978,63 @@ def test_empty_not_evaluated_identity_keeps_current_report_available(
     current = cache.current(now)
     assert current['status'] == report['status'] and current['reason'] == ''
     assert descriptor['id'] not in page._object(current['last_gate_events'])
+
+
+
+@pytest.mark.parametrize('budget', ['bytes', 'time'])
+def test_definition_lookup_budget_is_visible_request_local_and_retryable(
+    tape: tuple[Path, page.Document, datetime], monkeypatch: pytest.MonkeyPatch, budget: str,
+) -> None:
+    root, report, now = tape
+    original = page._objects(report['gates'])[0]
+    records: list[page.Document] = []
+    versions: list[str] = []
+    for index in range(14):
+        # Genuine registry definitions and captured event evidence; replay only deployment/time envelopes.
+        sha = f'{index+1:040x}'
+        catalog = build_catalog(sha)
+        versions.append(catalog['version'])
+        (root / f'catalog-{catalog["version"]}.json').write_text(json.dumps(catalog))
+        records.append({**original, 'deployed_sha': sha, 'catalog_version': catalog['version'],
+            'evidence_id': f'catalog-budget-envelope:{index}',
+            'evaluated_at': (page._instant(original['evaluated_at'])-timedelta(seconds=index)).isoformat()})
+    _write(next(root.glob('gate-events-*')), records)
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    for version in versions:
+        cache._load_catalog(version)
+    cache.advance(now, budget_seconds=2)
+    query = {'gate_id': [str(original['gate_id'])], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
+    reads: list[int] = []
+    original_read = Path.read_bytes
+
+    def measured_read(path: Path) -> bytes:
+        raw = original_read(path)
+        if path.name.startswith('catalog-'):
+            reads.append(len(raw))
+            if budget == 'time':
+                time.sleep(0.06)  # One delayed filesystem read exhausts the unchanged 50 ms lookup budget.
+        return raw
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, 'read_bytes', measured_read)
+        if budget == 'bytes':
+            scoped.setattr(page, 'time', SimpleNamespace(monotonic=lambda: 0.0))  # Isolate byte admission from wall-clock scheduling.
+        result = cache.history(query, now)
+    assert result['definitions_limited'] is True and result['limited'] is True
+    assert len(page._objects(result['events'])) == len(records)
+    assert 0 < len(page._objects(result['definitions'])) < len(records)
+    assert len(page._objects(result['definitions'])) == len(reads)
+    assert sum(reads) <= page.READ_BUDGET
+    assert len(reads) == 1 if budget == 'time' else sum(reads) + (root / f'catalog-{versions[len(reads)]}.json').stat().st_size > page.READ_BUDGET
+    assert cache.history_limited is False and cache.current(now)['history_limited'] is False
+    returned_versions = {definition['catalog_version'] for definition in page._objects(result['definitions'])}
+    omitted = next(record for record in records if record['catalog_version'] not in returned_versions)
+    stamp = page._instant(omitted['evaluated_at'])
+    retried = cache.history({**query, 'from': [(stamp-timedelta(microseconds=1)).isoformat()],
+        'to': [(stamp+timedelta(microseconds=1)).isoformat()]}, now)
+    assert retried['events'] == [omitted]
+    assert retried['limited'] is False and retried['definitions_limited'] is False
+    definition = page._objects(retried['definitions'])[0]
+    assert definition['catalog_version'] == omitted['catalog_version']
+    assert page._object(definition['code'])['deployed_sha'] == omitted['deployed_sha']

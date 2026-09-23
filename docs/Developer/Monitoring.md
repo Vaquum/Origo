@@ -154,7 +154,10 @@ Projection activation is not formal certification approval or a physical full-hi
 
 The monitor appends one unheld whole-inventory report per distinct minute before Dagit
 or Resend. `monitor.data_current` is stored only in that committed sample; gate
-history reads its verdict there, never from a separate event write. R1/C1/D1 mail waits for five consecutive failing slots with the same key;
+history reads its verdict there, never from a separate event write. Once committed, a
+repeat tick in that minute performs no probes or writes; changes and interrupted
+delivery are handled on the next scheduled minute. A failed sample commit remains
+retryable. R1/C1/D1 mail waits for five consecutive failing slots with the same key;
 C2, UNKNOWN and evidence/tape/page faults notify immediately under the existing cooldown.
 Gaps, UNKNOWN and recovery reset holds. The target is Resend acceptance within eight
 minutes of a predicate breach while monitor, ClickHouse and Resend are reachable.
@@ -190,6 +193,8 @@ samples omit unobserved gate placeholders; the catalog supplies their explicit
 UNKNOWN/NOT_EVALUATED display. Event-driven gates retain the last original outcome
 and timestamp separately from current blocking state. Corrupt oversized history
 records mark the history limited while later valid evidence remains readable.
+Historical definition lookups keep their byte/time caps; omitted definitions are
+explicitly incomplete, never a complete replay without the original thresholds/code.
 
 Historical receipt/proof attribution starts at the current monitor activation.
 Restart or rollback never reuses a catalog file's old creation time as deployment

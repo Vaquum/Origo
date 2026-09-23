@@ -1218,6 +1218,8 @@ def source_failure_evaluations(
     evidence: dict[str, Scalar] | None = None,
 ) -> list[GateEvaluation]:
     """Convert attributable FAILED events without treating recovery as a fresh gate evaluation."""
+    from origo.sources.adapters.binance_daily import REST_HOST_BUDGETS
+
     if event_type != 'FAILED':
         return []
     families = _FAILURE_GATES.get(error_code, ())
@@ -1231,11 +1233,13 @@ def source_failure_evaluations(
         family = gate['id'].split(':')[0]
         if family not in families or (gate['scope'] and affected not in gate['scope']):
             continue
-        # A provider circuit receipt without host attribution cannot select a host gate.
-        if family.startswith('provider.rate_circuit.') and gate['id'].partition(':')[2] != (
-            evidence or {}
-        ).get('host'):
-            continue
+        if family.startswith('provider.rate_circuit.'):
+            host = (evidence or {}).get('host')
+            if not isinstance(host, str) or not host:
+                continue
+            budget_host = host if host in REST_HOST_BUDGETS else 'default'
+            if gate['id'].partition(':')[2] != budget_host:
+                continue
         result.append(
             gate_evaluation(
                 gate,
@@ -1338,13 +1342,14 @@ def import_gate_events(
     rows = client.execute(
         f"""
         SELECT kind, source_key, event_time, event_id, error_code, event_type,
-               component, consumer, check_results, review_state, partition_key, revision, build_id
+               component, consumer, check_results, review_state, partition_key, revision, build_id, message
         FROM (
             SELECT 'failure' AS kind, source_key, event_time, toString(event_id) AS event_id,
                    error_code, event_type, ifNull(component,'') AS component,
                    ifNull(consumer,'') AS consumer, '' AS check_results, '' AS review_state,
                    ifNull(partition_key,'') AS partition_key, ifNull(revision,'') AS revision,
-                   ifNull(toString(build_id),'') AS build_id
+                   ifNull(toString(build_id),'') AS build_id,
+                   if(error_code='PROVIDER_RATE_CIRCUIT', substring(message,1,1024), '') AS message
             FROM {database}.source_failure_log
             WHERE event_time >= toDateTime64(%(since)s, 6, 'UTC')
               AND event_time <= toDateTime64(%(until)s, 6, 'UTC')
@@ -1352,7 +1357,7 @@ def import_gate_events(
             SELECT 'certification', source_key, recorded_at,
                    hex(SHA256(concat(source_key, partition_key, revision, toString(build_id),
                        dagster_run_id, toString(recorded_at)))), '', '', '', '', check_results,
-                   review_state, partition_key, revision, toString(build_id)
+                   review_state, partition_key, revision, toString(build_id), ''
             FROM {database}.source_certification_log
             WHERE recorded_at >= toDateTime64(%(since)s, 6, 'UTC')
               AND recorded_at <= toDateTime64(%(until)s, 6, 'UTC')
@@ -1389,6 +1394,7 @@ def import_gate_events(
             partition,
             revision,
             build,
+            message,
         ) = row
         if not isinstance(stamp, datetime):
             raise TypeError('Stored gate event time must be a datetime.')
@@ -1400,6 +1406,14 @@ def import_gate_events(
             'build_id': str(build),
         }
         if kind == 'failure':
+            if code == 'PROVIDER_RATE_CIRCUIT':
+                circuit = re.fullmatch(
+                    r'Binance request circuit is open for ([a-z0-9.:-]{1,253})\.'
+                    r'(?: \(egress [0-9]{1,3}(?:\.[0-9]{1,3}){3}\)\.)?',
+                    str(message),
+                )
+                if circuit is not None:
+                    evidence['host'] = circuit[1]
             events.extend(
                 source_failure_evaluations(
                     catalog,

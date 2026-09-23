@@ -493,6 +493,121 @@ def test_historical_import_executes_real_bounded_query(
         client.disconnect()
 
 
+@pytest.mark.parametrize(
+    ('source_key', 'url', 'egress_ip', 'host', 'budget_host'),
+    [
+        (
+            'binance_spot_aggtrades',
+            'https://api1.binance.com',
+            None,
+            'api.binance.com',
+            'api.binance.com',
+        ),
+        (
+            'binance_perp_trades',
+            'https://fapi.binance.com',
+            '37.27.112.140',
+            'fapi.binance.com',
+            'fapi.binance.com',
+        ),
+        ('binance_spot_aggtrades', 'https://provider.invalid', None, 'provider.invalid', 'default'),
+    ],
+)
+def test_historical_import_attributes_real_persisted_provider_circuit(
+    origo_test_env: dict[str, str],
+    tmp_path: Path,
+    catalog: LawCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    source_key: str,
+    url: str,
+    egress_ip: str | None,
+    host: str,
+    budget_host: str,
+) -> None:
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.sources.adapters import binance_daily as daily
+    from origo.sources.adapters.binance_provisional import BinanceProvisionalBase
+    from origo.sources.storage import SourceStore
+
+    spec = next(spec for spec in registry.SOURCE_REGISTRY if spec.key == source_key)
+    adapter = spec.provisional
+    assert isinstance(adapter, BinanceProvisionalBase)
+    monkeypatch.setenv(adapter.REST_BASE_URL_ENV, url)
+    monkeypatch.setenv('BINANCE_API_KEY', 'unused-circuit-test')
+    if egress_ip is not None:
+        monkeypatch.setenv('ORIGO_BINANCE_PERP_EGRESS_IPS', egress_ip)
+    else:
+        monkeypatch.delenv('ORIGO_BINANCE_PERP_EGRESS_IPS', raising=False)
+    root = tmp_path / 'locks'
+    root.mkdir()
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(root))
+    # Fault protocol only: exercise the actual circuit before any market request.
+    state = daily._budget_state_file(root, url, egress_ip)
+    state.write_text(f'0 {time.time() + 3600:.6f}')
+    saved_state = state.read_bytes()
+
+    def no_request(*args: object, **kwargs: object) -> None:
+        pytest.fail('An open provider circuit must not make an outbound request')
+
+    monkeypatch.setattr(daily, '_request', no_request)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(
+        spec, SourceStore(client, 'origo', spec), root, 'worker:catalog-circuit'
+    )
+    try:
+        runtime.setup()
+        start = datetime.now(UTC)
+        key = (start - timedelta(minutes=2)).strftime('%Y-%m-%dT%H:%M:00Z')
+        with pytest.raises(SourceError) as blocked:
+            runtime.build(key, provisional=True)
+        assert blocked.value.code == 'PROVIDER_RATE_CIRCUIT'
+        assert state.read_bytes() == saved_state
+        suffix = f' (egress {egress_ip}).' if egress_ip is not None else ''
+        message = f'Binance request circuit is open for {host}.' + suffix
+        assert str(blocked.value) == message
+        rows = client.execute(
+            'SELECT toString(event_id), event_time, error_code, message '
+            'FROM origo.source_failure_log WHERE source_key=%(source)s',
+            {'source': source_key},
+        )
+        assert len(rows) == 1 and rows[0][2:] == ('PROVIDER_RATE_CIRCUIT', message)
+        events, cursor = import_gate_events(
+            client, 'origo', catalog, datetime.now(UTC), known_since=start
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert event['gate_id'] == f'provider.rate_circuit.ban:{budget_host}'
+        assert event['outcome'] == 'EXPECTED_WAIT'
+        assert event['evidence']['host'] == host
+        assert event['evidence_id'] == rows[0][0]
+        assert event.get('catalog_version') == catalog['version']
+        repeated, next_cursor = import_gate_events(
+            client, 'origo', catalog, datetime.now(UTC), known_since=start, cursor=cursor
+        )
+        assert repeated == [] and next_cursor == cursor
+        # Historical hostless and malformed envelopes must not borrow the source's host.
+        for index, old_message in enumerate(
+            (
+                'Binance request circuit is open.',
+                'Binance request circuit is open for api.binance.com. trailing',
+                'Binance request circuit is open for api.binance.com. (egress invalid).',
+            )
+        ):
+            runtime.failures.record(
+                operation=f'circuit-envelope-{index}',
+                error_code='PROVIDER_RATE_CIRCUIT',
+                scope='PARTITION',
+                partition=key,
+                message=old_message,
+            )
+        unattributed, _ = import_gate_events(
+            client, 'origo', catalog, datetime.now(UTC), known_since=start, cursor=cursor
+        )
+        assert unattributed == []
+    finally:
+        client.disconnect()
+
+
 def test_component_gate_events_retain_real_proof_identity(
     real_minutes: tuple[SourceRuntime, tuple[str, ...], dict[str, tuple[Row, ...]], int],
     catalog: LawCatalog,

@@ -195,3 +195,7 @@ Historical receipt/proof attribution starts at the current monitor activation.
 Restart or rollback never reuses a catalog file's old creation time as deployment
 evidence; earlier unimported events remain unobserved. Already taped events retain
 their original catalog, identity and timestamp.
+
+Provider circuit failures record their actual host in the existing error message.
+Historical import parses that owner format; old hostless failures cannot be assigned
+to a host gate. No host is inferred from a source name.

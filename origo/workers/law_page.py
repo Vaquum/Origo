@@ -77,7 +77,8 @@ def _number(value: Json) -> float | None:
 
 
 def _identity(event: Document) -> tuple[str, str, str]:
-    return str(event.get('gate_id', '')), str(event.get('definition_version', '')), str(event.get('evidence_id', ''))
+    gate, version, evidence = (event.get(key) for key in ('gate_id', 'definition_version', 'evidence_id'))
+    return gate if isinstance(gate, str) else '', version if isinstance(version, str) else '', evidence if isinstance(evidence, str) else ''
 
 
 def _valid_report(report: Document) -> bool:
@@ -142,7 +143,7 @@ def _micros(stamp: datetime) -> int:
 
 def _sample_brief(report: Document) -> Document:
     feeds = _objects(report.get('feeds'))
-    core = sorted((str(event.get('gate_id')), str(event.get('definition_version', ''))) for event in _objects(report.get('gates')) if str(event.get('gate_id')).startswith('law.'))
+    core = sorted((gate, version) for gate, version, _ in map(_identity, _objects(report.get('gates'))) if gate.startswith('law.'))
     expected = {f"law.{name}:{feed.get('source_key')}" for feed in feeds for name in _object(feed.get('predicates'))} | {'law.inventory'}
     complete = {key for key, version in core if version} == expected and len(core) == len(expected)
     return {

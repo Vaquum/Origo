@@ -112,7 +112,9 @@ def _weighted_request(
 
         now = time.time()
         if now < circuit_until:
-            raise SourceError('PROVIDER_RATE_CIRCUIT', 'Binance request circuit is open.')
+            raise SourceError(
+                'PROVIDER_RATE_CIRCUIT', f'Binance request circuit is open for {_budget_host(url)}.'
+            )
         time.sleep(max(0.0, next_request - now))
         next_request = time.time() + weight / rate
         persist()

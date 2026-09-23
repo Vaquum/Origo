@@ -588,6 +588,8 @@ def test_core_definition_changes_break_streak_but_deployment_metadata_does_not(
     core = next(event for event in page._objects(moved['gates']) if str(event['gate_id']).startswith('law.'))
     core['definition_version'] = 'predicate-change'
     assert page._sample_brief(moved)['policy'] != original['policy']
+    core['definition_version'] = None
+    assert page._sample_brief(moved)['policy'] is None
     moved['gates'] = []
     assert page._sample_brief(moved)['policy'] is None
     assert not page.consecutive_window([{**original, 'status': 'PASS', 'policy': None}], str(original['slot']))
@@ -819,7 +821,8 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
 
 
 
-@pytest.mark.parametrize('corruption', ['invalid_json', 'invalid_timestamp', 'indexed_record', 'missing_identity', 'missing_slot', 'duplicate_sample'])
+@pytest.mark.parametrize('corruption', ['invalid_json', 'invalid_timestamp', 'indexed_record', 'missing_identity', 'missing_slot', 'duplicate_sample',
+    *[f'identity:{field}:{kind}' for field in ('gate_id', 'definition_version', 'evidence_id') for kind in ('null', 'list', 'numeric')]])
 def test_corrupt_history_records_remain_visibly_incomplete(
     tape: tuple[Path, page.Document, datetime], corruption: str,
 ) -> None:
@@ -830,6 +833,10 @@ def test_corrupt_history_records_remain_visibly_incomplete(
     broken = good[:-2] + b'!\n' if corruption == 'invalid_json' else json.dumps({**original, 'evaluated_at': 'damaged-timestamp'}).encode() + b'\n'
     if corruption == 'missing_identity':
         broken = json.dumps({key: value for key, value in original.items() if key != 'evidence_id'}).encode() + b'\n'
+    if corruption.startswith('identity:'):
+        _, field, kind = corruption.split(':')
+        invalid: page.Json = {'null': None, 'list': [original[field]], 'numeric': 1}[kind]
+        broken = json.dumps({**original, field: invalid}).encode() + b'\n'
     if corruption in ('missing_slot', 'duplicate_sample'):
         path = next(root.glob('samples-*'))
         good = json.dumps(report).encode() + b'\n'
@@ -936,3 +943,20 @@ def test_monitor_verdict_history_uses_only_committed_valid_samples(
     assert restarted.history(query, now)['events'] == []
     assert restarted.history(query, now)['limited'] is True
     assert restarted.current(now)['status'] == 'UNKNOWN'
+
+
+
+def test_empty_not_evaluated_identity_keeps_current_report_available(
+    tape: tuple[Path, page.Document, datetime],
+) -> None:
+    root, report, now = tape
+    catalog = build_catalog(SHA)
+    descriptor = next(gate for gate in catalog['gates'] if gate['id'].startswith('source.component_integrity.'))
+    placeholder = gate_evaluation(descriptor, evidence_id='', evaluated_at=str(report['evaluation_start']),
+        outcome='NOT_EVALUATED', evidence={}, reason='historical_definition_unavailable', catalog_version=catalog['version'])
+    recorded = {**report, 'gates': [*page._objects(report['gates']), cast(page.Document, json.loads(json.dumps(placeholder)))]}
+    _write(next(root.glob('samples-*')), [recorded])
+    cache = page.TapeCache(root)
+    current = cache.current(now)
+    assert current['status'] == report['status'] and current['reason'] == ''
+    assert descriptor['id'] not in page._object(current['last_gate_events'])

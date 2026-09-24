@@ -1108,7 +1108,9 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
     assert len(current) == 15
-    assert sorted(current, key=lambda gate: gate['id']) == sorted(original, key=lambda gate: str(gate['id']))
+    current_semantics = [{**gate, 'code': {'path': gate['code']['path']}} for gate in current]
+    original_semantics = [{**gate, 'code': {'path': page._object(gate['code'])['path']}} for gate in original]
+    assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
     report = page._object(baseline['report'])
     before = page._sample_brief(report)
     assert before['policy'] == baseline['expected_policy'] == '5647749677518a069becefee8dbdafb774d940f23575986b7d2b04c08314da5e'
@@ -1159,7 +1161,9 @@ def test_overview_production_shape_stays_within_resource_budgets(
     Path('/tmp/origo-overview-production-memory.json').write_text(json.dumps({**result, 'report_bytes': size}, indent=2))
 
 
-def test_overview_totals_match_catalog_and_observed_evidence(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+def test_overview_totals_match_catalog_and_observed_evidence(
+    production_serving: tuple[str, page.TapeCache, page.Document, datetime], operational_report: page.Document, tmp_path: Path,
+) -> None:
     url, _, report, _ = production_serving
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -1171,6 +1175,8 @@ def test_overview_totals_match_catalog_and_observed_evidence(production_serving:
             text = _figure(tab, key).replace(',', '')
             assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
         assert 'not due' in _figure(tab, 'C1').lower()
+        output_count = len([item for item in page._objects(report['projections']) if ':consumer:' in str(item['id'])])
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == f'Unknown / {output_count}'
         assert 'unknown' in _figure(tab, 'queue').lower() or 'not recorded' in _figure(tab, 'queue').lower()
         assert 'Monitor checks' in tab.locator('#monitor-band').inner_text()
         for key in ('R1', 'C1', 'C2', 'D1', 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear'):
@@ -1181,6 +1187,68 @@ def test_overview_totals_match_catalog_and_observed_evidence(production_serving:
             tab.locator('[data-close]').click()
         assert len(page._objects(report['feeds'])) == 6
         browser.close()
+
+    evidence = {str(event['gate_id']).removeprefix('monitor.'): page._object(event['evidence'])
+        for event in page._objects(operational_report['gates']) if str(event['gate_id']).startswith('monitor.')}
+    now = page._instant(operational_report['evaluation_end']) + timedelta(seconds=1)
+    cache = page.TapeCache(tmp_path / 'measured-monitor' / 'law')
+    cache.refresh_latest(now)
+    while cache.loading:
+        cache.advance(now, budget_seconds=1)
+    server = page.LawServer(('127.0.0.1', 0), cache, lambda: now)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            tab.goto(f'http://127.0.0.1:{server.server_port}/law')
+            tab.locator('.overview-card').first.wait_for()
+            for key, gate, numerator, denominator in (
+                ('workers', 'workers_alive', 'workers_fresh', 'workers_expected'),
+                ('collectors', 'collectors_serving', 'collectors_serving', 'collectors_expected'),
+            ):
+                value = evidence[gate]
+                assert tab.locator(f'[data-overview="{key}"] .overview-value').inner_text() == f"{value[numerator]} / {value[denominator]}"
+            assert evidence['dagster_reachable']['reachable'] is True
+            assert tab.locator('[data-overview="queue"] .overview-value').inner_text() == str(evidence['queue_bounded']['queued_runs'])
+            operations = page._object(cache.current(now)['operations_history'])
+            for key, metric, gate in (('workers', 'failed_receipts', 'workers_alive'), ('errors', 'error_lines', 'no_error_logs')):
+                values = page._object(page._object(operations[metric])['60m'])
+                assert values['count'] == evidence[gate][metric]
+                assert f"≥ {values['count']}" in _figure(tab, key)
+                assert str(values['observed_slots']) in _figure(tab, key)
+            for key, gates in (('workers', ('workers_alive',)), ('queue', ('queue_bounded', 'dagster_reachable')),
+                ('collectors', ('collectors_serving',)), ('errors', ('no_error_logs',))):
+                tab.locator(f'[data-overview="{key}"]').click()
+                for index, gate in enumerate(gates):
+                    fields = tab.locator('#detail .evidence-row').nth(index).locator('dl').evaluate(
+                        "dl=>Object.fromEntries([...dl.querySelectorAll('dt')].map(dt=>[dt.textContent,dt.nextElementSibling.textContent]))")
+                    expected = {name.replace('_', ' '): str(value).lower() if isinstance(value, bool) else str(value)
+                        for name, value in evidence[gate].items() if value is not None and not isinstance(value, (dict, list))}
+                    assert fields == expected
+                metric = {'workers': 'failed_receipts', 'errors': 'error_lines'}.get(key)
+                if metric:
+                    for horizon in ('60m', '24h'):
+                        values = page._object(page._object(operations[metric])[horizon])
+                        assert f"{horizon} · ≥ {values['count']} observed" in tab.locator('#detail').inner_text()
+                        assert str(values['window_end']) in tab.locator('#detail').inner_text()
+                tab.locator('[data-close]').click()
+            outputs = [item for item in page._objects(operational_report['projections']) if ':consumer:' in str(item['id'])]
+            assert outputs and all('publication_policy' in item for item in outputs)
+            for remove_policy in (False, True):
+                if remove_policy:
+                    tab.evaluate("()=>{for(const p of data.last_report.projections)delete p.publication_policy;render()}")
+                assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == f'Unknown / {len(outputs)}'
+                tab.locator('[data-overview="outputs"]').click()
+                assert tab.locator('#detail .evidence-row').count() == len(outputs)
+                assert tab.locator('#detail .evidence-row .UNKNOWN').count() == len(outputs)
+                tab.locator('[data-close]').click()
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
@@ -1364,8 +1432,16 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
             tab.locator('[data-close]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status=savedOutput.status;p.reason=savedOutput.reason;render()}")
         assert 'current' in node.inner_text().lower()
+        tab.locator('[data-view="overview"]').click()
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '1 / 10'
+        assert '9 unknown' in _figure(tab, 'outputs')
+        tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='FAILED';p.reason='artifact_missing';render()}")
         assert node.locator('.FAIL,.FAILED').count() == 1
+        tab.locator('[data-view="overview"]').click()
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '0 / 10'
+        assert '9 unknown' in _figure(tab, 'outputs')
+        tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='STALE';p.reason='publication_state_changed';p.publication_policy.reason='within_budget';const f=data.last_report.feeds.find(f=>f.source_key==='binance_perp_trades');f.predicates.R1.status='FAIL';render()}")
         assert source.locator('.source-head .FAIL').count() == 1
         tab.evaluate("()=>{data.last_report.feeds.find(f=>f.source_key==='binance_perp_trades').predicates.R1.status='UNKNOWN';render()}")
@@ -1387,6 +1463,13 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         tab.locator('.overview-card').first.wait_for()
         assert 'Age of this sample' in tab.locator('body').inner_text()
         assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
+        tab.evaluate("()=>{window.originalStages=structuredClone(data.last_report.projections);for(const p of data.last_report.projections){p.status='UNKNOWN';p.reason='not_observed'}render()}")
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 10'
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 54'
+        tab.evaluate("()=>{const known=originalStages.find(p=>!p.id.includes(':consumer:')&&p.status==='CURRENT');Object.assign(data.last_report.projections.find(p=>p.id===known.id),known);render()}")
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 54'
+        assert '53 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
+        tab.evaluate("()=>{data.last_report.projections=originalStages;render()}")
         before = len(requests)
         age = tab.locator('#sample-age').inner_text()
         tab.clock.run_for(2000)
@@ -1438,7 +1521,7 @@ def test_history_concurrency_deadlines_and_current_refresh(production_serving: t
 
 def test_operational_history_totals_preserve_intervals_and_limits(
     production_tape: tuple[Path, page.Document, datetime], operational_report: page.Document,
-    production_serving: tuple[str, page.TapeCache, page.Document, datetime],
+    production_serving: tuple[str, page.TapeCache, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, original, now = production_tape
     terminal = page._instant(original['sampling_slot']).replace(second=0, microsecond=0)
@@ -1461,7 +1544,7 @@ def test_operational_history_totals_preserve_intervals_and_limits(
         cache.refresh_latest(now)
         for item in records:
             cache._sample(item)
-        cache.loading, cache.history_limited = loading, cache.history_limited or limited
+        cache.loading, cache.operations_limited = loading, limited
         cache._refresh_operations()
         return cache, page._object(page._object(cache.current(now)['operations_history'])['error_lines'])
 
@@ -1540,4 +1623,19 @@ def test_operational_history_totals_preserve_intervals_and_limits(
     cache, full = totals([record(terminal-timedelta(minutes=1499-index)) for index in range(1500)])
     assert len(cache.operations_samples) <= 1441 and cache.operations_bytes <= 1024 * 1024
     assert page._object(full['24h'])['count'] == 0 and page._object(full['24h'])['complete'] is True
+    cache._event({})  # Unrelated malformed gate history must not poison complete recent intervals.
+    assert cache.history_limited is True
+    cache._refresh_operations()
+    for metric in ('error_lines', 'failed_receipts'):
+        for horizon in ('60m', '24h'):
+            row = page._object(page._object(cache.operations_history[metric])[horizon])
+            assert row['complete'] is True and row['limited'] is False
+    with monkeypatch.context() as limits:
+        limits.setattr(page, 'MAX_OPERATIONS_BYTES', 0)
+        cache._remember_operations(record(terminal+timedelta(minutes=1)))
+    cache._refresh_operations()
+    for metric in ('error_lines', 'failed_receipts'):
+        for horizon in ('60m', '24h'):
+            row = page._object(page._object(cache.operations_history[metric])[horizon])
+            assert row['complete'] is False and row['limited'] is True and row['count'] is None
     assert page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024

@@ -552,7 +552,7 @@ class TapeCache:
                 reason = 'catalog_unavailable'
             status = 'UNKNOWN' if reason else str(record.get('status')) if record else 'UNKNOWN'
             required = catalog.get('law_gate_ids') if catalog else None
-            observed = {f"law.{name}:{feed.get('source_key')}" for feed in _objects(record.get('feeds'))
+            observed: set[str] = {f"law.{name}:{feed.get('source_key')}" for feed in _objects(record.get('feeds'))
                         for name in _object(feed.get('predicates'))} if record else set()
             if status == 'PASS' and (not isinstance(required, list) or not required
                                      or not set(str(key) for key in required) <= observed):

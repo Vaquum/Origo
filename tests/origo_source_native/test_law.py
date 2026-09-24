@@ -642,6 +642,7 @@ def test_market_state_receipt_damage_does_not_redefine_raw_reader_health(
         law_case.client.execute(f"INSERT INTO {table} SELECT * FROM {table} WHERE component='market_state_latest'")
     report = law_case.report(START + timedelta(minutes=1))
     assert predicate(report, 'R1')['status'] == 'PASS'
+    assert 'hash_market_state_latest' not in predicate(report, 'R1')['evidence']
     cube = predicate(report, 'M1')
     assert cube['status'] == ('FAIL' if damage == 'empty' else 'UNKNOWN')
     assert cube['reason'] == ('cube_proof_empty' if damage == 'empty' else 'cube_proof_invalid')

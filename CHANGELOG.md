@@ -1,6 +1,10 @@
-# v3.24.1
+# v3.24.2
 
 - Add `docs/Reference/Binance-rallies.md`, the guide and reference for the Binance spot rally export. It covers running an export on the production host, copying the files off and reading them, rally selection, the lead-in and boundary settings, the rally definition, the file columns and metadata, data coverage, limits, errors and reproducibility. The README links it.
+
+# v3.24.1
+
+- Make the named-laws page test wait for the law overview before focusing a tooltip. After a reload that response re-renders every law card, so a focus made just before it landed moved to a replaced node and the visibility check failed intermittently (CI run 35975375043). Test-only; the page is unchanged.
 
 # v3.24.0
 

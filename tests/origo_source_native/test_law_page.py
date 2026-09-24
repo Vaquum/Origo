@@ -1337,6 +1337,8 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         assert 'unknown' in tab.locator('.gate').filter(has=tab.locator('[data-gate="law.R1:binance_spot_trades"]')).inner_text().lower()
         tab.reload()
         tab.locator('.gate').first.wait_for()
+        # The overview response re-renders every card; focus only after it lands.
+        tab.wait_for_function('() => ![...requests.keys()].some(key => key.startsWith("days|"))')
         info = tab.locator('.gate .info').first
         info.focus()
         tooltip = tab.locator('.gate .tooltip').first

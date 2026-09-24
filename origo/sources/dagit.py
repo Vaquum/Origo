@@ -132,14 +132,19 @@ HEALTH_RECONCILIATION_BATCH_SIZE = 4
 HEALTH_RECONCILIATION_RETRY_DELAYS = (60, 300, 1800, 3600)
 
 
-def _reconciliation_selection(urgent: list[str], offset: int) -> list[str]:
+def _reconciliation_selection(repairs: list[str], upgrades: list[str], offset: int) -> list[str]:
     """Up to four of the partitions whose version or status differs, rotating the start
-    with the tick so a failing batch cannot starve the rest. Nothing else is selected: a
-    canonical day whose Dagster record matches the store is not re-materialized, because
-    every build and repair re-checks its retained content and an operator can launch the
-    canonical job for any day."""
-    start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(urgent))
-    return (urgent[start:] + urgent[:start])[:HEALTH_RECONCILIATION_BATCH_SIZE]
+    with the tick so a failing batch cannot starve the rest. Component upgrades only fill
+    the slots repairs leave, so a history upgrade never delays a repair. Nothing else is
+    selected: a canonical day whose Dagster record matches the store is not re-materialized,
+    because every build and repair re-checks its retained content and an operator can launch
+    the canonical job for any day."""
+
+    def rotated(keys: list[str]) -> list[str]:
+        start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(keys))
+        return keys[start:] + keys[:start]
+
+    return (rotated(repairs) + rotated(upgrades))[:HEALTH_RECONCILIATION_BATCH_SIZE]
 
 
 def _partition_runs(
@@ -277,7 +282,6 @@ def build_reconciliation_sensor(
                 key
                 for key in keys
                 if key not in current
-                or missing.get(key)
                 or tags_by_partition.get(key, {}).get('dagster/data_version') != versions[key]
             ]
             statuses = (
@@ -295,7 +299,9 @@ def build_reconciliation_sensor(
                 for key, status in statuses.items()
                 if status is not None and status.value == 'FAILED'
             ]
-            selected = _reconciliation_selection(list(dict.fromkeys(changed + failed_keys)), offset)
+            repairs = list(dict.fromkeys(changed + failed_keys))
+            upgrades = [key for key in keys if missing.get(key) and key not in repairs]
+            selected = _reconciliation_selection(repairs, upgrades, offset)
             now = datetime.now(UTC).timestamp()
             requests = (
                 [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]

@@ -546,7 +546,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ),
             (
                 'batch',
-                'Reconciliation rotates only changed or urgent partitions up to the batch limit.',
+                'Reconciliation rotates only changed or urgent partitions up to the batch limit; missing-component upgrades fill only slots repairs leave.',
                 {'partitions': _threshold('sources.dagit:HEALTH_RECONCILIATION_BATCH_SIZE')},
             ),
             (

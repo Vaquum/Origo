@@ -1199,6 +1199,22 @@ def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(production_s
         assert tab.locator('#detail').is_visible()
         tab.locator('[data-close]').click()
         assert tab.locator('#detail').is_hidden()
+        tab.locator('[data-overview="R1"]').click()
+        tab.locator('[data-view="laws"]').click()
+        tab.locator('.gate [data-gate="law.R1:binance_spot_trades"]').click()
+        tab.locator('[data-close]').click()
+        assert tab.evaluate('state.view') == 'laws' and tab.locator('#detail').is_hidden()
+        tab.locator('.gate [data-gate="law.R1:binance_spot_trades"]').click()
+        tab.go_back()
+        tab.wait_for_function('() => !state.gate')
+        tab.locator('.gate [data-gate="law.C1:binance_spot_trades"]').click()
+        tab.go_back()
+        tab.wait_for_function('() => !state.gate')
+        tab.go_forward()
+        tab.wait_for_function("() => state.gate === 'law.C1:binance_spot_trades'")
+        tab.locator('[data-close]').click()
+        assert tab.evaluate('state.view') == 'laws' and tab.locator('#detail').is_hidden()
+        assert tab.evaluate('state.gate || state.overview || null') is None
         tab.locator('[data-view="sources"]').click()
         tab.locator('.source').first.wait_for()
         tab.evaluate('window.scrollTo(0,250)')
@@ -1227,6 +1243,18 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()
+        tab.goto(url+'/law?view=gates&family=law.R1')
+        tab.locator('.gate').first.wait_for()
+        assert tab.locator('.gate').count() == 4 and tab.locator('#gate-family').input_value() == 'R1'
+        assert tab.evaluate('state.view') == 'laws'
+        assert tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
+        tab.locator('#gate-family').select_option('C1')
+        tab.go_back()
+        tab.wait_for_function("() => state.family === 'R1'")
+        assert tab.locator('.gate').count() == 4 and tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
+        tab.go_forward()
+        tab.wait_for_function("() => state.family === 'C1'")
+        assert tab.locator('.gate').count() == 4 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
         tab.goto(url+'/law?view=gates')
         tab.locator('.gate').first.wait_for()
         assert tab.locator('.law-group').count() == 4 and tab.locator('.gate').count() == 14
@@ -1303,7 +1331,12 @@ def test_recovery_comparison_states_and_signed_change(production_serving: tuple[
 
 
 def test_wait_and_publication_presentations_preserve_raw_evidence(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
-    url, _, _, _ = production_serving
+    url, _, report, _ = production_serving
+    feed = next(item for item in page._objects(report['feeds']) if item['source_key'] == 'binance_perp_trades')
+    c1 = page._object(page._object(feed['predicates'])['C1'])
+    evidence = page._object(c1['evidence'])
+    assert c1['status'] == 'NOT_DUE'
+    deadline = page._instant(evidence['deadline']).strftime('%Y-%m-%d %H:%M')
     target = 'binance_perp_trades:consumer:mount'
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -1312,7 +1345,7 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
         tab.locator('.source').first.wait_for()
         tab.locator('[data-projection="binance_perp_trades:raw"]').click()
         text = tab.locator('#detail').inner_text()
-        assert '2026-09-23' in text and '10:30' in text
+        assert str(evidence['day']) in text and deadline in text
         tab.locator('[data-close]').click()
         # This protocol test applies policy states to an unchanged captured artifact; it makes no new production claim.
         tab.evaluate("id=>{const p=data.last_report.projections.find(p=>p.id===id);window.savedOutput=structuredClone(p);p.status='STALE';p.reason='publication_state_changed';p.publication_policy={reason:'within_budget',lag_seconds:0,grace_seconds:10800,state_through:p.data_through,published_through:p.data_through};render()}", target)
@@ -1404,6 +1437,7 @@ def test_history_concurrency_deadlines_and_current_refresh(production_serving: t
 
 def test_operational_history_totals_preserve_intervals_and_limits(
     production_tape: tuple[Path, page.Document, datetime], operational_report: page.Document,
+    production_serving: tuple[str, page.TapeCache, page.Document, datetime],
 ) -> None:
     root, original, now = production_tape
     terminal = page._instant(original['sampling_slot']).replace(second=0, microsecond=0)
@@ -1436,6 +1470,34 @@ def test_operational_history_totals_preserve_intervals_and_limits(
     assert hour['count'] == 0 and hour['complete'] is True and hour['covered_seconds'] == 3600
     assert hour['observed_slots'] == hour['expected_slots'] == 60
     assert page._object(horizons['24h'])['complete'] is False
+    previous_hour = [record(terminal-timedelta(minutes=60-index)) for index in range(60)]
+    for fault in ('missing_metrics', 'read_failed'):
+        latest = record(terminal)
+        for event in page._objects(latest['gates']):
+            if event['gate_id'] in ('monitor.no_error_logs', 'monitor.workers_alive'):
+                event.update(evidence={} if fault == 'missing_metrics' else {'read_ok': False}, outcome='UNKNOWN', reason=fault)
+        failed_cache, values = totals([*previous_hour, latest])
+        for metric in ('error_lines', 'failed_receipts'):
+            failed = page._object(page._object(page._object(failed_cache.current(now)['operations_history'])[metric])['60m'])
+            assert failed['window_end'] == (terminal-timedelta(minutes=1)).isoformat()
+            assert failed['count'] == 0 and failed['observed_slots'] == 60 and failed['covered_seconds'] == 3600
+            assert failed['complete'] is False, fault
+        failed_cache.refresh_latest(now)
+        failed_cache._refresh_operations()
+        failed = page._object(page._object(page._object(failed_cache.current(now)['operations_history'])['error_lines'])['60m'])
+        assert failed['complete'] is False and failed['window_end'] == (terminal-timedelta(minutes=1)).isoformat()
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            tab.route('**/law.json', lambda route: route.fulfill(json=failed_cache.current(now)))
+            tab.goto(production_serving[0]+'/law')
+            tab.locator('.overview-card').first.wait_for()
+            assert '≥ 0' in _figure(tab, 'errors')
+            tab.locator('[data-overview="errors"]').click()
+            text = tab.locator('#detail').inner_text().lower()
+            assert 'covered' in text and 'window end' in text
+            assert str(failed['window_end']).lower() in text
+            browser.close()
     for records, reason in ((complete[1:], 'missing'), ([*complete, complete[-1]], 'duplicate'),
         ([record(terminal-timedelta(minutes=59), start=terminal-timedelta(minutes=61)), *complete[1:]], 'boundary'),
         ([*complete[:-1], record(terminal, start=terminal-timedelta(minutes=2))], 'overlap'),

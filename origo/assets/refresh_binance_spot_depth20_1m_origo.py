@@ -57,17 +57,18 @@ def _count_projection_rows(
     return clickhouse_scalar_int(result)
 
 
-def _insert_minute_row(
+def _insert_minute_rows(
     client: ClickHouseClient,
     database: str,
-    minute_start: datetime,
+    start: datetime,
+    end: datetime,
 ) -> None:
-    minute_end = minute_start + timedelta(minutes=1)
+    """Project every minute in [start, end) from its latest snapshot."""
     client.execute(
         f"""
         INSERT INTO {database}.{DEPTH20_1M_TABLE_NAME}
         SELECT
-            toStartOfMinute(datetime) AS datetime,
+            toStartOfMinute(datetime) AS minute,
             source_timestamp_ms,
             (bids[1].1 + asks[1].1) / 2 AS book_mid_price,
             ((asks[1].1 - bids[1].1) / book_mid_price) * 10000 AS book_spread_bps,
@@ -76,12 +77,22 @@ def _insert_minute_row(
             (book_bid_depth_20_notional - book_ask_depth_20_notional)
               / (book_bid_depth_20_notional + book_ask_depth_20_notional) AS book_imbalance_20
         FROM {database}.{SNAPSHOTS_TABLE_NAME} FINAL
-        WHERE datetime >= toDateTime64('{_clickhouse_datetime(minute_start)}.000', 3)
-          AND datetime < toDateTime64('{_clickhouse_datetime(minute_end)}.000', 3)
-        ORDER BY datetime DESC
-        LIMIT 1
+        WHERE datetime >= toDateTime64('{_clickhouse_datetime(start)}.000', 3)
+          AND datetime < toDateTime64('{_clickhouse_datetime(end)}.000', 3)
+        ORDER BY source_timestamp_ms DESC
+        LIMIT 1 BY minute
         """
     )
+
+
+def _snapshot_day(client: ClickHouseClient, database: str, bound: str) -> datetime:
+    seconds = clickhouse_scalar_int(
+        client.execute(
+            f'SELECT toUnixTimestamp(toStartOfDay({bound}(datetime))) '
+            f'FROM {database}.{SNAPSHOTS_TABLE_NAME}'
+        )
+    )
+    return datetime.fromtimestamp(seconds, timezone.utc)
 
 
 def refresh_minute(client: ClickHouseClient, database: str, minute_start: datetime) -> int:
@@ -92,7 +103,7 @@ def refresh_minute(client: ClickHouseClient, database: str, minute_start: dateti
         raise RuntimeError(
             f'No Binance spot depth20 source snapshots found for {minute_start.isoformat()}'
         )
-    _insert_minute_row(client, database, minute_start)
+    _insert_minute_rows(client, database, minute_start, minute_start + timedelta(minutes=1))
     return _count_projection_rows(client, database, minute_start)
 
 
@@ -121,6 +132,40 @@ def refresh_binance_spot_depth20_1m_origo(
             'minute_start': minute_start.isoformat(),
             'source_rows': source_count,
             'rows_inserted': inserted_count,
+            'table': f'{settings.database}.{DEPTH20_1M_TABLE_NAME}',
+        }
+    finally:
+        client.disconnect()
+
+
+@asset(
+    group_name='binance_spot_depth20_data',
+    description='Re-projects every depth20 1m minute from its latest retained snapshot, one UTC day at a time',
+)
+def repair_binance_spot_depth20_1m_history_origo(
+    context: AssetExecutionContext,
+) -> dict[str, object]:
+    settings = get_clickhouse_settings()
+    client = make_clickhouse_client(settings)
+
+    try:
+        snapshots = clickhouse_scalar_int(
+            client.execute(f'SELECT count() FROM {settings.database}.{SNAPSHOTS_TABLE_NAME}')
+        )
+        if snapshots == 0:
+            raise RuntimeError('No Binance spot depth20 snapshots to project.')
+        first_day = _snapshot_day(client, settings.database, 'min')
+        last_day = _snapshot_day(client, settings.database, 'max')
+        day = first_day
+        while day <= last_day:
+            _insert_minute_rows(client, settings.database, day, day + timedelta(days=1))
+            context.log.info(f'Re-projected depth20 minutes of {day.date().isoformat()}')
+            day += timedelta(days=1)
+
+        return {
+            'first_day': first_day.date().isoformat(),
+            'last_day': last_day.date().isoformat(),
+            'days': (last_day - first_day).days + 1,
             'table': f'{settings.database}.{DEPTH20_1M_TABLE_NAME}',
         }
     finally:

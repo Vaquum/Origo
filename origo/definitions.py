@@ -52,6 +52,7 @@ from .assets.create_binance_spot_depth200_snapshots_table_origo import (
 )
 from .assets.refresh_binance_spot_depth20_1m_origo import (
     refresh_binance_spot_depth20_1m_origo,
+    repair_binance_spot_depth20_1m_history_origo,
 )
 from .assets.refresh_binance_spot_depth200_1m_origo import (
     refresh_binance_spot_depth200_1m_origo,
@@ -153,6 +154,11 @@ repair_binance_spot_depth20_projection_job = define_asset_job(
 repair_binance_spot_depth200_projection_job = define_asset_job(
     name='repair_binance_spot_depth200_projection_job',
     selection=['refresh_binance_spot_depth200_1m_origo'],
+)
+
+repair_binance_spot_depth20_1m_history_job = define_asset_job(
+    name='repair_binance_spot_depth20_1m_history_job',
+    selection=['repair_binance_spot_depth20_1m_history_origo'],
 )
 
 reconcile_binance_spot_depth20_partition_state_origo_job = define_asset_job(
@@ -314,6 +320,7 @@ defs = Definitions(
             create_binance_spot_depth200_1m_table_origo,
             sync_binance_spot_depth20_snapshots_to_origo,
             refresh_binance_spot_depth20_1m_origo,
+            repair_binance_spot_depth20_1m_history_origo,
             reconcile_binance_spot_depth20_partition_state_origo,
             sync_binance_spot_depth200_snapshots_to_origo,
             refresh_binance_spot_depth200_1m_origo,
@@ -343,6 +350,7 @@ defs = Definitions(
           backfill_binance_spot_depth200_data_source_job,
           repair_binance_spot_depth20_projection_job,
           repair_binance_spot_depth200_projection_job,
+          repair_binance_spot_depth20_1m_history_job,
           reconcile_binance_spot_depth20_partition_state_origo_job,
           reconcile_binance_spot_depth200_partition_state_origo_job,
           publish_btc_briefing_feed_job,

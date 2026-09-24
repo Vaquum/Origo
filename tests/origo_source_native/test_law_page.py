@@ -1170,7 +1170,7 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         tab = browser.new_page()
         tab.goto(url+'/law')
         tab.locator('.overview-card').first.wait_for()
-        assert tab.locator('.overview-card').count() == 4
+        assert tab.locator('.overview-card').count() == 6
         for key, numerator, denominator in (('R1', 4, 4), ('C1', 2, 4), ('C2', 4, 4), ('D1', 2880, 2880)):
             text = _figure(tab, key).replace(',', '')
             assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
@@ -1179,7 +1179,7 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == f'Unknown / {output_count}'
         assert 'unknown' in _figure(tab, 'queue').lower() or 'not recorded' in _figure(tab, 'queue').lower()
         assert 'Monitor checks' in tab.locator('#monitor-band').inner_text()
-        for key in ('R1', 'C1', 'C2', 'D1', 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear'):
+        for key in ('R1', 'C1', 'C2', 'D1', 'M1', 'M2', 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear'):
             tab.locator(f'[data-overview="{key}"]').click()
             assert tab.locator('#detail').is_visible()
             assert tab.locator('#detail').inner_text().strip()
@@ -1326,14 +1326,14 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         assert tab.locator('.gate').count() == 4 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
         tab.goto(url+'/law?view=gates')
         tab.locator('.gate').first.wait_for()
-        assert tab.locator('.law-group').count() == 4 and tab.locator('.gate').count() == 14
+        assert tab.locator('.law-group').count() == 6 and tab.locator('.gate').count() == 16
         assert tab.evaluate("state.view") == 'laws'
         assert all(str(gate).startswith('law.') for gate in tab.locator('.gate [data-gate]').evaluate_all('(items)=>items.map(x=>x.dataset.gate)'))
         # Catalog envelope corruption cannot add an obligation or remove a required denominator.
         tab.evaluate("()=>{const extra=structuredClone(descriptor('law.R1:binance_spot_trades'));extra.id+=':outside-inventory';data.catalog.gates.push(extra);render()}")
-        assert tab.locator('.gate').count() == 14
+        assert tab.locator('.gate').count() == 16
         tab.evaluate("()=>{data.catalog.gates=data.catalog.gates.filter(g=>g.id!=='law.R1:binance_spot_trades');data.last_report.feeds=data.last_report.feeds.filter(f=>f.source_key!=='binance_spot_trades');render()}")
-        assert tab.locator('.gate').count() == 14
+        assert tab.locator('.gate').count() == 16
         assert 'unknown' in tab.locator('.gate').filter(has=tab.locator('[data-gate="law.R1:binance_spot_trades"]')).inner_text().lower()
         tab.reload()
         tab.locator('.gate').first.wait_for()
@@ -1344,14 +1344,14 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         tooltip = tab.locator('.gate .tooltip').first
         assert tooltip.is_visible() and 'threshold' in tooltip.inner_text().lower()
         assert '/blob/58b45deee0602e7524c2efcba4e532174ad40902/' in str(tooltip.locator('a').get_attribute('href'))
-        tab.locator('.day').last.click()
+        tab.locator('[data-law-id="law.D1:binance_spot_depth200_1m"] .day').last.click()
         tab.locator('#detail .event').first.wait_for()
         tab.locator('#detail .event details').first.locator('summary').click()
         assert 'Definition at evaluation' in tab.locator('#detail').inner_text()
         tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
         tab.wait_for_function('() => data !== null')
         assert 'runtime' in tab.locator('#detail').inner_text().lower() or 'runtime' in tab.locator('#message').inner_text().lower()
-        assert tab.locator('.gate').count() <= 14
+        assert tab.locator('.gate').count() <= 16
         browser.close()
 
 
@@ -1467,10 +1467,10 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
         tab.evaluate("()=>{window.originalStages=structuredClone(data.last_report.projections);for(const p of data.last_report.projections){p.status='UNKNOWN';p.reason='not_observed'}render()}")
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 10'
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 54'
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 56'
         tab.evaluate("()=>{const known=originalStages.find(p=>!p.id.includes(':consumer:')&&p.status==='CURRENT');Object.assign(data.last_report.projections.find(p=>p.id===known.id),known);render()}")
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 54'
-        assert '53 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 56'
+        assert '55 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
         tab.evaluate("()=>{data.last_report.projections=originalStages;render()}")
         before = len(requests)
         age = tab.locator('#sample-age').inner_text()
@@ -1516,7 +1516,7 @@ def test_history_concurrency_deadlines_and_current_refresh(production_serving: t
         tab.locator('[data-view="overview"]').click()
         tab.wait_for_function('() => historyRequests.active===0', timeout=2000)
         assert tab.evaluate('historyRequests.peak') <= 2
-        assert tab.locator('.overview-card').count() == 4
+        assert tab.locator('.overview-card').count() == 6
         assert tab.evaluate('histories.size') <= 8
         browser.close()
 
@@ -1672,3 +1672,18 @@ def test_market_state_laws_and_projection_nodes_render_from_tape(
         assert 'fail' in tab.locator('[data-overview="M2"]').inner_text().lower()
         tab.screenshot(path='/tmp/origo-market-state-law-overview.png', full_page=True)
         browser.close()
+
+
+def test_market_state_unobserved_members_prevent_a_clear_window(
+    production_tape: tuple[Path, page.Document, datetime],
+) -> None:
+    root, original, now = production_tape
+    assert original['status'] == 'PASS'
+    cache = page.TapeCache(root)
+    current = cache.current(now)
+    assert current['status'] == 'UNKNOWN'
+    assert current['consecutive_clear_slots'] == 0
+    required = page._object(current['catalog'])['law_gate_ids']
+    assert isinstance(required, list) and 'law.M1:binance_spot_trades' in required
+    assert 'law.M2:binance_spot_trades' in required
+    assert current['last_report'] == original

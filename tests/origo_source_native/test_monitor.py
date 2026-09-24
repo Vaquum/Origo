@@ -1452,7 +1452,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
 
     catalog = build_catalog('58b45deee0602e7524c2efcba4e532174ad40902')
     required = catalog['law_gate_ids']
-    assert len(required) == 14 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
+    assert len(required) == 16 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
     monkeypatch.setattr('origo.sources.registry.SOURCE_REGISTRY', ())
     assert build_catalog(catalog['deployed_sha'])['law_gate_ids'] == required
 

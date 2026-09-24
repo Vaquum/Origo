@@ -1,3 +1,7 @@
+# v3.24.1
+
+- Add `docs/Reference/Binance-rallies.md`, the guide and reference for the Binance spot rally export. It covers running an export on the production host, copying the files off and reading them, rally selection, the lead-in and boundary settings, the rally definition, the file columns and metadata, data coverage, limits, errors and reproducibility. The README links it.
+
 # v3.24.0
 
 Export Binance spot rallies by ID or time range: each anchor minute whose price reaches +30 bps within 240 minutes becomes one rally, written to `rallies.arrow` with the bounds that select its rows from `trades.arrow` and `book.arrow`, which hold each trade and depth-200 snapshot once. Each rally's rows can start `minutes_before` ahead of its anchor, and a per-request boundary setting starts them at the first record at or after that instant or at the last one before it. Runs on the production host; acceptance uses authentic 2017-08-17 and 2026-06-27 data.

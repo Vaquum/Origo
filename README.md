@@ -113,6 +113,7 @@ Origo is research software. Data outputs are not investment advice, trading advi
 - Run [your first native query](https://docs.vaquum.fi/origo/guides/run-your-first-native-query) and [your first aligned query](https://docs.vaquum.fi/origo/guides/run-your-first-aligned-query) against the warehouse
 - Rebuild derived tables with [Rebuild Projections](https://docs.vaquum.fi/origo/guides/rebuild-projections) and check coverage with [Understand Historical Coverage](https://docs.vaquum.fi/origo/guides/understand-historical-coverage)
 - Export datasets with [Export Data](https://docs.vaquum.fi/origo/guides/export-data)
+- Export Binance spot rallies with their trades and order book using the [rally export guide and reference](https://github.com/Vaquum/Origo/blob/main/docs/Reference/Binance-rallies.md)
 - See the mechanical PR gates in [AGENTS.md](https://github.com/Vaquum/Origo/blob/main/AGENTS.md) and their implementations under [tools](https://github.com/Vaquum/Origo/tree/main/tools)
 - Follow the change record in [CHANGELOG.md](https://github.com/Vaquum/Origo/blob/main/CHANGELOG.md)
 - Contribute through [Contributing](https://docs.vaquum.fi/origo/developer/contributing) and the [Developer docs](https://docs.vaquum.fi/origo/developer)

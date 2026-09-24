@@ -734,7 +734,11 @@ def test_same_sha_configuration_regimes_preserve_exact_original_definitions(
         cache._load_catalog(version)
     cache.advance(now, budget_seconds=2)
     query = {'gate_id': ['monitor.queue_bounded'], 'from': [(now-timedelta(hours=1)).isoformat()], 'to': [now.isoformat()]}
-    result = cache.history(query, now)
+    # Definition identity is independent of the separately tested metadata lookup budget.
+    with monkeypatch.context() as scoped:
+        scoped.setattr(page, 'time', SimpleNamespace(monotonic=lambda: 0.0))
+        result = cache.history(query, now)
+    assert result['definitions_limited'] is False
     definitions = {str(item['catalog_version']): item for item in page._objects(result['definitions'])}
     assert set(definitions) == set(versions)
     for version, threshold in zip(versions, (200, 201), strict=True):

@@ -868,6 +868,7 @@ def test_paginated_history_retains_each_original_catalog_definition(
     serving: tuple[str, page.TapeCache, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     url, cache, report, now = serving
+    monkeypatch.setattr(page, 'PAGE_SIZE', 10)
     catalogs = []
     events: list[page.Document] = []
     # Actual configured catalogs; UNKNOWN events claim no unobserved reader measurement.

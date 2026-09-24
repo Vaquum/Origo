@@ -1,6 +1,11 @@
-# v3.25.1
+# v3.25.2
 
 - Allow raw-perp minutes up to 512 page requests per attempt, preserving the 100-page default for other sources, boundary validation and provider budgets; publish each adapter's effective cap in the law catalog.
+
+# v3.25.1
+
+- Project each `binance_spot_depth20_1m` minute from its latest snapshot. The projection aliased `toStartOfMinute(datetime) AS datetime`, so its `ORDER BY datetime DESC` sorted on a per-minute constant and `LIMIT 1` returned the minute's first snapshot. In production that held for all 190,615 projected minutes from 2026-05-14 10:28 to 2026-09-24 12:38 UTC, about 60 seconds before the minute's last snapshot. `binance_spot_depth200_1m` already took the latest snapshot and is unchanged.
+- Add `repair_binance_spot_depth20_1m_history_job`, which re-projects every depth20 minute from its retained snapshots one UTC day at a time. It takes no configuration; launch it once from Dagit after this deploy. The table is a `ReplacingMergeTree(source_timestamp_ms)`, so each corrected row supersedes the stored one and a re-run changes nothing. The minute-partitioned `repair_binance_spot_depth20_projection_job` would need about 190,000 runs for the same history.
 
 # v3.25.0
 

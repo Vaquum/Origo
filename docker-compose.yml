@@ -7,6 +7,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/clickhouse-config.xml
+      - ./clickhouse-users.xml:/etc/clickhouse-server/users.d/clickhouse-users.xml:ro
     environment:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
@@ -84,6 +85,8 @@ services:
     environment:
       - PYTHONPATH=/opt/app
       - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - ORIGO_LAW_PAGE_URL=http://law:8485/healthz
+      - ORIGO_LAW_APP_IMAGE=${APP_IMAGE:-local}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       # Alerts stay disabled locally: the monitor logs findings when ORIGO_ALERT_* is unset.
       - ORIGO_ALERT_RESEND_API_KEY=${ORIGO_ALERT_RESEND_API_KEY:-}
@@ -93,6 +96,9 @@ services:
       - .:/opt/app
       - worker-heartbeats:/opt/origo/heartbeats
       - source-publications:/opt/origo/shadow:ro
+      - law-samples:/var/lib/origo-law
+      - ./parquet_data:/opt/parquet:ro
+      - ./arrow_data:/opt/arrow:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -103,6 +109,28 @@ services:
       timeout: 15s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
+
+  law:
+    build: .
+    image: origo-dagster:latest
+    command: python -m origo.workers.law_page
+    ports:
+      - "0.0.0.0:8484:8484"
+    volumes:
+      - law-samples:/var/lib/origo-law:ro
+    cpus: 0.5
+    mem_limit: 256m
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.law_page", "--check"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   vector:
@@ -206,3 +234,5 @@ volumes:
   source-publications:
 
   worker-heartbeats:
+
+  law-samples:

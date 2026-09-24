@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import Any, cast
+from typing import IO, Any, cast
 
 import pytest
 import yaml
@@ -18,12 +18,25 @@ from dagster import Failure
 from origo.alerts.email import AlertSettings, send_alert
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
+from origo.law import LawReport, evaluate
+from origo.law_catalog import build_catalog
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
-from origo.workers.monitor import DELIVERY_LAG_SECONDS, CollectorProbe, Monitor
+from origo.workers.monitor import (
+    DELIVERY_LAG_SECONDS,
+    CollectorProbe,
+    Cursor,
+    Finding,
+    LawTape,
+    Monitor,
+    held_law_keys,
+)
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
+
+from .test_law import LawCase
+from .test_law import law_case as law_case
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / 'tests/fixtures/dagster/graphql'
@@ -85,6 +98,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         server = cast(_Recorder, self.server)
+        if self.path == '/healthz':
+            self._respond(200, b'ok\n')
+            return
         if self.path.startswith('/history'):
             server.history_calls.append(self.path)
             if server.history_malformed:
@@ -173,6 +189,8 @@ def _monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
         database='origo',
+        law_client=_EmptyClient(),
+        law_root=tmp_path / 'law',
         heartbeat_dir=tmp_path / 'heartbeats',
         probes=probes,
         settings=settings if settings is not None else _settings(server),
@@ -221,7 +239,7 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
     second = monitor.tick(NOW + timedelta(minutes=1))
     assert set(second.failed) >= expected
     assert len(_emails(recorder)) == 1
-    assert len(_check_posts(recorder)) == 12
+    assert len(_check_posts(recorder)) == 14
     later = monitor.tick(NOW + timedelta(hours=7))
     assert set(later.failed) >= expected
     assert len(_emails(recorder)) == 2
@@ -273,8 +291,8 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         }
     }
     quiet = _monitor(recorder, tmp_path / 'quiet').tick(NOW)
-    assert quiet.failed == ()
-    assert len(_emails(recorder)) == 1
+    assert quiet.failed and all(key.startswith('law:') for key in quiet.failed)
+    assert len(_emails(recorder)) == 2
 
 
 def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Path) -> None:
@@ -415,7 +433,8 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert email['to'] == ['operator@example.test']
     assert 'Dagit check evaluations: written.' in email['text']
     for key in outcome.failed:
-        assert key in email['text']
+        if not (key.startswith(('law:R1:', 'law:C1:', 'law:D1:')) and ':FAIL:' in key):
+            assert key in email['text']
 
     # A Dagit that refuses the write is reported in the same e-mail.
     second = _monitor(recorder, tmp_path / 'refused', dagster_url=_url(recorder))
@@ -466,6 +485,7 @@ def test_monitor_checks_are_declared_in_definitions() -> None:
     assert sorted(MONITOR_CHECK_NAMES) == [
         'collectors_serving',
         'dagster_reachable',
+        'data_current',
         'no_error_logs',
         'publication_current',
         'queue_bounded',
@@ -758,3 +778,545 @@ def test_monitor_flags_runs_queued_past_the_stuck_threshold(recorder: _Recorder,
     assert all(
         post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded'
     )
+
+
+def _protocol_report(now: datetime) -> LawReport:
+    # Alert/tape protocol only: empty-store UNKNOWN evidence, not invented market rows.
+    report = evaluate(_EmptyClient(), 'origo', now)
+    catalog = build_catalog('')
+    report['catalog_version'] = catalog['version']
+    return report
+
+
+def test_law_tape_precedes_unheld_dagit_and_held_mail(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    original = monitor.reporter.check
+    checked: list[str] = []
+
+    def check(asset: str, name: str, *, passed: bool, metadata: Mapping[str, object]) -> bool:
+        assert (tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')).exists()
+        checked.append(name)
+        return original(asset, name, passed=passed, metadata=metadata)
+
+    monkeypatch.setattr(monitor.reporter, 'check', check)
+    monitor.tick(NOW)
+    assert checked == list(MONITOR_CHECK_NAMES)
+    report = json.loads((tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')).read_text())
+    assert report['status'] in ('FAIL', 'UNKNOWN')
+    assert len(report['gates']) < len(monitor.catalog['gates'])
+    assert all(event['reason'] != 'not_observed' for event in report['gates'])
+    assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
+    assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
+    assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
+    assert 'law:' in _emails(recorder)[0]['text']
+
+
+def test_data_current_hold_uses_consecutive_slots_and_cooldown(tmp_path: Path) -> None:
+    cursor = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
+    finding = Finding('law:R1:binance_perp_trades:FAIL:reader_stale', 'data_current', 'lag', 'lag')
+    for minute in range(5):
+        held = held_law_keys(cursor, [finding], (NOW + timedelta(minutes=minute)).isoformat())
+        assert (finding.key in held) == (minute < 4)
+        again = held_law_keys(cursor, [finding], (NOW + timedelta(minutes=minute)).isoformat())
+        assert again == held
+    cursor.save(tmp_path / 'cursor.json')
+    restarted = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
+    assert not held_law_keys(restarted, [finding], (NOW + timedelta(minutes=5)).isoformat())
+    assert held_law_keys(restarted, [finding], (NOW + timedelta(minutes=7)).isoformat())
+    held_law_keys(restarted, [], (NOW + timedelta(minutes=8)).isoformat())
+    assert held_law_keys(restarted, [finding], (NOW + timedelta(minutes=9)).isoformat())
+    immediate = Finding('law:C2:binance_perp_trades:FAIL:calendar_gap', 'data_current', 'gap', 'gap')
+    assert not held_law_keys(restarted, [immediate], NOW.isoformat())
+
+
+def test_tape_restart_duplicate_and_partial_write_preserve_evidence(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    first = _monitor(recorder, tmp_path)
+    first.tick(NOW)
+    segment = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    original = segment.read_bytes()
+    _monitor(recorder, tmp_path).tick(NOW)
+    assert segment.read_bytes() == original
+    with segment.open('ab') as stream:
+        stream.write(b'{"sampling_slot":')
+    tape = LawTape(tmp_path / 'law')
+    report = _protocol_report(NOW + timedelta(minutes=1))
+    tape.append(report, build_catalog(''))
+    lines = segment.read_bytes().splitlines()
+    assert len(lines) == 3 and lines[1] == b'{"sampling_slot": [incomplete]'
+    assert json.loads(lines[2])['sampling_slot'] == report['sampling_slot']
+    assert LawTape(tmp_path / 'law').latest(NOW)['sampling_slot'] == report['sampling_slot']
+
+
+
+
+@pytest.mark.parametrize('page_failed_first', [False, True])
+@pytest.mark.parametrize('restart', [False, True])
+def test_committed_minute_skips_changed_page_state_until_next_slot(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    page_failed_first: bool, restart: bool,
+) -> None:
+    def setup() -> Monitor:
+        instance = _monitor(recorder, tmp_path)
+        observe = instance._law_findings
+
+        def protocol_observation(now: datetime, existing: list[Finding]) -> list[Finding]:
+            # Isolate page/check delivery; the empty-store law evidence stays unchanged.
+            observe(now, existing)
+            return []
+
+        monkeypatch.setattr(instance, '_law_findings', protocol_observation)
+        return instance
+
+    monitor = setup()
+    monitor.page_url = _url(recorder) + ('/history' if page_failed_first else '/healthz')
+    monitor.tick(NOW)
+    samples = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    original = samples.read_bytes()
+    first = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert first['passed'] is not page_failed_first
+    if restart:
+        monitor = setup()
+    monitor.page_url = _url(recorder) + ('/healthz' if page_failed_first else '/history')
+    posts = list(recorder.posts)
+    observations: list[str] = []
+    dagster_findings, page_findings = monitor._dagster_findings, monitor._page_findings
+
+    def dagster(cursor: Cursor, window_end: datetime) -> tuple[list[Finding], bool]:
+        observations.append('dagster')
+        return dagster_findings(cursor, window_end)
+
+    def page() -> list[Finding]:
+        observations.append('page')
+        return page_findings()
+
+    monkeypatch.setattr(monitor, '_dagster_findings', dagster)
+    monkeypatch.setattr(monitor, '_page_findings', page)
+    skipped = monitor.tick(NOW + timedelta(seconds=30))
+    assert skipped.processed == () and skipped.failed == ()
+    assert not observations and recorder.posts == posts and samples.read_bytes() == original
+    monitor.tick(NOW + timedelta(minutes=1))
+    assert observations == ['dagster', 'page']
+    checks = [item for item in _check_posts(recorder) if item['check_name'] == 'data_current']
+    assert len(checks) == 2 and checks[-1]['passed'] is page_failed_first
+    rows = [json.loads(line) for line in samples.read_bytes().splitlines()]
+    assert len(rows) == 2
+    verdicts = [next(event['outcome'] for event in row['gates']
+                     if event['gate_id'] == 'monitor.data_current') for row in rows]
+    assert verdicts == (['FAIL', 'PASS'] if page_failed_first else ['PASS', 'FAIL'])
+
+
+def test_failed_sample_commit_can_retry_in_same_minute(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    append = monitor.law_tape.append
+
+    def failed_append(report: LawReport, catalog: object) -> None:
+        raise OSError('injected uncommitted sample')
+
+    monkeypatch.setattr(monitor.law_tape, 'append', failed_append)
+    assert 'detector_failed:law' in monitor.tick(NOW).failed
+    assert monitor.law_tape.last is None
+    monkeypatch.setattr(monitor.law_tape, 'append', append)
+    assert monitor.tick(NOW + timedelta(seconds=30)).processed == tuple(MONITOR_CHECK_NAMES)
+    samples = tmp_path / 'law' / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    assert len(samples.read_bytes().splitlines()) == 1
+    assert len(_check_posts(recorder)) == 2 * len(MONITOR_CHECK_NAMES)
+
+
+def test_sample_lookup_failure_does_not_skip_independent_detectors(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+
+    latest = monitor.law_tape.latest
+    reads: list[datetime] = []
+
+    def failed_latest(now: datetime) -> LawReport | None:
+        reads.append(now)
+        if len(reads) == 1:
+            raise OSError('injected transient tape read failure')
+        return latest(now)
+
+    monkeypatch.setattr(monitor.law_tape, 'latest', failed_latest)
+    outcome = monitor.tick(NOW)
+    assert 'detector_failed:law' in outcome.failed
+    assert _failure_keys() <= set(outcome.failed)
+    assert len(_check_posts(recorder)) == len(MONITOR_CHECK_NAMES)
+    assert reads == [NOW] and monitor.law_tape.last is None
+    retry = monitor.tick(NOW + timedelta(seconds=30))
+    assert retry.processed == tuple(MONITOR_CHECK_NAMES) and monitor.law_tape.last is not None
+    assert reads == [NOW, NOW + timedelta(seconds=30)]
+
+
+@pytest.mark.parametrize('missing_own', [False, True])
+def test_corrupt_complete_current_slot_cannot_suppress_monitor(
+    recorder: _Recorder, tmp_path: Path, missing_own: bool,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    report = _protocol_report(NOW) if missing_own else {'sampling_slot': NOW.isoformat()}
+    samples = monitor.law_tape.root / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    samples.parent.mkdir(parents=True)
+    samples.write_text(json.dumps(report) + '\n')
+    original = samples.read_bytes()
+    outcome = monitor.tick(NOW)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert 'detector_failed:law' in outcome.failed and _failure_keys() <= set(outcome.failed)
+    assert len(_check_posts(recorder)) == len(MONITOR_CHECK_NAMES)
+    assert samples.read_bytes() == original
+
+
+def test_pre_catalog_component_proofs_remain_visible_without_historical_pass(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase,
+) -> None:
+    sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    catalog = build_catalog(sha)
+    # Reusing an older catalog must not attribute intervening validation to this activation.
+    LawTape(tmp_path / 'law').write_catalog(catalog)
+    law_case.minute(0)
+    monitor = _monitor(recorder, tmp_path)
+    monitor.law_client = law_case.client
+    monitor.deployed_sha = sha
+    now = datetime.now(UTC)
+    findings = monitor._law_findings(now, [])
+    report = monitor.pending_report
+    assert report is not None
+    proofs = [dict(item) for item in report['projections'] if item['reason'] == 'validated_activation']
+    assert proofs
+    old_ids = {item['evidence_id'] for item in proofs}
+    before = [event for event in report['gates'] if event['evidence_id'] in old_ids]
+    assert before and all(event['outcome'] == 'PASS' for event in before)
+    assert monitor._commit_law(now, findings) == []
+    saved = json.loads((monitor.law_tape.root / now.strftime('samples-%Y-%m-%d.jsonl')).read_text())
+    assert [item for item in saved['projections'] if item['evidence_id'] in old_ids] == proofs
+    assert all(event['outcome'] == 'NOT_EVALUATED' and event['evidence_id'] == ''
+               and event['reason'] == 'historical_definition_unavailable' for event in before)
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*.jsonl')
+              for line in path.read_text().splitlines()]
+    assert not any(event['evidence_id'] in old_ids for event in events)
+    # Actual validation after the catalog exists remains attributable to its definition.
+    law_case.minute(1)
+    later = now + timedelta(minutes=1)
+    findings = monitor._law_findings(later, [])
+    current = monitor.pending_report
+    assert current is not None
+    new_ids = {item['evidence_id'] for item in current['projections']
+               if item['reason'] == 'validated_activation'} - old_ids
+    assert new_ids
+    assert monitor._commit_law(later, findings) == []
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*.jsonl')
+              for line in path.read_text().splitlines()]
+    assert all(any(event['evidence_id'] == identity and event['outcome'] == 'PASS'
+                   for event in events) for identity in new_ids)
+    assert not any(event['evidence_id'] in old_ids for event in events)
+
+
+def test_law_tape_failure_keeps_other_checks_and_delivery_running(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.law_tape.root.write_text('not a directory')
+    outcome = monitor.tick(NOW)
+    assert 'detector_failed:law' in outcome.failed
+    assert set(post['check_name'] for post in _check_posts(recorder)) == set(MONITOR_CHECK_NAMES)
+    assert 'detector_failed:law' in _emails(recorder)[0]['text']
+    assert _failure_keys() <= set(outcome.failed)
+
+
+
+@pytest.mark.parametrize('fault', ['sample', 'partial_sample', 'gate_events', 'retention'])
+def test_law_commit_failure_never_leaves_a_durable_data_current_pass(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    observe = monitor._law_findings
+
+    def protocol_observation(now: datetime, existing: list[Finding]) -> list[Finding]:
+        # Exercise a previously clear check's write protocol; keep all empty-store data evidence intact.
+        observe(now, existing)
+        return []
+
+    monkeypatch.setattr(monitor, '_law_findings', protocol_observation)
+    append = monitor.law_tape._append
+
+    def failing_append(path: Path, value: object) -> None:
+        if path.name.startswith('samples-') and fault in ('sample', 'partial_sample'):
+            if fault == 'partial_sample':
+                path.write_bytes(b'{"sampling_slot":')
+            raise OSError('injected sample append failure')
+        if path.name.startswith('gate-events-') and fault == 'gate_events':
+            raise OSError('injected gate append failure')
+        append(path, value)
+
+    monkeypatch.setattr(monitor.law_tape, '_append', failing_append)
+    if fault == 'retention':
+        old = NOW - timedelta(days=31)
+        old_path = monitor.law_tape.root / old.strftime('samples-%Y-%m-%d.jsonl')
+        old_path.parent.mkdir(parents=True)
+        old_path.write_text(json.dumps(_protocol_report(old)) + '\n')
+        unlink = Path.unlink
+
+        def failing_unlink(path: Path, missing_ok: bool = False) -> None:
+            if path == old_path:
+                raise OSError('injected retention failure')
+            unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, 'unlink', failing_unlink)
+    outcome = monitor.tick(NOW)
+    assert any(key in outcome.failed for key in ('detector_failed:law', 'law:gate_events:UNKNOWN'))
+    own_check = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert own_check['passed'] is False
+    events = [json.loads(line) for path in monitor.law_tape.root.glob('gate-events-*')
+              for line in path.read_text().splitlines()]
+    assert not any(event['gate_id'] == 'monitor.data_current' for event in events)
+    saved = LawTape(monitor.law_tape.root).latest(NOW)
+    if fault == 'gate_events':
+        assert saved is not None
+        own = next(event for event in saved['gates'] if event['gate_id'] == 'monitor.data_current')
+        assert own['outcome'] == 'FAIL' and own['evidence']['finding_count'] == 1
+    else:
+        assert saved is None and monitor.law_tape.last is None
+
+
+def test_data_current_has_no_second_verdict_append(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import Sequence
+
+    from origo.law_catalog import GateEvaluation
+
+    monitor = _monitor(recorder, tmp_path)
+    append_events = monitor.law_tape.append_events
+
+    def reject_duplicate(events: Sequence[GateEvaluation], *, deadline: float | None = None) -> None:
+        assert all(event['gate_id'] != 'monitor.data_current' for event in events)
+        append_events(events, deadline=deadline)
+
+    monkeypatch.setattr(monitor.law_tape, 'append_events', reject_duplicate)
+    outcome = monitor.tick(NOW)
+    assert 'law:gate_events:UNKNOWN' not in outcome.failed
+    assert 'detector_failed:law' not in outcome.failed
+    saved = monitor.law_tape.last
+    assert saved is not None
+    own = next(event for event in saved['gates'] if event['gate_id'] == 'monitor.data_current')
+    own_check = next(item for item in _check_posts(recorder) if item['check_name'] == 'data_current')
+    assert (own['outcome'] == 'PASS') == own_check['passed']
+
+
+def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
+    recorder: _Recorder, tmp_path: Path,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.page_url = _url(recorder) + '/healthz'
+    assert monitor._page_findings() == []
+    monitor.page_url = _url(recorder) + '/history'
+    assert monitor._page_findings()[0].key == 'law_page_unreachable'
+    monitor.page_url = 'http://127.0.0.1:1/healthz'
+    started = time.monotonic()
+    outcome = monitor.tick(NOW)
+    assert time.monotonic() - started < 5
+    assert 'law_page_unreachable' in outcome.failed
+    assert 'law_page_unreachable' in _emails(recorder)[0]['text']
+    report = monitor.law_tape.last
+    assert report is not None
+    event = next(event for event in report['gates'] if event['gate_id'] == 'monitor.data_current')
+    assert event['outcome'] == 'FAIL'
+    assert event['evidence']['finding_count'] == sum(item.startswith(('law:', 'detector_failed:law')) or item == 'law_page_unreachable' for item in outcome.failed)
+
+
+def test_historical_gate_import_is_bounded_resumable_and_attributable(
+    recorder: _Recorder, tmp_path: Path, origo_test_env: dict[str, str],
+) -> None:
+    from origo.sources.contracts import SourceError
+    from origo.sources.lifecycle import SourceRuntime
+    from origo.sources.locking import source_lock
+    from origo.sources.storage import SourceStore
+    from origo.workers.monitor import LawClient
+
+    client = make_clickhouse_client(get_clickhouse_settings())
+    spec = SOURCE_REGISTRY[0]
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', 'worker:law-history')
+    try:
+        runtime.setup()
+        start = datetime.now(UTC)
+        monitor = _monitor(recorder, tmp_path, client=client)
+        monitor.law_client = LawClient(get_clickhouse_settings())
+        monitor.catalog = build_catalog('')
+        monitor.law_tape.append(_protocol_report(start), monitor.catalog)
+        with source_lock(runtime.lock_root, spec.key, 'consumer_mount'):
+            with pytest.raises(SourceError):
+                runtime.publish('mount', str(tmp_path / 'mount'))
+        observed = datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS)
+        cursor = Cursor.load(tmp_path / 'cursor.json', observed, 15)
+        begun = time.monotonic()
+        assert monitor._history_findings(cursor, observed) == []
+        assert time.monotonic() - begun < 5
+        segment = next(monitor.law_tape.root.glob('gate-events-*'))
+        events = [json.loads(line) for line in segment.read_text().splitlines()]
+        assert len(events) == 1
+        assert events[0]['gate_id'] == 'locks.contention.source'
+        assert events[0]['outcome'] == 'EXPECTED_WAIT'
+        assert events[0]['catalog_version'] == monitor.catalog['version']
+        assert datetime.fromisoformat(events[0]['evaluated_at']) < observed
+        cursor.save(tmp_path / 'cursor.json')
+        restarted = Cursor.load(tmp_path / 'cursor.json', observed, 15)
+        original = segment.read_bytes()
+        monitor.law_tape = LawTape(monitor.law_tape.root)
+        assert monitor._history_findings(restarted, observed) == []
+        assert segment.read_bytes() == original
+        assert restarted.law_history == cursor.law_history
+        # A later minute sample does not erase an actual imported event or renew its time.
+        from origo.workers.law_page import TapeCache, _object
+
+        findings = monitor._law_findings(observed, [])
+        assert monitor._commit_law(observed, findings) == []
+        cache = TapeCache(monitor.law_tape.root)
+        cache.refresh_latest(observed)
+        cache.advance(observed, budget_seconds=2)
+        recorded = _object(cache.current(observed)['last_gate_events'])
+        assert recorded['locks.contention.source'] == events[0]
+        assert not any(event['gate_id'] == 'locks.contention.source'
+                       for event in monitor.law_tape.last['gates'])
+    finally:
+        client.disconnect()
+
+
+@pytest.mark.parametrize('configuration_only', [False, True])
+def test_gate_history_activation_excludes_intervening_receipts_after_reversion_and_restart(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase,
+    monkeypatch: pytest.MonkeyPatch, configuration_only: bool,
+) -> None:
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from origo.sources.contracts import SourceError
+    from origo.sources.locking import source_lock
+
+    sha = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+    monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '200')
+    catalog_a = build_catalog(sha)
+    if configuration_only:
+        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '201')
+        catalog_b = build_catalog(sha)
+    else:
+        catalog_b = build_catalog('ffbdeb9ae1f03c30dffc3daa2d2de81041adfcc7')
+    assert catalog_a['version'] != catalog_b['version']
+
+    def receipt() -> None:
+        runtime = replace(law_case.runtime, run_id=f'worker:law-reversion:{uuid4()}')
+        with source_lock(runtime.lock_root, runtime.spec.key, 'consumer_mount'):
+            with pytest.raises(SourceError, match='Source lock is already held'):
+                runtime.publish('mount', str(tmp_path / 'mount'))
+
+    def observed() -> datetime:
+        return datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS)
+
+    first = _monitor(recorder, tmp_path, client=law_case.client)
+    first.law_client, first.catalog = law_case.client, catalog_a
+    first.law_tape.write_catalog(catalog_a)
+    receipt()
+    cursor = Cursor.load(first.cursor_path, observed(), 15)
+    assert first._history_findings(cursor, observed()) == []
+    cursor.save(first.cursor_path)
+    segment = next(first.law_tape.root.glob('gate-events-*'))
+    original = segment.read_bytes()
+    assert len(original.splitlines()) == 1
+
+    # B leaves a real receipt unimported; A's retained catalog predates it.
+    first.law_tape.write_catalog(catalog_b)
+    receipt()
+    monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', '200')
+    returned = _monitor(recorder, tmp_path, client=law_case.client)
+    returned.law_client, returned.catalog = law_case.client, build_catalog(sha)
+    assert returned.catalog['version'] == catalog_a['version']
+    cursor = Cursor.load(returned.cursor_path, observed(), 15)
+    assert returned._history_findings(cursor, observed()) == []
+    assert segment.read_bytes() == original
+    receipt()
+    assert returned._history_findings(cursor, observed()) == []
+    cursor.save(returned.cursor_path)
+    after_return = segment.read_bytes()
+    events = [json.loads(line) for line in after_return.splitlines()]
+    assert len(events) == 2 and after_return.startswith(original)
+    assert events[-1]['catalog_version'] == catalog_a['version']
+    assert datetime.fromisoformat(events[-1]['evaluated_at']) >= returned.law_known_since
+
+    # Same-version restart also cannot claim missed pre-activation receipts.
+    receipt()
+    restarted = _monitor(recorder, tmp_path, client=law_case.client)
+    restarted.law_client, restarted.catalog = law_case.client, catalog_a
+    cursor = Cursor.load(restarted.cursor_path, observed(), 15)
+    assert restarted._history_findings(cursor, observed()) == []
+    assert segment.read_bytes() == after_return
+    receipt()
+    assert restarted._history_findings(cursor, observed()) == []
+    events = [json.loads(line) for line in segment.read_bytes().splitlines()]
+    assert len(events) == 3
+    assert datetime.fromisoformat(events[-1]['evaluated_at']) >= restarted.law_known_since
+    assert events[-1]['catalog_version'] == catalog_a['version']
+    assert restarted._history_findings(cursor, observed()) == []
+    assert len(segment.read_bytes().splitlines()) == 3
+
+
+def test_segment_retention_preserves_30_days_and_closeout_evidence(tmp_path: Path) -> None:
+    tape = LawTape(tmp_path / 'law')
+    catalog = build_catalog('')
+    old = NOW - timedelta(days=31)
+    report = _protocol_report(old)
+    tape.append(report, catalog)
+    old_path = tape.root / old.strftime('samples-%Y-%m-%d.jsonl')
+    # A selected evidence copy is outside rotating day segments; contents remain original.
+    selected = tape.root / 'closeout' / old_path.name
+    selected.parent.mkdir()
+    selected.write_bytes(old_path.read_bytes())
+    for days in range(30, 0, -1):
+        stamp = NOW - timedelta(days=days)
+        tape._append(tape.root / stamp.strftime('samples-%Y-%m-%d.jsonl'), _protocol_report(stamp))
+    tape.append(_protocol_report(NOW), catalog)
+    assert not old_path.exists()
+    assert len(list(tape.root.glob('samples-*'))) == 31
+    assert json.loads(selected.read_text())['sampling_slot'] == report['sampling_slot']
+    assert (tape.root / f'catalog-{catalog["version"]}.json').exists()
+
+
+def test_complete_json_without_newline_is_not_a_committed_observation(tmp_path: Path) -> None:
+    tape = LawTape(tmp_path)
+    report = _protocol_report(NOW)
+    segment = tmp_path / NOW.strftime('samples-%Y-%m-%d.jsonl')
+    segment.write_text(json.dumps(report))
+    assert tape.latest(NOW) is None and tape.corrupt_tail
+    tape.append(_protocol_report(NOW + timedelta(minutes=1)), build_catalog(''))
+    assert len(segment.read_text().splitlines()) == 2
+    with pytest.raises(ValueError):
+        json.loads(segment.read_text().splitlines()[0])
+
+
+def test_gate_event_index_resumes_without_rescanning_days(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    monitor.tick(NOW)
+    report = monitor.law_tape.last
+    assert report is not None
+    events = [event for event in report['gates'] if event['evidence_id']]
+    restarted = LawTape(monitor.law_tape.root)
+    with pytest.raises(TimeoutError):
+        restarted.append_events(events, deadline=time.monotonic() - 1)
+    restarted.append_events(events)
+    saved = {path.name: path.read_bytes() for path in restarted.root.glob('gate-events-*')}
+    original = Path.open
+    reads: list[str] = []
+
+    def opened(path: Path, mode: str = 'r', *args: object, **kwargs: object) -> IO[bytes] | IO[str]:
+        if path.name.startswith('gate-events-') and mode == 'rb':
+            reads.append(path.name)
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', opened)
+    restarted.append_events(events)
+    assert reads == []
+    assert saved == {path.name: path.read_bytes() for path in restarted.root.glob('gate-events-*')}

@@ -1,3 +1,7 @@
+# v3.22.0
+
+Expose reader coverage, source projections and production gate history through a read-only public dashboard, using bounded monitoring and the existing alert path. Health probes have isolated capacity; sparse observations and semantic gate versions keep history inexpensive and deployment-independent. Historical attribution respects configuration changes and monitor restarts. Repeated sampling minutes preserve one verdict; bounded historical definition lookups disclose incomplete results.
+
 # v3.21.9
 
 - Reduce raw-perp minute paging with a nearer start and a bounded return to the existing start when boundary proof is absent; preserve complete rows and request evidence.

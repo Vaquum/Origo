@@ -3,5 +3,25 @@
     <default>
       <log_processors_profiles>0</log_processors_profiles>
     </default>
+    <law_reader>
+      <readonly>1</readonly>
+      <max_memory_usage>536870912</max_memory_usage>
+      <max_execution_time>5</max_execution_time>
+      <max_threads>1</max_threads>
+      <max_concurrent_queries_for_user>1</max_concurrent_queries_for_user>
+      <constraints>
+        <max_execution_time><min>0.001</min><max>5</max><changeable_in_readonly/></max_execution_time>
+        <max_memory_usage><min>1</min><max>536870912</max><changeable_in_readonly/></max_memory_usage>
+        <max_threads><min>1</min><max>1</max><changeable_in_readonly/></max_threads>
+      </constraints>
+    </law_reader>
   </profiles>
+  <users>
+    <law_reader>
+      <password from_env="CLICKHOUSE_PASSWORD"/>
+      <networks><ip>::/0</ip></networks>
+      <profile>law_reader</profile>
+      <quota>default</quota>
+    </law_reader>
+  </users>
 </clickhouse>

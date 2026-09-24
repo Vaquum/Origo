@@ -136,7 +136,12 @@ def _published_ports() -> list[PublishedPort]:
 
 
 def test_all_published_ports_bind_loopback() -> None:
-    exposed = [f'{p.service}: {p.raw}' for p in _published_ports() if p.host_ip != LOOPBACK]
+    exposed = [
+        f'{p.service}: {p.raw}'
+        for p in _published_ports()
+        if p.host_ip != LOOPBACK
+        and (p.service, p.host_ip, p.published, p.target) != ('law', '0.0.0.0', '8484', '8484')
+    ]
     assert exposed == []
 
 
@@ -164,7 +169,7 @@ def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None
     end = workflow.index(end_marker, start) + len(end_marker)
     recovery = textwrap.dedent(workflow[start:end])
     # Execute the deployed shell path against Docker responses, including failures.
-    docker = r'''
+    docker = r"""
 set -euo pipefail
 PROJECT_NAME=test
 function docker() {
@@ -175,7 +180,7 @@ function docker() {
         printf '%s\n' 'old-daemon daemon-host' ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
         printf '%s\n' 'old-ui ui-host' ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -191,7 +196,7 @@ function docker() {
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
 }
-'''
+"""
     for case in ('removed', 'stopped', 'running', 'inventory-error', 'inspect-error'):
         invocation = tmp_path / case
         result = subprocess.run(
@@ -230,7 +235,7 @@ def test_egress_preflight_detaches_stdin_and_precedes_replacement(tmp_path: Path
     (deploy / 'prepare_binance_egress.sh').write_text(
         'printf "setup\\n" >> "$CALLS"\nexit "$SETUP_EXIT"\n'
     )
-    stub = r'''
+    stub = r"""
 set -euo pipefail
 PROJECT_NAME=test
 function docker() {
@@ -248,12 +253,12 @@ function docker() {
         return "$PREFLIGHT_EXIT" ;;
       'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
         return 0 ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
 }
-'''
+"""
     for setup_exit, preflight_exit, expected in (
         ('0', '0', ['setup', 'preflight', 'up', 'after-up']),
         ('1', '0', ['setup']),
@@ -264,8 +269,12 @@ function docker() {
             ['bash', '-s'],
             input=stub + invocation + '\nprintf "after-up\\n" >> "$CALLS"\n',
             cwd=tmp_path,
-            env={**os.environ, 'CALLS': str(calls), 'SETUP_EXIT': setup_exit,
-                 'PREFLIGHT_EXIT': preflight_exit},
+            env={
+                **os.environ,
+                'CALLS': str(calls),
+                'SETUP_EXIT': setup_exit,
+                'PREFLIGHT_EXIT': preflight_exit,
+            },
             capture_output=True,
             text=True,
         )
@@ -278,7 +287,7 @@ def test_egress_setup_validates_before_install_and_preserves_primary(tmp_path: P
     import subprocess
 
     # Generated networkd shape from the production eno1 contract; no market data.
-    network = '''[Match]
+    network = """[Match]
 Name=eno1
 
 [Network]
@@ -298,11 +307,11 @@ GatewayOnLink=true
 Destination=::/0
 Gateway=fe80::1
 GatewayOnLink=true
-'''
+"""
     fixture = tmp_path / 'eno1.network'
     fixture.write_text(network)
     # Redirect only host-side commands: execute the actual setup/validation script.
-    stub = r'''
+    stub = r"""
 set -euo pipefail
 function cp() {
     if [ "$1" = -a ] && [ "$2" = /etc/netplan ]; then
@@ -353,18 +362,32 @@ function ip() {
     esac
 }
 source "$SETUP_SCRIPT"
-'''
+"""
     installed = tmp_path / '60-origo-egress.yaml'
     addresses = tmp_path / 'addresses'
     addresses.write_text('37.27.112.167/32\n')
-    for case in ('initial-failure', 'first', 'repeat', 'generate-fails', 'changed-dns', 'changed-primary', 'changed-route'):
+    for case in (
+        'initial-failure',
+        'first',
+        'repeat',
+        'generate-fails',
+        'changed-dns',
+        'changed-primary',
+        'changed-route',
+    ):
         calls = tmp_path / f'calls-{case}'
         before = installed.read_bytes() if installed.exists() else None
         result = subprocess.run(
             ['bash', '-c', stub],
-            env={**os.environ, 'SETUP_SCRIPT': str(REPO_ROOT / 'deploy/prepare_binance_egress.sh'),
-                 'BASE_NETWORK': str(fixture), 'INSTALLED': str(installed),
-                 'ADDRESSES': str(addresses), 'CALLS': str(calls), 'SETUP_CASE': case},
+            env={
+                **os.environ,
+                'SETUP_SCRIPT': str(REPO_ROOT / 'deploy/prepare_binance_egress.sh'),
+                'BASE_NETWORK': str(fixture),
+                'INSTALLED': str(installed),
+                'ADDRESSES': str(addresses),
+                'CALLS': str(calls),
+                'SETUP_CASE': case,
+            },
             capture_output=True,
             text=True,
         )
@@ -374,14 +397,20 @@ source "$SETUP_SCRIPT"
             assert observed[:3] == ['generate', 'generate', 'install']
             assert observed[-1] == 'route'
             assert installed.stat().st_mode & 0o777 == 0o600
-            assert installed.read_bytes() == (REPO_ROOT / 'deploy/60-origo-egress.yaml').read_bytes()
+            assert (
+                installed.read_bytes() == (REPO_ROOT / 'deploy/60-origo-egress.yaml').read_bytes()
+            )
             additions = [call for call in observed if call.startswith('add ')]
-            assert additions == (['add 37.27.112.140/32', 'add 37.27.112.144/32'] if case == 'first' else [])
+            assert additions == (
+                ['add 37.27.112.140/32', 'add 37.27.112.144/32'] if case == 'first' else []
+            )
         else:
             assert result.returncode != 0, case
             assert (installed.read_bytes() if installed.exists() else None) == before
             if case != 'changed-route':
-                assert 'install' not in observed and not any(call.startswith('add ') for call in observed)
+                assert 'install' not in observed and not any(
+                    call.startswith('add ') for call in observed
+                )
 
 
 def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
@@ -401,5 +430,58 @@ def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
         assert declaration in raw_perp
     assert 'ports:' not in raw_perp
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert 'ORIGO_PERP_WORKER_HOSTNAME: perp-${{ github.run_id }}-${{ github.run_attempt }}' in workflow
+    assert (
+        'ORIGO_PERP_WORKER_HOSTNAME: perp-${{ github.run_id }}-${{ github.run_attempt }}'
+        in workflow
+    )
     assert '"ORIGO_PERP_WORKER_HOSTNAME": os.environ["ORIGO_PERP_WORKER_HOSTNAME"]' in workflow
+
+
+def test_law_volume_port_and_credentials_are_isolated() -> None:
+    for filename in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        text = (REPO_ROOT / filename).read_text()
+        law = text.split('  law:\n', 1)[1].split('  vector:\n', 1)[0]
+        assert '"0.0.0.0:8484:8484"' in law
+        assert 'law-samples:/var/lib/origo-law:ro' in law
+        assert 'read_only: true' in law and 'cpus: 0.5' in law and 'mem_limit: 256m' in law
+        assert '"--check"' in law
+        assert 'user: "65534:65534"' in law
+        assert 'cap_drop: [ALL]' in law
+        assert 'security_opt: ["no-new-privileges:true"]' in law
+        for forbidden in (
+            'environment:',
+            'env_file:',
+            'docker.sock',
+            'network_mode:',
+            'clickhouse-data:',
+        ):
+            assert forbidden not in law
+        monitor = text.split('  monitor:\n', 1)[1].split('  law:\n', 1)[0]
+        assert 'law-samples:/var/lib/origo-law\n' in monitor
+        assert 'ORIGO_LAW_PAGE_URL=http://law:8485/healthz' in monitor
+        assert text.count('law-samples:/var/lib/origo-law') == 2
+    test_all_published_ports_bind_loopback()
+
+
+def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law'
+    assert command in workflow
+    assert workflow.index('bash deploy/prepare_binance_egress.sh') < workflow.index(command)
+    assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')
+    assert '</dev/null' in workflow
+    test_only_raw_perp_uses_host_network_with_deployment_identity()
+
+
+def test_deployed_clickhouse_image_includes_law_reader_profile() -> None:
+    # Production ships configuration in its SHA-tagged image, not a host bind mount.
+    dockerfile = (REPO_ROOT / 'Dockerfile.clickhouse').read_text()
+    assert 'COPY clickhouse-users.xml /etc/clickhouse-server/users.d/clickhouse-users.xml' in dockerfile
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    build = workflow.split('      - name: Build and push ClickHouse image', 1)[1].split('      - name:', 1)[0]
+    assert 'context: .' in build and 'file: ./Dockerfile.clickhouse' in build
+    assert '${{ env.CLICKHOUSE_IMAGE }}' in build
+    assert 'origo-clickhouse:${GITHUB_SHA}' in workflow
+    clickhouse = DEPLOY_COMPOSE.read_text().split('  clickhouse:', 1)[1].split('  dagit:', 1)[0]
+    assert 'image: ${CLICKHOUSE_IMAGE:?CLICKHOUSE_IMAGE is required}' in clickhouse
+    assert 'CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}' in clickhouse

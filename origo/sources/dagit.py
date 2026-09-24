@@ -128,14 +128,18 @@ def observe_source(runtime: SourceRuntime) -> dict[str, object]:
     }
 
 
+HEALTH_RECONCILIATION_BATCH_SIZE = 4
+HEALTH_RECONCILIATION_RETRY_DELAYS = (60, 300, 1800, 3600)
+
+
 def _reconciliation_selection(urgent: list[str], offset: int) -> list[str]:
     """Up to four of the partitions whose version or status differs, rotating the start
     with the tick so a failing batch cannot starve the rest. Nothing else is selected: a
     canonical day whose Dagster record matches the store is not re-materialized, because
     every build and repair re-checks its retained content and an operator can launch the
     canonical job for any day."""
-    start = offset * 4 % max(1, len(urgent))
-    return (urgent[start:] + urgent[:start])[:4]
+    start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(urgent))
+    return (urgent[start:] + urgent[:start])[:HEALTH_RECONCILIATION_BATCH_SIZE]
 
 
 def _partition_runs(
@@ -181,16 +185,20 @@ def _partition_runs(
     )
 
 
+HEALTH_MIN_INTERVAL_SECONDS = 300
+HEALTH_IDLE_INTERVAL_SECONDS = 3600
+
+
 def _health_due(
     context: SensorEvaluationContext, runtime: SourceRuntime, job: JobDefinition, now: float
 ) -> bool:
     if context.instance.get_runs(RunsFilter(job_name=job.name, statuses=_ACTIVE), limit=1):
         return False
     last = context.instance.get_run_records(RunsFilter(job_name=job.name), limit=1)
-    age = now - (last[0].end_time or last[0].update_timestamp.timestamp()) if last else 3600
-    if age < 300:
+    age = now - (last[0].end_time or last[0].update_timestamp.timestamp()) if last else HEALTH_IDLE_INTERVAL_SECONDS
+    if age < HEALTH_MIN_INTERVAL_SECONDS:
         return False
-    if age >= 3600:
+    if age >= HEALTH_IDLE_INTERVAL_SECONDS:
         return True
     return bool(
         runtime.store.execute(
@@ -333,8 +341,8 @@ def build_reconciliation_sensor(
                             authority,
                         )
                         continue
-                    attempt = min(int(latest.tags.get('origo_source_retry_attempt', '1')), 4)
-                    delay = (60, 300, 1800, 3600)[attempt - 1]
+                    attempt = min(int(latest.tags.get('origo_source_retry_attempt', '1')), len(HEALTH_RECONCILIATION_RETRY_DELAYS))
+                    delay = HEALTH_RECONCILIATION_RETRY_DELAYS[attempt - 1]
                     ended = latest_record.end_time or latest_record.update_timestamp.timestamp()
                     if now - ended < delay:
                         continue
@@ -350,7 +358,7 @@ def build_reconciliation_sensor(
                             'origo_source_partition': key,
                             'origo_source_reconciliation': 'true',
                             'origo_source_authority': authority,
-                            'origo_source_retry_attempt': str(min(attempt + 1, 4)),
+                            'origo_source_retry_attempt': str(min(attempt + 1, len(HEALTH_RECONCILIATION_RETRY_DELAYS))),
                             'dagster/priority': '10',
                         },
                     )

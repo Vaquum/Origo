@@ -37,6 +37,11 @@ if TYPE_CHECKING:
     from .binance_daily import Response
 
 
+PROVISIONAL_CATCHUP_LOOKBACK_HOURS = 36
+PROVISIONAL_CATCHUP_MINUTES = 5
+PROVISIONAL_PAGE_CAP = 100
+
+
 def _objects(body: bytes) -> tuple[dict[str, object], ...]:
     payload: object = json.loads(body)
     if not isinstance(payload, list):
@@ -117,8 +122,8 @@ class BinanceProvisionalBase:
             return ()
         missing: list[Partition] = []
         # The 36-hour lookback also stays inside fapi's 2-day aggTrades search window.
-        cursor = max(anchor, last - timedelta(hours=36))
-        while cursor < last and len(missing) < 5:
+        cursor = max(anchor, last - timedelta(hours=PROVISIONAL_CATCHUP_LOOKBACK_HOURS))
+        while cursor < last and len(missing) < PROVISIONAL_CATCHUP_MINUTES:
             if not any(interval.start <= cursor < interval.end for interval in covered):
                 missing.append(self.partition(cursor.strftime('%Y-%m-%dT%H:%M:%SZ')))
             cursor += timedelta(minutes=1)
@@ -254,7 +259,7 @@ class BinanceProvisionalBase:
             ended_message = 'Historical-trade paging ended before the minute boundary.'
             unordered_message = 'Historical trades are unordered or duplicated.'
             precedes_message = 'Historical trade precedes its locator boundary.'
-        for _ in range(100):
+        for _ in range(PROVISIONAL_PAGE_CAP):
             page = request(
                 page_path,
                 {'symbol': symbol, 'fromId': next_id, 'limit': self.PAGE_LIMIT},

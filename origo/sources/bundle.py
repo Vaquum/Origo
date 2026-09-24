@@ -251,13 +251,16 @@ def _execute_canonical(
                     runtime.repair(config.partition_key)
             record = runtime.reconcile(config.partition_key)
         successful = True
-    return {
+    result: dict[str, object] = {
         'partition_key': record.partition.key,
         'revision': record.revision,
         'build_id': str(record.build_id),
         'generation': record.generation,
-        'reconciled_at': datetime.now(UTC).isoformat(),
     }
+    if not repair:
+        result['reconciled_at'] = datetime.now(UTC).isoformat()
+    return result
+
 
 
 def _execute_operation(

@@ -31,7 +31,6 @@ from origo.sources import registry
 from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
-    PROVISIONAL_PAGE_CAP,
 )
 from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_TOTAL_RESERVE_TENTHS
 from origo.sources.contracts import RolloutStage, Row, SourceError
@@ -155,8 +154,11 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
         assert gates[f'sensor.reconciliation.batch:{key}']['thresholds'] == {
             'partitions': HEALTH_RECONCILIATION_BATCH_SIZE,
         }
+        assert spec.provisional is not None
+        page_cap = int(getattr(spec.provisional, 'PAGE_CAP'))
+        assert page_cap == (512 if key == 'binance_perp_trades' else 100)
         assert gates[f'provider.response_completeness.page_cap:{key}']['thresholds'] == {
-            'pages': PROVISIONAL_PAGE_CAP,
+            'pages': page_cap,
         }
         assert (
             gates[f'sensor.retry.budget:{key}']['thresholds']['retry_count']

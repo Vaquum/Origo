@@ -719,7 +719,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 'sources.adapters.binance_provisional:BinanceProvisionalBase.fetch',
                 'Minute activation',
                 'A closed minute must reach its end boundary within the page request cap, including a discarded initial page.',
-                {'pages': _threshold('sources.adapters.binance_provisional:PROVISIONAL_PAGE_CAP')},
+                {'pages': int(getattr(spec.provisional, 'PAGE_CAP'))},
                 evidence='source_observation_log; source_failure_log; worker_minute_log',
             )
             for condition, description in (

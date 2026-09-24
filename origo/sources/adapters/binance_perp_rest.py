@@ -52,6 +52,7 @@ class BinancePerpProvisional(BinanceProvisionalBase):
     # Fapi caps fromId-paged historicalTrades at 500 rows: limit=1000 answers
     # HTTP 400 code -1130 (verified live 2026-09-19). Do not raise this again.
     PAGE_LIMIT: ClassVar[int] = 500
+    PAGE_CAP: ClassVar[int] = 512
     CREDENTIAL_REQUIRED: ClassVar[bool] = True
     PAGING_BACKTRACK_IDS: ClassVar[int] = 1000
 

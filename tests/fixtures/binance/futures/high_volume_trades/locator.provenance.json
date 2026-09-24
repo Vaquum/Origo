@@ -1,0 +1,12 @@
+{
+  "origin": "verified_aggregate_archive",
+  "archive_url": "https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-21.zip",
+  "zip_sha256": "4ec6dc278b293522f4f7278781d8a1534ac295b1a3e424a0e8fd4f685b1821e8",
+  "checksum_line": "4ec6dc278b293522f4f7278781d8a1534ac295b1a3e424a0e8fd4f685b1821e8  BTCUSDT-aggTrades-2026-09-21.zip",
+  "csv_member": "BTCUSDT-aggTrades-2026-09-21.csv",
+  "source_csv_row_index": 569197,
+  "source_csv_row": "3458119876,82933.7,0.4,8100178650,8100178650,1789979880001,false\n",
+  "source_csv_row_sha256": "d6747cb1b3857fff7454a0f3692478943e086c6949470fdeacff08e49ec1092a",
+  "header_plus_row_sha256": "a70ce6dc04f2fe15a2734689b45b11094509b189e5cf4aa87aafc2f09417cf06",
+  "selection_method": "First original aggregate archive row with transact_time >= 1789979880000 and < 1789979940000; fields a/f/l/T mapped directly from agg_trade_id/first_trade_id/last_trade_id/transact_time. Zero-based row index excludes CSV header. This locator is archive-derived, not a captured HTTP response."
+}

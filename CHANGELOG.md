@@ -1,3 +1,7 @@
+# v3.24.1
+
+- Make the named-laws page test wait for the law overview before focusing a tooltip. After a reload that response re-renders every law card, so a focus made just before it landed moved to a replaced node and the visibility check failed intermittently (CI run 35975375043). Test-only; the page is unchanged.
+
 # v3.24.0
 
 Export Binance spot rallies by ID or time range: each anchor minute whose price reaches +30 bps within 240 minutes becomes one rally, written to `rallies.arrow` with the bounds that select its rows from `trades.arrow` and `book.arrow`, which hold each trade and depth-200 snapshot once. Each rally's rows can start `minutes_before` ahead of its anchor, and a per-request boundary setting starts them at the first record at or after that instant or at the last one before it. Runs on the production host; acceptance uses authentic 2017-08-17 and 2026-06-27 data.

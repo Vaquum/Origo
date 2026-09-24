@@ -1,8 +1,8 @@
 # v3.26.1
 
-- A backfill never holds another source's fills back: each native backfill, or bulk job run outside one, is one share of the ten-slot historical lane, and a bulk run's queue priority is minus its own share's outstanding runs. Concurrent backfills alternate instead of queueing behind the earliest; deployment recovery re-derives the same ranks.
-- Reconciliation launches changed or failed partitions before missing-component upgrades. The 2021+ market state sweep (2,092 days, four per minute) only fills slots that repairs leave, so it no longer delays a spot repair by up to 8.7 hours.
-- Enforce the 3.26.0 rollback floor at deployment: before any container is replaced, the new image checks every component in production's activations against its declarations and stops the deploy if one is undeclared.
+- A backfill never holds another source's fills back. Each native backfill, or bulk job run outside one, is one share of the ten-slot historical lane. Runs queue by start-time fair queuing: a run's place is the later of the lane's oldest queued place and one past its share's newest queued place. Concurrent backfills alternate, a late backfill joins where the lane is instead of jumping ahead, and deployment recovery keeps the places admission gave.
+- Reconciliation launches changed or failed partitions before missing-component upgrades. The 2021+ market state sweep (2,092 days, four per minute) only fills slots that repairs leave, rotating through them so every pending upgrade is reached. It no longer delays a spot repair by up to 8.7 hours.
+- Enforce the 3.26.0 rollback floor at deployment: before any container is replaced, the new image checks every source and component in production's activations against its declarations and stops the deploy if any is undeclared.
 - M2 fails as `cube_history_incomplete` while any 2021+ day lacks the cube, keeping the first missing day and its reason in evidence, instead of surfacing that day's `cube_not_activated` as if the cube were off.
 - The PR template requires that no backfill blocks another source's fills; pausing publication stays allowed.
 - The completed-inventory maintenance test advances its simulated clock only through the work window, so a loaded machine no longer times out its reporting reserve.

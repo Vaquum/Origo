@@ -177,7 +177,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             identity = f'publication.current.canonical_drift:{spec.key}:consumer:{consumer.key}'
             location = gates[identity]['code']
             assert location is not None
-            assert location['path'] == 'origo/sources/profiles/consumer_base.py'
+            assert location['path'] == 'origo/sources/profiles/consumer_inputs.py'
             ready = gates[f'publication.canonical_readiness:{spec.key}:consumer:{consumer.key}']
             assert 'unresolved partition failure' in ready['condition']
     location = gates['orchestration.admission.redundant_launch']['code']
@@ -717,3 +717,21 @@ def test_publication_observation_checks_real_token_and_artifacts(
             root,
             deadline=time.monotonic() - 1,
         )
+
+
+def test_market_state_catalog_is_visible_in_sources(catalog: LawCatalog) -> None:
+    source = next(item for item in catalog['sources'] if item['id'] == 'binance_spot_trades')
+    nodes = {node['name']: node for node in source['projections']}
+    assert nodes['market_state']['lane'] == 'canonical'
+    assert nodes['market_state_latest']['lane'] == 'provisional'
+    assert nodes['market_state_latest']['current_target'] == nodes['market_state']['id']
+    gates = {gate['id']: gate for gate in catalog['gates']}
+    for name in ('M1', 'M2'):
+        identity = f'law.{name}:binance_spot_trades'
+        assert identity in catalog.get('law_gate_ids', [])
+        assert nodes['market_state']['id'] in gates[identity]['scope']
+        assert gates[identity]['cadence'] == 'periodic'
+        assert gates[identity]['code'] is not None
+    assert gates['law.M1:binance_spot_trades']['thresholds']['budget_seconds'] == 180
+    assert str(gates['law.M2:binance_spot_trades']['thresholds']['anchor']).startswith('2021-01-01')
+    assert gates['law.C2:binance_spot_trades']['thresholds']['anchor'] == '2017-08-17'

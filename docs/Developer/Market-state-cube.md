@@ -7,9 +7,10 @@ Only an explicit operator amendment changes L01–L17.
 ## Base projection — slice #466
 
 `origo.sources.profiles.market_state` supplies two component declarations over one
-logical base projection. They are not registered in the live spot source yet.
-This slice delivers the aggregation module; it does not claim deployed coverage,
-a query API, file lifecycle, historical migration or production performance.
+logical base projection. Slice #469 registers both in the live spot source,
+with applicability from 2021-01-01 and a persisted `market_state` activation group.
+The base projection and its operational lifecycle do not yet deliver the query
+API, Arrow file lifecycle or whole-history performance acceptance.
 
 The builder reads its build-owned, validated `raw` or `raw_latest` table and writes
 the corresponding precreated `market_state` or `market_state_latest` table.
@@ -71,24 +72,72 @@ Run the first slice's engine checks with:
 pytest tests/origo_source_native/test_market_state_projection.py -q
 ```
 
-## Activation prerequisites and remaining delivery
+## Registration and operational rollout — slice #469
 
-1. Deliver mixed-footprint validation and component applicability without
-   changing existing source history or publication semantics. Deploy compatibility
-   before activating expanded footprints: old binaries reject additional hashes.
-2. Build missing eligible contributions from retained raw under source partition
-   and maintenance locks; preserve existing product data and hash validation.
-   Make interrupted/resumed upgrade and rollback safe without raw duplication.
-   Keep incomplete additions invisible until their evidence is activated.
-3. Integrate automatic backfill, gap/retry, corrections, reconciliation, readiness
-   and capacity remeasurement. Verify native Dagster behavior on isolated real
-   data in the actual GUI before claiming operator delivery.
-4. Deliver protected query snapshots, exact dyadic selections, sparse Arrow files,
-   POCs, a local API and demonstrated actual-access expiry. Freeze signatures,
-   schemas, errors, lifecycle and resource decisions in their slice before code.
-5. Run the disclosed real-history benchmark and resource/recovery evidence,
-   including full history at base resolution and ingestion/publication contention.
+Deployment creates both revisions tables and current views while the persisted
+component group remains off. Every build reads the flag under the shared heavy
+maintenance fence; the enable operation holds that fence exclusively. Deployment
+recreates Dagster, Dagit and the spot provisional worker, checks that their former
+containers (and child writers) retired, then runs `origo.sources.rollout`.
+No operator toggle, source configuration or separate projection launch is required.
+The rollout marker is stored in `source_component_rollout_log`; a missing row is off.
 
-Adding these declarations to `SPOT_COMPONENTS` before the upgrade would make
-retained validation and canonical readiness reject existing accepted history.
-The unregistered boundary is therefore deliberate and tested.
+This release is the binary rollback floor after activation. Pre-compatible images
+reject expanded component inventories and must not be deployed after enablement.
+Native rollback to a retained legacy generation remains supported by this release:
+old product hashes are accepted and the cube view hides the unselected addition.
+
+Existing accepted days and minutes gain only their missing projection. The upgrade
+holds the existing partition and maintenance fences, validates retained products,
+reads a private view over retained raw, and preserves the original revision,
+build identity, product rows and hashes. It adds a generation selecting the new
+component hash. No provider refetch or second raw copy is required.
+Completed, validated additions are reused after interruption; only never-activated
+incomplete additions may be removed and rebuilt. The current view requires the
+component hash in the selected activation, so staged additions stay invisible.
+
+Native canonical reconciliation selects accepted days missing enabled components;
+Dagster backfill, selected gaps and retries use the same lifecycle. The provisional
+worker handles fresh minutes first, then a bounded batch of missing accepted
+minutes. Existing consumer readiness remains independent of incomplete cube
+coverage. Upgrade failures are visible as `component_upgrade` failures with scope
+`NONE`, leaving valid existing products available. Capacity evidence is keyed to
+the enabled component footprint, and admission/build share the maintenance fence.
+
+Cube-only activation updates publication metadata without rebuilding unchanged
+bar exports. Mount and Hugging Face renderers retain the full source-state tokens
+for monitoring and also fingerprint the component inputs they actually consume.
+Matching inputs preserve monthly Parquet files, Arrow links and Hugging Face
+version directories/upload evidence. A legacy manifest can establish equality
+only through an actual retained activation whose full token matches its evidence.
+Missing proof or changed inputs takes the normal render path. Publication checks
+canonical inputs again before commit and retains the original pinned provisional
+records; it cannot claim minutes that arrived during rendering.
+
+The existing monitor evaluates **M1** (current cube proof, raw/trade and taker-count
+agreement, 180-second freshness) and **M2** (calendar coverage from 2021-01-01).
+The same law tape, Sources catalog, `/law` view and alert path carry these results.
+Historical gaps remain visible even while current ingestion is healthy; deployment
+and registration alone do not establish complete historical coverage.
+
+Run the real-engine operational checks with:
+
+```sh
+pytest tests/origo_source_native/test_market_state_registration.py -q
+```
+
+Native GUI acceptance on 2026-09-24 used the committed, checksum-proven
+2025-01-01 capture in a disposable ClickHouse/Dagster environment. Selecting the
+retained day in the native partition bar and launching one run upgraded generation
+1 to 2; native **Re-execute all** kept generation 2. Both runs succeeded in about
+six seconds. SQL confirmed all seven original hashes and the build/revision were
+unchanged, with one raw build and one cube receipt: 15 cells accounted for all
+12,000 captured trades and 5,310 taker buys. Capacity sampling was controlled test
+evidence; this does not establish production capacity or complete historical coverage.
+
+## Remaining PRD delivery
+
+- Protected query snapshots, exact dyadic selections, sparse Arrow files, POCs,
+  a local API and expiry 24 hours after actual last access.
+- Disclosed real-history benchmark and resource/recovery evidence, including
+  full history at base resolution and ingestion/publication contention.

@@ -29,7 +29,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -54,7 +54,14 @@ from origo.utils.arrow_store import (
 
 from ..contracts import Snapshot, SnapshotReader, SourceError, StateRecord
 from ..hashing import state_token
+from ..publication import publication_current
 from ..storage import SourceStore
+from .consumer_inputs import (
+    CONSUMED_COMPONENTS,
+    input_token,
+    month_input_tokens,
+    verified_snapshot,
+)
 from .formulas import huggingface_time as time_snapshot
 from .formulas.spot_series import MountKlineSpec, month_path
 
@@ -161,11 +168,13 @@ def _previous_manifest(root: Path) -> dict[str, object]:
     return cast(dict[str, object], manifest)
 
 
-def _require_canonical(reader: SourceStore, token: object) -> None:
-    if reader.snapshot(canonical_only=True).token != token:
-        raise RuntimeError(
-            'Canonical state changed while rendering; staged output remains unpublished.'
-        )
+def _snapshot_metadata(store: SourceStore, snapshot: Snapshot) -> dict[str, object]:
+    return {
+        'state_token': store.canonical_token(snapshot),
+        'pinned_token': snapshot.token,
+        'input_token': input_token(store.spec.key, snapshot),
+        'active_through': max(record.partition.end for record in snapshot.records).isoformat(),
+    }
 
 
 def _write_manifest(root: Path, manifest: dict[str, object]) -> None:
@@ -175,8 +184,10 @@ def _write_manifest(root: Path, manifest: dict[str, object]) -> None:
     )
 
 
-def _commit_manifest(reader: SourceStore, root: Path, manifest: dict[str, object]) -> None:
-    _require_canonical(reader, manifest['state_token'])
+def _commit_manifest(
+    reader: SourceStore, snapshot: Snapshot, root: Path, manifest: dict[str, object]
+) -> None:
+    manifest.update(_snapshot_metadata(reader, verified_snapshot(reader, snapshot)))
     _write_manifest(root, manifest)
 
 
@@ -203,7 +214,7 @@ def _pinned(reader: SourceStore, snapshot: Snapshot) -> Iterator[str]:
             ],
         )
         for component in reader.spec.components:
-            if component.key not in ('time', 'dollar', 'time_latest', 'raw_latest'):
+            if component.key not in CONSUMED_COMPONENTS:
                 continue
             columns = ', '.join(['source_date', *(column.name for column in component.columns)])
             reader.execute(
@@ -227,6 +238,51 @@ def month_tokens(source: str, snapshot: Snapshot, *, export_start_date: str) -> 
             continue
         grouped.setdefault(month, []).append(record)
     return {month: state_token(source, tuple(grouped[month])) for month in sorted(grouped)}
+
+
+def _previous_month_inputs(
+    store: SourceStore,
+    snapshot: Snapshot,
+    previous: dict[str, object],
+    tokens: dict[str, str],
+    inputs: dict[str, str],
+    *,
+    export_start_date: str,
+) -> dict[str, str]:
+    prior = dict(cast(dict[str, str], previous.get('month_input_tokens') or {}))
+    previous_months = cast(dict[str, str], previous.get('month_tokens') or {})
+    unresolved = set(previous_months) & set(tokens) - set(prior)
+    if not unresolved:
+        return prior
+    legacy = month_tokens(
+        store.spec.key,
+        store.legacy_equivalent_snapshot(snapshot),
+        export_start_date=export_start_date,
+    )
+    for month in unresolved:
+        if previous_months[month] in (tokens[month], legacy.get(month)):
+            prior[month] = inputs[month]
+    return prior
+
+
+def _reusable_snapshot(
+    store: SourceStore, snapshot: Snapshot, root: Path, previous: dict[str, object], kind: str
+) -> bool:
+    if not previous:
+        return False
+    if 'input_token' in previous:
+        same_inputs = previous['input_token'] == input_token(store.spec.key, snapshot)
+    else:
+        same_inputs = previous.get('pinned_token') == snapshot.token
+        if not same_inputs:
+            legacy = store.legacy_equivalent_snapshot(snapshot)
+            same_inputs = previous.get('pinned_token') == legacy.token
+    if not same_inputs:
+        return False
+    token = previous.get('pinned_token')
+    if not isinstance(token, str):
+        raise ValueError('Publication manifest lacks its pinned state token.')
+    return publication_current(store.spec, kind, token, root=root.parent.parent, pinned=True)
 
 
 def _prune_bounds(year: int, month: int) -> tuple[str, str]:
@@ -332,13 +388,16 @@ def mount(
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
     previous = _previous_manifest(root)
-    previous_months = cast(dict[str, str], previous.get('month_tokens') or {})
     previous_files = {
         str(cast(dict[str, object], entry)['path']): cast(dict[str, object], entry)
         for entry in cast(list[object], previous.get('files') or [])
     }
     tokens = month_tokens(store.spec.key, snapshot, export_start_date=decl.export_start_date)
-    changed = months_to_render(decl, tokens, previous_months, previous_files)
+    inputs = month_input_tokens(store.spec.key, snapshot, export_start_date=decl.export_start_date)
+    previous_inputs = _previous_month_inputs(
+        store, snapshot, previous, tokens, inputs, export_start_date=decl.export_start_date
+    )
+    changed = months_to_render(decl, inputs, previous_inputs, previous_files)
     if len(changed) > MOUNT_WORKER_MONTH_CAP and not allow_full:
         raise SourceError(
             'RENDER_DEFERRED',
@@ -349,7 +408,6 @@ def mount(
         'mount render source=%s months=%d changed=%d', store.spec.key, len(tokens), len(changed)
     )
     changed_set = set(changed)
-    state = store.canonical_token(snapshot)
     parquet_root = parquet_source_root()
     owner = store.spec.key if decl.scope_staging_to_source else None
     _clear_orphan_staging(parquet_root, root, time.time(), staging_owner=owner)
@@ -359,15 +417,21 @@ def mount(
     rebuilt: set[str] = set()
     staged_series: list[StagedSeries] = []
     try:
-        with _pinned(store, snapshot) as database:
+        with _pinned(store, snapshot) if changed else nullcontext('') as database:
             # Watermarks are render-constant: resolve once instead of re-scanning
             # the pinned base per month. An empty base falls back to the inline
             # per-query cut with identical semantics.
-            cut_rows = store.execute(f'SELECT max(datetime) FROM {database}.time')
+            cut_rows = (
+                store.execute(f'SELECT max(datetime) FROM {database}.time') if changed else []
+            )
             base_cut = str(cut_rows[0][0]) if cut_rows and cut_rows[0][0] is not None else None
-            day_rows = store.execute(f'SELECT max(toDate(start_datetime)) FROM {database}.dollar')
+            day_rows = (
+                store.execute(f'SELECT max(toDate(start_datetime)) FROM {database}.dollar')
+                if changed
+                else []
+            )
             base_day = str(day_rows[0][0]) if day_rows and day_rows[0][0] is not None else None
-            for index, (month, token) in enumerate(tokens.items()):
+            for index, (month, token) in enumerate(inputs.items()):
                 year, number = int(month[:4]), int(month[5:7])
                 if month in changed_set:
                     log.info(
@@ -382,7 +446,7 @@ def mount(
                     entry = previous_files.get(str(target))
                     if (
                         entry is not None
-                        and previous_months.get(month) == token
+                        and previous_inputs.get(month) == token
                         and target.is_file()
                         and entry.get('sha256') == _sha256(target)
                     ):
@@ -446,7 +510,7 @@ def mount(
             staged = stage_series(series.name, build)
             if staged is not None:
                 staged_series.append(staged)
-        _require_canonical(store, state)
+        verified = verified_snapshot(store, snapshot)
         for target, pending in staged_months.items():
             target.parent.mkdir(parents=True, exist_ok=True)
             os.replace(pending, target)
@@ -463,13 +527,14 @@ def mount(
         shutil.rmtree(staging, ignore_errors=True)
     manifest: dict[str, object] = {
         'source_key': store.spec.key,
-        'state_token': state,
-        'pinned_token': snapshot.token,
-        'active_through': max(record.partition.end for record in snapshot.records).isoformat(),
+        **_snapshot_metadata(store, verified),
         'kind': 'mount',
-        'month_tokens': tokens,
+        'month_tokens': month_tokens(
+            store.spec.key, verified, export_start_date=decl.export_start_date
+        ),
+        'month_input_tokens': inputs,
         'files': files,
-        'version': snapshot.token,
+        'version': verified.token,
     }
     _write_manifest(root, manifest)
 
@@ -500,6 +565,10 @@ def huggingface(
     store, root = _root(destination, reader, kind, renderer_label=decl.renderer_label)
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
+    previous = _previous_manifest(root)
+    if _reusable_snapshot(store, snapshot, root, previous, kind):
+        _commit_manifest(store, snapshot, root, previous)
+        return
     end = max(record.partition.end for record in snapshot.records)
     export_end_date = (end - timedelta(days=1)).strftime('%Y-%m-%d')
     end_limit = end.strftime('%Y-%m-%d %H:%M:%S')
@@ -606,7 +675,7 @@ def huggingface(
         'files': files,
         'version': build.name,
     }
-    _commit_manifest(store, root, manifest)
+    _commit_manifest(store, snapshot, root, manifest)
 
 
 def huggingface_shadow(

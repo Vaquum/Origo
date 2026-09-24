@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Iterator, Mapping
@@ -41,6 +42,23 @@ class CapturedMinutes(BinanceSpotProvisional):
         return Revision(digest, digest, '{}', len(rows), lambda: iter(rows))
 
 
+class CapturedDays(daily.BinanceSpotDaily):
+    def fetch(self, partition: Partition) -> Revision:
+        if partition.key not in ('2024-12-31', '2025-01-01'):
+            return super().fetch(partition)
+        body = (ARCHIVES / f'BTCUSDT-trades-{partition.key}.csv').read_bytes()
+        evidence = (ARCHIVES / f'BTCUSDT-trades-{partition.key}.provenance.json').read_text()
+        assert hashlib.sha256(body).hexdigest() == json.loads(evidence)['selected_sha256']
+        rows = tuple(daily.spot_csv_rows(body, partition))
+        digest = content_hash(rows, schema_version=1)
+        return Revision(digest, digest, evidence, len(rows), lambda: iter(rows))
+
+    def discover(self, partition: Partition) -> str:
+        if partition.key in ('2024-12-31', '2025-01-01'):
+            return self.fetch(partition).key
+        return super().discover(partition)
+
+
 @dataclass
 class LawCase:
     client: Client
@@ -53,11 +71,13 @@ class LawCase:
         return law.evaluate(self.client, 'origo', now)
 
 
-def _case(tmp_path: Path, anchor: datetime | None) -> LawCase:
+def _case(tmp_path: Path, anchor: datetime | None, *, enable_cube: bool = True) -> LawCase:
     client = make_clickhouse_client(get_clickhouse_settings())
-    spec = replace(BINANCE_SPOT_TRADES_SPEC, provisional=CapturedMinutes())
+    spec = replace(BINANCE_SPOT_TRADES_SPEC, canonical=CapturedDays(), provisional=CapturedMinutes())
     runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4()))
     runtime.setup(anchor=anchor)
+    if enable_cube:
+        runtime.enable_components('market_state')
     return LawCase(client, runtime)
 
 
@@ -470,3 +490,177 @@ def test_new_depth_declaration_requires_explicit_law_coverage(
     feed = next(feed for feed in report['feeds'] if feed['source_key'] == 'new_depth_1m')
     assert feed['predicates']['inventory']['status'] == 'UNKNOWN'
     assert report['status'] != 'PASS'
+
+
+def test_market_state_laws_report_missing_stale_and_complete_coverage(law_case: LawCase) -> None:
+    law_case.minute(0)
+    now = START + timedelta(minutes=1, seconds=5)
+    report = law_case.report(now)
+    assert predicate(report, 'M1')['status'] == 'PASS'
+    evidence = predicate(report, 'M1')['evidence']
+    assert evidence['cube_trade_count'] == evidence['raw_trade_count'] == 2631
+    assert evidence['cube_taker_buy_trade_count'] == evidence['raw_taker_buy_trade_count']
+    assert predicate(report, 'M2')['status'] == 'FAIL'
+    assert predicate(report, 'M2')['evidence']['anchor'] == '2021-01-01'
+    assert predicate(report, 'M2')['evidence']['first_invalid_day'] == '2021-01-01'
+    assert predicate(report, 'M2')['evidence']['valid_days'] == 0
+    stale = law_case.report(START + timedelta(minutes=4, seconds=1))
+    assert predicate(stale, 'M1')['reason'] == 'reader_stale'
+    assert predicate(stale, 'M1')['status'] == 'FAIL'
+    assert next(p for p in stale['projections'] if p['id'] == f'{SOURCE}:market_state_latest')['status'] == 'STALE'
+    record = law_case.runtime.store.records()[0]
+    legacy = json.dumps([item for item in record.component_hashes if item[0] != 'market_state_latest'])
+    law_case.client.execute(
+        'ALTER TABLE origo.source_activation_log UPDATE component_hashes=%(hashes)s WHERE build_id=%(build)s',
+        {'hashes': legacy, 'build': record.build_id}, settings={'mutations_sync': 2},
+    )
+    unactivated = law_case.report(now)
+    assert predicate(unactivated, 'R1')['status'] == 'PASS'
+    assert predicate(unactivated, 'M1')['reason'] == 'cube_not_activated'
+    # Same-build rows and completed receipts cannot stand in for activation.
+    assert int(str(law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_market_state_latest_revisions')[0][0])) > 0
+    law_case.client.execute(
+        'ALTER TABLE origo.source_activation_log UPDATE component_hashes=%(hashes)s WHERE build_id=%(build)s',
+        {'hashes': json.dumps(record.component_hashes), 'build': record.build_id}, settings={'mutations_sync': 2},
+    )
+    assert predicate(law_case.report(now), 'M1')['status'] == 'PASS'
+    law_case.client.execute(
+        'ALTER TABLE origo.binance_spot_trades_market_state_latest_revisions DELETE WHERE build_id=%(build)s',
+        {'build': record.build_id}, settings={'mutations_sync': 2},
+    )
+    damaged = law_case.report(now)
+    assert predicate(damaged, 'R1')['status'] == 'PASS'
+    assert predicate(damaged, 'M1')['reason'] == 'cube_counts_mismatch'
+    assert predicate(damaged, 'M1')['evidence']['cube_trade_count'] == 0
+
+
+def test_market_state_calendar_uses_real_days_and_frozen_start(
+    canonical_case: LawCase, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical_case.runtime.build('2017-08-17')
+    old = canonical_case.report(datetime(2017, 8, 18, 5, tzinfo=UTC))
+    assert predicate(old, 'C1')['status'] == 'PASS'
+    assert predicate(old, 'M2')['status'] == 'PASS'
+    assert predicate(old, 'M2')['evidence']['expected_days'] == 0
+    for day in ('2024-12-31', '2025-01-01'):
+        canonical_case.runtime.build(day)
+    proofs = law._proofs(law._Queries(canonical_case.client), 'origo', SOURCE, '')
+    now = datetime(2025, 1, 2, 5, tzinfo=UTC)
+    fixed = law._m2(proofs, now)
+    assert fixed['evidence']['anchor'] == '2021-01-01'
+    assert fixed['status'] == 'FAIL' and fixed['evidence']['valid_days'] == 2
+    assert fixed['evidence']['first_invalid_day'] == '2021-01-01'
+    # Exercise a complete calendar using only the two unchanged captured days.
+    # Production's fixed 2021 anchor is asserted above; no market rows are invented.
+    with monkeypatch.context() as narrowed:
+        narrowed.setattr(law, 'CUBE_START', datetime(2024, 12, 31, tzinfo=UTC))
+        complete = law._m2(proofs, now)
+        assert complete['status'] == 'PASS'
+        assert complete['evidence']['expected_days'] == complete['evidence']['valid_days'] == 2
+        selected = next(p for p in proofs if p.key == '2024-12-31')
+        legacy = replace(selected, hashes={key: value for key, value in selected.hashes.items() if key != 'market_state'})
+        missing = law._m2([legacy if p is selected else p for p in proofs], now)
+        assert missing['status'] == 'FAIL' and missing['reason'] == 'cube_not_activated'
+        assert missing['evidence']['first_invalid_day'] == '2024-12-31'
+        assert missing['evidence']['valid_days'] == 1
+        assert law._calendar([legacy], selected.start.date())['status'] == 'PASS'
+        corrupted = replace(selected, hashes={**selected.hashes, 'market_state': 'corrupted-proof'})
+        unknown = law._m2([corrupted if p is selected else p for p in proofs], now)
+        assert unknown['status'] == 'UNKNOWN' and unknown['evidence']['unknown_days'] == 1
+
+
+def test_market_state_missing_declaration_remains_unknown(
+    law_case: LawCase, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    law_case.minute(0)
+    spec = law_case.runtime.spec
+    absent = replace(spec, components=tuple(c for c in spec.components if not c.key.startswith('market_state')))
+    monkeypatch.setattr(law, 'SOURCE_REGISTRY', tuple(absent if s.key == SOURCE else s for s in law.SOURCE_REGISTRY))
+    report = law_case.report(START + timedelta(minutes=1))
+    assert predicate(report, 'R1')['status'] == 'PASS'
+    assert predicate(report, 'M1')['reason'] == predicate(report, 'M2')['reason'] == 'cube_profile_mismatch'
+
+
+def test_market_state_disabled_group_is_visible_without_failing_existing_reader(
+    origo_test_env: dict[str, str], tmp_path: Path,
+) -> None:
+    case = _case(tmp_path, START, enable_cube=False)
+    try:
+        case.minute(0)
+        report = case.report(START + timedelta(minutes=1))
+        assert predicate(report, 'R1')['status'] == 'PASS'
+        assert predicate(report, 'M1')['status'] == 'FAIL'
+        assert predicate(report, 'M1')['reason'] == 'cube_not_activated'
+        assert predicate(report, 'M2')['status'] == 'FAIL'
+        nodes = {p['id']: p for p in report['projections']}
+        assert nodes[f'{SOURCE}:market_state']['status'] == 'FAILED'
+        assert nodes[f'{SOURCE}:market_state_latest']['status'] == 'FAILED'
+    finally:
+        case.client.disconnect()
+
+
+def test_market_state_canonical_count_probe_preserves_fractional_edges(canonical_case: LawCase) -> None:
+    record = canonical_case.runtime.build('2025-01-01')
+    query = law._Queries(canonical_case.client)
+    proofs = law._proofs(query, 'origo', SOURCE, '')
+    minute = START + timedelta(minutes=1)
+    # Select a real captured minute inside its accepted canonical day. The monitor
+    # probe must preserve the surrounding 56.25 / 168.75-second base-cell edges.
+    selected = law._result('PASS', 'reader_current',
+        partition_key=record.partition.key, build_id=str(record.build_id),
+        selected_minute=minute.isoformat(), provisional=False,
+        reader_end=(minute + timedelta(minutes=1)).isoformat(), budget_seconds=180, age_seconds=0)
+    result = law._m1(query, 'origo', canonical_case.runtime.spec, minute + timedelta(minutes=1), proofs, selected)
+    assert result['status'] == 'PASS'
+    evidence = result['evidence']
+    assert evidence['checked_start'] == '2025-01-01T00:00:56.250000+00:00'
+    assert evidence['checked_end'] == '2025-01-01T00:02:48.750000+00:00'
+    assert evidence['cube_trade_count'] == evidence['raw_trade_count']
+    assert evidence['cube_taker_buy_trade_count'] == evidence['raw_taker_buy_trade_count']
+    raw = canonical_case.client.execute(
+        "SELECT count() FROM origo.binance_spot_trades_raw_revisions WHERE source_date='2025-01-01' "
+        "AND datetime>=toDateTime64('2025-01-01 00:00:56',6,'UTC') "
+        "AND datetime<toDateTime64('2025-01-01 00:02:48',6,'UTC')")
+    assert raw[0][0] != evidence['raw_trade_count']
+
+
+@pytest.mark.parametrize('damage', ['missing', 'hash', 'empty', 'duplicate'])
+def test_market_state_receipt_damage_does_not_redefine_raw_reader_health(
+    law_case: LawCase, damage: str,
+) -> None:
+    law_case.minute(0)
+    before = law_case.report(START + timedelta(minutes=1))
+    assert predicate(before, 'R1')['status'] == predicate(before, 'M1')['status'] == 'PASS'
+    table = 'origo.source_component_log'
+    if damage == 'missing':
+        law_case.client.execute(f"ALTER TABLE {table} DELETE WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    elif damage == 'hash':
+        law_case.client.execute(f"ALTER TABLE {table} UPDATE content_hash='damaged' WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    elif damage == 'empty':
+        law_case.client.execute(f"ALTER TABLE {table} UPDATE row_count=0 WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    else:
+        law_case.client.execute(f"INSERT INTO {table} SELECT * FROM {table} WHERE component='market_state_latest'")
+    report = law_case.report(START + timedelta(minutes=1))
+    assert predicate(report, 'R1')['status'] == 'PASS'
+    assert 'hash_market_state_latest' not in predicate(report, 'R1')['evidence']
+    cube = predicate(report, 'M1')
+    assert cube['status'] == ('FAIL' if damage == 'empty' else 'UNKNOWN')
+    assert cube['reason'] == ('cube_proof_empty' if damage == 'empty' else 'cube_proof_invalid')
+
+
+def test_market_state_receipt_damage_preserves_canonical_product_laws(canonical_case: LawCase) -> None:
+    canonical_case.runtime.build('2025-01-01')
+    now = datetime(2025, 1, 2, 5, tzinfo=UTC)
+    before = canonical_case.report(now)
+    assert predicate(before, 'C1')['status'] == 'PASS'
+    baseline_days = predicate(canonical_case.report(now + timedelta(days=1)), 'C2')['evidence']['valid_days']
+    canonical_case.client.execute(
+        "ALTER TABLE origo.source_component_log DELETE WHERE component='market_state'",
+        settings={'mutations_sync': 2},
+    )
+    after = canonical_case.report(now)
+    assert predicate(after, 'C1')['status'] == 'PASS'
+    assert predicate(canonical_case.report(now + timedelta(days=1)), 'C2')['evidence']['valid_days'] == baseline_days
+    assert predicate(after, 'M2')['evidence']['unknown_days'] == 1
+    assert predicate(after, 'M2')['evidence']['valid_days'] == 0
+    assert predicate(after, 'M2')['status'] == 'FAIL'  # Earlier required days are absent too.

@@ -1,3 +1,9 @@
+# v3.26.0
+
+- Register the Binance spot market state base projection from 2021-01-01, activate it after writer retirement, and upgrade accepted history from retained raw without copying existing products.
+- Reuse existing bar export files and Hugging Face uploads during cube-only history activation, retaining exact source-state publication evidence.
+- Keep cube coverage and freshness visible through M1/M2 in the existing law monitor, with automatic native reconciliation and capacity remeasurement.
+
 # v3.25.2
 
 - Allow raw-perp minutes up to 512 page requests per attempt, preserving the 100-page default for other sources, boundary validation and provider budgets; publish each adapter's effective cap in the law catalog.

@@ -441,7 +441,7 @@ def held_law_keys(cursor: Cursor, findings: Sequence[Finding], slot: str) -> set
         if (
             len(parts) < 5
             or parts[0] != 'law'
-            or parts[1] not in ('R1', 'C1', 'D1')
+            or parts[1] not in ('R1', 'C1', 'D1', 'M1')
             or parts[3] != 'FAIL'
         ):
             continue

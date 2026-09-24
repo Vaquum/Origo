@@ -569,7 +569,9 @@ def test_spot_agg_huggingface_upload_records_every_rendered_series(
     monkeypatch.setattr(
         agg_snapshot, 'get_spot_agg_dollar_klines', lambda **kwargs: frame.clear()
     )
-    destination = str(tmp_path / 'files' / store.spec.key / 'huggingface')
+    # The replaced formula is a direct-render acceptance case with no prior publication.
+    destination = str(tmp_path / 'direct-files' / store.spec.key / 'huggingface')
+    assert not (Path(destination) / 'latest.json').exists()
     spot_agg_consumers._huggingface(store, store.snapshot(), destination)
     assert [call for call, _ in FakeHfApi.calls] == ['create_repo', 'upload_folder'] * 6
     manifest = json.loads((Path(destination) / 'latest.json').read_text())

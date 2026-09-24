@@ -140,14 +140,14 @@ watchdog's exit is in `origo.container_log`.
 ## Public reader law
 
 `/law` opens on Overview: fresh trades, daily archive readiness, historical calendar
-coverage and depth minute coverage. Compact secondary figures show exact-current
+coverage, depth minutes and market state cube freshness/history. Compact secondary figures show exact-current
 outputs, worker heartbeats, queue, collectors, observed incidents and the core-law
 clear window. Operational checks are separate from data health; healthy heartbeats
 do not prove successful work. Every figure opens its original evidence.
 
 Sources shows each declared source and projection with its consumer outputs. Laws
 shows only the named data laws over 30 UTC days: live trades are fresh, yesterday's
-archive is ready, historical coverage is complete, and depth minutes are complete.
+archive is ready, historical coverage is complete, depth minutes are complete, market state cube is fresh, and market state history is complete.
 Required law membership comes from the frozen evaluator inventory through the
 catalog's `law_gate_ids`; missing members remain UNKNOWN. The separate inventory
 guard remains mandatory. Friendly headings are page copy: original descriptors,
@@ -172,6 +172,24 @@ Spot/perp freshness budgets are initially 180/300 seconds. Missing daily archive
 NOT_DUE before 04:30/10:30 UTC respectively; arrivals are validated immediately.
 Projection activation is not formal certification approval or a physical full-history audit.
 
+The BTCUSDT market state cube has separate M1/M2 predicates under
+`binance_spot_trades`. M1 requires an activated cube component for the selected
+reader generation, applies the 180-second spot freshness budget, and compares
+trade and taker-buy counts against retained raw rows in the at-most-112.5-second
+base-cell window intersecting the selected closed minute. Both sides use the same
+partition, revision and build; UInt32 cube counts widen before summation.
+M2 checks every canonical day from **2021-01-01 UTC**, through yesterday once its
+archive exists or its delivery deadline passes. It reports expected, valid,
+missing and unknown day counts plus the first invalid day using the existing
+bounded proof read; it never scans historical raw/cube rows. The source's original
+2017 anchor and R1/C1/C2 remain unchanged. Valid legacy generations preserve their
+existing product health during upgrade. Cube-only proof damage is reported by
+M1/M2 without changing otherwise valid R1/C1/C2. Staged but unactivated cube receipts do
+not satisfy M1/M2. Cube nodes and gates appear in Sources, Overview and Laws from
+the same declarations and monitor tape. Missing registration, proof or physical
+count evidence is never green. These probes retain the five-second statement,
+512 MiB, single-thread and 20-second whole-pass budgets; timeout is UNKNOWN.
+
 The monitor appends one unheld whole-inventory report per distinct minute before Dagit
 or Resend. `monitor.data_current` is stored only in that committed sample; gate
 history reads its verdict there, never from a separate event write. Once committed, a
@@ -179,6 +197,7 @@ repeat tick in that minute performs no probes or writes; changes and interrupted
 delivery are handled on the next scheduled minute. A failed sample commit remains
 retryable. R1/C1/D1 mail waits for five consecutive failing slots with the same key;
 C2, UNKNOWN and evidence/tape/page faults notify immediately under the existing cooldown.
+M1 uses the same five-slot live hold; M2 coverage failures notify immediately.
 Gaps, UNKNOWN and recovery reset holds. The target is Resend acceptance within eight
 minutes of a predicate breach while monitor, ClickHouse and Resend are reachable.
 This is not a guarantee of recipient inbox delivery.

@@ -176,10 +176,16 @@ function docker() {
     case "$*" in
       'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
         printf '%s\n' old-daemon old-ui ;;
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker')
+        printf '%s\n' old-daemon old-ui old-spot ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
+        return 0 ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-daemon')
         printf '%s\n' 'old-daemon daemon-host' ;;
       'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
         printf '%s\n' 'old-ui ui-host' ;;
+      'inspect --format {{.Id}} '*)
+        printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
         return 0 ;;
       'ps -aq --no-trunc')
@@ -221,6 +227,101 @@ function docker() {
                 assert int(arguments[arguments.index('--legacy-before') + 1]) > 0
 
 
+def test_cube_activation_requires_all_previous_writers_retired(tmp_path: Path) -> None:
+    import os
+    import subprocess
+    import textwrap
+
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    start = workflow.index('          prior_workers=()')
+    end = workflow.index("          echo 'post-up: ClickHouse smoke test starting'", start)
+    rollout = textwrap.dedent(workflow[start:end])
+    docker = r"""
+set -euo pipefail
+PROJECT_NAME=test
+function docker() {
+    case "$*" in
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
+        printf '%s\n' old-daemon old-ui ;;
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker')
+        printf 'inventory\n' >> "$CALLS"
+        if [ "$RETIREMENT_CASE" = prior-ps-error ]; then return 1; fi
+        printf '%s\n' old-daemon old-ui old-spot ;;
+      'inspect --format {{.Id}} {{.Config.Hostname}} old-daemon')
+        printf '%s\n' 'old-daemon daemon-host' ;;
+      'inspect --format {{.Id}} {{.Config.Hostname}} old-ui')
+        printf '%s\n' 'old-ui ui-host' ;;
+      'inspect --format {{.Id}} '*)
+        if [ "$RETIREMENT_CASE" = prior-inspect-error ]; then return 1; fi
+        printf '%s\n' "${@: -1}" ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
+        printf 'recreate\n' >> "$CALLS" ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
+        printf 'up\n' >> "$CALLS" ;;
+      'ps -aq --no-trunc')
+        if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
+        if [ "$RETIREMENT_CASE" != removed ]; then
+            printf '%s\n' old-daemon old-ui old-spot
+        fi
+        printf '%s\n' new-daemon new-ui new-spot ;;
+      'inspect --format {{.State.Running}} '*)
+        printf 'inspect %s\n' "${@: -1}" >> "$CALLS"
+        if [ "$RETIREMENT_CASE" = inspect-error ]; then return 1; fi
+        if [ "${@: -1}" = old-spot ]; then
+            if [ "$RETIREMENT_CASE" = spot-inspect-error ]; then return 1; fi
+            if [ "$RETIREMENT_CASE" = spot-running ]; then printf true; return 0; fi
+            if [ "$RETIREMENT_CASE" = spot-unknown ]; then printf unknown; return 0; fi
+        fi
+        if [ "$RETIREMENT_CASE" = running ]; then printf true; else printf false; fi ;;
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster sh -c '*)
+        return 0 ;;
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.orchestration.recovery'*)
+        printf 'recovery\n' >> "$CALLS" ;;
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.sources.rollout')
+        if read -r swallowed; then
+            printf 'Activation consumed deployment stdin: %s\n' "$swallowed" >&2
+            return 2
+        fi
+        printf 'activate\n' >> "$CALLS" ;;
+      *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
+    esac
+}
+"""
+    for case in (
+        'removed', 'stopped', 'repeat', 'running', 'spot-running', 'spot-unknown',
+        'prior-ps-error', 'prior-inspect-error', 'inventory-error', 'inspect-error',
+        'spot-inspect-error',
+    ):
+        calls = tmp_path / f'cube-{case}'
+        attempts = 2 if case == 'repeat' else 1
+        result = subprocess.run(
+            ['bash', '-s'],
+            input=docker + (rollout + '\n') * attempts + '\nprintf "after-rollout\\n" >> "$CALLS"\n',
+            env={**os.environ, 'RETIREMENT_CASE': case, 'CALLS': str(calls)},
+            capture_output=True,
+            text=True,
+        )
+        observed = calls.read_text().splitlines()
+        if case in ('removed', 'stopped', 'repeat'):
+            assert result.returncode == 0, result.stderr
+            phases = [call for call in observed if not call.startswith('inspect ')]
+            assert phases == (
+                ['inventory', 'recreate', 'up', 'recovery', 'activate'] * attempts
+                + ['after-rollout']
+            )
+            if case != 'removed':
+                assert observed.count('inspect old-spot') == attempts
+        else:
+            assert result.returncode != 0, case
+            assert 'activate' not in observed and 'after-rollout' not in observed
+            if case.startswith('prior-'):
+                assert 'recreate' not in observed
+            if case in ('inventory-error', 'inspect-error'):
+                assert 'recovery' not in observed
+            if case.startswith('spot-'):
+                assert 'inspect old-spot' in observed
+
+
 def test_egress_preflight_detaches_stdin_and_precedes_replacement(tmp_path: Path) -> None:
     import os
     import subprocess
@@ -251,8 +352,10 @@ function docker() {
           *) return 3 ;;
         esac
         return "$PREFLIGHT_EXIT" ;;
-      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
+      'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit'|'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker')
         return 0 ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
+        printf 'recreate\n' >> "$CALLS" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
@@ -260,7 +363,7 @@ function docker() {
 }
 """
     for setup_exit, preflight_exit, expected in (
-        ('0', '0', ['setup', 'preflight', 'up', 'after-up']),
+        ('0', '0', ['setup', 'preflight', 'recreate', 'up', 'after-up']),
         ('1', '0', ['setup']),
         ('0', '1', ['setup', 'preflight']),
     ):

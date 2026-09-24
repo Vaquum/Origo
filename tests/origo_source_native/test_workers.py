@@ -153,6 +153,9 @@ def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
                 if path.name == 'docker-compose.deploy.yml':
                     assert service['mem_limit'] == '16g'
         workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-        launch = next(line for line in workflow.splitlines() if 'up -d --wait' in line).split()
+        launch = next(
+            line for line in workflow.splitlines()
+            if 'up -d --wait' in line and 'depth-worker' in line
+        ).split()
         assert set(provisional) <= set(launch)
         assert 'depth-worker' in launch and 'provisional-worker' in launch

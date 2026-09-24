@@ -242,6 +242,13 @@ def build_reconciliation_sensor(
             )
             runtime.require_shared_mount()
             records = runtime.store.records(canonical_only=True)
+            enabled = runtime.store.enabled_groups()
+            missing = {
+                record.partition.key: tuple(
+                    item.key for item in runtime.store.missing_components(record, enabled=enabled)
+                )
+                for record in records
+            } if enabled else {}
             offset = 0
             if context.cursor:
                 loaded: object = json.loads(context.cursor)
@@ -270,6 +277,7 @@ def build_reconciliation_sensor(
                 key
                 for key in keys
                 if key not in current
+                or missing.get(key)
                 or tags_by_partition.get(key, {}).get('dagster/data_version') != versions[key]
             ]
             statuses = (
@@ -315,6 +323,8 @@ def build_reconciliation_sensor(
                 if any(record.dagster_run.status in _ACTIVE for record in runs):
                     continue
                 authority = current.get(key, 'MISSING')
+                if missing.get(key):
+                    authority += ':components=' + ','.join(missing[key])
                 latest_record = runs[0] if runs else None
                 latest = latest_record.dagster_run if latest_record else None
                 attempt = 0

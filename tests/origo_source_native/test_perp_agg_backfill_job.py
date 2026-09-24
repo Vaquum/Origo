@@ -596,7 +596,9 @@ def test_perp_agg_huggingface_shadow_renders_locally_without_uploading(
     monkeypatch.setattr(
         agg_snapshot, 'get_perp_agg_dollar_klines', lambda **kwargs: frame.clear()
     )
-    destination = str(tmp_path / 'files' / store.spec.key / 'huggingface_shadow')
+    # The replaced formula is a direct-render acceptance case with no prior publication.
+    destination = str(tmp_path / 'direct-files' / store.spec.key / 'huggingface_shadow')
+    assert not (Path(destination) / 'latest.json').exists()
     perp_agg_consumers._huggingface_shadow(store, store.snapshot(), destination)
     assert FakeHfApi.calls == []
     manifest = json.loads((Path(destination) / 'latest.json').read_text())

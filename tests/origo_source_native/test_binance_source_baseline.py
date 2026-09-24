@@ -166,6 +166,8 @@ def test_spot_source_identity_contract(
         'raw_latest',
         'time_latest',
         'dollar_latest',
+        'market_state',
+        'market_state_latest',
     ]
     # The legacy table names stay readable as views over the components that replaced them;
     # the tables without a successor are retired.

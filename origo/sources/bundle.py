@@ -13,9 +13,8 @@ from dagster import (
     AssetDep,
     AssetExecutionContext,
     AssetMaterialization,
-    AssetSpec,
     AssetsDefinition,
-    FreshnessPolicy,
+    AssetSpec,
     BackfillPolicy,
     Config,
     DagsterRunStatus,
@@ -25,6 +24,7 @@ from dagster import (
     DefaultSensorStatus,
     Definitions,
     Failure,
+    FreshnessPolicy,
     JobDefinition,
     MaterializeResult,
     MetadataValue,
@@ -42,12 +42,13 @@ from dagster import (
 )
 from dagster._core.definitions.unresolved_asset_job_definition import UnresolvedAssetJobDefinition
 
-from origo.workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 
 from .archive import archive_session
 from .capacity import CapacityMonitor
 from .cleanup import preserve_primary_failure
+from .component_upgrade import ComponentUpgradeError
 from .contracts import (
     ArchiveNotPublishedYet,
     RevisionedSourceSpec,
@@ -189,32 +190,45 @@ def _failure_context(operation: str, key: str) -> tuple[str, str, str | None, st
     return 'certification' if operation == 'certify' else operation, 'PARTITION', key or None, None
 
 
-def _execute_operation(
-    runtime: SourceRuntime, operation: str, config: SourceRunConfig
+def _execute_canonical(
+    runtime: SourceRuntime, config: SourceRunConfig, *, repair: bool = False
 ) -> dict[str, object]:
-    spec = runtime.spec
-    if operation == 'setup':
-        runtime.setup(anchor=datetime.fromisoformat(config.anchor) if config.anchor else None)
-        return {'source_key': spec.key, 'status': 'ready'}
-    if operation == 'canonical':
-        if not config.partition_key:
-            raise ValueError('Source execution requires an explicit partition key.')
-        active = any(
-            record.partition.key == config.partition_key
-            for record in runtime.store.records(canonical_only=True)
+    if not config.partition_key:
+        raise ValueError('Source execution requires an explicit partition key.')
+    current = runtime.store.record(runtime.spec.canonical.partition(config.partition_key))
+    active = current is not None
+    upgrading = current is not None and any(
+        item.key not in dict(current.component_hashes)
+        for item in runtime.store.components(current.partition)
+    )
+    if config.capacity_probe and active:
+        raise SourceError(
+            'CAPACITY_PROBE_ALREADY_ACTIVE',
+            'Select a day that is not active for measurement; use normal backfill configuration to retry an active day.',
         )
-        if config.capacity_probe and active:
-            raise SourceError(
-                'CAPACITY_PROBE_ALREADY_ACTIVE',
-                'Select a day that is not active for measurement; use normal backfill configuration to retry an active day.',
+    capacity: CapacityMonitor | None = None
+    if (not config.reconcile_only and not repair) or upgrading:
+        try:
+            capacity = CapacityMonitor(
+                runtime, probe=None if config.automatic_capacity or upgrading else config.capacity_probe
             )
-        capacity: CapacityMonitor | None = None
-        if not config.reconcile_only:
+            capacity.check()
+        except Exception as error:
+            runtime.failures.record(
+                operation='capacity',
+                scope='SOURCE',
+                error_code=failure_code(error),
+                message=failure_message(error),
+            )
+            raise
+    successful = False
+    if capacity is not None:
+        capacity.start_sampling()
+
+    def finish_capacity() -> None:
+        if capacity is not None:
             try:
-                capacity = CapacityMonitor(
-                    runtime, probe=None if config.automatic_capacity else config.capacity_probe
-                )
-                capacity.check()
+                capacity.finish(successful=successful)
             except Exception as error:
                 runtime.failures.record(
                     operation='capacity',
@@ -223,24 +237,11 @@ def _execute_operation(
                     message=failure_message(error),
                 )
                 raise
-        successful = False
-        if capacity is not None:
-            capacity.start_sampling()
 
-        def finish_capacity() -> None:
-            if capacity is not None:
-                try:
-                    capacity.finish(successful=successful)
-                except Exception as error:
-                    runtime.failures.record(
-                        operation='capacity',
-                        scope='SOURCE',
-                        error_code=failure_code(error),
-                        message=failure_message(error),
-                    )
-                    raise
-
-        with preserve_primary_failure('capacity measurement', finish_capacity):
+    with preserve_primary_failure('capacity measurement', finish_capacity):
+        if repair:
+            record = runtime.repair(config.partition_key)
+        else:
             if not config.reconcile_only:
                 try:
                     runtime.build(config.partition_key)
@@ -249,14 +250,30 @@ def _execute_operation(
                         raise
                     runtime.repair(config.partition_key)
             record = runtime.reconcile(config.partition_key)
-            successful = True
-        return {
-            'partition_key': record.partition.key,
-            'revision': record.revision,
-            'build_id': str(record.build_id),
-            'generation': record.generation,
-            'reconciled_at': datetime.now(UTC).isoformat(),
-        }
+        successful = True
+    result: dict[str, object] = {
+        'partition_key': record.partition.key,
+        'revision': record.revision,
+        'build_id': str(record.build_id),
+        'generation': record.generation,
+    }
+    if not repair:
+        result['reconciled_at'] = datetime.now(UTC).isoformat()
+    return result
+
+
+
+def _execute_operation(
+    runtime: SourceRuntime, operation: str, config: SourceRunConfig
+) -> dict[str, object]:
+    spec = runtime.spec
+    if operation == 'setup':
+        runtime.setup(anchor=datetime.fromisoformat(config.anchor) if config.anchor else None)
+        return {'source_key': spec.key, 'status': 'ready'}
+    if operation in ('canonical', 'repair'):
+        runtime.require_shared_mount()
+        with source_lock(runtime.lock_root, spec.key, 'heavy', shared=True):
+            return _execute_canonical(runtime, config, repair=operation == 'repair')
     if operation == 'provisional' and not config.partition_key:
         adapter = spec.provisional
         if adapter is None:
@@ -267,14 +284,10 @@ def _execute_operation(
         for partition in candidates:
             runtime.build(partition.key, provisional=True)
         return {'refreshed_partitions': [partition.key for partition in candidates]}
-    if operation in ('provisional', 'repair'):
+    if operation == 'provisional':
         if not config.partition_key:
             raise ValueError('Source execution requires an explicit partition key.')
-        record = (
-            runtime.repair(config.partition_key)
-            if operation == 'repair'
-            else runtime.build(config.partition_key, provisional=operation == 'provisional')
-        )
+        record = runtime.build(config.partition_key, provisional=True)
         return {
             'partition_key': record.partition.key,
             'revision': record.revision,
@@ -469,14 +482,18 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 failure_code(error),
                 failure_message(error),
             )
+            verdict_error = (
+                error.__cause__ if isinstance(error, ComponentUpgradeError)
+                and isinstance(error.__cause__, Exception) else error
+            )
             if operation == 'canonical':
                 # A data/configuration verdict holds automatic reconciliation; worker and
                 # transport failures are retried by the sensor after releasing the pool.
                 verdict = (
-                    isinstance(error, SourceError)
-                    and not retryable_source_error(error)
-                    and error.code not in ('SOURCE_LOCK_BUSY', 'CAPACITY_SAMPLER_STUCK')
-                ) or isinstance(error, (ValueError, TypeError))
+                    isinstance(verdict_error, SourceError)
+                    and not retryable_source_error(verdict_error)
+                    and verdict_error.code not in ('SOURCE_LOCK_BUSY', 'CAPACITY_SAMPLER_STUCK')
+                ) or isinstance(verdict_error, (ValueError, TypeError))
                 context.instance.add_run_tags(
                     context.run.run_id,
                     {
@@ -485,7 +502,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     },
                 )
             if operation == 'canonical' and (
-                config.reconcile_only or not retryable_source_error(error)
+                config.reconcile_only or not retryable_source_error(verdict_error)
             ):
                 raise Failure(
                     description=f'{failure_code(error)}: {failure_message(error)}',

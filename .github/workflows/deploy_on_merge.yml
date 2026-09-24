@@ -203,7 +203,16 @@ jobs:
           for worker in $(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit); do
             prior_workers+=("$(docker inspect --format '{{.Id}} {{.Config.Hostname}}' "$worker")")
           done
+          prior_cube_writers=()
+          prior_cube_writer_ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker)"
+          for worker in $prior_cube_writer_ids; do
+            prior_cube_writers+=("$(docker inspect --format '{{.Id}}' "$worker")")
+          done
           retirement_boundary=$(date +%s)
+          # Recreate every cube writer, including on a retry of this same deployment.
+          # Retiring the container also retires its local child run processes.
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker \
+            || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
@@ -245,6 +254,19 @@ jobs:
           echo 'post-up: deployment recovery starting'
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
             "${recovery_args[@]}" </dev/null
+          for worker_id in "${prior_cube_writers[@]}"; do
+            case $'\n'"$existing_worker_ids"$'\n' in
+              *$'\n'"$worker_id"$'\n'*) running="$(docker inspect --format '{{.State.Running}}' "$worker_id")" ;;
+              *) running=false ;;
+            esac
+            if [ "$running" != false ]; then
+              echo "Previous cube writer is still running: $worker_id" >&2
+              exit 1
+            fi
+          done
+          echo 'post-up: registered component activation starting'
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
+            python -m origo.sources.rollout </dev/null
           echo 'post-up: ClickHouse smoke test starting'
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster python - <<'PY'
           from origo.utils.get_clickhouse_client import get_clickhouse_client

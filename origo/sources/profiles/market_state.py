@@ -1,4 +1,4 @@
-"""Base-cell contributions for PRD-0022; registration follows the history upgrade."""
+"""Registered base-cell contributions for the market state cube (PRD-0022)."""
 
 from datetime import UTC, datetime
 
@@ -71,6 +71,8 @@ MARKET_STATE_COMPONENTS: tuple[ComponentSpec, ...] = (
         ('time_index', 'price_index'),
         'first_trade_at',
         build_market_state,
+        start_at=CUBE_START,
+        activation_group='market_state',
     ),
     ComponentSpec(
         'market_state_latest',
@@ -80,5 +82,7 @@ MARKET_STATE_COMPONENTS: tuple[ComponentSpec, ...] = (
         build_market_state,
         provisional=True,
         current_target='market_state',
+        start_at=CUBE_START,
+        activation_group='market_state',
     ),
 )

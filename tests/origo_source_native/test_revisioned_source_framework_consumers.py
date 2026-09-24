@@ -30,6 +30,7 @@ from origo.sources.storage import SourceStore
 from origo.utils.arrow_store import build_series_frame
 
 from .test_binance_daily_source_adapter import archive_response
+from .test_market_state_registration import CapturedArchive
 
 
 class FakeHfApi:
@@ -207,10 +208,11 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
             reads += 1
             # Publication reads the canonical state, then pins; the renderer's pre-commit
             # recheck is the third read, where a canonical change must be observed.
-            if reads >= 3:
-                runtime.rollback(
-                    record, operator='test', reason='Real-build software rollback during render'
-                )
+            if reads == 3:
+                captured = replace(spec, canonical=CapturedArchive())
+                SourceRuntime(
+                    captured, SourceStore(client, 'origo', captured), runtime.lock_root, runtime.run_id
+                ).build('2024-12-31')
             return original(canonical_only=canonical_only)
 
         with monkeypatch.context() as patch:
@@ -222,7 +224,8 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
         assert not removed.exists()
         assert {s.name: (tmp_path / 'arrow' / s.name / 'latest.arrow').resolve() for s in SPECS} == targets
         assert not list((tmp_path / 'parquet').glob('.staging-*'))
-        assert store.generation(record.partition) == 2
+        assert store.generation(record.partition) == 1
+        assert store.record(spec.canonical.partition('2024-12-31')) is not None
         assert client.execute(
             "SELECT count() FROM origo.source_failure_log WHERE operation='consumer' AND blocking_scope='CONSUMER' AND event_type='FAILED'"
         ) == [(1,)]

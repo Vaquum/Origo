@@ -242,6 +242,15 @@ class ProvisionalFeed:
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
             if not any(interval.start <= gap_start < interval.end for interval in covered):
                 ordered.insert(1, adapter.partition(frontier))
+        enabled = store.enabled_groups()
+        if enabled:
+            queued = {partition.key for partition in ordered}
+            missing = [
+                record.partition for record in reversed(store.records())
+                if record.partition.provisional and record.partition.key not in queued
+                and store.missing_components(record, enabled=enabled)
+            ]
+            ordered.extend(missing[:PROVISIONAL_MAX_WORKERS])
         admitted = [
             partition
             for partition in ordered

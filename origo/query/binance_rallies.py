@@ -463,7 +463,11 @@ def _book_rows(
     bounds: list[tuple[int, int] | None] = []
     for rally in rallies:
         first = int(np.searchsorted(times, rally.anchor))
-        if boundary == 'before' and first > 0 and times[first - 1] >= rally.anchor - _LOOKBACK:
+        if boundary == 'before':
+            # Without a snapshot before the anchor the rally cannot start there: no book rows.
+            if first == 0 or times[first - 1] < rally.anchor - _LOOKBACK:
+                bounds.append(None)
+                continue
             first -= 1
         last = int(np.searchsorted(times, rally.hit_time, side='right')) - 1
         if first > last:

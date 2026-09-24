@@ -114,6 +114,20 @@ def _reactivate_2017() -> None:
         client.disconnect()
 
 
+def _omit_book_before(moment: str) -> None:
+    """Drop the authentic snapshots observed before ``moment`` (UTC) from the test book."""
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        client.execute(
+            'DELETE FROM origo.binance_spot_depth200_snapshots '
+            f"WHERE datetime < toDateTime64('{moment}', 3, 'UTC')"
+        )
+    finally:
+        client.disconnect()
+
+
 def _fixture_trades() -> pl.DataFrame:
     return pl.read_parquet(TRADES_2026)
 
@@ -404,6 +418,16 @@ def test_boundary_setting(rally_data: None, tmp_path: Path) -> None:
     trade_ids = set(after['trades.arrow']['trade_id'].to_pylist())
     assert set(shared) <= trade_ids
     assert all(trade_id > first['hit_trade_id'] for trade_id in shared[1:])
+
+    # Without the snapshots before 11:39 the 11:39 rally has no snapshot to start from with
+    # 'before', so it has no book rows; 'after' still starts it at 11:39:00.394.
+    _omit_book_before('2026-06-27 11:39:00')
+    gap_before, gap_after = _rallies(_window(tmp_path, boundary='before')), _rallies(_window(tmp_path))
+    assert gap_before.row(0, named=True)['first_snapshot_time'] is None
+    assert gap_before.row(0, named=True)['last_snapshot_time'] is None
+    for column in ('first_snapshot_time', 'last_snapshot_time'):
+        assert gap_before[column][1:].to_list() == rb[column][1:].to_list()
+        assert gap_after[column].to_list() == ra[column].to_list()
 
 
 def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:

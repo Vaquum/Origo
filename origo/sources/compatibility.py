@@ -25,10 +25,10 @@ def undeclared_components() -> dict[str, list[str]]:
     finally:
         client.disconnect()
     declared = {spec.key: {item.key for item in spec.components} for spec in SOURCE_REGISTRY}
+    # A source the image does not register at all would silently stop being maintained.
     undeclared = {
-        str(source): sorted(set(cast(list[str], keys)) - declared[str(source)])
+        str(source): sorted(set(cast(list[str], keys)) - declared.get(str(source), set[str]()))
         for source, keys in rows
-        if str(source) in declared
     }
     return {source: keys for source, keys in undeclared.items() if keys}
 

@@ -86,7 +86,7 @@ This release is the binary rollback floor after activation. Pre-compatible image
 reject expanded component inventories and must not be deployed after enablement.
 Deployment enforces the floor: before any container is replaced, the new image runs
 `python -m origo.sources.compatibility`, which fails when production's activations
-name a component the image does not declare.
+name a source or component the image does not declare.
 Native rollback to a retained legacy generation remains supported by this release:
 old product hashes are accepted and the cube view hides the unselected addition.
 

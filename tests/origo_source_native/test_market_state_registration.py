@@ -490,6 +490,10 @@ def test_deployment_refuses_an_image_that_cannot_read_activated_components(
     assert compatibility.undeclared_components() == {runtime.spec.key: ['market_state']}
     with pytest.raises(SystemExit, match='market_state'):
         compatibility.main()
+    # An image that dropped the source entirely cannot pass by not declaring it.
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', ())
+    dropped = compatibility.undeclared_components()[runtime.spec.key]
+    assert {'raw', 'market_state'} <= set(dropped)
     monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (runtime.spec,))
     assert compatibility.undeclared_components() == {}
 

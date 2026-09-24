@@ -152,6 +152,31 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
         assert sum(r.job_name == job for r in runs) == 2
 
 
+def test_a_long_backfill_never_holds_another_sources_backfill_back(instance):
+    for n in range(20):
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'spotbulk'},
+        )
+    for n in range(6):
+        submit(
+            instance,
+            job='backfill_binance_perp_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'perpbulk'},
+        )
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    for _ in range(2):
+        runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+        # The later backfill takes turns in the shared lane instead of queueing behind 20 runs.
+        assert len(runs) == 10
+        assert sum(run.tags['dagster/backfill'] == 'perpbulk' for run in runs) == 5
+        # Deployment recovery re-derives the same ranks.
+        recover_queue(instance)
+
+
 def test_maintenance_lane_dequeues_while_routine_and_backfill_lanes_are_full(instance):
     probe = create_run_for_test(instance, job_name='maintain_operational_metadata_job')
     tags = execution_tags(probe)

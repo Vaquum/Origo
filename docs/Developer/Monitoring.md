@@ -139,10 +139,30 @@ watchdog's exit is in `origo.container_log`.
 
 ## Public reader law
 
-`/law` defaults to Sources: each declared source and projection, its own evidence and
-consumer outputs. Gates shows production/runtime decisions over 30 UTC days, with
-exact meaning, threshold and deployed-code links. Recovery separates reader lag,
-late daily archives, older calendar holes and the consecutive core-law clear window.
+`/law` opens on Overview: fresh trades, daily archive readiness, historical calendar
+coverage and depth minute coverage. Compact secondary figures show exact-current
+outputs, worker heartbeats, queue, collectors, observed incidents and the core-law
+clear window. Operational checks are separate from data health; healthy heartbeats
+do not prove successful work. Every figure opens its original evidence.
+
+Sources shows each declared source and projection with its consumer outputs. Laws
+shows only the named data laws over 30 UTC days: live trades are fresh, yesterday's
+archive is ready, historical coverage is complete, and depth minutes are complete.
+Required law membership comes from the frozen evaluator inventory through the
+catalog's `law_gate_ids`; missing members remain UNKNOWN. The separate inventory
+guard remains mandatory. Friendly headings are page copy: original descriptors,
+conditions, thresholds, definition versions and code provenance are unchanged.
+`view=gates` remains an alias; runtime gate links explain their operational locator.
+The bounded `/law/gates.json` and `/law/history.json` APIs retain runtime forensic
+evidence, captured by the monitor and replayed by `law_page.TapeCache`.
+
+Recovery shows trade delay and signed one-hour change, and depth missing-minute
+history with its actual checked window. An absent comparison is labelled, not zero.
+Late daily archives remain distinct from live-reader freshness. Publication token
+mismatches within existing coverage-lag policy are pending, never exact-current;
+known data failures take precedence. Equal-frontier revision mismatch has no
+revision-age timeout in the existing policy. Dagit destinations are linked only
+when an operator-facing URL is recorded; otherwise the exact asset/check is text.
 Source/projection inventory comes from source and depth declarations, never UI lists.
 
 `data_current` evaluates R1 (readable selected minute and reader end), C1 (yesterday's
@@ -166,7 +186,7 @@ This is not a guarantee of recipient inbox delivery.
 Only the monitor mounts `/var/lib/origo-law` writable. The public page has a read-only
 mount, no database/exchange/mail credentials and no backend query path. Page requests
 read bounded caches/tape only; API history is catalog-ID restricted, at most 30 days
-and 1,000 original events per page. Missing, corrupt or older-than-120-second evidence
+and 1,000 original events per page. Missing, corrupt or 120-second-old evidence
 is UNKNOWN. HTTP health means the page serves, independently of its data verdict;
 red data never blocks deployment or recovery. Health probes use an unpublished internal
 port (8485), independently of public request slots. The page runs without root privileges.
@@ -188,7 +208,7 @@ PRD #442 remains open until a genuine production window and three contemporaneou
 SQL cross-checks are attached; CI and historical reconstruction cannot substitute.
 
 Current JSON excludes the 30-day grid and repeated catalog. The browser fetches the
-catalog once per version and loads compact gate history when Gates is shown. Report and catalog versions must match; a refresh race remains UNKNOWN until a consistent refresh. Minute
+catalog once per version and loads compact law history when Laws is shown. Report and catalog versions must match; a refresh race remains UNKNOWN until a consistent refresh. Minute
 samples omit unobserved gate placeholders; the catalog supplies their explicit
 UNKNOWN/NOT_EVALUATED display. Event-driven gates retain the last original outcome
 and timestamp separately from current blocking state. Corrupt oversized history
@@ -204,3 +224,36 @@ their original catalog, identity and timestamp.
 Provider circuit failures record their actual host in the existing error message.
 Historical import parses that owner format; old hostless failures cannot be assigned
 to a host gate. No host is inferred from a source name.
+
+
+## Overview evidence and resource bounds
+
+Overview adds no database queries, collector probes or exchange calls. Per-tick
+scalar counts reuse the monitor's existing reads and reset to unknown on failed
+reads. The worker denominator includes enabled provisional workers, the single
+shared depth worker, and already-discovered heartbeat members; missing required
+members stay unknown. Queue zero is never inferred from unreachable Dagster.
+
+Error lines and failed receipts show 60-minute observed totals, with 24-hour detail.
+Their recorded intervals are the effective whole-second UTC SQL bounds. Tape commit
+precedes cursor persistence, so overlapping intervals can occur: replay excludes
+ambiguous overlaps and boundary-crossing intervals, never prorates, and reports
+covered seconds and observed/expected slots. Missing fields, history gaps/loading,
+read caps and incomplete coverage make the number a lower bound, or UNKNOWN when
+nothing is usable. Exactly 1,000 rows is a capped lower bound. No historical counts
+are reconstructed from finding totals.
+
+The page caches at most 1,441 compact recent operational samples within an additional
+1 MiB, separate from the unchanged 96 MiB core-history budget. Overview reuses cached
+aggregates without per-request tape scans or browser history fanout. Current refresh
+remains independent of history, every 30 seconds with a five-second deadline; the
+sample expires at 120 seconds. All lazy history shares at most two concurrent
+requests, bounded queues and five-second deadlines, including pagination. Selection
+changes cancel superseded work. The eight-entry cache, 5,000 client events, 1,000
+server events per page, 30-day range, 1 MiB record limit and four public slots remain.
+
+The recorded six-source/54-projection baseline is 126,790 compact JSON bytes. Its
+Overview additions must stay within 8 KiB and the result within 160 KiB. Local replay
+checks keep process RSS below 256 MiB and a warmed current response below one second;
+production is never load-tested for dashboard acceptance. These are bounded costs,
+not zero-cost monitoring.

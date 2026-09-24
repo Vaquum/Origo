@@ -1,6 +1,10 @@
-# v3.23.0
+# v3.24.0
 
 Export Binance spot rallies by ID or time range: each anchor minute whose price reaches +30 bps within 240 minutes becomes one rally, written to `rallies.arrow` with the bounds that select its rows from `trades.arrow` and `book.arrow`, which hold each trade and depth-200 snapshot once. Each rally's rows can start `minutes_before` ahead of its anchor, and a per-request boundary setting starts them at the first record at or after that instant or at the last one before it. Runs on the production host; acceptance uses authentic 2017-08-17 and 2026-06-27 data.
+
+# v3.23.0
+
+- Open the reader dashboard on numerical data health, with named laws, depth coverage and compact source/recovery views. Expose operational counts from existing monitor reads and bounded tape history; preserve original law definitions, production query counts and missing-evidence semantics.
 
 # v3.22.0
 

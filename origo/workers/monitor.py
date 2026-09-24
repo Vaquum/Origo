@@ -62,6 +62,8 @@ from origo.law_catalog import (
     GateEvaluation,
     LawCatalog,
     ProjectionObservation,
+    PublicationPolicy,
+    Scalar,
     build_catalog,
     gate_evaluation,
     import_gate_events,
@@ -73,7 +75,7 @@ from origo.sources.contracts import Client, RolloutStage, identifier
 from origo.sources.registry import SOURCE_REGISTRY
 
 from .dagster_reader import DagsterReader, RunFailure
-from .depth import DEPTH_SPECS
+from .depth import DEPTH_SPECS, DepthFeed
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (
@@ -488,6 +490,8 @@ class Monitor:
         self.law_tape = LawTape(law_root)
         self.catalog: LawCatalog | None = None
         self.pending_report: LawReport | None = None
+        self.tick_evidence: dict[str, dict[str, Scalar]] = {}
+        self.publication_policy: dict[str, PublicationPolicy] = {}
         self.deployed_sha = deployed_sha
         self.page_url = page_url
         self.arrow_root = arrow_root
@@ -495,6 +499,7 @@ class Monitor:
         self.client = client
         self.database = database
         self.heartbeat_dir = heartbeat_dir
+        self.heartbeat_inventory: set[Path] = set()
         self.probes = tuple(probes)
         self.settings = settings
         self.reporter = reporter
@@ -529,6 +534,21 @@ class Monitor:
         window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
         cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
         self.pending_report = None
+        self.publication_policy = {}
+        self.tick_evidence = {
+            'dagster_reachable': {'reachable': None, 'unhealthy_daemons': None},
+            'queue_bounded': {'queued_runs': None, 'queue_threshold': self.queue_threshold},
+            'workers_alive': {
+                'workers_fresh': None, 'workers_expected': None, 'workers_unknown': None,
+                'failed_receipts': None, 'window_start': None, 'window_end': None,
+                'counts_limited': False,
+            },
+            'collectors_serving': {'collectors_serving': None, 'collectors_expected': None},
+            'no_error_logs': {
+                'error_lines': None, 'window_start': None, 'window_end': None,
+                'counts_limited': False,
+            },
+        }
         # Every detector is isolated: a fault in one becomes its own finding on its check,
         # the other checks still run, the evaluations are still written and the e-mail is still
         # sent. A detector that did not complete its read leaves its cursor where it was.
@@ -710,7 +730,7 @@ class Monitor:
                     evidence_id=f'{identity}:{slot}',
                     evaluated_at=now.isoformat(),
                     outcome='FAIL' if items else 'PASS',
-                    evidence={'finding_count': len(items)},
+                    evidence={'finding_count': len(items), **self.tick_evidence.get(name, {})},
                     reason='finding_present' if items else 'check_passed',
                 )
             )
@@ -718,6 +738,8 @@ class Monitor:
             event['catalog_version'] = self.catalog['version']
         report['gates'] = events
         for observation in report['projections']:
+            if observation['id'] in self.publication_policy:
+                observation['publication_policy'] = self.publication_policy[observation['id']]
             observation['gate_ids'] = sorted(
                 set(observation['gate_ids'])
                 | {
@@ -980,6 +1002,14 @@ class Monitor:
         only advances past what was actually read."""
         findings: list[Finding] = []
         health = self.dagster.health()
+        self.tick_evidence['dagster_reachable'] = {
+            'reachable': health.reachable,
+            'unhealthy_daemons': len(health.unhealthy_daemons) if health.reachable else None,
+        }
+        self.tick_evidence['queue_bounded'] = {
+            'queued_runs': health.queued_runs if health.reachable else None,
+            'queue_threshold': self.queue_threshold,
+        }
         if not health.reachable:
             return [
                 Finding(
@@ -1058,12 +1088,15 @@ class Monitor:
             for spec in SOURCE_REGISTRY
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
         }
-        return sorted((set(self.heartbeat_dir.glob('*.heartbeat')) - ignored) | expected)
+        self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
+        return sorted(self.heartbeat_inventory | expected)
 
     def _worker_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:
         findings: list[Finding] = []
         now = window_end + timedelta(seconds=DELIVERY_LAG_SECONDS)
-        for heartbeat in self._heartbeats():
+        heartbeats = self._heartbeats()
+        fresh = 0
+        for heartbeat in heartbeats:
             if not heartbeat_is_fresh(
                 heartbeat, max_age_seconds=HEARTBEAT_MAX_AGE_SECONDS, now=now.timestamp()
             ):
@@ -1076,9 +1109,23 @@ class Monitor:
                         f'Older than {HEARTBEAT_MAX_AGE_SECONDS} seconds.',
                     )
                 )
-        for receipt in failed_receipts_since(
+            else:
+                fresh += 1
+        receipts = failed_receipts_since(
             self.client, self.database, datetime.fromisoformat(cursor.receipts_after), window_end
-        ):
+        )
+        members = set(heartbeats)
+        if DEPTH_SPECS:
+            members.add(heartbeat_path(self.heartbeat_dir, DepthFeed.name))
+        unknown = len(members - self.heartbeat_inventory)
+        self.tick_evidence['workers_alive'] = {
+            'workers_fresh': fresh, 'workers_expected': len(members),
+            'workers_unknown': unknown, 'failed_receipts': len(receipts),
+            'window_start': datetime.fromisoformat(cursor.receipts_after).astimezone(UTC).replace(microsecond=0).isoformat(),
+            'window_end': window_end.astimezone(UTC).replace(microsecond=0).isoformat(),
+            'counts_limited': len(receipts) >= 1000,
+        }
+        for receipt in receipts:
             findings.append(
                 Finding(
                     f'receipt_failed:{receipt.feed}:{receipt.series}',
@@ -1115,12 +1162,22 @@ class Monitor:
                         f'{reason} ({minute.isoformat()}).',
                     )
                 )
+        self.tick_evidence['collectors_serving'] = {
+            'collectors_serving': len(self.probes) - len(findings),
+            'collectors_expected': len(self.probes),
+        }
         return findings
 
     def _log_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:
         rows = error_log_rows_since(
             self.client, self.database, datetime.fromisoformat(cursor.logs_after), window_end
         )
+        self.tick_evidence['no_error_logs'] = {
+            'error_lines': len(rows),
+            'window_start': datetime.fromisoformat(cursor.logs_after).astimezone(UTC).replace(microsecond=0).isoformat(),
+            'window_end': window_end.astimezone(UTC).replace(microsecond=0).isoformat(),
+            'counts_limited': len(rows) >= 1000,
+        }
         by_service: dict[str, list[str]] = {}
         for row in rows:
             by_service.setdefault(row.service, []).append(row.message)
@@ -1136,6 +1193,18 @@ class Monitor:
 
     def _publication_findings(self) -> list[Finding]:
         """One finding per public consumer whose published end lags the source state."""
+        self.publication_policy = {
+            node: PublicationPolicy(reason='unknown' if applicable else 'not_applicable',
+                                    lag_seconds=None, grace_seconds=None,
+                                    state_through=None, published_through=None)
+            for node, applicable in [
+                *((f'{spec.key}:consumer:{consumer.key}',
+                   consumer.public and spec.rollout_stage != RolloutStage.DORMANT)
+                  for spec in SOURCE_REGISTRY for consumer in spec.consumers),
+                *((f'{spec.projection_table_name}:consumer:arrow', False) for spec in DEPTH_SPECS),
+            ]
+        }
+        policies = {key: value.copy() for key, value in self.publication_policy.items()}
         if not self.publication_root.is_dir():
             raise RuntimeError(f'Publication root {self.publication_root} is not mounted.')
         spans: dict[str, tuple[datetime, datetime, datetime, datetime, int]] = {}
@@ -1161,6 +1230,9 @@ class Monitor:
                 continue
             oldest, current, canonical_oldest, canonical_current, canonical_count = span
             if self.dagster.backfill_owns_publication(spec.key):
+                for consumer in spec.consumers:
+                    if consumer.public:
+                        policies[f'{spec.key}:consumer:{consumer.key}']['reason'] = 'backfill_active'
                 continue
             for consumer in spec.consumers:
                 if not consumer.public:
@@ -1173,6 +1245,8 @@ class Monitor:
                 else:
                     start, end = oldest, current
                     grace = PINNED_PUBLICATION_STALE_AFTER
+                policy = policies[f'{spec.key}:consumer:{consumer.key}']
+                policy.update(grace_seconds=grace.total_seconds(), state_through=end.isoformat())
                 manifest = self.publication_root / spec.key / consumer.key / 'latest.json'
                 try:
                     published = _utc(
@@ -1180,11 +1254,13 @@ class Monitor:
                             str(json.loads(manifest.read_text())['active_through'])
                         )
                     )
+                    policy['published_through'] = published.isoformat()
                 except FileNotFoundError:
                     # Never published: the span of the state itself is the lag, so a
                     # fresh source stays quiet while an old one pages.
                     published = start
                 except (OSError, ValueError, KeyError, TypeError) as error:
+                    policy['reason'] = 'unreadable'
                     findings.append(
                         Finding(
                             f'publication_manifest_unreadable:{spec.key}:{consumer.key}',
@@ -1194,6 +1270,8 @@ class Monitor:
                         )
                     )
                     continue
+                policy.update(lag_seconds=(end - published).total_seconds(),
+                              reason='stale' if end - published > grace else 'within_budget')
                 if end - published > grace:
                     findings.append(
                         Finding(
@@ -1204,6 +1282,7 @@ class Monitor:
                             f'state through {end.isoformat()}.',
                         )
                     )
+        self.publication_policy = policies
         return findings
 
 

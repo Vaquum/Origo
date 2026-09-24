@@ -681,6 +681,10 @@ def test_publication_stale_huggingface_is_a_finding(
         'publication_stale:binance_perp_trades:huggingface'
     ]
     assert findings[0].check == 'publication_current'
+    assert monitor.publication_policy['binance_perp_trades:consumer:huggingface']['grace_seconds'] == 86400
+    _manifest(root, 'binance_perp_trades', 'huggingface', NOW - timedelta(hours=24))
+    assert monitor._publication_findings() == []
+    assert monitor.publication_policy['binance_perp_trades:consumer:huggingface']['reason'] == 'within_budget'
 
 
 def test_publication_current_consumers_are_quiet(
@@ -1320,3 +1324,208 @@ def test_gate_event_index_resumes_without_rescanning_days(
     restarted.append_events(events)
     assert reads == []
     assert saved == {path.name: path.read_bytes() for path in restarted.root.glob('gate-events-*')}
+
+
+class _TrackedClient:
+    def __init__(self, client: object) -> None:
+        from origo.sources.contracts import Client
+
+        self.client = cast(Client, client)
+        self.calls: list[tuple[str, object | None]] = []
+        self.fail = False
+
+    def execute(
+        self, query: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[tuple[object, ...]]:
+        self.calls.append((query, params))
+        if self.fail:
+            raise RuntimeError('Protocol fault: operational read unavailable')
+        return self.client.execute(query, params, settings=settings)
+
+    def disconnect(self) -> None:
+        self.client.disconnect()
+
+
+def test_overview_evidence_reuses_reads_and_preserves_unknowns(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from origo.law import LAW_INVENTORY
+    from origo.workers.monitor import Scalar
+
+    client = law_case.client
+    ensure_monitoring_tables(client, 'origo')
+    tracked = _TrackedClient(client)
+    now = NOW.replace(microsecond=250000)
+    since = (NOW - timedelta(minutes=2)).replace(microsecond=750000)
+    until = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
+    # Fault envelopes around fractional query boundaries; no market rows are invented.
+    stamps = [since.replace(microsecond=500000), until.replace(microsecond=125000)]
+    client.execute('INSERT INTO origo.worker_minute_log VALUES', [
+        ('depth', f'boundary_fault:{index}', stamp.replace(tzinfo=None), 0, '', 1,
+         'FAILED', 'PROTOCOL_FAULT', 'boundary test', 'test', stamp.replace(tzinfo=None))
+        for index, stamp in enumerate(stamps)
+    ])
+    client.execute('INSERT INTO origo.container_log VALUES', [
+        (stamp.replace(tzinfo=None), 'monitor-test', 'test', 'stderr', 'ERROR', 'Protocol boundary fault')
+        for stamp in stamps
+    ])
+    monkeypatch.setenv('OVERVIEW_COLLECTOR', _url(recorder))
+    monkeypatch.setenv('OVERVIEW_TOKEN', 'test')
+    monitor = _monitor(recorder, tmp_path, client=tracked,
+                       probes=(CollectorProbe('depth20', 'OVERVIEW_COLLECTOR', 'OVERVIEW_TOKEN'),))
+    Cursor(since.timestamp(), since.isoformat(), since.isoformat(), {}, '', 0, 0).save(monitor.cursor_path)
+    heartbeat_calls: list[datetime] = []
+    heartbeats = monitor._heartbeats
+
+    def observed_heartbeats() -> list[Path]:
+        heartbeat_calls.append(now)
+        return heartbeats()
+
+    monkeypatch.setattr(monitor, '_heartbeats', observed_heartbeats)
+    outcome = monitor.tick(now)
+    assert 'receipt_failed:depth:boundary_fault:0' in outcome.failed
+    assert 'receipt_failed:depth:boundary_fault:1' not in outcome.failed
+
+    def evidence(check: str) -> dict[str, Scalar]:
+        report = monitor.law_tape.last
+        assert report is not None
+        return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
+
+    workers, logs = evidence('workers_alive'), evidence('no_error_logs')
+    assert workers['workers_fresh'] == 4 and workers['workers_expected'] == 5
+    assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
+    assert logs['error_lines'] == 1
+    for measured in (workers, logs):
+        assert measured['window_start'] == since.replace(microsecond=0).isoformat()
+        assert measured['window_end'] == until.replace(microsecond=0).isoformat()
+        assert measured['counts_limited'] is False
+    assert evidence('queue_bounded')['queued_runs'] == 0
+    assert evidence('dagster_reachable')['reachable'] is True
+    assert evidence('collectors_serving')['collectors_serving'] == 1
+    assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
+    for query, params in tracked.calls[:2]:
+        assert 'LIMIT 1000' in query
+        assert params == {'since': since.replace(tzinfo=None), 'until': until.replace(tzinfo=None)}
+    saved = Cursor.load(monitor.cursor_path, now, 15)
+    assert saved.receipts_after == saved.logs_after == until.isoformat()
+
+    # Exactly the bounded page size is already a lower bound, even without proof of row1001.
+    stamp = (NOW - timedelta(seconds=30)).replace(tzinfo=None)
+    client.execute('INSERT INTO origo.worker_minute_log VALUES', [
+        ('depth', f'cap_fault:{index}', stamp, 0, '', 1, 'FAILED', 'PROTOCOL_FAULT',
+         'cap test', 'test', stamp) for index in range(999)
+    ])
+    client.execute('INSERT INTO origo.container_log VALUES', [
+        (stamp, 'monitor-test', 'test', 'stderr', 'ERROR', 'Protocol cap fault')
+        for _ in range(999)
+    ])
+    touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
+    heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
+    monitor.tick(now + timedelta(minutes=1))
+    assert evidence('workers_alive')['workers_expected'] == 5
+    assert evidence('workers_alive')['workers_unknown'] == 1
+    assert evidence('workers_alive')['workers_fresh'] == 4
+    assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
+    assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
+    assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
+
+    tracked.fail = True
+    recorder.graphql['Health'] = {'errors': [{'message': 'Protocol fault: unavailable'}]}
+    monitor.tick(now + timedelta(minutes=2))
+    assert evidence('dagster_reachable')['reachable'] is False
+    assert evidence('dagster_reachable')['unhealthy_daemons'] is None
+    assert evidence('queue_bounded')['queued_runs'] is None
+    for key in ('workers_fresh', 'workers_expected', 'workers_unknown', 'failed_receipts', 'window_start', 'window_end'):
+        assert evidence('workers_alive')[key] is None
+    assert evidence('no_error_logs')['error_lines'] is None
+    assert evidence('no_error_logs')['window_start'] is None
+    assert len(tracked.calls) == 9 and len(heartbeat_calls) == len(recorder.history_calls) == 3
+
+    def unavailable_publication() -> list[Finding]:
+        raise RuntimeError('Protocol fault before publication detector entry')
+
+    monkeypatch.setattr(monitor, '_publication_findings', unavailable_publication)
+    monitor.tick(now + timedelta(minutes=3))
+    assert monitor.publication_policy == {}
+    assert monitor.law_tape.last is not None
+    assert not any('publication_policy' in item for item in monitor.law_tape.last['projections'])
+
+    catalog = build_catalog('58b45deee0602e7524c2efcba4e532174ad40902')
+    required = catalog['law_gate_ids']
+    assert len(required) == 14 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
+    monkeypatch.setattr('origo.sources.registry.SOURCE_REGISTRY', ())
+    assert build_catalog(catalog['deployed_sha'])['law_gate_ids'] == required
+
+
+def test_publication_policy_evidence_reuses_existing_decisions(
+    recorder: _Recorder, tmp_path: Path, law_case: LawCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = 'binance_spot_trades'
+    law_case.minute(0)
+    end = datetime(2025, 1, 1, 0, 1, tzinfo=UTC)
+    root = tmp_path / 'shadow'
+    mount = root / source / 'mount' / 'latest.json'
+    _manifest(root, source, 'mount', end - timedelta(hours=3))
+    tracked = _TrackedClient(law_case.client)
+    monitor = _monitor(recorder, tmp_path, client=tracked, publication_root=root)
+    reader = _HoldReader(False)
+    calls: list[str] = []
+    owned = reader.backfill_owns_publication
+
+    def observed_owner(key: str) -> bool:
+        calls.append(key)
+        return owned(key)
+
+    monkeypatch.setattr(reader, 'backfill_owns_publication', observed_owner)
+    monkeypatch.setattr(monitor, 'dagster', reader)
+    reads: list[Path] = []
+    read_text = Path.read_text
+
+    def observed_read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if path.name == 'latest.json':
+            reads.append(path)
+        return read_text(path, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, 'read_text', observed_read)
+    key = f'{source}:consumer:mount'
+    assert monitor._publication_findings() == []
+    assert len(tracked.calls) == len(calls) == len(reads) == 1
+    assert monitor.publication_policy[key] == {
+        'reason': 'within_budget', 'lag_seconds': 10800.0, 'grace_seconds': 10800.0,
+        'state_through': end.isoformat(), 'published_through': (end - timedelta(hours=3)).isoformat(),
+    }
+    assert monitor.publication_policy[f'{source}:consumer:huggingface']['reason'] == 'unknown'
+    assert monitor.publication_policy['binance_perp_aggtrades:consumer:mount']['reason'] == 'not_applicable'
+    assert monitor.publication_policy['binance_spot_depth20_1m:consumer:arrow']['reason'] == 'not_applicable'
+
+    _manifest(root, source, 'mount', end - timedelta(hours=3, seconds=1))
+    assert monitor._publication_findings()[0].key == f'publication_stale:{source}:mount'
+    assert monitor.publication_policy[key]['reason'] == 'stale'
+    monkeypatch.setattr(reader, '_owned', True)
+    before = len(reads)
+    assert monitor._publication_findings() == []
+    assert monitor.publication_policy[key]['reason'] == 'backfill_active'
+    assert len(reads) == before
+    monkeypatch.setattr(reader, '_owned', False)
+    _manifest(root, source, 'mount', end)
+    mount.write_text(json.dumps({'active_through': end.isoformat(), 'state_token': 'revision-mismatch-fault'}))
+    assert monitor._publication_findings() == []
+    assert monitor.publication_policy[key]['reason'] == 'within_budget'
+    assert monitor.publication_policy[key]['lag_seconds'] == 0
+    mount.unlink()
+    assert monitor._publication_findings() == []
+    assert monitor.publication_policy[key]['published_through'] is None
+    assert monitor.publication_policy[key]['lag_seconds'] == 0
+    mount.write_text('{invalid-manifest-fault')
+    assert monitor._publication_findings()[0].key == f'publication_manifest_unreadable:{source}:mount'
+    assert monitor.publication_policy[key]['reason'] == 'unreadable'
+    tracked.fail = True
+    findings, complete = monitor._guarded('publication_current', 'publication', lambda: (monitor._publication_findings(), True))
+    assert not complete and findings[0].key == 'detector_failed:publication'
+    assert monitor.publication_policy[key]['reason'] == 'unknown'
+    assert len(tracked.calls) == 7 and len(calls) == 6 and len(reads) == 5
+    monitor._law_findings(NOW, findings)
+    assert monitor.pending_report is not None
+    outputs = [item for item in monitor.pending_report['projections'] if ':consumer:' in item['id']]
+    assert len(outputs) == 10
+    assert all(item['publication_policy'] == monitor.publication_policy[item['id']] for item in outputs)

@@ -204,6 +204,44 @@ def test_a_late_backfill_joins_the_lane_at_its_current_place(instance):
     assert sum(run.tags['dagster/backfill'] == 'spotbulk' for run in runs) == 5
 
 
+def test_a_new_backfill_joins_at_the_lowest_queued_place(instance):
+    def backfill(share, job, count):
+        return [
+            submit(instance, job=job, day=f'2021-{n // 28 + 1:02d}-{n % 28 + 1:02d}', tags={'dagster/backfill': share})
+            for n in range(count)
+        ]
+
+    early = backfill('earlybulk', 'backfill_binance_spot_aggtrades_source_job', 1)
+    older = backfill('olderbulk', 'backfill_binance_spot_trades_source_job', 30)
+    for run in older[:20]:
+        instance.report_run_canceled(run)
+    backfill('lowbulk', 'backfill_binance_perp_trades_source_job', 20)
+    instance.report_run_canceled(early[0])
+    # The oldest queued run now holds place 20, while the lowest queued place is 0.
+    backfill('newbulk', 'backfill_binance_perp_aggtrades_source_job', 10)
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    assert sum(run.tags['dagster/backfill'] == 'newbulk' for run in runs) == 5
+
+
+def test_restarted_recovery_continues_after_places_it_kept(instance):
+    legacy = [
+        create_run_for_test(
+            instance,
+            job_name='backfill_binance_spot_trades_source_job',
+            status=DagsterRunStatus.QUEUED,
+            tags={'dagster/backfill': 'legacybulk', 'dagster/partition': f'2020-03-{n + 1:02d}'},
+        )
+        for n in range(6)
+    ]
+    # An interrupted recovery placed the first three before it stopped.
+    for place, run in enumerate(legacy[:3]):
+        instance.add_run_tags(run.run_id, execution_tags(run, place))
+    recover_queue(instance)
+    places = [-int(instance.get_run_by_id(run.run_id).tags['dagster/priority']) for run in legacy]
+    assert places == [0, 1, 2, 3, 4, 5]
+
+
 def test_maintenance_lane_dequeues_while_routine_and_backfill_lanes_are_full(instance):
     probe = create_run_for_test(instance, job_name='maintain_operational_metadata_job')
     tags = execution_tags(probe)

@@ -68,11 +68,11 @@ def recover_queue(instance: DagsterInstance) -> dict[str, int]:
         for run in outstanding_runs(instance):
             share = bulk_share(run)
             order = 0
-            if share and SHARE_TAG in run.tags:
-                order = bulk_order(run)
-            elif share:
-                order = places[share]
-                places[share] += 1
+            if share:
+                # A place kept from admission or an interrupted recovery also moves the share's
+                # next place past it, so a restart never repeats early places.
+                order = bulk_order(run) if SHARE_TAG in run.tags else places[share]
+                places[share] = max(places[share], order + 1)
             tags = execution_tags(run, order)
             instance.add_run_tags(run.run_id, tags)
             counts['classified'] += 1

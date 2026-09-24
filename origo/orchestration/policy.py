@@ -64,7 +64,7 @@ def bulk_order(run: DagsterRun) -> int:
 
 def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
     """``order`` is a bulk run's place in the historical lane (start-time fair queuing): a share
-    joins at the lane's oldest queued place and then follows its own queue, so concurrent
+    joins at the lane's lowest queued place and then follows its own queue, so concurrent
     backfills alternate and one backfill never holds another source's fills back."""
     share = bulk_share(run)
     bulk = share is not None

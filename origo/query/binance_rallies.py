@@ -47,8 +47,9 @@ MAX_TIME_TO_HIT = timedelta(minutes=240)
 HORIZON_GRID_MINUTES = (1, 3, 5, 15, 30, 60, 120, 240)
 # The reference trade and the before-start records are looked up this far back.
 LOOKBACK = timedelta(hours=24)
-# Bounds the extra history one request reads from production ClickHouse.
-MAX_MINUTES_BEFORE = 1440
+# Bounds the trades one request loads from production ClickHouse, lead-in included:
+# a day's range with up to a day of lead-in.
+MAX_READ_SPAN = timedelta(hours=48)
 
 RALLY_FIELDS = (
     'rally_id', 'anchor_time', 'reference_trade_id', 'reference_time', 'reference_price',
@@ -73,6 +74,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _MINUTE = 60_000_000
 _MAX = MAX_TIME_TO_HIT // _US
 _LOOKBACK = LOOKBACK // _US
+_MAX_READ = MAX_READ_SPAN // _US
 _ID = re.compile(rf'binance:spot:BTCUSDT:{DEFINITION_VERSION}:t(\d+)')
 
 _LEVELS = pl.List(pl.Struct({'price': pl.Float64, 'quantity': pl.Float64}))
@@ -175,11 +177,18 @@ def export_binance_rallies(
     minutes_before: int = 0,
 ) -> tuple[Path, Path, Path]:
     request = _request(rally_ids, start, end, boundary, minutes_before)
+    windows = _windows(request)
+    loaded = sum(_limit(anchors[-1], end) - anchors[0] + request.lead for anchors, end in windows)
+    if loaded > _MAX_READ:
+        raise ValueError(
+            f'The request would load {loaded * _US} of trades; one request loads at most '
+            f'{MAX_READ_SPAN}, lead-in included. Split it.'
+        )
     if output_dir.exists():
         raise FileExistsError(f'{output_dir} already exists.')
     reader = _Reader(_connect(), _database())
     try:
-        rallies, trades, partitions = _detect_all(reader, request)
+        rallies, trades, partitions = _detect_all(reader, request, windows)
         book, bounds, book_reads = _book_rows(reader, rallies, request.boundary)
     finally:
         reader.client.close()
@@ -219,14 +228,8 @@ def _request(
 ) -> _Request:
     if cast(str, boundary) not in ('after', 'before'):
         raise ValueError(f'Unknown boundary {boundary!r}; use "after" or "before".')
-    if (
-        not isinstance(cast(object, minutes_before), int)
-        or not 0 <= minutes_before <= MAX_MINUTES_BEFORE
-    ):
-        raise ValueError(
-            f'minutes_before must be an integer from 0 to {MAX_MINUTES_BEFORE}, '
-            f'not {minutes_before!r}.'
-        )
+    if not isinstance(cast(object, minutes_before), int) or minutes_before < 0:
+        raise ValueError(f'minutes_before must be a non-negative integer, not {minutes_before!r}.')
     lead = minutes_before * _MINUTE
     description: dict[str, object] = {'boundary': boundary, 'minutes_before': minutes_before}
     if rally_ids is not None and start is None and end is None:
@@ -255,9 +258,11 @@ def _iso(value: int) -> str:
 
 def _parse_id(value: str) -> int:
     match = _ID.fullmatch(value)
-    if match is None or int(match.group(1)) % 60:
+    anchor = int(match.group(1)) * 1_000_000 if match else 0
+    # The canonical form must round-trip: no leading zeros, non-ASCII digits or seconds.
+    if match is None or anchor % _MINUTE or _rally_id(anchor) != value:
         raise ValueError(f'Unsupported rally ID: {value!r}')
-    return int(match.group(1)) * 1_000_000
+    return anchor
 
 
 def _rally_id(anchor: int) -> str:
@@ -322,8 +327,10 @@ class _Reader:
                 quote_quantity, toBool(is_buyer_maker) AS is_buyer_maker,
                 toBool(is_best_match) AS is_best_match
             FROM {self.database}.{TRADES_SOURCE}_{component}_revisions
-            WHERE has({{{name}:Array(Tuple(String, String, String))}},
-                      (partition_key, revision, toString(build_id)))
+            WHERE source_date BETWEEN toDate(fromUnixTimestamp64Micro({{low:Int64}}, 'UTC'))
+                              AND toDate(fromUnixTimestamp64Micro({{high:Int64}}, 'UTC'))
+              AND (partition_key, revision, toString(build_id))
+                  IN {{{name}:Array(Tuple(String, String, String))}}
               AND datetime >= fromUnixTimestamp64Micro({{low:Int64}}, 'UTC')
               AND datetime < fromUnixTimestamp64Micro({{high:Int64}}, 'UTC')"""
             for component, name in (('raw', 'canonical'), ('raw_latest', 'provisional'))
@@ -362,9 +369,8 @@ class _Reader:
 
 
 def _detect_all(
-    reader: _Reader, request: _Request
+    reader: _Reader, request: _Request, windows: Sequence[tuple[tuple[int, ...], int | None]]
 ) -> tuple[list[_Rally], pl.DataFrame, list[_Partition]]:
-    windows = _windows(request)
     reads = [
         (anchors[0] - request.lead - _LOOKBACK, _limit(anchors[-1], end))
         for anchors, end in windows

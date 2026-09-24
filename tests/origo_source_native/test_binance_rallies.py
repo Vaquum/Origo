@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from itertools import count
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import polars as pl
 import pyarrow as pa
@@ -23,6 +24,13 @@ from clickhouse_driver import Client
 from dagster import materialize
 
 import origo.query.binance_rallies as rallies_module
+from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters.binance_spot_rest import BinanceSpotProvisional
+from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.contracts import Partition, Revision, StateRecord
+from origo.sources.hashing import content_hash
+from origo.sources.lifecycle import SourceRuntime
+from origo.sources.storage import SourceStore
 from origo.query.binance_rallies import (
     BOOK_FIELDS,
     METADATA_KEY,
@@ -93,11 +101,6 @@ def _trade_rows_2017() -> list[tuple[Any, ...]]:
 
 def _reactivate_2017() -> None:
     """Activate a second revision of 2017-08-17 holding the same official rows."""
-    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-    from origo.sources.contracts import StateRecord
-    from origo.sources.storage import SourceStore
-
     build = UUID(int=2)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
@@ -116,8 +119,6 @@ def _reactivate_2017() -> None:
 
 def _omit_book_before(moment: str) -> None:
     """Drop the authentic snapshots observed before ``moment`` (UTC) from the test book."""
-    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         client.execute(
@@ -139,8 +140,18 @@ def _fixture_book() -> pl.DataFrame:
     )
 
 
-@pytest.fixture()
-def rally_data(origo_test_env: dict[str, str], origo_assets: dict[str, Any]) -> None:
+class _ExcerptMinutes(BinanceSpotProvisional):
+    """The 2026-06-27 excerpt served minute by minute, as the provisional REST tail would."""
+
+    def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
+        rows = tuple(
+            row for row in _fixture_trades().iter_rows() if partition.start <= row[-1] < partition.end
+        )
+        digest = content_hash(rows, schema_version=1)
+        return Revision(digest, digest, '{}', len(rows), lambda: iter(rows))
+
+
+def _create_book(origo_assets: dict[str, Any]) -> None:
     created = materialize(
         [
             origo_assets['create_origo_database'],
@@ -148,16 +159,30 @@ def rally_data(origo_test_env: dict[str, str], origo_assets: dict[str, Any]) -> 
         ]
     )
     assert created.success
+    book = [
+        (observed_at, source_ms, update_id, [tuple(level.values()) for level in bids],
+         [tuple(level.values()) for level in asks])
+        for observed_at, source_ms, update_id, bids, asks in pl.read_parquet(BOOK_2026).iter_rows()
+    ]
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        client.execute(
+            """INSERT INTO origo.binance_spot_depth200_snapshots
+            (datetime, source_timestamp_ms, last_update_id, bids, asks) VALUES""",
+            book,
+        )
+    finally:
+        client.disconnect()
+
+
+@pytest.fixture()
+def rally_data(origo_test_env: dict[str, str], origo_assets: dict[str, Any]) -> None:
+    _create_book(origo_assets)
     for day in ('2017-08-17', '2026-06-27'):
         seed_spot_source(day)
     trades_2026 = [
         (date(2026, 6, 27), '2026-06-27', SEED_REVISION, SEED_BUILD_ID, *row)
         for row in _fixture_trades().iter_rows()
-    ]
-    book = [
-        (observed_at, source_ms, update_id, [tuple(level.values()) for level in bids],
-         [tuple(level.values()) for level in asks])
-        for observed_at, source_ms, update_id, bids, asks in pl.read_parquet(BOOK_2026).iter_rows()
     ]
     client = Client(
         host=origo_test_env['CLICKHOUSE_HOST'],
@@ -171,11 +196,6 @@ def rally_data(origo_test_env: dict[str, str], origo_assets: dict[str, Any]) -> 
             (source_date, partition_key, revision, build_id, trade_id, price, quantity,
              quote_quantity, timestamp, is_buyer_maker, is_best_match, datetime) VALUES""",
             _trade_rows_2017() + trades_2026,
-        )
-        client.execute(
-            """INSERT INTO origo.binance_spot_depth200_snapshots
-            (datetime, source_timestamp_ms, last_update_id, bids, asks) VALUES""",
-            book,
         )
     finally:
         client.disconnect()
@@ -288,6 +308,8 @@ def test_id_selection(
         f'binance:perp:BTCUSDT:r30v1:t{anchor}',
         f'binance:spot:BTCUSDT:r30v1:t{anchor + 1}',
         f'binance:spot:BTCUSDT:r30v1:t{anchor + 60}',
+        f'binance:spot:BTCUSDT:r30v1:t0{anchor}',
+        'binance:spot:BTCUSDT:r30v1:t' + ''.join(chr(0x660 + int(d)) for d in str(anchor)),
     ):
         output = tmp_path / f'rejected-{next(_names)}'
         with pytest.raises(ValueError):
@@ -487,6 +509,7 @@ def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:
             assert [field.type for field in tables[name].schema] == [TYPES[f] for f in fields]
 
     anchor_id = f'binance:spot:BTCUSDT:r30v1:t{int(_at("11:39").timestamp())}'
+    first = int(_at('11:39').timestamp())
     for selector in (
         {'rally_ids': [anchor_id], 'start': _at('11:39'), 'end': _at('11:55')},
         {},
@@ -498,7 +521,9 @@ def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:
         {'start': _at('11:39'), 'end': _at('11:55'), 'boundary': 'middle'},
         {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': -1},
         {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 1.5},
-        {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 1441},
+        {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 2880},
+        {'start': _at('11:39'), 'end': _at('11:39') + timedelta(hours=49)},
+        {'rally_ids': [f'binance:spot:BTCUSDT:r30v1:t{first + 200 * 60 * n}' for n in range(16)]},
     ):
         output = tmp_path / f'invalid-{next(_names)}'
         with pytest.raises(ValueError):
@@ -534,3 +559,44 @@ def test_deterministic_atomic_output(
         export_binance_rallies(output_dir=existing, start=_at('11:39'), end=_at('11:55'))
     assert [path.name for path in existing.iterdir()] == ['kept.txt']
     assert (existing / 'kept.txt').read_text() == 'kept'
+
+
+def test_provisional_minutes(
+    origo_test_env: dict[str, str], origo_assets: dict[str, Any], tmp_path: Path
+) -> None:
+    """The excerpt built as provisional minutes through the real runtime exports as canonical,
+    at the provisional tail's millisecond precision."""
+    _create_book(origo_assets)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        spec = replace(BINANCE_SPOT_TRADES_SPEC, provisional=_ExcerptMinutes())
+        store = SourceStore(client, 'origo', spec)
+        runtime = SourceRuntime(spec, store, tmp_path / 'locks', str(uuid4()))
+        runtime.setup(anchor=_at('11:38'))
+        for minute in range(17):
+            key = (_at('11:38') + timedelta(minutes=minute)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            runtime.build(key, provisional=True)
+    finally:
+        client.disconnect()
+
+    tables = _window(tmp_path)
+    metadata = json.loads(tables['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])
+    partitions = metadata['sources']['trades']['partitions']
+    assert len(partitions) == 17 and all(part['provisional'] for part in partitions)
+    rallies = _rallies(tables)
+    labels = EXPECTED['BTCUSDT-spot-trades-2026-06-27T1138-1155']['rallies']
+    assert rallies.select(
+        pl.col('anchor_time').dt.epoch('s'), 'reference_trade_id', 'hit_trade_id'
+    ).rows() == [tuple(label[:3]) for label in labels]
+    assert rallies['time_to_hit'].dt.total_microseconds().to_list() == [
+        label[3] // 1000 * 1000 for label in labels
+    ]
+    source = _fixture_trades().filter(pl.col('trade_id').is_between(6453964086, 6453974454))
+    assert pl.from_arrow(tables['trades.arrow']).equals(
+        source.select(
+            'trade_id', pl.col('datetime').dt.truncate('1ms').alias('timestamp'), 'price',
+            'quantity', 'quote_quantity', pl.col('is_buyer_maker').cast(pl.Boolean),
+            pl.col('is_best_match').cast(pl.Boolean),
+        )
+    )
+    assert tables['book.arrow'].num_rows == 401

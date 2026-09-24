@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo"
-version = "3.24.2"
+version = "3.24.3"
 description = "Event-sourced market data platform for deterministic, replayable financial data access"
 readme = "README.md"
 license = "MIT"

@@ -1,3 +1,7 @@
+# v3.24.3
+
+- Allow raw-perp minutes up to 512 page requests per attempt, preserving the 100-page default for other sources, boundary validation and provider budgets; publish each adapter's effective cap in the law catalog.
+
 # v3.24.2
 
 - Add `docs/Reference/Binance-rallies.md`, the guide and reference for the Binance spot rally export. It covers running an export on the production host, copying the files off and reading them, rally selection, the lead-in and boundary settings, the rally definition, the file columns and metadata, data coverage, limits, errors and reproducibility. The README links it.

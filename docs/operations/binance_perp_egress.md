@@ -37,7 +37,13 @@ real minute, not a universal throughput benchmark. Recorded-input fault cases
 prove bounded recovery and rejection; they are not new provider captures.
 
 First-page pre-minute proof, ordered raw IDs/times, actual end-boundary evidence,
-500-row requests and the total 100-page bound remain. A short page is not EOF.
+500-row requests remain. [S463](https://github.com/Vaquum/Origo/issues/463) raises
+only raw-perp to 512 page requests per attempt, including a discarded initial page;
+other provisional sources retain 100. A short page is not EOF. This finite allowance
+does not cover every historical minute: the reported 263,775-row minute exceeds it
+even with full pages. The 512 historical requests cost 102,400 weight plus the
+locator, about 71 minutes on one IP before latency or contention; retries restart
+acquisition from the beginning.
 The predecessor lookup and f-64 approach were removed from this intervention.
 
 A six-hour September 23 sample had 260 completed observation records averaging

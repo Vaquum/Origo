@@ -46,6 +46,22 @@ jobs:
             tests/origo_source_native/test_law_page.py::test_operational_history_totals_preserve_intervals_and_limits \
             tests/origo_source_native/test_law_page.py::test_overview_production_shape_stays_within_resource_budgets
 
+      - name: Execute raw-perp page-budget acceptance tests
+        run: |
+          pytest -q --junitxml=perp-page-budget.xml \
+            tests/origo_source_native/test_binance_perp_efficiency.py::test_busy_perp_minute_exceeds_100_pages_and_matches_archive \
+            tests/origo_source_native/test_binance_perp_efficiency.py::test_perp_page_cap_fails_without_end_witness \
+            tests/origo_source_native/test_binance_perp_efficiency.py::test_perp_fallback_counts_against_page_cap \
+            tests/origo_source_native/test_binance_perp_efficiency.py::test_page_caps_preserve_other_sources_and_request_budgets
+          python - <<'PYTHON'
+          from xml.etree import ElementTree
+
+          suites = ElementTree.parse('perp-page-budget.xml').getroot().findall('testsuite')
+          assert sum(int(suite.attrib['tests']) for suite in suites) == 4
+          for outcome in ('skipped', 'failures', 'errors'):
+              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
+          PYTHON
+
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
 

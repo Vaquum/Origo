@@ -12,7 +12,11 @@ queues or activate automation in Dagit.
   consume the backfill allocation and `maintain_operational_metadata_job` (workload
   `maintenance`, priority 300) always has a lane while the other two are full. All
   sources share the historical allocation; registering another source does not
-  multiply the server's concurrency budget.
+  multiply the server's concurrency budget. Each native backfill, or bulk job run
+  outside one, is one share of that lane: a bulk run's priority is minus the number
+  of its own share's outstanding runs, so concurrent backfills alternate and a long
+  backfill never holds another source's fills back. Deployment recovery re-derives
+  the same ranks.
 - Native dequeue uses nineteen launch threads and a one-second poll. Canonical
   source operations retain their registered eight-worker pool. Ten backfill run
   slots preserve the existing launch capacity around those eight operations;

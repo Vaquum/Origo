@@ -197,9 +197,15 @@ class ComponentSpec:
     build: Callable[[BuildContext], None]
     provisional: bool = False
     current_target: str | None = None
+    start_at: datetime | None = None
+    activation_group: str | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
+        if self.activation_group is not None:
+            identifier(self.activation_group)
+        if self.start_at is not None and self.start_at.tzinfo != UTC:
+            raise ValueError('Component applicability must start at a UTC instant.')
         names = tuple(column.name for column in self.columns)
         if len(names) != len(set(names)) or not set(self.primary_key) <= set(names):
             raise ValueError('Component columns and primary key must be unambiguous.')

@@ -352,7 +352,7 @@ def test_market_state_uint32_overflow_and_hash_compatibility(cube_client: Client
     )
 
 
-def test_market_state_remains_unregistered() -> None:
+def test_market_state_is_registered_with_applicability_and_rollout_group() -> None:
     expected = (
         'raw',
         'time',
@@ -364,8 +364,12 @@ def test_market_state_remains_unregistered() -> None:
         'raw_latest',
         'time_latest',
         'dollar_latest',
+        'market_state',
+        'market_state_latest',
     )
     assert tuple(component.key for component in SPOT_COMPONENTS) == expected
     assert BINANCE_SPOT_TRADES_SPEC.components == SPOT_COMPONENTS
     assert len(MARKET_STATE_COMPONENTS) == 2
-    assert not set(MARKET_STATE_COMPONENTS) & set(SPOT_COMPONENTS)
+    assert set(MARKET_STATE_COMPONENTS) <= set(SPOT_COMPONENTS)
+    assert all(item.start_at == CUBE_START for item in MARKET_STATE_COMPONENTS)
+    assert all(item.activation_group == 'market_state' for item in MARKET_STATE_COMPONENTS)

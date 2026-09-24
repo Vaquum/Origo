@@ -213,7 +213,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 
 
 def build_catalog(deployed_sha: str) -> LawCatalog:
-    from origo.law import LAW_ANCHORS, LAW_INVENTORY
+    from origo.law import LAW_ANCHORS, LAW_INVENTORY, MARKET_STATE_SOURCE
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -821,7 +821,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         'law_gate_ids': [
             f'law.{predicate}:{source}'
             for source in LAW_INVENTORY
-            for predicate in (('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',))
+            for predicate in (('R1', 'C1', 'C2', 'M1', 'M2') if source == MARKET_STATE_SOURCE else ('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',))
         ],
     }
     catalog['version'] = _hash(catalog)
@@ -962,6 +962,21 @@ def _operational_gates(add: _AddGate) -> None:
                 cadence='periodic',
                 evidence='law sample independent reader/proof query',
             )
+    market_source = str(_resolve('law:MARKET_STATE_SOURCE'))
+    for predicate, owner, condition, thresholds in (
+        ('M1', 'law:_m1',
+         'The reader-selected market state generation must contain activated cube proof and matching physical trade and taker-buy counts in its bounded base-cell window; reader age stays within the spot freshness budget.',
+         {'budget_seconds': _threshold('law:R1_SPOT_BUDGET_SECONDS'),
+          'base_time_us': _threshold('sources.profiles.market_state:BASE_TIME_US')}),
+        ('M2', 'law:_m2',
+         'Every canonical UTC day from the cube anchor through the due archive frontier must have activated market state proof. Unactivated additions and absent days never count as coverage.',
+         {'anchor': str(_resolve('sources.profiles.market_state:CUBE_START'))}),
+    ):
+        add(f'law.{predicate}:{market_source}',
+            [market_source, f'{market_source}:market_state', f'{market_source}:market_state_latest'],
+            owner, 'Market state cube law observation', condition, thresholds,
+            role='observe', cadence='periodic',
+            evidence='law sample active component proofs and bounded reader-selected count query')
     for spec in DEPTH_SPECS:
         add(
             f'law.D1:{spec.projection_table_name}',

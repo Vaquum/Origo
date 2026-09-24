@@ -165,6 +165,11 @@ class SourceStore:
             build_id UUID, generation UInt64, dagster_run_id String
         ) ENGINE=MergeTree ORDER BY (source_key, backfill_id, partition_key)""")
 
+        self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_component_rollout_log')} (
+            source_key String, activation_group String, enabled UInt8,
+            recorded_at DateTime64(6, 'UTC')
+        ) ENGINE=MergeTree ORDER BY (source_key, activation_group, recorded_at)""")
+
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_discovery_log')} (
             source_key String, partition_key String, requested_at DateTime64(6, 'UTC')
         ) ENGINE=MergeTree ORDER BY (source_key, partition_key)""")
@@ -275,7 +280,7 @@ class SourceStore:
                 if provisional.current_target == component.key
             )
             self.execute(
-                f'CREATE VIEW IF NOT EXISTS {self.table(self.spec.names.prefix + "_" + component.key + "_current")} AS '
+                f'CREATE OR REPLACE VIEW {self.table(self.spec.names.prefix + "_" + component.key + "_current")} AS '
                 + ' UNION ALL '.join(selections)
             )
         for name in (*_RETIRED_TABLES, *self.spec.retired_tables):
@@ -318,10 +323,15 @@ class SourceStore:
 
     def _current_select(self, target: ComponentSpec, source: ComponentSpec) -> str:
         selected = ', '.join(f'd.{column.name}' for column in target.columns)
+        active = (
+            f" AND arrayExists(pair -> pair[1] = '{source.key}', "
+            "JSONExtract(a.component_hashes, 'Array(Array(String))'))"
+            if source.activation_group is not None else ''
+        )
         return f"""SELECT {selected} FROM {self.component_table(source.key)} d
             INNER JOIN {self.table('source_current_partitions')} a
             ON d.partition_key=a.partition_key AND d.revision=a.revision AND d.build_id=a.build_id
-            WHERE a.source_key='{self.spec.key}' AND a.provisional={int(source.provisional)}"""
+            WHERE a.source_key='{self.spec.key}' AND a.provisional={int(source.provisional)}{active}"""
 
     def generation(self, partition: Partition) -> int:
         rows = self.execute(
@@ -335,11 +345,56 @@ class SourceStore:
         )
         return _int(rows[0][0])
 
-    def components(self, partition: Partition) -> tuple[ComponentSpec, ...]:
+    def enabled_groups(self) -> frozenset[str]:
+        groups = {item.activation_group for item in self.spec.components if item.activation_group}
+        if not groups:
+            return frozenset()
+        rows = self.execute(
+            f"""SELECT activation_group FROM {self.table('source_component_rollout_log')}
+            WHERE source_key=%(source)s GROUP BY activation_group
+            HAVING argMax(enabled, recorded_at)=1""",
+            {'source': self.spec.key},
+        )
+        enabled = frozenset(str(row[0]) for row in rows)
+        if not enabled <= groups:
+            raise SourceError('COMPONENT_ROLLOUT_INVALID', 'Enabled component group is undeclared.')
+        return enabled
+
+    def known_components(self, partition: Partition) -> tuple[ComponentSpec, ...]:
         return tuple(
-            component
-            for component in self.spec.components
+            component for component in self.spec.components
             if component.provisional == partition.provisional
+            and (component.start_at is None or partition.end > component.start_at)
+        )
+
+    def components(self, partition: Partition) -> tuple[ComponentSpec, ...]:
+        enabled = self.enabled_groups()
+        return tuple(
+            component for component in self.known_components(partition)
+            if component.activation_group is None or component.activation_group in enabled
+        )
+
+    def accepted_components(self, record: StateRecord) -> tuple[ComponentSpec, ...]:
+        known = self.known_components(record.partition)
+        keys = {key for key, _digest in record.component_hashes}
+        base = {item.key for item in known if item.activation_group is None}
+        valid = base <= keys <= {item.key for item in known}
+        for group in {item.activation_group for item in known if item.activation_group}:
+            members = {item.key for item in known if item.activation_group == group}
+            valid = valid and (not keys & members or members <= keys)
+        if not valid or len(keys) != len(record.component_hashes):
+            raise SourceError('RETAINED_CONTENT_INVALID', 'Retained component inventory is invalid.')
+        return tuple(item for item in known if item.key in keys)
+
+    def missing_components(
+        self, record: StateRecord, *, enabled: frozenset[str] | None = None
+    ) -> tuple[ComponentSpec, ...]:
+        accepted = {item.key for item in self.accepted_components(record)}
+        groups = self.enabled_groups() if enabled is None else enabled
+        return tuple(
+            item for item in self.known_components(record.partition)
+            if item.key not in accepted
+            and (item.activation_group is None or item.activation_group in groups)
         )
 
     def validate_component(
@@ -430,6 +485,40 @@ class SourceStore:
             Partition(str(row[0]), _utc(row[1]), _utc(row[2]), bool(row[3])) for row in rows
         )
 
+    @staticmethod
+    def _state_record(row: Row) -> StateRecord:
+        hashes: object = json.loads(str(row[7]))
+        if not isinstance(hashes, list):
+            raise TypeError('Activation component hashes must be a list.')
+        pairs: list[tuple[str, str]] = []
+        for item in cast(list[object], hashes):
+            if not isinstance(item, list):
+                raise TypeError('Activation component hash entry must be a pair.')
+            pair = cast(list[object], item)
+            if len(pair) != 2:
+                raise TypeError('Activation component hash entry must be a pair.')
+            if not isinstance(pair[0], str) or not isinstance(pair[1], str):
+                raise TypeError('Activation component hash entry must contain strings.')
+            pairs.append((pair[0], pair[1]))
+        return StateRecord(
+            Partition(str(row[0]), _utc(row[2]), _utc(row[3]), bool(row[1])),
+            _int(row[4]), str(row[5]), _uuid(row[6]), tuple(pairs),
+        )
+
+    def record(self, partition: Partition) -> StateRecord | None:
+        rows = self.execute(
+            f"""SELECT partition_key, provisional, partition_start, partition_end,
+            generation, revision, build_id, component_hashes
+            FROM {self.table('source_active_partitions')}
+            WHERE source_key=%(source)s AND partition_key=%(partition)s
+              AND provisional=%(provisional)s""",
+            {'source': self.spec.key, 'partition': partition.key,
+             'provisional': int(partition.provisional)},
+        )
+        if len(rows) > 1:
+            raise SourceError('RETAINED_CONTENT_INVALID', 'Partition has ambiguous active state.')
+        return self._state_record(rows[0]) if rows else None
+
     def records(self, *, canonical_only: bool = False) -> tuple[StateRecord, ...]:
         rows = self.execute(
             f"""SELECT partition_key, provisional, partition_start, partition_end,
@@ -440,28 +529,7 @@ class SourceStore:
         )
         result: list[StateRecord] = []
         for row in rows:
-            hashes: object = json.loads(str(row[7]))
-            if not isinstance(hashes, list):
-                raise TypeError('Activation component hashes must be a list.')
-            pairs: list[tuple[str, str]] = []
-            for item in cast(list[object], hashes):
-                if not isinstance(item, list):
-                    raise TypeError('Activation component hash entry must be a pair.')
-                pair = cast(list[object], item)
-                if len(pair) != 2:
-                    raise TypeError('Activation component hash entry must be a pair.')
-                if not isinstance(pair[0], str) or not isinstance(pair[1], str):
-                    raise TypeError('Activation component hash entry must contain strings.')
-                pairs.append((pair[0], pair[1]))
-            result.append(
-                StateRecord(
-                    Partition(str(row[0]), _utc(row[2]), _utc(row[3]), bool(row[1])),
-                    _int(row[4]),
-                    str(row[5]),
-                    _uuid(row[6]),
-                    tuple(pairs),
-                )
-            )
+            result.append(self._state_record(row))
         canonical = [record for record in result if not record.partition.provisional]
         if canonical_only:
             return tuple(canonical)
@@ -503,9 +571,10 @@ class SourceStore:
         )
 
     def complete_builds(self) -> tuple[str, dict[str, object]]:
-        """Subquery of builds whose component log carries every declared canonical component."""
+        """Builds complete for existing canonical consumers, independent of additive rollout."""
         keys = tuple(
-            component.key for component in self.spec.components if not component.provisional
+            component.key for component in self.spec.components
+            if not component.provisional and component.activation_group is None
         )
         return (
             f"""(SELECT source_key, partition_key, revision, build_id
@@ -543,7 +612,10 @@ class SourceStore:
         result: list[Row] = []
         names = ', '.join(column.name for column in specification.columns)
         for record in snapshot.records:
-            if record.partition.provisional != specification.provisional:
+            if record.partition.provisional != specification.provisional or (
+                specification.activation_group is not None
+                and component not in dict(record.component_hashes)
+            ):
                 continue
             result.extend(
                 self.execute(

@@ -1529,3 +1529,13 @@ def test_publication_policy_evidence_reuses_existing_decisions(
     outputs = [item for item in monitor.pending_report['projections'] if ':consumer:' in item['id']]
     assert len(outputs) == 10
     assert all(item['publication_policy'] == monitor.publication_policy[item['id']] for item in outputs)
+
+
+def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:
+    cursor = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
+    fresh = Finding('law:M1:binance_spot_trades:FAIL:cube_not_activated', 'data_current', 'cube', 'missing')
+    history = Finding('law:M2:binance_spot_trades:FAIL:cube_not_activated', 'data_current', 'cube', 'history')
+    for minute in range(5):
+        held = held_law_keys(cursor, [fresh, history], (NOW + timedelta(minutes=minute)).isoformat())
+        assert (fresh.key in held) == (minute < 4)
+        assert history.key not in held

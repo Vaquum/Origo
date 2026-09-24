@@ -1641,3 +1641,34 @@ def test_operational_history_totals_preserve_intervals_and_limits(
             row = page._object(page._object(cache.operations_history[metric])[horizon])
             assert row['complete'] is False and row['limited'] is True and row['count'] is None
     assert page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024
+
+
+def test_market_state_laws_and_projection_nodes_render_from_tape(
+    serving: tuple[str, page.TapeCache, page.Document, datetime],
+) -> None:
+    url, _, report, _ = serving
+    feed = next(item for item in page._objects(report['feeds']) if item['source_key'] == 'binance_spot_trades')
+    predicates = page._object(feed['predicates'])
+    assert page._object(predicates['M1'])['status'] == 'PASS'
+    assert page._object(predicates['M2'])['status'] == 'FAIL'
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url + '/law?view=sources')
+        cube = tab.locator('[data-projection="binance_spot_trades:market_state"]')
+        assert 'failed' in cube.inner_text().lower()
+        latest = tab.locator('[data-projection="binance_spot_trades:market_state_latest"]')
+        assert 'current' in latest.inner_text().lower()
+        tab.screenshot(path='/tmp/origo-market-state-law-sources.png', full_page=True)
+        tab.goto(url + '/law?view=laws&family=M2')
+        tab.wait_for_selector('[data-law-id="law.M2:binance_spot_trades"]')
+        assert tab.locator('.gate').count() == 1
+        assert 'fail' in tab.locator('.gate').inner_text().lower()
+        tab.locator('.gate [data-gate="law.M2:binance_spot_trades"]').click()
+        assert '2021-01-01' in tab.locator('#detail').inner_text()
+        tab.goto(url + '/law')
+        tab.wait_for_selector('[data-overview="M1"]')
+        assert 'pass' in tab.locator('[data-overview="M1"]').inner_text().lower()
+        assert 'fail' in tab.locator('[data-overview="M2"]').inner_text().lower()
+        tab.screenshot(path='/tmp/origo-market-state-law-overview.png', full_page=True)
+        browser.close()

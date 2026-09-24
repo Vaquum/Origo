@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from dagster import get_dagster_logger
 
+from .component_upgrade import ComponentUpgradeError, attach_components
 from .contracts import (
     ArchiveNotPublishedYet,
     BuildContext,
@@ -118,6 +119,40 @@ class SourceRuntime:
             )
             raise
 
+    def enable_components(self, group: str) -> None:
+        self.spec.require_enabled('component_enablement')
+        self.require_shared_mount()
+        if group not in {component.activation_group for component in self.spec.components}:
+            raise ValueError(f'Unknown component activation group: {group}')
+        with source_lock(self.lock_root, self.spec.key, 'heavy', wait=True):
+            if group not in self.store.enabled_groups():
+                self.store.execute(
+                    f'INSERT INTO {self.store.table("source_component_rollout_log")} VALUES',
+                    [(self.spec.key, group, 1, datetime.now(UTC))],
+                )
+            if group not in self.store.enabled_groups():
+                raise RuntimeError('Component enablement did not persist.')
+
+    def upgrade_components(self, key: str, *, provisional: bool = False) -> StateRecord:
+        self.spec.require_enabled('component_upgrade')
+        self.require_shared_mount()
+        adapter = self.spec.provisional if provisional else self.spec.canonical
+        if adapter is None:
+            raise ValueError('This source has no provisional adapter.')
+        partition = adapter.partition(key)
+        with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
+            record = self.store.record(partition)
+            if record is None:
+                raise SourceError('ACTIVE_PARTITION_MISSING', 'No selected generation is active.')
+            self._validate_retained(record)
+            return self._upgrade_components(record)
+
+    def _upgrade_components(self, record: StateRecord) -> StateRecord:
+        return attach_components(
+            self.store, record, failure_log=self.failures,
+            run_id=self.run_id, progress=self._beat_progress,
+        )
+
     def build(self, key: str, *, provisional: bool = False) -> StateRecord:
         get_dagster_logger('origo.sources').info(
             'source=%s partition=%s phase=build_started provisional=%s run=%s',
@@ -139,6 +174,10 @@ class SourceRuntime:
             with partition_work(self.lock_root, self.spec.key, lock):
                 expected = self.store.generation(partition)
                 if provisional:
+                    retained = self.store.record(partition)
+                    if retained is not None and self.store.missing_components(retained):
+                        self._validate_retained(retained)
+                        return self._upgrade_components(retained)
                     previous = self.store.execute(
                         f"""SELECT evidence_json FROM {self.store.table('source_observation_log')}
                         WHERE source_key=%(source)s AND partition_key=%(partition)s
@@ -183,6 +222,7 @@ class SourceRuntime:
                         self.spec.canonical.revalidate(
                             partition, Revision(current.revision, '', '{}', 0, lambda: iter(()))
                         )
+                        current = self._upgrade_components(current)
                         self.failures.recover_partition(partition=key)
                         self._recover_superseded(key)
                         return current
@@ -194,12 +234,13 @@ class SourceRuntime:
                 ]
                 if current and current[0].revision == revision.key:
                     self._validate_retained(current[0])
+                    retained = self._upgrade_components(current[0])
                     if provisional:
                         self.failures.recover(operation=operation, partition=key)
                         self.failures.recover(operation='component', partition=key)
                     else:
                         self.failures.recover_partition(partition=key)
-                    return current[0]
+                    return retained
                 record = self._build_components(partition, revision, build_id, expected)
                 if provisional:
                     self._activate(record, expected)
@@ -211,6 +252,8 @@ class SourceRuntime:
                     self.failures.recover_partition(partition=key)
                     self._recover_superseded(key)
                 return record
+        except ComponentUpgradeError:
+            raise
         except Exception as error:
             self._record_attempt_failure(operation, key, build_id, error)
             raise
@@ -386,13 +429,8 @@ class SourceRuntime:
                 )
 
     def _validate_retained(self, record: StateRecord) -> None:
-        components = self.store.components(record.partition)
+        components = self.store.accepted_components(record)
         expected = dict(record.component_hashes)
-        if set(expected) != {component.key for component in components}:
-            raise SourceError(
-                'RETAINED_CONTENT_INVALID',
-                'Activation does not contain the complete component set.',
-            )
         params = {
             'source': self.spec.key,
             'source_date': record.partition.start.date(),
@@ -484,7 +522,8 @@ class SourceRuntime:
                 self._validate_retained(record)
                 revision = Revision(record.revision, '', '{}', 0, lambda: iter(()))
                 try:
-                    self.spec.canonical.revalidate(record.partition, revision)
+                    if not record.partition.provisional:
+                        self.spec.canonical.revalidate(record.partition, revision)
                 except SourceError as error:
                     if error.code != 'OFFICIAL_REVISION_CHANGED' or not quarantine:
                         self.failures.record(
@@ -591,6 +630,10 @@ class SourceRuntime:
         build_id = uuid4()
         try:
             with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
+                current = self.store.record(partition)
+                if current is None:
+                    raise SourceError('ACTIVE_PARTITION_MISSING', 'No canonical generation is active.')
+                record = current
                 try:
                     self._validate_retained(record)
                 except SourceError as error:
@@ -606,8 +649,9 @@ class SourceRuntime:
                         build_id=record.build_id,
                     )
                 else:
+                    upgraded = self._upgrade_components(record)
                     self.failures.recover_partition(partition=key)
-                    return record
+                    return upgraded
                 expected = self.store.generation(partition)
                 revision = self.spec.canonical.fetch(partition)
                 rebuilt = self._build_components(partition, revision, build_id, expected)
@@ -615,6 +659,8 @@ class SourceRuntime:
                 self._activate(rebuilt, expected)
                 self.failures.recover_partition(partition=key)
                 return rebuilt
+        except ComponentUpgradeError:
+            raise
         except Exception as error:
             self._record_attempt_failure('repair', key, build_id, error)
             raise
@@ -692,7 +738,7 @@ class SourceRuntime:
                             continue
                         planned.append(str(build_id))
                         if not dry_run:
-                            for component in self.store.components(partition):
+                            for component in self.store.known_components(partition):
                                 self.store.client.execute(
                                     f"""ALTER TABLE {self.store.component_table(component.key)}
                                     DELETE WHERE partition_key=%(partition)s AND build_id=%(build)s""",
@@ -798,6 +844,7 @@ class SourceRuntime:
                 self.spec.canonical.revalidate(
                     record.partition, Revision(record.revision, '', '{}', 0, lambda: iter(()))
                 )
+                record = self._upgrade_components(record)
                 if self.store.generation(record.partition) != record.generation:
                     raise SourceError(
                         'GENERATION_CHANGED', 'Activation advanced during reconciliation.'
@@ -829,6 +876,8 @@ class SourceRuntime:
                     record.generation,
                 )
                 return record
+        except ComponentUpgradeError:
+            raise
         except Exception as error:
             self.failures.record(
                 operation='integrity',

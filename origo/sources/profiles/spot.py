@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..contracts import Column
+from .market_state import MARKET_STATE_COMPONENTS
 from .profile_base import ProfileDeclaration, build_components
 
 _RAW = (
@@ -52,4 +53,4 @@ _DECL = ProfileDeclaration(
     imbalance_module='spot_dollar_imbalance_klines',
 )
 
-SPOT_COMPONENTS = build_components(_DECL)
+SPOT_COMPONENTS = (*build_components(_DECL), *MARKET_STATE_COMPONENTS)

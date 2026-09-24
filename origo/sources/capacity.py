@@ -12,7 +12,6 @@ from dagster import get_dagster_logger
 from .contracts import SourceError
 from .lifecycle import SourceRuntime
 
-
 CAPACITY_TOTAL_RESERVE_TENTHS = 3
 CAPACITY_WORKING_SET_FACTOR = 2
 CAPACITY_FREE_INODE_DENOMINATOR = 10
@@ -55,7 +54,9 @@ def _volumes(runtime: SourceRuntime) -> tuple[_Volume, ...]:
         Path(os.environ.get('ORIGO_SOURCE_DAGSTER_VOLUME_PATH', '/opt/dagster-instance')),
         Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')),
     )
-    return tuple(_Volume(f'{path}:{path.stat().st_dev}:{server}', path) for path in paths)
+    enabled = runtime.store.enabled_groups()
+    footprint = ':components=' + ','.join(sorted(enabled)) if enabled else ''
+    return tuple(_Volume(f'{path}:{path.stat().st_dev}:{server}{footprint}', path) for path in paths)
 
 
 class CapacityMonitor:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
+from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
 
@@ -41,6 +42,7 @@ D1_MAX_MISSING_SLOTS = 2
 D1_DELIVERY_GRACE_SECONDS = 60
 CANONICAL_COMPONENTS = ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
 PROVISIONAL_COMPONENTS = ('raw_latest', 'time_latest', 'dollar_latest')
+MARKET_STATE_SOURCE = 'binance_spot_trades'
 LAW_QUERY_SETTINGS = {
     'max_memory_usage': 536870912,
     'max_execution_time': 5,
@@ -51,7 +53,7 @@ LAW_QUERY_SETTINGS = {
 LAW_EVALUATION_TIMEOUT_SECONDS = 20
 LawStatus = Literal['PASS', 'FAIL', 'UNKNOWN', 'NOT_DUE']
 OverallStatus = Literal['PASS', 'FAIL', 'UNKNOWN']
-LawPredicate = Literal['R1', 'C1', 'C2', 'D1', 'inventory']
+LawPredicate = Literal['R1', 'C1', 'C2', 'D1', 'M1', 'M2', 'inventory']
 Scalar = str | int | float | bool | None
 
 
@@ -110,6 +112,7 @@ class _Queries:
 
 @dataclass(frozen=True)
 class _Proof:
+    source: str
     key: str
     provisional: bool
     start: datetime
@@ -120,7 +123,7 @@ class _Proof:
     components: tuple[tuple[str, int, str, datetime], ...]
 
     @classmethod
-    def read(cls, row: Row) -> _Proof:
+    def read(cls, row: Row, source: str) -> _Proof:
         raw: object = json.loads(str(row[6]))
         if not isinstance(raw, list):
             raise ValueError('Invalid activation hashes.')
@@ -136,7 +139,7 @@ class _Proof:
         if len(hashes) != len(pairs):
             raise ValueError('Duplicate activation hashes.')
         proofs = cast(list[tuple[object, ...]], row[7])
-        return cls(str(row[0]), bool(row[1]), _utc(row[2]), _utc(row[3]), str(row[4]),
+        return cls(source, str(row[0]), bool(row[1]), _utc(row[2]), _utc(row[3]), str(row[4]),
                    str(row[5]), hashes, tuple(
                        (str(p[0]), int(str(p[1])), str(p[2]), _utc(p[3])) for p in proofs
                    ))
@@ -147,14 +150,19 @@ class _Proof:
 
     def verdict(self) -> PredicateReport:
         expected = PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
-        if set(self.hashes) != set(expected) or len(self.components) != len(expected):
+        extra: set[str] = {'market_state_latest' if self.provisional else 'market_state'} if (
+            self.source == MARKET_STATE_SOURCE and self.end > CUBE_START
+        ) else set()
+        activated = set(self.hashes)
+        if (not set(expected) <= activated or activated - set(expected) - extra
+                or any(item[0] not in set(expected) | extra for item in self.components)):
             return _result('UNKNOWN', 'proof_inventory_invalid')
-        if any(self.component(key) is None for key in expected):
+        if any(self.component(key) is None for key in activated):
             return _result('UNKNOWN', 'proof_identity_or_hash_invalid')
         raw = self.component('raw_latest' if self.provisional else 'raw')
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
-        empty = next((item[0] for item in self.components if item[1] == 0), None)
+        empty = next((item[0] for item in self.components if item[0] in activated and item[1] == 0), None)
         if raw[1] > 0 and empty is not None:
             return _result('FAIL', 'component_proof_empty', empty_component=empty, raw_proof_rows=raw[1])
         return _result('PASS' if raw[1] > 0 else 'FAIL', 'active_proof' if raw[1] else 'raw_proof_empty',
@@ -173,7 +181,7 @@ def _proofs(query: _Queries, database: str, source: str, build: str) -> list[_Pr
         ) p USING (source_key, partition_key, provisional, revision, build_id)
         WHERE source_key=%(source)s AND (NOT provisional OR toString(build_id)=%(build)s)""",
         {'source': source, 'build': build})
-    return [_Proof.read(row) for row in rows]
+    return [_Proof.read(row, source) for row in rows]
 
 
 def _edge(query: _Queries, database: str, source: str, now: datetime) -> list[Row]:
@@ -311,9 +319,133 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
     return observations
 
 
+def _cube_proof(record: _Proof) -> PredicateReport:
+    key = 'market_state_latest' if record.provisional else 'market_state'
+    if key not in record.hashes:
+        return _result('FAIL', 'cube_not_activated')
+    proof = record.component(key)
+    if proof is None:
+        return _result('UNKNOWN', 'cube_proof_invalid')
+    if proof[1] <= 0:
+        return _result('FAIL', 'cube_proof_empty')
+    return _result('PASS', 'cube_activated', cube_proof_rows=proof[1], cube_hash=proof[2])
+
+
+def _m1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetime,
+        proofs: list[_Proof], r1: PredicateReport) -> PredicateReport:
+    evidence = dict(r1['evidence'])
+    if r1['status'] != 'PASS':
+        return _result(r1['status'], r1['reason'], **evidence)
+    records = [p for p in proofs if p.build == evidence.get('build_id')
+               and p.key == evidence.get('partition_key')]
+    if len(records) != 1:
+        return _result('UNKNOWN', 'cube_reader_identity_ambiguous', **evidence)
+    record = records[0]
+    if record.end <= CUBE_START:
+        return _result('PASS', 'cube_not_applicable', **evidence)
+    proof = _cube_proof(record)
+    evidence.update(proof['evidence'])
+    if proof['status'] != 'PASS':
+        return _result(proof['status'], proof['reason'], **evidence)
+    minute = datetime.fromisoformat(str(evidence['selected_minute']))
+    unit = timedelta(microseconds=BASE_TIME_US)
+    left = (minute - CUBE_START) // unit
+    right = (minute + timedelta(minutes=1) - CUBE_START + unit - timedelta(microseconds=1)) // unit
+    start, end = max(record.start, CUBE_START + left * unit), min(record.end, CUBE_START + right * unit)
+    suffix = '_latest' if record.provisional else ''
+    prefix = identifier(spec.names.prefix)
+    rows = query(f"""SELECT 'raw', count(), countIf(is_buyer_maker=0)
+        FROM {database}.{prefix}_raw{suffix}_revisions
+        WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
+          AND build_id=%(build)s AND datetime>=toDateTime64(%(start)s, 6, 'UTC')
+          AND datetime<toDateTime64(%(end)s, 6, 'UTC')
+        UNION ALL
+        SELECT 'cube', sum(toUInt64(trade_count)), sum(toUInt64(taker_buy_trade_count))
+        FROM {database}.{prefix}_market_state{suffix}_revisions
+        WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
+          AND build_id=%(build)s AND time_index>=%(left)s AND time_index<%(right)s""", {
+        'date': record.start.date(), 'key': record.key, 'revision': record.revision,
+        'build': record.build, 'start': start.strftime('%Y-%m-%d %H:%M:%S.%f'),
+        'end': end.strftime('%Y-%m-%d %H:%M:%S.%f'), 'left': left, 'right': right,
+    })
+    counts = {str(row[0]): (int(str(row[1])), int(str(row[2]))) for row in rows}
+    if len(rows) != 2 or set(counts) != {'raw', 'cube'}:
+        return _result('UNKNOWN', 'cube_count_evidence_invalid', **evidence)
+    evidence.update(checked_start=start.isoformat(), checked_end=end.isoformat(),
+                    raw_trade_count=counts['raw'][0], raw_taker_buy_trade_count=counts['raw'][1],
+                    cube_trade_count=counts['cube'][0], cube_taker_buy_trade_count=counts['cube'][1])
+    valid = counts['raw'] == counts['cube'] and counts['cube'][0] > 0
+    return _result('PASS' if valid else 'FAIL', 'cube_reader_current' if valid else 'cube_counts_mismatch', **evidence)
+
+
+def _cube_calendar(proofs: list[_Proof], day: date) -> PredicateReport:
+    base = _calendar(proofs, day)
+    if base['status'] != 'PASS':
+        return base
+    record = next(p for p in proofs if not p.provisional and p.key == day.isoformat())
+    return _cube_proof(record)
+
+
+def _m2(proofs: list[_Proof], now: datetime) -> PredicateReport:
+    anchor = CUBE_START.date()
+    yesterday = now.date() - timedelta(days=1)
+    deadline = now.replace(hour=C1_SPOT_DEADLINE[0], minute=C1_SPOT_DEADLINE[1], second=0, microsecond=0)
+    include_yesterday = now >= deadline or any(not p.provisional and p.start.date() == yesterday for p in proofs)
+    end = now.date() if include_yesterday else yesterday
+    expected = max(0, (end - anchor).days)
+    evidence: dict[str, Scalar] = dict(anchor=anchor.isoformat(), expected_days=expected,
+        valid_days=0, missing_days=0, unknown_days=0, first_invalid_day=None,
+        checked_through=datetime.combine(end, datetime.min.time(), UTC).isoformat())
+    by_day: dict[date, list[_Proof]] = {}
+    for proof in proofs:
+        if not proof.provisional and proof.end > CUBE_START:
+            by_day.setdefault(proof.start.date(), []).append(proof)
+    first: PredicateReport | None = None
+    valid, missing, unknown = 0, 0, 0
+    for offset in range(expected):
+        day = anchor + timedelta(days=offset)
+        result = _cube_calendar(by_day.get(day, []), day)
+        if result['status'] == 'PASS':
+            valid += 1
+        else:
+            missing += int(result['status'] == 'FAIL')
+            unknown += int(result['status'] == 'UNKNOWN')
+            if first is None:
+                first = result
+                evidence['first_invalid_day'] = day.isoformat()
+    evidence.update(valid_days=valid, missing_days=missing, unknown_days=unknown)
+    return _result('FAIL' if missing else 'UNKNOWN' if unknown else 'PASS',
+                   first['reason'] if first else 'cube_calendar_complete', **evidence)
+
+
+def _cube_observations(observations: list[ProjectionObservation], predicates: dict[LawPredicate, PredicateReport],
+                       now: datetime) -> None:
+    for observation in observations:
+        component = observation['id'].partition(':')[2]
+        if component not in ('market_state', 'market_state_latest'):
+            continue
+        name: LawPredicate = 'M1' if component.endswith('_latest') else 'M2'
+        result = predicates[name]
+        observation.update(status='CURRENT' if result['status'] == 'PASS' else 'UNKNOWN' if result['status'] == 'UNKNOWN' else 'STALE' if result['reason'] == 'reader_stale' else 'FAILED',
+            reason=result['reason'], observed_at=now.isoformat(), evidence_at=now.isoformat(),
+            evidence_id=f'law.{name}:{MARKET_STATE_SOURCE}:{now.isoformat()}',
+            gate_ids=[f'law.{name}:{MARKET_STATE_SOURCE}'])
+        if now <= CUBE_START or result['reason'] == 'cube_not_applicable' or (name == 'M2' and result['evidence'].get('expected_days') == 0):
+            observation.update(status='INACTIVE', reason='cube_not_applicable')
+        elif name == 'M1' and result['status'] == 'PASS' and not result['evidence'].get('provisional'):
+            observation.update(status='INACTIVE', reason='cube_provisional_not_selected')
+
+
 def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetime) -> tuple[FeedReport, list[ProjectionObservation]]:
-    if {c.key for c in spec.components if not c.provisional} != set(CANONICAL_COMPONENTS) or {c.key for c in spec.components if c.provisional} != set(PROVISIONAL_COMPONENTS):
-        return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in ('R1', 'C1', 'C2')}}, []
+    declared = {c.key for c in spec.components}
+    cube: set[str] = {'market_state', 'market_state_latest'} if spec.key == MARKET_STATE_SOURCE else set()
+    canonical = {c.key for c in spec.components if not c.provisional}
+    provisional = declared - canonical
+    if (not set(CANONICAL_COMPONENTS) <= canonical or not set(PROVISIONAL_COMPONENTS) <= provisional
+            or canonical - set(CANONICAL_COMPONENTS) - (cube & {'market_state'})
+            or provisional - set(PROVISIONAL_COMPONENTS) - (cube & {'market_state_latest'})):
+        names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
+        return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)
     proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '')
     def observed(call: Callable[[], PredicateReport]) -> PredicateReport:
@@ -328,7 +460,18 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
         'R1': observed(lambda: _r1(query, database, spec, now, edges, proofs)),
         'C2': observed(lambda: _c2(query, database, proofs, spec.key, now)),
     }
-    return {'source_key': spec.key, 'predicates': predicates}, _projections(spec, proofs, now, predicates['R1'])
+    if cube:
+        if cube <= declared and all(c.start_at == CUBE_START and c.activation_group == 'market_state'
+                                    for c in spec.components if c.key in cube):
+            predicates['M1'] = observed(lambda: _m1(query, database, spec, now, proofs, predicates['R1']))
+            predicates['M2'] = _m2(proofs, now)
+        else:
+            predicates['M1'] = _result('UNKNOWN', 'cube_profile_mismatch')
+            predicates['M2'] = _result('UNKNOWN', 'cube_profile_mismatch')
+    observations = _projections(spec, proofs, now, predicates['R1'])
+    if cube:
+        _cube_observations(observations, predicates, now)
+    return {'source_key': spec.key, 'predicates': predicates}, observations
 
 
 def _depth(query: _Queries, database: str, source: str, now: datetime) -> FeedReport:
@@ -358,7 +501,7 @@ def evaluate(client: Client, database: str, now: datetime) -> LawReport:
     projections: list[ProjectionObservation] = []
     feed: FeedReport
     for source in inventory:
-        names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',)
+        names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if source == MARKET_STATE_SOURCE else ('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',)
         try:
             if source in LAW_ANCHORS and source in specs:
                 feed, observations = _trade(query, database, specs[source], now)

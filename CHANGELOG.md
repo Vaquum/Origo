@@ -1,3 +1,8 @@
+# v3.26.0
+
+- Register the Binance spot market state base projection from 2021-01-01, activate it after writer retirement, and upgrade accepted history from retained raw without copying existing products.
+- Keep cube coverage and freshness visible through M1/M2 in the existing law monitor, with automatic native reconciliation and capacity remeasurement.
+
 # v3.25.1
 
 - Project each `binance_spot_depth20_1m` minute from its latest snapshot. The projection aliased `toStartOfMinute(datetime) AS datetime`, so its `ORDER BY datetime DESC` sorted on a per-minute constant and `LIMIT 1` returned the minute's first snapshot. In production that held for all 190,615 projected minutes from 2026-05-14 10:28 to 2026-09-24 12:38 UTC, about 60 seconds before the minute's last snapshot. `binance_spot_depth200_1m` already took the latest snapshot and is unchanged.

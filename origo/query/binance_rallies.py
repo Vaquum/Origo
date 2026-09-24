@@ -45,8 +45,10 @@ TARGET_BPS = 30
 TARGET = 1.003
 MAX_TIME_TO_HIT = timedelta(minutes=240)
 HORIZON_GRID_MINUTES = (1, 3, 5, 15, 30, 60, 120, 240)
-# The reference trade and the before-anchor snapshot are looked up this far back.
+# The reference trade and the before-start records are looked up this far back.
 LOOKBACK = timedelta(hours=24)
+# Bounds the extra history one request reads from production ClickHouse.
+MAX_MINUTES_BEFORE = 1440
 
 RALLY_FIELDS = (
     'rally_id', 'anchor_time', 'reference_trade_id', 'reference_time', 'reference_price',
@@ -178,7 +180,7 @@ def export_binance_rallies(
     reader = _Reader(_connect(), _database())
     try:
         rallies, trades, partitions = _detect_all(reader, request)
-        book, bounds = _book_rows(reader, rallies, request.boundary)
+        book, bounds, book_reads = _book_rows(reader, rallies, request.boundary)
     finally:
         reader.client.close()
     metadata = {
@@ -201,7 +203,7 @@ def export_binance_rallies(
                     for part in partitions
                 ],
             },
-            'book': {'table': f'{reader.database}.{BOOK_TABLE}', 'read': 'FINAL'},
+            'book': {'table': f'{reader.database}.{BOOK_TABLE}', 'read': 'FINAL', **book_reads},
         },
     }
     frames = (_rally_frame(rallies, bounds), _trade_rows(trades, rallies), book)
@@ -217,8 +219,14 @@ def _request(
 ) -> _Request:
     if cast(str, boundary) not in ('after', 'before'):
         raise ValueError(f'Unknown boundary {boundary!r}; use "after" or "before".')
-    if not isinstance(cast(object, minutes_before), int) or minutes_before < 0:
-        raise ValueError(f'minutes_before must be a non-negative integer, not {minutes_before!r}.')
+    if (
+        not isinstance(cast(object, minutes_before), int)
+        or not 0 <= minutes_before <= MAX_MINUTES_BEFORE
+    ):
+        raise ValueError(
+            f'minutes_before must be an integer from 0 to {MAX_MINUTES_BEFORE}, '
+            f'not {minutes_before!r}.'
+        )
     lead = minutes_before * _MINUTE
     description: dict[str, object] = {'boundary': boundary, 'minutes_before': minutes_before}
     if rally_ids is not None and start is None and end is None:
@@ -419,6 +427,8 @@ def _detect(
             reader.trades(pinned, low, high),
         ]
     )
+    # Trade-ID order is time order: the source adapters enforce strictly increasing IDs with
+    # non-decreasing timestamps, so `times` is sorted for every search below.
     ids = trades['trade_id'].to_numpy()
     times = trades['timestamp'].dt.epoch('us').to_numpy()
     prices = trades['price'].to_numpy()
@@ -467,14 +477,18 @@ def _trade_rows(trades: pl.DataFrame, rallies: Sequence[_Rally]) -> pl.DataFrame
 
 def _book_rows(
     reader: _Reader, rallies: Sequence[_Rally], boundary: Boundary
-) -> tuple[pl.DataFrame, list[tuple[int, int] | None]]:
-    """Snapshots of the rallies, each once, and each rally's first and last snapshot time."""
+) -> tuple[pl.DataFrame, list[tuple[int, int] | None], dict[str, list[list[str]]]]:
+    """Snapshots of the rallies, each once, each rally's first and last snapshot time, and
+    the book reads: inclusive `spans` and the `[from, to)` windows searched for `last_before`."""
     frames = [pl.DataFrame(schema=_BOOK)]
+    reads: dict[str, list[list[str]]] = {'spans': [], 'last_before': []}
     for low, high in _spans([(rally.start, rally.hit_time) for rally in rallies]):
         if boundary == 'before':
+            reads['last_before'].append([_iso(low - _LOOKBACK), _iso(low)])
             carry_in = reader.book(low - _LOOKBACK, low, last=True)
             if carry_in.height:
                 low = int(carry_in['observed_at'].dt.epoch('us')[0])
+        reads['spans'].append([_iso(low), _iso(high)])
         frames.append(reader.book(low, high))
     # A span's before-anchor snapshot repeats the previous span's last one across a book gap.
     book = pl.concat(frames).unique('observed_at', keep='first', maintain_order=True)
@@ -496,7 +510,7 @@ def _book_rows(
             continue
         keep[first : last + 1] = True
         bounds.append((int(times[first]), int(times[last])))
-    return book.filter(pl.Series(keep)), bounds
+    return book.filter(pl.Series(keep)), bounds, reads
 
 
 def _spans(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:

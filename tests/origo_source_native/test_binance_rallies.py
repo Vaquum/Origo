@@ -362,6 +362,12 @@ def test_three_file_export(rally_data: None, tmp_path: Path) -> None:
         {'partition_key': '2026-06-27', 'provisional': False, 'revision': SEED_REVISION,
          'build_id': str(SEED_BUILD_ID)}
     ]
+    assert described['sources']['book'] == {
+        'table': 'origo.binance_spot_depth200_snapshots',
+        'read': 'FINAL',
+        'spans': [['2026-06-27T11:39:00+00:00', '2026-06-27T11:45:40.878016+00:00']],
+        'last_before': [],
+    }
 
     trades, book = tables['trades.arrow'], tables['book.arrow']
     assert trades.num_rows == 10_369 == len(set(trades['trade_id'].to_pylist()))
@@ -403,6 +409,13 @@ def test_boundary_setting(rally_data: None, tmp_path: Path) -> None:
         assert rally_before['first_snapshot_time'] == snapshots.filter(pl.col('datetime') < anchor)['datetime'].max()
         assert rally_after['last_snapshot_time'] == rally_before['last_snapshot_time']
     assert rb['first_snapshot_time'][0] == _at('11:38:59.392')
+    book_reads = json.loads(before['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])
+    assert book_reads['sources']['book']['last_before'] == [
+        ['2026-06-26T11:39:00+00:00', '2026-06-27T11:39:00+00:00']
+    ]
+    assert book_reads['sources']['book']['spans'] == [
+        ['2026-06-27T11:38:59.392000+00:00', '2026-06-27T11:45:40.878016+00:00']
+    ]
     assert rb['last_snapshot_time'].to_list() == [
         _at('11:45:38.393'), _at('11:45:38.393'), _at('11:45:38.393'), _at('11:45:40.392')
     ]
@@ -485,6 +498,7 @@ def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:
         {'start': _at('11:39'), 'end': _at('11:55'), 'boundary': 'middle'},
         {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': -1},
         {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 1.5},
+        {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 1441},
     ):
         output = tmp_path / f'invalid-{next(_names)}'
         with pytest.raises(ValueError):

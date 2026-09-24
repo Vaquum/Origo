@@ -224,12 +224,38 @@ def test_a_new_backfill_joins_at_the_served_frontier(instance):
     serve(instance, older[:20])
     newer = backfill('newbulk', 'backfill_binance_perp_aggtrades_source_job', 10)
     places = [-int(instance.get_run_by_id(run.run_id).tags['dagster/priority']) for run in newer]
-    assert places == list(range(19, 29))
+    assert places == list(range(20, 30))
     serve(instance, behind)
     daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
     runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
     # The newcomer starts at served service, so the older backfill keeps half the lane.
     assert sum(run.tags['dagster/backfill'] == 'olderbulk' for run in runs) == 5
+
+
+def test_a_stream_of_new_backfills_cannot_starve_an_older_one(instance):
+    older = [
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'olderbulk'},
+        )
+        for n in range(20)
+    ]
+    serve(instance, older[:10])
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    for wave in range(3):
+        for n in range(4):
+            submit(
+                instance,
+                job='backfill_binance_perp_trades_source_job',
+                day=f'2022-{wave + 1:02d}-{n + 1:02d}',
+                tags={'dagster/backfill': f'single{wave}{n}'},
+            )
+        runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+        # Each wave of one-run backfills queues behind the older backfill's next place.
+        assert runs[0].tags['dagster/backfill'] == 'olderbulk'
+        serve(instance, runs[:5])
 
 
 def test_restarted_recovery_continues_after_places_it_kept(instance):

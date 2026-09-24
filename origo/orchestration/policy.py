@@ -65,16 +65,17 @@ def bulk_order(run: DagsterRun) -> int:
 
 
 def frontier(instance: DagsterInstance) -> int:
-    """The highest historical-lane place ever launched; it only moves forward with service."""
+    """The historical-lane place after the highest one ever launched. It moves only with
+    service, and a newcomer admitted there ties with, and queues after, older backlogs."""
     value = cast(SqlRunStorage, instance.run_storage).get_cursor_values({FRONTIER_KEY})
     return int(value.get(FRONTIER_KEY, '0'))
 
 
 def advance_frontier(instance: DagsterInstance, run: DagsterRun) -> None:
     """Record a launched bulk run's place; callers hold the admission lock."""
-    if bulk_share(run) is not None and SHARE_TAG in run.tags and bulk_order(run) > frontier(instance):
+    if bulk_share(run) is not None and SHARE_TAG in run.tags and bulk_order(run) >= frontier(instance):
         cast(SqlRunStorage, instance.run_storage).set_cursor_values(
-            {FRONTIER_KEY: str(bulk_order(run))}
+            {FRONTIER_KEY: str(bulk_order(run) + 1)}
         )
 
 

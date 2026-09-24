@@ -547,7 +547,7 @@ def test_browser_age_expires_during_held_fetch(
         tab.clock.install()
         # A genuine report at 119 seconds old is still within its contractual freshness window.
         tab.route('**/law.json', lambda route: route.fulfill(json=cache.current(now+timedelta(seconds=118))))
-        tab.goto(url+'/law')
+        tab.goto(url+'/law?view=sources')
         tab.locator('.node .CURRENT').first.wait_for()
         tab.unroute('**/law.json')
         held: list[object] = []
@@ -790,7 +790,7 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
         tab = browser.new_page()
         tab.goto(url+'/law?view=gates')
         tab.locator('.day').first.wait_for()
-        tab.wait_for_function('() => !overviewLoading')
+        tab.wait_for_function('() => ![...requests.keys()].some(key => key.startsWith("days|"))')
         # A genuine configured catalog changes between the two HTTP reads. Source evidence is unchanged.
         old_catalog = page._object(cache.current(now)['catalog'])
         old_gate = next(gate for gate in page._objects(old_catalog['gates']) if gate['id'] == 'monitor.queue_bounded')
@@ -807,7 +807,7 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
 
         tab.route('**/law/catalog.json', lambda route: (arrive_before_catalog_response(), route.continue_()))
         tab.evaluate('refresh()')
-        tab.wait_for_function('() => !overviewLoading')
+        tab.wait_for_function('() => ![...requests.keys()].some(key => key.startsWith("days|"))')
         assert tab.evaluate('data.status') == 'UNKNOWN'
         assert tab.evaluate('data.last_report.catalog_version') == old_version
         assert tab.evaluate('data.catalog.version') == old_version
@@ -817,7 +817,7 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
         # A delayed old overview must not repopulate the heatmap after adopting the new report/catalog pair.
         tab.route('**/law/gates.json', lambda route: route.fulfill(json=old_overview))
         tab.evaluate('refresh()')
-        tab.wait_for_function('() => !overviewLoading')
+        tab.wait_for_function('() => ![...requests.keys()].some(key => key.startsWith("days|"))')
         assert tab.evaluate('data.last_report.catalog_version') == new_catalog['version']
         assert tab.evaluate('data.catalog.version') == new_catalog['version']
         assert tab.evaluate('data.gate_days === undefined') is True
@@ -897,11 +897,11 @@ def test_paginated_history_retains_each_original_catalog_definition(
         more.click()
         more.wait_for(state='hidden')
         loaded = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
-        assert len(loaded['events']) == page.PAGE_SIZE + 1
-        assert {item['catalog_version'] for item in loaded['definitions']} == {catalog['version'] for catalog in catalogs}
+        assert len(loaded['events']) == page.PAGE_SIZE + 2
+        assert {item['catalog_version'] for item in loaded['definitions']} == {str(report['catalog_version']), *(catalog['version'] for catalog in catalogs)}
         for position, threshold in ((0, 201), (-1, 200)):
             item = tab.locator('#detail .event').nth(position)
-            item.locator('summary').click()
+            item.locator('summary').first.click()
             assert f'budget seconds: {threshold}' in item.inner_text()
             assert f'/blob/{SHA}/' in str(item.locator('details a').get_attribute('href'))
         # Definition retention follows retained events, including the browser's existing 5,000-event cap.
@@ -920,7 +920,7 @@ def test_paginated_history_retains_each_original_catalog_definition(
         more.wait_for(state='hidden')
         retained = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
         assert retained['definitions_limited'] is True and retained['limited'] is True
-        assert len(retained['events']) == page.PAGE_SIZE + 1 and len(retained['definitions']) == 1
+        assert len(retained['events']) == page.PAGE_SIZE + 2 and len(retained['definitions']) == 2
         assert 'lookup budget reached' in tab.locator('#detail').inner_text()
         tab.evaluate("async()=>{histories.clear();await loadHistory('law.R1:binance_spot_trades')}")
         assert tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades')).limited") is False
@@ -1445,6 +1445,30 @@ def test_operational_history_totals_preserve_intervals_and_limits(
         assert row['complete'] is False, reason
         assert row['count'] is not None, reason
         assert float(str(row['covered_seconds'])) <= 3600
+        if reason == 'duplicate':
+            assert row['observed_slots'] == 59 and row['covered_seconds'] == 59*60
+    for duplicate_records in ([complete[-1], complete[-1]], [record(terminal, cap=True), complete[-1]]):
+        duplicate_cache, duplicate_values = totals(duplicate_records)
+        row = page._object(duplicate_values['60m'])
+        assert row['count'] is None and row['observed_slots'] == row['covered_seconds'] == 0
+        duplicate_cache.refresh_latest(now)
+        duplicate_cache._refresh_operations()
+        refreshed = page._object(page._object(page._object(duplicate_cache.current(now)['operations_history'])['error_lines'])['60m'])
+        assert refreshed['count'] is None and refreshed['observed_slots'] == refreshed['covered_seconds'] == 0
+    exact_cap = record(terminal, cap=True)
+    fractional = record(terminal)
+    for event in page._objects(exact_cap['gates']):
+        if event['gate_id'] == 'monitor.no_error_logs':
+            page._object(event['evidence'])['counts_limited'] = False
+    for event in page._objects(fractional['gates']):
+        if event['gate_id'] == 'monitor.no_error_logs':
+            page._object(event['evidence'])['window_start'] = (terminal-timedelta(minutes=1)+timedelta(microseconds=1)).isoformat()
+    _, cap_result = totals([*complete[:-1], exact_cap])
+    assert page._object(cap_result['60m'])['limited'] is True
+    assert page._object(cap_result['60m'])['count'] == 1000
+    _, fractional_result = totals([*complete[:-1], fractional])
+    assert page._object(fractional_result['60m'])['complete'] is False
+    assert page._object(fractional_result['60m'])['covered_seconds'] == 59*60
     for flag in ('loading', 'limited'):
         _, values = totals(complete, **{flag: True})
         assert page._object(values['60m'])['complete'] is False

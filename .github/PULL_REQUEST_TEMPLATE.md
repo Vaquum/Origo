@@ -14,6 +14,7 @@ _(Fill in at least a short description of the intent of the change.)_
 - [ ] I updated CHANGELOG.md (unless only docs or other non-code aspect was changed)
 - [ ] I updated pyproject.toml (unless only docs or other non-code aspect was changed)
 - [ ] I added and/or updated tests (if behavior changed or new code paths added)
+- [ ] No backfill in this change blocks another source's fills (pausing publication is allowed; blocking other fills never is)
 - [ ] I validated changes manually
 - [ ] I validated changes with LLM
 - [ ] I removed any extraneous examples/comments

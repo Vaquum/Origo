@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-09-24T06:45:00Z",
+  "retrieval": "read-only clickhouse-client queries against Origo production ClickHouse, written with FORMAT Parquet (zstd)",
+  "trades": {
+    "file": "BTCUSDT-spot-trades-2026-06-27T1138-1155.parquet",
+    "sha256": "c433006724daabbca30b8be0a832f143b603206d6b75449e0f3b10b6075a24cf",
+    "rows": 22661,
+    "query": "SELECT trade_id, price, quantity, quote_quantity, timestamp, is_buyer_maker, is_best_match, datetime FROM origo.binance_spot_trades_raw_current WHERE datetime >= '2026-06-27 11:38:00' AND datetime < '2026-06-27 11:55:00' ORDER BY trade_id FORMAT Parquet",
+    "source_partition": {
+      "source_key": "binance_spot_trades",
+      "partition_key": "2026-06-27",
+      "provisional": false,
+      "generation": 1,
+      "revision": "663f81f2e09114d80003a0ec4a27ea2c54edc8de18297fc0f07812b65e3d0db4",
+      "build_id": "18e8bf1f-54c6-4f3b-8df8-6d9315006644"
+    }
+  },
+  "book": {
+    "file": "BTCUSDT-spot-depth200-2026-06-27T1138-1155.parquet",
+    "sha256": "ce74b2c8b7077b8f0cc6f1abd150f9b1da28d6d7c8a2062f1ac5228321867cb1",
+    "rows": 1020,
+    "query": "SELECT datetime, source_timestamp_ms, last_update_id, bids, asks FROM origo.binance_spot_depth200_snapshots FINAL WHERE datetime >= '2026-06-27 11:38:00' AND datetime < '2026-06-27 11:55:00' ORDER BY datetime FORMAT Parquet"
+  },
+  "detection_day": {
+    "file": "tests/fixtures/binance/spot/daily/trades/revisioned/BTCUSDT-trades-2017-08-17.csv",
+    "provenance": "tests/fixtures/binance/spot/daily/trades/revisioned/BTCUSDT-trades-2017-08-17.provenance.json"
+  },
+  "expected": {
+    "file": "expected.json",
+    "method": "Brute-force scan in trade-ID order, written apart from the exporter: the reference is the last trade before the anchor; the hit is the first trade at or after the anchor with price >= reference * 1.003 before anchor + 240 minutes, within the data of each file. The 2017-08-17 labels were cross-checked with a polars as-of join; the 2026-06-27 labels match a ClickHouse query run on production."
+  }
+}

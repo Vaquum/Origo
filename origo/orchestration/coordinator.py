@@ -4,7 +4,15 @@ from dagster import DagsterRun, DagsterRunStatus, RunsFilter
 from dagster._core.run_coordinator.base import SubmitRunContext
 from dagster._core.run_coordinator.queued_run_coordinator import QueuedRunCoordinator
 
-from .policy import IDENTITY_TAG, OUTSTANDING, SHARE_TAG, admission_lock, bulk_share, execution_tags
+from .policy import (
+    IDENTITY_TAG,
+    SHARE_TAG,
+    WORKLOAD_TAG,
+    admission_lock,
+    bulk_order,
+    bulk_share,
+    execution_tags,
+)
 
 
 class OrigoQueuedRunCoordinator(QueuedRunCoordinator):
@@ -16,14 +24,22 @@ class OrigoQueuedRunCoordinator(QueuedRunCoordinator):
             if run.status != DagsterRunStatus.NOT_STARTED:
                 return run
             share = bulk_share(run)
-            ahead = (
-                self._instance.get_runs_count(
-                    RunsFilter(statuses=OUTSTANDING, tags={SHARE_TAG: share})
+            order = 0
+            if share:
+                queued = [DagsterRunStatus.QUEUED]
+                oldest = self._instance.get_runs(
+                    RunsFilter(statuses=queued, tags={WORKLOAD_TAG: 'backfill'}),
+                    limit=1,
+                    ascending=True,
                 )
-                if share
-                else 0
-            )
-            tags = execution_tags(run, ahead)
+                newest = self._instance.get_runs(
+                    RunsFilter(statuses=queued, tags={SHARE_TAG: share}), limit=1
+                )
+                order = max(
+                    bulk_order(oldest[0]) if oldest else 0,
+                    bulk_order(newest[0]) + 1 if newest else 0,
+                )
+            tags = execution_tags(run, order)
             self._instance.add_run_tags(run.run_id, tags)
             duplicates = self._instance.get_runs(
                 RunsFilter(

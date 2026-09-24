@@ -30,8 +30,10 @@ from .policy import (
     CLAIM_TAG,
     IDENTITY_TAG,
     REDUNDANT_TAG,
+    SHARE_TAG,
     WORKER_TAG,
     admission_lock,
+    bulk_order,
     bulk_share,
     execution_tags,
     reconcile_stale_concurrency_claims,
@@ -59,14 +61,19 @@ def recover_queue(instance: DagsterInstance) -> dict[str, int]:
     # Deploy restarts kill pooled steps mid-flight; only terminal runs are freed, so this
     # cannot race admission and runs outside the lock.
     counts['stale_slots_freed'] = reconcile_stale_concurrency_claims(instance)
-    # Oldest first, so each bulk run keeps the rank admission gave it within its share.
-    ahead: Counter[str] = Counter()
+    # A bulk run keeps the place admission gave it; runs admitted before shares existed
+    # take places in their share's queue order, oldest first.
+    places: Counter[str] = Counter()
     with admission_lock(instance):
         for run in outstanding_runs(instance):
             share = bulk_share(run)
-            tags = execution_tags(run, ahead[share] if share else 0)
-            if share:
-                ahead[share] += 1
+            order = 0
+            if share and SHARE_TAG in run.tags:
+                order = bulk_order(run)
+            elif share:
+                order = places[share]
+                places[share] += 1
+            tags = execution_tags(run, order)
             instance.add_run_tags(run.run_id, tags)
             counts['classified'] += 1
             current = instance.get_run_by_id(run.run_id)

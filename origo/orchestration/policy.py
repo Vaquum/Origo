@@ -57,9 +57,15 @@ def bulk_share(run: DagsterRun) -> str | None:
     return backfill or (run.job_name if run.job_name.startswith('backfill_') else None)
 
 
-def execution_tags(run: DagsterRun, ahead: int = 0) -> dict[str, str]:
-    """``ahead`` counts the outstanding runs of the run's own bulk share. Ranking bulk runs by
-    it alternates concurrent backfills, so one backfill never holds another source's fills back."""
+def bulk_order(run: DagsterRun) -> int:
+    """A bulk run's place in the historical lane; lower places dequeue first."""
+    return -int(run.tags['dagster/priority'])
+
+
+def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
+    """``order`` is a bulk run's place in the historical lane (start-time fair queuing): a share
+    joins at the lane's oldest queued place and then follows its own queue, so concurrent
+    backfills alternate and one backfill never holds another source's fills back."""
     share = bulk_share(run)
     bulk = share is not None
     short_job = run.job_name in {
@@ -80,7 +86,7 @@ def execution_tags(run: DagsterRun, ahead: int = 0) -> dict[str, str]:
         IDENTITY_TAG: request_identity(run),
         **({ROUTINE_JOB_TAG: run.job_name} if not (bulk or maintenance) else {}),
         **({SHARE_TAG: share} if share else {}),
-        'dagster/priority': '300' if maintenance else str(-ahead) if bulk else '200' if daily else '100',
+        'dagster/priority': '300' if maintenance else str(-order) if bulk else '200' if daily else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,
     }

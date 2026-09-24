@@ -173,8 +173,35 @@ def test_a_long_backfill_never_holds_another_sources_backfill_back(instance):
         # The later backfill takes turns in the shared lane instead of queueing behind 20 runs.
         assert len(runs) == 10
         assert sum(run.tags['dagster/backfill'] == 'perpbulk' for run in runs) == 5
-        # Deployment recovery re-derives the same ranks.
+        # Deployment recovery keeps the places admission gave.
         recover_queue(instance)
+
+
+def test_a_late_backfill_joins_the_lane_at_its_current_place(instance):
+    spot = [
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-{n // 28 + 3:02d}-{n % 28 + 1:02d}',
+            tags={'dagster/backfill': 'spotbulk'},
+        )
+        for n in range(40)
+    ]
+    # The head of the long backfill has already been served.
+    for run in spot[:25]:
+        instance.report_run_canceled(run)
+    for n in range(20):
+        submit(
+            instance,
+            job='backfill_binance_perp_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'perpbulk'},
+        )
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    # The newcomer alternates with the older backfill's remaining queue instead of taking the lane.
+    assert len(runs) == 10
+    assert sum(run.tags['dagster/backfill'] == 'spotbulk' for run in runs) == 5
 
 
 def test_maintenance_lane_dequeues_while_routine_and_backfill_lanes_are_full(instance):

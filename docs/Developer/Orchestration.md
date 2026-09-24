@@ -13,10 +13,12 @@ queues or activate automation in Dagit.
   `maintenance`, priority 300) always has a lane while the other two are full. All
   sources share the historical allocation; registering another source does not
   multiply the server's concurrency budget. Each native backfill, or bulk job run
-  outside one, is one share of that lane: a bulk run's priority is minus the number
-  of its own share's outstanding runs, so concurrent backfills alternate and a long
-  backfill never holds another source's fills back. Deployment recovery re-derives
-  the same ranks.
+  outside one, is one share of that lane, queued by start-time fair queuing: a run's
+  place is the later of the lane's oldest queued place and one past its share's newest
+  queued place, and its priority is minus that place. A share joining late starts where
+  the lane is, never ahead of or behind an older backlog, so concurrent backfills
+  alternate and none holds another source's fills back. Deployment recovery keeps the
+  places admission gave.
 - Native dequeue uses nineteen launch threads and a one-second poll. Canonical
   source operations retain their registered eight-worker pool. Ten backfill run
   slots preserve the existing launch capacity around those eight operations;

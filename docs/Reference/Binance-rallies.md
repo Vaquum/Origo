@@ -40,9 +40,11 @@ These commands run on your own machine. Set `ORIGO_HOST` to your SSH destination
 2. Copy the directory to your machine, then remove it from the container:
 
    ```bash
-   ssh "$ORIGO_HOST" docker cp tdw-control-plane-dagster-1:/tmp/rallies-2026-06-27 - | tar -xf -
-   ssh "$ORIGO_HOST" docker exec tdw-control-plane-dagster-1 rm -r /tmp/rallies-2026-06-27
+   (set -o pipefail; ssh "$ORIGO_HOST" docker cp tdw-control-plane-dagster-1:/tmp/rallies-2026-06-27 - | tar -xf -) &&
+     ssh "$ORIGO_HOST" docker exec tdw-control-plane-dagster-1 rm -r /tmp/rallies-2026-06-27
    ```
+
+   The removal runs only if the whole copy succeeded. `pipefail` is needed because `tar` accepts an empty stream, so on its own it would not notice a failed `docker cp`.
 
    Copy the files off right away. Every merge to `main` deploys and replaces the container, and its `/tmp` goes with it.
 

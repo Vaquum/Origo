@@ -622,3 +622,44 @@ def test_market_state_canonical_count_probe_preserves_fractional_edges(canonical
         "AND datetime>=toDateTime64('2025-01-01 00:00:56',6,'UTC') "
         "AND datetime<toDateTime64('2025-01-01 00:02:48',6,'UTC')")
     assert raw[0][0] != evidence['raw_trade_count']
+
+
+@pytest.mark.parametrize('damage', ['missing', 'hash', 'empty', 'duplicate'])
+def test_market_state_receipt_damage_does_not_redefine_raw_reader_health(
+    law_case: LawCase, damage: str,
+) -> None:
+    law_case.minute(0)
+    before = law_case.report(START + timedelta(minutes=1))
+    assert predicate(before, 'R1')['status'] == predicate(before, 'M1')['status'] == 'PASS'
+    table = 'origo.source_component_log'
+    if damage == 'missing':
+        law_case.client.execute(f"ALTER TABLE {table} DELETE WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    elif damage == 'hash':
+        law_case.client.execute(f"ALTER TABLE {table} UPDATE content_hash='damaged' WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    elif damage == 'empty':
+        law_case.client.execute(f"ALTER TABLE {table} UPDATE row_count=0 WHERE component='market_state_latest'", settings={'mutations_sync': 2})
+    else:
+        law_case.client.execute(f"INSERT INTO {table} SELECT * FROM {table} WHERE component='market_state_latest'")
+    report = law_case.report(START + timedelta(minutes=1))
+    assert predicate(report, 'R1')['status'] == 'PASS'
+    cube = predicate(report, 'M1')
+    assert cube['status'] == ('FAIL' if damage == 'empty' else 'UNKNOWN')
+    assert cube['reason'] == ('cube_proof_empty' if damage == 'empty' else 'cube_proof_invalid')
+
+
+def test_market_state_receipt_damage_preserves_canonical_product_laws(canonical_case: LawCase) -> None:
+    canonical_case.runtime.build('2025-01-01')
+    now = datetime(2025, 1, 2, 5, tzinfo=UTC)
+    before = canonical_case.report(now)
+    assert predicate(before, 'C1')['status'] == 'PASS'
+    baseline_days = predicate(canonical_case.report(now + timedelta(days=1)), 'C2')['evidence']['valid_days']
+    canonical_case.client.execute(
+        "ALTER TABLE origo.source_component_log DELETE WHERE component='market_state'",
+        settings={'mutations_sync': 2},
+    )
+    after = canonical_case.report(now)
+    assert predicate(after, 'C1')['status'] == 'PASS'
+    assert predicate(canonical_case.report(now + timedelta(days=1)), 'C2')['evidence']['valid_days'] == baseline_days
+    assert predicate(after, 'M2')['evidence']['unknown_days'] == 1
+    assert predicate(after, 'M2')['evidence']['valid_days'] == 0
+    assert predicate(after, 'M2')['status'] == 'FAIL'  # Earlier required days are absent too.

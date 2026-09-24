@@ -116,6 +116,15 @@ Run the real-engine operational checks with:
 pytest tests/origo_source_native/test_market_state_registration.py -q
 ```
 
+Native GUI acceptance on 2026-09-24 used the committed, checksum-proven
+2025-01-01 capture in a disposable ClickHouse/Dagster environment. Selecting the
+retained day in the native partition bar and launching one run upgraded generation
+1 to 2; native **Re-execute all** kept generation 2. Both runs succeeded in about
+six seconds. SQL confirmed all seven original hashes and the build/revision were
+unchanged, with one raw build and one cube receipt: 15 cells accounted for all
+12,000 captured trades and 5,310 taker buys. Capacity sampling was controlled test
+evidence; this does not establish production capacity or complete historical coverage.
+
 ## Remaining PRD delivery
 
 - Protected query snapshots, exact dyadic selections, sparse Arrow files, POCs,

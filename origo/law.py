@@ -157,16 +157,16 @@ class _Proof:
         if (not set(expected) <= activated or activated - set(expected) - extra
                 or any(item[0] not in set(expected) | extra for item in self.components)):
             return _result('UNKNOWN', 'proof_inventory_invalid')
-        if any(self.component(key) is None for key in activated):
+        if any(self.component(key) is None for key in expected):
             return _result('UNKNOWN', 'proof_identity_or_hash_invalid')
         raw = self.component('raw_latest' if self.provisional else 'raw')
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
-        empty = next((item[0] for item in self.components if item[0] in activated and item[1] == 0), None)
+        empty = next((item[0] for item in self.components if item[0] in expected and item[1] == 0), None)
         if raw[1] > 0 and empty is not None:
             return _result('FAIL', 'component_proof_empty', empty_component=empty, raw_proof_rows=raw[1])
         return _result('PASS' if raw[1] > 0 else 'FAIL', 'active_proof' if raw[1] else 'raw_proof_empty',
-                       raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items()})
+                       raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
 
 
 def _proofs(query: _Queries, database: str, source: str, build: str) -> list[_Proof]:

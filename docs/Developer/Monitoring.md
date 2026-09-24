@@ -183,7 +183,8 @@ archive exists or its delivery deadline passes. It reports expected, valid,
 missing and unknown day counts plus the first invalid day using the existing
 bounded proof read; it never scans historical raw/cube rows. The source's original
 2017 anchor and R1/C1/C2 remain unchanged. Valid legacy generations preserve their
-existing product health during upgrade; staged but unactivated cube receipts do
+existing product health during upgrade. Cube-only proof damage is reported by
+M1/M2 without changing otherwise valid R1/C1/C2. Staged but unactivated cube receipts do
 not satisfy M1/M2. Cube nodes and gates appear in Sources, Overview and Laws from
 the same declarations and monitor tape. Missing registration, proof or physical
 count evidence is never green. These probes retain the five-second statement,

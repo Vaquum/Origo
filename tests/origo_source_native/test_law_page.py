@@ -1107,9 +1107,16 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     catalog = build_catalog(str(baseline['deployed_sha']))
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
-    assert len(current) == 15
-    current_semantics = [{**gate, 'code': {'path': gate['code']['path']}} for gate in current]
-    original_semantics = [{**gate, 'code': {'path': page._object(gate['code'])['path']}} for gate in original]
+    assert len(current) == 17
+    original_ids = {str(gate['id']) for gate in original}
+    assert {gate['id'] for gate in current} - original_ids == {
+        'law.M1:binance_spot_trades', 'law.M2:binance_spot_trades'}
+    # The accepted legacy law contract stays unchanged. Its implementation hash
+    # advances with the additive proof evaluator; old evidence retains its version.
+    current_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
+                          'code': {'path': gate['code']['path']}} for gate in current if gate['id'] in original_ids]
+    original_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
+                           'code': {'path': page._object(gate['code'])['path']}} for gate in original]
     assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
     report = page._object(baseline['report'])
     before = page._sample_brief(report)

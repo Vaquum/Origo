@@ -2,9 +2,9 @@
 
 Spot and perp declare their provisional parameters on subclasses; the base owns
 minute-partition math, the 36h/5 candidate window, the locate+page loop, the
-100-page cap, and the empty-minute two-observation evidence. Per-source hooks
-stay on the subclasses: the row mapper, and HTTP plus the clock, which resolve
-through the subclass modules so the test patch seams keep working.
+source-specific page cap, and the empty-minute two-observation evidence.
+Per-source hooks stay on the subclasses: the row mapper, and HTTP plus the clock,
+which resolve through the subclass modules so the test patch seams keep working.
 
 A subclass whose rows come from the locator endpoint itself (aggregate
 channels) declares ``HISTORICAL_TRADES_PATH = None``: the loop pages the
@@ -94,6 +94,7 @@ class BinanceProvisionalBase:
     WEIGHT_BOUNDARY: ClassVar[int]
     WEIGHT_HISTORICAL: ClassVar[int]
     PAGE_LIMIT: ClassVar[int]
+    PAGE_CAP: ClassVar[int] = PROVISIONAL_PAGE_CAP
     CREDENTIAL_REQUIRED: ClassVar[bool]
     PAGING_BACKTRACK_IDS: ClassVar[int]
 
@@ -259,7 +260,7 @@ class BinanceProvisionalBase:
             ended_message = 'Historical-trade paging ended before the minute boundary.'
             unordered_message = 'Historical trades are unordered or duplicated.'
             precedes_message = 'Historical trade precedes its locator boundary.'
-        for _ in range(PROVISIONAL_PAGE_CAP):
+        for _ in range(self.PAGE_CAP):
             page = request(
                 page_path,
                 {'symbol': symbol, 'fromId': next_id, 'limit': self.PAGE_LIMIT},
@@ -293,7 +294,8 @@ class BinanceProvisionalBase:
             next_id = _int(page[-1], id_field) + 1
         if not complete:
             raise RuntimeError(
-                f'{self.SOURCE_NOUN.capitalize()} closed-minute paging exceeded the 100-page cap.'
+                f'{self.SOURCE_NOUN.capitalize()} closed-minute paging exceeded the '
+                f'{self.PAGE_CAP}-page cap.'
             )
         if self.PAGING_BACKTRACK_IDS > 0 and skipped == 0 and first_id > 1:
             raise RuntimeError(

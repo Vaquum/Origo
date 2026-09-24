@@ -140,11 +140,13 @@ def _reconciliation_selection(repairs: list[str], upgrades: list[str], offset: i
     because every build and repair re-checks its retained content and an operator can launch
     the canonical job for any day."""
 
-    def rotated(keys: list[str]) -> list[str]:
-        start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(keys))
-        return keys[start:] + keys[:start]
+    def window(keys: list[str], size: int) -> list[str]:
+        # Consecutive ticks take consecutive windows, so every key is reached.
+        start = offset * size % max(1, len(keys))
+        return (keys[start:] + keys[:start])[:size]
 
-    return (rotated(repairs) + rotated(upgrades))[:HEALTH_RECONCILIATION_BATCH_SIZE]
+    selected = window(repairs, HEALTH_RECONCILIATION_BATCH_SIZE)
+    return selected + window(upgrades, HEALTH_RECONCILIATION_BATCH_SIZE - len(selected))
 
 
 def _partition_runs(

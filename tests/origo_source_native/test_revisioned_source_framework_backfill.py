@@ -738,6 +738,10 @@ def test_reconciliation_repairs_precede_component_upgrades() -> None:
         batch = _reconciliation_selection([repair], upgrades, tick)
         assert batch[0] == repair and len(batch) == 4
     assert _reconciliation_selection([], upgrades, 1) == upgrades[4:8]
+    # Upgrades rotate through the slots repairs leave, so none waits behind stuck ones.
+    four = upgrades[:4]
+    reached = {key for tick in range(4) for key in _reconciliation_selection([repair], four, tick)}
+    assert reached == {repair, *four}
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,7 @@
+# v3.23.0
+
+Export Binance spot rallies by ID or time range: each anchor minute whose price reaches +30 bps within 240 minutes becomes one rally, written to `rallies.arrow` with the bounds that select its rows from `trades.arrow` and `book.arrow`, which hold each trade and depth-200 snapshot once. A per-request boundary setting starts each rally at the first record at or after its anchor, or at the last one before it. Runs on the production host; acceptance uses authentic 2017-08-17 and 2026-06-27 data.
+
 # v3.22.0
 
 Expose reader coverage, source projections and production gate history through a read-only public dashboard, using bounded monitoring and the existing alert path. Health probes have isolated capacity; sparse observations and semantic gate versions keep history inexpensive and deployment-independent. Historical attribution respects configuration changes and monitor restarts. Repeated sampling minutes preserve one verdict; bounded historical definition lookups disclose incomplete results.

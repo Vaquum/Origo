@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import socket
 import struct
 import subprocess
@@ -11,13 +12,13 @@ import time
 import urllib.request
 from collections.abc import Iterator
 from contextlib import ExitStack
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from playwright.sync_api import Route, sync_playwright
+from playwright.sync_api import Page, Route, sync_playwright
 
 from origo import law
 from origo.law_catalog import build_catalog, gate_evaluation
@@ -25,8 +26,11 @@ from origo.workers import law_page as page
 
 from .test_law import law_case as law_case
 from .test_law import real_law_report as real_law_report
+from .test_monitor import _monitor, _Recorder
+from .test_monitor import recorder as recorder
 
 SHA = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
+BASELINE = Path(__file__).parents[1] / 'fixtures/law/overview-baseline-58b45de.json'
 
 
 def _write(path: Path, records: list[page.Document]) -> None:
@@ -276,7 +280,7 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         errors: list[str] = []
         tab.on('pageerror', lambda error: errors.append(str(error)))
         started = time.monotonic()
-        tab.goto(url + '/law')
+        tab.goto(url + '/law?view=sources')
         tab.locator('.source').first.wait_for()
         assert time.monotonic() - started < 2
         catalog = page._object(cache.current(now)['catalog'])
@@ -312,7 +316,7 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         tab.locator('[data-view="recovery"]').click()
         assert 'projection=' in tab.url and 'source=' in tab.url
         assert tab.locator('.chart-card').count() == 1
-        assert 'Core-law consecutive clear window' in tab.locator('#message').inner_text()
+        assert 'Core-law consecutive clear window' not in tab.locator('#message').inner_text()
         tab.screenshot(path='/tmp/origo-law-recovery.png', full_page=True)
         tab.set_viewport_size({'width': 390, 'height': 844})
         tab.locator('[data-view="sources"]').click()
@@ -413,8 +417,7 @@ def test_history_cache_limits_preserve_current_report(
     assert cache._definitions(str(original['gate_id']))
 
 
-def test_thirty_day_replay_cache_fits_page_memory_budget(tape: tuple[Path, page.Document, datetime]) -> None:
-    root, _, _ = tape
+def _measure_memory(root: Path) -> page.Document:
     script = r"""
 import json, resource, sys, time
 from datetime import datetime, timedelta
@@ -429,7 +432,7 @@ for n in range(43201):
     stamp = (now - timedelta(minutes=n)).replace(second=0, microsecond=0).isoformat()
     cache._sample({**report, 'sampling_slot': stamp, 'evaluation_start': stamp})
 # Normal production volume: 58 gate envelopes per minute. Original evidence is unchanged.
-events = report['gates']
+events = [event for event in report['gates'] if event.get('evidence_id')]
 for n in range(43200):
     stamp = (now - timedelta(minutes=43200-n)).isoformat()
     for index in range(58):
@@ -440,13 +443,18 @@ current = cache.current(now)
 rss = (next(int(line.split()[1]) for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('VmHWM:')) / 1024
     if sys.platform.startswith('linux') else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576)
 print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache.event_count, 'index_bytes': sum(len(value) for value in cache.index.values()),
-    'current_seconds': time.monotonic()-started, 'limited': current['history_limited']}))
+    'current_seconds': time.monotonic()-started, 'limited': current['history_limited'],
+    'operations_slots': len(cache.operations_samples), 'operations_bytes': cache.operations_bytes, 'sample_bytes': cache.sample_bytes}))
 """
     measured = subprocess.run([sys.executable, '-c', script, str(root)], check=True, capture_output=True, text=True)
-    result = json.loads(measured.stdout)
+    return page._decode(measured.stdout.encode())
+
+
+def test_thirty_day_replay_cache_fits_page_memory_budget(tape: tuple[Path, page.Document, datetime]) -> None:
+    result = _measure_memory(tape[0])
     assert result['samples'] == 43201 and result['events'] == 2_505_600
     assert result['index_bytes'] == 2_505_600 * 16
-    assert result['rss_mib'] < 256 and result['current_seconds'] < 1
+    assert float(str(result['rss_mib'])) < 256 and float(str(result['current_seconds'])) < 1
     assert result['limited'] is False
     Path('/tmp/origo-law-cache-memory.json').write_text(json.dumps(result, indent=2))
 
@@ -764,7 +772,7 @@ def test_recovery_delta_retains_direction_without_changing_duration(
         tab.locator('.chart-card').wait_for()
         normal = tab.evaluate('duration', magnitude)
         # Signed formatting vectors use a captured age magnitude, not claimed historical market deltas.
-        for value, expected in ((-magnitude, f'-{normal} · less lag'), (magnitude, f'+{normal} · more lag'), (0, '0s · unchanged'), (None, '—')):
+        for value, expected in ((-magnitude, f'-{normal} · less lag'), (magnitude, f'+{normal} · more lag'), (0, '0s · unchanged'), (None, 'No exact observation one hour earlier')):
             tab.evaluate("value=>{data.delay_change_1h_seconds.binance_spot_trades=value;renderContent()}", value)
             assert tab.locator('.recovery-metrics>div').nth(1).locator('strong').inner_text() == expected
         assert tab.evaluate('duration', magnitude) == normal
@@ -816,7 +824,7 @@ def test_catalog_report_interleaving_never_displays_mixed_definitions(
         assert tab.evaluate("descriptor('monitor.queue_bounded').thresholds.queue_threshold") == threshold
         tab.unroute('**/law/gates.json')
         tab.evaluate('loadOverview()')
-        assert tab.locator('.day').count() == len(new_catalog['gates']) * 30
+        assert tab.locator('.day').count() == len(new_catalog['law_gate_ids']) * 30
         assert tab.evaluate('data.status') == report['status']
         browser.close()
 
@@ -862,14 +870,14 @@ def test_paginated_history_retains_each_original_catalog_definition(
     url, cache, report, now = serving
     catalogs = []
     events: list[page.Document] = []
-    # Actual configured catalogs; UNKNOWN events claim no unobserved queue measurement.
+    # Actual configured catalogs; UNKNOWN events claim no unobserved reader measurement.
     for index, threshold in enumerate((200, 201)):
-        monkeypatch.setenv('ORIGO_ALERT_QUEUE_THRESHOLD', str(threshold))
+        monkeypatch.setattr(law, 'R1_SPOT_BUDGET_SECONDS', threshold)
         catalog = build_catalog(SHA)
         catalogs.append(catalog)
         (cache.root / f'catalog-{catalog["version"]}.json').write_text(json.dumps(catalog))
         cache._load_catalog(catalog['version'])
-        descriptor = next(gate for gate in catalog['gates'] if gate['id'] == 'monitor.queue_bounded')
+        descriptor = next(gate for gate in catalog['gates'] if gate['id'] == 'law.R1:binance_spot_trades')
         stamp = page._instant(report['evaluation_start']) - timedelta(seconds=30 if index == 0 else 0)
         event = gate_evaluation(descriptor, evidence_id=f'configuration-envelope:{index}',
             evaluated_at=stamp.isoformat(), outcome='UNKNOWN', evidence={}, reason='not_observed', catalog_version=catalog['version'])
@@ -882,22 +890,22 @@ def test_paginated_history_retains_each_original_catalog_definition(
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()
-        tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
+        tab.goto(url+'/law?view=gates&gate=law.R1:binance_spot_trades')
         more = tab.locator('[data-more]')
         more.wait_for()
-        assert tab.evaluate("getHistory(historyKey('monitor.queue_bounded')).definitions.length") == 1
+        assert tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades')).definitions.length") == 1
         more.click()
         more.wait_for(state='hidden')
-        loaded = tab.evaluate("getHistory(historyKey('monitor.queue_bounded'))")
+        loaded = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
         assert len(loaded['events']) == page.PAGE_SIZE + 1
         assert {item['catalog_version'] for item in loaded['definitions']} == {catalog['version'] for catalog in catalogs}
         for position, threshold in ((0, 201), (-1, 200)):
             item = tab.locator('#detail .event').nth(position)
             item.locator('summary').click()
-            assert f'queue threshold: {threshold}' in item.inner_text()
+            assert f'budget seconds: {threshold}' in item.inner_text()
             assert f'/blob/{SHA}/' in str(item.locator('details a').get_attribute('href'))
         # Definition retention follows retained events, including the browser's existing 5,000-event cap.
-        pruned = tab.evaluate("()=>{const h=getHistory(historyKey('monitor.queue_bounded'));return mergeDefinitions([h.events[0]],h.definitions)}")
+        pruned = tab.evaluate("()=>{const h=getHistory(historyKey('law.R1:binance_spot_trades'));return mergeDefinitions([h.events[0]],h.definitions)}")
         assert len(pruned) == 1 and pruned[0]['catalog_version'] == catalogs[1]['version']
         # Replay an actual first response with metadata-budget omission, followed by a complete older page.
         def omit_first_definitions(route: Route) -> None:
@@ -906,16 +914,16 @@ def test_paginated_history_retains_each_original_catalog_definition(
             limited.update(definitions=[], definitions_limited=True, limited=True)
             route.fulfill(json=limited)
         tab.route('**/law/history.json?*', omit_first_definitions)
-        tab.evaluate("async()=>{histories.clear();await loadHistory('monitor.queue_bounded')}")
+        tab.evaluate("async()=>{histories.clear();await loadHistory('law.R1:binance_spot_trades')}")
         tab.unroute('**/law/history.json?*')
         more.click()
         more.wait_for(state='hidden')
-        retained = tab.evaluate("getHistory(historyKey('monitor.queue_bounded'))")
+        retained = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
         assert retained['definitions_limited'] is True and retained['limited'] is True
         assert len(retained['events']) == page.PAGE_SIZE + 1 and len(retained['definitions']) == 1
         assert 'lookup budget reached' in tab.locator('#detail').inner_text()
-        tab.evaluate("async()=>{histories.clear();await loadHistory('monitor.queue_bounded')}")
-        assert tab.evaluate("getHistory(historyKey('monitor.queue_bounded')).limited") is False
+        tab.evaluate("async()=>{histories.clear();await loadHistory('law.R1:binance_spot_trades')}")
+        assert tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades')).limited") is False
         browser.close()
 
 
@@ -1038,3 +1046,411 @@ def test_definition_lookup_budget_is_visible_request_local_and_retryable(
     definition = page._objects(retried['definitions'])[0]
     assert definition['catalog_version'] == omitted['catalog_version']
     assert page._object(definition['code'])['deployed_sha'] == omitted['deployed_sha']
+
+
+@pytest.fixture()
+def production_tape(tmp_path: Path) -> tuple[Path, page.Document, datetime]:
+    baseline = page._decode(BASELINE.read_bytes())
+    report = copy.deepcopy(page._object(baseline['report']))
+    catalog = build_catalog(str(baseline['deployed_sha']))
+    report['catalog_version'] = catalog['version']
+    root = tmp_path / 'captured-law'
+    root.mkdir()
+    (root / f"catalog-{catalog['version']}.json").write_text(json.dumps(catalog))
+    day = str(report['sampling_slot'])[:10]
+    _write(root / f'samples-{day}.jsonl', [report])
+    _write(root / f'gate-events-{day}.jsonl', [event for event in page._objects(report['gates']) if event.get('evidence_id')])
+    return root, report, page._instant(report['evaluation_end']) + timedelta(seconds=1)
+
+
+@pytest.fixture()
+def production_serving(production_tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, page.TapeCache, page.Document, datetime]]:
+    root, report, now = production_tape
+    cache = page.TapeCache(root)
+    cache.refresh_latest(now)
+    while cache.loading:
+        cache.advance(now, budget_seconds=1)
+    server = page.LawServer(('127.0.0.1', 0), cache, lambda: now)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_port}', cache, report, now
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.fixture()
+def operational_report(recorder: _Recorder, tmp_path: Path) -> page.Document:
+    monitor = _monitor(recorder, tmp_path / 'measured-monitor')
+    monitor.tick(datetime.now(UTC))
+    assert monitor.law_tape.last is not None
+    return page._decode(json.dumps(monitor.law_tape.last).encode())
+
+
+def _figure(tab: Page, key: str) -> str:
+    return tab.locator(f'[data-overview="{key}"]').inner_text()
+
+
+def test_served_page_layout_contract() -> None:
+    tabs = re.findall(r'<button[^>]*role="tab"[^>]*>', page.PAGE)
+    assert [re.search(r'data-view="([^"]+)"', tag).group(1) for tag in tabs] == ['overview', 'sources', 'laws', 'recovery']
+    assert 'aria-selected="true"' in tabs[0]
+    assert not any(text in page.PAGE for text in ('Source to reader · live evidence', 'Know where your data stands.',
+        'Follow every declared stage from its source to its published output.'))
+
+
+def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
+    baseline = page._decode(BASELINE.read_bytes())
+    catalog = build_catalog(str(baseline['deployed_sha']))
+    original = page._objects(baseline['law_descriptors'])
+    current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
+    assert len(current) == 15
+    assert sorted(current, key=lambda gate: gate['id']) == sorted(original, key=lambda gate: str(gate['id']))
+    report = page._object(baseline['report'])
+    before = page._sample_brief(report)
+    assert before['policy'] == baseline['expected_policy'] == '5647749677518a069becefee8dbdafb774d940f23575986b7d2b04c08314da5e'
+    decorated = copy.deepcopy(report)
+    # Additive protocol fields are not new measurements and must not redefine the data laws.
+    for event in page._objects(decorated['gates']):
+        if str(event['gate_id']).startswith('monitor.'):
+            page._object(event['evidence']).update(queued_runs=None, workers_fresh=None, error_lines=None)
+    for observation in page._objects(decorated['projections']):
+        if ':consumer:' in str(observation['id']):
+            observation['publication_policy'] = {'reason': 'unknown', 'lag_seconds': None, 'grace_seconds': None,
+                'state_through': None, 'published_through': None}
+    after = page._sample_brief(decorated)
+    assert before == after
+    end = page._instant(report['sampling_slot'])
+    vectors = [{**before, 'slot': (end-timedelta(minutes=4320-index)).isoformat(),
+        'start': (end-timedelta(minutes=4320-index)).isoformat()} for index in range(4321)]
+    assert len(page.consecutive_window(vectors, end.isoformat())) == 4321
+    vectors[-1] = {**after, 'slot': end.isoformat(), 'start': end.isoformat()}
+    assert len(page.consecutive_window(vectors, end.isoformat())) == 4321
+
+
+def test_overview_production_shape_stays_within_resource_budgets(
+    production_tape: tuple[Path, page.Document, datetime], operational_report: page.Document,
+) -> None:
+    root, report, _ = production_tape
+    baseline = page._decode(BASELINE.read_bytes())
+    raw = page._object(baseline['report'])
+    assert len(json.dumps(raw, separators=(',', ':')).encode()) == baseline['compact_report_bytes'] == 126790
+    assert len(page._objects(report['feeds'])) == 6 and len(page._objects(report['projections'])) == 54
+    additions = {str(event['gate_id']): event['evidence'] for event in page._objects(operational_report['gates']) if str(event['gate_id']).startswith('monitor.')}
+    decorated = copy.deepcopy(report)
+    for event in page._objects(decorated['gates']):
+        if event['gate_id'] in additions:
+            event['evidence'] = additions[str(event['gate_id'])]
+    for observation in page._objects(decorated['projections']):
+        if ':consumer:' in str(observation['id']):
+            observation['publication_policy'] = {'reason': 'unknown', 'lag_seconds': None, 'grace_seconds': None, 'state_through': None, 'published_through': None}
+    size = len(json.dumps(decorated, separators=(',', ':')).encode())
+    assert size-len(json.dumps(report, separators=(',', ':')).encode()) <= 8*1024 and size <= 160*1024
+    _write(next(root.glob('samples-*')), [decorated])
+    assert page.MAX_RECORD == 1024 * 1024 and page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024
+    result = _measure_memory(root)
+    assert result['samples'] == 43201 and result['events'] == 2_505_600
+    assert result['index_bytes'] == 2_505_600 * 16 and result['limited'] is False
+    assert float(str(result['rss_mib'])) < 256 and float(str(result['current_seconds'])) < 1
+    assert int(str(result['operations_slots'])) <= 1441 and int(str(result['operations_bytes'])) <= 1024*1024
+    Path('/tmp/origo-overview-production-memory.json').write_text(json.dumps({**result, 'report_bytes': size}, indent=2))
+
+
+def test_overview_totals_match_catalog_and_observed_evidence(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, report, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law')
+        tab.locator('.overview-card').first.wait_for()
+        assert tab.locator('.overview-card').count() == 4
+        for key, numerator, denominator in (('R1', 4, 4), ('C1', 2, 4), ('C2', 4, 4), ('D1', 2880, 2880)):
+            text = _figure(tab, key).replace(',', '')
+            assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
+        assert 'not due' in _figure(tab, 'C1').lower()
+        assert 'unknown' in _figure(tab, 'queue').lower() or 'not recorded' in _figure(tab, 'queue').lower()
+        assert 'Monitor checks' in tab.locator('#monitor-band').inner_text()
+        for key in ('R1', 'C1', 'C2', 'D1', 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear'):
+            tab.locator(f'[data-overview="{key}"]').click()
+            assert tab.locator('#detail').is_visible()
+            assert tab.locator('#detail').inner_text().strip()
+            assert '127.0.0.1:4000' not in tab.locator('#detail').inner_text()
+            tab.locator('[data-close]').click()
+        assert len(page._objects(report['feeds'])) == 6
+        browser.close()
+
+
+def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page(viewport={'width': 1366, 'height': 900}, has_touch=True)
+        tab.goto(url+'/law')
+        tab.locator('.overview-card').first.wait_for()
+        assert tab.locator('[role="tab"]').all_text_contents() == ['Overview', 'Sources', 'Laws', 'Recovery']
+        for item in tab.locator('.overview-card,.overview-secondary,#monitor-band,#inventory-band').all():
+            box = item.bounding_box()
+            assert box is not None and box['width'] > 0 and box['height'] > 0
+            assert 0 <= box['x'] and 0 <= box['y'] and box['x']+box['width'] <= 1366 and box['y']+box['height'] <= 900, box
+        tab.locator('[data-overview="R1"]').focus()
+        tab.keyboard.press('Enter')
+        assert tab.locator('#detail').is_visible()
+        tab.locator('[data-close]').click()
+        assert tab.locator('#detail').is_hidden()
+        tab.locator('[data-view="sources"]').click()
+        tab.locator('.source').first.wait_for()
+        tab.evaluate('window.scrollTo(0,250)')
+        position = tab.evaluate('scrollY')
+        target = tab.locator('.source-title').nth(2)
+        box = target.bounding_box()
+        assert box is not None and 0 <= box['y'] < 900
+        target.click()
+        tab.go_back()
+        tab.wait_for_function('() => !state.source')
+        tab.wait_for_function('value => Math.abs(scrollY-value)<3', arg=position)
+        tab.set_viewport_size({'width': 390, 'height': 844})
+        for view in ('overview', 'sources', 'laws', 'recovery'):
+            tab.locator(f'[data-view="{view}"]').click()
+            assert tab.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        assert 'READER RECOVERY' not in tab.locator('body').inner_text()
+        tab.screenshot(path='/tmp/origo-overview-mobile.png', full_page=True)
+        tab.set_viewport_size({'width': 1366, 'height': 900})
+        tab.locator('[data-view="overview"]').click()
+        tab.screenshot(path='/tmp/origo-overview-desktop.png', full_page=True)
+        browser.close()
+
+
+def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=gates')
+        tab.locator('.gate').first.wait_for()
+        assert tab.locator('.law-group').count() == 4 and tab.locator('.gate').count() == 14
+        assert tab.evaluate("state.view") == 'laws'
+        assert all(str(gate).startswith('law.') for gate in tab.locator('.gate [data-gate]').evaluate_all('(items)=>items.map(x=>x.dataset.gate)'))
+        # Catalog envelope corruption cannot add an obligation or remove a required denominator.
+        tab.evaluate("()=>{const extra=structuredClone(descriptor('law.R1:binance_spot_trades'));extra.id+=':outside-inventory';data.catalog.gates.push(extra);render()}")
+        assert tab.locator('.gate').count() == 14
+        tab.evaluate("()=>{data.catalog.gates=data.catalog.gates.filter(g=>g.id!=='law.R1:binance_spot_trades');data.last_report.feeds=data.last_report.feeds.filter(f=>f.source_key!=='binance_spot_trades');render()}")
+        assert tab.locator('.gate').count() == 14
+        assert 'unknown' in tab.locator('.gate').filter(has=tab.locator('[data-gate="law.R1:binance_spot_trades"]')).inner_text().lower()
+        tab.reload()
+        tab.locator('.gate').first.wait_for()
+        info = tab.locator('.gate .info').first
+        info.focus()
+        tooltip = tab.locator('.gate .tooltip').first
+        assert tooltip.is_visible() and 'threshold' in tooltip.inner_text().lower()
+        assert '/blob/58b45deee0602e7524c2efcba4e532174ad40902/' in str(tooltip.locator('a').get_attribute('href'))
+        tab.locator('.day').last.click()
+        tab.locator('#detail .event').first.wait_for()
+        tab.locator('#detail .event details').first.locator('summary').click()
+        assert 'Definition at evaluation' in tab.locator('#detail').inner_text()
+        tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
+        tab.wait_for_function('() => data !== null')
+        assert 'runtime' in tab.locator('#detail').inner_text().lower() or 'runtime' in tab.locator('#message').inner_text().lower()
+        assert tab.locator('.gate').count() <= 14
+        browser.close()
+
+
+def test_depth_recovery_uses_real_continuity_evidence(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        for source in ('binance_spot_depth20_1m', 'binance_spot_depth200_1m'):
+            tab.goto(url+'/law?view=recovery&source='+source)
+            card = tab.locator('.chart-card')
+            card.wait_for()
+            tab.wait_for_function('() => document.querySelector(".chart-card svg") !== null')
+            text = card.inner_text().lower()
+            assert '1,440' in text or '1440' in text
+            assert '0' in text and 'missing' in text
+            assert not any(word in text for word in ('reader delay', 'daily archive', 'older history', 'unknown'))
+            assert card.locator('svg text').filter(has_text=re.compile(r'^0$')).count() >= 1
+            tab.locator('[data-view="sources"]').click()
+            selected = tab.locator(f'[data-source-card="{source}"]')
+            assert '1,440' in selected.inner_text() or '1440' in selected.inner_text()
+            assert 'reader delay' not in selected.inner_text().lower()
+        tab.evaluate("()=>{delete data.last_report.feeds.find(f=>f.source_key===state.source).predicates.D1;select({view:'recovery'})}")
+        assert 'unknown' in tab.locator('.chart-card').inner_text().lower()
+        browser.close()
+
+
+def test_recovery_comparison_states_and_signed_change(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, report, _ = production_serving
+    feed = next(item for item in page._objects(report['feeds']) if item['source_key'] == 'binance_spot_trades')
+    magnitude = page._number(page._object(page._object(page._object(feed['predicates'])['R1'])['evidence'])['age_seconds'])
+    assert magnitude is not None and magnitude > 0
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=recovery&source=binance_spot_trades')
+        tab.locator('.chart-card').wait_for()
+        assert 'one hour' in tab.locator('.chart-card').inner_text().lower()
+        assert any(word in tab.locator('.chart-card').inner_text().lower() for word in ('no exact observation one hour earlier', 'baseline unavailable')), tab.locator('.chart-card').inner_text()
+        normal = tab.evaluate('duration', magnitude)
+        for value, expected in ((-magnitude, f'-{normal} · less lag'), (magnitude, f'+{normal} · more lag'), (0, '0s · unchanged')):
+            tab.evaluate("value=>{data.delay_change_1h_seconds.binance_spot_trades=value;renderContent()}", value)
+            assert expected in tab.locator('.chart-card').inner_text()
+        for flag in ('history_loading', 'history_limited'):
+            tab.evaluate("flag=>{data.delay_change_1h_seconds.binance_spot_trades=null;data.history_loading=false;data.history_limited=false;data[flag]=true;renderContent()}", flag)
+            assert ('loading' if flag.endswith('loading') else 'limited') in tab.locator('.chart-card').inner_text().lower()
+        browser.close()
+
+
+def test_wait_and_publication_presentations_preserve_raw_evidence(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    target = 'binance_perp_trades:consumer:mount'
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url+'/law?view=sources')
+        tab.locator('.source').first.wait_for()
+        tab.locator('[data-projection="binance_perp_trades:raw"]').click()
+        text = tab.locator('#detail').inner_text()
+        assert '2026-09-23' in text and '10:30' in text
+        tab.locator('[data-close]').click()
+        # This protocol test applies policy states to an unchanged captured artifact; it makes no new production claim.
+        tab.evaluate("id=>{const p=data.last_report.projections.find(p=>p.id===id);window.savedOutput=structuredClone(p);p.status='STALE';p.reason='publication_state_changed';p.publication_policy={reason:'within_budget',lag_seconds:0,grace_seconds:10800,state_through:p.data_through,published_through:p.data_through};render()}", target)
+        node = tab.locator(f'[data-projection="{target}"]')
+        node.click()
+        assert 'pending' in tab.locator('#detail').inner_text().lower()
+        tab.locator('[data-close]').click()
+        assert tab.evaluate("data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount').status") == 'STALE'
+        source = tab.locator('[data-source-card="binance_perp_trades"]')
+        assert source.locator('.source-head .FAIL').count() == 0
+        for state, word in (('unknown', 'unknown'), ('stale', 'failed'), ('backfill_active', 'backfill')):
+            tab.evaluate("reason=>{data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount').publication_policy.reason=reason;render()}", state)
+            node.click()
+            assert word in tab.locator('#detail').inner_text().lower()
+            tab.locator('[data-close]').click()
+        tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status=savedOutput.status;p.reason=savedOutput.reason;render()}")
+        assert 'current' in node.inner_text().lower()
+        tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='FAILED';p.reason='artifact_missing';render()}")
+        assert node.locator('.FAIL,.FAILED').count() == 1
+        tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='STALE';p.reason='publication_state_changed';p.publication_policy.reason='within_budget';const f=data.last_report.feeds.find(f=>f.source_key==='binance_perp_trades');f.predicates.R1.status='FAIL';render()}")
+        assert source.locator('.source-head .FAIL').count() == 1
+        tab.evaluate("()=>{data.last_report.feeds.find(f=>f.source_key==='binance_perp_trades').predicates.R1.status='UNKNOWN';render()}")
+        assert source.locator('.source-head .UNKNOWN').count() == 1
+        tab.evaluate("()=>{delete data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount').publication_policy;render()}")
+        assert 'unknown' in node.inner_text().lower()
+        browser.close()
+
+
+def test_overview_unknowns_override_stale_or_mismatched_numbers(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.clock.install()
+        requests: list[str] = []
+        tab.on('request', lambda request: requests.append(request.url))
+        tab.goto(url+'/law')
+        tab.locator('.overview-card').first.wait_for()
+        assert 'Age of this sample' in tab.locator('body').inner_text()
+        assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
+        before = len(requests)
+        age = tab.locator('#sample-age').inner_text()
+        tab.clock.run_for(2000)
+        assert tab.locator('#sample-age').inner_text() != age and len(requests) == before
+        tab.route('**/law.json', lambda route: None)
+        tab.clock.fast_forward(121000)
+        assert tab.locator('.overview-card .PASS,.overview-card .CURRENT').count() == 0
+        assert 'unknown' in tab.locator('#health').inner_text().lower()
+        for key in ('R1', 'C1', 'C2', 'D1'):
+            assert 'unknown' in _figure(tab, key).lower() or 'unavailable' in _figure(tab, key).lower()
+        browser.close()
+
+
+def test_history_concurrency_deadlines_and_current_refresh(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+    url, _, _, _ = production_serving
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.add_init_script('''{
+          const original = window.fetch;window.historyRequests={active:0,peak:0,aborted:0,started:0,current:0};
+          window.fetch=(url,options={})=>{
+            const history=String(url).includes('/law/history.json')||String(url).includes('/law/gates.json');
+            if(!history){if(String(url).endsWith('/law.json'))historyRequests.current++;return original(url,options)}
+            historyRequests.active++;historyRequests.started++;historyRequests.peak=Math.max(historyRequests.peak,historyRequests.active);
+            options.signal?.addEventListener('abort',()=>historyRequests.aborted++,{once:true});
+            return original(url,options).finally(()=>historyRequests.active--);
+          };
+        }''')
+        tab.goto(url+'/law')
+        tab.locator('.overview-card').first.wait_for()
+        assert tab.evaluate('historyRequests.started') == 0
+        tab.route('**/law/history.json?*', lambda route: None)
+        tab.route('**/law/gates.json', lambda route: None)
+        tab.locator('[data-view="recovery"]').click()
+        tab.wait_for_function('() => historyRequests.active===2')
+        assert tab.evaluate('historyRequests.peak') == 2
+        current = tab.evaluate('historyRequests.current')
+        tab.evaluate('refresh()')
+        assert tab.evaluate('historyRequests.current') == current + 1
+        tab.wait_for_function('() => historyRequests.aborted>0', timeout=6500)
+        tab.locator('[data-view="laws"]').click()
+        tab.locator('[data-view="overview"]').click()
+        tab.wait_for_function('() => historyRequests.active===0', timeout=2000)
+        assert tab.evaluate('historyRequests.peak') <= 2
+        assert tab.locator('.overview-card').count() == 4
+        assert tab.evaluate('histories.size') <= 8
+        browser.close()
+
+
+def test_operational_history_totals_preserve_intervals_and_limits(
+    production_tape: tuple[Path, page.Document, datetime], operational_report: page.Document,
+) -> None:
+    root, original, now = production_tape
+    terminal = page._instant(original['sampling_slot']).replace(second=0, microsecond=0)
+    measured = {str(event['gate_id']): page._object(event['evidence']) for event in page._objects(operational_report['gates'])}
+    # Protocol clock/cap vectors replay actual local-monitor reads, never claim production history.
+    def record(end: datetime, *, start: datetime | None = None, cap: bool = False) -> page.Document:
+        result = copy.deepcopy(original)
+        result.update(sampling_slot=end.isoformat(), evaluation_start=end.isoformat(), evaluation_end=end.isoformat())
+        for event in page._objects(result['gates']):
+            metric = {'monitor.no_error_logs': 'error_lines', 'monitor.workers_alive': 'failed_receipts'}.get(str(event['gate_id']))
+            if metric:
+                assert measured[str(event['gate_id'])][metric] == 0
+                event['evidence'] = {**measured[str(event['gate_id'])], metric: 1000 if cap else measured[str(event['gate_id'])][metric],
+                    'window_start': (start or end-timedelta(minutes=1)).isoformat(), 'window_end': end.isoformat(), 'counts_limited': cap}
+        return result
+
+    def totals(records: list[page.Document], *, loading: bool = False, limited: bool = False) -> tuple[page.TapeCache, page.Document]:
+        _write(next(root.glob('samples-*')), [records[-1]])
+        cache = page.TapeCache(root)
+        cache.refresh_latest(now)
+        for item in records:
+            cache._sample(item)
+        cache.loading, cache.history_limited = loading, cache.history_limited or limited
+        cache._refresh_operations()
+        return cache, page._object(page._object(cache.current(now)['operations_history'])['error_lines'])
+
+    complete = [record(terminal-timedelta(minutes=59-index)) for index in range(60)]
+    _, horizons = totals(complete)
+    hour = page._object(horizons['60m'])
+    assert hour['count'] == 0 and hour['complete'] is True and hour['covered_seconds'] == 3600
+    assert hour['observed_slots'] == hour['expected_slots'] == 60
+    assert page._object(horizons['24h'])['complete'] is False
+    for records, reason in ((complete[1:], 'missing'), ([*complete, complete[-1]], 'duplicate'),
+        ([record(terminal-timedelta(minutes=59), start=terminal-timedelta(minutes=61)), *complete[1:]], 'boundary'),
+        ([*complete[:-1], record(terminal, start=terminal-timedelta(minutes=2))], 'overlap'),
+        ([*complete[:-1], record(terminal, cap=True)], 'cap')):
+        _, values = totals(records)
+        row = page._object(values['60m'])
+        assert row['complete'] is False, reason
+        assert row['count'] is not None, reason
+        assert float(str(row['covered_seconds'])) <= 3600
+    for flag in ('loading', 'limited'):
+        _, values = totals(complete, **{flag: True})
+        assert page._object(values['60m'])['complete'] is False
+    _, absent = totals([original])
+    assert page._object(absent['60m'])['count'] is None
+    cache, full = totals([record(terminal-timedelta(minutes=1499-index)) for index in range(1500)])
+    assert len(cache.operations_samples) <= 1441 and cache.operations_bytes <= 1024 * 1024
+    assert page._object(full['24h'])['count'] == 0 and page._object(full['24h'])['complete'] is True
+    assert page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024

@@ -28,6 +28,24 @@ jobs:
       - name: Install browser for dashboard acceptance
         run: python -m playwright install --with-deps chromium
 
+      - name: Pin Overview acceptance test entry points
+        run: |
+          pytest --collect-only -q \
+            tests/origo_source_native/test_law_page.py::test_overview_totals_match_catalog_and_observed_evidence \
+            tests/origo_source_native/test_monitor.py::test_overview_evidence_reuses_reads_and_preserves_unknowns \
+            tests/origo_source_native/test_law_page.py::test_overview_layout_and_navigation_at_desktop_and_mobile_sizes \
+            tests/origo_source_native/test_law_page.py::test_named_laws_filter_history_and_legacy_links \
+            tests/origo_source_native/test_law_page.py::test_depth_recovery_uses_real_continuity_evidence \
+            tests/origo_source_native/test_law_page.py::test_recovery_comparison_states_and_signed_change \
+            tests/origo_source_native/test_monitor.py::test_publication_policy_evidence_reuses_existing_decisions \
+            tests/origo_source_native/test_law_page.py::test_wait_and_publication_presentations_preserve_raw_evidence \
+            tests/origo_source_native/test_law_page.py::test_overview_unknowns_override_stale_or_mismatched_numbers \
+            tests/origo_source_native/test_law_page.py::test_history_concurrency_deadlines_and_current_refresh \
+            tests/origo_source_native/test_law_page.py::test_named_laws_preserve_original_definitions_and_clear_window \
+            tests/origo_source_native/test_law_page.py::test_served_page_layout_contract \
+            tests/origo_source_native/test_law_page.py::test_operational_history_totals_preserve_intervals_and_limits \
+            tests/origo_source_native/test_law_page.py::test_overview_production_shape_stays_within_resource_budgets
+
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
 

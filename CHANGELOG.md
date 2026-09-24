@@ -1,3 +1,7 @@
+# v3.25.0
+
+- Add the unregistered market state base projection: 56.25-second by 125-USDT cells from normalized spot trade times, checked UInt32 counts, compensated Float64 USDT volumes and partition-safe provisional contributions. Activation awaits the retained-history migration; existing source products remain unchanged.
+
 # v3.24.2
 
 - Add `docs/Reference/Binance-rallies.md`, the guide and reference for the Binance spot rally export. It covers running an export on the production host, copying the files off and reading them, rally selection, the lead-in and boundary settings, the rally definition, the file columns and metadata, data coverage, limits, errors and reproducibility. The README links it.

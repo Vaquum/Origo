@@ -1,6 +1,10 @@
-# v3.24.3
+# v3.25.1
 
 - Allow raw-perp minutes up to 512 page requests per attempt, preserving the 100-page default for other sources, boundary validation and provider budgets; publish each adapter's effective cap in the law catalog.
+
+# v3.25.0
+
+- Add the unregistered market state base projection: 56.25-second by 125-USDT cells from normalized spot trade times, checked UInt32 counts, compensated Float64 USDT volumes and partition-safe provisional contributions. Activation awaits the retained-history migration; existing source products remain unchanged.
 
 # v3.24.2
 

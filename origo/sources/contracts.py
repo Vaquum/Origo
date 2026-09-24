@@ -163,6 +163,7 @@ class Column:
         identifier(self.name)
         if self.sql_type not in {
             'UInt8',
+            'UInt32',
             'UInt64',
             'Int64',
             'Float64',

@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 from itertools import count
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import polars as pl
 import pyarrow as pa
@@ -88,6 +89,29 @@ def _trade_rows_2017() -> list[tuple[Any, ...]]:
             )
             for trade_id, price, quantity, quote_quantity, time_ms, maker, best in csv.reader(handle)
         ]
+
+
+def _reactivate_2017() -> None:
+    """Activate a second revision of 2017-08-17 holding the same official rows."""
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+    from origo.sources.contracts import StateRecord
+    from origo.sources.storage import SourceStore
+
+    build = UUID(int=2)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        client.execute(
+            """INSERT INTO origo.binance_spot_trades_raw_revisions
+            (source_date, partition_key, revision, build_id, trade_id, price, quantity,
+             quote_quantity, timestamp, is_buyer_maker, is_best_match, datetime) VALUES""",
+            [(*row[:2], 'reseed', build, *row[4:]) for row in _trade_rows_2017()],
+        )
+        store = SourceStore(client, 'origo', BINANCE_SPOT_TRADES_SPEC)
+        partition = BINANCE_SPOT_TRADES_SPEC.canonical.partition('2017-08-17')
+        store.insert_activation(StateRecord(partition, 2, 'reseed', build, ()), 'reseed')
+    finally:
+        client.disconnect()
 
 
 def _fixture_trades() -> pl.DataFrame:
@@ -227,7 +251,9 @@ def test_first_hit_definition(rally_data: None, tmp_path: Path) -> None:
     assert window['hit_trade_id'][3] == 6453974454 == tie['trade_id'][6]
 
 
-def test_id_selection(rally_data: None, tmp_path: Path) -> None:
+def test_id_selection(
+    rally_data: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ranged = _window(tmp_path)
     ids = _rallies(ranged)['rally_id'].to_list()
     assert ids == [
@@ -253,6 +279,35 @@ def test_id_selection(rally_data: None, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             export_binance_rallies(output_dir=output, rally_ids=[value])
         assert not output.exists()
+
+    # IDs more than 240 minutes apart are read in separate windows from one pin: a revision
+    # activated after the first trade read is not read by the later window.
+    labels = EXPECTED['BTCUSDT-trades-2017-08-17']['rallies']
+    early = labels[0]
+    late = next(label for label in labels if label[0] >= early[0] + 241 * 60)
+    read = rallies_module._Reader.trades
+
+    def reactivate_after_first_read(self: Any, *args: Any, **kwargs: Any) -> pl.DataFrame:
+        if not reactivated:
+            _reactivate_2017()
+            reactivated.append(True)
+        return read(self, *args, **kwargs)
+
+    reactivated: list[bool] = []
+    monkeypatch.setattr(rallies_module._Reader, 'trades', reactivate_after_first_read)
+    windows = _export(
+        tmp_path, rally_ids=[f'binance:spot:BTCUSDT:r30v1:t{label[0]}' for label in (late, early)]
+    )
+    assert reactivated == [True]
+    metadata = json.loads(windows['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])
+    assert metadata['sources']['trades']['partitions'] == [
+        {'partition_key': '2017-08-17', 'provisional': False, 'revision': SEED_REVISION,
+         'build_id': str(SEED_BUILD_ID)}
+    ]
+    assert _rallies(windows).select(
+        pl.col('anchor_time').dt.epoch('s'), 'reference_trade_id', 'hit_trade_id',
+        pl.col('time_to_hit').dt.total_microseconds(),
+    ).rows() == [tuple(early), tuple(late)]
 
 
 def test_full_containment(rally_data: None, tmp_path: Path) -> None:

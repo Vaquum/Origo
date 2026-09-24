@@ -126,8 +126,6 @@ class _IPC(Protocol):
 pa = cast(_PyArrow, import_module('pyarrow'))
 ipc = cast(_IPC, import_module('pyarrow.ipc'))
 
-# One pinned partition of the trade source: key, provisional, revision, build ID.
-_Partition = tuple[str, bool, str, str]
 
 
 @dataclass(frozen=True)
@@ -136,6 +134,18 @@ class _Request:
     end: int | None
     boundary: Boundary
     description: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _Partition:
+    """A trade-source partition pinned for the whole export; start and end in microseconds."""
+
+    key: str
+    provisional: bool
+    revision: str
+    build_id: str
+    start: int
+    end: int
 
 
 @dataclass(frozen=True)
@@ -182,9 +192,9 @@ def export_binance_rallies(
             'trades': {
                 'source': TRADES_SOURCE,
                 'partitions': [
-                    {'partition_key': key, 'provisional': provisional, 'revision': revision,
-                     'build_id': build}
-                    for key, provisional, revision, build in partitions
+                    {'partition_key': part.key, 'provisional': part.provisional,
+                     'revision': part.revision, 'build_id': part.build_id}
+                    for part in partitions
                 ],
             },
             'book': {'table': f'{reader.database}.{BOOK_TABLE}', 'read': 'FINAL'},
@@ -268,10 +278,12 @@ class _Reader:
         return pl.read_ipc_stream(io.BytesIO(body))
 
     def partitions(self, low: int, high: int) -> list[_Partition]:
-        """The trade partitions current now that overlap [low, high), pinned for this export."""
+        """The trade partitions current now that overlap [low, high)."""
         frame = self.frame(
             f"""SELECT partition_key, toBool(provisional) AS provisional, revision,
-                toString(build_id) AS build_id
+                toString(build_id) AS build_id,
+                toUnixTimestamp64Micro(toDateTime64(partition_start, 6, 'UTC')) AS start,
+                toUnixTimestamp64Micro(toDateTime64(partition_end, 6, 'UTC')) AS end
             FROM {self.database}.source_current_partitions
             WHERE source_key = {{source:String}}
               AND partition_start < fromUnixTimestamp64Micro({{high:Int64}}, 'UTC')
@@ -280,31 +292,38 @@ class _Reader:
             {'source': TRADES_SOURCE, 'low': low, 'high': high},
         )
         return [
-            (str(key), bool(provisional), str(revision), str(build))
-            for key, provisional, revision, build in frame.iter_rows()
+            _Partition(str(key), bool(provisional), str(revision), str(build), int(start), int(end))
+            for key, provisional, revision, build, start, end in frame.iter_rows()
         ]
 
     def trades(
-        self, partitions: Sequence[_Partition], low: int, high: int, *, last: bool = False
+        self, pinned: Sequence[_Partition], low: int, high: int, *, last: bool = False
     ) -> pl.DataFrame:
         """Trades of the pinned partitions in [low, high), or only the last of them."""
+        parts = [part for part in pinned if part.start < high and part.end > low]
         selects = ' UNION ALL '.join(
             f"""SELECT trade_id, toDateTime64(datetime, 6, 'UTC') AS timestamp, price, quantity,
                 quote_quantity, toBool(is_buyer_maker) AS is_buyer_maker,
                 toBool(is_best_match) AS is_best_match
             FROM {self.database}.{TRADES_SOURCE}_{component}_revisions
-            WHERE has({{{pinned}:Array(Tuple(String, String, String))}},
+            WHERE has({{{name}:Array(Tuple(String, String, String))}},
                       (partition_key, revision, toString(build_id)))
               AND datetime >= fromUnixTimestamp64Micro({{low:Int64}}, 'UTC')
               AND datetime < fromUnixTimestamp64Micro({{high:Int64}}, 'UTC')"""
-            for component, pinned in (('raw', 'canonical'), ('raw_latest', 'provisional'))
+            for component, name in (('raw', 'canonical'), ('raw_latest', 'provisional'))
         )
         order = 'trade_id DESC LIMIT 1' if last else 'trade_id'
         return self.frame(
             f'SELECT * FROM ({selects}) ORDER BY {order}',
             {
-                'canonical': [(key, rev, build) for key, prov, rev, build in partitions if not prov],
-                'provisional': [(key, rev, build) for key, prov, rev, build in partitions if prov],
+                'canonical': [
+                    (part.key, part.revision, part.build_id)
+                    for part in parts
+                    if not part.provisional
+                ],
+                'provisional': [
+                    (part.key, part.revision, part.build_id) for part in parts if part.provisional
+                ],
                 'low': low,
                 'high': high,
             },
@@ -329,22 +348,31 @@ class _Reader:
 def _detect_all(
     reader: _Reader, request: _Request
 ) -> tuple[list[_Rally], pl.DataFrame, list[_Partition]]:
+    windows = _windows(request)
+    reads = [(anchors[0] - _LOOKBACK, _limit(anchors[-1], end)) for anchors, end in windows]
+    # One pin for every window, so no two windows read different revisions of a partition.
+    pinned = (
+        reader.partitions(min(low for low, _ in reads), max(high for _, high in reads))
+        if reads
+        else []
+    )
     rallies: list[_Rally] = []
     frames = [pl.DataFrame(schema=_TRADES)]
-    partitions: dict[_Partition, None] = {}
-    for anchors, end in _windows(request):
-        found, frame, pinned = _detect(reader, anchors, end, request.boundary)
+    for anchors, end in windows:
+        found, frame = _detect(reader, pinned, anchors, end, request.boundary)
         rallies += found
         frames.append(frame)
-        partitions.update(dict.fromkeys(pinned))
     if request.end is None:
         missing = sorted(set(request.anchors) - {rally.anchor for rally in rallies})
         if missing:
             ids = ', '.join(_rally_id(anchor) for anchor in missing)
             raise ValueError(f'Not rallies in the available data: {ids}')
-    # A window's predecessor repeats the previous window's last trade when none lies between.
+    # A window's predecessor is the previous window's last pinned trade when none lies between.
     trades = pl.concat(frames).unique('trade_id', keep='first', maintain_order=True)
-    return rallies, trades.sort('trade_id'), list(partitions)
+    read = [
+        part for part in pinned if any(part.start < high and part.end > low for low, high in reads)
+    ]
+    return rallies, trades.sort('trade_id'), read
 
 
 def _windows(request: _Request) -> list[tuple[tuple[int, ...], int | None]]:
@@ -360,16 +388,23 @@ def _windows(request: _Request) -> list[tuple[tuple[int, ...], int | None]]:
     return [(tuple(group), None) for group in groups]
 
 
+def _limit(anchor: int, end: int | None) -> int:
+    """Exclusive end of an anchor's hit search: 240 minutes on, or the range end if sooner."""
+    return anchor + _MAX if end is None else min(anchor + _MAX, end)
+
+
 def _detect(
-    reader: _Reader, anchors: tuple[int, ...], end: int | None, boundary: Boundary
-) -> tuple[list[_Rally], pl.DataFrame, list[_Partition]]:
-    low = anchors[0]
-    high = anchors[-1] + _MAX if end is None else min(anchors[-1] + _MAX, end)
-    partitions = reader.partitions(low - _LOOKBACK, high)
+    reader: _Reader,
+    pinned: Sequence[_Partition],
+    anchors: tuple[int, ...],
+    end: int | None,
+    boundary: Boundary,
+) -> tuple[list[_Rally], pl.DataFrame]:
+    low, high = anchors[0], _limit(anchors[-1], end)
     trades = pl.concat(
         [
-            reader.trades(partitions, low - _LOOKBACK, low, last=True),
-            reader.trades(partitions, low, high),
+            reader.trades(pinned, low - _LOOKBACK, low, last=True),
+            reader.trades(pinned, low, high),
         ]
     )
     ids = trades['trade_id'].to_numpy()
@@ -380,8 +415,7 @@ def _detect(
         first = int(np.searchsorted(times, anchor))
         if first == 0 or times[first - 1] < anchor - _LOOKBACK:
             continue
-        limit = anchor + _MAX if end is None else min(anchor + _MAX, end)
-        stop = int(np.searchsorted(times, limit))
+        stop = int(np.searchsorted(times, _limit(anchor, end)))
         hits = np.flatnonzero(prices[first:stop] >= prices[first - 1] * TARGET)
         if hits.size == 0:
             continue
@@ -398,7 +432,7 @@ def _detect(
                 int(ids[reference if boundary == 'before' else first]),
             )
         )
-    return rallies, trades, partitions
+    return rallies, trades
 
 
 def _trade_rows(trades: pl.DataFrame, rallies: Sequence[_Rally]) -> pl.DataFrame:

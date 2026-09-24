@@ -204,7 +204,8 @@ jobs:
             prior_workers+=("$(docker inspect --format '{{.Id}} {{.Config.Hostname}}' "$worker")")
           done
           prior_cube_writers=()
-          for worker in $(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker); do
+          prior_cube_writer_ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker)"
+          for worker in $prior_cube_writer_ids; do
             prior_cube_writers+=("$(docker inspect --format '{{.Id}}' "$worker")")
           done
           retirement_boundary=$(date +%s)

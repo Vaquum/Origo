@@ -422,8 +422,8 @@ def test_market_state_native_backfill_and_gap_selection(
             run_config=request.run_config, tags=request.tags,
         ).success
         assert runtime.store.execute(
-            "SELECT countIf(successful) FROM origo.source_capacity_log WHERE volume_id='market_state'"
-        )[0][0] >= 1
+            "SELECT countIf(successful)>0 FROM origo.source_capacity_log WHERE volume_id='market_state'"
+        ) == [(1,)]
         after = runtime.store.records(canonical_only=True)[0]
         _assert_upgrade(runtime, before, after)
         assert _cube_count(runtime) > 0

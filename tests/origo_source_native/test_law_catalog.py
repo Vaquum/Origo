@@ -726,7 +726,7 @@ def test_market_state_catalog_is_visible_in_sources(catalog: LawCatalog) -> None
     gates = {gate['id']: gate for gate in catalog['gates']}
     for name in ('M1', 'M2'):
         identity = f'law.{name}:binance_spot_trades'
-        assert identity in catalog['law_gate_ids']
+        assert identity in catalog.get('law_gate_ids', [])
         assert nodes['market_state']['id'] in gates[identity]['scope']
         assert gates[identity]['cadence'] == 'periodic'
         assert gates[identity]['code'] is not None

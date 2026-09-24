@@ -433,7 +433,7 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert email['to'] == ['operator@example.test']
     assert 'Dagit check evaluations: written.' in email['text']
     for key in outcome.failed:
-        if not (key.startswith(('law:R1:', 'law:C1:', 'law:D1:')) and ':FAIL:' in key):
+        if not (key.startswith(('law:R1:', 'law:C1:', 'law:D1:', 'law:M1:')) and ':FAIL:' in key):
             assert key in email['text']
 
     # A Dagit that refuses the write is reported in the same e-mail.

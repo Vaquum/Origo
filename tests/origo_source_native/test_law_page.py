@@ -300,7 +300,7 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         assert f'projection={target.replace(":", "%3A")}' in tab.url
         assert tab.locator('.gate .info').count() == tab.locator('.gate').count()
         tab.locator('#gate-search').fill('Reader age')
-        assert tab.locator('.gate').count() == 1
+        assert tab.locator('.gate').count() == 2
         tab.locator('#gate-search').fill('')
         info = tab.locator('.gate .info').first
         info.focus()

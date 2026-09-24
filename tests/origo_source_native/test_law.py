@@ -518,7 +518,7 @@ def test_market_state_laws_report_missing_stale_and_complete_coverage(law_case: 
     assert predicate(unactivated, 'R1')['status'] == 'PASS'
     assert predicate(unactivated, 'M1')['reason'] == 'cube_not_activated'
     # Same-build rows and completed receipts cannot stand in for activation.
-    assert law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_market_state_latest_revisions')[0][0] > 0
+    assert int(str(law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_market_state_latest_revisions')[0][0])) > 0
     law_case.client.execute(
         'ALTER TABLE origo.source_activation_log UPDATE component_hashes=%(hashes)s WHERE build_id=%(build)s',
         {'hashes': json.dumps(record.component_hashes), 'build': record.build_id}, settings={'mutations_sync': 2},

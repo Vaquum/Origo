@@ -132,21 +132,22 @@ HEALTH_RECONCILIATION_BATCH_SIZE = 4
 HEALTH_RECONCILIATION_RETRY_DELAYS = (60, 300, 1800, 3600)
 
 
-def _reconciliation_selection(repairs: list[str], upgrades: list[str], offset: int) -> list[str]:
+def _reconciliation_selection(
+    repairs: list[str], upgrades: list[str], offset: int, after: str
+) -> tuple[list[str], str]:
     """Up to four of the partitions whose version or status differs, rotating the start
     with the tick so a failing batch cannot starve the rest. Component upgrades only fill
-    the slots repairs leave, so a history upgrade never delays a repair. Nothing else is
-    selected: a canonical day whose Dagster record matches the store is not re-materialized,
-    because every build and repair re-checks its retained content and an operator can launch
-    the canonical job for any day."""
-
-    def window(keys: list[str], size: int) -> list[str]:
-        # Consecutive ticks take consecutive windows, so every key is reached.
-        start = offset * size % max(1, len(keys))
-        return (keys[start:] + keys[:start])[:size]
-
-    selected = window(repairs, HEALTH_RECONCILIATION_BATCH_SIZE)
-    return selected + window(upgrades, HEALTH_RECONCILIATION_BATCH_SIZE - len(selected))
+    the slots repairs leave, so a history upgrade never delays a repair. They continue in
+    key order after the last upgrade taken, so every pending upgrade is reached whatever
+    slots are free. Nothing else is selected: a canonical day whose Dagster record matches
+    the store is not re-materialized, because every build and repair re-checks its retained
+    content and an operator can launch the canonical job for any day. Returns the batch and
+    the last upgrade taken."""
+    start = offset * HEALTH_RECONCILIATION_BATCH_SIZE % max(1, len(repairs))
+    selected = (repairs[start:] + repairs[:start])[:HEALTH_RECONCILIATION_BATCH_SIZE]
+    ordered = [key for key in upgrades if key > after] + [key for key in upgrades if key <= after]
+    chosen = ordered[: HEALTH_RECONCILIATION_BATCH_SIZE - len(selected)]
+    return selected + chosen, chosen[-1] if chosen else after
 
 
 def _partition_runs(
@@ -256,13 +257,14 @@ def build_reconciliation_sensor(
                 )
                 for record in records
             } if enabled else {}
-            offset = 0
+            offset, after = 0, ''
             if context.cursor:
                 loaded: object = json.loads(context.cursor)
                 if not isinstance(loaded, dict):
                     raise ValueError('Reconciliation cursor must be an object.')
                 # Old cursors may contain `known`; identity now comes from Dagster itself.
                 offset = int(str(cast(dict[str, object], loaded).get('offset', 0)))
+                after = str(cast(dict[str, object], loaded).get('upgraded_after', ''))
             current = {
                 record.partition.key: f'{record.revision}:{record.build_id}:{record.generation}'
                 for record in records
@@ -303,7 +305,7 @@ def build_reconciliation_sensor(
             ]
             repairs = list(dict.fromkeys(changed + failed_keys))
             upgrades = [key for key in keys if missing.get(key) and key not in repairs]
-            selected = _reconciliation_selection(repairs, upgrades, offset)
+            selected, last_upgrade = _reconciliation_selection(repairs, upgrades, offset, after)
             now = datetime.now(UTC).timestamp()
             requests = (
                 [RunRequest(job_name=health_job.name, run_key=f'{spec.key}:health:{tick}')]
@@ -311,7 +313,7 @@ def build_reconciliation_sensor(
                 else []
             )
             health_count = len(requests)
-            context.update_cursor(json.dumps({'offset': offset + 1}))
+            context.update_cursor(json.dumps({'offset': offset + 1, 'upgraded_after': last_upgrade}))
             inflight = context.instance.get_runs(
                 filters=RunsFilter(
                     tags={'origo_source_key': spec.key, 'origo_source_reconciliation': 'true'},

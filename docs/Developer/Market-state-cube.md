@@ -104,6 +104,16 @@ coverage. Upgrade failures are visible as `component_upgrade` failures with scop
 `NONE`, leaving valid existing products available. Capacity evidence is keyed to
 the enabled component footprint, and admission/build share the maintenance fence.
 
+Cube-only activation updates publication metadata without rebuilding unchanged
+bar exports. Mount and Hugging Face renderers retain the full source-state tokens
+for monitoring and also fingerprint the component inputs they actually consume.
+Matching inputs preserve monthly Parquet files, Arrow links and Hugging Face
+version directories/upload evidence. A legacy manifest can establish equality
+only through an actual retained activation whose full token matches its evidence.
+Missing proof or changed inputs takes the normal render path. Publication checks
+canonical inputs again before commit and retains the original pinned provisional
+records; it cannot claim minutes that arrived during rendering.
+
 The existing monitor evaluates **M1** (current cube proof, raw/trade and taker-count
 agreement, 180-second freshness) and **M2** (calendar coverage from 2021-01-01).
 The same law tape, Sources catalog, `/law` view and alert path carry these results.

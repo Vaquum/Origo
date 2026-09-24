@@ -563,6 +563,60 @@ class SourceStore:
         records = self.records(canonical_only=canonical_only)
         return Snapshot(state_token(self.spec.key, records), records)
 
+    def legacy_equivalent_snapshot(self, snapshot: Snapshot) -> Snapshot:
+        """Recover actual base-only activations for legacy publication token checks."""
+        candidates: list[tuple[StateRecord, tuple[tuple[str, str], ...]]] = []
+        for record in snapshot.records:
+            base = {
+                component.key for component in self.accepted_components(record)
+                if component.activation_group is None
+            }
+            hashes = tuple(sorted(pair for pair in record.component_hashes if pair[0] in base))
+            if len(hashes) != len(record.component_hashes):
+                candidates.append((record, hashes))
+        previous: dict[tuple[str, bool], StateRecord] = {}
+        for offset in range(0, len(candidates), 256):
+            batch = candidates[offset:offset + 256]
+            identities = tuple(
+                (record.partition.key, int(record.partition.provisional), record.revision,
+                 record.build_id, list(hashes))
+                for record, hashes in batch
+            )
+            rows = self.execute(
+                f"""SELECT partition_key, provisional, partition_start, partition_end,
+                generation, revision, build_id, component_hashes
+                FROM {self.table('source_activation_log')}
+                WHERE source_key=%(source)s AND partition_key IN %(partitions)s
+                    AND tuple(partition_key, provisional, revision, build_id,
+                    arraySort(JSONExtract(component_hashes, 'Array(Tuple(String, String))')))
+                    IN %(identities)s
+                ORDER BY generation DESC
+                LIMIT 1 BY partition_key, provisional, revision, build_id""",
+                {'source': self.spec.key, 'identities': identities,
+                 'partitions': tuple(record.partition.key for record, _hashes in batch)},
+            )
+            current = {
+                (record.partition.key, record.partition.provisional): (record, hashes)
+                for record, hashes in batch
+            }
+            for row in rows:
+                retained = self._state_record(row)
+                key = (retained.partition.key, retained.partition.provisional)
+                record, hashes = current[key]
+                if (
+                    retained.partition == record.partition
+                    and retained.generation < record.generation
+                    and retained.revision == record.revision
+                    and retained.build_id == record.build_id
+                    and tuple(sorted(retained.component_hashes)) == hashes
+                ):
+                    previous[key] = retained
+        records = tuple(
+            previous.get((record.partition.key, record.partition.provisional), record)
+            for record in snapshot.records
+        )
+        return Snapshot(state_token(self.spec.key, records), records)
+
     def canonical_token(self, snapshot: Snapshot) -> str:
         """The token of the canonical records pinned in a snapshot; publication currency."""
         return state_token(

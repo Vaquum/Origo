@@ -105,6 +105,8 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
         'raw_latest',
         'time_latest',
         'dollar_latest',
+        'market_state',
+        'market_state_latest',
     }
     assert {consumer.key for consumer in store.spec.consumers} == {'mount', 'huggingface'}
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]
@@ -123,6 +125,12 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
     assert all(state.status.value == 'RUNNING' for state in instance.all_instigator_state())
     assert len(instance.all_instigator_state()) == len(bundle.sensors) + len(bundle.schedules)
     assert store.canonical_ready()
+    assert store.enabled_groups() == frozenset()
+    record, = store.snapshot().records
+    assert record.partition.key == DAY
+    assert set(dict(record.component_hashes)) == {
+        'raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned',
+    }
     assert store.execute('SELECT min(successful) FROM origo.source_capacity_log') == [(1,)]
     token = store.snapshot().token
     for consumer in store.spec.consumers:

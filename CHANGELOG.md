@@ -1,6 +1,7 @@
 # v3.26.0
 
 - Register the Binance spot market state base projection from 2021-01-01, activate it after writer retirement, and upgrade accepted history from retained raw without copying existing products.
+- Reuse existing bar export files and Hugging Face uploads during cube-only history activation, retaining exact source-state publication evidence.
 - Keep cube coverage and freshness visible through M1/M2 in the existing law monitor, with automatic native reconciliation and capacity remeasurement.
 
 # v3.25.2

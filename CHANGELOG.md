@@ -1,3 +1,7 @@
+# v3.23.0
+
+- Open the reader dashboard on numerical data health, with named laws, depth coverage and compact source/recovery views. Expose operational counts from existing monitor reads and bounded tape history; preserve original law definitions, production query counts and missing-evidence semantics.
+
 # v3.22.0
 
 Expose reader coverage, source projections and production gate history through a read-only public dashboard, using bounded monitoring and the existing alert path. Health probes have isolated capacity; sparse observations and semantic gate versions keep history inexpensive and deployment-independent. Historical attribution respects configuration changes and monitor restarts. Repeated sampling minutes preserve one verdict; bounded historical definition lookups disclose incomplete results.

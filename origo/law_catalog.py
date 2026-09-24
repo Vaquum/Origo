@@ -69,6 +69,17 @@ class LawCatalog(TypedDict):
     deployed_sha: str
     sources: list[SourceDescriptor]
     gates: list[GateDescriptor]
+    law_gate_ids: NotRequired[list[str]]
+
+
+class PublicationPolicy(TypedDict):
+    reason: Literal[
+        'within_budget', 'backfill_active', 'stale', 'unreadable', 'unknown', 'not_applicable'
+    ]
+    lag_seconds: float | None
+    grace_seconds: float | None
+    state_through: str | None
+    published_through: str | None
 
 
 class ProjectionObservation(TypedDict):
@@ -81,6 +92,7 @@ class ProjectionObservation(TypedDict):
     reason: str
     gate_ids: list[str]
     dagit_url: str | None
+    publication_policy: NotRequired[PublicationPolicy]
 
 
 class GateEvaluation(TypedDict):
@@ -201,6 +213,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 
 
 def build_catalog(deployed_sha: str) -> LawCatalog:
+    from origo.law import LAW_ANCHORS, LAW_INVENTORY
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -805,6 +818,11 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         'deployed_sha': deployed_sha,
         'sources': sources,
         'gates': gates,
+        'law_gate_ids': [
+            f'law.{predicate}:{source}'
+            for source in LAW_INVENTORY
+            for predicate in (('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',))
+        ],
     }
     catalog['version'] = _hash(catalog)
     return catalog

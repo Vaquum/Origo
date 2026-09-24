@@ -14,7 +14,7 @@ from dagster._grpc.client import DagsterGrpcClient
 from dagster._grpc.types import GetCurrentRunsResult
 from dagster._serdes import deserialize_value
 
-from .policy import CLAIM_TAG, REDUNDANT_TAG, WORKER_TAG, admission_lock
+from .policy import CLAIM_TAG, REDUNDANT_TAG, WORKER_TAG, admission_lock, advance_frontier
 
 
 class OrigoRunLauncher(DefaultRunLauncher):
@@ -37,6 +37,7 @@ class OrigoRunLauncher(DefaultRunLauncher):
                     CLAIM_TAG: run.run_id,
                 },
             )
+            advance_frontier(self._instance, run)
         super().launch_run(context)
 
     @property

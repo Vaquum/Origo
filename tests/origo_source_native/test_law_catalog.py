@@ -177,7 +177,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             identity = f'publication.current.canonical_drift:{spec.key}:consumer:{consumer.key}'
             location = gates[identity]['code']
             assert location is not None
-            assert location['path'] == 'origo/sources/profiles/consumer_base.py'
+            assert location['path'] == 'origo/sources/profiles/consumer_inputs.py'
             ready = gates[f'publication.canonical_readiness:{spec.key}:consumer:{consumer.key}']
             assert 'unresolved partition failure' in ready['condition']
     location = gates['orchestration.admission.redundant_launch']['code']

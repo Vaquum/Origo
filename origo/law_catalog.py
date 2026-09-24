@@ -611,8 +611,8 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 ),
                 (
                     'current.canonical_drift',
-                    'sources.profiles.consumer_base:_require_canonical',
-                    'The canonical state token must still match the render snapshot when the local publication manifest is committed.',
+                    'sources.profiles.consumer_inputs:verified_snapshot',
+                    'Canonical consumed inputs must still match the render snapshot at commit; equivalent activations refresh canonical metadata while preserving the pinned provisional records.',
                 ),
                 (
                     'current',

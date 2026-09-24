@@ -69,7 +69,7 @@ TYPES = {
     'bids': LEVELS,
     'asks': LEVELS,
 }
-NULLABLE = {'first_snapshot_time', 'last_snapshot_time'}
+NULLABLE = {'first_trade_id', 'first_snapshot_time', 'last_snapshot_time'}
 # The four rallies anchored in [11:39, 11:55) on 2026-06-27, in anchor order.
 WINDOW_ANCHORS = ['11:39', '11:41', '11:42', '11:43']
 
@@ -279,7 +279,7 @@ def test_id_selection(
         assert selected[name].equals(ranged[name])
         assert selected[name].equals(reordered[name], check_metadata=True)
     request = json.loads(selected['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])['request']
-    assert request == {'rally_ids': ids, 'boundary': 'after'}
+    assert request == {'rally_ids': ids, 'boundary': 'after', 'minutes_before': 0}
 
     anchor = int(_at('11:39').timestamp())
     for value in (
@@ -355,7 +355,8 @@ def test_three_file_export(rally_data: None, tmp_path: Path) -> None:
     described = json.loads(metadata.pop())
     assert described['definition']['version'] == 'r30v1'
     assert described['request'] == {
-        'start': '2026-06-27T11:39:00+00:00', 'end': '2026-06-27T11:55:00+00:00', 'boundary': 'after'
+        'start': '2026-06-27T11:39:00+00:00', 'end': '2026-06-27T11:55:00+00:00',
+        'boundary': 'after', 'minutes_before': 0,
     }
     assert described['sources']['trades']['partitions'] == [
         {'partition_key': '2026-06-27', 'provisional': False, 'revision': SEED_REVISION,
@@ -419,6 +420,40 @@ def test_boundary_setting(rally_data: None, tmp_path: Path) -> None:
     assert set(shared) <= trade_ids
     assert all(trade_id > first['hit_trade_id'] for trade_id in shared[1:])
 
+    # minutes_before moves each rally's start ahead of its anchor and the boundary applies
+    # there; detection and IDs do not change.
+    padded_after = _window(tmp_path, minutes_before=1)
+    padded_before = _window(tmp_path, boundary='before', minutes_before=1)
+    pa_rallies, pb_rallies = _rallies(padded_after), _rallies(padded_before)
+    assert pa_rallies.select(detection).equals(ra.select(detection))
+    assert pb_rallies.select(detection).equals(ra.select(detection))
+    assert pa_rallies['first_trade_id'].to_list() == [
+        6453962827, 6453965058, 6453966483, 6453967738
+    ]
+    assert pa_rallies['first_snapshot_time'].to_list() == [
+        _at('11:38:00.393'), _at('11:40:00.393'), _at('11:41:00.393'), _at('11:42:00.392')
+    ]
+    assert (padded_after['trades.arrow'].num_rows, padded_after['book.arrow'].num_rows) == (
+        11_628, 461
+    )
+    # Nothing precedes 11:38 in the data, so with 'before' the 11:39 rally has no record to
+    # start from and gets no rows; the others start at the last record before their start.
+    assert pb_rallies['first_trade_id'].to_list() == [None, 6453965057, 6453966482, 6453967737]
+    assert pb_rallies['first_snapshot_time'].to_list() == [
+        None, _at('11:39:59.393'), _at('11:40:59.396'), _at('11:41:59.392')
+    ]
+    assert pb_rallies.row(0, named=True)['last_snapshot_time'] is None
+    assert (padded_before['trades.arrow'].num_rows, padded_before['book.arrow'].num_rows) == (
+        9_398, 342
+    )
+    padded_ids = _export(
+        tmp_path, rally_ids=ra['rally_id'].to_list(), boundary='before', minutes_before=1
+    )
+    for name in OUTPUT_FILENAMES:
+        assert padded_ids[name].equals(padded_before[name])
+    metadata = padded_before['rallies.arrow'].schema.metadata[METADATA_KEY.encode()]
+    assert json.loads(metadata)['request']['minutes_before'] == 1
+
     # Without the snapshots before 11:39 the 11:39 rally has no snapshot to start from with
     # 'before', so it has no book rows; 'after' still starts it at 11:39:00.394.
     _omit_book_before('2026-06-27 11:39:00')
@@ -448,6 +483,8 @@ def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:
         {'start': _at('11:55'), 'end': _at('11:39')},
         {'start': _at('11:39'), 'end': _at('11:39')},
         {'start': _at('11:39'), 'end': _at('11:55'), 'boundary': 'middle'},
+        {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': -1},
+        {'start': _at('11:39'), 'end': _at('11:55'), 'minutes_before': 1.5},
     ):
         output = tmp_path / f'invalid-{next(_names)}'
         with pytest.raises(ValueError):

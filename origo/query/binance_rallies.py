@@ -3,7 +3,9 @@
 A rally is a UTC minute anchor whose first trade at or above the last pre-anchor trade
 price x 1.003 comes within 240 minutes. An export writes three Arrow IPC files:
 ``rallies.arrow`` holds one row per rally with the bounds that select its rows from
-``trades.arrow`` and ``book.arrow``, which hold each trade and snapshot once.
+``trades.arrow`` and ``book.arrow``, which hold each trade and snapshot once. A rally's rows
+start ``minutes_before`` ahead of its anchor, at the first record at or after that instant
+(``boundary='after'``) or the last record before it (``boundary='before'``), and end at its hit.
 
 ClickHouse is reachable only on the production host, so exports run inside an Origo
 container there, for example::
@@ -127,12 +129,12 @@ pa = cast(_PyArrow, import_module('pyarrow'))
 ipc = cast(_IPC, import_module('pyarrow.ipc'))
 
 
-
 @dataclass(frozen=True)
 class _Request:
     anchors: tuple[int, ...]
     end: int | None
     boundary: Boundary
+    lead: int
     description: dict[str, object]
 
 
@@ -151,13 +153,14 @@ class _Partition:
 @dataclass(frozen=True)
 class _Rally:
     anchor: int
+    start: int
     reference_id: int
     reference_time: int
     reference_price: float
     hit_id: int
     hit_time: int
     hit_price: float
-    first_trade_id: int
+    first_trade_id: int | None
 
 
 def export_binance_rallies(
@@ -167,8 +170,9 @@ def export_binance_rallies(
     start: datetime | None = None,
     end: datetime | None = None,
     boundary: Literal['after', 'before'] = 'after',
+    minutes_before: int = 0,
 ) -> tuple[Path, Path, Path]:
-    request = _request(rally_ids, start, end, boundary)
+    request = _request(rally_ids, start, end, boundary, minutes_before)
     if output_dir.exists():
         raise FileExistsError(f'{output_dir} already exists.')
     reader = _Reader(_connect(), _database())
@@ -209,21 +213,25 @@ def _request(
     start: datetime | None,
     end: datetime | None,
     boundary: Boundary,
+    minutes_before: int,
 ) -> _Request:
     if cast(str, boundary) not in ('after', 'before'):
         raise ValueError(f'Unknown boundary {boundary!r}; use "after" or "before".')
-    description: dict[str, object] = {'boundary': boundary}
+    if not isinstance(cast(object, minutes_before), int) or minutes_before < 0:
+        raise ValueError(f'minutes_before must be a non-negative integer, not {minutes_before!r}.')
+    lead = minutes_before * _MINUTE
+    description: dict[str, object] = {'boundary': boundary, 'minutes_before': minutes_before}
     if rally_ids is not None and start is None and end is None:
         anchors = tuple(sorted({_parse_id(value) for value in rally_ids}))
         description['rally_ids'] = [_rally_id(anchor) for anchor in anchors]
-        return _Request(anchors, None, boundary, description)
+        return _Request(anchors, None, boundary, lead, description)
     if rally_ids is None and start is not None and end is not None:
         low, high = _utc_us(start), _utc_us(end)
         if low >= high:
             raise ValueError('start must be before end.')
         description |= {'start': _iso(low), 'end': _iso(high)}
         first = -(-low // _MINUTE) * _MINUTE
-        return _Request(tuple(range(first, high, _MINUTE)), high, boundary, description)
+        return _Request(tuple(range(first, high, _MINUTE)), high, boundary, lead, description)
     raise ValueError('Select rallies with either rally_ids, or both start and end.')
 
 
@@ -349,7 +357,10 @@ def _detect_all(
     reader: _Reader, request: _Request
 ) -> tuple[list[_Rally], pl.DataFrame, list[_Partition]]:
     windows = _windows(request)
-    reads = [(anchors[0] - _LOOKBACK, _limit(anchors[-1], end)) for anchors, end in windows]
+    reads = [
+        (anchors[0] - request.lead - _LOOKBACK, _limit(anchors[-1], end))
+        for anchors, end in windows
+    ]
     # One pin for every window, so no two windows read different revisions of a partition.
     pinned = (
         reader.partitions(min(low for low, _ in reads), max(high for _, high in reads))
@@ -359,7 +370,7 @@ def _detect_all(
     rallies: list[_Rally] = []
     frames = [pl.DataFrame(schema=_TRADES)]
     for anchors, end in windows:
-        found, frame = _detect(reader, pinned, anchors, end, request.boundary)
+        found, frame = _detect(reader, pinned, anchors, end, request.boundary, request.lead)
         rallies += found
         frames.append(frame)
     if request.end is None:
@@ -399,8 +410,9 @@ def _detect(
     anchors: tuple[int, ...],
     end: int | None,
     boundary: Boundary,
+    lead: int,
 ) -> tuple[list[_Rally], pl.DataFrame]:
-    low, high = anchors[0], _limit(anchors[-1], end)
+    low, high = anchors[0] - lead, _limit(anchors[-1], end)
     trades = pl.concat(
         [
             reader.trades(pinned, low - _LOOKBACK, low, last=True),
@@ -420,16 +432,23 @@ def _detect(
         if hits.size == 0:
             continue
         reference, hit = first - 1, first + int(hits[0])
+        # The rows start `lead` before the anchor, at the record the boundary names there.
+        start = anchor - lead
+        opening = int(np.searchsorted(times, start))
+        if boundary == 'before':
+            has_prior = opening > 0 and times[opening - 1] >= start - _LOOKBACK
+            opening = opening - 1 if has_prior else -1
         rallies.append(
             _Rally(
                 anchor,
+                start,
                 int(ids[reference]),
                 int(times[reference]),
                 float(prices[reference]),
                 int(ids[hit]),
                 int(times[hit]),
                 float(prices[hit]),
-                int(ids[reference if boundary == 'before' else first]),
+                None if opening < 0 else int(ids[opening]),
             )
         )
     return rallies, trades
@@ -439,6 +458,8 @@ def _trade_rows(trades: pl.DataFrame, rallies: Sequence[_Rally]) -> pl.DataFrame
     ids = trades['trade_id'].to_numpy()
     keep = np.zeros(len(ids), dtype=bool)
     for rally in rallies:
+        if rally.first_trade_id is None:
+            continue
         low = int(np.searchsorted(ids, rally.first_trade_id))
         keep[low : int(np.searchsorted(ids, rally.hit_id, side='right'))] = True
     return trades.filter(pl.Series(keep))
@@ -449,7 +470,7 @@ def _book_rows(
 ) -> tuple[pl.DataFrame, list[tuple[int, int] | None]]:
     """Snapshots of the rallies, each once, and each rally's first and last snapshot time."""
     frames = [pl.DataFrame(schema=_BOOK)]
-    for low, high in _spans([(rally.anchor, rally.hit_time) for rally in rallies]):
+    for low, high in _spans([(rally.start, rally.hit_time) for rally in rallies]):
         if boundary == 'before':
             carry_in = reader.book(low - _LOOKBACK, low, last=True)
             if carry_in.height:
@@ -462,10 +483,10 @@ def _book_rows(
     keep = np.zeros(len(times), dtype=bool)
     bounds: list[tuple[int, int] | None] = []
     for rally in rallies:
-        first = int(np.searchsorted(times, rally.anchor))
+        first = int(np.searchsorted(times, rally.start))
         if boundary == 'before':
-            # Without a snapshot before the anchor the rally cannot start there: no book rows.
-            if first == 0 or times[first - 1] < rally.anchor - _LOOKBACK:
+            # Without a snapshot before the start the rally cannot start there: no book rows.
+            if first == 0 or times[first - 1] < rally.start - _LOOKBACK:
                 bounds.append(None)
                 continue
             first -= 1
@@ -561,7 +582,7 @@ def _schemas(metadata: str) -> tuple[object, object, object]:
         'bids': levels,
         'asks': levels,
     }
-    nullable = {'first_snapshot_time', 'last_snapshot_time'}
+    nullable = {'first_trade_id', 'first_snapshot_time', 'last_snapshot_time'}
     meta = {METADATA_KEY: metadata}
     rallies, trades, book = (
         pa.schema([pa.field(name, types[name], name in nullable) for name in fields], meta)

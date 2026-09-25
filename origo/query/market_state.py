@@ -58,13 +58,12 @@ SUMMARY_FILE: Final = 'summary.arrow'
 BATCH_ROWS: Final = 65_536
 MAX_BODY_BYTES: Final = 65_536
 # Measured on 2026-09-25: the full-history base cells statement needs 0.7-1.3 GiB and takes
-# 1.3 s on 4 threads (1.9 s on 2). Two queries use 8 of the host's 48 hardware threads, and
-# growth spills to disk instead of failing.
+# 1.3 s on 4 threads (1.9 s on 2). Two queries use 8 of the host's 48 hardware threads. No
+# statement spills to disk: one that outgrows its memory fails, so no temporary data can take
+# the disk that result admission keeps for source ingestion.
 QUERY_SETTINGS: Final[Mapping[str, object]] = {
     'max_threads': 4,
     'max_memory_usage': 4 * 1024**3,
-    'max_bytes_before_external_group_by': 2 * 1024**3,
-    'max_bytes_before_external_sort': 2 * 1024**3,
     'max_execution_time': 60,
     'timeout_overflow_mode': 'throw',
     'max_block_size': BATCH_ROWS,
@@ -287,6 +286,11 @@ def parse_request(raw: bytes) -> Request:
     )
 
 
+def statement_settings(result_id: str) -> dict[str, object]:
+    """The declared settings for every statement of one result, attributed by ``log_comment``."""
+    return {**QUERY_SETTINGS, 'log_comment': result_id}
+
+
 def pin(store: SourceStore, settings: Mapping[str, object]) -> Pin:
     """Pin the current accepted partitions; coverage ends at the first one without the cube."""
     rows = store.execute(
@@ -327,7 +331,7 @@ def write_result(
     reclaimed a build this request read, or held the fence too long to prove it did not.
     """
     created = datetime.now(UTC)
-    settings = {**QUERY_SETTINGS, 'log_comment': result_id}
+    settings = statement_settings(result_id)
     started = time.perf_counter()
     state = pin(runtime.store, settings)
     pinned = time.perf_counter()

@@ -1,16 +1,16 @@
 # v3.27.1
 
 - Tune the market state query service from production measurements.
-  - Every ClickHouse statement of a query, the pin included, runs with 4 threads, 4 GiB, a spill to disk at 2 GiB and 60 s. The pin previously ran on 1 thread with no time limit.
-  - Every statement's `log_comment` is its result ID.
+  - Every ClickHouse statement of a query, the pin and the admission floor included, runs with 4 threads, 4 GiB and 60 s, and never spills to disk. The pin previously ran on 1 thread with no time limit.
+  - Every such statement's `log_comment` is its result ID.
 - Sum row totals and grid totals exactly while cells stream: integer mantissas per (row, exponent), rounded once. The result is identical to `math.fsum` over the emitted cells, and the service's memory no longer grows with result size.
 - The service's health probe reads the whole answer, so it no longer logs its own probes as disconnected clients.
 - Each published query logs its pin, price-extent, SQL, write, validation and publication times and the service's peak RSS.
 - Add `tools/benchmark_market_state.py`, PRD-0022's frozen acceptance benchmark (#476):
   - 16 cases in stages A–D through the real client;
   - a raw-trade reference over the same pinned builds;
-  - resource, contention and operator-view evidence;
-  - a `PASS`/`FAIL` verdict.
+  - resource, contention, recovery, expiry and operator-view evidence;
+  - an interim verdict and a final one.
 
 # v3.27.0
 

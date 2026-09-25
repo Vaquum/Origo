@@ -528,11 +528,16 @@ def test_resolutions_up_to_the_float64_range_are_exact() -> None:
 
 
 @pytest.mark.parametrize(('n', 'm'), [(0, 0), (3, 0), (0, 2), (11, 5)])
-def test_row_sums_and_totals_stream_exactly(cube: SourceRuntime, tmp_path: Path, n: int, m: int) -> None:
+def test_row_sums_and_totals_stream_exactly(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n: int, m: int
+) -> None:
     runtime = built(cube, DAY1, DAY2, DAY3)
     pR = 125.0 * 2**m
+    # One cell per batch, so every sum crosses batch boundaries.
+    monkeypatch.setattr(market_state, 'QUERY_SETTINGS', {**market_state.QUERY_SETTINGS, 'max_block_size': 1})
     result = run(runtime, tmp_path, tR=56.25 * 2**n, pR=pR)
     cells = result.cells
+    assert len(cells) >= 2
     assert result.summary['volume'] == math.fsum(cell['volume'] for cell in cells)
     assert result.summary['taker_buy_volume'] == math.fsum(cell['taker_buy_volume'] for cell in cells)
     assert result.summary['poc'] == _reference_poc(_row_sums(cells, 'volume'), pR)
@@ -554,6 +559,28 @@ def test_row_sums_and_totals_stream_exactly(cube: SourceRuntime, tmp_path: Path,
     # A volume the exact sum cannot represent stops the result instead of summing wrongly.
     with pytest.raises(ValueError, match='finite and not negative'):
         market_state._ExactSums().add(np.array([0], dtype=np.uint64), np.array([math.inf]))
+
+
+def test_exact_sums_match_fsum_across_the_float64_range() -> None:
+    # Arithmetic edge cases, not market data: zeros, subnormals, the largest mantissas and
+    # exponents far apart, split over batches, where rounding each row first would differ.
+    tiny, huge = math.ulp(0.0), float.fromhex('0x1.fffffffffffffp+1000')
+    values = [0.0, tiny, 5 * tiny, 2.0**-1022, math.nextafter(2.0**52, 0.0), 2.0**52, 1e16, 1.0, 1e-16, 1e-16, huge, 3.0]
+    rows = [0, 0, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4]
+    for size in (1, 2, 5, 12):
+        sums = market_state._ExactSums()
+        for start in range(0, len(values), size):
+            sums.add(np.array(rows[start:start + size], dtype=np.uint64), np.array(values[start:start + size]))
+        grouped: dict[int, list[float]] = defaultdict(list)
+        for row, value in zip(rows, values, strict=True):
+            grouped[row].append(value)
+        assert sums.rows() == {row: math.fsum(parts) for row, parts in grouped.items()}
+        assert sums.total() == math.fsum(values)
+    # The total is the correctly rounded sum of every value, not a sum of rounded row totals.
+    split = market_state._ExactSums()
+    split.add(np.array([0, 0, 1], dtype=np.uint64), np.array([1.0, 1e-16, 1e-16]))
+    assert split.rows() == {0: 1.0, 1: 1e-16}
+    assert split.total() == math.fsum([1.0, 1e-16, 1e-16]) != math.fsum([1.0, 1e-16])
 
 
 def _statement(query: str) -> str:
@@ -588,8 +615,8 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
         effective = {**defaults, **settings}
         assert effective['max_threads'] == '4'
         assert effective['max_memory_usage'] == str(4 * 1024**3)
-        assert effective['max_bytes_before_external_group_by'] == str(2 * 1024**3)
-        assert effective['max_bytes_before_external_sort'] == str(2 * 1024**3)
+        assert 'max_bytes_before_external_group_by' not in effective
+        assert 'max_bytes_before_external_sort' not in effective
         assert effective['max_execution_time'] == '60'
         assert effective['timeout_overflow_mode'] == 'throw'
         assert effective['max_block_size'] == '65536'

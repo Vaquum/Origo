@@ -253,7 +253,7 @@ def _sample(stage: str, stream: int, number: int, case: str, request: Mapping[st
         'stage': stage, 'stream': stream, 'round': number, 'case': case, 'request': dict(request),
         'started_at': stamp(started), 'status': None, 'error': '', 'result_id': '', 'readable': False,
         'read_seconds': None, 'cells': 0, 'bytes': 0, 'cells_path': '', 'summary_path': '',
-        'data_cutoff': '', 'canonical_through': '', 'state_token': '',
+        'data_cutoff': '', 'canonical_through': '', 'state_token': '', 'rectangle': None,
     }
     try:
         result = ask(request, url)
@@ -280,6 +280,10 @@ def _sample(stage: str, stream: int, number: int, case: str, request: Mapping[st
     sample['read_seconds'] = time.perf_counter() - began
     sample['readable'] = cells.num_rows == sample['cells'] and summary.num_rows == 1
     sample['bytes'] = sum(os.stat(mounted(path, mount)).st_size for path in (result.cells, result.summary))
+    if sample['readable']:
+        # The effective rectangle tells the verdict which statements the result ran.
+        row = summary.select(['t1', 't2', 'p1', 'p2']).to_pylist()[0]
+        sample['rectangle'] = {'t1': stamp(row['t1']), 't2': stamp(row['t2']), 'p1': row['p1'], 'p2': row['p2']}
     return sample
 
 
@@ -317,13 +321,24 @@ def succeeded(sample: Mapping[str, object]) -> bool:
 
 
 def _statements(sample: Mapping[str, object]) -> set[str]:
-    """The statements a published result ran: a result with cells read them, and read its
-    time window's price extent first unless both price bounds were supplied."""
-    if int(str(sample['cells'])) == 0:
-        return {'floor', 'pin', 'validate'}
+    """The statements a published result ran, from its request and effective rectangle.
+
+    A non-empty time window validates its builds, reads its price extent unless both price
+    bounds were supplied, and reads cells when its price interval is not empty, even if no
+    cell is occupied. A window rounded onto one edge validates only when that edge lies
+    inside a build, so only its floor and pin are certain.
+    """
+    rectangle = _mapping(sample['rectangle'])
+    if _utc(str(rectangle['t1'])) >= _utc(str(rectangle['t2'])):
+        return {'floor', 'pin'}
     request = _mapping(sample['request'])
-    automatic = request.get('p1') is None or request.get('p2') is None
-    return {'floor', 'pin', 'cells', 'validate'} | ({'extent'} if automatic else set())
+    expected = {'floor', 'pin', 'validate'}
+    if request.get('p1') is None or request.get('p2') is None:
+        expected.add('extent')
+    p1, p2 = rectangle['p1'], rectangle['p2']
+    if p1 is not None and p2 is not None and float(str(p1)) < float(str(p2)):
+        expected.add('cells')
+    return expected
 
 
 def result_metadata(sample: Mapping[str, object], mount: Path, url: str) -> dict[str, object]:

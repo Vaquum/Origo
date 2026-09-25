@@ -432,6 +432,12 @@ def test_verdict_judges_a_real_run_directory(
                 if not (row['statement'] == 'extent' and row['log_comment'] == next(s['result_id'] for s in samples if s['case'] == 'T2'))
             ],
         }, {}),
+        # C16's shape: a result with no occupied cell still read cells over its non-empty price interval.
+        'cells statement of an empty result missing': ('E0', [{**samples[0], 'cells': 0}, *samples[1:]], {
+            **evidence, 'statement': [
+                row for row in evidence['statement'] if not (row['statement'] == 'cells' and row['log_comment'] == samples[0]['result_id'])
+            ],
+        }, {}),
         'finest case missing': ('Q2', [sample for sample in samples if sample['case'] != meta['finest']], evidence, {}),
         'materializations missing': ('E0', samples, evidence, {'materializations': []}),
         'numerical result missing': ('N1', samples, evidence, {'numeric': {k: v for k, v in inputs['numeric'].items() if k != 'T3'}}),

@@ -349,6 +349,7 @@ def test_verdict_judges_a_real_run_directory(
     with caplog.at_level(logging.INFO):
         samples = _run(service, cube, run, stages)
         service.api.tick(datetime.now(UTC))
+    ticked = str(int(datetime.now(UTC).timestamp() * 1000))
     # The service logs through logging; the runbook captures the same lines with docker logs.
     log = [
         f'{datetime.fromtimestamp(record.created, UTC):%Y-%m-%d %H:%M:%S},{int(record.msecs):03d} INFO {record.name} {record.getMessage()}'
@@ -370,7 +371,10 @@ def test_verdict_judges_a_real_run_directory(
         'numeric': bench.numeric_checks(meta, samples, service.store.root, service.url, reference),
         'log': log, 'hosts': hosts, 'deploys': [],
         'staging': sorted(path.name for path in (service.store.root / 'staging').iterdir()),
-        'materializations': [metadata for asset, metadata in service.reporter.calls if asset == 'market_state_query_service'],
+        # As dagit_materializations reads them: the event time in milliseconds beside the metadata.
+        'materializations': [
+            {'timestamp': ticked, **metadata} for asset, metadata in service.reporter.calls if asset == 'market_state_query_service'
+        ],
         'extras': {
             'backfill': {},
             'compression': bench.compression(next(s['cells_path'] for s in reversed(samples) if s['case'] == 'T2')),
@@ -387,17 +391,34 @@ def test_verdict_judges_a_real_run_directory(
         'K1': False, 'K2': False, 'O1': True,
     }
     assert report['voids'] == [] and str(report['verdict']).startswith('FAIL F')
-    assert report['criteria']['R1']['rss_peak_bytes'] > 0 and report['criteria']['O1']['successful_requests'] == len(samples)
+    assert report['criteria']['R1']['rss_peak_bytes'] > 0 and report['criteria']['O1']['answered_ok'] == len(samples)
     assert [row['statement'] for row in report['reference_cost']] == ['reference']
     assert set(report['compression']) == {'uncompressed', 'zstd', 'lz4'} and report['results_volume']['staging'] == []
     assert str(report['stage_a']).startswith('first requests since the service started')
     # Missing, duplicated or foreign evidence changes the verdict; nothing missing becomes a pass.
     later = [(started + timedelta(seconds=1)).isoformat()]
+    settled = max(datetime.fromisoformat(str(sample['ended_at'])) for sample in samples) + bench.SETTLING + timedelta(seconds=1)
+    query_receipt = next(row for row in evidence['receipt'] if (row['feed'], row['series']) == bench.QUERY_RECEIPTS)
+    busy = {
+        **samples[-1], 'status': 503, 'result_id': '', 'readable': False, 'read_seconds': None, 'cells': 0,
+        'error': '{"error": "busy"}',
+    }
     changed: dict[str, tuple[str, list[dict[str, Any]], dict[str, Any], dict[str, Any]]] = {
         'sample dropped': ('P0', samples[1:], evidence, {}),
         'sample duplicated': ('P0', [*samples, samples[0]], evidence, {}),
         'statements missing': ('E0', samples, {**evidence, 'statement': []}, {}),
         'receipts missing': ('O1', samples, {**evidence, 'receipt': []}, {}),
+        'receipts after the window': ('O1', samples, {
+            **evidence, 'receipt': [{**row, 'recorded_at': settled.isoformat()} for row in evidence['receipt']],
+        }, {}),
+        'receipt of another request': ('O1', samples, {**evidence, 'receipt': [*evidence['receipt'], {**query_receipt, 'error': 'ok=1'}]}, {}),
+        'materializations after the window': ('O1', samples, evidence, {
+            'materializations': [{**entry, 'timestamp': str(int(settled.timestamp() * 1000))} for entry in inputs['materializations']],
+        }),
+        'busy answer': ('Q3', [*samples, busy], evidence, {}),
+        'host snapshot missing a container': ('S', samples, evidence, {
+            'hosts': (hosts[0], {key: value for key, value in hosts[1].items() if not key.startswith('market-state_')}),
+        }),
         'phase log missing': ('E0', samples, evidence, {'log': [line for line in log if 'market state result' not in line]}),
         'cells statement missing': ('E0', samples, {
             **evidence, 'statement': [
@@ -428,12 +449,34 @@ def test_verdict_judges_a_real_run_directory(
     }
     own = bench.judge(run.name, meta, [*samples, failed], shared, **inputs)
     assert own['voids'] == [] and own['criteria']['Q3']['passed'] is False
+    # A failure open only after that ID's first statement, such as a refused connection, cannot
+    # account for it; nor does the run's own busy answer void anything.
+    unreached = {
+        **failed, 'status': None, 'error': 'ConnectionRefusedError: [Errno 111] Connection refused',
+        'started_at': (started + timedelta(seconds=4)).isoformat(), 'ended_at': (started + timedelta(seconds=4)).isoformat(),
+    }
+    assert str(bench.judge(run.name, meta, [*samples, unreached], shared, **inputs)['verdict']).startswith(
+        'VOID another consumer shared the service: 1 foreign requests'
+    )
+    assert bench.judge(run.name, meta, [*samples, busy], evidence, **inputs)['voids'] == []
     deploy = {'createdAt': started.isoformat(), 'updatedAt': (started + timedelta(minutes=3)).isoformat(), 'headSha': 'abcdef0123456789'}
     assert str(bench.judge(run.name, meta, samples, evidence, **{**inputs, 'deploys': [deploy]})['verdict']).startswith('VOID deploy abcdef01')
     recent = ({**hosts[0], 'provisional-worker_started': [(started - timedelta(minutes=30)).isoformat()]}, hosts[1])
     assert str(bench.judge(run.name, meta, samples, evidence, **{**inputs, 'hosts': recent})['verdict']).startswith('VOID baseline unclean')
-    backfilled = {**inputs['extras'], 'backfill': {'native_backfills': [{'job': 'backfill_binance_spot_trades_source_job'}]}}
+    running = {
+        'job': 'backfill_binance_spot_trades_source_job', 'backfill_id': 'abcd', 'partition': '2026-09-20',
+        'start_time': (started - timedelta(minutes=30)).timestamp(), 'end_time': None,
+    }
+    backfilled = {**inputs['extras'], 'backfill': {'native_backfills': [running]}}
     assert str(bench.judge(run.name, meta, samples, evidence, **{**inputs, 'extras': backfilled})['verdict']).startswith('VOID native backfill')
+    # Backfill runs that started after the evidence read, ended before the baseline or never started did not overlap.
+    read = datetime.fromisoformat(str(evidence['window'][0]['ended_at'])).replace(tzinfo=UTC)
+    apart = {**inputs['extras'], 'backfill': {'native_backfills': [
+        {**running, 'start_time': (read + timedelta(minutes=1)).timestamp()},
+        {**running, 'start_time': (started - timedelta(hours=3)).timestamp(), 'end_time': (started - timedelta(minutes=61)).timestamp()},
+        {**running, 'start_time': None},
+    ]}}
+    assert bench.judge(run.name, meta, samples, evidence, **{**inputs, 'extras': apart})['voids'] == []
     # The lifecycle facts the expiry step records, from the service's own store.
     facts = bench.lifecycle_facts(service.store.root, {sample['result_id'] for sample in samples})
     assert facts['results_on_disk'] == facts['lifecycle_rows'] == str(len(samples)) and facts['last_access']

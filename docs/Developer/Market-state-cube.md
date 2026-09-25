@@ -198,6 +198,10 @@ Exploratory runs against the deployed service on 2026-09-25 set the tuning:
   - The pin and the admission floor run under the same settings, and each carries
     `log_comment` = the result ID. Only the source's shared-mount check, inside the source
     lifecycle, stays unattributed.
+  - The HTTP client opens no ClickHouse session. The statements share no state, and ClickHouse
+    releases a session only after its answer is sent. A statement sent at once after the
+    previous answer failed `SESSION_IS_LOCKED` in 3 of 800 back-to-back pairs on 25.3.2.39,
+    and in 2 of 12 local runs of the acceptance tests, answering the query `500`.
 - **Exact streaming sums.** Row sums and totals are summed exactly while the cells stream:
   integer mantissas per (row, exponent), rounded once. That is `math.fsum`'s result, and the
   memory no longer grows with the result. On a real 4.3 M-cell result it took 0.19 s where
@@ -225,7 +229,8 @@ read to it.
   - a native Dagster backfill overlapping the run or its baseline;
   - a feed worker or ClickHouse start within the hour before the run.
 
-  Any other restart of a container during the run fails criterion `S`.
+  Any other restart of a container during the run, or a container missing from either host
+  snapshot, fails criterion `S`. A `503 busy` answer fails `Q3`.
 
 ### Acceptance run
 

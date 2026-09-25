@@ -443,7 +443,8 @@ FORMAT JSONEachRow;
 
 def backfill(runs_db: Path, trades_per_day: Callable[[], Mapping[str, int]], since: datetime) -> dict[str, object]:
     """Rows per summed run second and per wall second of the 2,092-day cube upgrade, and every
-    native backfill run that overlapped the run or its baseline from ``since`` on."""
+    native backfill run still running or ended after the baseline before ``since`` began; ``judge``
+    keeps those that started before the evidence read."""
     connection = sqlite3.connect(f'file:{runs_db}?mode=ro', uri=True)
     try:
         runs = connection.execute(
@@ -972,27 +973,40 @@ def judge(
     if unclean and not deployed:
         voids.append(f"baseline unclean: {', '.join(unclean)} started within 60 minutes before the run")
     # Every service request, in flight, failed or published, logs statements under its result ID.
-    # The run's own requests are its known IDs plus at most one unknown ID per failure that never
-    # learned its ID, so a failing run can never pass itself off as a shared one.
+    # The run's own requests are its known IDs, and each failure that never learned its ID accounts
+    # for at most one unknown ID whose first statement ran while that request was open: a failing
+    # run can never pass itself off as a shared one, and a failure that never reached the service
+    # cannot hide another consumer. A busy answer is the run's own Q3 failure; a consumer holding
+    # the slot shows up here.
     shared_until = queried + SETTLING
     known = {str(sample['result_id']) for sample in samples if sample['result_id']}
-    requested = {
-        str(row['log_comment']) for row in evidence.get('request', [])
-        if started <= _utc(str(row['first_at'])) <= shared_until
-    }
-    unattributed = sum(1 for sample in samples if not sample['result_id'])
-    foreign = max(len(requested - known) - unattributed, 0)
+    unknown = sorted(
+        _utc(str(row['first_at'])) for row in evidence.get('request', [])
+        if str(row['log_comment']) not in known and started <= _utc(str(row['first_at'])) <= shared_until
+    )
+    open_ = sorted(
+        (_utc(str(sample['ended_at'])), _utc(str(sample['started_at']))) for sample in samples if not sample['result_id']
+    )
+    foreign = 0
+    for first in unknown:
+        request = next((request for request in open_ if request[1] <= first <= request[0]), None)
+        if request is None:
+            foreign += 1
+        else:
+            open_.remove(request)
     published = sorted(set(published_between(log, started, shared_until)) - known)
-    busy = [sample for sample in samples if sample['status'] == 503 and 'busy' in str(sample['error'])]
-    if foreign or published or busy:
-        voids.append(
-            f'another consumer shared the service: {foreign} foreign requests, {len(published)} foreign results, '
-            f'{len(busy)} busy answers'
-        )
+    if foreign or published:
+        voids.append(f'another consumer shared the service: {foreign} foreign requests, {len(published)} foreign results')
     maintenance = [row for row in evidence.get('maintenance', []) if started <= _utc(str(row['at'])) <= (ended or queried)]
     if maintenance:
         voids.append(f'maintenance ran during the run: {len(maintenance)} cleanup or rollout records')
-    backfills = _list(_mapping(extras.get('backfill', {})).get('native_backfills', []))
+    # runs.db is read after the run; only a backfill run that started before the evidence read
+    # and was still running when the baseline began overlapped it.
+    backfills = [
+        run for run in map(_mapping, _list(_mapping(extras.get('backfill', {})).get('native_backfills', [])))
+        if run['start_time'] is not None and float(str(run['start_time'])) <= (ended or queried).timestamp()
+        and (run['end_time'] is None or float(str(run['end_time'])) >= (started - BASELINE).timestamp())
+    ]
     if backfills:
         voids.append(f'native backfill runs overlapped the run or its baseline: {len(backfills)}')
 
@@ -1024,15 +1038,17 @@ def judge(
         }),
     }
     criteria.update(latency(samples, finest))
+    # A container missing from either snapshot has no restart or baseline evidence.
+    missing = [container for container in CONTAINERS if any(f'{container}_started' not in facts for facts in hosts)]
     restarted = [
         container for container in CONTAINERS
         if f'{container}_started' in after and _utc(after[f'{container}_started'][0]) > started
     ]
     criteria['S'] = {
-        'restarted': restarted,
+        'restarted': restarted, 'missing': missing,
         'restart_counts': {key: value for key, value in after.items() if key.endswith('_restarts')},
         'oom_killed': {key: value for key, value in after.items() if key.endswith('_oom_killed')},
-        'passed': not restarted or bool(deployed),
+        'passed': not missing and (not restarted or bool(deployed)),
     }
     for key in ('N1', 'N2', 'N3', 'N4'):
         criteria[key] = {
@@ -1067,14 +1083,20 @@ def judge(
     load_ = contention(list(evidence.get('receipt', [])), started, queried, referenced, ended or queried)
     criteria['K1'] = {'passed': bool(load_['K1'])}
     criteria['K2'] = {'passed': bool(load_['K2'])}
+    # The query window's receipts and materializations count exactly the answers the run received:
+    # another consumer inside the window voids the run, and nothing outside it counts.
+    answered = sum(1 for sample in samples if sample['status'] == 200)
     receipted = sum(
         int(match.group(1)) for row in evidence.get('receipt', [])
-        if (row['feed'], row['series']) == QUERY_RECEIPTS and started <= _utc(str(row['recorded_at']))
+        if (row['feed'], row['series']) == QUERY_RECEIPTS and started <= _utc(str(row['recorded_at'])) <= shared_until
         for match in [_OK_COUNT.search(str(row['error']))] if match
     )
-    shown = sum(int(str(entry.get('queries_ok') or 0)) for entry in materializations)
-    criteria['O1'] = {'successful_requests': len(successes), 'receipted_ok': receipted, 'dagit_queries_ok': shown,
-                      'passed': receipted >= len(successes) and shown >= len(successes)}
+    shown = sum(
+        int(str(entry.get('queries_ok') or 0)) for entry in materializations
+        if started <= datetime.fromtimestamp(int(str(entry['timestamp'])) / 1000, UTC) <= shared_until
+    )
+    criteria['O1'] = {'answered_ok': answered, 'receipted_ok': receipted, 'dagit_queries_ok': shown,
+                      'passed': receipted == answered == shown}
 
     failed = [key for key, value in criteria.items() if not value['passed']]
     verdict = f"VOID {'; '.join(voids)}" if voids else 'INTERIM PASS' if not failed else 'FAIL ' + ' '.join(failed)

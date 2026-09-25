@@ -697,6 +697,8 @@ def _metadata(result_id: str, request: Request, plan: _Plan, token: str) -> dict
 
 
 def _connect() -> _HttpClient:
+    # No session: the statements share no state, and ClickHouse releases a session only after its
+    # answer is sent, so a statement sent right after the previous answer can find it locked.
     factory = getattr(import_module('clickhouse_connect'), 'get_client')
     return cast(
         _HttpClient,
@@ -707,6 +709,7 @@ def _connect() -> _HttpClient:
             password=os.environ['CLICKHOUSE_PASSWORD'],
             connect_timeout=10,
             send_receive_timeout=RECEIVE_TIMEOUT_SECONDS,
+            autogenerate_session_id=False,
         ),
     )
 

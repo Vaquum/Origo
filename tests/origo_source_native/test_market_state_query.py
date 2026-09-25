@@ -635,3 +635,15 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
     assert [field.name for field in CELLS_SCHEMA] == [
         'time_index', 'price_index', 'volume', 'trade_count', 'taker_buy_volume', 'taker_buy_trade_count'
     ]
+
+
+def test_statements_open_no_clickhouse_session(origo_test_env: dict[str, str]) -> None:
+    # ClickHouse releases a session only after its answer is sent, so statements sent back to back
+    # on one session intermittently fail with SESSION_IS_LOCKED; without one nothing carries over.
+    client = market_state._connect()
+    try:
+        client.raw_query('SET max_threads = 7', settings={}, fmt=None, external_data=None)
+        carried = client.raw_query("SELECT getSetting('max_threads') = 7", settings={}, fmt='TabSeparated', external_data=None)
+    finally:
+        client.close()
+    assert carried == b'0\n'

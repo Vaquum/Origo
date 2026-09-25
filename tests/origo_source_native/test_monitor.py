@@ -180,11 +180,11 @@ def _monitor(
     if publication_root is None:
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
-    for spec in SOURCE_REGISTRY:
-        if spec.provisional is not None:
-            heartbeat = heartbeat_path(tmp_path / 'heartbeats', f'provisional_{spec.key}')
-            if not heartbeat.exists():
-                touch_heartbeat(heartbeat)
+    workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY if spec.provisional is not None]
+    for feed in (*workers, 'market_state_api'):
+        heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
+        if not heartbeat.exists():
+            touch_heartbeat(heartbeat)
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -365,7 +365,7 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
-    assert len(monitor._heartbeats()) == 4
+    assert len(monitor._heartbeats()) == 5
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(
@@ -1392,7 +1392,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 4 and workers['workers_expected'] == 5
+    assert workers['workers_fresh'] == 5 and workers['workers_expected'] == 6
     assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
@@ -1422,9 +1422,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 5
+    assert evidence('workers_alive')['workers_expected'] == 6
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 4
+    assert evidence('workers_alive')['workers_fresh'] == 5
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2

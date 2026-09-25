@@ -186,7 +186,7 @@ function docker() {
         printf '%s\n' 'old-ui ui-host' ;;
       'inspect --format {{.Id}} '*)
         printf '%s\n' "${@: -1}" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -256,7 +256,7 @@ function docker() {
         printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
         printf 'up\n' >> "$CALLS" ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -356,7 +356,7 @@ function docker() {
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
@@ -568,7 +568,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
 
 def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law'
+    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state'
     assert command in workflow
     assert workflow.index('bash deploy/prepare_binance_egress.sh') < workflow.index(command)
     assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')
@@ -588,3 +588,48 @@ def test_deployed_clickhouse_image_includes_law_reader_profile() -> None:
     clickhouse = DEPLOY_COMPOSE.read_text().split('  clickhouse:', 1)[1].split('  dagit:', 1)[0]
     assert 'image: ${CLICKHOUSE_IMAGE:?CLICKHOUSE_IMAGE is required}' in clickhouse
     assert 'CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}' in clickhouse
+
+
+def test_market_state_api_is_deployed_on_loopback_with_bounded_resources() -> None:
+    for filename in ('docker-compose.deploy.yml', 'docker-compose.yml'):
+        text = (REPO_ROOT / filename).read_text()
+        services, volumes = text.split('\nvolumes:\n', 1)
+        assert services.count('\n  market-state:\n') == 1 and volumes.count('\n  market-state:') == 1
+        service = services.split('\n  market-state:\n', 1)[1]
+        for declaration in (
+            '"127.0.0.1:8486:8486"',
+            'market-state:/opt/origo/market-state',
+            'source-locks:/opt/origo/locks',
+            'worker-heartbeats:/opt/origo/heartbeats',
+            'ORIGO_SOURCE_LOCK_DIR=/opt/origo/locks',
+            'command: python -m origo.workers.market_state_api',
+            'test: ["CMD", "python", "-m", "origo.workers.market_state_api", "--check"]',
+            'restart: unless-stopped',
+        ):
+            assert declaration in service, (filename, declaration)
+        dependencies = service.split('depends_on:', 1)[1].split('command:', 1)[0]
+        assert 'clickhouse:\n        condition: service_healthy' in dependencies
+        assert 'dagster:\n        condition: service_healthy' in dependencies
+        for forbidden in ('network_mode:', 'law-samples', 'ORIGO_PROVISIONAL_SOURCE', 'docker.sock'):
+            assert forbidden not in service
+    deploy = DEPLOY_COMPOSE.read_text().split('\nvolumes:\n', 1)
+    service = deploy[0].split('\n  market-state:\n', 1)[1]
+    for declaration in (
+        'image: ${APP_IMAGE:?APP_IMAGE is required}',
+        'cpus: 2',
+        'mem_limit: 2g',
+        'read_only: true',
+        'cap_drop: [ALL]',
+        'security_opt: ["no-new-privileges:true"]',
+        'tmpfs:\n      - /tmp',
+        'interval: 60s',
+        'timeout: 15s',
+        'retries: 3',
+        'start_period: 60s',
+    ):
+        assert declaration in service, declaration
+    assert '  market-state:\n    # Compose-managed with a pinned name' in deploy[1]
+    assert 'name: tdw-control-plane_market-state' in deploy[1]
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    assert 'provisional-binance-perp-aggtrades law market-state \\' in workflow
+    test_all_published_ports_bind_loopback()

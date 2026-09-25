@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import logging
 import math
 import sqlite3
+import sys
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock
@@ -20,10 +22,14 @@ from origo.query import market_state
 from origo.query.market_state import parse_request
 from origo.query.market_state_reader import read_table
 from origo.sources.lifecycle import SourceRuntime
-from tools import benchmark_market_state as bench
 
 from .test_market_state_api import Service, service  # noqa: F401
 from .test_market_state_query import MINUTES, cube  # noqa: F401
+
+# pytest puts tests/ on sys.path, where tests/tools shadows the repository's tools/; the
+# benchmark, and the stream processes it spawns, import it from the repository root.
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+bench = importlib.import_module('tools.benchmark_market_state')
 
 
 def test_frozen_protocol_matches_the_slice() -> None:

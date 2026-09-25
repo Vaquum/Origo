@@ -590,8 +590,9 @@ def server_defaults(client: Any) -> dict[str, str]:
 
 
 def effective(settings: dict[str, str], defaults: dict[str, str], name: str) -> str:
+    # system.settings shows the automatic thread count quoted, as 'auto(4)'.
     value = settings.get(name, defaults.get(name, ''))
-    return value.removeprefix('auto(').removesuffix(')')
+    return value.strip("'").removeprefix('auto(').removesuffix(')')
 
 
 def _statement(query: str) -> str:

@@ -370,10 +370,10 @@ def test_published_queries_log_their_phases(service: Service, caplog: pytest.Log
         client.disconnect()
     kinds = ['floor' if 'source_capacity_log' in query_ else _statement(query_) for query_, _ in rows]
     assert kinds == ['floor', 'pin', 'extent', 'cells', 'validate']
-    assert all(
+    assert [
         tuple(effective(settings, defaults, name) for name in ('max_threads', 'max_memory_usage', 'max_execution_time'))
-        == ('4', str(4 * 1024**3), '60') for _, settings in rows
-    )
+        for _, settings in rows
+    ] == [('4', str(4 * 1024**3), '60')] * 5
 
 
 def test_tick_reports_receipts_heartbeat_and_live_asset(

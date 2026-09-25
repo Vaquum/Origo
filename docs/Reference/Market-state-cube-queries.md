@@ -164,12 +164,11 @@ failures during renewals, for up to 120 s; a query is never retried.
 ## Limits
 
 - **Concurrency:** two queries at once; renewals never wait for a query.
-- **ClickHouse:** each query runs with 2 threads, 2 GiB of memory and 60 s. A stalled
-  transfer fails after 90 s.
+- **ClickHouse:** each query runs with 4 threads, 4 GiB of memory and 60 s, and never spills
+  to disk. A stalled transfer fails after 90 s.
 - **Result budget:** 64 GiB of result files.
 - **Disk floor:** results never lower free disk below the largest source capacity reserve
   plus 8 GiB.
-- **Measured on 2026-09-25:**
-  - full history at 56.25 s × 125 USDT: 4.3 M cells in a 207 MB file, 2.2 s to read and write;
-  - one day at base resolution: 0.08 s;
-  - a year at 900 s × 250 USDT: 0.27 s.
+- **Latency:** the PRD's target is that most requests finish in a few seconds, including full
+  history at 56.25 s × 125 USDT: 4.3 M cells in a 207 MB file. The acceptance run of #476
+  measures every case in production, and its report is posted on #462.

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
@@ -23,6 +24,7 @@ from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
     METADATA_KEY,
+    QUERY_SETTINGS,
     SUMMARY_SCHEMA,
     RequestError,
     parse_request,
@@ -330,7 +332,7 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
         # The first day of the cube's history is missing: no coverage, and every request is a 409.
         runtime.enable_components('market_state')
         runtime.build(DAY2)
-        state = pin(runtime.store)
+        state = pin(runtime.store, QUERY_SETTINGS)
         assert state.records == () and state.cutoff == datetime(2021, 1, 1, tzinfo=UTC)
         with pytest.raises(RequestError) as missing:
             run(runtime, tmp_path)
@@ -340,9 +342,9 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
             'data_cutoff': '2021-01-01T00:00:00.000000+00:00',
         }
         runtime.build(DAY1)
-        assert pin(runtime.store).cutoff == datetime(2021, 1, 3, tzinfo=UTC)
+        assert pin(runtime.store, QUERY_SETTINGS).cutoff == datetime(2021, 1, 3, tzinfo=UTC)
         runtime.build(DAY3)
-        assert pin(runtime.store).cutoff == datetime(2021, 1, 4, tzinfo=UTC)
+        assert pin(runtime.store, QUERY_SETTINGS).cutoff == datetime(2021, 1, 4, tzinfo=UTC)
         return
     if scenario == 'interior_day_without_the_cube':
         runtime.build(DAY2)  # accepted before the cube was enabled: no market_state component
@@ -355,7 +357,7 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
         built(runtime, DAY1, minutes=(MINUTES[0], MINUTES[2]))
         expected_keys, cutoff = [DAY1, MINUTES[0]], datetime(2021, 1, 2, 0, 1, tzinfo=UTC)
         read = trades(DAY1) + trades(DAY2, end='2021-01-02T00:01:00Z')
-    state = pin(runtime.store)
+    state = pin(runtime.store, QUERY_SETTINGS)
     assert [record.partition.key for record in state.records] == expected_keys
     assert state.cutoff == cutoff
     assert_cells(run(runtime, tmp_path).cells, reference(read, 0, 0))
@@ -388,7 +390,7 @@ def test_one_pinned_state_serves_the_whole_request(
     cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = built(cube, DAY1, minutes=MINUTES)
-    pinned = pin(runtime.store)
+    pinned = pin(runtime.store, QUERY_SETTINGS)
     other = SourceRuntime(runtime.spec, SourceStore(make_clickhouse_client(get_clickhouse_settings()), 'origo', runtime.spec), runtime.lock_root, str(uuid4()))
     connect = market_state._connect
     changes: list[str] = []
@@ -421,7 +423,7 @@ def test_reclaimed_pinned_build_discards_the_result(
     cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = built(cube, DAY1, minutes=MINUTES)
-    target = next(record for record in pin(runtime.store).records if record.partition.key == MINUTES[1])
+    target = next(record for record in pin(runtime.store, QUERY_SETTINGS).records if record.partition.key == MINUTES[1])
     connect = market_state._connect
 
     def cleanup_during_read() -> object:
@@ -525,30 +527,123 @@ def test_resolutions_up_to_the_float64_range_are_exact() -> None:
         assert beyond.value.reason == 'unsupported_resolution'
 
 
+@pytest.mark.parametrize(('n', 'm'), [(0, 0), (3, 0), (0, 2), (11, 5)])
+def test_row_sums_and_totals_stream_exactly(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n: int, m: int
+) -> None:
+    runtime = built(cube, DAY1, DAY2, DAY3)
+    pR = 125.0 * 2**m
+    # One cell per batch, so every sum crosses batch boundaries.
+    monkeypatch.setattr(market_state, 'QUERY_SETTINGS', {**market_state.QUERY_SETTINGS, 'max_block_size': 1})
+    result = run(runtime, tmp_path, tR=56.25 * 2**n, pR=pR)
+    cells = result.cells
+    assert len(cells) >= 2
+    assert result.summary['volume'] == math.fsum(cell['volume'] for cell in cells)
+    assert result.summary['taker_buy_volume'] == math.fsum(cell['taker_buy_volume'] for cell in cells)
+    assert result.summary['poc'] == _reference_poc(_row_sums(cells, 'volume'), pR)
+    assert result.summary['taker_buy_poc'] == _reference_poc(_row_sums(cells, 'taker_buy_volume'), pR)
+    rows = np.array([cell['price_index'] for cell in cells], dtype=np.uint64)
+    for measure in ('volume', 'taker_buy_volume'):
+        values = np.array([cell[measure] for cell in cells], dtype=np.float64)
+        expected_keys = {
+            int(row) * 2048 + max(int(bits) >> 52, 1) for row, bits in zip(rows, values.view(np.uint64), strict=True)
+        }
+        # Any batching gives math.fsum's result, from one integer per (row, exponent).
+        for size in (1, 7, 65_536):
+            sums = market_state._ExactSums()
+            for start in range(0, len(values), size):
+                sums.add(rows[start:start + size], values[start:start + size])
+            assert sums.rows() == _row_sums(cells, measure)
+            assert sums.total() == math.fsum(values.tolist())
+            assert set(sums.parts) == expected_keys
+    # A volume the exact sum cannot represent stops the result instead of summing wrongly.
+    with pytest.raises(ValueError, match='finite and not negative'):
+        market_state._ExactSums().add(np.array([0], dtype=np.uint64), np.array([math.inf]))
+
+
+def test_exact_sums_match_fsum_across_the_float64_range() -> None:
+    # Arithmetic edge cases, not market data: zeros, subnormals, the largest mantissas and
+    # exponents far apart, split over batches, where rounding each row first would differ.
+    tiny, huge = math.ulp(0.0), float.fromhex('0x1.fffffffffffffp+1000')
+    values = [0.0, tiny, 5 * tiny, 2.0**-1022, math.nextafter(2.0**52, 0.0), 2.0**52, 1e16, 1.0, 1e-16, 1e-16, huge, 3.0]
+    rows = [0, 0, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4]
+    for size in (1, 2, 5, 12):
+        sums = market_state._ExactSums()
+        for start in range(0, len(values), size):
+            sums.add(np.array(rows[start:start + size], dtype=np.uint64), np.array(values[start:start + size]))
+        grouped: dict[int, list[float]] = defaultdict(list)
+        for row, value in zip(rows, values, strict=True):
+            grouped[row].append(value)
+        assert sums.rows() == {row: math.fsum(parts) for row, parts in grouped.items()}
+        assert sums.total() == math.fsum(values)
+    # The total is the correctly rounded sum of every value, not a sum of rounded row totals.
+    split = market_state._ExactSums()
+    split.add(np.array([0, 0, 1], dtype=np.uint64), np.array([1.0, 1e-16, 1e-16]))
+    assert split.rows() == {0: 1.0, 1: 1e-16}
+    assert split.total() == math.fsum([1.0, 1e-16, 1e-16]) != math.fsum([1.0, 1e-16])
+
+
+def server_defaults(client: Any) -> dict[str, str]:
+    """The server's default settings, which query_log's Settings omits: a setting equal to its
+    default, such as ``max_threads`` 4 on a four-core machine, is not recorded as changed."""
+    return dict(client.execute('SELECT name, value FROM system.settings'))
+
+
+def effective(settings: dict[str, str], defaults: dict[str, str], name: str) -> str:
+    # system.settings shows the automatic thread count quoted, as 'auto(4)'.
+    value = settings.get(name, defaults.get(name, ''))
+    return value.strip("'").removeprefix('auto(').removesuffix(')')
+
+
+def _statement(query: str) -> str:
+    for marker, name in (
+        ('component_hashes', 'pin'), ('min(price_index)', 'extent'), ('sumKahan(volume)', 'cells'), ('source_cleanup_log', 'validate'),
+    ):
+        if marker in query:
+            return name
+    return query
+
+
 def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_path: Path) -> None:
     runtime = built(cube, DAY1)
-    run(runtime, tmp_path, tR=900, pR=250)
+    result = run(runtime, tmp_path, tR=900, pR=250)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         client.execute('SYSTEM FLUSH LOGS')
         rows = client.execute(
-            "SELECT Settings FROM system.query_log WHERE type = 'QueryFinish' "
-            "AND query LIKE '%sumKahan(taker_buy_volume)%' AND query NOT LIKE '%system.query_log%' "
-            'ORDER BY event_time_microseconds DESC LIMIT 1'
+            "SELECT query, Settings FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
+            'ORDER BY event_time_microseconds',
+            {'result': result.staging.name},
         )
-        # query_log records only settings that differ from the server default.
-        defaults = dict(client.execute(
-            "SELECT name, value FROM system.settings WHERE name IN ('timeout_overflow_mode')"
-        ))
+        defaults = server_defaults(client)
     finally:
         client.disconnect()
-    effective = {**defaults, **rows[0][0]}
-    assert effective['max_threads'] == '2'
-    assert effective['max_memory_usage'] == str(2 * 1024**3)
-    assert effective['max_execution_time'] == '60'
-    assert effective['timeout_overflow_mode'] == 'throw'
-    assert effective['max_block_size'] == '65536'
+    # Every statement of the request, the pin included, carries the declared bounds and its result ID.
+    assert [_statement(query) for query, _ in rows] == ['pin', 'extent', 'cells', 'validate']
+    for _, settings in rows:
+        assert effective(settings, defaults, 'max_threads') == '4'
+        assert effective(settings, defaults, 'max_memory_usage') == str(4 * 1024**3)
+        # Nothing spills: neither the absolute triggers nor 25.3's default ratio triggers are on.
+        for trigger in ('max_bytes_before_external_group_by', 'max_bytes_before_external_sort',
+                        'max_bytes_ratio_before_external_group_by', 'max_bytes_ratio_before_external_sort'):
+            assert effective(settings, defaults, trigger) == '0', trigger
+        assert effective(settings, defaults, 'max_execution_time') == '60'
+        assert effective(settings, defaults, 'timeout_overflow_mode') == 'throw'
+        assert effective(settings, defaults, 'max_block_size') == '65536'
+        assert settings['log_comment'] == result.staging.name
     assert SUMMARY_SCHEMA.field('p1').nullable and not SUMMARY_SCHEMA.field('first_row_partial').nullable
     assert [field.name for field in CELLS_SCHEMA] == [
         'time_index', 'price_index', 'volume', 'trade_count', 'taker_buy_volume', 'taker_buy_trade_count'
     ]
+
+
+def test_statements_open_no_clickhouse_session(origo_test_env: dict[str, str]) -> None:
+    # ClickHouse releases a session only after its answer is sent, so statements sent back to back
+    # on one session intermittently fail with SESSION_IS_LOCKED; without one nothing carries over.
+    client = market_state._connect()
+    try:
+        client.raw_query('SET max_threads = 7', settings={}, fmt=None, external_data=None)
+        carried = client.raw_query("SELECT getSetting('max_threads') = 7", settings={}, fmt='TabSeparated', external_data=None)
+    finally:
+        client.close()
+    assert carried == b'0\n'

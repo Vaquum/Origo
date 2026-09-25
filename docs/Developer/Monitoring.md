@@ -72,6 +72,15 @@ The market state query service (`origo.workers.market_state_api`, Compose servic
     (busy, source maintenance, client gone), else `OK`;
   - carries the counts per code in `error`.
 - **Dagit.** Every tick materializes `market_state_query_service`.
+- **Logs.** Each published query logs two INFO lines:
+  - `market state result <id>` with its cells, bytes and the pin, price-extent, SQL, write
+    and validation times;
+  - `market state query <id> published` with the publication time, the total time and the
+    service's peak RSS.
+
+  Every ClickHouse statement of the query carries `log_comment` = `<id>` in
+  `system.query_log`.
+
 Receipt reconciliation is scoped to the source: another source's long-running attempt
 cannot be marked dead by a faster worker.
 

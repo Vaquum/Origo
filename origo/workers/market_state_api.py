@@ -35,7 +35,7 @@ from typing import Final, Literal, cast
 from uuid import uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.query.market_state import Request, RequestError, iso, parse_request, write_result
+from origo.query.market_state import Request, RequestError, iso, parse_request, statement_settings, write_result
 from origo.query.market_state_results import (
     FLOOR_MARGIN_BYTES,
     IDLE_EXPIRY_SECONDS,
@@ -245,8 +245,9 @@ class MarketStateApi:
         self, runtime: SourceRuntime, request: Request, result_id: str
     ) -> tuple[dict[str, object], Path, Path]:
         """Admit, write and publish one result; any failure discards the unreturned result."""
+        started = time.monotonic()
         runtime.require_shared_mount()
-        floor = source_floor(runtime.store, self.store.disk(self.store.root).total)
+        floor = source_floor(runtime.store, self.store.disk(self.store.root).total, statement_settings(result_id))
         self.store.admit(result_id, 0, floor)
         try:
             staging = self.store.register(result_id)
@@ -254,10 +255,15 @@ class MarketStateApi:
                 runtime, request, staging, result_id=result_id,
                 guard=lambda staged: self.store.admit(result_id, staged, floor),
             )
+            publishing = time.monotonic()
             cells, summary = self.store.publish(result_id)
         except BaseException:
             self.store.discard(result_id)
             raise
+        log.info(
+            'market state query %s published publish_ms=%d total_ms=%d rss_peak_bytes=%d',
+            result_id, _elapsed(publishing), _elapsed(started), _rss_bytes(),
+        )
         return answer, cells, summary
 
     def _failed(self, error: Exception) -> Answer:
@@ -297,14 +303,16 @@ class MarketStateApi:
 
 
 
-def source_floor(store: SourceStore, total_bytes: int) -> int:
+def source_floor(store: SourceStore, total_bytes: int, settings: Mapping[str, object]) -> int:
     """The free space admission keeps: the largest source capacity reserve plus a margin.
 
     Each source's reserve is ``capacity.check``'s, read-only: the larger of 30% of the
     filesystem and twice its largest measured working set times its canonical concurrency.
     """
     rows = store.execute(
-        f'SELECT source_key, max(working_set_bytes) FROM {store.table("source_capacity_log")} GROUP BY source_key'
+        f'SELECT source_key, max(working_set_bytes) FROM {store.table("source_capacity_log")} GROUP BY source_key',
+        None,
+        settings,
     )
     measured = {str(row[0]): int(str(row[1])) for row in rows}
     reserve = (total_bytes * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10
@@ -445,7 +453,8 @@ def _healthy(port: int) -> bool:
     A 200 from ``/healthz`` proves it, and so does a connection the server accepts and then
     drops, cleanly or with a reset: it sheds connections beyond its slots only while it is
     accepting. A refused connection, or no answer within the probe timeout, means the server
-    is gone or wedged.
+    is gone or wedged. The whole answer is read, so the probe never closes while the server
+    is still writing and the server never logs its own probe as a disconnected client.
     """
     try:
         probe = socket.create_connection(('127.0.0.1', port), timeout=PROBE_TIMEOUT_SECONDS)
@@ -455,9 +464,8 @@ def _healthy(port: int) -> bool:
     with probe:
         try:
             probe.sendall(b'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n')
-            # A status line may arrive in fragments; read until it is complete or the peer closes.
-            while len(answer) < 12:
-                fragment = probe.recv(12 - len(answer))
+            while len(answer) < 1024:
+                fragment = probe.recv(1024 - len(answer))
                 if not fragment:
                     break
                 answer += fragment

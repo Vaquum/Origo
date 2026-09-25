@@ -188,7 +188,170 @@ covered both volume measures, row resolutions up to 1000 USDT and windows of up 
 columns. The lower-row rule is therefore checked against an independent reference, not an
 observed tie.
 
-## Remaining PRD delivery
+## Measured acceptance — slice #476
 
-- The disclosed real-history benchmark and resource/recovery evidence against the deployed
-  service, including full history at base resolution and ingestion/publication contention.
+Exploratory runs against the deployed service on 2026-09-25 set the tuning:
+- **Query settings.** Every statement runs with 4 threads, 4 GiB and 60 s. The full-history
+  base cells statement needs 0.7–1.3 GiB and takes 1.3 s on 4 threads (1.9 s on 2).
+  - Nothing spills to disk: a statement that outgrows its memory fails, so temporary data
+    never takes the disk that result admission keeps for ingestion.
+  - The pin and the admission floor run under the same settings, and each carries
+    `log_comment` = the result ID. Only the source's shared-mount check, inside the source
+    lifecycle, stays unattributed.
+  - The HTTP client opens no ClickHouse session. The statements share no state, and ClickHouse
+    releases a session only after its answer is sent. A statement sent at once after the
+    previous answer failed `SESSION_IS_LOCKED` in 3 of 800 back-to-back pairs on 25.3.2.39,
+    and in 2 of 12 local runs of the acceptance tests, answering the query `500`.
+- **Exact streaming sums.** Row sums and totals are summed exactly while the cells stream:
+  integer mantissas per (row, exponent), rounded once. That is `math.fsum`'s result, and the
+  memory no longer grows with the result. On a real 4.3 M-cell result it took 0.19 s where
+  the lists of Python floats took 0.74 s.
+- **Health probe.** The self-probe reads the whole answer, so the service no longer logs its
+  own probes as disconnected clients.
+- **Phase logs.** Each published query logs its pin, price-extent, SQL, write, validation and
+  publication times, and the service's lifetime peak RSS.
+
+The protocol is frozen in #476 and in `tools/benchmark_market_state.py`;
+`test_frozen_protocol_matches_the_slice` holds every constant, the generated SQL and the Dagit
+read to it.
+- **Corpus and stages.** 16 cases (C01–C16) in stages:
+  - A: cold, one request per case;
+  - B: 5 warm rounds;
+  - C: two concurrent streams of 3 rounds, in ID order and in reverse, each in its own process;
+  - D: two full-history base requests started together, three times.
+- **Verdicts.** `verdict` prints `INTERIM PASS`, `FAIL <criteria>` or `VOID <causes>`.
+  `finalize` adds recovery and expiry and prints the final `PASS`. PRD-0022 closes only on a
+  final `PASS`.
+- **A void run is repeated and reported. Only an external cause voids it:**
+  - a deploy overlapping the run or its baseline, evidenced by `deploy_on_merge`;
+  - another consumer's query in the window;
+  - cleanup or component rollout for the source;
+  - a native Dagster backfill overlapping the run or its baseline;
+  - a feed worker or ClickHouse start within the hour before the run.
+
+  Any other restart of a container during the run, or a container missing from either host
+  snapshot, fails criterion `S`. A `503 busy` answer fails `Q3`.
+
+### Acceptance run
+
+The run needs these conditions:
+- on `37.27.112.167`, as root;
+- after the deploy, and at least 60 minutes after ClickHouse and every feed worker last started;
+- outside 00:00–01:30 UTC;
+- a quiet window announced to downstream consumers.
+
+The client container needs no ClickHouse credentials. The raw reference and the evidence
+run through `clickhouse-client` in the ClickHouse container, and the reference reads with
+direct I/O, so the other services keep their page cache. Set `SHA` to the deployed merge SHA.
+
+```sh
+IMAGE="ghcr.io/vaquum/origo-dagster:$SHA"
+VOLUME=/var/lib/docker/volumes/tdw-control-plane_market-state/_data
+RUN="$HOME/market-state-acceptance/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$RUN"
+host_facts() {
+  echo "captured_at=$(date -u +%FT%T.%6NZ)"
+  for name in clickhouse dagster market-state provisional-worker provisional-binance-spot-aggtrades \
+      provisional-binance-perp-aggtrades provisional-binance-perp-trades depth-worker; do
+    docker inspect -f "${name}_started={{.State.StartedAt}}
+${name}_image={{.Image}}
+${name}_restarts={{.RestartCount}}
+${name}_oom_killed={{.State.OOMKilled}}
+${name}_exit_code={{.State.ExitCode}}" "tdw-control-plane-$name-1"
+  done
+  echo "cpu=$(lscpu | sed -n 's/^Model name: *//p')"
+  echo "cpus=$(nproc)"
+  echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
+  echo "kernel=$(uname -r)"
+  lsblk -dn -o NAME,SIZE,MODEL | sed 's/^/disk=/'
+  echo "root_filesystem=$(df -B1 --output=size,used,avail / | tail -1)"
+  echo "results_volume_bytes=$(du -sb "$VOLUME" | cut -f1)"
+}
+consumer() {
+  docker run --rm --pull never --network host -v tdw-control-plane_market-state:/mnt/cube:ro \
+    -v "$RUN":/acceptance "$IMAGE" python tools/benchmark_market_state.py "$@" --run /acceptance --mount /mnt/cube
+}
+```
+
+0. **Fresh service.** `docker restart -t 0 tdw-control-plane-market-state-1`, then wait for
+   `healthy`. The run then starts with a new process, so the peak RSS it reports belongs to the
+   run. The client refuses the frozen corpus between 00:00 and 01:30 UTC.
+1. `host_facts > "$RUN/host_before.txt" && consumer client` runs stages A–D, about five minutes.
+2. The raw reference takes about ten minutes on 2 threads; this is an estimate.
+
+   ```sh
+   docker exec -i tdw-control-plane-clickhouse-1 clickhouse-client --format ArrowStream < "$RUN/reference.sql" > "$RUN/reference.arrow"
+   ```
+3. The evidence:
+
+   ```sh
+   docker exec -i tdw-control-plane-clickhouse-1 clickhouse-client < "$RUN/evidence.sql" > "$RUN/evidence.jsonl"
+   ```
+
+   Run it at least 15 minutes after step 1 ends, which the reference normally covers, so late
+   depth minutes have landed.
+4. The service log and the backfill figures:
+
+   ```sh
+   docker logs tdw-control-plane-market-state-1 > "$RUN/service.log" 2>&1
+   docker exec tdw-control-plane-dagster-1 python tools/benchmark_market_state.py backfill \
+     --since "$(python3 -c "import json, sys; print(json.load(open(sys.argv[1]))['started_at'])" "$RUN/run.json")" > "$RUN/backfill.json"
+   ```
+
+   Then, from a checkout with `gh`, record every deploy that could overlap the run and copy
+   the file into `$RUN/deploys.json`:
+
+   ```sh
+   gh run list --repo Vaquum/Origo --workflow deploy_on_merge.yml --limit 20 --json createdAt,updatedAt,headSha,conclusion > deploys.json
+   ```
+5. `host_facts > "$RUN/host_after.txt"`
+6. `consumer verdict` writes `report.json`, `report.md` and `report.part<N>.md`, and prints the
+   interim verdict last. Then record the expiry anchor, the last access of the run's results:
+
+   ```sh
+   docker exec -i tdw-control-plane-market-state-1 python tools/benchmark_market_state.py expiry < "$RUN/result_ids.txt" > "$RUN/expiry_due.txt"
+   ```
+7. **Recovery.** Tell the operator first: this raises the monitor's `receipt_failed` and
+   `error_logs:market-state` alerts once each. The script:
+   - waits for a registered result to appear in `staging/`, then kills the service at once with
+     SIGKILL, because `python` runs as PID 1 and ignores SIGTERM;
+   - records the interrupted result ID;
+   - after one tick, records the log line, `staging/`, the lifecycle rows, the latest query
+     receipt and a follow-up one-day request.
+
+   ```sh
+   before="$(ls "$VOLUME/staging")"
+   docker run --rm --pull never --network host "$IMAGE" python -c "from origo.query.market_state_reader import query; query()" > "$RUN/recovery_client.txt" 2>&1 &
+   client=$!
+   for attempt in $(seq 200); do
+     interrupted="$(comm -13 <(echo "$before") <(ls "$VOLUME/staging") | head -1)"
+     [ -n "$interrupted" ] && break
+     sleep 0.05
+   done
+   [ -n "$interrupted" ] && docker restart -t 0 tdw-control-plane-market-state-1
+   wait $client; echo "client_exit=$?" > "$RUN/recovery.txt"
+   echo "interrupted=$interrupted" >> "$RUN/recovery.txt"
+   sleep 90
+   echo "interrupted_logged=$(docker logs --since 3m tdw-control-plane-market-state-1 2>&1 | grep -c 'interrupted by the previous process: 1')" >> "$RUN/recovery.txt"
+   echo "staging_after=$(ls "$VOLUME/staging" | wc -l)" >> "$RUN/recovery.txt"
+   echo "$interrupted" | docker exec -i tdw-control-plane-market-state-1 python tools/benchmark_market_state.py expiry | sed -n 's/^lifecycle_rows=/lifecycle_rows=/p' >> "$RUN/recovery.txt"
+   echo "receipt=$(docker exec -i tdw-control-plane-clickhouse-1 clickhouse-client --query "SELECT concat(status, ' ', error_code, ' ', error) FROM origo.worker_minute_log WHERE feed = 'market_state_api' AND series = 'binance_spot_trades:query' ORDER BY recorded_at DESC LIMIT 1")" >> "$RUN/recovery.txt"
+   echo "follow_up_status=$(docker run --rm --pull never --network host "$IMAGE" python -c "from origo.query.market_state_reader import query; query(t1='2026-09-01T00:00:00Z', t2='2026-09-02T00:00:00Z'); print(200)")" >> "$RUN/recovery.txt"
+   ```
+
+   If no registered result appeared, `finalize` reports the step as not performed, and it is
+   repeated. It is never read as a service failure.
+8. **Expiry.** At the anchor's `last_access` plus 24 hours and 2 minutes, run:
+
+   ```sh
+   docker exec -i tdw-control-plane-market-state-1 python tools/benchmark_market_state.py expiry < "$RUN/result_ids.txt" > "$RUN/expiry.txt"
+   ```
+
+   Nothing may read the run's results in between. The recovery step's results are not in
+   `result_ids.txt`, and each keeps its own clock.
+9. `docker run --rm --pull never -v "$RUN":/acceptance "$IMAGE" python tools/benchmark_market_state.py finalize --run /acceptance`
+   writes `report-final.*` and prints the final verdict last. Post the `report-final.part<N>.md`
+   files on #462 in order, unedited. Each part opens with the SHA-256 of the whole
+   `report-final.md`.
+
+The run directory stays on the host.

@@ -316,6 +316,16 @@ def succeeded(sample: Mapping[str, object]) -> bool:
     return sample['status'] == 200 and sample['readable'] is True
 
 
+def _statements(sample: Mapping[str, object]) -> set[str]:
+    """The statements a published result ran: a result with cells read them, and read its
+    time window's price extent first unless both price bounds were supplied."""
+    if int(str(sample['cells'])) == 0:
+        return {'floor', 'pin', 'validate'}
+    request = _mapping(sample['request'])
+    automatic = request.get('p1') is None or request.get('p2') is None
+    return {'floor', 'pin', 'cells', 'validate'} | ({'extent'} if automatic else set())
+
+
 def result_metadata(sample: Mapping[str, object], mount: Path, url: str) -> dict[str, object]:
     schema = open_file(mounted(str(sample['summary_path']), mount), url=url).schema
     return json.loads(schema.metadata[b'origo.market_state'])
@@ -504,8 +514,9 @@ def latency(samples: Sequence[Mapping[str, object]], finest: str = FINEST) -> di
     pooled = [seconds(sample) for sample in samples if sample['stage'] in ('A', 'B', 'C')]
     fine = [seconds(sample) for sample in samples if sample['case'] == finest]
     failures = [sample for sample in samples if not succeeded(sample)]
-    p90 = nearest_rank(pooled, QUANTILES['Q1'])
-    median, slowest = nearest_rank(fine, QUANTILES['median']), max(fine)
+    # With no samples at all a quantile is as slow as a failure, so an incomplete run still gets its report.
+    p90 = nearest_rank(pooled, QUANTILES['Q1']) if pooled else math.inf
+    median, slowest = (nearest_rank(fine, QUANTILES['median']), max(fine)) if fine else (math.inf, math.inf)
     return {
         'Q1': {'p90_seconds': p90, 'rank': math.ceil(QUANTILES['Q1'] * len(pooled)), 'samples': len(pooled),
                'limit': THRESHOLDS['Q1_p90_seconds'], 'passed': p90 <= THRESHOLDS['Q1_p90_seconds']},
@@ -1020,8 +1031,7 @@ def judge(
     unlogged = [result_id for result_id in ids if {'pin_ms', 'total_ms', 'rss_peak_bytes'} - set(timings.get(result_id, {}))]
     unrecorded = [
         str(sample['result_id']) for sample in successes
-        if not ({'floor', 'pin', 'validate'} | ({'cells'} if int(str(sample['cells'])) > 0 else set()))
-        <= {str(row['statement']) for row in statements if row['log_comment'] == sample['result_id']}
+        if not _statements(sample) <= {str(row['statement']) for row in statements if row['log_comment'] == sample['result_id']}
     ]
     criteria['E0'] = {
         'missing_sections': missing_sections, 'results_without_phase_logs': unlogged,

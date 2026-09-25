@@ -425,6 +425,14 @@ def test_verdict_judges_a_real_run_directory(
                 row for row in evidence['statement'] if not (row['statement'] == 'cells' and row['log_comment'] == samples[0]['result_id'])
             ],
         }, {}),
+        # T2 has automatic price bounds, so it read its price extent.
+        'extent statement missing': ('E0', samples, {
+            **evidence, 'statement': [
+                row for row in evidence['statement']
+                if not (row['statement'] == 'extent' and row['log_comment'] == next(s['result_id'] for s in samples if s['case'] == 'T2'))
+            ],
+        }, {}),
+        'finest case missing': ('Q2', [sample for sample in samples if sample['case'] != meta['finest']], evidence, {}),
         'materializations missing': ('E0', samples, evidence, {'materializations': []}),
         'numerical result missing': ('N1', samples, evidence, {'numeric': {k: v for k, v in inputs['numeric'].items() if k != 'T3'}}),
         'service restarted': ('S', samples, evidence, {'hosts': (hosts[0], {**hosts[1], 'market-state_started': later})}),

@@ -215,8 +215,8 @@ def client(
     pins = sorted({tuple(pin) for sample in checked for pin in _list(result_metadata(sample, mount, url)['pins'])})
     identities = [(str(key), str(revision), str(build)) for key, _, revision, build in pins]
     tag = f'market_state_reference:{run.name}'
-    (run / 'reference.sql').write_text(f'SET max_query_size = 67108864;\n{reference_select(identities, tag)};\n')
     (run / 'evidence.sql').write_text(evidence_sql(started, ids, tag))
+    (run / 'reference.sql').write_text(f'SET max_query_size = 67108864;\n{reference_select(identities, tag)};\n')
 
 
 def _frozen_constants(
@@ -338,7 +338,9 @@ def reference_select(identities: Iterable[tuple[str, str, str]], tag: str) -> st
     pinned ``(source_date, revision, build_id)`` tuples; a build ID belongs to one partition.
     Time uses the normalized datetime in integer microseconds, price integer cents, and volumes
     exact Decimal128(18) sums. It also counts trades whose builder price index would differ from
-    the integer-cents one, and trades before the cube's history start: both must be zero.
+    the integer-cents one, and trades before the cube's history start: both must be zero. With no
+    identities, because every numerical request failed, it reads nothing and returns no rows, so
+    the verdict still runs and reports the failures.
     """
     groups: dict[bool, list[str]] = {False: [], True: []}
     for key, revision, build in identities:
@@ -354,7 +356,10 @@ def reference_select(identities: Iterable[tuple[str, str, str]], tag: str) -> st
                 WHERE (source_date, revision, build_id) IN (SELECT * FROM values('source_date Date, revision String, build_id UUID', {', '.join(groups[provisional])}))"""
             )
     if not parts:
-        raise ValueError('The reference needs at least one pinned identity.')
+        parts.append(
+            """SELECT 0 AS provisional, build_id, datetime, price, quote_quantity, is_buyer_maker,
+                toUInt64(0) AS i, toUInt64(0) AS j FROM origo.binance_spot_trades_raw_revisions WHERE 0"""
+        )
     settings = ', '.join(f'{name} = {value}' for name, value in REFERENCE_SETTINGS.items())
     return f"""SELECT toUInt8(provisional) AS provisional, toString(build_id) AS build, i, j,
     count() AS trades, countIf(is_buyer_maker = 0) AS taker_trades,
@@ -686,13 +691,15 @@ def _poc(sums: Mapping[int, Decimal], price_resolution: float) -> tuple[float | 
 
 
 def landing(
-    receipts: Sequence[Mapping[str, object]], feed: str, data: str, mount: str | None, start: datetime, end: datetime
+    receipts: Sequence[Mapping[str, object]], feed: str, data: str, mount: str | None, start: datetime, end: datetime,
+    observed: datetime,
 ) -> dict[str, object]:
-    """Landing lags of the data minutes that closed in ``[start, end)``.
+    """Landing lags of the data minutes that closed in ``[start, end)``, as seen at ``observed``.
 
     A data minute lands at its first ``OK`` receipt. Its publication lands at the first ``OK``
     receipt of the publication series recorded at or after that: publication receipts carry the
-    worker's tick minute, not a data minute, and an unchanged state publishes nothing.
+    worker's tick minute, not a data minute, and an unchanged state publishes nothing. Receipts
+    recorded after ``observed``, when the evidence was read, do not count.
     """
     first_ok: dict[datetime, datetime] = {}
     published: list[datetime] = []
@@ -701,6 +708,8 @@ def landing(
         if receipt['feed'] != feed:
             continue
         recorded = _utc(str(receipt['recorded_at']))
+        if recorded > observed:
+            continue
         if receipt['series'] == data and receipt['status'] == 'OK':
             minute = _utc(str(receipt['minute']))
             first_ok[minute] = min(first_ok.get(minute, recorded), recorded)
@@ -742,9 +751,11 @@ def _spread(values: Sequence[float]) -> dict[str, float] | None:
 
 
 def contention(
-    receipts: Sequence[Mapping[str, object]], started: datetime, queried: datetime, referenced: tuple[datetime, datetime] | None
+    receipts: Sequence[Mapping[str, object]], started: datetime, queried: datetime,
+    referenced: tuple[datetime, datetime] | None, observed: datetime,
 ) -> dict[str, object]:
-    """K1 and K2 over the query window against the hour before it; the reference window is reported."""
+    """K1 and K2 over the query window against the hour before it, as seen when the evidence was
+    read at ``observed``; the reference window is reported."""
     windows = {
         'baseline': (started - BASELINE, started),
         'query': (started, queried + SETTLING),
@@ -753,7 +764,7 @@ def contention(
     series: dict[str, object] = {}
     k1 = k2 = True
     for feed, data, mount in (*CONTENTION_SERIES, *REPORTED_SERIES):
-        measured = {name: landing(receipts, feed, data, mount, *bounds) for name, bounds in windows.items()}
+        measured = {name: landing(receipts, feed, data, mount, *bounds, observed) for name, bounds in windows.items()}
         judged = (feed, data, mount) in CONTENTION_SERIES
         baseline, window = measured['baseline'], measured['query']
         complete = (
@@ -766,7 +777,10 @@ def contention(
         if judged:
             k1, k2 = k1 and complete, k2 and timely
         series[f'{feed}/{data}'] = {'judged': judged, 'complete': complete, 'timely': timely, **measured}
-    return {'series': series, 'K1': k1, 'K2': k2, 'windows': {name: [stamp(a), stamp(b)] for name, (a, b) in windows.items()}}
+    return {
+        'series': series, 'K1': k1, 'K2': k2, 'observed': stamp(observed),
+        'windows': {name: [stamp(a), stamp(b)] for name, (a, b) in windows.items()},
+    }
 
 
 def _timely(baseline: object, window: object) -> bool:
@@ -1023,7 +1037,7 @@ def judge(
         'objects': tables, 'physical': physical,
         'passed': physical == list(PROJECTION_TABLES) and all(engine == 'View' for _, engine in tables if 'MergeTree' not in engine),
     }
-    load_ = contention(list(evidence.get('receipt', [])), started, queried, referenced)
+    load_ = contention(list(evidence.get('receipt', [])), started, queried, referenced, ended or queried)
     criteria['K1'] = {'passed': bool(load_['K1'])}
     criteria['K2'] = {'passed': bool(load_['K2'])}
     receipted = sum(

@@ -249,6 +249,11 @@ def test_reference_agrees_with_real_results_and_catches_a_mismatch(
     assert wrong['N1'] is False and wrong['only_in_cube'] == cells.num_rows and wrong['reference_cells'] == 0
     # A summary that does not belong to the cells fails N3, with its own reference intact.
     assert bench.check_result(cells, tables['T2'][1], metadata, reference)['N3'] is False
+    # With no identities, because every numerical request failed, the reference still runs and is
+    # empty, so the verdict reports those failures instead of the run stopping.
+    empty = _arrow(_without_direct_io(bench.reference_select([], 'test')))
+    assert empty.num_rows == 0 and empty.schema.names == reference.schema.names
+    assert bench.check_result(cells, summary, metadata, empty)['N1'] is False
 
 
 def _receipt(series: str, minute: datetime, recorded: datetime, status: str = 'OK', feed: str = 'provisional') -> dict[str, object]:
@@ -281,8 +286,17 @@ def test_contention_compares_first_ok_landing_lags() -> None:
     queried = started + timedelta(minutes=6)
     end = queried + timedelta(minutes=12)
     receipts = _receipts(started, end)
-    load = bench.contention(receipts, started, queried, None)
+    load = bench.contention(receipts, started, queried, None, end)
     assert load['K1'] is True and load['K2'] is True
+    # Only receipts recorded by the time the evidence was read count: a window minute that
+    # landed after that is missing.
+    late_minute = (started + timedelta(minutes=4)).strftime('%Y-%m-%d %H:%M:%S')
+    landed_late = [
+        {**row, 'recorded_at': (end + timedelta(seconds=30)).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}
+        if row['series'] == 'binance_spot_trades' and row['minute'] == late_minute else row
+        for row in receipts
+    ]
+    assert bench.contention(landed_late, started, queried, None, end)['K1'] is False
     spot = load['series']['provisional/binance_spot_trades']
     assert (spot['baseline']['landed'], spot['baseline']['lag']['p50']) == (60, 20.0)
     assert (spot['query']['minutes'], spot['query']['landed'], spot['query']['lag']['p50']) == (11, 11, 21.0)
@@ -292,21 +306,21 @@ def test_contention_compares_first_ok_landing_lags() -> None:
     # A missing data minute, or one never published afterwards, fails K1.
     gap = (started + timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M:%S')
     missing = [row for row in receipts if not (row['series'] == 'binance_spot_trades' and row['minute'] == gap)]
-    assert bench.contention(missing, started, queried, None)['K1'] is False
+    assert bench.contention(missing, started, queried, None, end)['K1'] is False
     unpublished = [
         row for row in receipts
         if not (row['series'] == 'binance_spot_trades:mount' and str(row['recorded_at']) >= started.strftime('%Y-%m-%d %H:%M:%S'))
     ]
-    assert bench.contention(unpublished, started, queried, None)['K1'] is False
+    assert bench.contention(unpublished, started, queried, None, end)['K1'] is False
     # A median 3 s above the baseline, or a p90 beyond its p95 plus 5 s, fails K2; 1.9 s does not.
-    assert bench.contention(_receipts(started, end, window_lag=23.0), started, queried, None)['K2'] is False
-    assert bench.contention(_receipts(started, end, window_lag=21.9), started, queried, None)['K2'] is True
+    assert bench.contention(_receipts(started, end, window_lag=23.0), started, queried, None, end)['K2'] is False
+    assert bench.contention(_receipts(started, end, window_lag=21.9), started, queried, None, end)['K2'] is True
     # Too little baseline is an incomplete measurement, not a pass.
     short = [row for row in receipts if str(row['minute']) >= (started - timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M:%S')]
-    assert bench.contention(short, started, queried, None)['K1'] is False
+    assert bench.contention(short, started, queried, None, end)['K1'] is False
     # The reported perp trades series never decides the verdict.
     without_perp = [row for row in receipts if not str(row['series']).startswith('binance_perp_trades')]
-    assert bench.contention(without_perp, started, queried, None)['K1'] is True
+    assert bench.contention(without_perp, started, queried, None, end)['K1'] is True
 
 
 def _evidence(sql: str) -> str:

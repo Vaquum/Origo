@@ -14,7 +14,7 @@ import pytest
 from dagster import AssetKey, DagsterInstance, Definitions, RunRequest, build_sensor_context
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources import capacity, dagit, rollout
+from origo.sources import capacity, compatibility, dagit, rollout
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
@@ -471,3 +471,32 @@ def test_market_state_deployment_enablement_is_fenced(
     assert snapshot < inventory < retire < proof < enable_command
     assert 'exit 1' in workflow[proof:enable_command]
     assert 'docker inspect --format' in workflow[proof:enable_command]
+
+
+def test_deployment_refuses_an_image_that_cannot_read_activated_components(
+    registered_cube: CubeRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = registered_cube.runtime
+    legacy = replace(
+        runtime.spec,
+        components=tuple(item for item in runtime.spec.components if item.activation_group is None),
+    )
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (legacy,))
+    runtime.build(_DAY)
+    assert compatibility.undeclared_components() == {}
+    runtime.enable_components('market_state')
+    runtime.upgrade_components(_DAY)
+    # A pre-cube image cannot read the expanded activation, so its deployment must stop.
+    assert compatibility.undeclared_components() == {runtime.spec.key: ['market_state']}
+    with pytest.raises(SystemExit, match='market_state'):
+        compatibility.main()
+    # An image that dropped the source entirely cannot pass by not declaring it.
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', ())
+    dropped = compatibility.undeclared_components()[runtime.spec.key]
+    assert {'raw', 'market_state'} <= set(dropped)
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (runtime.spec,))
+    assert compatibility.undeclared_components() == {}
+
+    workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/deploy_on_merge.yml').read_text()
+    guard = workflow.index('dagster -m origo.sources.compatibility')
+    assert workflow.index('docker-compose.deploy.yml pull') < guard < workflow.index(' up -d ')

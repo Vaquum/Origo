@@ -712,14 +712,41 @@ def test_reconciliation_failures_do_not_starve_other_partitions() -> None:
         for index in range(12)
     ]
     urgent = keys[:8]
-    selected = [_reconciliation_selection(urgent, tick) for tick in range(len(keys))]
+    selected = [_reconciliation_selection(urgent, [], tick, '')[0] for tick in range(len(keys))]
     assert all(len(batch) <= 4 for batch in selected)
     # Every urgent partition is reached within two ticks, and a partition whose Dagster
     # record already matches the store is never re-materialized: the sensor used to add one
     # rotating day per tick, which re-ran the whole history once every two days.
     assert set().union(*(set(batch) for batch in selected[:2])) == set(urgent)
     assert set().union(*(set(batch) for batch in selected)) == set(urgent)
-    assert _reconciliation_selection([], 7) == []
+    assert _reconciliation_selection([], [], 7, '') == ([], '')
+
+
+def test_reconciliation_repairs_precede_component_upgrades() -> None:
+    from datetime import timedelta
+
+    from origo.sources.dagit import _reconciliation_selection
+
+    # Partition scheduling state only: no market rows are generated.
+    upgrades = [
+        (datetime.fromisoformat(DAY) + timedelta(days=index)).date().isoformat()
+        for index in range(2000)
+    ]
+    repair = '2026-09-20'
+    # A whole-history upgrade backlog never pushes a repair out of the next batch.
+    after = ''
+    for tick in range(600):
+        batch, after = _reconciliation_selection([repair], upgrades, tick, after)
+        assert batch[0] == repair and len(batch) == 4
+    assert _reconciliation_selection([], upgrades, 1, upgrades[3]) == (upgrades[4:8], upgrades[7])
+    # Upgrades continue after the last one taken, so free-slot counts such as
+    # [1, 2, 1, 1, 1] reach every pending upgrade.
+    five, after, reached = upgrades[:5], '', set[str]()
+    for tick, count in enumerate([3, 2, 3, 3, 3] * 2):
+        repairs = [f'2026-09-{day:02d}' for day in range(1, count + 1)]
+        batch, after = _reconciliation_selection(repairs, five, tick, after)
+        reached.update(batch)
+    assert set(five) <= reached
 
 
 @pytest.mark.parametrize(

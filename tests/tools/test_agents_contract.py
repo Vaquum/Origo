@@ -40,3 +40,8 @@ def test_law_exception_preserves_ten_laws_and_monitor_authority() -> None:
     assert 'Do not add another dashboard, alert path' in text
     test_repo_agents_file_contains_zero_bang_authority_and_ten_laws()
     test_repo_agents_file_exists_and_has_expected_sha256()
+
+
+def test_pull_request_template_forbids_blocking_backfills() -> None:
+    template = (REPO_ROOT / '.github/PULL_REQUEST_TEMPLATE.md').read_text(encoding='utf-8')
+    assert "- [ ] No backfill in this change blocks another source's fills" in template

@@ -190,6 +190,8 @@ jobs:
 
           cd "$DEPLOY_DIR"
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
+          # Before any container is replaced, the new image must read every activated component.
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility </dev/null
           bash deploy/prepare_binance_egress.sh
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '
           import os, socket

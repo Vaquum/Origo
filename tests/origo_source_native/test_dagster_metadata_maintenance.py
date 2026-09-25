@@ -1653,7 +1653,8 @@ def test_completed_inventory_survives_scheduled_dry_runs(
     ) -> list[Candidate]:
         nonlocal elapsed
         result = scan(instance, layout, journal, config, now, deadline)
-        elapsed += 4
+        # The batch consumes the rest of its work window; the reporting reserve stays real time.
+        elapsed = max(elapsed, deadline - time.monotonic())
         return result
 
     def run_maintenance(config: OperationalMetadataMaintenanceConfig) -> worker.Outcome:
@@ -1665,8 +1666,9 @@ def test_completed_inventory_survives_scheduled_dry_runs(
     clock = SimpleNamespace(time=lambda: future, monotonic=lambda: time.monotonic() + elapsed)
     monkeypatch.setattr(worker, 'time', clock)
     monkeypatch.setattr(retention, 'time', clock)
-    # Each real scan batch consumes the short invocation's work window.
-    config = POLICY.model_copy(update={'max_runs_per_batch': 1, 'max_runtime_seconds': 10})
+    # Each real scan batch consumes its invocation's work window. The production runtime
+    # budget leaves a 60-second reporting reserve, so a loaded machine cannot time out.
+    config = POLICY.model_copy(update={'max_runs_per_batch': 1, 'max_runtime_seconds': 600})
     for index in range(3):
         outcome = run_maintenance(config)
         assert outcome.inventory_complete is (index == 2)

@@ -26,6 +26,7 @@ from origo.orchestration.policy import (
     IDENTITY_TAG,
     REDUNDANT_TAG,
     WORKER_TAG,
+    advance_frontier,
     execution_tags,
 )
 from origo.orchestration.recovery import recover_queue, recover_retired_workers
@@ -150,6 +151,129 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
     assert runs[0].tags['origo/workload'] == 'routine'
     for job in {r.job_name for r in runs if r.tags['origo/workload'] == 'routine'}:
         assert sum(r.job_name == job for r in runs) == 2
+
+
+def serve(instance, runs):
+    """Launch accounting as the run launcher records it, then take the runs off the queue."""
+    for run in runs:
+        advance_frontier(instance, instance.get_run_by_id(run.run_id))
+        instance.report_run_canceled(run)
+
+
+def test_a_long_backfill_never_holds_another_sources_backfill_back(instance):
+    for n in range(20):
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'spotbulk'},
+        )
+    for n in range(6):
+        submit(
+            instance,
+            job='backfill_binance_perp_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'perpbulk'},
+        )
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    for _ in range(2):
+        runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+        # The later backfill takes turns in the shared lane instead of queueing behind 20 runs.
+        assert len(runs) == 10
+        assert sum(run.tags['dagster/backfill'] == 'perpbulk' for run in runs) == 5
+        # Deployment recovery keeps the places admission gave.
+        recover_queue(instance)
+
+
+def test_a_late_backfill_joins_the_lane_at_its_current_place(instance):
+    spot = [
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-{n // 28 + 3:02d}-{n % 28 + 1:02d}',
+            tags={'dagster/backfill': 'spotbulk'},
+        )
+        for n in range(40)
+    ]
+    # The head of the long backfill has already been served.
+    serve(instance, spot[:25])
+    for n in range(20):
+        submit(
+            instance,
+            job='backfill_binance_perp_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'perpbulk'},
+        )
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    # The newcomer alternates with the older backfill's remaining queue instead of taking the lane.
+    assert len(runs) == 10
+    assert sum(run.tags['dagster/backfill'] == 'spotbulk' for run in runs) == 5
+
+
+def test_a_new_backfill_joins_at_the_served_frontier(instance):
+    def backfill(share, job, count):
+        return [
+            submit(instance, job=job, day=f'2021-{n // 28 + 1:02d}-{n % 28 + 1:02d}', tags={'dagster/backfill': share})
+            for n in range(count)
+        ]
+
+    older = backfill('olderbulk', 'backfill_binance_spot_trades_source_job', 30)
+    behind = backfill('behindbulk', 'backfill_binance_perp_trades_source_job', 20)
+    # The older backfill was served through place 19 while the other one waited at places 0-19.
+    serve(instance, older[:20])
+    newer = backfill('newbulk', 'backfill_binance_perp_aggtrades_source_job', 10)
+    places = [-int(instance.get_run_by_id(run.run_id).tags['dagster/priority']) for run in newer]
+    assert places == list(range(20, 30))
+    serve(instance, behind)
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+    # The newcomer starts at served service, so the older backfill keeps half the lane.
+    assert sum(run.tags['dagster/backfill'] == 'olderbulk' for run in runs) == 5
+
+
+def test_a_stream_of_new_backfills_cannot_starve_an_older_one(instance):
+    older = [
+        submit(
+            instance,
+            job='backfill_binance_spot_trades_source_job',
+            day=f'2020-03-{n + 1:02d}',
+            tags={'dagster/backfill': 'olderbulk'},
+        )
+        for n in range(20)
+    ]
+    serve(instance, older[:10])
+    daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
+    for wave in range(3):
+        for n in range(4):
+            submit(
+                instance,
+                job='backfill_binance_perp_trades_source_job',
+                day=f'2022-{wave + 1:02d}-{n + 1:02d}',
+                tags={'dagster/backfill': f'single{wave}{n}'},
+            )
+        runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
+        # Each wave of one-run backfills queues behind the older backfill's next place.
+        assert runs[0].tags['dagster/backfill'] == 'olderbulk'
+        serve(instance, runs[:5])
+
+
+def test_restarted_recovery_continues_after_places_it_kept(instance):
+    legacy = [
+        create_run_for_test(
+            instance,
+            job_name='backfill_binance_spot_trades_source_job',
+            status=DagsterRunStatus.QUEUED,
+            tags={'dagster/backfill': 'legacybulk', 'dagster/partition': f'2020-03-{n + 1:02d}'},
+        )
+        for n in range(6)
+    ]
+    # An interrupted recovery placed the first three before it stopped.
+    for place, run in enumerate(legacy[:3]):
+        instance.add_run_tags(run.run_id, execution_tags(run, place))
+    recover_queue(instance)
+    places = [-int(instance.get_run_by_id(run.run_id).tags['dagster/priority']) for run in legacy]
+    assert places == [0, 1, 2, 3, 4, 5]
 
 
 def test_maintenance_lane_dequeues_while_routine_and_backfill_lanes_are_full(instance):

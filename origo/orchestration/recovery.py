@@ -4,6 +4,7 @@ Dagster run. No market data is deleted."""
 import argparse
 import json
 import signal
+from collections import Counter
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from types import FrameType
@@ -29,8 +30,11 @@ from .policy import (
     CLAIM_TAG,
     IDENTITY_TAG,
     REDUNDANT_TAG,
+    SHARE_TAG,
     WORKER_TAG,
     admission_lock,
+    bulk_order,
+    bulk_share,
     execution_tags,
     reconcile_stale_concurrency_claims,
 )
@@ -57,9 +61,19 @@ def recover_queue(instance: DagsterInstance) -> dict[str, int]:
     # Deploy restarts kill pooled steps mid-flight; only terminal runs are freed, so this
     # cannot race admission and runs outside the lock.
     counts['stale_slots_freed'] = reconcile_stale_concurrency_claims(instance)
+    # A bulk run keeps the place admission gave it; runs admitted before shares existed
+    # take places in their share's queue order, oldest first.
+    places: Counter[str] = Counter()
     with admission_lock(instance):
         for run in outstanding_runs(instance):
-            tags = execution_tags(run)
+            share = bulk_share(run)
+            order = 0
+            if share:
+                # A place kept from admission or an interrupted recovery also moves the share's
+                # next place past it, so a restart never repeats early places.
+                order = bulk_order(run) if SHARE_TAG in run.tags else places[share]
+                places[share] = max(places[share], order + 1)
+            tags = execution_tags(run, order)
             instance.add_run_tags(run.run_id, tags)
             counts['classified'] += 1
             current = instance.get_run_by_id(run.run_id)

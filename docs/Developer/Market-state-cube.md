@@ -84,6 +84,9 @@ The rollout marker is stored in `source_component_rollout_log`; a missing row is
 
 This release is the binary rollback floor after activation. Pre-compatible images
 reject expanded component inventories and must not be deployed after enablement.
+Deployment enforces the floor: before any container is replaced, the new image runs
+`python -m origo.sources.compatibility`, which fails when production's activations
+name a source or component the image does not declare.
 Native rollback to a retained legacy generation remains supported by this release:
 old product hashes are accepted and the cube view hides the unselected addition.
 
@@ -96,8 +99,9 @@ Completed, validated additions are reused after interruption; only never-activat
 incomplete additions may be removed and rebuilt. The current view requires the
 component hash in the selected activation, so staged additions stay invisible.
 
-Native canonical reconciliation selects accepted days missing enabled components;
-Dagster backfill, selected gaps and retries use the same lifecycle. The provisional
+Native canonical reconciliation selects accepted days missing enabled components
+in the batch slots that changed or failed partitions leave, so the history upgrade
+never delays a repair; Dagster backfill, selected gaps and retries use the same lifecycle. The provisional
 worker handles fresh minutes first, then a bounded batch of missing accepted
 minutes. Existing consumer readiness remains independent of incomplete cube
 coverage. Upgrade failures are visible as `component_upgrade` failures with scope

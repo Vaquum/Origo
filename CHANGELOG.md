@@ -1,3 +1,12 @@
+# v3.26.1
+
+- A backfill never holds another source's fills back. Each native backfill, or bulk job run outside one, is one share of the ten-slot historical lane. Runs queue by start-time fair queuing: a run's place is the later of the service frontier (the place after the highest one ever launched, recorded by the launcher) and one past its share's newest queued place. Concurrent backfills alternate, a late backfill starts at served service instead of jumping ahead of an older backlog, a stream of new backfills cannot starve an older one, and deployment recovery keeps the places admission gave, continuing after them when restarted.
+- Reconciliation launches changed or failed partitions before missing-component upgrades. The 2021+ market state sweep (2,092 days, four per minute) only fills slots that repairs leave, continuing in key order after the last upgrade taken, so every pending upgrade is reached whatever slots are free. It no longer delays a spot repair by up to 8.7 hours.
+- Enforce the 3.26.0 rollback floor at deployment: before any container is replaced, the new image checks every source and component in production's activations against its declarations and stops the deploy if any is undeclared.
+- M2 fails as `cube_history_incomplete` while any 2021+ day lacks the cube, keeping the first missing day and its reason in evidence, instead of surfacing that day's `cube_not_activated` as if the cube were off.
+- The PR template requires that no backfill blocks another source's fills; pausing publication stays allowed.
+- The completed-inventory maintenance test advances its simulated clock only through the work window, so a loaded machine no longer times out its reporting reserve.
+
 # v3.26.0
 
 - Register the Binance spot market state base projection from 2021-01-01, activate it after writer retirement, and upgrade accepted history from retained raw without copying existing products.

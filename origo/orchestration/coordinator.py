@@ -4,7 +4,15 @@ from dagster import DagsterRun, DagsterRunStatus, RunsFilter
 from dagster._core.run_coordinator.base import SubmitRunContext
 from dagster._core.run_coordinator.queued_run_coordinator import QueuedRunCoordinator
 
-from .policy import IDENTITY_TAG, admission_lock, execution_tags
+from .policy import (
+    IDENTITY_TAG,
+    SHARE_TAG,
+    admission_lock,
+    bulk_order,
+    bulk_share,
+    execution_tags,
+    frontier,
+)
 
 
 class OrigoQueuedRunCoordinator(QueuedRunCoordinator):
@@ -15,7 +23,16 @@ class OrigoQueuedRunCoordinator(QueuedRunCoordinator):
                 raise ValueError('Submitted run does not exist.')
             if run.status != DagsterRunStatus.NOT_STARTED:
                 return run
-            tags = execution_tags(run)
+            share = bulk_share(run)
+            order = 0
+            if share:
+                # Start-time fair queuing: join at the service frontier, after the share's own queue.
+                newest = self._instance.get_runs(
+                    RunsFilter(statuses=[DagsterRunStatus.QUEUED], tags={SHARE_TAG: share}),
+                    limit=1,
+                )
+                order = max(frontier(self._instance), bulk_order(newest[0]) + 1 if newest else 0)
+            tags = execution_tags(run, order)
             self._instance.add_run_tags(run.run_id, tags)
             duplicates = self._instance.get_runs(
                 RunsFilter(

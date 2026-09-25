@@ -560,8 +560,9 @@ def test_market_state_calendar_uses_real_days_and_frozen_start(
         selected = next(p for p in proofs if p.key == '2024-12-31')
         legacy = replace(selected, hashes={key: value for key, value in selected.hashes.items() if key != 'market_state'})
         missing = law._m2([legacy if p is selected else p for p in proofs], now)
-        assert missing['status'] == 'FAIL' and missing['reason'] == 'cube_not_activated'
+        assert missing['status'] == 'FAIL' and missing['reason'] == 'cube_history_incomplete'
         assert missing['evidence']['first_invalid_day'] == '2024-12-31'
+        assert missing['evidence']['first_invalid_reason'] == 'cube_not_activated'
         assert missing['evidence']['valid_days'] == 1
         assert law._calendar([legacy], selected.start.date())['status'] == 'PASS'
         corrupted = replace(selected, hashes={**selected.hashes, 'market_state': 'corrupted-proof'})

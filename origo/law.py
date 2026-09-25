@@ -414,8 +414,12 @@ def _m2(proofs: list[_Proof], now: datetime) -> PredicateReport:
                 first = result
                 evidence['first_invalid_day'] = day.isoformat()
     evidence.update(valid_days=valid, missing_days=missing, unknown_days=unknown)
+    if first is not None:
+        evidence['first_invalid_reason'] = first['reason']
+    # Missing days fail as incomplete history; the first day's own reason stays in evidence.
     return _result('FAIL' if missing else 'UNKNOWN' if unknown else 'PASS',
-                   first['reason'] if first else 'cube_calendar_complete', **evidence)
+                   'cube_history_incomplete' if missing else first['reason'] if first else 'cube_calendar_complete',
+                   **evidence)
 
 
 def _cube_observations(observations: list[ProjectionObservation], predicates: dict[LawPredicate, PredicateReport],

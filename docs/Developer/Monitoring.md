@@ -180,8 +180,10 @@ base-cell window intersecting the selected closed minute. Both sides use the sam
 partition, revision and build; UInt32 cube counts widen before summation.
 M2 checks every canonical day from **2021-01-01 UTC**, through yesterday once its
 archive exists or its delivery deadline passes. It reports expected, valid,
-missing and unknown day counts plus the first invalid day using the existing
-bounded proof read; it never scans historical raw/cube rows. The source's original
+missing and unknown day counts plus the first invalid day and its reason using the
+existing bounded proof read; it never scans historical raw/cube rows. Any missing
+day fails M2 as `cube_history_incomplete`, one stable reason while an upgrade sweep
+is still covering history. The source's original
 2017 anchor and R1/C1/C2 remain unchanged. Valid legacy generations preserve their
 existing product health during upgrade. Cube-only proof damage is reported by
 M1/M2 without changing otherwise valid R1/C1/C2. Staged but unactivated cube receipts do

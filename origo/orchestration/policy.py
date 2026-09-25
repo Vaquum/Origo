@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import cast
 
 from dagster import DagsterInstance, DagsterRun, DagsterRunStatus, RunsFilter
+from dagster._core.storage.runs.sql_run_storage import SqlRunStorage
 
 SHORT_JOB_MAX_RUNTIME_SECONDS = 1800
 DEFAULT_JOB_MAX_RUNTIME_SECONDS = 93600
 WORKLOAD_TAG = 'origo/workload'
 IDENTITY_TAG = 'origo/request_identity'
 ROUTINE_JOB_TAG = 'origo/routine_job'
+SHARE_TAG = 'origo/backfill_share'
+FRONTIER_KEY = 'origo/backfill_frontier'
 WORKER_TAG = 'origo/worker_container'
 CLAIM_TAG = 'origo/launch_claimed'
 REDUNDANT_TAG = 'origo/redundant_run'
@@ -50,8 +53,38 @@ def request_identity(run: DagsterRun) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def execution_tags(run: DagsterRun) -> dict[str, str]:
-    bulk = bool(run.tags.get('dagster/backfill')) or run.job_name.startswith('backfill_')
+def bulk_share(run: DagsterRun) -> str | None:
+    """A bulk run's share of the historical lane: its native backfill, else its bulk job."""
+    backfill = run.tags.get('dagster/backfill')
+    return backfill or (run.job_name if run.job_name.startswith('backfill_') else None)
+
+
+def bulk_order(run: DagsterRun) -> int:
+    """A bulk run's place in the historical lane; lower places dequeue first."""
+    return -int(run.tags['dagster/priority'])
+
+
+def frontier(instance: DagsterInstance) -> int:
+    """The historical-lane place after the highest one ever launched. It moves only with
+    service, and a newcomer admitted there ties with, and queues after, older backlogs."""
+    value = cast(SqlRunStorage, instance.run_storage).get_cursor_values({FRONTIER_KEY})
+    return int(value.get(FRONTIER_KEY, '0'))
+
+
+def advance_frontier(instance: DagsterInstance, run: DagsterRun) -> None:
+    """Record a launched bulk run's place; callers hold the admission lock."""
+    if bulk_share(run) is not None and SHARE_TAG in run.tags and bulk_order(run) >= frontier(instance):
+        cast(SqlRunStorage, instance.run_storage).set_cursor_values(
+            {FRONTIER_KEY: str(bulk_order(run) + 1)}
+        )
+
+
+def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
+    """``order`` is a bulk run's place in the historical lane (start-time fair queuing): a share
+    joins at the service frontier and then follows its own queue, so concurrent backfills
+    alternate and one backfill never holds another source's fills back."""
+    share = bulk_share(run)
+    bulk = share is not None
     short_job = run.job_name in {
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
@@ -69,7 +102,8 @@ def execution_tags(run: DagsterRun) -> dict[str, str]:
         WORKLOAD_TAG: 'maintenance' if maintenance else 'backfill' if bulk else 'routine',
         IDENTITY_TAG: request_identity(run),
         **({ROUTINE_JOB_TAG: run.job_name} if not (bulk or maintenance) else {}),
-        'dagster/priority': '300' if maintenance else '0' if bulk else '200' if daily else '100',
+        **({SHARE_TAG: share} if share else {}),
+        'dagster/priority': '300' if maintenance else str(-order) if bulk else '200' if daily else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,
     }

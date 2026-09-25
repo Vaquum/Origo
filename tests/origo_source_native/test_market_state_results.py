@@ -165,8 +165,18 @@ def test_publication_survives_each_crash_window(
         store.publish(failed)
     monkeypatch.setattr(market_state_results, '_sync', real_sync)
     assert (root / 'results' / failed).is_dir()
-    store.discard(failed)
-    assert not (root / 'results' / failed).exists() and store.access(failed, 'cells.arrow') is None
+    # A crash in the middle of that discard leaves a registration recovery finishes.
+    rmtree = market_state_results.shutil.rmtree
+
+    def interrupted_rmtree(path: object, *args: object, **kwargs: object) -> None:
+        raise OSError('simulated crash while removing a discarded result')
+
+    monkeypatch.setattr(market_state_results.shutil, 'rmtree', interrupted_rmtree)
+    with pytest.raises(OSError):
+        store.discard(failed)
+    monkeypatch.setattr(market_state_results.shutil, 'rmtree', rmtree)
+    assert (root / 'results' / failed).is_dir() and store.access(failed, 'cells.arrow') is None
+    assert store.usage()[1] > 0  # retired but still on disk: counted until removed
     # A restart rolls every registered step back or forward.
     restarted = ResultStore(root, clock=clock, disk=roomy)
     assert restarted.recover() == 1
@@ -174,6 +184,7 @@ def test_publication_survives_each_crash_window(
     assert (root / 'results' / forward / 'cells.arrow').is_file()
     assert restarted.access(forward, 'cells.arrow') is not None
     assert not retiring_cells.exists() and not (root / 'results' / retiring).exists()
+    assert not (root / 'results' / failed).exists() and restarted.access(failed, 'cells.arrow') is None
     assert done_cells.is_file() and restarted.access(done, 'summary.arrow') is not None
     assert foreign[0].read_text() == 'foreign'
     assert all((directory / 'cells.arrow').read_text() == 'foreign' for directory in foreign[1:])

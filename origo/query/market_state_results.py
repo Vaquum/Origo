@@ -116,6 +116,8 @@ class ResultStore:
                 with self._transaction() as connection:
                     connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
                 interrupted += 1
+            elif state == 'discarding':
+                self._remove(identity)
             elif not _owned_directory(final) and _owned_directory(staging):
                 staging.rename(final)
                 _sync(self.staging)
@@ -182,17 +184,25 @@ class ResultStore:
         """Remove a result whose paths were never returned, in whatever state it reached.
 
         A publication that failed after its lifecycle commit leaves the result registered as
-        published, in staging or already renamed; nobody holds its paths, so it goes too.
+        published, in staging or already renamed; nobody holds its paths, so it goes too. The
+        result is first marked ``discarding`` with its files retired, so a crash before the
+        rows go leaves a registration that recovery finishes, never unowned files.
         """
         identity = str(UUID(result_id))
         with self._transaction() as connection:
-            connection.execute('DELETE FROM files WHERE result_id = ?', (identity,))
-            connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
+            connection.execute("UPDATE results SET state = 'discarding' WHERE result_id = ?", (identity,))
+            connection.execute('UPDATE files SET retired = 1 WHERE result_id = ?', (identity,))
+        self._remove(identity)
+        with self._lock:
+            self._staged.pop(identity, None)
+
+    def _remove(self, identity: str) -> None:
         for directory in (self.staging / identity, self.results / identity):
             if _owned_directory(directory):
                 shutil.rmtree(directory)
-        with self._lock:
-            self._staged.pop(identity, None)
+        with self._transaction() as connection:
+            connection.execute('DELETE FROM files WHERE result_id = ?', (identity,))
+            connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
 
     def access(self, result_id: str, name: str) -> datetime | None:
         """Renew a published file's clock; ``None`` when it is unknown or already retired."""

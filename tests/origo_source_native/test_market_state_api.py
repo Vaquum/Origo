@@ -30,7 +30,7 @@ from origo.workers.monitor import DELIVERY_LAG_SECONDS, MARKET_STATE_API_FEED
 from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
 
-from .test_market_state_query import DAY1, _statement, built, cube  # noqa: F401
+from .test_market_state_query import DAY1, _statement, built, cube, effective, server_defaults  # noqa: F401
 from .test_monitor import _monitor, recorder  # noqa: F401
 
 
@@ -365,12 +365,13 @@ def test_published_queries_log_their_phases(service: Service, caplog: pytest.Log
             'ORDER BY event_time_microseconds',
             {'result': result.result_id},
         )
+        defaults = server_defaults(client)
     finally:
         client.disconnect()
     kinds = ['floor' if 'source_capacity_log' in query_ else _statement(query_) for query_, _ in rows]
     assert kinds == ['floor', 'pin', 'extent', 'cells', 'validate']
     assert all(
-        (settings['max_threads'], settings['max_memory_usage'], settings['max_execution_time'])
+        tuple(effective(settings, defaults, name) for name in ('max_threads', 'max_memory_usage', 'max_execution_time'))
         == ('4', str(4 * 1024**3), '60') for _, settings in rows
     )
 

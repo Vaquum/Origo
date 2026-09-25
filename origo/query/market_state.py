@@ -60,10 +60,13 @@ MAX_BODY_BYTES: Final = 65_536
 # Measured on 2026-09-25: the full-history base cells statement needs 0.7-1.3 GiB and takes
 # 1.3 s on 4 threads (1.9 s on 2). Two queries use 8 of the host's 48 hardware threads. No
 # statement spills to disk: one that outgrows its memory fails, so no temporary data can take
-# the disk that result admission keeps for source ingestion.
+# the disk that result admission keeps for source ingestion. ClickHouse 25.3 spills at half the
+# memory limit by default, so both ratios are switched off.
 QUERY_SETTINGS: Final[Mapping[str, object]] = {
     'max_threads': 4,
     'max_memory_usage': 4 * 1024**3,
+    'max_bytes_ratio_before_external_group_by': 0,
+    'max_bytes_ratio_before_external_sort': 0,
     'max_execution_time': 60,
     'timeout_overflow_mode': 'throw',
     'max_block_size': BATCH_ROWS,

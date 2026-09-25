@@ -583,6 +583,17 @@ def test_exact_sums_match_fsum_across_the_float64_range() -> None:
     assert split.total() == math.fsum([1.0, 1e-16, 1e-16]) != math.fsum([1.0, 1e-16])
 
 
+def server_defaults(client: Any) -> dict[str, str]:
+    """The server's default settings, which query_log's Settings omits: a setting equal to its
+    default, such as ``max_threads`` 4 on a four-core machine, is not recorded as changed."""
+    return dict(client.execute('SELECT name, value FROM system.settings'))
+
+
+def effective(settings: dict[str, str], defaults: dict[str, str], name: str) -> str:
+    value = settings.get(name, defaults.get(name, ''))
+    return value.removeprefix('auto(').removesuffix(')')
+
+
 def _statement(query: str) -> str:
     for marker, name in (
         ('component_hashes', 'pin'), ('min(price_index)', 'extent'), ('sumKahan(volume)', 'cells'), ('source_cleanup_log', 'validate'),
@@ -603,24 +614,22 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
             'ORDER BY event_time_microseconds',
             {'result': result.staging.name},
         )
-        # query_log records only settings that differ from the server default.
-        defaults = dict(client.execute(
-            "SELECT name, value FROM system.settings WHERE name IN ('timeout_overflow_mode')"
-        ))
+        defaults = server_defaults(client)
     finally:
         client.disconnect()
     # Every statement of the request, the pin included, carries the declared bounds and its result ID.
     assert [_statement(query) for query, _ in rows] == ['pin', 'extent', 'cells', 'validate']
     for _, settings in rows:
-        effective = {**defaults, **settings}
-        assert effective['max_threads'] == '4'
-        assert effective['max_memory_usage'] == str(4 * 1024**3)
-        assert 'max_bytes_before_external_group_by' not in effective
-        assert 'max_bytes_before_external_sort' not in effective
-        assert effective['max_execution_time'] == '60'
-        assert effective['timeout_overflow_mode'] == 'throw'
-        assert effective['max_block_size'] == '65536'
-        assert effective['log_comment'] == result.staging.name
+        assert effective(settings, defaults, 'max_threads') == '4'
+        assert effective(settings, defaults, 'max_memory_usage') == str(4 * 1024**3)
+        # Nothing spills: neither the absolute triggers nor 25.3's default ratio triggers are on.
+        for trigger in ('max_bytes_before_external_group_by', 'max_bytes_before_external_sort',
+                        'max_bytes_ratio_before_external_group_by', 'max_bytes_ratio_before_external_sort'):
+            assert effective(settings, defaults, trigger) == '0', trigger
+        assert effective(settings, defaults, 'max_execution_time') == '60'
+        assert effective(settings, defaults, 'timeout_overflow_mode') == 'throw'
+        assert effective(settings, defaults, 'max_block_size') == '65536'
+        assert settings['log_comment'] == result.staging.name
     assert SUMMARY_SCHEMA.field('p1').nullable and not SUMMARY_SCHEMA.field('first_row_partial').nullable
     assert [field.name for field in CELLS_SCHEMA] == [
         'time_index', 'price_index', 'volume', 'trade_count', 'taker_buy_volume', 'taker_buy_trade_count'

@@ -63,7 +63,8 @@ def test_frozen_protocol_matches_the_slice() -> None:
     )
     assert bench.REPORTED_SERIES == (('provisional', 'binance_perp_trades', 'binance_perp_trades:mount'),)
     assert bench.REFERENCE_SETTINGS == {
-        'max_threads': 2, 'max_memory_usage': 8 * 1024**3, 'max_execution_time': 3600, 'min_bytes_to_use_direct_io': 1,
+        'max_threads': 2, 'max_memory_usage': 8 * 1024**3, 'max_bytes_ratio_before_external_group_by': 0,
+        'max_bytes_ratio_before_external_sort': 0, 'max_execution_time': 3600, 'min_bytes_to_use_direct_io': 1,
     }
     assert bench.PROJECTION_TABLES == (
         'binance_spot_trades_market_state_latest_revisions', 'binance_spot_trades_market_state_revisions',
@@ -88,8 +89,8 @@ def test_frozen_protocol_matches_the_slice() -> None:
         'dagit': bench.DAGIT_QUERY % (1, 2),
     }
     assert {name: hashlib.sha256(text.encode()).hexdigest() for name, text in frozen.items()} == {
-        'reference': 'c2ed2c9fb03bb193462df78d6a0623984019f1999de08a1c18030d8496b118f7',
-        'evidence': '3fe6b7af5a3ae68a2142255e47a01ea53ede317cd3cea9b1c9d22433a6a11ffe',
+        'reference': '2194d54d1843e246ebc123321970c7b85b3ded22cfc7e0e2a1800de0a6f1507e',
+        'evidence': 'b2f95b6b70ec1daf737695a2ab72b81807d83bffa8ea62bdb1a6205dd35e668c',
         'dagit': '0255ad5cb6b14dfe55df090ff65d8afafb74fbc88faff8240f52c0150b0c8ede',
     }
     # The corpus, resolved for an unfloored start: the tail cases floor to the minute.
@@ -357,7 +358,8 @@ def test_verdict_judges_a_real_run_directory(
     reference = _arrow(_without_direct_io(statement))
     (run / 'evidence.jsonl').write_text(_evidence((run / 'evidence.sql').read_text()))
     meta, loaded, evidence = bench.load(run)
-    assert loaded == samples and set(evidence) >= {'window', 'statement', 'parts', 'table', 'receipt'}
+    assert loaded == samples and set(evidence) >= {'window', 'statement', 'request', 'parts', 'table', 'receipt'}
+    assert {row['log_comment'] for row in evidence['request']} == {sample['result_id'] for sample in samples}
     started = datetime.fromisoformat(str(meta['started_at']))
     # Host facts as the runbook records them: every container started long before the run.
     hosts = (
@@ -397,6 +399,11 @@ def test_verdict_judges_a_real_run_directory(
         'statements missing': ('E0', samples, {**evidence, 'statement': []}, {}),
         'receipts missing': ('O1', samples, {**evidence, 'receipt': []}, {}),
         'phase log missing': ('E0', samples, evidence, {'log': [line for line in log if 'market state result' not in line]}),
+        'cells statement missing': ('E0', samples, {
+            **evidence, 'statement': [
+                row for row in evidence['statement'] if not (row['statement'] == 'cells' and row['log_comment'] == samples[0]['result_id'])
+            ],
+        }, {}),
         'materializations missing': ('E0', samples, evidence, {'materializations': []}),
         'numerical result missing': ('N1', samples, evidence, {'numeric': {k: v for k, v in inputs['numeric'].items() if k != 'T3'}}),
         'service restarted': ('S', samples, evidence, {'hosts': (hosts[0], {**hosts[1], 'market-state_started': later})}),
@@ -408,6 +415,19 @@ def test_verdict_judges_a_real_run_directory(
     foreign = [*log, f'{started + timedelta(seconds=1):%Y-%m-%d %H:%M:%S},000 INFO origo.workers.market_state_api '
                'market state query 11111111-2222-3333-4444-555555555555 published publish_ms=1 total_ms=2 rss_peak_bytes=3']
     assert str(bench.judge(run.name, meta, samples, evidence, **{**inputs, 'log': foreign})['verdict']).startswith('VOID another consumer')
+    in_flight = {'section': 'request', 'log_comment': '11111111-2222-3333-4444-666666666666', 'first_at': (started + timedelta(seconds=2)).isoformat()}
+    shared = {**evidence, 'request': [*evidence['request'], in_flight]}
+    assert str(bench.judge(run.name, meta, samples, shared, **inputs)['verdict']).startswith(
+        'VOID another consumer shared the service: 1 foreign requests, 0 foreign results'
+    )
+    # The run's own failed request, which never learned its result ID, accounts for that ID: the
+    # run fails instead of voiding, so a failing service cannot hide behind a shared window.
+    failed = {
+        **samples[0], 'status': 500, 'result_id': '', 'readable': False, 'read_seconds': None, 'cells': 0,
+        'error': '{"error": "export_failed"}', 'ended_at': (started + timedelta(seconds=3)).isoformat(),
+    }
+    own = bench.judge(run.name, meta, [*samples, failed], shared, **inputs)
+    assert own['voids'] == [] and own['criteria']['Q3']['passed'] is False
     deploy = {'createdAt': started.isoformat(), 'updatedAt': (started + timedelta(minutes=3)).isoformat(), 'headSha': 'abcdef0123456789'}
     assert str(bench.judge(run.name, meta, samples, evidence, **{**inputs, 'deploys': [deploy]})['verdict']).startswith('VOID deploy abcdef01')
     recent = ({**hosts[0], 'provisional-worker_started': [(started - timedelta(minutes=30)).isoformat()]}, hosts[1])

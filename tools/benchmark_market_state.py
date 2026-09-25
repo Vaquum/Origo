@@ -83,6 +83,8 @@ PROJECTION_TABLES: Final = ('binance_spot_trades_market_state_latest_revisions',
 REFERENCE_SETTINGS: Final = {
     'max_threads': 2,
     'max_memory_usage': 8 * 1024**3,
+    'max_bytes_ratio_before_external_group_by': 0,
+    'max_bytes_ratio_before_external_sort': 0,
     'max_execution_time': 3600,
     'min_bytes_to_use_direct_io': 1,
 }
@@ -401,6 +403,14 @@ SELECT 'statement' AS section, q.log_comment AS log_comment, toString(q.type) AS
 FROM system.query_log AS q
 WHERE q.event_time >= toDateTime('{begun}', 'UTC') AND q.type != 'QueryStart' AND q.log_comment IN ({comments})
 FORMAT JSONEachRow;
+SELECT 'request' AS section, q.log_comment AS log_comment,
+    toString(toTimeZone(min(q.event_time_microseconds), 'UTC')) AS first_at
+FROM system.query_log AS q
+WHERE q.event_time >= toDateTime('{begun}', 'UTC')
+    AND match(q.log_comment, '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$')
+    AND (q.query LIKE '%source_capacity_log%' OR q.query LIKE '%component_hashes%' OR q.query LIKE '%min(price_index)%'
+         OR q.query LIKE '%sumKahan(volume)%' OR q.query LIKE '%source_cleanup_log%')
+GROUP BY q.log_comment FORMAT JSONEachRow;
 SELECT 'parts' AS section, p.table AS table, sum(p.rows) AS rows, sum(p.data_compressed_bytes) AS compressed_bytes,
     sum(p.data_uncompressed_bytes) AS uncompressed_bytes, count() AS parts
 FROM system.parts AS p WHERE p.active AND p.database = 'origo' AND p.table LIKE 'binance_spot_trades%'
@@ -961,10 +971,24 @@ def judge(
     ]
     if unclean and not deployed:
         voids.append(f"baseline unclean: {', '.join(unclean)} started within 60 minutes before the run")
-    foreign = sorted(set(published_between(log, started, queried)) - set(ids))
+    # Every service request, in flight, failed or published, logs statements under its result ID.
+    # The run's own requests are its known IDs plus at most one unknown ID per failure that never
+    # learned its ID, so a failing run can never pass itself off as a shared one.
+    shared_until = queried + SETTLING
+    known = {str(sample['result_id']) for sample in samples if sample['result_id']}
+    requested = {
+        str(row['log_comment']) for row in evidence.get('request', [])
+        if started <= _utc(str(row['first_at'])) <= shared_until
+    }
+    unattributed = sum(1 for sample in samples if not sample['result_id'])
+    foreign = max(len(requested - known) - unattributed, 0)
+    published = sorted(set(published_between(log, started, shared_until)) - known)
     busy = [sample for sample in samples if sample['status'] == 503 and 'busy' in str(sample['error'])]
-    if foreign or busy:
-        voids.append(f'another consumer shared the service: {len(foreign)} foreign results, {len(busy)} busy answers')
+    if foreign or published or busy:
+        voids.append(
+            f'another consumer shared the service: {foreign} foreign requests, {len(published)} foreign results, '
+            f'{len(busy)} busy answers'
+        )
     maintenance = [row for row in evidence.get('maintenance', []) if started <= _utc(str(row['at'])) <= (ended or queried)]
     if maintenance:
         voids.append(f'maintenance ran during the run: {len(maintenance)} cleanup or rollout records')
@@ -976,11 +1000,14 @@ def judge(
     frozen = meta.get('frozen') is True and meta.get('protocol_version') == PROTOCOL_VERSION
     criteria['F'] = {'frozen': frozen, 'passed': frozen}
     criteria['P0'] = completeness(samples, corpus, stages, pairs, pair_case)
-    missing_sections = [section for section in ('window', 'statement', 'parts', 'table', 'receipt') if not evidence.get(section)]
+    missing_sections = [
+        section for section in ('window', 'statement', 'request', 'parts', 'table', 'receipt') if not evidence.get(section)
+    ]
     unlogged = [result_id for result_id in ids if {'pin_ms', 'total_ms', 'rss_peak_bytes'} - set(timings.get(result_id, {}))]
     unrecorded = [
-        result_id for result_id in ids
-        if not {'floor', 'pin', 'validate'} <= {str(row['statement']) for row in statements if row['log_comment'] == result_id}
+        str(sample['result_id']) for sample in successes
+        if not ({'floor', 'pin', 'validate'} | ({'cells'} if int(str(sample['cells'])) > 0 else set()))
+        <= {str(row['statement']) for row in statements if row['log_comment'] == sample['result_id']}
     ]
     criteria['E0'] = {
         'missing_sections': missing_sections, 'results_without_phase_logs': unlogged,

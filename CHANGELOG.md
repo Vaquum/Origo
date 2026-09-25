@@ -1,3 +1,17 @@
+# v3.27.0
+
+- Add the market state query service (`market-state`, `127.0.0.1:8486`).
+  - A local caller posts any of `t1`, `t2`, `p1`, `p2`, `tR` and `pR` and receives `cells.arrow` and `summary.arrow`.
+  - The files hold the occupied cells, grid totals, both POCs, the effective rectangle, the data cutoff and the source state they were read from.
+  - Bounds round to the 56.25 s × 125 USDT lattice with midpoints up. Resolutions are exact dyadic multiples.
+  - Coverage starts at 2021-01-01 and stops at the first uncovered day or minute.
+- Each query pins one accepted state, reads only its identities, and proves afterwards that no cleanup reclaimed them. No query holds the maintenance fence during a read.
+- Result files expire 24 hours after their last read through the cube reader (`origo.query.market_state_reader`, standard library and pyarrow only).
+  - Publication, crash recovery and cleanup touch only registered results.
+  - Admission keeps free disk above the source capacity reserve plus 8 GiB.
+- The service reports one cleanup receipt and one aggregated query receipt per minute, and the `market_state_query_service` asset in Dagit. The monitor expects its heartbeat from first start.
+- Add authentic captures of official 2021-01-01 to 2021-01-03 archive rows, covering the cube's history start and its earliest taker-free cell, for the query tests.
+
 # v3.26.1
 
 - A backfill never holds another source's fills back. Each native backfill, or bulk job run outside one, is one share of the ten-slot historical lane. Runs queue by start-time fair queuing: a run's place is the later of the service frontier (the place after the highest one ever launched, recorded by the launcher) and one past its share's newest queued place. Concurrent backfills alternate, a late backfill starts at served service instead of jumping ahead of an older backlog, a stream of new backfills cannot starve an older one, and deployment recovery keeps the places admission gave, continuing after them when restarted.

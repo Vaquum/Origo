@@ -57,6 +57,21 @@ one tick per minute, restarted by the watchdog when a tick hangs:
 
 The monitor expects a heartbeat for every enabled provisional source, including one
 that has never started, and ignores the retired shared `provisional.heartbeat`.
+
+The market state query service (`origo.workers.market_state_api`, Compose service
+`market-state`) is an observed worker of the same kind:
+- **Heartbeat.** It touches `market_state_api.heartbeat` at start and after every tick. The
+  monitor expects that heartbeat from first start, so the first deploy can raise one
+  `heartbeat_stale:market_state_api` before the container starts.
+- **Tick.** Each tick expires result files idle for 24 hours and probes the service's own
+  `GET /healthz`. A server that stops answering exits for a restart.
+- **Receipts.** Each tick writes one `binance_spot_trades:cleanup` receipt. When queries
+  ended since the last tick, it also writes one aggregated `binance_spot_trades:query`
+  receipt. That receipt:
+  - is `FAILED` if any export failed or was interrupted, else `REJECTED` if any was refused
+    (busy, source maintenance, client gone), else `OK`;
+  - carries the counts per code in `error`.
+- **Dagit.** Every tick materializes `market_state_query_service`.
 Receipt reconciliation is scoped to the source: another source's long-running attempt
 cannot be marked dead by a faster worker.
 
@@ -78,6 +93,7 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 | Is a feed current | Dagster event log (the live feed asset's freshness state) | The asset's freshness in Dagit; `origo_monitor:workers_alive` for the worker behind it |
 | Is every public consumer publishing the current state | The consumer manifests under `/opt/origo/shadow` against `origo.source_active_partitions` | `origo_monitor:publication_current`; a stale consumer names its published and state ends |
 | What did a worker do for a minute | `origo.worker_minute_log` | `SELECT * FROM origo.worker_minute_log WHERE minute = ...` |
+| Did market state queries succeed, and were idle results reclaimed | `origo.worker_minute_log` (feed `market_state_api`) and the service's `lifecycle.sqlite` | `market_state_query_service` in Dagit; `origo_monitor:workers_alive` for `FAILED` receipts |
 | Why did a source build or publication fail | `origo.source_failure_log` | `binance_spot_trades_failure_sensor` output in Dagit; the table itself |
 | What did a container print | `origo.container_log` (14 days) | `SELECT * FROM origo.container_log WHERE service = ... ORDER BY timestamp` |
 | Are the depth collectors serving | The collectors' history endpoints | `origo_monitor:collectors_serving` |

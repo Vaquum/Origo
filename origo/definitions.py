@@ -71,6 +71,7 @@ from .assets.reconcile_binance_spot_depth200_partition_state_origo import (
 )
 from .assets.build_depth_snapshot_store_arrow import build_depth_snapshot_store_arrow
 from .workers.depth import LIVE_FEED_ASSET as DEPTH_LIVE_FEED_ASSET
+from .workers.market_state_api import ASSET as MARKET_STATE_QUERY_ASSET
 from .workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 
 
@@ -308,11 +309,22 @@ binance_spot_depth_live_feed = AssetsDefinition(
         )
     ]
 )
+market_state_query_service = AssetsDefinition(
+    specs=[
+        AssetSpec(
+            MARKET_STATE_QUERY_ASSET,
+            group_name='live_feeds',
+            description='The market state query service materializes this every cleanup tick.',
+            freshness_policy=FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW),
+        )
+    ]
+)
 
 
 defs = Definitions(
     assets=[origo_monitor,
             binance_spot_depth_live_feed,
+            market_state_query_service,
             create_origo_database,
             create_binance_spot_depth20_snapshots_table_origo,
             create_binance_spot_depth20_1m_table_origo,

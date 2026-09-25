@@ -80,7 +80,7 @@ def record_receipt(
     rows: int,
     sha256: str,
     duration_ms: int,
-    status: Literal['OK', 'FAILED', 'STARTED'],
+    status: Literal['OK', 'FAILED', 'STARTED', 'REJECTED'],
     error_code: str = '',
     error: str = '',
 ) -> None:

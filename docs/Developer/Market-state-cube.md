@@ -139,9 +139,56 @@ unchanged, with one raw build and one cube receipt: 15 cells accounted for all
 12,000 captured trades and 5,310 taker buys. Capacity sampling was controlled test
 evidence; this does not establish production capacity or complete historical coverage.
 
+## Local query service — slice #474
+
+`python -m origo.workers.market_state_api` runs as the Compose service `market-state` on
+`127.0.0.1:8486`. The consumer contract (request, response, files, expiry and errors) is in
+[Market state cube queries](../Reference/Market-state-cube-queries.md).
+
+- **One pinned state per request.** `origo.query.market_state.pin` reads
+  `source_current_partitions`, the SQL form of `SourceStore.records()` (0.19 s instead of
+  3.66 s in production). Cube coverage starts at 2021-01-01 and ends at the first day
+  without `market_state` or minute without `market_state_latest`.
+  - The query reads only those `(partition_key, revision, build_id)` identities, passed as
+    clickhouse-connect external tables.
+  - It then takes the shared `heavy` fence and checks `source_cleanup_log` for the builds it
+    read. A hit discards the result.
+  - The fence is never held during a read, so cleanup, rollback and component enablement
+    never wait for a query.
+- **Result storage.** `origo.query.market_state_results.ResultStore` records each result in
+  `lifecycle.sqlite` before its staging directory exists.
+  - It publishes by an fsynced rename.
+  - After a restart it rolls interrupted steps back or forward.
+  - It retires a file 24 hours after its last read through the cube reader.
+  - Admission keeps free disk above the largest source capacity reserve plus 8 GiB, and
+    results within 64 GiB.
+- **Monitoring.** One cleanup receipt and at most one aggregated query receipt per minute go
+  to `worker_minute_log` (feed `market_state_api`). The live asset
+  `market_state_query_service` is in Dagit, and the monitor expects the service's heartbeat
+  from first start.
+
+Run its real-engine checks with:
+
+```sh
+pytest tests/origo_source_native/test_market_state_query.py tests/origo_source_native/test_market_state_results.py tests/origo_source_native/test_market_state_api.py -q
+```
+
+The tests read three committed, checksum-verified captures of official archive rows:
+
+- 2021-01-01 00:57:11–01:00:00, 2,366 trades. This includes column 62, row 231, the earliest
+  taker-free base cell in the production cube.
+- The first 3 minutes of 2021-01-02, 3,243 trades.
+- The first minute of 2021-01-03, 1,830 trades.
+
+The test source anchors at 2021-01-01, the fixed history start. Their volume tolerances hold
+only for these captures.
+
+No authentic equal-volume POC tie was found. On 2026-09-25 a search of the full history
+covered both volume measures, row resolutions up to 1000 USDT and windows of up to 64
+columns. The lower-row rule is therefore checked against an independent reference, not an
+observed tie.
+
 ## Remaining PRD delivery
 
-- Protected query snapshots, exact dyadic selections, sparse Arrow files, POCs,
-  a local API and expiry 24 hours after actual last access.
-- Disclosed real-history benchmark and resource/recovery evidence, including
-  full history at base resolution and ingestion/publication contention.
+- The disclosed real-history benchmark and resource/recovery evidence against the deployed
+  service, including full history at base resolution and ingestion/publication contention.

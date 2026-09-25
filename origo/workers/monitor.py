@@ -108,6 +108,8 @@ CHECK_NAMES: tuple[CheckName, ...] = (
     'workers_alive',
 )
 DEFAULT_WEBSERVER_URL = 'http://dagit:3000'
+# The market state query service (origo.workers.market_state_api) is expected from first start.
+MARKET_STATE_API_FEED = 'market_state_api'
 PROBE_TIMEOUT_SECONDS = 10
 # ClickHouse rows are read up to this far behind the clock: Vector delivers a log line
 # seconds after its stamp and a worker stamps a receipt before inserting it, so a row
@@ -1087,7 +1089,7 @@ class Monitor:
             heartbeat_path(self.heartbeat_dir, f'provisional_{spec.key}')
             for spec in SOURCE_REGISTRY
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
-        }
+        } | {heartbeat_path(self.heartbeat_dir, MARKET_STATE_API_FEED)}
         self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
         return sorted(self.heartbeat_inventory | expected)
 

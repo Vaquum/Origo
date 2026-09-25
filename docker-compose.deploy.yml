@@ -240,6 +240,43 @@ services:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
 
+  market-state:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      - PYTHONPATH=/opt/app
+      - DAGSTER_WEBSERVER_URL=http://dagit:3000
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - ORIGO_SOURCE_LOCK_DIR=/opt/origo/locks
+    ports:
+      - "127.0.0.1:8486:8486"
+    volumes:
+      - market-state:/opt/origo/market-state
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    tmpfs:
+      - /tmp
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      dagster:
+        condition: service_healthy
+    command: python -m origo.workers.market_state_api
+    # Root keeps write access to the root-owned shared lock and heartbeat volumes; the
+    # container is read-only and holds no capabilities. A full-history base-resolution
+    # query streamed its 207 MB file in 114 MB of RSS (measured 2026-09-25).
+    cpus: 2
+    mem_limit: 2g
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.market_state_api", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
     name: tdw-control-plane_clickhouse-data
@@ -268,3 +305,8 @@ volumes:
   worker-heartbeats:
 
   law-samples:
+
+  market-state:
+    # Compose-managed with a pinned name: consumers mount the query results read-only by
+    # this name at /opt/origo/market-state, the path the service returns.
+    name: tdw-control-plane_market-state

@@ -440,16 +440,29 @@ def _runtime(lock_root: Path) -> tuple[SourceRuntime, Client]:
 def _healthy(port: int) -> bool:
     """Whether the query server's accept loop is alive.
 
-    A 200 from ``/healthz`` proves it, and so does an immediate close: the server sheds
-    connections beyond its slots only while it is accepting. A refused connection or no
-    answer at all within the probe timeout means the server is gone or wedged.
+    A 200 from ``/healthz`` proves it, and so does a connection the server accepts and then
+    drops, cleanly or with a reset: it sheds connections beyond its slots only while it is
+    accepting. A refused connection, or no answer within the probe timeout, means the server
+    is gone or wedged.
     """
     try:
-        with socket.create_connection(('127.0.0.1', port), timeout=PROBE_TIMEOUT_SECONDS) as probe:
-            probe.sendall(b'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n')
-            answer = probe.recv(12)
+        probe = socket.create_connection(('127.0.0.1', port), timeout=PROBE_TIMEOUT_SECONDS)
     except OSError:
         return False
+    answer = b''
+    with probe:
+        try:
+            probe.sendall(b'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n')
+            # A status line may arrive in fragments; read until it is complete or the peer closes.
+            while len(answer) < 12:
+                fragment = probe.recv(12 - len(answer))
+                if not fragment:
+                    break
+                answer += fragment
+        except (ConnectionResetError, BrokenPipeError):
+            return True
+        except OSError:
+            return False
     return answer == b'' or answer.startswith(b'HTTP/1.0 200') or answer.startswith(b'HTTP/1.1 200')
 
 

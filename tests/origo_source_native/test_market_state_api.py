@@ -4,6 +4,7 @@ import ast
 import json
 import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -211,6 +212,23 @@ def test_request_bounds_keep_the_service_responsive(
         wedged.listen(8)
         assert market_state_api._healthy(wedged.getsockname()[1]) is False
     assert market_state_api._healthy(9) is False
+    # A healthy status line that arrives in fragments is still healthy.
+    with socket.socket() as slow:
+        slow.bind(('127.0.0.1', 0))
+        slow.listen(1)
+
+        def answer_in_pieces() -> None:
+            connection, _ = slow.accept()
+            with connection:
+                connection.recv(1024)
+                for piece in (b'HTTP/1.0 2', b'00 OK\r\n\r\n'):
+                    connection.sendall(piece)
+                    time.sleep(0.2)
+
+        responder = threading.Thread(target=answer_in_pieces, daemon=True)
+        responder.start()
+        assert market_state_api._healthy(slow.getsockname()[1]) is True
+        responder.join(5)
     # A deeply nested renewal body is an invalid path, not a dropped connection.
     assert service.post('/v1/market-state/access', b'[' * 10_000)[:2] == (
         400, {'error': 'invalid_request', 'reason': 'invalid_path'}

@@ -125,7 +125,7 @@ class MarketStateApi:
 
     def access(self, raw: bytes) -> Answer:
         try:
-            value = json.loads(raw or b'{}')
+            value = json.loads(raw)
         except (ValueError, RecursionError):
             return 400, {'error': 'invalid_request', 'reason': 'invalid_path'}, {}
         path = cast(dict[str, object], value).get('path') if isinstance(value, dict) else None
@@ -332,9 +332,12 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         api = cast(ApiServer, self.server).api
         try:
-            length = int(self.headers.get('Content-Length') or 0)
+            declared = self.headers.get('Content-Length')
+            length = -1 if declared is None or self.headers.get('Transfer-Encoding') else int(declared)
             if length < 0 or length > 65_536:
-                self._send(400, {'error': 'invalid_request', 'reason': 'invalid_json', 'detail': 'The body exceeds 65536 bytes.'}, {})
+                # Chunked or unsized bodies are refused rather than read as an empty request.
+                self.close_connection = True
+                self._send(400, {'error': 'invalid_request', 'reason': 'invalid_json', 'detail': 'A Content-Length body of at most 65536 bytes is required.'}, {})
                 return
             raw = self.rfile.read(length)
             answer: Answer

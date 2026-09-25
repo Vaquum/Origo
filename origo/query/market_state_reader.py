@@ -216,7 +216,14 @@ def _post(url: str, route: str, body: Mapping[str, object], timeout: float) -> M
 
 
 def _number(value: int | float | Decimal) -> int | float:
-    """A resolution as a JSON number the service decodes to the same exact decimal."""
+    """A resolution as a JSON number the service decodes to exactly the same value.
+
+    Integral values travel as integers: a large float's shortest repr is not its exact value.
+    """
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
     if isinstance(value, Decimal):
         if value == value.to_integral_value():
             return int(value)

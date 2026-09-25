@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -226,6 +227,9 @@ def test_supplied_bounds_round_to_nearest_base_edges(cube: SourceRuntime, tmp_pa
     down = run(runtime, tmp_path, t1='2021-01-01T00:58:35.6249999Z', t2='2021-01-01T01:00:00Z', p1='28937.49')
     assert down.answer['effective']['t1'] == '2021-01-01T00:58:07.500000+00:00'
     assert down.answer['effective']['p1'] == 28875.0
+    # Rounding is exact however long the literal: this one lies just below the midpoint.
+    long = run(runtime, tmp_path, t1='2021-01-01T00:58:35.6249999Z', t2='2021-01-01T01:00:00Z', p1='28937.4999999999999999999999999999')
+    assert long.answer['effective']['p1'] == 28875.0 and long.cells == down.cells
     assert_cells(down.cells, reference(day, 0, 0, columns=(62, 64), rows=(231, 233)))
     # A coarse grid whose rectangle cuts its first/last column and both rows aggregates only
     # the selected base cells.
@@ -469,6 +473,11 @@ def test_reclaimed_pinned_build_discards_the_result(
         (b'{', 'invalid_json', None),
         (b'[]', 'invalid_json', None),
         (b'[' * 10_000, 'invalid_json', None),
+        (b'', 'invalid_json', None),
+        (b'{"tR": 1e10000000000}', 'unsupported_resolution', 'tR'),
+        (b'{"pR": 1e-10000000000}', 'unsupported_resolution', 'pR'),
+        (b'{"t1": "0001-01-01T00:00:00+01:00"}', 'invalid_time', 't1'),
+        (b'{"t2": "9999-12-31T23:59:59-01:00"}', 'invalid_time', 't2'),
         (b'{"tR": NaN}', 'invalid_json', None),
         (b'{"tR": 900, "tR": 1800}', 'invalid_json', None),
         (b'{"x": 1}', 'unknown_field', 'x'),
@@ -502,6 +511,9 @@ def test_invalid_requests_are_rejected_with_reasons(raw: bytes, reason: str, fie
 
 
 def test_resolutions_up_to_the_float64_range_are_exact() -> None:
+    started = time.perf_counter()
+    tiny = parse_request(b'{"p1": 1e-10000000000}')
+    assert tiny.p1 == Decimal('1e-10000000000') and time.perf_counter() - started < 1
     largest_time = 225 * 2**1016  # 56.25 x 2^1018
     largest_price = 125 * 2**1017
     request = parse_request(json.dumps({'tR': largest_time, 'pR': largest_price}).encode())

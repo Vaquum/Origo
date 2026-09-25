@@ -70,12 +70,12 @@ FENCE_WAIT_SECONDS: Final = 60.0
 _T0_US: Final = int(CUBE_START.timestamp()) * 1_000_000
 _TIME_BASE: Final = Fraction(BASE_TIME_US, 1_000_000)
 _PRICE_BASE: Final = Fraction(BASE_PRICE_USDT)
-_HALF_PRICE: Final = Decimal(BASE_PRICE_USDT) / 2
 # Every returned price bound is an exact Float64: edge x 125 stays at or below 2^53, so a
 # price must round to an edge no larger than this, i.e. stay below ``_PRICE_LIMIT``.
 _MAX_PRICE_EDGE: Final = 2**53 // BASE_PRICE_USDT
 _PRICE_LIMIT: Final = Decimal((_MAX_PRICE_EDGE + 1) * BASE_PRICE_USDT) - Decimal(BASE_PRICE_USDT) / 2
 _MAX_TEXT: Final = 64
+_FIRST_MIDPOINT: Final = Decimal(BASE_PRICE_USDT) / 2
 _FLOAT64_MAX: Final = Fraction(sys.float_info.max)
 _CUBE_COMPONENTS: Final = {False: 'market_state', True: 'market_state_latest'}
 _PIN_STRUCTURE: Final = 'partition_key String, revision String, build_id UUID'
@@ -252,7 +252,7 @@ def parse_request(raw: bytes) -> Request:
     if len(raw) > MAX_BODY_BYTES:
         raise RequestError(400, 'invalid_json', f'The body exceeds {MAX_BODY_BYTES} bytes.')
     try:
-        body = json.loads(raw or b'{}', parse_float=Decimal, parse_constant=_constant, object_pairs_hook=_object)
+        body = json.loads(raw, parse_float=Decimal, parse_constant=_constant, object_pairs_hook=_object)
     except (ValueError, RecursionError) as error:
         raise RequestError(400, 'invalid_json', f'The body is not valid JSON: {type(error).__name__}.') from error
     if not isinstance(body, dict):
@@ -712,7 +712,10 @@ def _time(value: object, name: str) -> datetime | None:
         raise RequestError(400, 'invalid_time', f'{name} is not an ISO 8601 time: {value!r}.', field=name) from error
     if parsed.tzinfo is None:
         raise RequestError(400, 'time_zone_required', f'{name} needs an explicit UTC offset.', field=name)
-    return parsed.astimezone(UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError as error:
+        raise RequestError(400, 'invalid_time', f'{name} is outside the representable UTC range.', field=name) from error
 
 
 def _price(value: object, name: str) -> Decimal | None:
@@ -738,6 +741,10 @@ def _exponent(value: object, base: Fraction, name: str) -> int:
         return 0
     if isinstance(value, bool) or not isinstance(value, int | Decimal):
         raise RequestError(400, 'unsupported_resolution', f'{name} must be a JSON number.', field=name)
+    if isinstance(value, Decimal) and value.is_finite() and not 0 <= value.adjusted() <= 308:
+        # Resolutions lie between 56.25 and the Float64 maximum; refusing other magnitudes
+        # first keeps a short literal such as 1e10000000000 from expanding in Fraction.
+        raise RequestError(400, 'unsupported_resolution', f'{name} is outside the Float64 range.', field=name)
     try:
         ratio = Fraction(value) / base
     except (ValueError, OverflowError) as error:
@@ -758,7 +765,12 @@ def _time_edge(value: datetime) -> int:
 
 
 def _price_edge(value: Decimal) -> int:
-    return int((value + _HALF_PRICE) // BASE_PRICE_USDT)
+    # Exact rational arithmetic: Decimal's 28-digit context would round a long literal
+    # just below a midpoint up across it. Prices below the first midpoint are edge 0,
+    # which also keeps a literal such as 1e-10000000000 from expanding in Fraction.
+    if value < _FIRST_MIDPOINT:
+        return 0
+    return int((Fraction(value) + Fraction(BASE_PRICE_USDT, 2)) // BASE_PRICE_USDT)
 
 
 def _micros(value: datetime) -> int:

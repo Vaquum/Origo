@@ -233,8 +233,11 @@ class ResultStore:
             identity, file_name = str(UUID(str(result_id))), str(name)
             if file_name not in RESULT_FILES:
                 raise RuntimeError(f'Refusing to remove an unrecognised result file: {file_name!r}.')
-            target = self.results / identity / file_name
-            if target.is_file() or target.is_symlink():
+            directory = self.results / identity
+            target = directory / file_name
+            # Only inside the store's own real directory: a result directory replaced by a
+            # symlink must never lead the unlink to a foreign file.
+            if _owned_directory(directory) and (target.is_file() or target.is_symlink()):
                 target.unlink()
                 removed += 1
             with self._transaction() as connection:
@@ -244,7 +247,6 @@ class ResultStore:
                 ).fetchone()[0]
                 if not remaining:
                     connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
-            directory = self.results / identity
             if not remaining and _owned_directory(directory) and not any(directory.iterdir()):
                 directory.rmdir()
         return removed

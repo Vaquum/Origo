@@ -302,6 +302,20 @@ def test_cleanup_and_reads_race_safely(
             400, {'error': 'invalid_request', 'reason': 'invalid_path'}
         )
     assert post(url, '/v1/market-state/access', {'path': f'/x/{uuid4()}/cells.arrow'}) == (410, {'error': 'gone'})
+    # A registered result directory replaced by a symlink never leads cleanup to foreign files.
+    fourth, fourth_cells, _ = published(store, runtime)
+    outside = tmp_path / 'foreign'
+    outside.mkdir()
+    for name in ('cells.arrow', 'summary.arrow'):
+        (outside / name).write_text('foreign')
+    for child in fourth_cells.parent.iterdir():
+        child.unlink()
+    fourth_cells.parent.rmdir()
+    fourth_cells.parent.symlink_to(outside, target_is_directory=True)
+    clock.advance(DAY_NS + 1)
+    store.expire()
+    assert [path.read_text() for path in sorted(outside.iterdir())] == ['foreign', 'foreign']
+    assert store.access(fourth, 'cells.arrow') is None
 
 
 def test_admission_keeps_the_source_reserve(

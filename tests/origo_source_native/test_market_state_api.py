@@ -119,6 +119,9 @@ def test_http_contract_and_supported_caller(
     cells = read_table(result.cells.replace(str(root), str(mount)), url=service.url)
     summary = read_table(result.summary.replace(str(root), str(mount)), url=service.url).to_pylist()
     assert cells.num_rows == response['cell_count'] and summary[0]['result_id'] == result.result_id
+    # A large integral float resolution travels exactly.
+    wide = query(tR=56.25 * 2**60, pR=125.0 * 2**40, url=service.url)
+    assert (wide.response['effective']['tR'], wide.response['effective']['pR']) == (56.25 * 2**60, 125.0 * 2**40)
     # Every error has its declared shape.
     status, body, _ = service.post('/v1/market-state/query', b'{"x": 1}')
     assert (status, body['error'], body['reason'], body['field']) == (400, 'invalid_request', 'unknown_field', 'x')
@@ -174,6 +177,16 @@ def test_request_bounds_keep_the_service_responsive(
     stalled.settimeout(5)
     assert stalled.recv(1) == b''
     stalled.close()
+    # Chunked or unsized bodies are refused, never read as an empty request.
+    chunked = socket.create_connection(('127.0.0.1', port))
+    chunked.sendall(
+        b'POST /v1/market-state/query HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n'
+        b'1c\r\n{"t1": "2021-01-01T00:58:00Z"}\r\n0\r\n\r\n'
+    )
+    chunked.settimeout(5)
+    assert b' 400 ' in chunked.recv(4096).split(b'\r\n', 1)[0]
+    chunked.close()
+    assert service.post('/v1/market-state/query', b'')[:2][0] == 400
     # Oversized bodies are refused without reading them.
     connection = socket.create_connection(('127.0.0.1', port))
     connection.sendall(b'POST /v1/market-state/query HTTP/1.1\r\nHost: x\r\nContent-Length: 70000\r\n\r\n')

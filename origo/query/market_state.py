@@ -16,25 +16,25 @@ minute without cube evidence is read, so an uncovered interval can never appear 
 trades.
 
 Cell volumes are ClickHouse ``sumKahan`` sums of the selected base contributions. Row sums,
-grid totals and POCs are ``math.fsum`` over the emitted cells, so a consumer reproduces them
-exactly from ``cells.arrow``. Counts widen to UInt64 before summing.
+grid totals and POCs equal ``math.fsum`` over the emitted cells, so a consumer reproduces them
+exactly from ``cells.arrow``; they are accumulated exactly while the cells stream, so memory
+does not grow with the result. Counts widen to UInt64 before summing.
 """
 
 from __future__ import annotations
 
 import json
-import math
+import logging
 import os
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from importlib import import_module
-from itertools import chain
 from pathlib import Path
 from typing import Final, Protocol, cast
 from uuid import UUID
@@ -57,15 +57,22 @@ CELLS_FILE: Final = 'cells.arrow'
 SUMMARY_FILE: Final = 'summary.arrow'
 BATCH_ROWS: Final = 65_536
 MAX_BODY_BYTES: Final = 65_536
+# Measured on 2026-09-25: the full-history base cells statement needs 0.7-1.3 GiB and takes
+# 1.3 s on 4 threads (1.9 s on 2). Two queries use 8 of the host's 48 hardware threads, and
+# growth spills to disk instead of failing.
 QUERY_SETTINGS: Final[Mapping[str, object]] = {
-    'max_threads': 2,
-    'max_memory_usage': 2 * 1024**3,
+    'max_threads': 4,
+    'max_memory_usage': 4 * 1024**3,
+    'max_bytes_before_external_group_by': 2 * 1024**3,
+    'max_bytes_before_external_sort': 2 * 1024**3,
     'max_execution_time': 60,
     'timeout_overflow_mode': 'throw',
     'max_block_size': BATCH_ROWS,
 }
 RECEIVE_TIMEOUT_SECONDS: Final = 90
 FENCE_WAIT_SECONDS: Final = 60.0
+
+log = logging.getLogger('origo.query.market_state')
 
 _T0_US: Final = int(CUBE_START.timestamp()) * 1_000_000
 _TIME_BASE: Final = Fraction(BASE_TIME_US, 1_000_000)
@@ -82,6 +89,12 @@ _PIN_STRUCTURE: Final = 'partition_key String, revision String, build_id UUID'
 _CELL_COLUMNS: Final = (
     'time_index, price_index, volume, trade_count, taker_buy_volume, taker_buy_trade_count'
 )
+_MANTISSA: Final = np.uint64((1 << 52) - 1)
+_HIDDEN_BIT: Final = np.uint64(1 << 52)
+_LOW_BITS: Final = np.uint64((1 << 26) - 1)
+_EXPONENTS: Final = 2048
+# A Float64 is ``mantissa * 2**(exponent - 1075)``, with exponent 1 for subnormals.
+_SCALE: Final = 1 << 1075
 
 
 class _Array(Protocol):
@@ -274,7 +287,7 @@ def parse_request(raw: bytes) -> Request:
     )
 
 
-def pin(store: SourceStore) -> Pin:
+def pin(store: SourceStore, settings: Mapping[str, object]) -> Pin:
     """Pin the current accepted partitions; coverage ends at the first one without the cube."""
     rows = store.execute(
         f"""SELECT partition_key, provisional, partition_start, partition_end, generation,
@@ -282,6 +295,7 @@ def pin(store: SourceStore) -> Pin:
         FROM {store.table('source_current_partitions')} WHERE source_key=%(source)s
         ORDER BY partition_start, provisional""",
         {'source': SOURCE},
+        settings,
     )
     cursor = canonical_through = CUBE_START
     pinned: list[StateRecord] = []
@@ -313,14 +327,20 @@ def write_result(
     reclaimed a build this request read, or held the fence too long to prove it did not.
     """
     created = datetime.now(UTC)
-    state = pin(runtime.store)
+    settings = {**QUERY_SETTINGS, 'log_comment': result_id}
+    started = time.perf_counter()
+    state = pin(runtime.store, settings)
+    pinned = time.perf_counter()
     plan = _plan(request, state)
     token = state_token(SOURCE, plan.records)
     client = _connect()
     try:
-        prices = plan.prices(client, runtime.store)
-        totals = _write_cells(client, runtime.store, plan, prices, staging / CELLS_FILE, result_id, token, guard)
-        _validate(runtime, client, plan.records)
+        prices = plan.prices(client, runtime.store, settings)
+        priced = time.perf_counter()
+        totals = _write_cells(client, runtime.store, plan, prices, staging / CELLS_FILE, result_id, token, guard, settings)
+        written = time.perf_counter()
+        _validate(runtime, client, plan.records, settings)
+        validated = time.perf_counter()
     finally:
         client.close()
     fields: dict[str, object] = {
@@ -336,12 +356,12 @@ def write_result(
         'first_row_partial': prices.partial(prices.lower, request.price_exponent),
         'last_row_partial': prices.partial(prices.upper, request.price_exponent),
         'last_column_unfinished': plan.unfinished,
-        'volume': totals.volume,
+        'volume': totals.volumes.total(),
         'trade_count': totals.trade_count,
-        'taker_buy_volume': totals.taker_buy_volume,
+        'taker_buy_volume': totals.taker_volumes.total(),
         'taker_buy_trade_count': totals.taker_buy_trade_count,
-        'poc': _poc(totals.rows, request.price_resolution),
-        'taker_buy_poc': _poc(totals.taker_rows, request.price_resolution),
+        'poc': _poc(totals.volumes.rows(), request.price_resolution),
+        'taker_buy_poc': _poc(totals.taker_volumes.rows(), request.price_resolution),
         'cell_count': totals.cells,
         'data_cutoff': state.cutoff,
         'canonical_through': state.canonical_through,
@@ -351,6 +371,11 @@ def write_result(
     summary = SUMMARY_SCHEMA.with_metadata(_metadata(result_id, request, plan, token))
     with ipc.new_file(str(staging / SUMMARY_FILE), summary) as writer:
         writer.write_batch(pa.RecordBatch.from_pylist([fields], schema=summary))
+    log.info(
+        'market state result %s cells=%d bytes=%d pin_ms=%d extent_ms=%d sql_ms=%d write_ms=%d validate_ms=%d',
+        result_id, totals.cells, sum((staging / name).stat().st_size for name in (CELLS_FILE, SUMMARY_FILE)),
+        _ms(pinned - started), _ms(priced - pinned), _ms(totals.waited), _ms(totals.writing), _ms(validated - written),
+    )
     return {
         'result_id': result_id,
         'effective': {
@@ -418,7 +443,7 @@ class _Plan:
             )
         return ' UNION ALL '.join(parts), external
 
-    def prices(self, client: _HttpClient, store: SourceStore) -> _Prices:
+    def prices(self, client: _HttpClient, store: SourceStore, settings: Mapping[str, object]) -> _Prices:
         """Supplied bounds as rounded; an automatic bound is the time window's occupied extent.
 
         When the automatic side falls on the wrong side of a supplied bound, or the window
@@ -430,14 +455,16 @@ class _Plan:
         upper = None if request.p2 is None else _price_edge(request.p2)
         if lower is not None and upper is not None:
             return _Prices(lower, upper)
-        observed = self._observed(client, store)
+        observed = self._observed(client, store, settings)
         if lower is not None:
             return _Prices(lower, lower if observed is None else max(observed[1], lower))
         if upper is not None:
             return _Prices(upper if observed is None else min(observed[0], upper), upper)
         return _Prices(None, None) if observed is None else _Prices(*observed)
 
-    def _observed(self, client: _HttpClient, store: SourceStore) -> tuple[int, int] | None:
+    def _observed(
+        self, client: _HttpClient, store: SourceStore, settings: Mapping[str, object]
+    ) -> tuple[int, int] | None:
         """The occupied base rows inside the time window, whatever price bound was supplied."""
         selection = self.union(store, None)
         if selection is None:
@@ -445,7 +472,7 @@ class _Plan:
         body, external = selection
         text = client.raw_query(
             f'SELECT count(), min(price_index), max(price_index) FROM ({body})',
-            settings=QUERY_SETTINGS, fmt='TabSeparated', external_data=external,
+            settings=settings, fmt='TabSeparated', external_data=external,
         ).decode().split()
         count, low, high = (int(value) for value in text)
         return None if count == 0 else (low, high + 1)
@@ -470,15 +497,51 @@ class _Prices:
         return self.bounds is not None and edge is not None and edge % 2**exponent != 0
 
 
+class _ExactSums:
+    """Correctly rounded sums of non-negative Float64 values by row, fed batch by batch.
+
+    A Float64 is an integer mantissa times a power of two. Mantissas are added as integers per
+    (row, exponent): their 26-bit halves go through ``bincount``, which is exact while a batch
+    sums fewer than 2^26 values. One integer division then rounds each sum once, so every sum
+    equals ``math.fsum`` over the same values, and the state is one integer per (row, exponent)
+    however many cells stream through.
+    """
+
+    def __init__(self) -> None:
+        self.parts: dict[int, int] = {}
+
+    def add(self, rows: npt.NDArray[np.uint64], values: npt.NDArray[np.float64]) -> None:
+        bits = values.view(np.uint64)
+        exponents = (bits >> np.uint64(52)).astype(np.int64)
+        if bool(np.any(bits >> np.uint64(63))) or bool(np.any(exponents == _EXPONENTS - 1)):
+            raise ValueError('Cell volumes must be finite and not negative.')
+        mantissas = np.where(exponents > 0, (bits & _MANTISSA) | _HIDDEN_BIT, bits & _MANTISSA)
+        keys, slots = np.unique(rows.astype(np.int64) * _EXPONENTS + np.maximum(exponents, 1), return_inverse=True)
+        high = np.bincount(slots, weights=(mantissas >> np.uint64(26)).astype(np.float64)).astype(np.int64)
+        low = np.bincount(slots, weights=(mantissas & _LOW_BITS).astype(np.float64)).astype(np.int64)
+        for key, upper, lower in zip(keys.tolist(), high.tolist(), low.tolist(), strict=True):
+            self.parts[key] = self.parts.get(key, 0) + (upper << 26) + lower
+
+    def rows(self) -> dict[int, float]:
+        scaled: dict[int, int] = {}
+        for key, mantissas in self.parts.items():
+            row, exponent = divmod(key, _EXPONENTS)
+            scaled[row] = scaled.get(row, 0) + (mantissas << exponent)
+        return {row: total / _SCALE for row, total in scaled.items()}
+
+    def total(self) -> float:
+        return sum(mantissas << (key % _EXPONENTS) for key, mantissas in self.parts.items()) / _SCALE
+
+
 @dataclass
 class _Totals:
     cells: int = 0
     trade_count: int = 0
     taker_buy_trade_count: int = 0
-    volume: float = 0.0
-    taker_buy_volume: float = 0.0
-    rows: dict[int, float] | None = None
-    taker_rows: dict[int, float] | None = None
+    volumes: _ExactSums = field(default_factory=_ExactSums)
+    taker_volumes: _ExactSums = field(default_factory=_ExactSums)
+    waited: float = 0.0
+    writing: float = 0.0
 
 
 def _plan(request: Request, state: Pin) -> _Plan:
@@ -516,12 +579,10 @@ def _write_cells(
     result_id: str,
     token: str,
     guard: Callable[[int], None],
+    settings: Mapping[str, object],
 ) -> _Totals:
     schema = CELLS_SCHEMA.with_metadata(_metadata(result_id, plan.request, plan, token))
     totals = _Totals()
-    volumes: dict[int, list[npt.NDArray[np.float64]]] = {}
-    takers: dict[int, list[npt.NDArray[np.float64]]] = {}
-    batches: list[tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]] = []
     bounds = prices.bounds
     selection = None if bounds is None else plan.union(store, bounds)
     with ipc.new_file(str(path), schema) as writer:
@@ -533,27 +594,27 @@ def _write_cells(
                     {_shift('price_index', plan.request.price_exponent)} AS J, volume, trade_count,
                     taker_buy_volume, taker_buy_trade_count FROM ({body}))
                 GROUP BY I, J ORDER BY I, J"""
-            with client.raw_stream(query, settings=QUERY_SETTINGS, fmt='ArrowStream', external_data=external) as stream:
+            started = time.perf_counter()
+            with client.raw_stream(query, settings=settings, fmt='ArrowStream', external_data=external) as stream:
                 for batch in ipc.open_stream(stream):
+                    began = time.perf_counter()
                     arrays = [batch.column(index).cast(schema.field(index).type) for index in range(6)]
                     writer.write_batch(pa.RecordBatch.from_arrays(arrays, schema=schema))
                     guard(path.stat().st_size)
                     rows = cast(npt.NDArray[np.uint64], arrays[1].to_numpy())
-                    volume = cast(npt.NDArray[np.float64], arrays[2].to_numpy())
-                    taker = cast(npt.NDArray[np.float64], arrays[4].to_numpy())
                     totals.cells += batch.num_rows
                     totals.trade_count += int(cast(npt.NDArray[np.uint64], arrays[3].to_numpy()).sum())
                     totals.taker_buy_trade_count += int(cast(npt.NDArray[np.uint64], arrays[5].to_numpy()).sum())
-                    batches.append((volume, taker))
-                    _group(rows, volume, taker, volumes, takers)
-    totals.volume = math.fsum(chain.from_iterable(volume.tolist() for volume, _ in batches))
-    totals.taker_buy_volume = math.fsum(chain.from_iterable(taker.tolist() for _, taker in batches))
-    totals.rows = {row: math.fsum(chain.from_iterable(part.tolist() for part in parts)) for row, parts in volumes.items()}
-    totals.taker_rows = {row: math.fsum(chain.from_iterable(part.tolist() for part in parts)) for row, parts in takers.items()}
+                    totals.volumes.add(rows, cast(npt.NDArray[np.float64], arrays[2].to_numpy()))
+                    totals.taker_volumes.add(rows, cast(npt.NDArray[np.float64], arrays[4].to_numpy()))
+                    totals.writing += time.perf_counter() - began
+            totals.waited = time.perf_counter() - started - totals.writing
     return totals
 
 
-def _validate(runtime: SourceRuntime, client: _HttpClient, records: tuple[StateRecord, ...]) -> None:
+def _validate(
+    runtime: SourceRuntime, client: _HttpClient, records: tuple[StateRecord, ...], settings: Mapping[str, object]
+) -> None:
     """Prove no cleanup reclaimed a build this request read.
 
     Cleanup holds the fence exclusively while it deletes and logs; once the shared fence is
@@ -572,7 +633,7 @@ def _validate(runtime: SourceRuntime, client: _HttpClient, records: tuple[StateR
                 reclaimed = client.raw_query(
                     f"""SELECT count() FROM {runtime.store.table('source_cleanup_log')}
                     WHERE source_key='{SOURCE}' AND build_id IN (SELECT build_id FROM reads)""",
-                    settings=QUERY_SETTINGS, fmt='TabSeparated', external_data=external,
+                    settings=settings, fmt='TabSeparated', external_data=external,
                 ).decode().strip()
             break
         except SourceError as error:
@@ -585,31 +646,16 @@ def _validate(runtime: SourceRuntime, client: _HttpClient, records: tuple[StateR
         raise SourceError('SOURCE_MAINTENANCE', 'A cleanup reclaimed a build this query read.')
 
 
-def _group(
-    rows: npt.NDArray[np.uint64],
-    volume: npt.NDArray[np.float64],
-    taker: npt.NDArray[np.float64],
-    volumes: dict[int, list[npt.NDArray[np.float64]]],
-    takers: dict[int, list[npt.NDArray[np.float64]]],
-) -> None:
-    """Collect each batch's cell volumes by price row, for the exact row sums."""
-    if not len(rows):
-        return
-    order = np.argsort(rows, kind='stable')
-    rows, volume, taker = rows[order], volume[order], taker[order]
-    starts = [0, *(np.flatnonzero(np.diff(rows)) + 1).tolist()]
-    for start, end in zip(starts, [*starts[1:], len(rows)], strict=True):
-        row = int(rows[start])
-        volumes.setdefault(row, []).append(volume[start:end])
-        takers.setdefault(row, []).append(taker[start:end])
-
-
-def _poc(rows: Mapping[int, float] | None, price_resolution: float) -> float | None:
+def _poc(rows: Mapping[int, float], price_resolution: float) -> float | None:
     """The centre ``(J + 0.5) * pR`` of the row with the largest sum; the lower row wins a tie."""
-    best = max((rows or {}).values(), default=0.0)
-    if best <= 0.0 or not rows:
+    best = max(rows.values(), default=0.0)
+    if best <= 0.0:
         return None
     return (min(row for row, total in rows.items() if total == best) + 0.5) * price_resolution
+
+
+def _ms(seconds: float) -> int:
+    return int(seconds * 1000)
 
 
 def _shift(column: str, exponent: int) -> str:

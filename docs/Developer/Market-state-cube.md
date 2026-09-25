@@ -188,7 +188,96 @@ covered both volume measures, row resolutions up to 1000 USDT and windows of up 
 columns. The lower-row rule is therefore checked against an independent reference, not an
 observed tie.
 
-## Remaining PRD delivery
+## Measured acceptance — slice #476
 
-- The disclosed real-history benchmark and resource/recovery evidence against the deployed
-  service, including full history at base resolution and ingestion/publication contention.
+Exploratory runs against the deployed service on 2026-09-25 set the tuning:
+- **Query settings.** Every statement runs with 4 threads, 4 GiB, a spill to disk at 2 GiB
+  for aggregation and sorting, and 60 s. The full-history base cells statement needs
+  0.7–1.3 GiB and takes 1.3 s on 4 threads (1.9 s on 2). The pin statement runs under the
+  same settings, and every statement's `log_comment` is its result ID.
+- **Exact streaming sums.** Row sums and totals are summed exactly while the cells stream:
+  integer mantissas per (row, exponent), rounded once. That is `math.fsum`'s result, and the
+  memory no longer grows with the result. On a real 4.3 M-cell result it took 0.19 s where
+  the lists of Python floats took 0.74 s.
+- **Health probe.** The self-probe reads the whole answer, so the service no longer logs its
+  own probes as disconnected clients.
+- **Phase logs.** Each published query logs its pin, price-extent, SQL, write, validation and
+  publication times, and the service's peak RSS.
+
+The protocol is frozen in #476 and in `tools/benchmark_market_state.py` (`cases()`,
+`STAGES`, `PAIRS`, `THRESHOLDS`, `TOLERANCE`, `NUMERIC_CASES`, `CONTENTION_SERIES`);
+`test_frozen_protocol_matches_the_slice` holds them to the issue.
+- **Corpus.** 16 cases cover the current tail, a day, a month, a year, two years, the PRD's
+  original rectangle and full history, at base and coarser independent resolutions, with
+  explicit and omitted bounds and one empty rectangle.
+- **Stages.** A (cold), B (5 warm rounds), C (two concurrent streams of 3 rounds) and D (two
+  full-history base requests at once, three times).
+- **Criteria.**
+  - Latency: the nearest-rank p90 of all A–C samples ≤ 3 s, a failure counting as infinite.
+    Full history at base: a median ≤ 5 s and a maximum ≤ 10 s. No request fails.
+  - Numerical: the cube against a raw-trade reference over the same pinned builds.
+    - Cell sets and counts are exact.
+    - Volumes are within max(1e-8, 1e-12 × ref) USDT.
+    - Totals and POCs are bit-exact against `math.fsum` from `cells.arrow`.
+  - Resources: the service's peak RSS ≤ 1 GiB, no spill, and `staging/` empty.
+  - Contention: every minute of the listed live series lands during the run, with a p50
+    landing lag at most 2 s above the hour before.
+  - The run's queries are visible in the receipts and in Dagit.
+
+### Acceptance run
+
+On `37.27.112.167` after the deploy, as root. The client container needs no ClickHouse
+credentials. The raw reference and the evidence run through `clickhouse-client` in the
+ClickHouse container, and the reference reads with direct I/O so it leaves the page cache to
+the other services. Set `SHA` to the deployed merge SHA.
+
+```sh
+IMAGE="ghcr.io/vaquum/origo-dagster:$SHA"
+RUN="$HOME/market-state-acceptance/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$RUN"
+host_facts() {
+  echo "captured_at=$(date -u +%FT%T.%6NZ)"
+  for name in clickhouse market-state; do
+    echo "${name//-/_}_started=$(docker inspect -f '{{.State.StartedAt}}' "tdw-control-plane-$name-1")"
+  done
+  echo "image=$(docker inspect -f '{{.Config.Image}}' tdw-control-plane-market-state-1)"
+  echo "cpu=$(lscpu | sed -n 's/^Model name: *//p')"
+  echo "cpus=$(nproc)"
+  echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
+  echo "kernel=$(uname -r)"
+  lsblk -dn -o NAME,SIZE,MODEL | sed 's/^/disk=/'
+  echo "root_filesystem=$(df -B1 --output=size,used,avail / | tail -1)"
+  echo "results_volume_bytes=$(du -sb /var/lib/docker/volumes/tdw-control-plane_market-state/_data | cut -f1)"
+}
+consumer() {
+  docker run --rm --pull never --network host -v tdw-control-plane_market-state:/mnt/cube:ro \
+    -v "$RUN":/acceptance "$IMAGE" python tools/benchmark_market_state.py "$@" --run /acceptance --mount /mnt/cube
+}
+```
+
+1. `host_facts > "$RUN/host_before.txt" && consumer client` runs stages A–D, about five minutes.
+2. `docker exec -i tdw-control-plane-clickhouse-1 clickhouse-client --format ArrowStream < "$RUN/reference.sql" > "$RUN/reference.arrow"`
+   is the raw reference, about ten minutes on 2 threads.
+3. `docker exec -i tdw-control-plane-clickhouse-1 clickhouse-client < "$RUN/evidence.sql" > "$RUN/evidence.jsonl"`
+4. `docker logs tdw-control-plane-market-state-1 > "$RUN/service.log" 2>&1 && docker exec tdw-control-plane-dagster-1 python tools/benchmark_market_state.py backfill > "$RUN/backfill.json"`
+5. `host_facts > "$RUN/host_after.txt"`
+6. `consumer verdict` writes `report.json` and `report.md` and prints `PASS` or
+   `FAIL <criteria>` last. Post `report.md` on #462 unedited.
+7. **Recovery.** Tell the operator first: this raises the monitor's receipt-failure and
+   error-log alerts once each.
+   - Run: `docker run --rm --pull never --network host "$IMAGE" python -c "from origo.query.market_state_reader import query; query()" & sleep 1; docker restart tdw-control-plane-market-state-1; wait`
+   - Expected:
+     - the client fails with a connection error;
+     - `docker logs --since 2m tdw-control-plane-market-state-1 2>&1 | grep -c 'interrupted by the previous process: 1'` prints `1`;
+     - `ls /var/lib/docker/volumes/tdw-control-plane_market-state/_data/staging | wc -l` prints `0`.
+   - After the next tick, the latest `binance_spot_trades:query` receipt is `FAILED` with
+     `EXPORT_INTERRUPTED`, and a one-day request returns 200.
+8. **Expiry.** 24 hours and 2 minutes after the verdict, the following prints `0 0`: no
+   result of the run remains on disk or in `lifecycle.sqlite`.
+
+   ```sh
+   echo "$(ls /var/lib/docker/volumes/tdw-control-plane_market-state/_data/results | grep -c -F -f "$RUN/result_ids.txt") $(docker exec -i tdw-control-plane-market-state-1 python -c "import sqlite3, sys; ids = set(sys.stdin.read().split()); print(sum(1 for (r,) in sqlite3.connect('file:/opt/origo/market-state/lifecycle.sqlite?mode=ro', uri=True).execute('SELECT result_id FROM results') if r in ids))" < "$RUN/result_ids.txt")"
+   ```
+
+A run is void, and repeated, if ClickHouse or `market-state` starts inside it. The verdict's
+`V` criterion checks this. The run directory stays on the host.

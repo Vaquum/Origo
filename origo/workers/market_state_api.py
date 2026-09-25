@@ -245,6 +245,7 @@ class MarketStateApi:
         self, runtime: SourceRuntime, request: Request, result_id: str
     ) -> tuple[dict[str, object], Path, Path]:
         """Admit, write and publish one result; any failure discards the unreturned result."""
+        started = time.monotonic()
         runtime.require_shared_mount()
         floor = source_floor(runtime.store, self.store.disk(self.store.root).total)
         self.store.admit(result_id, 0, floor)
@@ -254,10 +255,15 @@ class MarketStateApi:
                 runtime, request, staging, result_id=result_id,
                 guard=lambda staged: self.store.admit(result_id, staged, floor),
             )
+            publishing = time.monotonic()
             cells, summary = self.store.publish(result_id)
         except BaseException:
             self.store.discard(result_id)
             raise
+        log.info(
+            'market state query %s published publish_ms=%d total_ms=%d rss_peak_bytes=%d',
+            result_id, _elapsed(publishing), _elapsed(started), _rss_bytes(),
+        )
         return answer, cells, summary
 
     def _failed(self, error: Exception) -> Answer:
@@ -445,7 +451,8 @@ def _healthy(port: int) -> bool:
     A 200 from ``/healthz`` proves it, and so does a connection the server accepts and then
     drops, cleanly or with a reset: it sheds connections beyond its slots only while it is
     accepting. A refused connection, or no answer within the probe timeout, means the server
-    is gone or wedged.
+    is gone or wedged. The whole answer is read, so the probe never closes while the server
+    is still writing and the server never logs its own probe as a disconnected client.
     """
     try:
         probe = socket.create_connection(('127.0.0.1', port), timeout=PROBE_TIMEOUT_SECONDS)
@@ -455,9 +462,8 @@ def _healthy(port: int) -> bool:
     with probe:
         try:
             probe.sendall(b'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n')
-            # A status line may arrive in fragments; read until it is complete or the peer closes.
-            while len(answer) < 12:
-                fragment = probe.recv(12 - len(answer))
+            while len(answer) < 1024:
+                fragment = probe.recv(1024 - len(answer))
                 if not fragment:
                     break
                 answer += fragment

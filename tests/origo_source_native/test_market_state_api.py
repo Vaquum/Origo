@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import socket
 import struct
 import sys
@@ -293,6 +294,67 @@ def test_request_bounds_keep_the_service_responsive(
     monkeypatch.setattr(market_state, 'RECEIVE_TIMEOUT_SECONDS', 90)
     monkeypatch.setattr(market_state, '_shift', shift)
     assert query(url=service.url).response['cell_count'] == first.response['cell_count']
+
+
+def test_health_probe_reads_the_whole_answer(service: Service, caplog: pytest.LogCaptureFixture) -> None:
+    # A server still writing when the probe has its status line must be able to finish:
+    # closing early resets the connection and fails the server's next write.
+    written: list[str] = []
+    with socket.socket() as pieces:
+        pieces.bind(('127.0.0.1', 0))
+        pieces.listen(1)
+
+        def answer_in_pieces() -> None:
+            connection, _ = pieces.accept()
+            with connection:
+                connection.recv(1024)
+                try:
+                    for piece in (b'HTTP/1.0 200 OK\r\n', b'Content-Length: 16\r\n\r\n', b'{"status": "ok"}'):
+                        connection.sendall(piece)
+                        time.sleep(0.2)
+                    written.append('whole answer')
+                except OSError as error:
+                    written.append(type(error).__name__)
+
+        responder = threading.Thread(target=answer_in_pieces, daemon=True)
+        responder.start()
+        assert market_state_api._healthy(pieces.getsockname()[1]) is True
+        responder.join(5)
+    assert written == ['whole answer']
+    port = service.server.server_address[1]
+    with caplog.at_level(logging.WARNING, logger='origo.workers.market_state_api'):
+        assert all(market_state_api._healthy(port) for _ in range(200))
+        time.sleep(0.5)
+    assert [record.getMessage() for record in caplog.records if 'client disconnected' in record.getMessage()] == []
+    # A server shedding connections beyond its slots is still alive.
+    idle = [socket.create_connection(('127.0.0.1', port)) for _ in range(32)]
+    time.sleep(0.3)
+    try:
+        assert market_state_api._healthy(port) is True
+    finally:
+        for sock in idle:
+            sock.close()
+
+
+def _fields(message: str, prefix: str) -> dict[str, int]:
+    assert message.startswith(prefix), message
+    return {key: int(value) for key, value in (field.split('=', 1) for field in message.removeprefix(prefix).split())}
+
+
+def test_published_queries_log_their_phases(service: Service, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO):
+        result = query(url=service.url)
+    messages = {record.name: record.getMessage() for record in caplog.records if result.result_id in record.getMessage()}
+    written = _fields(messages['origo.query.market_state'], f'market state result {result.result_id} ')
+    published = _fields(messages['origo.workers.market_state_api'], f'market state query {result.result_id} published ')
+    assert set(written) == {'cells', 'bytes', 'pin_ms', 'extent_ms', 'sql_ms', 'write_ms', 'validate_ms'}
+    assert set(published) == {'publish_ms', 'total_ms', 'rss_peak_bytes'}
+    assert written['cells'] == result.response['cell_count']
+    assert written['bytes'] == sum(Path(path).stat().st_size for path in (result.cells, result.summary))
+    assert min(written.values()) >= 0 and min(published.values()) >= 0
+    phases = sum(written[name] for name in ('pin_ms', 'extent_ms', 'sql_ms', 'write_ms', 'validate_ms'))
+    assert published['total_ms'] + 5 >= phases + published['publish_ms']
+    assert published['rss_peak_bytes'] > 0
 
 
 def test_tick_reports_receipts_heartbeat_and_live_asset(

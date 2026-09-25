@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
@@ -23,6 +24,7 @@ from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
     METADATA_KEY,
+    QUERY_SETTINGS,
     SUMMARY_SCHEMA,
     RequestError,
     parse_request,
@@ -330,7 +332,7 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
         # The first day of the cube's history is missing: no coverage, and every request is a 409.
         runtime.enable_components('market_state')
         runtime.build(DAY2)
-        state = pin(runtime.store)
+        state = pin(runtime.store, QUERY_SETTINGS)
         assert state.records == () and state.cutoff == datetime(2021, 1, 1, tzinfo=UTC)
         with pytest.raises(RequestError) as missing:
             run(runtime, tmp_path)
@@ -340,9 +342,9 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
             'data_cutoff': '2021-01-01T00:00:00.000000+00:00',
         }
         runtime.build(DAY1)
-        assert pin(runtime.store).cutoff == datetime(2021, 1, 3, tzinfo=UTC)
+        assert pin(runtime.store, QUERY_SETTINGS).cutoff == datetime(2021, 1, 3, tzinfo=UTC)
         runtime.build(DAY3)
-        assert pin(runtime.store).cutoff == datetime(2021, 1, 4, tzinfo=UTC)
+        assert pin(runtime.store, QUERY_SETTINGS).cutoff == datetime(2021, 1, 4, tzinfo=UTC)
         return
     if scenario == 'interior_day_without_the_cube':
         runtime.build(DAY2)  # accepted before the cube was enabled: no market_state component
@@ -355,7 +357,7 @@ def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
         built(runtime, DAY1, minutes=(MINUTES[0], MINUTES[2]))
         expected_keys, cutoff = [DAY1, MINUTES[0]], datetime(2021, 1, 2, 0, 1, tzinfo=UTC)
         read = trades(DAY1) + trades(DAY2, end='2021-01-02T00:01:00Z')
-    state = pin(runtime.store)
+    state = pin(runtime.store, QUERY_SETTINGS)
     assert [record.partition.key for record in state.records] == expected_keys
     assert state.cutoff == cutoff
     assert_cells(run(runtime, tmp_path).cells, reference(read, 0, 0))
@@ -388,7 +390,7 @@ def test_one_pinned_state_serves_the_whole_request(
     cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = built(cube, DAY1, minutes=MINUTES)
-    pinned = pin(runtime.store)
+    pinned = pin(runtime.store, QUERY_SETTINGS)
     other = SourceRuntime(runtime.spec, SourceStore(make_clickhouse_client(get_clickhouse_settings()), 'origo', runtime.spec), runtime.lock_root, str(uuid4()))
     connect = market_state._connect
     changes: list[str] = []
@@ -421,7 +423,7 @@ def test_reclaimed_pinned_build_discards_the_result(
     cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = built(cube, DAY1, minutes=MINUTES)
-    target = next(record for record in pin(runtime.store).records if record.partition.key == MINUTES[1])
+    target = next(record for record in pin(runtime.store, QUERY_SETTINGS).records if record.partition.key == MINUTES[1])
     connect = market_state._connect
 
     def cleanup_during_read() -> object:
@@ -525,16 +527,54 @@ def test_resolutions_up_to_the_float64_range_are_exact() -> None:
         assert beyond.value.reason == 'unsupported_resolution'
 
 
+@pytest.mark.parametrize(('n', 'm'), [(0, 0), (3, 0), (0, 2), (11, 5)])
+def test_row_sums_and_totals_stream_exactly(cube: SourceRuntime, tmp_path: Path, n: int, m: int) -> None:
+    runtime = built(cube, DAY1, DAY2, DAY3)
+    pR = 125.0 * 2**m
+    result = run(runtime, tmp_path, tR=56.25 * 2**n, pR=pR)
+    cells = result.cells
+    assert result.summary['volume'] == math.fsum(cell['volume'] for cell in cells)
+    assert result.summary['taker_buy_volume'] == math.fsum(cell['taker_buy_volume'] for cell in cells)
+    assert result.summary['poc'] == _reference_poc(_row_sums(cells, 'volume'), pR)
+    assert result.summary['taker_buy_poc'] == _reference_poc(_row_sums(cells, 'taker_buy_volume'), pR)
+    rows = np.array([cell['price_index'] for cell in cells], dtype=np.uint64)
+    for measure in ('volume', 'taker_buy_volume'):
+        values = np.array([cell[measure] for cell in cells], dtype=np.float64)
+        expected_keys = {
+            int(row) * 2048 + max(int(bits) >> 52, 1) for row, bits in zip(rows, values.view(np.uint64), strict=True)
+        }
+        # Any batching gives math.fsum's result, from one integer per (row, exponent).
+        for size in (1, 7, 65_536):
+            sums = market_state._ExactSums()
+            for start in range(0, len(values), size):
+                sums.add(rows[start:start + size], values[start:start + size])
+            assert sums.rows() == _row_sums(cells, measure)
+            assert sums.total() == math.fsum(values.tolist())
+            assert set(sums.parts) == expected_keys
+    # A volume the exact sum cannot represent stops the result instead of summing wrongly.
+    with pytest.raises(ValueError, match='finite and not negative'):
+        market_state._ExactSums().add(np.array([0], dtype=np.uint64), np.array([math.inf]))
+
+
+def _statement(query: str) -> str:
+    for marker, name in (
+        ('component_hashes', 'pin'), ('min(price_index)', 'extent'), ('sumKahan(volume)', 'cells'), ('source_cleanup_log', 'validate'),
+    ):
+        if marker in query:
+            return name
+    return query
+
+
 def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_path: Path) -> None:
     runtime = built(cube, DAY1)
-    run(runtime, tmp_path, tR=900, pR=250)
+    result = run(runtime, tmp_path, tR=900, pR=250)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         client.execute('SYSTEM FLUSH LOGS')
         rows = client.execute(
-            "SELECT Settings FROM system.query_log WHERE type = 'QueryFinish' "
-            "AND query LIKE '%sumKahan(taker_buy_volume)%' AND query NOT LIKE '%system.query_log%' "
-            'ORDER BY event_time_microseconds DESC LIMIT 1'
+            "SELECT query, Settings FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
+            'ORDER BY event_time_microseconds',
+            {'result': result.staging.name},
         )
         # query_log records only settings that differ from the server default.
         defaults = dict(client.execute(
@@ -542,12 +582,18 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
         ))
     finally:
         client.disconnect()
-    effective = {**defaults, **rows[0][0]}
-    assert effective['max_threads'] == '2'
-    assert effective['max_memory_usage'] == str(2 * 1024**3)
-    assert effective['max_execution_time'] == '60'
-    assert effective['timeout_overflow_mode'] == 'throw'
-    assert effective['max_block_size'] == '65536'
+    # Every statement of the request, the pin included, carries the declared bounds and its result ID.
+    assert [_statement(query) for query, _ in rows] == ['pin', 'extent', 'cells', 'validate']
+    for _, settings in rows:
+        effective = {**defaults, **settings}
+        assert effective['max_threads'] == '4'
+        assert effective['max_memory_usage'] == str(4 * 1024**3)
+        assert effective['max_bytes_before_external_group_by'] == str(2 * 1024**3)
+        assert effective['max_bytes_before_external_sort'] == str(2 * 1024**3)
+        assert effective['max_execution_time'] == '60'
+        assert effective['timeout_overflow_mode'] == 'throw'
+        assert effective['max_block_size'] == '65536'
+        assert effective['log_comment'] == result.staging.name
     assert SUMMARY_SCHEMA.field('p1').nullable and not SUMMARY_SCHEMA.field('first_row_partial').nullable
     assert [field.name for field in CELLS_SCHEMA] == [
         'time_index', 'price_index', 'volume', 'trade_count', 'taker_buy_volume', 'taker_buy_trade_count'

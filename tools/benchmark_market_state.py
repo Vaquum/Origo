@@ -1027,7 +1027,7 @@ def judge(
     if maintenance:
         voids.append(f'maintenance ran during the run: {len(maintenance)} cleanup or rollout records')
     # runs.db is read after the run; only a backfill run that started before the evidence read
-    # and was still running when the baseline began overlapped it.
+    # and had not ended before the baseline began overlapped it.
     backfills = [
         run for run in map(_mapping, _list(_mapping(extras.get('backfill', {})).get('native_backfills', [])))
         if run['start_time'] is not None and float(str(run['start_time'])) <= (ended or queried).timestamp()

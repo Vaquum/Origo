@@ -78,10 +78,6 @@ log = logging.getLogger('origo.workers.market_state_api')
 
 Status = Literal['OK', 'REJECTED', 'FAILED']
 
-
-class _ClientGone(Exception):
-    """The client disconnected before its result was published."""
-
 Answer = tuple[int, dict[str, object], dict[str, str]]
 _PRECEDENCE: Final[tuple[Status, ...]] = ('FAILED', 'REJECTED', 'OK')
 
@@ -109,7 +105,29 @@ class MarketStateApi:
         self._token = ''
         self._monitoring_ready = False
 
-    def query(self, raw: bytes, connected: Callable[[], bool]) -> Answer:
+    def query(self, raw: bytes, deliver: Callable[[Answer], bool]) -> None:
+        """Answer one query through ``deliver``, which reports whether the client got it.
+
+        A published result whose answer could not be sent is discarded at once: nobody holds
+        its paths. A client that closed while the answer still fit the socket buffer cannot
+        be told apart from one that half-closed its write side and is still reading, so its
+        result is kept and expires 24 hours later.
+        """
+        answer = self._answer(raw)
+        delivered = deliver(answer)
+        status, payload, _ = answer
+        if status != 200:
+            return
+        result_id = str(payload['result_id'])
+        if not delivered:
+            self.store.discard(result_id)
+            self._count('REJECTED', 'CLIENT_DISCONNECTED')
+            return
+        with self._lock:
+            self._outcomes[('OK', '')] += 1
+            self._token = str(payload['state_token'])
+
+    def _answer(self, raw: bytes) -> Answer:
         try:
             request = parse_request(raw)
         except RequestError as error:
@@ -119,7 +137,7 @@ class MarketStateApi:
             self._count('REJECTED', 'QUERY_BUSY')
             return 503, {'error': 'busy'}, {'Retry-After': '5'}
         try:
-            return self._export(request, connected)
+            return self._export(request)
         finally:
             self.queries.release()
 
@@ -189,17 +207,14 @@ class MarketStateApi:
             os._exit(WATCHDOG_EXIT_CODE)
         return TickOutcome(FEED, minute, (CLEANUP_SERIES,), tuple(failed))
 
-    def _export(self, request: Request, connected: Callable[[], bool]) -> Answer:
+    def _export(self, request: Request) -> Answer:
         result_id = str(uuid4())
         try:
             runtime, client = _runtime(self.lock_root)
             try:
-                answer, cells, summary = self._publish(runtime, request, connected, result_id)
+                answer, cells, summary = self._publish(runtime, request, result_id)
             finally:
                 client.disconnect()
-        except _ClientGone:
-            self._count('REJECTED', 'CLIENT_DISCONNECTED')
-            return 499, {'error': 'client_disconnected'}, {}
         except RequestError as error:
             self._count_invalid()
             return error.status, error.body(), {}
@@ -217,9 +232,6 @@ class MarketStateApi:
             return 503, {'error': 'source_maintenance'}, {'Retry-After': '5'}
         except Exception as error:
             return self._failed(error)
-        with self._lock:
-            self._outcomes[('OK', '')] += 1
-            self._token = str(answer['state_token'])
         created = datetime.now(UTC)
         return 200, {
             **answer,
@@ -230,7 +242,7 @@ class MarketStateApi:
         }, {}
 
     def _publish(
-        self, runtime: SourceRuntime, request: Request, connected: Callable[[], bool], result_id: str
+        self, runtime: SourceRuntime, request: Request, result_id: str
     ) -> tuple[dict[str, object], Path, Path]:
         """Admit, write and publish one result; any failure discards the unreturned result."""
         runtime.require_shared_mount()
@@ -242,8 +254,6 @@ class MarketStateApi:
                 runtime, request, staging, result_id=result_id,
                 guard=lambda staged: self.store.admit(result_id, staged, floor),
             )
-            if not connected():
-                raise _ClientGone(result_id)
             cells, summary = self.store.publish(result_id)
         except BaseException:
             self.store.discard(result_id)
@@ -342,8 +352,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             answer: Answer
             if self.path == '/v1/market-state/query':
-                answer = api.query(raw, self._connected)
-            elif self.path == '/v1/market-state/access':
+                api.query(raw, lambda reply: self._send(*reply))
+                return
+            if self.path == '/v1/market-state/access':
                 answer = api.access(raw)
             else:
                 answer = 404, {'error': 'not_found'}, {}
@@ -362,20 +373,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         else:
             self._send(404, {'error': 'not_found'}, {})
 
-    def _connected(self) -> bool:
-        """Whether the client is still there: a closed peer reads as end of stream."""
-        connection = self.connection
-        try:
-            connection.setblocking(False)
-            return connection.recv(1, socket.MSG_PEEK) != b''
-        except BlockingIOError:
-            return True
-        except OSError:
-            return False
-        finally:
-            connection.settimeout(self.timeout)
-
-    def _send(self, status: int, payload: Mapping[str, object], headers: Mapping[str, str]) -> None:
+    def _send(self, status: int, payload: Mapping[str, object], headers: Mapping[str, str]) -> bool:
+        """Send one JSON answer; ``False`` when the client was gone."""
         body = json.dumps(payload, allow_nan=False).encode()
         try:
             self.send_response(status)
@@ -386,9 +385,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
+            self.wfile.flush()
         except OSError as error:
             self.close_connection = True
             log.warning('market state client disconnected: %s', type(error).__name__)
+            return False
+        return True
 
     def log_message(self, format: str, *args: object) -> None:
         log.debug(format, *args)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import socket
+import struct
 import sys
 import threading
 import time
@@ -243,20 +244,40 @@ def test_request_bounds_keep_the_service_responsive(
     finally:
         service.api.queries.release()
         service.api.queries.release()
-    # A client that disconnects before publication leaves no published result.
+    # A client that half-closes its write side after the body still receives its answer.
+    halfway = socket.create_connection(('127.0.0.1', port))
+    halfway.sendall(b'POST /v1/market-state/query HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}')
+    halfway.shutdown(socket.SHUT_WR)
+    halfway.settimeout(30)
+    reply = b''
+    while chunk := halfway.recv(65_536):
+        reply += chunk
+    halfway.close()
+    assert reply.startswith(b'HTTP/1.0 200')
+    kept = json.loads(reply.split(b'\r\n\r\n', 1)[1])
+    assert Path(str(kept['cells'])).is_file()
+    # A client that aborts while its query runs never receives the answer, so the
+    # published result is discarded at once.
     published_before = set((service.store.root / 'results').iterdir())
     original = market_state_api.write_result
+    started = threading.Event()
 
     def slow(*args: Any, **kwargs: Any) -> dict[str, object]:
+        started.set()
         time.sleep(1.0)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(market_state_api, 'write_result', slow)
     gone = socket.create_connection(('127.0.0.1', port))
     gone.sendall(b'POST /v1/market-state/query HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}')
+    assert started.wait(10)
+    gone.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
     gone.close()
-    time.sleep(3.0)
+    deadline = time.monotonic() + 15
+    while service.api._outcomes[('REJECTED', 'CLIENT_DISCONNECTED')] == 0 and time.monotonic() < deadline:
+        time.sleep(0.1)
     monkeypatch.setattr(market_state_api, 'write_result', original)
+    assert service.api._outcomes[('REJECTED', 'CLIENT_DISCONNECTED')] == 1
     assert set((service.store.root / 'results').iterdir()) == published_before
     assert list((service.store.root / 'staging').iterdir()) == []
     # An export whose transport stalls fails within its bound and frees its slot and staging.

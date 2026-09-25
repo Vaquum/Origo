@@ -186,9 +186,22 @@ def test_request_bounds_keep_the_service_responsive(
     extra = socket.create_connection(('127.0.0.1', port))
     extra.settimeout(5)
     assert extra.recv(1) == b''
+    # A server shedding load is alive: the self-probe must not restart it.
+    assert market_state_api._healthy(port) is True
     for sock in (*idle, extra):
         sock.close()
     time.sleep(1.5)
+    # A listener that never accepts, or a closed port, is not alive.
+    monkeypatch.setattr(market_state_api, 'PROBE_TIMEOUT_SECONDS', 1)
+    with socket.socket() as wedged:
+        wedged.bind(('127.0.0.1', 0))
+        wedged.listen(8)
+        assert market_state_api._healthy(wedged.getsockname()[1]) is False
+    assert market_state_api._healthy(9) is False
+    # A deeply nested renewal body is an invalid path, not a dropped connection.
+    assert service.post('/v1/market-state/access', b'[' * 10_000)[:2] == (
+        400, {'error': 'invalid_request', 'reason': 'invalid_path'}
+    )
     # With both query slots busy, renewals and health still answer.
     service.api.queries.acquire()
     service.api.queries.acquire()

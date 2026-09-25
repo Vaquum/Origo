@@ -25,8 +25,6 @@ import socket
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -128,7 +126,7 @@ class MarketStateApi:
     def access(self, raw: bytes) -> Answer:
         try:
             value = json.loads(raw or b'{}')
-        except ValueError:
+        except (ValueError, RecursionError):
             return 400, {'error': 'invalid_request', 'reason': 'invalid_path'}, {}
         path = cast(dict[str, object], value).get('path') if isinstance(value, dict) else None
         parsed = parse_result_path(path) if isinstance(path, str) and len(path) <= 4096 else None
@@ -234,12 +232,12 @@ class MarketStateApi:
     def _publish(
         self, runtime: SourceRuntime, request: Request, connected: Callable[[], bool], result_id: str
     ) -> tuple[dict[str, object], Path, Path]:
-        """Admit, write and publish one result; any failure discards its staging."""
+        """Admit, write and publish one result; any failure discards the unreturned result."""
         runtime.require_shared_mount()
         floor = source_floor(runtime.store, self.store.disk(self.store.root).total)
-        self.store.admit(None, 0, floor)
-        staging = self.store.register(result_id)
+        self.store.admit(result_id, 0, floor)
         try:
+            staging = self.store.register(result_id)
             answer = write_result(
                 runtime, request, staging, result_id=result_id,
                 guard=lambda staged: self.store.admit(result_id, staged, floor),
@@ -350,6 +348,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             log.warning('market state request unreadable: %s', type(error).__name__)
             return
+        except Exception:
+            log.exception('market state request failed: %s', self.path)
+            answer = 500, {'error': 'internal_error'}, {}
         self._send(*answer)
 
     def do_GET(self) -> None:
@@ -434,11 +435,19 @@ def _runtime(lock_root: Path) -> tuple[SourceRuntime, Client]:
 
 
 def _healthy(port: int) -> bool:
+    """Whether the query server's accept loop is alive.
+
+    A 200 from ``/healthz`` proves it, and so does an immediate close: the server sheds
+    connections beyond its slots only while it is accepting. A refused connection or no
+    answer at all within the probe timeout means the server is gone or wedged.
+    """
     try:
-        with urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=PROBE_TIMEOUT_SECONDS) as response:
-            return response.status == 200
-    except (OSError, urllib.error.URLError):
+        with socket.create_connection(('127.0.0.1', port), timeout=PROBE_TIMEOUT_SECONDS) as probe:
+            probe.sendall(b'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n')
+            answer = probe.recv(12)
+    except OSError:
         return False
+    return answer == b'' or answer.startswith(b'HTTP/1.0 200') or answer.startswith(b'HTTP/1.1 200')
 
 
 def _elapsed(started: float) -> int:

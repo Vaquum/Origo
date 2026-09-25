@@ -138,29 +138,24 @@ class ResultStore:
         staging = self.staging / identity
         staging.mkdir()
         staging.chmod(0o755)
-        with self._lock:
-            self._staged[identity] = 0
         return staging
 
-    def admit(self, result_id: str | None, staged_bytes: int, floor_bytes: int) -> None:
-        """Raise ``StorageFull`` unless results, reservations and the disk floor all fit.
+    def admit(self, result_id: str, staged_bytes: int, floor_bytes: int) -> None:
+        """Reserve room for a query's bytes, or raise ``StorageFull`` and reserve nothing.
 
         Every in-flight query holds ``QUERY_RESERVATION_BYTES`` or its actual bytes, whichever
-        is larger; the part not yet written is subtracted from free space.
+        is larger; the part not yet written is subtracted from free space. The check and the
+        reservation happen under one lock, so concurrent admissions cannot both pass.
         """
         with self._lock:
-            if result_id is not None:
-                self._staged[result_id] = staged_bytes
-            reserved = [max(QUERY_RESERVATION_BYTES, staged) for staged in self._staged.values()]
-            pending = sum(max(QUERY_RESERVATION_BYTES - staged, 0) for staged in self._staged.values())
-            if result_id is None:
-                reserved.append(QUERY_RESERVATION_BYTES)
-                pending += QUERY_RESERVATION_BYTES
-        used = self.usage()[1] + sum(reserved)
-        disk = self.disk(self.root)
-        free = disk.free - pending
-        if used > self.budget_bytes or free < floor_bytes or disk.free_inodes * 10 < disk.inodes:
-            raise StorageFull(used, self.budget_bytes, disk.free, floor_bytes)
+            staged = {**self._staged, result_id: staged_bytes}
+            reserved = sum(max(QUERY_RESERVATION_BYTES, size) for size in staged.values())
+            pending = sum(max(QUERY_RESERVATION_BYTES - size, 0) for size in staged.values())
+            used = self.usage()[1] + reserved
+            disk = self.disk(self.root)
+            if used > self.budget_bytes or disk.free - pending < floor_bytes or disk.free_inodes * 10 < disk.inodes:
+                raise StorageFull(used, self.budget_bytes, disk.free, floor_bytes)
+            self._staged[result_id] = staged_bytes
 
     def publish(self, result_id: str) -> tuple[Path, Path]:
         identity = str(UUID(result_id))
@@ -184,13 +179,18 @@ class ResultStore:
         return final / RESULT_FILES[0], final / RESULT_FILES[1]
 
     def discard(self, result_id: str) -> None:
-        """Remove an unpublished result and its registration."""
+        """Remove a result whose paths were never returned, in whatever state it reached.
+
+        A publication that failed after its lifecycle commit leaves the result registered as
+        published, in staging or already renamed; nobody holds its paths, so it goes too.
+        """
         identity = str(UUID(result_id))
-        staging = self.staging / identity
-        if _owned_directory(staging):
-            shutil.rmtree(staging)
         with self._transaction() as connection:
-            connection.execute("DELETE FROM results WHERE result_id = ? AND state = 'staging'", (identity,))
+            connection.execute('DELETE FROM files WHERE result_id = ?', (identity,))
+            connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
+        for directory in (self.staging / identity, self.results / identity):
+            if _owned_directory(directory):
+                shutil.rmtree(directory)
         with self._lock:
             self._staged.pop(identity, None)
 

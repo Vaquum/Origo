@@ -5,6 +5,7 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -261,7 +262,12 @@ def test_omitted_bounds_and_empty_rectangles(cube: SourceRuntime, tmp_path: Path
     assert edge.answer['effective']['t1'] == edge.answer['effective']['t2'] == '2021-01-01T00:58:07.500000+00:00'
     quiet = run(runtime, tmp_path, t1='2021-01-01T12:00:00Z', t2='2021-01-01T13:00:00Z')
     assert (quiet.answer['effective']['p1'], quiet.answer['effective']['p2']) == (None, None)
-    for empty in (above, below, edge, quiet):
+    # One supplied bound rounding onto the other side's automatic edge is empty too.
+    start = run(runtime, tmp_path, t2='2021-01-01T00:00:20Z')
+    assert start.answer['effective']['t1'] == start.answer['effective']['t2'] == '2021-01-01T00:00:00.000000+00:00'
+    end = run(runtime, tmp_path, t1='2021-01-02T00:00:00Z')
+    assert end.answer['effective']['t1'] == end.answer['effective']['t2'] == '2021-01-02T00:00:00.000000+00:00'
+    for empty in (above, below, edge, quiet, start, end):
         assert empty.cells == [] and empty.answer['cell_count'] == 0
         summary = empty.summary
         assert (summary['volume'], summary['trade_count']) == (0.0, 0)
@@ -444,6 +450,17 @@ def test_reclaimed_pinned_build_discards_the_result(
         with pytest.raises(SourceError) as held:
             run(runtime, tmp_path, t1='2021-01-01T00:00:00Z', t2='2021-01-01T01:00:00Z')
     assert held.value.code == 'SOURCE_MAINTENANCE'
+    # Any other lock failure stays itself: a persistent fault is not a retryable 503.
+
+    @contextmanager
+    def broken_lock(*args: object, **kwargs: object) -> Iterator[None]:
+        raise SourceError('SOURCE_LOCK_INVALID', 'The lock file could not be opened.')
+        yield
+
+    monkeypatch.setattr(market_state, 'source_lock', broken_lock)
+    with pytest.raises(SourceError) as broken:
+        run(runtime, tmp_path, t1='2021-01-01T00:00:00Z', t2='2021-01-01T01:00:00Z')
+    assert broken.value.code == 'SOURCE_LOCK_INVALID'
 
 
 @pytest.mark.parametrize(
@@ -451,6 +468,7 @@ def test_reclaimed_pinned_build_discards_the_result(
     [
         (b'{', 'invalid_json', None),
         (b'[]', 'invalid_json', None),
+        (b'[' * 10_000, 'invalid_json', None),
         (b'{"tR": NaN}', 'invalid_json', None),
         (b'{"tR": 900, "tR": 1800}', 'invalid_json', None),
         (b'{"x": 1}', 'unknown_field', 'x'),

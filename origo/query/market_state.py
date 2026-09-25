@@ -253,8 +253,8 @@ def parse_request(raw: bytes) -> Request:
         raise RequestError(400, 'invalid_json', f'The body exceeds {MAX_BODY_BYTES} bytes.')
     try:
         body = json.loads(raw or b'{}', parse_float=Decimal, parse_constant=_constant, object_pairs_hook=_object)
-    except ValueError as error:
-        raise RequestError(400, 'invalid_json', f'The body is not valid JSON: {error}.') from error
+    except (ValueError, RecursionError) as error:
+        raise RequestError(400, 'invalid_json', f'The body is not valid JSON: {type(error).__name__}.') from error
     if not isinstance(body, dict):
         raise RequestError(400, 'invalid_json', 'The body must be a JSON object.')
     fields = cast(dict[str, object], body)
@@ -487,7 +487,9 @@ def _plan(request: Request, state: Pin) -> _Plan:
     upper = cutoff_edge if request.t2 is None else _time_edge(request.t2)
     clipped_t1 = request.t1 is not None and lower < 0
     clipped_t2 = request.t2 is not None and upper > cutoff_edge
-    if request.t1 is not None and request.t2 is not None and lower == upper and 0 <= lower <= cutoff_edge:
+    if lower == upper and 0 <= lower <= cutoff_edge and cutoff_edge > 0:
+        # Bounds that round onto one edge inside existing coverage select nothing, whichever
+        # were supplied; with no coverage at all every request is outside it.
         low = high = lower
     else:
         low, high = max(lower, 0), min(upper, cutoff_edge)
@@ -574,7 +576,9 @@ def _validate(runtime: SourceRuntime, client: _HttpClient, records: tuple[StateR
                 ).decode().strip()
             break
         except SourceError as error:
-            if error.code != 'SOURCE_LOCK_BUSY' or time.monotonic() >= deadline:
+            if error.code != 'SOURCE_LOCK_BUSY':
+                raise
+            if time.monotonic() >= deadline:
                 raise SourceError('SOURCE_MAINTENANCE', 'A cleanup held the source fence past the query deadline.') from error
             time.sleep(0.5)
     if int(reclaimed):

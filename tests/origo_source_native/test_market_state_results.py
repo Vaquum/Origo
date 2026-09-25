@@ -16,7 +16,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from origo.query import market_state_reader
+from origo.query import market_state_reader, market_state_results
 from origo.query.market_state import CELLS_SCHEMA, METADATA_KEY, SUMMARY_SCHEMA, parse_request, write_result
 from origo.query.market_state_reader import open_file, read_table
 from origo.query.market_state_results import (
@@ -149,6 +149,24 @@ def test_publication_survives_each_crash_window(
     with pytest.raises(OSError):
         store.publish(forward)
     monkeypatch.setattr(Path, 'rename', rename)
+    # A publication that fails after its commit and rename is discarded whole: its paths
+    # were never returned, so neither rows nor files outlive it.
+    failed = str(uuid4())
+    write_result(runtime, parse_request(b'{}'), store.register(failed), result_id=failed, guard=lambda staged: None)
+    real_sync = market_state_results._sync
+
+    def sync(path: Path) -> None:
+        if path == store.results:
+            raise OSError('simulated fsync failure after the rename')
+        real_sync(path)
+
+    monkeypatch.setattr(market_state_results, '_sync', sync)
+    with pytest.raises(OSError):
+        store.publish(failed)
+    monkeypatch.setattr(market_state_results, '_sync', real_sync)
+    assert (root / 'results' / failed).is_dir()
+    store.discard(failed)
+    assert not (root / 'results' / failed).exists() and store.access(failed, 'cells.arrow') is None
     # A restart rolls every registered step back or forward.
     restarted = ResultStore(root, clock=clock, disk=roomy)
     assert restarted.recover() == 1
@@ -306,26 +324,26 @@ def test_admission_keeps_the_source_reserve(
         return DiskSample(total=total, free=free['bytes'], inodes=10**6, free_inodes=10**6)
 
     store = ResultStore(tmp_path / 'market-state', disk=disk, budget_bytes=10 * GIB)
-    store.admit(None, 0, floor)
     kept, kept_cells, kept_summary = published(store, runtime)
     before = (kept_cells.read_bytes(), kept_summary.read_bytes())
-    # Two simultaneous admissions near the floor: the first holds its reservation, so the
-    # second is refused before either writes.
+    # Two simultaneous admissions near the floor: the check and the reservation are one step,
+    # so the first holds its reservation and the second is refused before either writes.
     free['bytes'] = floor + QUERY_RESERVATION_BYTES + QUERY_RESERVATION_BYTES // 2
-    first = str(uuid4())
-    store.admit(None, 0, floor)
-    store.register(first)
+    first, second = str(uuid4()), str(uuid4())
+    store.admit(first, 0, floor)
     with pytest.raises(StorageFull) as near:
-        store.admit(None, 0, floor)
+        store.admit(second, 0, floor)
     assert near.value.floor == floor
     store.discard(first)
+    store.admit(second, 0, floor)
+    store.discard(second)
     # The byte budget refuses a result growing past it while it is written.
     with pytest.raises(StorageFull):
         store.admit(first, 11 * GIB, floor)
     # The inode reserve refuses too.
     store2 = ResultStore(tmp_path / 'other', disk=lambda path: DiskSample(total, 10**13, 1000, 99))
     with pytest.raises(StorageFull):
-        store2.admit(None, 0, 0)
+        store2.admit(str(uuid4()), 0, 0)
     # Refusals never evict unexpired results.
     assert (kept_cells.read_bytes(), kept_summary.read_bytes()) == before
     assert store.access(kept, 'cells.arrow') is not None

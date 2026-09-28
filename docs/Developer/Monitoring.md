@@ -151,17 +151,17 @@ watchdog's exit is in `origo.container_log`.
 - The monitor evaluates `collectors_serving`, `dagster_reachable`, `no_error_logs`,
   `publication_current`, `queue_bounded`, `workers_alive` and `data_current` every minute, writes the
   seven evaluations to Dagit through the webserver's report endpoint, then sends one
-  e-mail through Resend listing every new finding key. A key repeats inside the
-  cooldown (six hours by default) without a second e-mail; a queue backlog is one key.
-- Delivery: `RESEND_API_KEY` (repository secret), `ORIGO_ALERT_EMAIL_TO` (repository
-  variable) and `ORIGO_ALERT_EMAIL_FROM` (a sender on a domain verified in the Resend
-  account; the default `onboarding@resend.dev` reaches only the account owner). A
-  partial `ORIGO_ALERT_*` set is a configuration error; no set at all disables alerts
-  with a visible log line, which is the development default.
-- The daily digest goes out once at `ORIGO_ALERT_DIGEST_HOUR_UTC` (07:00 by default)
-  with the tick, finding and feed counts.
-- A mail outage fails the monitor tick visibly and is retried the next minute; a Dagit
-  outage is itself the `dagster_reachable` finding, still one e-mail within two minutes.
+  HTML/text summary through Resend when lifecycle changes or today's digest are due.
+  All notifications share a literal one-hour distinct-dispatch budget; repeats alone
+  do not trigger another message.
+- Delivery: `RESEND_API_KEY`, `ORIGO_ALERT_EMAIL_TO` and `ORIGO_ALERT_EMAIL_FROM` use
+  the existing deployment secret/variables. Partial required settings are a visible
+  configuration error. Absent settings disable sends while detection and evidence continue.
+- The daily digest is due at or after `ORIGO_ALERT_DIGEST_HOUR_UTC` (07:00 by default),
+  merged with pending changes and constrained by the global budget. Late starts catch
+  up today only. No lifetime tick/finding counters appear in the summary.
+- Mail outages retain immutable retry state and appear in check metadata/WARNING logs;
+  they do not interrupt independent detector cursors or create recursive ERROR alerts.
 
 ## Rules that must not change
 
@@ -234,14 +234,70 @@ count evidence is never green. These probes retain the five-second statement,
 The monitor appends one unheld whole-inventory report per distinct minute before Dagit
 or Resend. `monitor.data_current` is stored only in that committed sample; gate
 history reads its verdict there, never from a separate event write. Once committed, a
-repeat tick in that minute performs no probes or writes; changes and interrupted
-delivery are handled on the next scheduled minute. A failed sample commit remains
-retryable. R1/C1/D1 mail waits for five consecutive failing slots with the same key;
-C2, UNKNOWN and evidence/tape/page faults notify immediately under the existing cooldown.
-M1 uses the same five-slot live hold; M2 coverage failures notify immediately.
-Gaps, UNKNOWN and recovery reset holds. The target is Resend acceptance within eight
-minutes of a predicate breach while monitor, ClickHouse and Resend are reachable.
-This is not a guarantee of recipient inbox delivery.
+repeat tick in that minute resumes an existing private delivery intent before skipping
+probes, checks and sample writes. With no pending intent it preserves the existing skip.
+R1/C1/D1/M1 eligibility still requires five consecutive failing slots with the same
+original detector key. C2/M2, UNKNOWN and evidence/tape/page faults remain unheld.
+Grouping never changes these predicates, keys or holds. Reason changes can therefore
+reset held eligibility even within one stable operator incident.
+
+Dashboard and mail use `origo.observatory` for the same named laws, cards, status,
+measurements, copy and evidence coverage. HTML and plain text are the same ranked
+snapshot, with explicit omitted groups, observed/prepared times and incomplete history.
+Each body is capped at 64 KiB. The optional `ORIGO_ALERT_DASHBOARD_URL` must be
+an operator-facing HTTP(S) `/law` URL without credentials or fragments; invalid configuration
+omits the link and explains why. The private health URL is never used as an email link.
+
+Conditions group by source/predicate or component identity, independently of reasons.
+Repeated minute observations increase counts without triggering mail. New eligible
+failures, verification changes, expected waits, confirmed recovery (two consecutive
+passes) and reopening trigger summaries. Missing/UNKNOWN evidence resets confirmation;
+one passing sample is recovery pending. Event streams retain historical failures,
+become historical after 60 minutes and do not claim resolution from a quiet read.
+An event episode restarts only after 24 hours of fully observed quiet. Trend comparisons
+use compatible recorded endpoints exactly one hour apart. Reduced lag is point-to-point;
+rolling depth-gap changes cannot establish whether repair or window ageing caused them.
+
+All changes and today's digest share one global distinct-dispatch budget, at least
+3,600 seconds apart regardless of legacy cooldown configuration. The daily digest is
+due on the first allowed tick at or after its configured UTC hour that same day;
+a late restart catches up today only. Numeric changes/repetitions alone never trigger
+an additional non-digest message. There is no eight-minute acceptance guarantee under
+this hourly budget, nor a guarantee about provider processing or inbox-arrival times.
+
+The existing `monitor.cursor.json` holds one immutable pending batch: exact JSON request
+bytes, recipient/sender, endpoint, hash, idempotency key and fixed preparation-plus-one-hour
+expiry. Before **every** POST, the cursor reserves dispatch quarantine through request
+start + 10 + 3,600 seconds; completion extends it to at least completion + 3,600.
+Retries keep identical payload/key/endpoint, respect Retry-After and wait at least a
+minute. No request starts during the snapshot's final ten seconds. A nonempty provider
+acknowledgement is required to advance delivery watermarks. Timeouts and ambiguous
+responses remain uncertain. Expiry or terminal retirement keeps one receipt and up to
+32 coalesced loss intervals; acknowledged disclosures clear only what they included.
+Evidence older than 24 hours is disclosed as lost, never marked delivered.
+
+Cursor writes use a mode-0600 temporary file, fsync, atomic replacement and directory
+fsync. Failed durable reservation prohibits POST. Process restarts after any prior dispatch
+reserve another conservative hour (wall time alone cannot prove elapsed real time); legacy migration is persisted once.
+An attempted pending batch also waits its recorded retry delay again after restart, at least
+60 seconds; its original expiry remains fixed. Within a process, monotonic elapsed time
+preserves the remaining dispatch and retry waits across every forward clock correction;
+a clock discrepancy above 120 seconds resets the conservative hour. Mail failures
+are WARNING/check metadata, so they do not create recursive ERROR-log alerts.
+Detector cursors advance independently of mail success. The worker-heartbeats volume
+holds private intent and is shared by workers, but is absent from the public page.
+
+`notification-observations-YYYY-MM-DD.jsonl` records compact typed frames from existing
+detector reads even when a law sample fails. It preserves original detector keys and
+actual sampled eligibility, original lifecycle transitions, scalar values, read bounds/counts/caps and omissions.
+Transitions are recorded at capture time; moving the 24-hour replay boundary cannot
+turn an ongoing condition into a new notification.
+Unavailable measurements remain unavailable; no extra queries or probes reconstruct them.
+Frames use bounded lossless zlib/base64 encoding: 8 KiB per line, at most 64 groups and
+128 KiB decoded. This keeps repetitive typed field names from consuming the observation
+budget. Replay is capped at 1 MiB and one second per tick with a 16 MiB compact index.
+Segments retain 30 days; closeout evidence is separate. `operator-summary.json` is a
+replaceable public derivative capped at 16 KiB, containing no recipient or mail payload.
 
 Only the monitor mounts `/var/lib/origo-law` writable. The public page has a read-only
 mount, no database/exchange/mail credentials and no backend query path. Page requests

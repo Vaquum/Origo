@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "description": "Genuine public monitor-tape captures for alert-summary acceptance. HTTP captures preserve exact response body bytes; prior local captures are separately qualified. No operational observations are invented.",
+  "assembled_at": "2026-09-28T11:54:39.222698+00:00",
+  "repository": "https://github.com/Vaquum/Origo",
+  "files": [
+    {
+      "path": "tests/fixtures/law/alerts/current.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law.json",
+        "request_started_at": "2026-09-28T11:50:28.803908+00:00",
+        "captured_at": "2026-09-28T11:50:28.868000+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:50:28 GMT"
+      },
+      "sha256": "836b7c412e0bfdc84f2eb03a7d667e673db70f4c121cbc6693b288aa91bc6b03",
+      "bytes": 243195,
+      "deployed_shas": [
+        "7a516f9bdf865f832692aaf7f97393b74113fc93"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-28T11:50:00+00:00",
+        "end": "2026-09-28T11:50:24.142405+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/catalog.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/catalog.json",
+        "request_started_at": "2026-09-28T11:50:28.869600+00:00",
+        "captured_at": "2026-09-28T11:50:29.018390+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:50:29 GMT"
+      },
+      "sha256": "63a2ef20a554613f782629d3996661fe37a36db76c3780c322d0dec59edb34e9",
+      "bytes": 370496,
+      "deployed_shas": [
+        "7a516f9bdf865f832692aaf7f97393b74113fc93"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": null,
+        "end": null
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/r1-perp-20260928.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.R1%3Abinance_perp_trades&from=2026-09-28T00%3A00%3A00%2B00%3A00&to=2026-09-28T11%3A51%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:51:42.202903+00:00",
+        "captured_at": "2026-09-28T11:51:42.423863+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:51:42 GMT"
+      },
+      "sha256": "da93de1d9a92eb5c5a86624c733bd65011f72b2c77ef68976aca92d480514dfc",
+      "bytes": 881704,
+      "deployed_shas": [
+        "67619b72a0931514894b79d916706720fc3874d5",
+        "7a516f9bdf865f832692aaf7f97393b74113fc93"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-28T00:00:00+00:00",
+        "end": "2026-09-28T11:51:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/c1-perp-20260928.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.C1%3Abinance_perp_trades&from=2026-09-28T00%3A00%3A00%2B00%3A00&to=2026-09-28T11%3A51%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:51:42.428717+00:00",
+        "captured_at": "2026-09-28T11:51:42.609489+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:51:42 GMT"
+      },
+      "sha256": "bb85e19990e2e45e3c3c5def76f98ab6a4802da349d62cbb893af399204bb6c4",
+      "bytes": 611001,
+      "deployed_shas": [
+        "67619b72a0931514894b79d916706720fc3874d5",
+        "7a516f9bdf865f832692aaf7f97393b74113fc93"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-28T00:00:00+00:00",
+        "end": "2026-09-28T11:51:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/m1-spot-20260925.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.M1%3Abinance_spot_trades&from=2026-09-25T00%3A00%3A00%2B00%3A00&to=2026-09-25T06%3A00%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:51:42.620838+00:00",
+        "captured_at": "2026-09-28T11:51:42.733084+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:51:42 GMT"
+      },
+      "sha256": "a51b7643a4c18cfb326c5a366b274da5586e6d6c4af1f686dc3edf7d51606b7a",
+      "bytes": 593561,
+      "deployed_shas": [
+        "1b4c9436f63175c7729015530760672033aa3f1a",
+        "ad80d735ff695e5e97d66d1b18b34d15efa2b264"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-25T00:00:00+00:00",
+        "end": "2026-09-25T06:00:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/m2-spot-20260925.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.M2%3Abinance_spot_trades&from=2026-09-25T00%3A00%3A00%2B00%3A00&to=2026-09-25T06%3A00%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:51:42.739571+00:00",
+        "captured_at": "2026-09-28T11:51:42.904791+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:51:42 GMT"
+      },
+      "sha256": "09bd46a303c80a6690ae8fae09ce120a2ce461a5a5e94aa8c6d15350b4e26d85",
+      "bytes": 313083,
+      "deployed_shas": [
+        "1b4c9436f63175c7729015530760672033aa3f1a",
+        "ad80d735ff695e5e97d66d1b18b34d15efa2b264"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-25T00:00:00+00:00",
+        "end": "2026-09-25T06:00:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/r1-perp-20260924.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.R1%3Abinance_perp_trades&from=2026-09-24T05%3A00%3A00%2B00%3A00&to=2026-09-24T15%3A00%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:53:25.665285+00:00",
+        "captured_at": "2026-09-28T11:53:25.856567+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:53:25 GMT"
+      },
+      "sha256": "a8cec4b76ef5d9122b2c91657527ae4ace4fbe75dbd852170c0f5a06f8d3d75a",
+      "bytes": 711109,
+      "deployed_shas": [
+        "54c439f4e79952f2e30723a92f66652f18e01cc7",
+        "58b45deee0602e7524c2efcba4e532174ad40902",
+        "58f3dc8293489057d0392fa9d80c9364106aae19",
+        "8d5cfea560a2e04e9c84e5e64c76d95f5787950a",
+        "931a925607fddea3e3d1583a4f6975ec05c9ea08",
+        "ab6266e606d5da067bfef9eb19f8f96a8a8604bf",
+        "be4364940c70be07ef2920b666688c9950dfc0f7",
+        "c034318225c416fbccd67139fcba7c7afe54f0f7"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-24T05:00:00+00:00",
+        "end": "2026-09-24T15:00:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/m1-spot-20260924.json",
+      "origin": {
+        "url": "http://37.27.112.167:8484/law/history.json?gate_id=law.M1%3Abinance_spot_trades&from=2026-09-24T16%3A50%3A00%2B00%3A00&to=2026-09-24T18%3A00%3A00%2B00%3A00",
+        "request_started_at": "2026-09-28T11:53:25.861406+00:00",
+        "captured_at": "2026-09-28T11:53:25.908576+00:00",
+        "http_status": 200,
+        "content_type": "application/json",
+        "date": "Mon, 28 Sep 2026 11:53:25 GMT"
+      },
+      "sha256": "8a00c2cde1f0b11b7116b89b9f8ffb7167e21aa42efac6eb21c9d44b8f810031",
+      "bytes": 103336,
+      "deployed_shas": [
+        "ad80d735ff695e5e97d66d1b18b34d15efa2b264"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-24T16:50:00+00:00",
+        "end": "2026-09-24T18:00:00+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/current-0608.json",
+      "origin": {
+        "source_capture_path": "/tmp/origo-law-investigation.json",
+        "reported_origin_url": "http://37.27.112.167:8484/law.json",
+        "capture_metadata": "Previous local investigation capture; original HTTP headers/request timing were not retained. No claim of newly witnessed HTTP retrieval.",
+        "file_mtime_at_adoption": "2026-09-28T06:08:54.390383+00:00",
+        "adopted_at": "2026-09-28T11:54:39.176384+00:00"
+      },
+      "sha256": "a721c60283c55dc3743e06188c504238b4706c9bc8b1c28ad1f1d4f7629c2c26",
+      "bytes": 247800,
+      "deployed_shas": [
+        "67619b72a0931514894b79d916706720fc3874d5"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-28T06:08:00+00:00",
+        "end": "2026-09-28T06:08:16.929985+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    },
+    {
+      "path": "tests/fixtures/law/alerts/current-0611.json",
+      "origin": {
+        "source_capture_path": "/tmp/origo-law-investigation-latest.json",
+        "reported_origin_url": "http://37.27.112.167:8484/law.json",
+        "capture_metadata": "Previous local investigation capture; original HTTP headers/request timing were not retained. No claim of newly witnessed HTTP retrieval.",
+        "file_mtime_at_adoption": "2026-09-28T06:11:19.703598+00:00",
+        "adopted_at": "2026-09-28T11:54:39.222570+00:00"
+      },
+      "sha256": "85ae6c9ac9bf0deb43e3adb018ea8d246087e9cc942b91c6e54b35ad7a1030c5",
+      "bytes": 247792,
+      "deployed_shas": [
+        "67619b72a0931514894b79d916706720fc3874d5"
+      ],
+      "git_verification": "git cat-file -t <sha> = commit; git merge-base --is-ancestor <sha> origin/main = 0",
+      "interval": {
+        "start": "2026-09-28T06:11:00+00:00",
+        "end": "2026-09-28T06:11:16.544050+00:00"
+      },
+      "redactions": [],
+      "transformations": []
+    }
+  ],
+  "limitations": [
+    "The public history endpoint records gate outcome and evidence but does not record legacy detector notification eligibility or original mail delivery state. Eligibility cannot be asserted from these captures alone.",
+    "Actual received MIME, mailbox client screenshots and historical burst attribution remain unproven by these fixtures.",
+    "The two prior local current captures lack original HTTP request metadata; fresh captures and histories retain their request provenance.",
+    "Coverage is the endpoint’s recorded interval and completeness metadata; no records are inserted for gaps."
+  ]
+}

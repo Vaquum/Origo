@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import ast
+import shlex
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from typing import Final
 
@@ -48,3 +53,43 @@ def test_post_up_block_is_observable() -> None:
     assert text.count("echo 'post-up:") >= 3
     assert 'maintenance launch produced no run' in text
     assert 'maintenance launched run' in text
+
+
+def test_optional_dashboard_url_reaches_generated_deploy_environment() -> None:
+    workflow = DEPLOY_WORKFLOW.read_text()
+    assert 'ORIGO_ALERT_DASHBOARD_URL: ${{ vars.ORIGO_ALERT_DASHBOARD_URL }}' in workflow
+    validation = workflow.split('      - name: Validate deploy configuration', 1)[1].split(
+        '      - name:', 1
+    )[0]
+    assert 'ORIGO_ALERT_DASHBOARD_URL' not in validation
+    script = textwrap.dedent(
+        workflow.split("          python3 - <<'PY' > \"$DEPLOY_ENV_FILE\"\n", 1)[1].split(
+            '\n          PY', 1
+        )[0]
+    )
+    required = {
+        node.slice.value
+        for node in ast.walk(ast.parse(script))
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == 'os'
+        and node.value.attr == 'environ'
+        and isinstance(node.slice, ast.Constant)
+        and isinstance(node.slice.value, str)
+    }
+    assert 'ORIGO_ALERT_DASHBOARD_URL' not in required
+    for dashboard_url in (None, 'https://operations.example.com/law'):
+        environment = {key: 'deployment-test-value' for key in required}
+        if dashboard_url is not None:
+            environment['ORIGO_ALERT_DASHBOARD_URL'] = dashboard_url
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        exported = dict(item.split('=', 1) for item in shlex.split(result.stdout))
+        assert exported['ORIGO_ALERT_DASHBOARD_URL'] == (dashboard_url or '')
+        assert exported['ORIGO_ALERT_EMAIL_TO'] == 'deployment-test-value'

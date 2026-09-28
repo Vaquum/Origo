@@ -1,3 +1,7 @@
+# v3.29.0
+
+- Share recorded operator summaries between the law dashboard and HTML/text email; group incident lifecycles, preserve repeat/trend coverage, and bound distinct dispatches to hourly with durable immutable retries.
+
 # v3.28.0
 
 - Add the market state cube's detail component (PRD-0023, #480): `market_state_detail` and `market_state_detail_latest`, in the activation group `market_state_detail`, from 2021-01-01.

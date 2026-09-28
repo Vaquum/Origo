@@ -35,6 +35,14 @@ BASELINE = Path(__file__).parents[1] / 'fixtures/law/overview-baseline-58b45de.j
 
 def _write(path: Path, records: list[page.Document]) -> None:
     path.write_text(''.join(json.dumps(record) + '\n' for record in records))
+    if path.name.startswith('samples-') and records and page._valid_report(records[-1]):
+        now = page._instant(records[-1]['evaluation_end']) + timedelta(seconds=1)
+        cache = page.TapeCache(path.parent)
+        current = cache.current(now)
+        catalog = page._object(current.get('catalog'))
+        if catalog:
+            summary = page.build_summary(current, catalog, [], now=now)
+            (path.parent / 'operator-summary.json').write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')))
 
 
 @pytest.fixture()
@@ -1098,6 +1106,12 @@ def _figure(tab: Page, key: str) -> str:
     return tab.locator(f'[data-overview="{key}"]').inner_text()
 
 
+def _refresh_protocol_summary(tab: Page) -> None:
+    current = page._decode(str(tab.evaluate('JSON.stringify(data)')).encode())
+    summary = page.build_summary(current, page._object(current['catalog']), [], now=page._instant(current['checked_at']) + timedelta(seconds=1))
+    tab.evaluate('summary=>{data.operator_summary=summary;render()}', summary)
+
+
 def test_served_page_layout_contract() -> None:
     tabs = re.findall(r'<button[^>]*role="tab"[^>]*>', page.PAGE)
     assert [re.search(r'data-view="([^"]+)"', tag).group(1) for tag in tabs] == ['overview', 'sources', 'laws', 'recovery']
@@ -1262,13 +1276,19 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         thread.join(timeout=2)
 
 
-def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+@pytest.mark.parametrize('font_family', [None, 'Verdana, sans-serif'])
+def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(
+    production_serving: tuple[str, page.TapeCache, page.Document, datetime], font_family: str | None,
+) -> None:
     url, _, _, _ = production_serving
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page(viewport={'width': 1366, 'height': 900}, has_touch=True)
         tab.goto(url+'/law')
         tab.locator('.overview-card').first.wait_for()
+        # Wider font metrics must preserve the same viewport contract.
+        if font_family is not None:
+            tab.evaluate('font => document.body.style.fontFamily = font', font_family)
         assert tab.locator('[role="tab"]').all_text_contents() == ['Overview', 'Sources', 'Laws', 'Recovery']
         for item in tab.locator('.overview-card,.overview-secondary,#monitor-band,#inventory-band').all():
             box = item.bounding_box()
@@ -1445,12 +1465,14 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
             tab.locator('[data-close]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status=savedOutput.status;p.reason=savedOutput.reason;render()}")
         assert 'current' in node.inner_text().lower()
+        _refresh_protocol_summary(tab)  # The shared adapter now owns Overview rollups.
         tab.locator('[data-view="overview"]').click()
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '1 / 10'
         assert '9 unknown' in _figure(tab, 'outputs')
         tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='FAILED';p.reason='artifact_missing';render()}")
         assert node.locator('.FAIL,.FAILED').count() == 1
+        _refresh_protocol_summary(tab)
         tab.locator('[data-view="overview"]').click()
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '0 / 10'
         assert '9 unknown' in _figure(tab, 'outputs')
@@ -1559,7 +1581,10 @@ def test_operational_history_totals_preserve_intervals_and_limits(
             cache._sample(item)
         cache.loading, cache.operations_limited = loading, limited
         cache._refresh_operations()
-        return cache, page._object(page._object(cache.current(now)['operations_history'])['error_lines'])
+        current = cache.current(now)
+        summary = page.build_summary(current, page._object(current['catalog']), [], now=now)
+        (root / 'operator-summary.json').write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')))
+        return cache, page._object(page._object(current['operations_history'])['error_lines'])
 
     complete = [record(terminal-timedelta(minutes=59-index)) for index in range(60)]
     _, horizons = totals(complete)
@@ -1698,3 +1723,123 @@ def test_market_state_unobserved_members_prevent_a_clear_window(
     assert isinstance(required, list) and 'law.M1:binance_spot_trades' in required
     assert 'law.M2:binance_spot_trades' in required
     assert current['last_report'] == original
+
+
+def test_operator_summary_cache_requires_matching_record_and_freshness(
+    production_tape: tuple[Path, page.Document, datetime],
+) -> None:
+    root, report, now = production_tape
+    cache = page.TapeCache(root)
+    path = root / 'operator-summary.json'
+    recorded = page._decode(path.read_bytes())
+    current = cache.current(now)
+    assert page._object(current['operator_summary']) == recorded
+    assert len(page._objects(recorded['cards'])) == 12
+    for card in page._objects(recorded['cards'])[:6]:
+        assert page.LAW_COPY[str(card['id'])] in str(card['explanation'])
+    # Cache envelopes change, not the saved source observations.
+    for field in ('sampling_slot', 'catalog_version', 'observed_at'):
+        changed = {**recorded, field: 'unmatched'}
+        path.write_text(json.dumps(changed))
+        unknown = page._object(cache.current(now)['operator_summary'])
+        assert unknown['status'] == 'UNKNOWN', field
+        assert all(card['status'] == 'UNKNOWN' for card in page._objects(unknown['cards'])), field
+    path.write_text(json.dumps(recorded))
+    expired = page._object(cache.current(page._instant(report['evaluation_end']) + timedelta(seconds=120))['operator_summary'])
+    assert expired['status'] == 'UNKNOWN'
+    assert all(card['status'] == 'UNKNOWN' for card in page._objects(expired['cards']))
+    path.write_bytes(b'{' + b' ' * page.MAX_SUMMARY_BYTES)
+    assert page._object(cache.current(now)['operator_summary'])['status'] == 'UNKNOWN'
+    path.unlink()
+    assert page._object(cache.current(now)['operator_summary'])['status'] == 'UNKNOWN'
+
+
+def test_notification_derivatives_do_not_enter_public_history(
+    production_tape: tuple[Path, page.Document, datetime],
+) -> None:
+    root, _, now = production_tape
+    cache = page.TapeCache(root)
+    existing = cache._paths(now)
+    (root / f'notification-observations-{now.date().isoformat()}.jsonl').write_text('unreadable notification sidecar')
+    assert cache._paths(now) == existing
+    cache.refresh_latest(now)
+    while cache.loading:
+        cache.advance(now, budget_seconds=1)
+    assert cache.history_limited is False
+    assert cache.operations_limited is False
+
+
+def test_missing_law_sample_preserves_fresh_recorded_operational_cards(tmp_path: Path) -> None:
+    import base64
+    import zlib
+
+    captured = page._decode((BASELINE.parent / 'alerts/current.json').read_bytes())
+    catalog = page._decode((BASELINE.parent / 'alerts/catalog.json').read_bytes())
+    report = page._object(captured['last_report'])
+    now = page._instant(captured['checked_at'])
+    gates = [gate for gate in page._objects(report['gates']) if str(gate['gate_id']).startswith('monitor.')]
+    # Remove the law-reference envelope while keeping the genuine independent reads.
+    frame = page.Document(
+        sampling_slot=report['sampling_slot'], catalog_version=catalog['version'], law_sample_ref=None,
+        law_observed=False, checks_complete={}, read_windows={}, observations=[], omitted_groups=0,
+        complete=False,
+    )
+    from origo.observatory import ObservationFrame
+
+    summary = page.build_summary({
+        'last_report': None, 'checked_at': now.isoformat(), 'status': 'UNKNOWN',
+        'reason': 'law_observation_unavailable', 'operational_gates': list[page.Json](gates),
+        'operations_history': captured['operations_history'],
+    }, catalog, [cast(ObservationFrame, frame)], now=now)
+    (tmp_path / f"catalog-{catalog['version']}.json").write_bytes(json.dumps(catalog).encode())
+    path = tmp_path / 'operator-summary.json'
+    path.write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')))
+    sidecar = tmp_path / f'notification-observations-{now.date().isoformat()}.jsonl'
+    encoded = base64.b64encode(zlib.compress(json.dumps(frame).encode())).decode()
+    sidecar.write_text(json.dumps({'frame': encoded, 'brief': None}) + '\n')
+    cache = page.TapeCache(tmp_path)
+    current = cache.current(now)
+    assert current['last_report'] is None
+    actual = page._object(current['operator_summary'])
+    assert actual['status'] == 'UNKNOWN'
+    cards = {str(card['id']): card for card in page._objects(actual['cards'])}
+    assert all(cards[key]['status'] == 'UNKNOWN' for key in page.LAW_NAMES)
+    assert cards['workers']['value'] == '7 / 7' and cards['workers']['status'] == 'PASS'
+    server = page.LawServer(('127.0.0.1', 0), cache, lambda: now)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            url = f'http://127.0.0.1:{server.server_port}/law'
+            tab.goto(url)
+            tab.wait_for_function('() => !refreshing')
+            assert tab.locator('.overview-card').count() == len(page.LAW_NAMES)
+            assert tab.locator('.overview-card .badge.UNKNOWN').count() == len(page.LAW_NAMES)
+            assert tab.locator('[data-overview="workers"] .overview-value').inner_text() == cards['workers']['value']
+            assert tab.locator('[data-overview="workers"] .badge.PASS').count() == 1
+            assert tab.evaluate('data.last_report') is None
+            assert tab.evaluate('data.catalog.version') == catalog['version']
+            tab.evaluate('refresh()')
+            assert tab.locator('[data-overview="workers"] .badge.PASS').count() == 1
+            # Corrupt only the catalog envelope; genuine measurements stay unchanged.
+            inconsistent = {**_get(url + '.json'), 'operator_summary': {**actual, 'catalog_version': 'mismatched'}}
+            tab.route('**/law.json', lambda route: route.fulfill(json=inconsistent))
+            tab.evaluate('refresh()')
+            assert tab.evaluate('data.reason') == 'observation_service_unavailable'
+            assert tab.locator('[data-overview="workers"] .badge.UNKNOWN').count() == 1
+            tab.unroute('**/law.json')
+            tab.route('**/law/catalog.json', lambda route: route.fulfill(json={**catalog, 'version': 'mismatched'}))
+            tab.reload()
+            tab.wait_for_function('() => !refreshing')
+            assert tab.locator('.overview-card,.overview-secondary').count() == 0
+            assert 'No current status can be verified' in tab.locator('#message').inner_text()
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    sidecar.unlink()
+    assert page._object(cache.current(now)['operator_summary'])['status'] == 'UNKNOWN'
+    assert all(card['status'] == 'UNKNOWN' for card in page._objects(page._object(cache.current(now)['operator_summary'])['cards']))

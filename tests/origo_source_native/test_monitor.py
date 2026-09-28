@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import html
 import io
 import json
 import os
@@ -16,7 +18,9 @@ import pytest
 import yaml
 from dagster import Failure
 
-from origo.alerts.email import AlertSettings, send_alert
+from origo.alerts.email import AlertSettings, DeliveryError, send_alert
+from origo.alerts.summary import GLOBAL_INTERVAL_SECONDS
+from origo.observatory import LAW_NAMES
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
@@ -71,7 +75,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server API
         server = cast(_Recorder, self.server)
         length = int(self.headers.get('Content-Length', '0'))
-        body: dict[str, Any] = json.loads(self.rfile.read(length) or b'{}')
+        payload = self.rfile.read(length)
+        body: dict[str, Any] = json.loads(payload or b'{}')
         if self.path == '/graphql':
             document = server.graphql.get(str(body.get('operationName')))
             if document is None:
@@ -86,6 +91,8 @@ class _Handler(BaseHTTPRequestHandler):
                     **body,
                     '_authorization': self.headers.get('Authorization', ''),
                     '_user_agent': self.headers.get('User-Agent', ''),
+                    '_idempotency_key': self.headers.get('Idempotency-Key', ''),
+                    '_payload_sha256': hashlib.sha256(payload).hexdigest(),
                 },
             )
         )
@@ -222,35 +229,38 @@ def _failure_keys() -> set[str]:
 
 
 def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldown(
-    recorder: _Recorder, tmp_path: Path
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monitor = _monitor(recorder, tmp_path)
-    first = monitor.tick(NOW)
-    expected = _failure_keys()
-    assert expected and set(first.failed) >= expected
-    emails = _emails(recorder)
-    assert len(emails) == 1
-    for key in expected:
-        assert key in emails[0]['text']
-    # A job failing on successive partitions is one key, so the cooldown covers the whole
-    # outage; the partitions are in the detail.
-    briefing = [
-        line
-        for line in emails[0]['text'].splitlines()
-        if line.startswith('- run_failure:publish_btc_briefing_feed_job:')
-    ]
-    assert len(briefing) == 1
-    assert '2 runs of publish_btc_briefing_feed_job failed' in briefing[0]
-    assert 'partition 2021-11-28' in briefing[0] and 'partition 2018-01-16' in briefing[0]
-    assert len([key for key in first.failed if key.startswith('run_failure:')]) == len(expected)
-    assert all(post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded')
-    second = monitor.tick(NOW + timedelta(minutes=1))
-    assert set(second.failed) >= expected
-    assert len(_emails(recorder)) == 1
-    assert len(_check_posts(recorder)) == 14
-    later = monitor.tick(NOW + timedelta(hours=7))
-    assert set(later.failed) >= expected
-    assert len(_emails(recorder)) == 2
+    """Legacy name: per-key cooldown is retired; repeats obey the shared hourly policy."""
+    elapsed = [0.0]
+    monotonic = time.monotonic
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: monotonic() + elapsed[0])
+    for cooldown in (0, 21600):
+        folder = tmp_path / str(cooldown)
+        monitor = _monitor(recorder, folder, settings=_settings(recorder, cooldown_seconds=cooldown))
+        before = len(_emails(recorder))
+        first = monitor.tick(NOW)
+        expected = _failure_keys()
+        assert expected and set(first.failed) >= expected
+        assert len(_emails(recorder)) == before + 1
+        frame = monitor.notification_history.observations()[-1]
+        events = {row['group_id']: row for row in frame['observations'] if row['kind'] == 'event_stream'}
+        assert expected <= set(events)
+        briefing = events['run_failure:publish_btc_briefing_feed_job']
+        assert [item['value'] for item in briefing['measurements'] if item['name'] == 'event_count'] == [2]
+        assert len([key for key in first.failed if key.startswith('run_failure:')]) == len(expected)
+        email = _emails(recorder)[-1]
+        summary = json.loads((folder / 'law/operator-summary.json').read_text())
+        assert all(row['label'] in email['text'] for row in summary['incidents'])
+        assert 'Omitted recorded groups:' in email['text'] and '<html>' in email['html']
+        assert all(post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded')
+        elapsed[0] += 60
+        second = monitor.tick(NOW + timedelta(minutes=1))
+        assert set(second.failed) >= expected
+        assert len(_emails(recorder)) == before + 1
+        cursor = Cursor.load(monitor.cursor_path, NOW + timedelta(minutes=1), 15)
+        assert GLOBAL_INTERVAL_SECONDS <= cursor.next_distinct_at - NOW.timestamp() < 3620
+        assert cursor.notified_through == NOW.isoformat()
 
 
 def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tmp_path: Path) -> None:
@@ -351,7 +361,9 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         assert 'receipt_failed:depth:depth200_snapshots' not in outcome.failed
         alive = [post for post in _check_posts(recorder) if post['check_name'] == 'workers_alive']
         assert alive and alive[0]['passed'] is False
-        assert 'PROVIDER_HTTP_503' in _emails(recorder)[0]['text']
+        assert 'Worker heartbeats' in _emails(recorder)[0]['text']
+        assert 'Omitted recorded groups:' in _emails(recorder)[0]['text']
+        assert 'receipt_failed:depth:depth20_snapshots' in alive[0]['metadata']['keys']
     finally:
         client.disconnect()
 
@@ -419,7 +431,9 @@ def test_monitor_alerts_on_error_rows_in_container_log(
         }
         logs = [post for post in _check_posts(recorder) if post['check_name'] == 'no_error_logs']
         assert logs[0]['passed'] is False and logs[0]['metadata']['findings'] == 2
-        assert 'RuntimeError: boom' in _emails(recorder)[0]['text']
+        assert 'Error lines' in _emails(recorder)[0]['text']
+        assert 'error_logs:dagster' in logs[0]['metadata']['keys']
+        assert 'error_logs:clickhouse' in logs[0]['metadata']['keys']
     finally:
         client.disconnect()
 
@@ -439,52 +453,102 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     email = _emails(recorder)[0]
     assert email['_authorization'] == 'Bearer test-key'
     assert email['to'] == ['operator@example.test']
-    assert 'Dagit check evaluations: written.' in email['text']
-    for key in outcome.failed:
-        if not (key.startswith(('law:R1:', 'law:C1:', 'law:D1:', 'law:M1:')) and ':FAIL:' in key):
-            assert key in email['text']
+    assert 'Dagit checks recorded.' in email['text']
+    assert all(title in email['text'] and html.escape(title) in email['html'] for title in LAW_NAMES.values())
+    assert email['_idempotency_key']
+    recorded_keys = ', '.join(post['metadata']['keys'] for post in checks)
+    assert all(key in recorded_keys for key in outcome.failed)
+    assert 'Omitted recorded groups:' in email['text']
 
     # A Dagit that refuses the write is reported in the same e-mail.
     second = _monitor(recorder, tmp_path / 'refused', dagster_url=_url(recorder))
     second.reporter = Reporter('http://127.0.0.1:1', timeout_seconds=0.5)
     second.tick(NOW)
-    assert 'Dagit check evaluations: FAILED to write.' in _emails(recorder)[-1]['text']
+    assert 'Dagit check write did not succeed' in _emails(recorder)[-1]['text']
 
 
-def test_daily_digest_is_sent_once_at_the_configured_hour(recorder: _Recorder, tmp_path: Path) -> None:
+def test_daily_digest_is_sent_once_at_the_configured_hour(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy name: today's trailing-24h digest catches up after the configured hour."""
     recorder.graphql['Failures'] = {'data': {'runsOrError': {'__typename': 'Runs', 'results': []}}}
+    elapsed = [0.0]
+    monotonic = time.monotonic
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: monotonic() + elapsed[0])
     monitor = _monitor(recorder, tmp_path, settings=_settings(recorder, digest_hour_utc=NOW.hour))
     monitor.tick(NOW)
+    elapsed[0] = 60
     monitor.tick(NOW + timedelta(minutes=1))
     digests = [email for email in _emails(recorder) if 'daily digest' in email['subject']]
     assert len(digests) == 1
     assert digests[0]['subject'] == f'Origo daily digest {NOW.date().isoformat()}'
-    assert 'ticks: 1' in digests[0]['text']
+    assert 'ticks:' not in digests[0]['text'] and 'findings:' not in digests[0]['text']
+    assert '1,440 samples' in digests[0]['text'] and 'incomplete' in digests[0]['text']
+    elapsed[0] = 86400
     monitor.tick(NOW + timedelta(days=1))
     assert len([email for email in _emails(recorder) if 'daily digest' in email['subject']]) == 2
-    quiet = _monitor(recorder, tmp_path / 'quiet', settings=_settings(recorder, digest_hour_utc=(NOW.hour + 1) % 24))
+    catchup = _monitor(recorder, tmp_path / 'catchup', settings=_settings(recorder, digest_hour_utc=7))
+    catchup.tick(NOW + timedelta(days=1, hours=1))
+    assert _emails(recorder)[-1]['subject'] == f'Origo daily digest {(NOW + timedelta(days=1)).date().isoformat()}'
+    quiet = _monitor(recorder, tmp_path / 'quiet', settings=_settings(recorder, digest_hour_utc=NOW.hour + 1))
     quiet.tick(NOW)
-    assert len([email for email in _emails(recorder) if 'daily digest' in email['subject']]) == 2
+    assert len([email for email in _emails(recorder) if 'daily digest' in email['subject']]) == 3
 
 
 def test_send_alert_posts_to_resend(recorder: _Recorder) -> None:
     settings = _settings(recorder)
-    send_alert(settings, 'Origo alert: 1 new finding', 'body line\n')
+    payload = json.dumps({'from': settings.email_from, 'to': list(settings.email_to),
+                          'subject': 'Origo transport verification', 'text': 'body line\n',
+                          'html': '<p>body line</p>'}, separators=(',', ':')).encode()
+    acknowledgement = send_alert(payload, api_key=settings.resend_api_key,
+                                 api_url=settings.resend_api_url, idempotency_key='stored-batch')
     (path, body), = [(path, body) for path, body in recorder.posts if path == '/emails']
+    assert acknowledgement.startswith('email-')
     assert body['_authorization'] == 'Bearer test-key'
     # Resend's edge rejects the default urllib agent with 403 (Cloudflare error 1010).
     assert body['_user_agent'] == 'origo-monitor'
-    assert (body['from'], body['to'], body['subject'], body['text']) == (
-        'origo@example.test',
-        ['operator@example.test'],
-        'Origo alert: 1 new finding',
-        'body line\n',
+    assert body['_idempotency_key'] == 'stored-batch'
+    assert body['_payload_sha256'] == hashlib.sha256(payload).hexdigest()
+    assert (body['from'], body['to'], body['text'], body['html']) == (
+        'origo@example.test', ['operator@example.test'], 'body line\n', '<p>body line</p>',
     )
     recorder.email_status = 500
-    with pytest.raises(RuntimeError, match='HTTP 500'):
-        send_alert(settings, 'again', 'body')
-    with pytest.raises(RuntimeError, match='Alert delivery failed'):
-        send_alert(_settings(recorder, resend_api_url='http://127.0.0.1:1/emails'), 'down', 'body')
+    with pytest.raises(DeliveryError, match='HTTP 500') as fault:
+        send_alert(payload, api_key=settings.resend_api_key, api_url=settings.resend_api_url,
+                   idempotency_key='stored-batch')
+    assert fault.value.disposition == 'uncertain'
+    with pytest.raises(DeliveryError, match='transport failed') as unavailable:
+        send_alert(payload, api_key=settings.resend_api_key, api_url='http://127.0.0.1:1/emails',
+                   idempotency_key='stored-batch')
+    assert unavailable.value.disposition == 'uncertain'
+
+
+
+def test_pending_snapshot_expires_during_slow_private_cursor_save(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.alerts.summary import attempt_delivery, plan_notification
+    from origo.observatory import build_summary
+
+    capture_root = REPO_ROOT / 'tests/fixtures/law/alerts'
+    current = json.loads((capture_root / 'current.json').read_text())
+    catalog = json.loads((capture_root / 'catalog.json').read_text())
+    observed = datetime.fromisoformat(current['checked_at'])
+    summary = build_summary(current, catalog, [], now=observed)
+    cursor = Cursor.load(tmp_path / 'slow-save.json', observed, 15)
+    settings = _settings(recorder)
+    assert plan_notification(cursor, summary, settings, observed, True, transitions=True)
+    elapsed = [0.0]
+    monkeypatch.setattr('origo.alerts.summary.time.monotonic', lambda: elapsed[0])
+    writes = []
+    def persist() -> None:
+        cursor.save(tmp_path / 'slow-save.json')
+        writes.append(True)
+        elapsed[0] += 51
+    assert attempt_delivery(cursor, settings, observed + timedelta(seconds=3540), persist) == 'expired'
+    assert len(writes) == 2 and not _emails(recorder)
+    assert cursor.pending_notification is None and cursor.notified_through is None
+    assert cursor.last_delivery is not None and 'no request started' in cursor.last_delivery['reason']
 
 
 def test_monitor_checks_are_declared_in_definitions() -> None:
@@ -550,7 +614,8 @@ def test_settings_and_deployment_wiring_are_complete() -> None:
         assert 'worker-heartbeats' in compose['volumes']
     deploy = yaml.safe_load((REPO_ROOT / 'docker-compose.deploy.yml').read_text())
     environment = deploy['services']['monitor']['environment']
-    assert sum(entry.startswith('ORIGO_ALERT_') for entry in environment) == 6
+    assert sum(entry.startswith('ORIGO_ALERT_') for entry in environment) == 7
+    assert 'ORIGO_ALERT_DASHBOARD_URL=${ORIGO_ALERT_DASHBOARD_URL:-}' in environment
     assert 'ORIGO_ALERT_RESEND_API_KEY=${RESEND_API_KEY:?RESEND_API_KEY is required}' in environment
     vector = yaml.safe_load((REPO_ROOT / 'deploy/vector.yaml').read_text())
     assert vector['sinks']['clickhouse']['table'] == 'container_log'
@@ -574,7 +639,10 @@ def test_a_failing_detector_is_a_finding_and_the_tick_still_reports(
     assert {post['check_name']: post['passed'] for post in checks}['workers_alive'] is False
     assert {post['check_name']: post['passed'] for post in checks}['no_error_logs'] is False
     email = _emails(recorder)[0]
-    assert 'detector_failed:workers' in email['text'] and 'ClickHouse is down' in email['text']
+    assert 'History is incomplete' in email['text']
+    assert 'detector_failed:workers' in next(post for post in checks if post['check_name'] == 'workers_alive')['metadata']['keys']
+    frame = monitor.notification_history.observations()[-1]
+    assert any(row['group_id'] == 'detector_failed:workers' and row['status'] == 'UNKNOWN' for row in frame['observations'])
     cursor = json.loads((tmp_path / 'monitor.cursor.json').read_text())
     start = (NOW - timedelta(minutes=Monitor.lookback_minutes)).isoformat()
     # The detectors that could not read leave their cursors where they were; the Dagster
@@ -822,10 +890,14 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
     assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
-    assert 'law:' in _emails(recorder)[0]['text']
+    email = _emails(recorder)[0]
+    assert 'Live trades are fresh' in email['text'] and 'Depth minutes are complete' in email['text']
+    assert 'Evidence: samples-' in email['text']
 
 
 def test_data_current_hold_uses_consecutive_slots_and_cooldown(tmp_path: Path) -> None:
+    """Keep the original five-slot hold; delivery now uses the literal global hour."""
+    assert GLOBAL_INTERVAL_SECONDS == 3600
     cursor = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
     finding = Finding('law:R1:binance_perp_trades:FAIL:reader_stale', 'data_current', 'lag', 'lag')
     for minute in range(5):
@@ -1035,7 +1107,9 @@ def test_law_tape_failure_keeps_other_checks_and_delivery_running(
     outcome = monitor.tick(NOW)
     assert 'detector_failed:law' in outcome.failed
     assert set(post['check_name'] for post in _check_posts(recorder)) == set(MONITOR_CHECK_NAMES)
-    assert 'detector_failed:law' in _emails(recorder)[0]['text']
+    assert 'History is incomplete' in _emails(recorder)[0]['text']
+    assert 'Data laws: ◌ unknown' in _emails(recorder)[0]['text']
+    assert any('detector_failed:law' in post['metadata'].get('keys', '') for post in _check_posts(recorder))
     assert _failure_keys() <= set(outcome.failed)
 
 
@@ -1540,6 +1614,7 @@ def test_publication_policy_evidence_reuses_existing_decisions(
 
 
 def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:
+    assert GLOBAL_INTERVAL_SECONDS == 3600
     cursor = Cursor.load(tmp_path / 'cursor.json', NOW, 15)
     fresh = Finding('law:M1:binance_spot_trades:FAIL:cube_not_activated', 'data_current', 'cube', 'missing')
     history = Finding('law:M2:binance_spot_trades:FAIL:cube_not_activated', 'data_current', 'cube', 'history')
@@ -1615,3 +1690,317 @@ def test_capture_heartbeat_cannot_clear_reader_failure(
     assert perp['predicates']['R1']['status'] == 'FAIL'
     assert perp['predicates']['R1']['reason'] == 'reader_empty'
     assert perp['predicates']['R1']['evidence']['budget_seconds'] == 300
+
+
+@pytest.mark.parametrize('correction', ['single', 'cumulative'])
+def test_notification_quota_requires_monotonic_hour_despite_small_clock_corrections(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, correction: str,
+) -> None:
+    from origo.alerts.summary import plan_notification
+
+    from .test_alert_summary import _now, _summary
+
+    now, summary = _now(), _summary()
+    monitor = _monitor(recorder, tmp_path)
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def accepted(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        return f'local-provider-{len(dispatches)}'
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', accepted)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, summary, monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == 'acknowledged'
+    points = [(3540, 3630), (3609, 3699), (3610, 3700)] if correction == 'single' else [
+        (minute * 59, minute * 60) for minute in range(1, 63)
+    ]
+    for elapsed, wall_elapsed in points:
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = now + timedelta(seconds=wall_elapsed)
+        # Each tick reloads the durable quota; adjusted deadlines cannot live only in memory.
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        assert saved.next_distinct_at == cursor.next_distinct_at
+        prepared = plan_notification(cursor, summary, monitor.settings, adjusted_now, True, transitions=True)
+        if elapsed < 3610:
+            assert not prepared, (correction, elapsed, wall_elapsed)
+        if prepared:
+            assert monitor._resume_notification(cursor, adjusted_now) == 'acknowledged'
+    assert len(dispatches) == 2
+    assert dispatches[1] - dispatches[0] >= 3600
+
+
+@pytest.mark.parametrize('status', [429, 503])
+def test_truncated_http_error_body_keeps_pending_retry_and_detector_tick_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int,
+) -> None:
+    import http.client
+    import urllib.error
+    import urllib.request
+    from email.message import Message
+
+    from origo.alerts.summary import attempt_delivery, plan_notification
+
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now = _now()
+    previous = now - timedelta(minutes=1)
+    cursor = Cursor.load(monitor.cursor_path, previous, 15)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, previous, True, transitions=True)
+
+    def initial_timeout(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        raise DeliveryError('injected initial timeout', disposition='uncertain')
+
+    assert attempt_delivery(cursor, monitor.settings, previous, lambda: cursor.save(monitor.cursor_path),
+                            completion_clock=lambda: previous, sender=initial_timeout) == 'uncertain'
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+    monitor.notification_clock = (previous.timestamp(), time.monotonic() - 60)
+
+    class TruncatedErrorBody(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            raise http.client.IncompleteRead(b'partial transport response')
+
+    def failed_response(request: urllib.request.Request, timeout: float) -> object:
+        assert request.get_header('Idempotency-key') == original['idempotency_key']
+        calls.append('retry')
+        headers = Message()
+        headers['Retry-After'] = '120'
+        raise urllib.error.HTTPError(request.full_url, status, 'injected provider failure', headers, TruncatedErrorBody())
+
+    monkeypatch.setattr('origo.alerts.email.urllib.request.urlopen', failed_response)
+    outcome = monitor.tick(now)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert calls[0] == 'retry' and calls.count('dagit') == len(MONITOR_CHECK_NAMES)
+    restored = Cursor.load(monitor.cursor_path, now, 15)
+    pending = restored.pending_notification
+    assert pending is not None and pending['attempts'] == 2
+    assert pending['payload_sha256'] == original['payload_sha256']
+    assert pending['idempotency_key'] == original['idempotency_key']
+    assert pending['outcome'] == ('retryable' if status == 429 else 'uncertain')
+    assert pending['next_attempt_at'] >= now.timestamp() + 120
+    assert restored.failures_after == now.timestamp()
+    assert restored.receipts_after == restored.logs_after == (now - timedelta(seconds=DELIVERY_LAG_SECONDS)).isoformat()
+
+
+@pytest.mark.parametrize('fault', ['directory', 'append'])
+def test_notification_storage_failure_bounds_large_recorded_frame_before_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    from typing import Literal
+
+    from origo.observatory import Document, NotificationObservation, ObservationFrame
+    from origo.workers import law_page as page
+
+    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now = _now()
+    report = page._object(_document(CAPTURES / 'current.json')['last_report'])
+    original_frame = monitor._observation_frame
+    captured_frames: list[ObservationFrame] = []
+
+    def large_frame(report_arg: LawReport | None, findings: list[Finding], held: set[str],
+                    cursor: Cursor, reads: dict[str, bool], at: datetime) -> ObservationFrame:
+        frame = original_frame(report_arg, findings, held, cursor, reads, at)
+        observations: list[NotificationObservation] = []
+        # These are original captured gate identities, times and outcomes. NOT_EVALUATED
+        # is explicitly unavailable evidence, with no invented readings or eligibility.
+        for event in page._objects(report['gates']):
+            outcome = str(event['outcome'])
+            observations.append(NotificationObservation(
+                group_id=str(event['gate_id']), check=str(event['gate_id']), scope='', kind='condition',
+                status=cast(Literal['PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT'], outcome if outcome in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT') else 'UNKNOWN'),
+                definition_version=str(event['definition_version']), detector_keys=[], eligible=None,
+                read_window_key=None, measurements=[], evidence_refs=[str(event['evidence_id'])],
+                complete=outcome in ('PASS', 'FAIL', 'EXPECTED_WAIT'),
+            ))
+        assert len(observations) > 64
+        frame['observations'] = observations
+        captured_frames.append(frame)
+        return frame
+
+    monkeypatch.setattr(monitor, '_observation_frame', large_frame)
+    if fault == 'directory':
+        blocked = tmp_path / 'unavailable-notification-directory'
+        blocked.write_text('injected directory creation fault')
+        monitor.notification_history.root = blocked
+    else:
+        def failed_append(frame: ObservationFrame, report_arg: Document | None, at: datetime) -> None:
+            assert len(frame['observations']) > 64
+            raise OSError('injected failure before sidecar truncation')
+        monkeypatch.setattr(monitor.notification_history, 'append', failed_append)
+    monkeypatch.setattr('origo.alerts.summary.send_alert', lambda *args, **kwargs: 'local-provider-ack')
+    outcome = monitor.tick(now)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert calls.count('dagit') == len(MONITOR_CHECK_NAMES)
+    frame = captured_frames[0]
+    assert len(frame['observations']) <= 64
+    assert frame['omitted_groups'] and not frame['complete']
+    retained = monitor.notification_history.frames[frame['sampling_slot']]
+    assert len(retained) <= 8192
+    decoded, _ = monitor.notification_history.decode(retained)
+    assert len(decoded['observations']) <= 64 and not decoded['complete']
+    assert len(json.dumps(decoded, separators=(',', ':')).encode()) <= 128 * 1024
+    restored = Cursor.load(monitor.cursor_path, now, 15)
+    assert restored.failures_after == now.timestamp()
+    assert restored.receipts_after == restored.logs_after == (now - timedelta(seconds=DELIVERY_LAG_SECONDS)).isoformat()
+    assert restored.expired_through is not None
+
+
+def test_clock_correction_survives_failed_save_and_committed_minute_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.alerts.summary import plan_notification
+    from origo.workers import law_page as page
+
+    from .test_alert_summary import (
+        CAPTURES,
+        _document,
+        _monitor_with_recorded_reads,
+        _now,
+        _summary,
+    )
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now, summary = _now(), _summary()
+    initial = now - timedelta(minutes=2)
+    cursor = Cursor.load(monitor.cursor_path, initial, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (initial.timestamp(), clock[0])
+    monitor.law_tape.last = cast(LawReport, page._object(_document(CAPTURES / 'current.json')['last_report']))
+    dispatches: list[float] = []
+
+    def accepted(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        return f'local-provider-{len(dispatches)}'
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', accepted)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, summary, monitor.settings, initial, True, transitions=True)
+    assert monitor._resume_notification(cursor, initial) == 'acknowledged'
+    original_deadline = cursor.next_distinct_at
+    original_anchor = monitor.notification_clock
+
+    def failed_save(cursor: Cursor, path: Path) -> None:
+        raise OSError('injected corrected clock reservation persistence fault')
+
+    clock[0] += 60
+    with monkeypatch.context() as failing:
+        failing.setattr(Cursor, 'save', failed_save)
+        result = monitor.tick(now)
+    assert result.processed == () and calls == []
+    assert monitor.notification_clock == original_anchor
+    assert Cursor.load(monitor.cursor_path, now, 15).next_distinct_at == original_deadline
+    clock[0] += 5
+    result = monitor.tick(now + timedelta(seconds=5))
+    assert result.processed == () and calls == []
+    assert Cursor.load(monitor.cursor_path, now, 15).next_distinct_at == original_deadline + 60
+    for elapsed in (3550, 3609, 3610):
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = initial + timedelta(seconds=elapsed + 60)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        prepared = plan_notification(cursor, summary, monitor.settings, adjusted_now, True, transitions=True)
+        assert prepared is (elapsed == 3610)
+        if prepared:
+            assert monitor._resume_notification(cursor, adjusted_now) == 'acknowledged'
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] >= 3600
+
+
+@pytest.mark.parametrize('retry_after', [60, 120])
+def test_pending_retry_waits_for_monotonic_delay_after_clock_correction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_after: int,
+) -> None:
+    from origo.alerts.summary import plan_notification
+
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, [])
+    now = _now()
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def uncertain(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        raise DeliveryError('injected local timeout', disposition='uncertain', retry_after=retry_after)
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', uncertain)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == 'uncertain'
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+    for elapsed in (1, retry_after - 1, retry_after):
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = now + timedelta(seconds=elapsed + 59)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15).pending_notification
+        assert saved is not None
+        assert saved['next_attempt_at'] == now.timestamp() + retry_after + 59
+        assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'idempotency_key'))
+        assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else 'uncertain')
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after
+
+
+@pytest.mark.parametrize('retry_after', [60, 120])
+@pytest.mark.parametrize('disposition', ['retryable', 'uncertain'])
+def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_jump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_after: int, disposition: str,
+) -> None:
+    from typing import Literal
+
+    from origo.alerts.summary import plan_notification
+
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, [])
+    now = _now()
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def unavailable(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        raise DeliveryError('injected provider failure',
+                            disposition=cast(Literal['retryable', 'uncertain'], disposition), retry_after=retry_after)
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', unavailable)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == disposition
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+    # Restart one real second later, after the wall clock jumped beyond the stored retry.
+    monitor.notification_clock = None
+    recovery = now + timedelta(seconds=retry_after + 60)
+    clock[0] += 1
+    for elapsed in (0, retry_after - 1, retry_after):
+        clock[0] = 1001.0 + elapsed
+        adjusted_now = recovery + timedelta(seconds=elapsed)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15).pending_notification
+        assert saved is not None
+        assert saved['next_attempt_at'] == recovery.timestamp() + retry_after
+        assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'payload_base64', 'idempotency_key'))
+        assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else disposition)
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after + 1

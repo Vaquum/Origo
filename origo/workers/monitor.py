@@ -12,24 +12,27 @@ Every minute the tick evaluates seven checks on the ``origo_monitor`` asset:
 - ``publication_current``: every public consumer publishes the current source state;
 - ``data_current``: the reader law and its evidence/page are current.
 
-The evaluations are written to Dagit first, then one e-mail lists every new finding key
-and says whether that write succeeded. A key repeats inside the cooldown without a second
-e-mail. A daily digest goes out once at the configured hour. The only state is a cursor
-file; evaluated law evidence is appended to the public read-only tape.
+Evaluations precede mail preparation. Dashboard and HTML/text mail share one recorded
+operator summary. Lifecycle changes and today's digest share a global hourly dispatch
+budget; retries preserve an immutable private intent in the existing cursor. Compact
+notification observations extend the public tape without introducing another detector.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import http.client
 import json
 import logging
+import math
 import os
 import signal
 import sys
 import time
 import urllib.error
 import urllib.request
+import zlib
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -39,7 +42,16 @@ from pathlib import Path
 from types import FrameType
 from typing import Literal, cast
 
-from origo.alerts.email import AlertSettings, send_alert
+from origo.alerts.email import AlertSettings
+from origo.alerts.summary import (
+    DeliveryReceipt, LostInterval, PendingNotification, add_loss_interval, attempt_delivery,
+    plan_notification, prune_unsent, validate_delivery_receipt, validate_lost_intervals, validate_pending,
+)
+from origo.observatory import (
+    Document, Json, Measurement, NotificationObservation, ObservationFrame, ObservedRead, OperatorSummary,
+    build_summary, consecutive_window, decode_observation_record, lifecycle_transitions,
+    operation_sample as _operation_sample, operations_totals, sample_brief as _sample_brief,
+)
 from origo.assets.build_depth_snapshot_store_arrow import (
     depth_snapshot_chunk_relative_path,
     minute_start_from_partition_key,
@@ -160,12 +172,28 @@ class Cursor:
     law_streaks: dict[str, list[str | int]] = field(default_factory=lambda: {})
     law_history: dict[str, str] = field(default_factory=lambda: {})
 
+    notification_schema: int = 1
+    pending_notification: PendingNotification | None = None
+    last_delivery: DeliveryReceipt | None = None
+    next_distinct_at: float = 0.0
+    notified_through: str | None = None
+    expired_through: str | None = None
+    lost_intervals: list[LostInterval] = field(default_factory=lambda: [])
+    clock_checked_at: float = 0.0
+    notification_started_at: str | None = None
+    notification_fault: str = ''
+    invalid_notification_state: dict[str, object] | None = None
+
     @classmethod
     def load(cls, path: Path, now: datetime, lookback_minutes: int) -> Cursor:
         start = now - timedelta(minutes=lookback_minutes)
         if not path.exists():
             return cls(start.timestamp(), start.isoformat(), start.isoformat(), {}, '', 0, 0)
-        raw: object = json.loads(path.read_text())
+        with path.open('rb') as stream:
+            payload = stream.read(256 * 1024 + 1)
+        if len(payload) > 256 * 1024:
+            raise ValueError('Private monitor cursor exceeds 256 KiB; dispatch is blocked')
+        raw: object = json.loads(payload)
         if not isinstance(raw, dict):
             raise ValueError('The monitor cursor must be an object.')
         data = cast(dict[str, object], raw)
@@ -178,7 +206,7 @@ class Cursor:
             if isinstance(sent_raw, dict)
             else {}
         )
-        return cls(
+        cursor = cls(
             float(cast(float, data.get('failures_after', start.timestamp()))),
             str(data.get('receipts_after', start.isoformat())),
             str(data.get('logs_after', start.isoformat())),
@@ -189,12 +217,64 @@ class Cursor:
             cast(dict[str, list[str | int]], data.get('law_streaks', {})),
             cast(dict[str, str], data.get('law_history', {})),
         )
+        try:
+            if data.get('notification_schema') == 1:
+                pending = data.get('pending_notification')
+                receipt = data.get('last_delivery')
+                cursor.pending_notification = validate_pending(pending) if pending is not None else None
+                cursor.last_delivery = validate_delivery_receipt(receipt) if receipt is not None else None
+                cursor.lost_intervals = validate_lost_intervals(data.get('lost_intervals', []))
+                for key in ('next_distinct_at', 'clock_checked_at'):
+                    value = data.get(key, 0.0)
+                    if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
+                        raise ValueError(f'Invalid notification cursor {key}')
+                    setattr(cursor, key, float(value))
+                for key in ('notified_through', 'expired_through', 'notification_started_at'):
+                    value = data.get(key)
+                    if value is not None:
+                        if not isinstance(value, str) or datetime.fromisoformat(value).tzinfo is None:
+                            raise ValueError(f'Invalid notification cursor {key}')
+                        setattr(cursor, key, value)
+            else:
+                # A legacy digest has only a date. Reserve one hour once, then persist the migration.
+                recent = any(stamp > now.timestamp() - 3600 for stamp in sent.values())
+                if recent or cursor.last_digest_date >= now.date().isoformat():
+                    cursor.next_distinct_at = now.timestamp() + 3610
+                cursor.clock_checked_at = now.timestamp()
+                if any(stamp > now.timestamp() for stamp in sent.values()):
+                    add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Legacy send timestamp is in the future; one-hour dispatch quarantine applied.')
+        except (ValueError, TypeError, KeyError) as error:
+            cursor.notification_fault = f'{type(error).__name__}: {error}'[:300]
+            fields = ('notification_schema', 'pending_notification', 'last_delivery', 'next_distinct_at',
+                      'notified_through', 'expired_through', 'lost_intervals', 'clock_checked_at', 'notification_started_at')
+            cursor.invalid_notification_state = {key: data[key] for key in fields if key in data}
+            cursor.pending_notification = None
+            log.warning('Private notification state is corrupt; dispatch is blocked: %s', error)
+        return cursor
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         pending = path.with_name(path.name + '.partial')
-        pending.write_text(json.dumps(self.__dict__, sort_keys=True, indent=1))
+        data = {key: value for key, value in self.__dict__.items() if key not in ('invalid_notification_state', 'notification_fault')}
+        if self.invalid_notification_state is not None:
+            data.update(self.invalid_notification_state)
+        payload = json.dumps(data, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+        if len(payload) > 256 * 1024:
+            raise ValueError('Private monitor cursor exceeds 256 KiB; no POST permitted')
+        if self.pending_notification is not None:
+            validate_pending(self.pending_notification)
+        descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
         pending.replace(path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 def _utc(value: object) -> datetime:
@@ -412,6 +492,166 @@ class LawTape:
                 index.offset = path.stat().st_size
 
 
+
+class _NotificationHistory:
+    """Bounded replay of compact observations, independently of successful law samples."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.frames: dict[str, bytes] = {}
+        self.briefs: dict[str, Document] = {}
+        self.operations: dict[str, bytes] = {}
+        self.starts: dict[Path, int] = {}
+        self.ends: dict[Path, int] = {}
+        self.loading = False
+        self.limited = False
+
+    decode = staticmethod(decode_observation_record)
+
+    def remember(self, raw: bytes, now: datetime) -> None:
+        frame, brief = self.decode(raw)
+        slot = frame['sampling_slot']
+        observed = datetime.fromisoformat(slot)
+        if observed.tzinfo is None or observed > now + timedelta(seconds=60):
+            raise ValueError('Notification observation has an invalid sampling time')
+        if observed >= now - timedelta(hours=24):
+            if slot in self.frames and self.frames[slot] != raw:
+                self.limited = True
+            else:
+                self.frames[slot] = raw
+            evidence: list[Json] = []
+            for metric, check in (('error_lines', 'no_error_logs'), ('failed_receipts', 'workers_alive')):
+                window = frame['read_windows'].get(metric)
+                if window is not None:
+                    evidence.append({'gate_id': f'monitor.{check}', 'evidence': {
+                        metric: window['count'], 'window_start': window['window_start'],
+                        'window_end': window['window_end'], 'counts_limited': window['counts_limited'],
+                    }})
+            self.operations[slot] = _operation_sample({'gates': evidence})
+        if brief is not None and observed >= now.replace(second=0, microsecond=0) - timedelta(hours=72, minutes=1):
+            self.briefs[slot] = brief
+
+    @staticmethod
+    def encode(frame: ObservationFrame, report: Document | None) -> bytes:
+        brief = _sample_brief(report) if report is not None else None
+        rows = frame['observations']
+        omitted = frame['omitted_groups'] or 0
+        while True:
+            encoded_frame = json.dumps(frame, separators=(',', ':'), allow_nan=False).encode()
+            envelope = {'frame': base64.b64encode(zlib.compress(encoded_frame)).decode(), 'brief': brief}
+            raw = json.dumps(envelope, separators=(',', ':'), allow_nan=False).encode()
+            if len(encoded_frame) <= 128 * 1024 and len(raw) <= 8192 and len(rows) <= 64:
+                break
+            if not rows:
+                raise ValueError('Notification frame cannot fit the record budget')
+            removed = rows.pop()
+            if 'notification_transitions' in frame:
+                frame['notification_transitions'] = [item for item in frame['notification_transitions'] if item['group_id'] != removed['group_id']]
+            omitted += 1
+            frame['omitted_groups'] = omitted
+            frame['complete'] = False
+        return raw
+
+    def append(self, frame: ObservationFrame, report: Document | None, now: datetime) -> None:
+        raw = self.encode(frame, report)
+        self.root.mkdir(parents=True, exist_ok=True)
+        slot = frame['sampling_slot']
+        if slot in self.frames:
+            # A retry of a sampled minute cannot manufacture another observation.
+            return
+        path = self.root / now.strftime('notification-observations-%Y-%m-%d.jsonl')
+        if path.exists() and path.stat().st_size:
+            with path.open('rb') as existing:
+                existing.seek(-1, os.SEEK_END)
+                if existing.read(1) != b'\n':
+                    raise ValueError('Notification tape has an uncommitted tail; append blocked')
+        with path.open('ab') as stream:
+            stream.write(raw + b'\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        self.remember(raw, now)
+        self.ends[path] = path.stat().st_size
+        self.starts.setdefault(path, max(0, self.ends[path] - len(raw) - 1))
+
+    def refresh(self, now: datetime) -> None:
+        cutoff = now.replace(second=0, microsecond=0) - timedelta(hours=24)
+        self.frames = {slot: value for slot, value in self.frames.items()
+                       if datetime.fromisoformat(slot) >= cutoff}
+        self.operations = {slot: value for slot, value in self.operations.items() if slot in self.frames}
+        self.briefs = {slot: value for slot, value in self.briefs.items()
+                       if datetime.fromisoformat(slot) >= now.replace(second=0, microsecond=0) - timedelta(hours=72, minutes=1)}
+        before = now.date() - timedelta(days=30)
+        for path in self.root.glob('notification-observations-????-??-??.jsonl'):
+            day = date.fromisoformat(path.stem.removeprefix('notification-observations-'))
+            if day < before:
+                path.unlink()
+        budget = 1024 * 1024
+        deadline = time.monotonic() + 1
+        paths = [self.root / (now - timedelta(days=offset)).strftime('notification-observations-%Y-%m-%d.jsonl')
+                 for offset in range(4)]
+        for path in paths:
+            if budget <= 0 or time.monotonic() >= deadline:
+                break
+            if not path.exists():
+                continue
+            size = path.stat().st_size
+            end = self.starts.get(path, size)
+            if self.ends.get(path, size) != size:
+                # There is one writer. An externally replaced segment requires bounded replay.
+                end = size
+                self.limited = True
+            start = max(0, end - budget)
+            self.ends[path] = size
+            if end <= start:
+                self.starts[path] = 0
+                continue
+            with path.open('rb') as stream:
+                stream.seek(start)
+                data = stream.read(end - start)
+            budget -= len(data)
+            if start:
+                newline = data.find(b'\n')
+                if newline < 0:
+                    self.limited = True
+                    self.starts[path] = start
+                    continue
+                start += newline + 1
+                data = data[newline + 1:]
+            position = start + len(data)
+            for raw in reversed(data.splitlines(keepends=True)):
+                if time.monotonic() >= deadline:
+                    break
+                position -= len(raw)
+                if not raw.endswith(b'\n') or len(raw) > 8193:
+                    self.limited = True
+                    continue
+                try:
+                    self.remember(raw.rstrip(b'\n'), now)
+                except (ValueError, TypeError, KeyError, zlib.error) as error:
+                    self.limited = True
+                    log.warning('Notification history is incomplete: %s', error)
+            self.starts[path] = position
+        self.loading = any(path.exists() and self.starts.get(path, path.stat().st_size) > 0 for path in paths)
+        # Compressed slots and compact core briefs share an explicit memory budget.
+        weight = sum(sys.getsizeof(key) + sys.getsizeof(raw) for key, raw in self.frames.items())
+        weight += sum(len(json.dumps(brief)) * 4 + 1024 for brief in self.briefs.values())
+        while weight > 16 * 1024 * 1024 and self.briefs:
+            oldest_brief = min(self.briefs)
+            weight -= len(json.dumps(self.briefs.pop(oldest_brief))) * 4 + 1024
+            self.limited = True
+        while weight > 16 * 1024 * 1024 and self.frames:
+            oldest = min(self.frames)
+            weight -= sys.getsizeof(oldest) + sys.getsizeof(self.frames.pop(oldest))
+            self.operations.pop(oldest, None)
+            self.limited = True
+
+    def observations(self) -> list[ObservationFrame]:
+        frames = [self.decode(self.frames[slot])[0] for slot in sorted(self.frames)]
+        if (self.loading or self.limited) and frames:
+            frames[0]['complete'] = False
+        return frames
+
+
 def law_findings(report: LawReport) -> list[Finding]:
     findings: list[Finding] = []
     for feed in report['feeds']:
@@ -511,10 +751,20 @@ class Monitor:
         self.cursor_path = cursor_path
         self.publication_root = publication_root
         self.queue_threshold = settings.queue_threshold if settings else queue_threshold
+        self.notification_history = _NotificationHistory(law_root)
+        self.notification_clock: tuple[float, float] | None = None
+        self.event_counts: dict[str, int] = {}
+        self.condition_states: dict[str, tuple[str, str, bool]] = {}
+        self.capture_evidence: dict[str, int | float | None] = {}
 
     def tick(self, now: datetime) -> TickOutcome:
+        tick_started = time.monotonic()
         now = now.astimezone(UTC)
         minute = now.replace(second=0, microsecond=0)
+        cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
+        if not cursor.notification_fault:
+            self._notification_clock(cursor, now)
+        delivery_status = self._resume_notification(cursor, now)
         lookup_faults: list[Finding] = []
         try:
             previous = self.law_tape.latest(now)
@@ -537,8 +787,9 @@ class Monitor:
             lookup_faults.append(Finding('detector_failed:law', 'data_current',
                 'Committed law sample unavailable', f'{type(error).__name__}: {error}'[:300]))
         window_end = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
-        cursor = Cursor.load(self.cursor_path, now, self.lookback_minutes)
         self.pending_report = None
+        self.event_counts = {}
+        self.condition_states = {}
         self.publication_policy = {}
         self.tick_evidence = {
             'dagster_reachable': {'reachable': None, 'unhealthy_daemons': None},
@@ -563,7 +814,7 @@ class Monitor:
         workers, workers_read = self._guarded(
             'workers_alive', 'workers', lambda: (self._worker_findings(cursor, window_end), True)
         )
-        collectors, _ = self._guarded(
+        collectors, collectors_read = self._guarded(
             'collectors_serving',
             'collectors',
             lambda: (self._collector_findings(minute - timedelta(minutes=1)), True),
@@ -571,7 +822,7 @@ class Monitor:
         logs, logs_read = self._guarded(
             'no_error_logs', 'logs', lambda: (self._log_findings(cursor, window_end), True)
         )
-        publication, _ = self._guarded(
+        publication, publication_read = self._guarded(
             'publication_current',
             'publication',
             lambda: (self._publication_findings(), True),
@@ -592,15 +843,54 @@ class Monitor:
             or item.key in ('queue_backlog', 'detector_failed:law')
             for item in findings
         ):
-            history, _ = self._guarded(
+            history_findings, _ = self._guarded(
                 'data_current', 'law_history', lambda: (self._history_findings(cursor, now), True)
             )
-            findings.extend(history)
+            findings.extend(history_findings)
 
-        saved, _ = self._guarded(
+        report = self.pending_report
+        saved, law_committed = self._guarded(
             'data_current', 'law', lambda: (self._commit_law(now, findings), True)
         )
         findings.extend(saved)
+        if not law_committed:
+            report = None
+        notification_fault = ''
+        history: list[ObservationFrame] = []
+        frame: ObservationFrame | None = None
+        try:
+            self.notification_history.refresh(now)
+            history = self.notification_history.observations()
+            frame = self._observation_frame(report, findings, held, cursor, {
+                'queue_bounded': dagster_read, 'dagster_reachable': self.tick_evidence['dagster_reachable'].get('reachable') is True,
+                'workers_alive': workers_read, 'collectors_serving': collectors_read,
+                'no_error_logs': logs_read, 'publication_current': publication_read,
+                'data_current': report is not None,
+            }, now)
+            frame['notification_transitions'] = [
+                transition for transition in lifecycle_transitions([*history, frame], now=now)
+                if transition['sampling_slot'] == frame['sampling_slot']
+            ]
+            self.notification_history.append(frame, cast(Document, report) if report else None, now)
+            if not any(item['sampling_slot'] == frame['sampling_slot'] for item in history):
+                history.append(frame)
+            if frame['omitted_groups']:
+                add_loss_interval(cursor, minute.isoformat(), minute.isoformat(), 'Notification capture exceeded its group or byte limit.')
+        except (OSError, ValueError, TypeError, KeyError, zlib.error) as error:
+            self.notification_history.limited = True
+            notification_fault = f'{type(error).__name__}: {error}'[:300]
+            log.warning('Notification history unavailable: %s', notification_fault)
+            add_loss_interval(cursor, minute.isoformat(), minute.isoformat(), 'Notification observation persistence failed.')
+            # Current evidence remains usable with an explicitly incomplete history.
+            if frame is not None:
+                frame['complete'] = False
+                try:
+                    raw = self.notification_history.encode(frame, None)
+                    self.notification_history.remember(raw, now)
+                    history = [item for item in history if item['sampling_slot'] != frame['sampling_slot']] + [frame]
+                except (ValueError, TypeError, KeyError, zlib.error) as fallback_error:
+                    notification_fault = f'{notification_fault}; current evidence unavailable: {fallback_error}'[:300]
+                    log.warning('Notification current evidence unavailable: %s', fallback_error)
         by_check: dict[CheckName, list[Finding]] = {name: [] for name in CHECK_NAMES}
         for finding in findings:
             by_check[finding.check].append(finding)
@@ -613,50 +903,47 @@ class Monitor:
                     'findings': len(items),
                     'keys': ', '.join(item.key for item in items)[:2000],
                     'evaluated_at': now.isoformat(),
+                    'notification_delivery': cursor.notification_fault or delivery_status,
+                    'notification_history': notification_fault or 'recorded',
+                    'notification_configuration': self.settings.dashboard_url_fault if self.settings else 'alerts disabled',
                 },
             )
             for name, items in by_check.items()
         ]
         written = all(writes)
-        cooldown = self.settings.cooldown_seconds if self.settings else 0
-        fresh = [
-            finding
-            for finding in findings
-            if finding.key not in held
-            and now.timestamp() - cursor.sent.get(finding.key, 0.0) > cooldown
-        ]
-        if fresh:
-            self._send(
-                f'Origo alert: {len(fresh)} new finding{"s" if len(fresh) > 1 else ""}',
-                self._alert_body(fresh, written, now),
-            )
-            for finding in fresh:
-                cursor.sent[finding.key] = now.timestamp()
         cursor.ticks += 1
         cursor.findings += len(findings)
-        today = now.date().isoformat()
-        if (
-            self.settings is not None
-            and now.hour == self.settings.digest_hour_utc
-            and cursor.last_digest_date != today
-        ):
-            self._send(
-                f'Origo daily digest {today}',
-                f'ticks: {cursor.ticks}\nfindings: {cursor.findings}\n'
-                f'open now: {len(findings)}\nworker heartbeats: {len(self._heartbeats())}\n'
-                f'collectors probed: {len(self.probes)}\n',
-            )
-            cursor.last_digest_date = today
         if dagster_read:
             cursor.failures_after = now.timestamp()
         if workers_read:
             cursor.receipts_after = window_end.isoformat()
         if logs_read:
             cursor.logs_after = window_end.isoformat()
-        cursor.sent = {
-            key: stamp for key, stamp in cursor.sent.items() if now.timestamp() - stamp <= cooldown
-        }
-        cursor.save(self.cursor_path)
+        cursor.notification_started_at = cursor.notification_started_at or minute.isoformat()
+        if not cursor.notified_through and not cursor.expired_through and datetime.fromisoformat(cursor.notification_started_at) < now - timedelta(hours=24):
+            add_loss_interval(cursor, cursor.notification_started_at, (now - timedelta(hours=24)).isoformat(), 'Unsent evidence exceeded the 24-hour replay horizon.')
+        prune_unsent(cursor, now)
+        try:
+            cursor.save(self.cursor_path)
+            summary = self._notification_summary(report, now, delivery_status, history)
+            floor = cursor.notified_through or ''
+            changed = any(transition['sampling_slot'] > floor for frame in history for transition in frame.get('notification_transitions', []))
+            delivery_now = now + timedelta(seconds=max(0.0, time.monotonic() - tick_started))
+            if not cursor.notification_fault and self.settings is not None and plan_notification(cursor, summary, self.settings, delivery_now, written, transitions=changed):
+                cursor.save(self.cursor_path)
+                delivery_status = self._resume_notification(cursor, delivery_now)
+            summary['delivery_status'] = delivery_status
+            payload = json.dumps(summary, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
+            if len(payload) > 16 * 1024:
+                raise ValueError('Operator summary exceeds 16 KiB')
+            temporary = self.law_tape.root / 'operator-summary.json.partial'
+            temporary.write_bytes(payload)
+            temporary.replace(self.law_tape.root / 'operator-summary.json')
+        except (OSError, ValueError, TypeError, KeyError, zlib.error) as error:
+            log.warning('Notification summary/storage unavailable: %s', error)
+            self.reporter.check(MONITOR_ASSET, 'data_current', passed=not by_check['data_current'], metadata={
+                'notification_fault': f'{type(error).__name__}: {error}'[:300], 'evaluated_at': now.isoformat(),
+            })
         return TickOutcome(
             self.name,
             minute,
@@ -983,24 +1270,209 @@ class Monitor:
                 )
             ], False
 
-    def _send(self, subject: str, body: str) -> None:
-        if self.settings is None:
-            log.warning('alerts disabled (ORIGO_ALERT_* not set): %s\n%s', subject, body)
-            return
-        send_alert(self.settings, subject, body)
+    def _observation_frame(
+        self, report: LawReport | None, findings: Sequence[Finding], held: set[str],
+        cursor: Cursor, reads: dict[str, bool], now: datetime,
+    ) -> ObservationFrame:
+        slot = now.replace(second=0, microsecond=0).isoformat()
+        descriptors = {item['id']: item for item in self.catalog['gates']} if self.catalog else {}
+        reads.update(run_failure=reads['queue_bounded'], check_failed=reads['queue_bounded'], failed_receipts=reads['workers_alive'], error_logs=reads['no_error_logs'])
+        observations: dict[str, NotificationObservation] = {}
+        windows: dict[str, ObservedRead] = {}
+        for metric, check in (('error_lines', 'no_error_logs'), ('failed_receipts', 'workers_alive')):
+            evidence = self.tick_evidence[check]
+            count = evidence.get(metric)
+            windows[metric] = ObservedRead(
+                window_start=str(evidence['window_start']) if evidence.get('window_start') else None,
+                window_end=str(evidence['window_end']) if evidence.get('window_end') else None,
+                count=int(count) if isinstance(count, (int, float)) else None,
+                counts_limited=evidence.get('counts_limited') is True, complete=reads.get(check, False),
+            )
+        for metric in ('run_failure', 'check_failed'):
+            windows[metric] = ObservedRead(
+                window_start=datetime.fromtimestamp(cursor.failures_after, UTC).isoformat(),
+                window_end=now.isoformat(), count=sum(count for key, count in self.event_counts.items() if key.startswith(metric + ':')) if reads['queue_bounded'] else None,
+                counts_limited=(metric == 'check_failed' or sum(count for key, count in self.event_counts.items() if key.startswith(metric + ':')) >= 200),
+                complete=reads['queue_bounded'],
+            )
 
-    @staticmethod
-    def _alert_body(findings: Sequence[Finding], written: bool, now: datetime) -> str:
-        lines = [f'{now.isoformat()}: {len(findings)} new finding(s).', '']
-        lines.extend(f'- {f.key}: {f.title}. {f.detail}'.rstrip() for f in findings)
-        lines.append('')
-        lines.append(
-            'Dagit check evaluations: written.'
-            if written
-            else 'Dagit check evaluations: FAILED to write.'
+        def observation(group: str, check: str, scope: str,
+                        status: Literal['FAIL', 'UNKNOWN', 'PASS', 'EXPECTED_WAIT', 'NO_NEW_EVENTS'],
+                        keys: list[str], *, event: bool = False, evidence: Mapping[str, object] | None = None,
+                        reference: str = '', complete: bool = True) -> NotificationObservation:
+            owner = {'run_failure': 'queue_bounded', 'check_failed': 'queue_bounded', 'failed_receipts': 'workers_alive', 'error_logs': 'no_error_logs'}.get(check, check)
+            descriptor_id = group if group.startswith('law.') else f'monitor.{owner}'
+            descriptor = descriptors.get(descriptor_id)
+            version = descriptor['definition_version'] if descriptor else ''
+            measurements: list[Measurement] = []
+            values = evidence or {}
+            allowed = ('age_seconds', 'missing_slots', 'expected_slots', 'raw_proof_rows', 'day_count',
+                       'expected_days', 'valid_days', 'missing_days', 'unknown_days',
+                       'committed_age_seconds', 'response_age_seconds', 'durable_capture_age_seconds', 'spool_bytes',
+                       'queued_runs', 'queue_threshold', 'unhealthy_daemons', 'workers_fresh',
+                       'workers_expected', 'workers_unknown', 'collectors_serving', 'collectors_expected',
+                       'lag_seconds', 'grace_seconds', 'event_count', 'heartbeat_age_seconds')
+            for name in allowed:
+                value = values.get(name)
+                if name not in values:
+                    continue
+                threshold = values.get('budget_seconds') if name == 'age_seconds' else values.get('max_missing') if name == 'missing_slots' else values.get('grace_seconds') if name == 'lag_seconds' else values.get('queue_threshold') if name == 'queued_runs' else values.get('expected_days') if name == 'valid_days' else HEARTBEAT_MAX_AGE_SECONDS if name in ('committed_age_seconds', 'response_age_seconds', 'durable_capture_age_seconds') else CAPTURE_SPOOL_BYTES if name == 'spool_bytes' else None
+                measurements.append(Measurement(
+                    name=name, value=value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None,
+                    unit='seconds' if name.endswith('_seconds') else 'minutes' if name in ('missing_slots', 'expected_slots') else {'run_failure': 'failed runs', 'check_failed': 'failed check evaluations', 'failed_receipts': 'failed receipts', 'error_logs': 'error lines'}.get(check, 'events') if name == 'event_count' else 'workers' if name.startswith('workers_') else 'collectors' if name.startswith('collectors_') else 'runs' if name in ('queued_runs', 'queue_threshold') else 'daemons' if name == 'unhealthy_daemons' else 'rows' if name == 'raw_proof_rows' else 'bytes' if name == 'spool_bytes' else 'days',
+                    threshold=threshold if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) else None,
+                    observed_at=now.isoformat(), definition_version=version,
+                ))
+            if check == 'law.D1':
+                end = values.get('window_end')
+                expected = values.get('expected_slots')
+                for measurement in measurements:
+                    if measurement['name'] == 'missing_slots' and isinstance(end, str):
+                        measurement['window_end'] = end
+                        measurement['window_start'] = (datetime.fromisoformat(end) - timedelta(minutes=expected)).isoformat() if isinstance(expected, (int, float)) else None
+            return NotificationObservation(
+                group_id=group, check=check, scope=scope, kind='event_stream' if event else 'condition',
+                status=status, definition_version=version, detector_keys=sorted(set(keys)),
+                eligible=any(key not in held for key in keys) if keys else False,
+                read_window_key=('error_lines' if group.startswith('error_logs:') else 'failed_receipts' if group.startswith('receipt_failed:') else group.split(':', 1)[0]) if event else None,
+                measurements=measurements, evidence_refs=[reference] if reference else [], complete=complete,
+            )
+
+        if report is not None:
+            for feed in report['feeds']:
+                for predicate, result in feed['predicates'].items():
+                    group = f'law.{predicate}:{feed["source_key"]}'
+                    keys = [item.key for item in findings if item.key.startswith(f'law:{predicate}:{feed["source_key"]}:')]
+                    observations[group] = observation(
+                        group, f'law.{predicate}', feed['source_key'],
+                        'EXPECTED_WAIT' if result['status'] == 'NOT_DUE' else result['status'], keys,
+                        evidence=result['evidence'], reference=f'{now.strftime(LAW_SAMPLE_NAME)}:{slot}#{group}',
+                    )
+        for item in findings:
+            if item.key.startswith('law:') and len(item.key.split(':')) >= 5:
+                continue
+            parts = item.key.split(':')
+            event = parts[0] in ('run_failure', 'check_failed', 'receipt_failed', 'error_logs')
+            group = 'collector_capture' if parts[0] == 'collector_capture' else 'publication:' + ':'.join(parts[1:]) if parts[0] in ('publication_stale', 'publication_manifest_unreadable') else item.key
+            status: Literal['FAIL', 'UNKNOWN', 'PASS', 'EXPECTED_WAIT'] = 'UNKNOWN' if parts[0] in ('detector_failed', 'publication_manifest_unreadable') or item.key == 'collector_capture:unavailable' or item.key.startswith('law:') else 'FAIL'
+            prior = observations.get(group)
+            keys = [*prior['detector_keys'], item.key] if prior else [item.key]
+            values: Mapping[str, object] = {'event_count': self.event_counts.get(item.key)} if event else {'heartbeat_age_seconds': None} if parts[0] == 'heartbeat_stale' else self.tick_evidence.get(item.check, {}) if parts[0] in ('queue_backlog', 'dagster_unreachable') else self.capture_evidence if parts[0] == 'collector_capture' else {'collectors_serving': 0, 'collectors_expected': 1} if parts[0] == 'collector_silent' else {}
+            observations[group] = observation(group, ('failed_receipts' if parts[0] == 'receipt_failed' else parts[0]) if event else item.check, 'Raw-perp capture' if parts[0] == 'collector_capture' else ':'.join(parts[1:]), status, keys, event=event, evidence=values, reference=item.key)
+        for group, (check, scope, healthy) in self.condition_states.items():
+            if group not in observations:
+                observations[group] = observation(group, check, scope, 'PASS' if healthy else 'UNKNOWN', [], evidence={'heartbeat_age_seconds': None} if group.startswith('heartbeat_stale:') else None)
+        for group, policy in self.publication_policy.items():
+            if policy['reason'] == 'not_applicable':
+                continue
+            source, _, consumer = group.partition(':consumer:')
+            identity = f'publication:{source}:{consumer}'
+            status = 'EXPECTED_WAIT' if policy['reason'] == 'backfill_active' or policy['reason'] == 'within_budget' and (policy['lag_seconds'] or 0) > 0 else 'UNKNOWN' if policy['reason'] in ('unknown', 'unreadable') else 'FAIL' if policy['reason'] == 'stale' else 'PASS'
+            prior = observations.get(identity)
+            observations[identity] = observation(identity, 'publication_current', f'{source} · {consumer}', status, prior['detector_keys'] if prior else [], evidence=policy)
+        # Explicit clearance only when the responsible original read completed. Removed
+        # heartbeat members and unavailable law predicates cannot be inferred healthy.
+        for previous in ([self.notification_history.decode(self.notification_history.frames[max(self.notification_history.frames)])[0]] if self.notification_history.frames else []):
+            for prior in previous['observations']:
+                group, check = prior['group_id'], prior['check']
+                if group in observations or prior['kind'] == 'event_stream':
+                    continue
+                healthy = reads.get(check, False) and not group.startswith(('law.', 'heartbeat_stale:'))
+                observations[group] = observation(group, check, prior['scope'], 'PASS' if healthy else 'UNKNOWN', [], complete=healthy)
+        self.notification_check_outcomes = {check: 'FAIL' if any(item.check == check for item in findings) else 'PASS' if reads.get(check, False) else 'UNKNOWN' for check in CHECK_NAMES}
+        ordered = sorted(observations.values(), key=lambda row: (row['status'] not in ('FAIL', 'UNKNOWN'), row['group_id']))
+        return ObservationFrame(
+            sampling_slot=slot, catalog_version=self.catalog['version'] if self.catalog else None,
+            law_sample_ref=f'samples-{now.date().isoformat()}.jsonl#{slot}' if report is not None else None,
+            law_observed=report is not None, checks_complete=reads, read_windows=windows,
+            observations=ordered, omitted_groups=0, complete=all(reads.values()),
         )
-        lines.append('Investigate in this order: Dagit, ClickHouse, Docker, the collectors.')
-        return '\n'.join(lines) + '\n'
+
+    def _notification_summary(self, report: LawReport | None, now: datetime, status: str, history: Sequence[ObservationFrame]) -> OperatorSummary:
+        briefs = self.notification_history.briefs
+        terminal = report['sampling_slot'] if report else None
+        clear = consecutive_window(list(briefs.values()), terminal or '')
+        clear_seconds = (datetime.fromisoformat(str(clear[0]['start'])) - datetime.fromisoformat(str(clear[-1]['start']))).total_seconds() if clear else 0.0
+        current: Document = {
+            'last_report': cast(Document, report) if report else None,
+            'status': report['status'] if report else 'UNKNOWN',
+            'reason': '' if report else 'law_observation_unavailable',
+            'checked_at': report['evaluation_end'] if report else now.isoformat(),
+            'operations_history': operations_totals(self.notification_history.operations, loading=self.notification_history.loading, limited=self.notification_history.limited),
+            'delivery_status': status,
+            'operational_gates': [{
+                'gate_id': f'monitor.{check}', 'outcome': self.notification_check_outcomes[check],
+                'evidence': dict(evidence),
+            } for check, evidence in self.tick_evidence.items()] if history else [],
+            'consecutive_clear_seconds': clear_seconds,
+            'consecutive_clear_slots': len(clear),
+            'not_due_slots': sum(item.get('not_due') is True for item in clear),
+        }
+        summary = build_summary(current, cast(Document, self.catalog) if self.catalog else {}, history, now=now)
+        return summary
+
+    def _resume_notification(self, cursor: Cursor, now: datetime) -> str:
+        if cursor.notification_fault:
+            return 'state_corrupt: ' + cursor.notification_fault
+        try:
+            return attempt_delivery(cursor, self.settings, now, lambda: cursor.save(self.cursor_path))
+        except (OSError, ValueError) as error:
+            # Persist failures prohibit dispatch. Ordinary delivery faults cannot produce
+            # ERROR logs that the monitor would read back as new operator incidents.
+            log.warning('Notification delivery/storage unavailable: %s', error)
+            return f'storage_or_validation_fault: {type(error).__name__}: {error}'[:300]
+
+    def _notification_clock(self, cursor: Cursor, now: datetime) -> None:
+        timestamp, monotonic = now.timestamp(), time.monotonic()
+        persist_quarantine = False
+        if self.notification_clock is None:
+            pending = cursor.pending_notification
+            unresolved = pending is not None and pending['attempt_started_at'] is not None and pending['last_completion_at'] is None
+            reversed_clock = cursor.clock_checked_at > timestamp
+            # The process was absent: elapsed wall time does not prove elapsed real time.
+            prior_dispatch = cursor.last_delivery is not None or pending is not None and pending['first_dispatch_at'] is not None
+            if unresolved or reversed_clock or prior_dispatch:
+                cursor.next_distinct_at = max(cursor.next_distinct_at, timestamp + 3610)
+                if pending and (pending['first_dispatch_at'] is not None or reversed_clock):
+                    completion = pending['last_completion_at']
+                    retry_wait = max(60.0, pending['next_attempt_at'] - completion) if completion is not None else 60.0
+                    pending['next_attempt_at'] = max(pending['next_attempt_at'], timestamp + retry_wait)
+                if unresolved or reversed_clock:
+                    add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Restart after an unresolved request or clock reversal; delivery timing is uncertain.')
+                persist_quarantine = True
+        else:
+            old_wall, old_mono = self.notification_clock
+            elapsed = max(0.0, monotonic - old_mono)
+            remaining = cursor.next_distinct_at - old_wall - elapsed
+            if remaining > 0:
+                deadline = timestamp + remaining
+                if deadline > cursor.next_distinct_at:
+                    # Every forward correction consumes wall time, never the remaining
+                    # monotonic quarantine, even when many small corrections accumulate.
+                    cursor.next_distinct_at = deadline
+                    persist_quarantine = True
+            pending = cursor.pending_notification
+            if pending is not None:
+                retry_remaining = pending['next_attempt_at'] - old_wall - elapsed
+                retry_deadline = timestamp + retry_remaining
+                if retry_remaining > 0 and retry_deadline > pending['next_attempt_at']:
+                    pending['next_attempt_at'] = retry_deadline
+                    persist_quarantine = True
+            if abs((timestamp - old_wall) - elapsed) > 120:
+                cursor.next_distinct_at = max(cursor.next_distinct_at, timestamp + 3610)
+                add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Wall clock changed; notification dispatch is quarantined for one hour.')
+                persist_quarantine = True
+        cursor.clock_checked_at = timestamp
+        if persist_quarantine:
+            try:
+                cursor.save(self.cursor_path)
+            except (OSError, ValueError) as error:
+                cursor.notification_fault = f'Clock quarantine persistence failed: {error}'[:300]
+                log.warning('%s', cursor.notification_fault)
+            else:
+                self.notification_clock = (timestamp, monotonic)
+        else:
+            self.notification_clock = (timestamp, monotonic)
 
     def _dagster_findings(self, cursor: Cursor, window_end: datetime) -> tuple[list[Finding], bool]:
         """Findings from Dagster and whether the failure queries ran, so the failure cursor
@@ -1015,6 +1487,8 @@ class Monitor:
             'queued_runs': health.queued_runs if health.reachable else None,
             'queue_threshold': self.queue_threshold,
         }
+        self.condition_states['dagster_unreachable'] = ('dagster_reachable', '', health.reachable)
+        self.condition_states['queue_backlog'] = ('queue_bounded', '', health.reachable and health.queued_runs <= self.queue_threshold)
         if not health.reachable:
             return [
                 Finding(
@@ -1057,6 +1531,7 @@ class Monitor:
         for failure in self.dagster.failures_since(cursor.failures_after):
             by_job.setdefault(failure.job_name, []).append(failure)
         for job_name, failures in by_job.items():
+            self.event_counts[f'run_failure:{job_name}'] = len(failures)
             # One key per job: a job failing on successive partitions is one outage under
             # the cooldown, and the detail names the partitions and runs.
             detail = '; '.join(
@@ -1076,6 +1551,7 @@ class Monitor:
         for check in self.dagster.failed_checks_since(
             cursor.failures_after, exclude_asset=MONITOR_ASSET
         ):
+            self.event_counts[f'check_failed:{check.asset_key}:{check.check_name}'] = 1
             findings.append(
                 Finding(
                     f'check_failed:{check.asset_key}:{check.check_name}',
@@ -1103,9 +1579,11 @@ class Monitor:
         heartbeats = self._heartbeats()
         fresh = 0
         for heartbeat in heartbeats:
-            if not heartbeat_is_fresh(
+            healthy = heartbeat_is_fresh(
                 heartbeat, max_age_seconds=HEARTBEAT_MAX_AGE_SECONDS, now=now.timestamp()
-            ):
+            )
+            self.condition_states[f'heartbeat_stale:{heartbeat.stem}'] = ('workers_alive', heartbeat.stem, healthy)
+            if not healthy:
                 feed = heartbeat.name.removesuffix('.heartbeat')
                 findings.append(
                     Finding(
@@ -1132,6 +1610,8 @@ class Monitor:
             'counts_limited': len(receipts) >= 1000,
         }
         for receipt in receipts:
+            key = f'receipt_failed:{receipt.feed}:{receipt.series}'
+            self.event_counts[key] = self.event_counts.get(key, 0) + 1
             findings.append(
                 Finding(
                     f'receipt_failed:{receipt.feed}:{receipt.series}',
@@ -1143,6 +1623,7 @@ class Monitor:
         return findings
 
     def _capture_finding(self, now: datetime) -> Finding | None:
+        self.capture_evidence = {}
         path = self.heartbeat_dir / 'perp_capture.status.json'
         try:
             with path.open('rb') as stream:
@@ -1162,9 +1643,12 @@ class Monitor:
                 if parsed.tzinfo is None:
                     raise ValueError(f'Capture {field} has no timezone')
                 age = (now - parsed).total_seconds()
+                measurement = {'committed_at': 'committed_age_seconds', 'last_response_at': 'response_age_seconds', 'last_durable_capture_at': 'durable_capture_age_seconds'}[field]
+                self.capture_evidence[measurement] = age
                 if age > HEARTBEAT_MAX_AGE_SECONDS or age < -60:
                     raise ValueError(f'Capture {field} is stale or in the future')
             used = status.get('spool_bytes')
+            self.capture_evidence['spool_bytes'] = used if type(used) is int else None
             if type(used) is not int or used < 0 or used >= CAPTURE_SPOOL_BYTES:
                 raise ValueError('Capture spool capacity reached or invalid')
             error = status.get('error_code')
@@ -1199,6 +1683,7 @@ class Monitor:
                 reason = f'{type(error).__name__}: {error}'
             else:
                 reason = 'no rows for the last completed minute'
+            self.condition_states[f'collector_silent:{probe.name}'] = ('collectors_serving', probe.name, serving)
             if not serving:
                 findings.append(
                     Finding(
@@ -1209,6 +1694,7 @@ class Monitor:
                     )
                 )
         capture = self._capture_finding(minute + timedelta(minutes=1))
+        self.condition_states['collector_capture'] = ('collectors_serving', 'Raw-perp capture', capture is None)
         if capture is not None:
             findings.append(capture)
         self.tick_evidence['collectors_serving'] = {
@@ -1230,6 +1716,7 @@ class Monitor:
         by_service: dict[str, list[str]] = {}
         for row in rows:
             by_service.setdefault(row.service, []).append(row.message)
+        self.event_counts.update({f'error_logs:{service}': len(messages) for service, messages in by_service.items()})
         return [
             Finding(
                 f'error_logs:{service}',

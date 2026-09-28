@@ -311,9 +311,15 @@ def _replay_historical_busy_minute(root: Path) -> dict[str, int | float]:
     with sqlite3.connect(root / 'capture.sqlite3') as connection:
         payload = connection.execute('SELECT sum(length(payload)) FROM trades').fetchone()[0]
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == 'linux':
+        # ru_maxrss includes inherited pre-exec residency; VmHWM belongs to this exec image.
+        rss = int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines()
+                       if line.startswith('VmHWM:'))) * 1024
+    elif sys.platform != 'darwin':
+        rss *= 1024
     return {
         'rows': revision.row_count, 'spool_bytes': spool.spool_bytes(root),
-        'payload_bytes': payload, 'max_rss_bytes': rss if sys.platform == 'darwin' else rss * 1024,
+        'payload_bytes': payload, 'max_rss_bytes': rss,
         'wall_seconds': time.monotonic() - started, 'cpu_seconds': time.process_time() - cpu_started,
     }
 

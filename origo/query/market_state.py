@@ -19,6 +19,14 @@ Cell volumes are ClickHouse ``sumKahan`` sums of the selected base contributions
 grid totals and POCs equal ``math.fsum`` over the emitted cells, so a consumer reproduces them
 exactly from ``cells.arrow``; they are accumulated exactly while the cells stream, so memory
 does not grow with the result. Counts widen to UInt64 before summing.
+
+A request may name ``measures`` from the detail component (PRD-0023). It then pins only the
+partitions that hold both components, runs the cells statement above unchanged beside one
+statement over the detail component, and merges the two cell streams. The detail sums stay
+integers (satoshis, cents, microseconds) until each is divided once into BTC, USDT or seconds,
+so their totals are the integer totals divided once, not ``math.fsum`` of the emitted cells.
+Cells the path moved through or held in without trading appear only with ``path_length`` or
+``dwell``, and then count towards the automatic price extent.
 """
 
 from __future__ import annotations
@@ -52,7 +60,9 @@ from origo.sources.storage import SourceStore
 SOURCE: Final = 'binance_spot_trades'
 METADATA_KEY: Final = 'origo.market_state'
 SCHEMA_VERSION: Final = 1
-FIELDS: Final = ('t1', 't2', 'p1', 'p2', 'tR', 'pR')
+MEASURES_SCHEMA_VERSION: Final = 2
+FIELDS: Final = ('t1', 't2', 'p1', 'p2', 'tR', 'pR', 'measures')
+MEASURES: Final = ('base_volume', 'path_length', 'dwell', 'high', 'low', 'open', 'close')
 CELLS_FILE: Final = 'cells.arrow'
 SUMMARY_FILE: Final = 'summary.arrow'
 BATCH_ROWS: Final = 65_536
@@ -87,6 +97,10 @@ _MAX_TEXT: Final = 64
 _FIRST_MIDPOINT: Final = Decimal(BASE_PRICE_USDT) / 2
 _FLOAT64_MAX: Final = Fraction(sys.float_info.max)
 _CUBE_COMPONENTS: Final = {False: 'market_state', True: 'market_state_latest'}
+_DETAIL_COMPONENTS: Final = {False: 'market_state_detail', True: 'market_state_detail_latest'}
+# The detail sums in integer units, and the units they are divided into: satoshis per BTC,
+# cents per USDT and microseconds per second.
+_SCALES: Final = {'base_volume': 100_000_000, 'path_length': 100, 'dwell': 1_000_000}
 _PIN_STRUCTURE: Final = 'partition_key String, revision String, build_id UUID'
 _CELL_COLUMNS: Final = (
     'time_index, price_index, volume, trade_count, taker_buy_volume, taker_buy_trade_count'
@@ -107,6 +121,8 @@ class _Array(Protocol):
 class _Batch(Protocol):
     @property
     def num_rows(self) -> int: ...
+    @property
+    def num_columns(self) -> int: ...
     def column(self, i: int) -> _Array: ...
 
 
@@ -117,6 +133,7 @@ class _Field(Protocol):
 
 class _Schema(Protocol):
     def field(self, i: int) -> _Field: ...
+    def append(self, field: object) -> _Schema: ...
     def with_metadata(self, metadata: Mapping[str, str]) -> _Schema: ...
 
 
@@ -128,6 +145,7 @@ class _BatchClass(Protocol):
 class _PyArrow(Protocol):
     RecordBatch: _BatchClass
 
+    def array(self, obj: object, type: object = None, mask: object = None) -> _Array: ...
     def field(self, name: str, type: object, nullable: bool = True) -> object: ...
     def schema(self, fields: Sequence[object]) -> _Schema: ...
     def string(self) -> object: ...
@@ -233,6 +251,7 @@ class Request:
     p2: Decimal | None
     time_exponent: int
     price_exponent: int
+    measures: tuple[str, ...] = ()
 
     @property
     def time_resolution(self) -> float:
@@ -250,6 +269,7 @@ class Request:
             'p2': None if self.p2 is None else str(self.p2),
             'tR': self.time_resolution,
             'pR': self.price_resolution,
+            **({'measures': list(self.measures)} if self.measures else {}),
         }
 
 
@@ -286,6 +306,7 @@ def parse_request(raw: bytes) -> Request:
         t1, t2, p1, p2,
         _exponent(fields.get('tR'), _TIME_BASE, 'tR'),
         _exponent(fields.get('pR'), _PRICE_BASE, 'pR'),
+        _measures(fields.get('measures')),
     )
 
 
@@ -294,8 +315,9 @@ def statement_settings(result_id: str) -> dict[str, object]:
     return {**QUERY_SETTINGS, 'log_comment': result_id}
 
 
-def pin(store: SourceStore, settings: Mapping[str, object]) -> Pin:
-    """Pin the current accepted partitions; coverage ends at the first one without the cube."""
+def pin(store: SourceStore, settings: Mapping[str, object], *, detail: bool = False) -> Pin:
+    """Pin the current accepted partitions; coverage ends at the first one without the cube,
+    or with ``detail``, the first one without both the cube and its detail component."""
     rows = store.execute(
         f"""SELECT partition_key, provisional, partition_start, partition_end, generation,
         revision, build_id, component_hashes
@@ -309,8 +331,9 @@ def pin(store: SourceStore, settings: Mapping[str, object]) -> Pin:
     for record in (_record(row) for row in rows):
         if record.partition.end <= CUBE_START:
             continue
-        component = _CUBE_COMPONENTS[record.partition.provisional]
-        if record.partition.start != cursor or component not in dict(record.component_hashes):
+        provisional = record.partition.provisional
+        needed = (_CUBE_COMPONENTS[provisional], *((_DETAIL_COMPONENTS[provisional],) if detail else ()))
+        if record.partition.start != cursor or not set(needed) <= dict(record.component_hashes).keys():
             break
         pinned.append(record)
         cursor = record.partition.end
@@ -336,7 +359,7 @@ def write_result(
     created = datetime.now(UTC)
     settings = statement_settings(result_id)
     started = time.perf_counter()
-    state = pin(runtime.store, settings)
+    state = pin(runtime.store, settings, detail=bool(request.measures))
     pinned = time.perf_counter()
     plan = _plan(request, state)
     token = state_token(SOURCE, plan.records)
@@ -344,7 +367,8 @@ def write_result(
     try:
         prices = plan.prices(client, runtime.store, settings)
         priced = time.perf_counter()
-        totals = _write_cells(client, runtime.store, plan, prices, staging / CELLS_FILE, result_id, token, guard, settings)
+        write = _write_measures if request.measures else _write_cells
+        totals = write(client, runtime.store, plan, prices, staging / CELLS_FILE, result_id, token, guard, settings)
         written = time.perf_counter()
         _validate(runtime, client, plan.records, settings)
         validated = time.perf_counter()
@@ -374,8 +398,9 @@ def write_result(
         'canonical_through': state.canonical_through,
         'state_token': token,
         'created_at': created,
+        **{name: total / _SCALES[name] for name, total in totals.sums.items()},
     }
-    summary = SUMMARY_SCHEMA.with_metadata(_metadata(result_id, request, plan, token))
+    summary = _summary_schema(request.measures).with_metadata(_metadata(result_id, request, plan, token))
     with ipc.new_file(str(staging / SUMMARY_FILE), summary) as writer:
         writer.write_batch(pa.RecordBatch.from_pylist([fields], schema=summary))
     log.info(
@@ -427,14 +452,20 @@ class _Plan:
     def partial(self, edge: int, exponent: int) -> bool:
         return self.time_lower < self.time_upper and edge % 2**exponent != 0
 
-    def union(self, store: SourceStore, prices: tuple[int, int] | None) -> tuple[str, _External] | None:
-        """The pinned base contributions inside the rectangle, and their identity tables."""
+    def union(
+        self, store: SourceStore, prices: tuple[int, int] | None, detail: str | None = None
+    ) -> tuple[str, _External] | None:
+        """The pinned base contributions inside the rectangle, and their identity tables.
+
+        With ``detail``, those columns of the detail component's rows in the same rectangle.
+        """
         if self.time_lower >= self.time_upper or not self.records:
             return None
         external = _external()
         first = self.edge_time(self.time_lower).date()
         last = (self.edge_time(self.time_upper) - timedelta(microseconds=1)).date()
         price = '' if prices is None else f' AND price_index >= {prices[0]} AND price_index < {prices[1]}'
+        components, columns = (_CUBE_COMPONENTS, _CELL_COLUMNS) if detail is None else (_DETAIL_COMPONENTS, detail)
         parts: list[str] = []
         for provisional in (False, True):
             records = [record for record in self.records if record.partition.provisional == provisional]
@@ -443,7 +474,7 @@ class _Plan:
             name = 'provisional' if provisional else 'canonical'
             _add_identities(external, name, records)
             parts.append(
-                f"""SELECT {_CELL_COLUMNS} FROM {store.component_table(_CUBE_COMPONENTS[provisional])}
+                f"""SELECT {columns} FROM {store.component_table(components[provisional])}
                 WHERE source_date >= '{first.isoformat()}' AND source_date <= '{last.isoformat()}'
                 AND (partition_key, revision, build_id) IN (SELECT partition_key, revision, build_id FROM {name})
                 AND time_index >= {self.time_lower} AND time_index < {self.time_upper}{price}"""
@@ -472,8 +503,13 @@ class _Plan:
     def _observed(
         self, client: _HttpClient, store: SourceStore, settings: Mapping[str, object]
     ) -> tuple[int, int] | None:
-        """The occupied base rows inside the time window, whatever price bound was supplied."""
-        selection = self.union(store, None)
+        """The occupied base rows inside the time window, whatever price bound was supplied.
+
+        With path length or dwell requested, the rows the path moved through or held in count
+        too, so the extent is that of the detail component's rows.
+        """
+        moved = not {'path_length', 'dwell'}.isdisjoint(self.request.measures)
+        selection = self.union(store, None, 'price_index' if moved else None)
         if selection is None:
             return None
         body, external = selection
@@ -547,6 +583,7 @@ class _Totals:
     taker_buy_trade_count: int = 0
     volumes: _ExactSums = field(default_factory=_ExactSums)
     taker_volumes: _ExactSums = field(default_factory=_ExactSums)
+    sums: dict[str, int] = field(default_factory=dict[str, int])
     waited: float = 0.0
     writing: float = 0.0
 
@@ -595,12 +632,7 @@ def _write_cells(
     with ipc.new_file(str(path), schema) as writer:
         if selection is not None:
             body, external = selection
-            query = f"""SELECT I, J, sumKahan(volume), sum(toUInt64(trade_count)),
-                sumKahan(taker_buy_volume), sum(toUInt64(taker_buy_trade_count))
-                FROM (SELECT {_shift('time_index', plan.request.time_exponent)} AS I,
-                    {_shift('price_index', plan.request.price_exponent)} AS J, volume, trade_count,
-                    taker_buy_volume, taker_buy_trade_count FROM ({body}))
-                GROUP BY I, J ORDER BY I, J"""
+            query = _cells_statement(plan, body)
             started = time.perf_counter()
             with client.raw_stream(query, settings=settings, fmt='ArrowStream', external_data=external) as stream:
                 for batch in ipc.open_stream(stream):
@@ -617,6 +649,239 @@ def _write_cells(
                     totals.writing += time.perf_counter() - began
             totals.waited = time.perf_counter() - started - totals.writing
     return totals
+
+
+def _cells_statement(plan: _Plan, body: str) -> str:
+    """PRD-0022's cells statement over a selection of base contributions."""
+    return f"""SELECT I, J, sumKahan(volume), sum(toUInt64(trade_count)),
+                sumKahan(taker_buy_volume), sum(toUInt64(taker_buy_trade_count))
+                FROM (SELECT {_shift('time_index', plan.request.time_exponent)} AS I,
+                    {_shift('price_index', plan.request.price_exponent)} AS J, volume, trade_count,
+                    taker_buy_volume, taker_buy_trade_count FROM ({body}))
+                GROUP BY I, J ORDER BY I, J"""
+
+
+def _detail_statement(plan: _Plan, body: str) -> str:
+    """The requested measures per cell from the detail component, in cell order.
+
+    Sums stay integers. Prices and trade times come from the base cells with trades: a cell
+    without trades stores zeros there, so it never supplies an extreme, open or close. Such a
+    cell appears only with path length or dwell.
+    """
+    measures = plan.request.measures
+    traded = 'sum(toUInt64(trade_count)) > 0'
+    outputs = [f'sum(toUInt64({name}))' for name in _SCALES if name in measures]
+    if 'high' in measures:
+        outputs.append(f'if({traded}, maxIf(high, trade_count > 0), NULL)')
+    if 'low' in measures:
+        outputs.append(f'if({traded}, minIf(low, trade_count > 0), NULL)')
+    for measure, pick, side in (('open', 'argMinIf', 'first'), ('close', 'argMaxIf', 'last')):
+        if measure in measures:
+            outputs += [
+                f'if({traded}, {pick}({side}_price, {side}_trade_id, trade_count > 0), NULL)',
+                f'if({traded}, {pick}({side}_trade_at, {side}_trade_id, trade_count > 0), NULL)',
+            ]
+    having = '' if {'path_length', 'dwell'} & set(measures) else f' HAVING {traded}'
+    return f"""SELECT I, J, {', '.join(outputs)}
+        FROM (SELECT {_shift('time_index', plan.request.time_exponent)} AS I,
+            {_shift('price_index', plan.request.price_exponent)} AS J, * EXCEPT (time_index, price_index)
+            FROM ({body}))
+        GROUP BY I, J{having} ORDER BY I, J"""
+
+
+def _detail_columns(measures: tuple[str, ...]) -> str:
+    """The detail columns the requested measures read, and the trade count that qualifies prices."""
+    columns = ['time_index', 'price_index', 'trade_count', *(name for name in _SCALES if name in measures)]
+    columns += [name for name in ('high', 'low') if name in measures]
+    for measure, side in (('open', 'first'), ('close', 'last')):
+        if measure in measures:
+            columns += [f'{side}_price', f'{side}_trade_id', f'{side}_trade_at']
+    return ', '.join(columns)
+
+
+def _write_measures(
+    client: _HttpClient,
+    store: SourceStore,
+    plan: _Plan,
+    prices: _Prices,
+    path: Path,
+    result_id: str,
+    token: str,
+    guard: Callable[[int], None],
+    settings: Mapping[str, object],
+) -> _Totals:
+    """The cells of a request with measures: PRD-0022's statement beside the detail statement.
+
+    Both statements run at once and stream in cell order; the merge writes every cell either
+    holds. A cell only the detail statement holds has no trades, so its four PRD-0022 measures
+    are zero.
+    """
+    measures = plan.request.measures
+    schema = _cells_schema(measures).with_metadata(_metadata(result_id, plan.request, plan, token))
+    totals = _Totals(sums={name: 0 for name in _SCALES if name in measures})
+    bounds = prices.bounds
+    base = None if bounds is None else plan.union(store, bounds)
+    detail = None if bounds is None else plan.union(store, bounds, _detail_columns(measures))
+    with ipc.new_file(str(path), schema) as writer:
+        if base is None or detail is None:
+            return totals
+        other = _connect()
+        try:
+            started = time.perf_counter()
+            with (
+                client.raw_stream(
+                    _cells_statement(plan, base[0]), settings=settings, fmt='ArrowStream', external_data=base[1]
+                ) as first,
+                other.raw_stream(
+                    _detail_statement(plan, detail[0]), settings=settings, fmt='ArrowStream', external_data=detail[1]
+                ) as second,
+            ):
+                for keys, cells, extra in _merged(ipc.open_stream(first), ipc.open_stream(second)):
+                    began = time.perf_counter()
+                    arrays = _merged_arrays(keys, cells, extra, measures, totals)
+                    writer.write_batch(pa.RecordBatch.from_arrays(
+                        [pa.array(values, type=schema.field(index).type, mask=mask)
+                         for index, (values, mask) in enumerate(arrays)],
+                        schema=schema,
+                    ))
+                    guard(path.stat().st_size)
+                    rows = cast(npt.NDArray[np.uint64], arrays[1][0])
+                    totals.cells += len(keys)
+                    totals.trade_count += int(arrays[3][0].sum())
+                    totals.taker_buy_trade_count += int(arrays[5][0].sum())
+                    totals.volumes.add(rows, cast(npt.NDArray[np.float64], arrays[2][0]))
+                    totals.taker_volumes.add(rows, cast(npt.NDArray[np.float64], arrays[4][0]))
+                    totals.writing += time.perf_counter() - began
+            totals.waited = time.perf_counter() - started - totals.writing
+        finally:
+            other.close()
+    return totals
+
+
+_Column = npt.NDArray[np.generic]
+_Aligned = tuple[npt.NDArray[np.intp], list[_Column]]
+
+
+@dataclass
+class _Stream:
+    """One statement's cells in (I, J) order, read batch by batch."""
+
+    batches: Iterator[_Batch]
+    keys: npt.NDArray[np.uint64] = field(default_factory=lambda: np.empty(0, np.uint64))
+    columns: list[_Column] = field(default_factory=list[_Column])
+    done: bool = False
+
+    def fill(self) -> None:
+        batch = next(self.batches, None)
+        if batch is None:
+            self.done = True
+            return
+        values = [
+            np.asarray(batch.column(index).to_numpy(zero_copy_only=False)) for index in range(batch.num_columns)
+        ]
+        cells, rows = values[0].astype(np.uint64), values[1].astype(np.uint64)
+        # One sortable key per cell: time and price indices below 2^32 cover prices up to
+        # 536,870,911,999 USDT and 7,640 years of base columns.
+        if bool(np.any(cells >> np.uint64(32))) or bool(np.any(rows >> np.uint64(32))):
+            raise ValueError('Cell indices of 2^32 or more cannot be merged.')
+        self.keys = np.concatenate([self.keys, (cells << np.uint64(32)) | rows])
+        self.columns = [
+            np.concatenate([held, new]) for held, new in zip(self.columns, values[2:], strict=True)
+        ] if self.columns else values[2:]
+
+    def take(self, bound: np.uint64) -> tuple[npt.NDArray[np.uint64], list[_Column]]:
+        count = int(np.searchsorted(self.keys, bound, side='right'))
+        taken = self.keys[:count], [column[:count] for column in self.columns]
+        self.keys, self.columns = self.keys[count:], [column[count:] for column in self.columns]
+        return taken
+
+
+def _merged(
+    first: Iterator[_Batch], second: Iterator[_Batch]
+) -> Iterator[tuple[npt.NDArray[np.uint64], _Aligned, _Aligned]]:
+    """Two sorted cell streams in step: each round, every cell key up to the smallest last key
+    either unfinished stream holds, with the positions of each stream's cells among them."""
+    streams = (_Stream(first), _Stream(second))
+    while True:
+        for stream in streams:
+            while not stream.done and not len(stream.keys):
+                stream.fill()
+        if all(stream.done and not len(stream.keys) for stream in streams):
+            return
+        ends = [stream.keys[-1] for stream in streams if not stream.done]
+        bound = min(ends) if ends else np.uint64(2**64 - 1)
+        (left, left_columns), (right, right_columns) = (stream.take(bound) for stream in streams)
+        keys = np.union1d(left, right)
+        yield keys, (np.searchsorted(keys, left), left_columns), (np.searchsorted(keys, right), right_columns)
+
+
+def _merged_arrays(
+    keys: npt.NDArray[np.uint64],
+    cells: _Aligned,
+    extra: _Aligned,
+    measures: tuple[str, ...],
+    totals: _Totals,
+) -> list[tuple[_Column, _Column | None]]:
+    """The output columns of one round of merged cells, each with its null mask."""
+    size = len(keys)
+
+    def placed(values: _Column, aligned: _Aligned, index: int) -> _Column:
+        at, columns = aligned
+        if columns:
+            values[at] = columns[index]
+        return values
+
+    arrays: list[tuple[_Column, _Column | None]] = [
+        (keys >> np.uint64(32), None), (keys & np.uint64(0xFFFFFFFF), None)
+    ]
+    for index, kind in enumerate((np.float64, np.uint64, np.float64, np.uint64)):
+        arrays.append((placed(np.zeros(size, kind), cells, index), None))
+    sums = [name for name in _SCALES if name in measures]
+    for index, name in enumerate(sums):
+        values = cast(npt.NDArray[np.uint64], placed(np.zeros(size, np.uint64), extra, index))
+        totals.sums[name] += int(values.sum())
+        arrays.append((_units(values, _SCALES[name]), None))
+    times = [False] * sum(name in measures for name in ('high', 'low'))
+    times += [flag for name in ('open', 'close') if name in measures for flag in (False, True)]
+    for index, is_time in enumerate(times, start=len(sums)):
+        empty = np.full(size, np.datetime64('NaT', 'us')) if is_time else np.full(size, np.nan)
+        values = placed(empty, extra, index)
+        arrays.append((values, np.isnat(values) if is_time else np.isnan(values)))
+    return arrays
+
+
+def _units(values: npt.NDArray[np.uint64], scale: int) -> npt.NDArray[np.float64]:
+    """Integer sums of satoshis, cents or microseconds, each divided once into its unit.
+
+    Below 2^53 an integer converts to Float64 exactly, so one division rounds it correctly;
+    larger sums are divided as Python integers, which is correctly rounded too.
+    """
+    units = values.astype(np.float64) / scale
+    for index in np.flatnonzero(values >= np.uint64(2**53)).tolist():
+        units[index] = int(values[index]) / scale
+    return units
+
+
+def _cells_schema(measures: tuple[str, ...]) -> _Schema:
+    schema = CELLS_SCHEMA
+    for name in _SCALES:
+        if name in measures:
+            schema = schema.append(pa.field(name, _FLOAT64, nullable=False))
+    for name in ('high', 'low'):
+        if name in measures:
+            schema = schema.append(pa.field(name, _FLOAT64))
+    for name in ('open', 'close'):
+        if name in measures:
+            schema = schema.append(pa.field(name, _FLOAT64)).append(pa.field(f'{name}_at', _MICROS))
+    return schema
+
+
+def _summary_schema(measures: tuple[str, ...]) -> _Schema:
+    schema = SUMMARY_SCHEMA
+    for name in _SCALES:
+        if name in measures:
+            schema = schema.append(pa.field(name, _FLOAT64, nullable=False))
+    return schema
 
 
 def _validate(
@@ -674,7 +939,7 @@ def _metadata(result_id: str, request: Request, plan: _Plan, token: str) -> dict
     return {
         METADATA_KEY: json.dumps(
             {
-                'schema_version': SCHEMA_VERSION,
+                'schema_version': MEASURES_SCHEMA_VERSION if request.measures else SCHEMA_VERSION,
                 'result_id': result_id,
                 'request': request.describe(),
                 'grid': {
@@ -755,6 +1020,21 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _constant(value: str) -> object:
     raise ValueError(f'unsupported constant {value}')
+
+
+def _measures(value: object) -> tuple[str, ...]:
+    """The requested measures in ``MEASURES`` order; absent, null and [] request none."""
+    names = cast(list[object], value) if isinstance(value, list) else None
+    if value is not None and (
+        names is None
+        or not all(isinstance(name, str) and name in MEASURES for name in names)
+        or len(set(map(str, names))) != len(names)
+    ):
+        raise RequestError(
+            400, 'invalid_measures',
+            f'measures must be an array of distinct names from: {", ".join(MEASURES)}.', field='measures',
+        )
+    return tuple(name for name in MEASURES if names is not None and name in names)
 
 
 def _time(value: object, name: str) -> datetime | None:

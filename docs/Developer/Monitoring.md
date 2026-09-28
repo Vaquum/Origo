@@ -225,7 +225,9 @@ is still covering history. The source's original
 existing product health during upgrade. Cube-only proof damage is reported by
 M1/M2 without changing otherwise valid R1/C1/C2. Staged but unactivated cube receipts do
 not satisfy M1/M2. Cube nodes and gates appear in Sources, Overview and Laws from
-the same declarations and monitor tape. Missing registration, proof or physical
+the same declarations and monitor tape. The cube's detail components (PRD-0023) appear
+there as projections of their own, `UNKNOWN` until the partition they read holds the key;
+M1 and M2 judge only the cube. Missing registration, proof or physical
 count evidence is never green. These probes retain the five-second statement,
 512 MiB, single-thread and 20-second whole-pass budgets; timeout is UNKNOWN.
 

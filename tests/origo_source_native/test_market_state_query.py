@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import time
@@ -10,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -23,22 +25,31 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
+    MEASURES,
     METADATA_KEY,
     QUERY_SETTINGS,
     SUMMARY_SCHEMA,
+    Pin,
     RequestError,
     parse_request,
     pin,
     write_result,
 )
+from origo.query.market_state_reader import query, read_table
+from origo.query.market_state_results import ResultStore
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.contracts import Partition, PartitionPolicy, Revision, SourceError
 from origo.sources.hashing import content_hash, state_token
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.locking import source_lock
 from origo.sources.storage import SourceStore
+from origo.workers.market_state_api import MarketStateApi, serve
 
 from .test_binance_daily_source_adapter import ARCHIVES
+from .test_market_state_detail import Cell
+from .test_market_state_detail import Trade as Traded
+from .test_market_state_detail import _reference as _detail_reference
+from .test_market_state_detail import _trades as _detail_trades
 from .test_market_state_registration import CapturedArchive, _capture
 
 T0_US = 1_609_459_200_000_000
@@ -501,6 +512,14 @@ def test_reclaimed_pinned_build_discards_the_result(
         (b'{"tR": -56.25}', 'unsupported_resolution', 'tR'),
         (b'{"tR": 56.250000000000001}', 'unsupported_resolution', 'tR'),
         (b'{"pR": 100}', 'unsupported_resolution', 'pR'),
+        (b'{"measures": "dwell"}', 'invalid_measures', 'measures'),
+        (b'{"measures": {"dwell": true}}', 'invalid_measures', 'measures'),
+        (b'{"measures": ["dwell", "dwell"]}', 'invalid_measures', 'measures'),
+        (b'{"measures": ["volume"]}', 'invalid_measures', 'measures'),
+        (b'{"measures": ["Dwell"]}', 'invalid_measures', 'measures'),
+        (b'{"measures": [1]}', 'invalid_measures', 'measures'),
+        (b'{"measures": [null]}', 'invalid_measures', 'measures'),
+        (b'{"measures": [["dwell"]]}', 'invalid_measures', 'measures'),
     ],
 )
 def test_invalid_requests_are_rejected_with_reasons(raw: bytes, reason: str, field: str | None) -> None:
@@ -647,3 +666,356 @@ def test_statements_open_no_clickhouse_session(origo_test_env: dict[str, str]) -
     finally:
         client.close()
     assert carried == b'0\n'
+
+
+# PRD-0023: measures from the detail component. The reference is the detail tests' independent
+# per-partition build from the capture text, grouped here to the requested grid.
+
+_UNITS = {'base_volume': 100_000_000, 'path_length': 100, 'dwell': 1_000_000}
+_PRICES = ('high', 'low', 'open', 'open_at', 'close', 'close_at')
+
+
+def detailed(runtime: SourceRuntime, *days: str, minutes: tuple[str, ...] = ()) -> SourceRuntime:
+    """The cube and its detail component enabled, then the days and minutes built."""
+    runtime.enable_components('market_state_detail')
+    return built(runtime, *days, minutes=minutes)
+
+
+def alone(runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch, day: str) -> SourceRuntime:
+    """A later authentic capture, queried by itself.
+
+    Coverage runs from 2021-01-01 to the first missing day, so the capture's day is pinned on
+    its own, with both components.
+    """
+    detailed(runtime, day)
+    record = runtime.store.record(CapturedArchive().partition(day))
+    assert record is not None
+    assert {'market_state', 'market_state_detail'} <= dict(record.component_hashes).keys()
+
+    def pinned(store: SourceStore, settings: object, *, detail: bool = False) -> Pin:
+        return Pin((record,), record.partition.end, record.partition.end)
+
+    monkeypatch.setattr(market_state, 'pin', pinned)
+    return runtime
+
+
+def partition_cells(day: str, start: str, end: str, *, provisional: bool = False) -> dict[tuple[int, int], Cell]:
+    """One built partition's detail cells: a canonical day, or a provisional minute in milliseconds."""
+    body = (ARCHIVES / f'BTCUSDT-trades-{day}.csv').read_bytes()
+    low, high = _micros(start), _micros(end)
+    selected = [trade for trade in _detail_trades(body, milliseconds=provisional) if low <= trade.micros < high]
+    return _detail_reference(selected, low, high)
+
+
+def measured(
+    parts: list[dict[tuple[int, int], Cell]], n: int, m: int, *,
+    columns: tuple[int, int] | None = None, rows: tuple[int, int] | None = None,
+) -> dict[tuple[int, int], Cell]:
+    """Base cells of every partition grouped into (I, J) cells, trades pooled, sums added."""
+    grouped: dict[tuple[int, int], Cell] = {}
+    for cells in parts:
+        for (column, row), cell in cells.items():
+            if (columns is not None and not columns[0] <= column < columns[1]) or (
+                rows is not None and not rows[0] <= row < rows[1]
+            ):
+                continue
+            group = grouped.setdefault((column >> n if n < 64 else 0, row >> m if m < 64 else 0), Cell(cell.event))
+            group.trades += cell.trades
+            group.path += cell.path
+            group.dwell += cell.dwell
+    return grouped
+
+
+def _moment(micros: int) -> datetime:
+    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=micros)
+
+
+def expected_measures(cell: Cell, measures: tuple[str, ...]) -> dict[str, object]:
+    """A cell's measure columns: integer sums divided once, prices of its trades or null."""
+    sums = {'base_volume': sum(trade.sats for trade in cell.trades), 'path_length': cell.path, 'dwell': cell.dwell}
+    values: dict[str, object] = {name: sums[name] / _UNITS[name] for name in _UNITS if name in measures}
+    first = min(cell.trades, key=lambda trade: trade.id, default=None)
+    last = max(cell.trades, key=lambda trade: trade.id, default=None)
+    prices = {
+        'high': max((trade.price for trade in cell.trades), default=None),
+        'low': min((trade.price for trade in cell.trades), default=None),
+        'open': None if first is None else first.price, 'open_at': None if first is None else _moment(first.micros),
+        'close': None if last is None else last.price, 'close_at': None if last is None else _moment(last.micros),
+    }
+    values.update({name: prices[name] for name in _PRICES if name.removesuffix('_at') in measures})
+    return values
+
+
+def assert_measures(cells: list[dict[str, Any]], expected: dict[tuple[int, int], Cell], measures: tuple[str, ...]) -> None:
+    moved = not {'path_length', 'dwell'}.isdisjoint(measures)
+    emitted = {key: cell for key, cell in expected.items() if cell.trades or moved}
+    assert [(cell['time_index'], cell['price_index']) for cell in cells] == sorted(emitted)
+    names = [name for name in (*_UNITS, *_PRICES) if name.removesuffix('_at') in measures]
+    for cell in cells:
+        assert {name: cell[name] for name in names} == expected_measures(
+            emitted[(cell['time_index'], cell['price_index'])], measures
+        )
+
+
+def statement_hashes(result_id: str) -> list[str]:
+    """SHA-256 of every statement one result ran, in order."""
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        client.execute('SYSTEM FLUSH LOGS')
+        rows = client.execute(
+            "SELECT query FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
+            'ORDER BY event_time_microseconds',
+            {'result': result_id},
+        )
+    finally:
+        client.disconnect()
+    return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows]
+
+
+@pytest.mark.parametrize(('n', 'm'), [(0, 0), (1, 0), (0, 1), (2, 0), (2, 3), (6, 0), (11, 2), (64, 64), (1018, 1017)])
+def test_measures_match_raw_trades_at_independent_resolutions(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n: int, m: int
+) -> None:
+    runtime = detailed(cube, DAY1, minutes=MINUTES)
+    tR, pR = 225 * 2**n // 4 if n >= 2 else [56.25, 112.5][n], 125 * 2**m
+    result = run(runtime, tmp_path, tR=tR, pR=pR, measures=list(MEASURES))
+    # 2021-01-01's capture as its day and three provisional minutes of 2021-01-02, each built
+    # from its own trades; base cells split across minutes are summed once.
+    parts = [partition_cells(DAY1, '2021-01-01T00:00:00+00:00', '2021-01-02T00:00:00+00:00')] + [
+        partition_cells(DAY2, minute, (datetime.fromisoformat(minute) + timedelta(minutes=1)).isoformat(), provisional=True)
+        for minute in MINUTES
+    ]
+    expected = measured(parts, n, m)
+    assert_measures(result.cells, expected, MEASURES)
+    assert result.summary['cell_count'] == len(result.cells) == len(expected)
+    totals = {'base_volume': sum(trade.sats for cell in expected.values() for trade in cell.trades),
+              'path_length': sum(cell.path for cell in expected.values()),
+              'dwell': sum(cell.dwell for cell in expected.values())}
+    assert {name: result.summary[name] for name in _UNITS} == {name: totals[name] / _UNITS[name] for name in _UNITS}
+    # Over the same covered rectangle, PRD-0022's measures, totals and POCs are bit-identical.
+    effective = result.answer['effective']
+    plain = run(runtime, tmp_path, t1=effective['t1'], t2=effective['t2'], p1=effective['p1'], p2=effective['p2'], tR=tR, pR=pR)
+    names = [field.name for field in CELLS_SCHEMA]
+    assert [{name: cell[name] for name in names} for cell in result.cells if cell['trade_count']] == plain.cells
+    assert all(
+        (cell['volume'], cell['taker_buy_volume'], cell['taker_buy_trade_count']) == (0.0, 0.0, 0)
+        for cell in result.cells if not cell['trade_count']
+    )
+    for name in ('volume', 'trade_count', 'taker_buy_volume', 'taker_buy_trade_count', 'poc', 'taker_buy_poc'):
+        assert result.summary[name] == plain.summary[name], name
+    if (n, m) == (2, 0):
+        # The new totals are the integer totals divided once, not fsum of the emitted cells.
+        alone(runtime, monkeypatch, '2025-01-01')
+        day = run(runtime, tmp_path, t1='2025-01-01T00:00:00Z', t2='2025-01-02T00:00:00Z', tR=225, pR=125, measures=['base_volume'])
+        satoshis = sum(trade.sats for trade in _detail_trades((ARCHIVES / 'BTCUSDT-trades-2025-01-01.csv').read_bytes()))
+        assert len(day.cells) == 5 and satoshis == 12_348_987_000
+        assert day.summary['base_volume'] == satoshis / 10**8 == 123.48987
+        assert math.fsum(cell['base_volume'] for cell in day.cells) == 123.48987000000001
+
+
+def test_measures_selection_through_the_reader(cube: SourceRuntime, tmp_path: Path) -> None:
+    # The API tests import this module, so their helpers are imported here, once both exist.
+    from .test_market_state_api import RecordingReporter, roomy
+
+    detailed(cube, DAY1)
+    api = MarketStateApi(ResultStore(tmp_path / 'market-state', disk=roomy), RecordingReporter(), cube.lock_root, interrupted=1)
+    server = serve(api, port=0)
+    api.port = server.server_address[1]
+    url = f'http://127.0.0.1:{api.port}'
+    base = [field.name for field in CELLS_SCHEMA]
+    try:
+        for measures, columns in (
+            (None, []),
+            ([], []),
+            (['dwell'], ['dwell']),
+            (['close', 'dwell', 'high', 'open'], ['dwell', 'high', 'open', 'open_at', 'close', 'close_at']),
+        ):
+            result = query(t1='2021-01-01T00:00:00Z', t2='2021-01-02T00:00:00Z', measures=measures, url=url)
+            cells, summary = read_table(result.cells, url=url), read_table(result.summary, url=url)
+            assert cells.column_names == base + columns
+            assert summary.column_names == [field.name for field in SUMMARY_SCHEMA] + (['dwell'] if 'dwell' in columns else [])
+            chosen = [name for name in MEASURES if name in (measures or [])]
+            for table in (cells, summary):
+                meta = json.loads(table.schema.metadata[METADATA_KEY.encode()])
+                assert meta['schema_version'] == (2 if chosen else 1)
+                assert meta['request'].get('measures', []) == chosen and ('measures' in meta['request']) == bool(chosen)
+            rows = cells.to_pylist()
+            if 'high' in columns:
+                assert any(not row['trade_count'] for row in rows)
+                for row in rows:
+                    assert all((row[name] is None) == (not row['trade_count']) for name in columns[1:]), row
+        with pytest.raises(TypeError, match='not one string'):
+            query(measures='dwell', url=url)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize('day', [DAY1, '2021-05-19'])
+def test_column_prices_at_a_coarse_price_resolution(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, day: str
+) -> None:
+    runtime = detailed(cube, DAY1) if day == DAY1 else alone(cube, monkeypatch, day)
+    body = (ARCHIVES / f'BTCUSDT-trades-{day}.csv').read_bytes()
+    trades = _detail_trades(body)
+    start = datetime.fromisoformat(day).replace(tzinfo=UTC)
+    cells = _detail_reference(trades, _micros(start.isoformat()), _micros((start + timedelta(days=1)).isoformat()))
+    assert max(key[1] for key in cells) < 2**9
+    # Base columns, then columns of 32 hours that hold the day's untraded head and tail with its trades.
+    for n in (0, 11):
+        columns: dict[int, list[Traded]] = defaultdict(list)
+        for trade in trades:
+            columns[trade.column >> n].append(trade)
+        # 2021-05-19's column 212796 holds a row the path crossed eight times without a trade.
+        mixed = {column >> n for (column, _), cell in cells.items() if not cell.trades} & set(columns)
+        assert bool(mixed) == (n == 11 or day != DAY1)
+        result = run(
+            runtime, tmp_path, t1=start.isoformat(), t2=(start + timedelta(days=1)).isoformat(),
+            tR=56.25 * 2**n, pR=125 * 2**9, measures=['path_length', 'high', 'low', 'open', 'close'],
+        )
+        assert {cell['price_index'] for cell in result.cells} == {0}
+        assert {cell['time_index'] for cell in result.cells if cell['trade_count']} == set(columns)
+        for cell in result.cells:
+            group = columns.get(cell['time_index'], [])
+            first = min(group, key=lambda trade: trade.id, default=None)
+            last = max(group, key=lambda trade: trade.id, default=None)
+            assert (cell['open'], cell['high'], cell['low'], cell['close'], cell['open_at'], cell['close_at']) == (
+                (first.price, max(trade.price for trade in group), min(trade.price for trade in group), last.price,
+                 _moment(first.micros), _moment(last.micros))
+                if first is not None and last is not None else (None,) * 6
+            )
+
+
+def _bounds(result: Result) -> tuple[object, object]:
+    return result.answer['effective']['p1'], result.answer['effective']['p2']
+
+
+def test_measures_automatic_price_bounds(cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = detailed(cube, DAY1)
+    trades = _detail_trades((ARCHIVES / f'BTCUSDT-trades-{DAY1}.csv').read_bytes())
+    # Both bounds automatic: the extent of the emitted cells.
+    whole = run(runtime, tmp_path, measures=['dwell'])
+    rows = sorted({cell['price_index'] for cell in whole.cells})
+    assert _bounds(whole) == (rows[0] * 125.0, (rows[-1] + 1) * 125.0)
+    # After the day's last trade its price holds, untraded, until midnight.
+    last = trades[-1]
+    assert last.micros < _micros('2021-01-01T01:00:00+00:00')
+    tail = run(runtime, tmp_path, t1='2021-01-01T01:00:00Z', measures=['dwell'])
+    assert _bounds(tail) == (last.row * 125.0, (last.row + 1) * 125.0)
+    assert {(cell['price_index'], cell['trade_count']) for cell in tail.cells} == {(last.row, 0)}
+    assert tail.summary['dwell'] == 23 * 3600.0
+    assert (tail.summary['volume'], tail.summary['trade_count'], tail.summary['poc'], tail.summary['taker_buy_poc']) == (0.0, 0, None, None)
+    for other in (run(runtime, tmp_path, t1='2021-01-01T01:00:00Z', measures=['high']), run(runtime, tmp_path, t1='2021-01-01T01:00:00Z')):
+        assert _bounds(other) == (None, None) and other.cells == []
+    # One bound supplied: the other comes from the extent.
+    upper = run(runtime, tmp_path, p1=rows[-1] * 125, measures=['dwell'])
+    assert _bounds(upper) == (rows[-1] * 125.0, (rows[-1] + 1) * 125.0)
+    assert {cell['price_index'] for cell in upper.cells} == {rows[-1]}
+    # An empty rectangle: a supplied bound beyond the extent collapses the interval onto it.
+    empty = run(runtime, tmp_path, p1='30000', measures=['dwell', 'high'])
+    assert _bounds(empty) == (30000.0, 30000.0) and empty.cells == []
+    assert (empty.summary['dwell'], empty.summary['poc'], empty.summary['cell_count']) == (0.0, None, 0)
+    # A window that starts in another row than the trade before it: 2021-05-19's column 212796
+    # opens at row 267, where the price held from the column's start until its first trade at 268.
+    alone(runtime, monkeypatch, '2021-05-19')
+    jumpy = _detail_trades((ARCHIVES / 'BTCUSDT-trades-2021-05-19.csv').read_bytes())
+    first = next(index for index, trade in enumerate(jumpy) if trade.column == 212_796)
+    assert (jumpy[first - 1].row, jumpy[first].row) == (267, 268)
+    window = run(runtime, tmp_path, t1='2021-05-19T12:56:15Z', t2='2021-05-19T12:57:11.25Z', measures=['dwell'])
+    rows = sorted({cell['price_index'] for cell in window.cells})
+    assert 267 in rows and _bounds(window) == (rows[0] * 125.0, (rows[-1] + 1) * 125.0)
+    # A rectangle holding only moved-through cells: the 2023-03-24 halt.
+    alone(runtime, monkeypatch, '2023-03-24')
+    halt = run(runtime, tmp_path, t1='2023-03-24T12:00:00Z', t2='2023-03-24T13:00:00Z', measures=['dwell'])
+    assert _bounds(halt) == (28000.0, 28125.0)
+    assert {(cell['price_index'], cell['trade_count'], cell['dwell']) for cell in halt.cells} == {(224, 0, 56.25)}
+    assert (halt.summary['volume'], halt.summary['poc'], halt.summary['taker_buy_poc']) == (0.0, None, None)
+    for other in (run(runtime, tmp_path, t1='2023-03-24T12:00:00Z', t2='2023-03-24T13:00:00Z', measures=['low']),
+                  run(runtime, tmp_path, t1='2023-03-24T12:00:00Z', t2='2023-03-24T13:00:00Z')):
+        assert _bounds(other) == (None, None) and other.cells == []
+
+
+def test_integer_measures_divide_exactly_above_2_53() -> None:
+    # Full-history base volume is about 2^53 satoshis, where Float64 stops holding every integer.
+    probes = [0, 1, 12_348_987_000, 2**53 - 1, 2**53, 2**53 + 1, 2**53 + 3, 2**60 + 12_345, 2**64 - 1]
+    for scale in _UNITS.values():
+        units = market_state._units(np.array(probes, dtype=np.uint64), scale)
+        assert units.tolist() == [float(Fraction(value, scale)) for value in probes]
+        # Converting 2^53 + 1 to Float64 first rounds it before the division rounds again.
+        assert float(2**53 + 1) / scale != float(Fraction(2**53 + 1, scale)) == units[5]
+
+
+# SHA-256 of every statement each request below ran on v3.27.2 (7a516f9), recorded with this
+# test's captures: the pin, the automatic price extent when a bound was omitted, the cells and
+# the validation.
+_V3_27_2_STATEMENTS: dict[str, list[str]] = {
+    'everything': [
+        '0d80189b467fe176a4525a5ee2816636c9771a530836757a7e771233441f4345',
+        '3dc590e05df9463a6d56844e0ca28d6651bf32aa046c20f6cc09ca179e247afa',
+        '86c65d6ce39841d1d8a626ced4f2e89c981154bbca60549f381fd0198ad2118d',
+        'd5c62590764aee78b6fa98d93302fb20316c857474694e6f6107b089c023a83a',
+    ],
+    'window': [
+        '0d80189b467fe176a4525a5ee2816636c9771a530836757a7e771233441f4345',
+        '2fc2a648da423687f9b24af77ef2f1ea8acaded6b14dfbf270eaa1353736f0c8',
+        '863b6ff219685bbe1e37c41a2e0636cd7ca8733693068c7464da5d69de02f3af',
+        'd5c62590764aee78b6fa98d93302fb20316c857474694e6f6107b089c023a83a',
+    ],
+    'bounded': [
+        '0d80189b467fe176a4525a5ee2816636c9771a530836757a7e771233441f4345',
+        '66d5a802ccd37b441138d1c3fdb1479ad2c39d2dadbc6a1d931a4fe34953c94a',
+        'd5c62590764aee78b6fa98d93302fb20316c857474694e6f6107b089c023a83a',
+    ],
+    'tail': [
+        '0d80189b467fe176a4525a5ee2816636c9771a530836757a7e771233441f4345',
+        '432c0b269375ac991a03107e7ee842f19c1f360947679db0d4726ed9e527b9a4',
+        '82955091e7c8bbb182527e2a6ef416b4468cae3a4ec18b0fb14eaae56d76e060',
+        'd5c62590764aee78b6fa98d93302fb20316c857474694e6f6107b089c023a83a',
+    ],
+}
+
+
+def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, tmp_path: Path) -> None:
+    runtime = detailed(cube, DAY1, minutes=MINUTES)
+    requests: dict[str, dict[str, object]] = {
+        'everything': {},
+        'window': {'t1': '2021-01-01T00:57:11.25Z', 't2': '2021-01-01T01:00:00Z', 'tR': 225, 'pR': 250},
+        'bounded': {'t1': '2021-01-01T00:00:00Z', 't2': '2021-01-02T00:03:00Z', 'p1': 28000, 'p2': 30000, 'tR': 450, 'pR': 500},
+        'tail': {'t1': '2021-01-02T00:00:00Z', 'pR': 250},
+    }
+    for name, fields in requests.items():
+        for absent in ({}, {'measures': None}, {'measures': []}):
+            result = run(runtime, tmp_path, **fields, **absent)
+            assert statement_hashes(result.staging.name) == _V3_27_2_STATEMENTS[name], (name, absent)
+            for file, schema in (('cells.arrow', CELLS_SCHEMA), ('summary.arrow', SUMMARY_SCHEMA)):
+                assert ipc.open_file(result.staging / file).schema.remove_metadata() == schema
+                meta = metadata(result.staging / file)
+                assert set(meta) == {'schema_version', 'result_id', 'request', 'grid', 'data_cutoff', 'state_token', 'pins'}
+                assert meta['schema_version'] == 1 and set(meta['request']) == {'t1', 't2', 'p1', 'p2', 'tR', 'pR'}
+
+
+def test_measures_coverage_stops_where_detail_is_missing(cube: SourceRuntime, tmp_path: Path) -> None:
+    runtime = built(cube, DAY1, DAY2)
+    runtime.enable_components('market_state_detail')
+    runtime.upgrade_components(DAY1)
+    assert pin(runtime.store, QUERY_SETTINGS).cutoff == datetime(2021, 1, 3, tzinfo=UTC)
+    assert pin(runtime.store, QUERY_SETTINGS, detail=True).cutoff == datetime(2021, 1, 2, tzinfo=UTC)
+    # A later day with both components does not extend coverage past the day without detail.
+    runtime.build(DAY3)
+    detailed_state = pin(runtime.store, QUERY_SETTINGS, detail=True)
+    assert [record.partition.key for record in detailed_state.records] == [DAY1]
+    measured_days = run(runtime, tmp_path, measures=['dwell'])
+    assert measured_days.answer['data_cutoff'] == '2021-01-02T00:00:00.000000+00:00'
+    assert [pin_[0] for pin_ in metadata(measured_days.staging / 'summary.arrow')['pins']] == [DAY1]
+    with pytest.raises(RequestError) as later:
+        run(runtime, tmp_path, t1='2021-01-03T00:00:00Z', measures=['dwell'])
+    assert later.value.status == 409 and later.value.body() == {
+        'error': 'outside_coverage',
+        'history_start': '2021-01-01T00:00:00.000000+00:00',
+        'data_cutoff': '2021-01-02T00:00:00.000000+00:00',
+    }
+    # Without measures, coverage is the cube's own.
+    plain = run(runtime, tmp_path, t1='2021-01-03T00:00:00Z')
+    assert plain.answer['data_cutoff'] == '2021-01-04T00:00:00.000000+00:00' and plain.cells
+    runtime.upgrade_components(DAY2)
+    assert pin(runtime.store, QUERY_SETTINGS, detail=True).cutoff == datetime(2021, 1, 4, tzinfo=UTC)

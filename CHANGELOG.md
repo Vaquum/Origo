@@ -1,6 +1,21 @@
-# v3.28.0
+# v3.29.0
 
 - Share recorded operator summaries between the law dashboard and HTML/text email; group incident lifecycles, preserve repeat/trend coverage, and bound distinct dispatches to hourly with durable immutable retries.
+
+# v3.28.0
+
+- Add the market state cube's detail component (PRD-0023, #480): `market_state_detail` and `market_state_detail_latest`, in the activation group `market_state_detail`, from 2021-01-01.
+  - Per base cell: trade-by-trade path length in cents, dwell in microseconds, base volume in satoshis, the high and low, and the first and last trade by trade ID.
+  - Each day and provisional minute is measured from its own trades. The build fails unless every price converts to whole cents and every quantity to whole satoshis, trade IDs follow trade time, and the counts, satoshis, path and each column's dwell account for the partition.
+  - Deployment enables the group on every deploy, and reconciliation attaches it to accepted history, each attach at the next generation.
+  - This release is the rollback floor once a detail key is activated: the compatibility check refuses every image without the detail components.
+- Queries take an optional `measures` array of `base_volume`, `path_length`, `dwell`, `high`, `low`, `open` and `close`.
+  - Such a request pins only partitions holding both components, and runs PRD-0022's cells statement unchanged beside one over the detail component; the service merges the two.
+  - Detail sums are integers divided once, correctly rounded, and the summary adds their totals. Cells without trades appear with `path_length` or `dwell` and count towards the automatic price extent.
+  - Results with measures carry `schema_version` 2. Requests without measures run exactly the v3.27.2 statements and write the v3.27.2 schemas.
+  - `market_state_reader.query` takes `measures` and refuses a bare string.
+- The laws accept the detail keys; M1 and M2 keep judging the cube.
+- Add authentic captures of 2021-05-19, 2023-03-24 and 2025-10-10 archive rows: a multi-row move, a trading halt, and a burst of 24,433 trades at one timestamp.
 
 # v3.27.2
 

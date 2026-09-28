@@ -1433,8 +1433,10 @@ class Monitor:
             prior_dispatch = cursor.last_delivery is not None or pending is not None and pending['first_dispatch_at'] is not None
             if unresolved or reversed_clock or prior_dispatch:
                 cursor.next_distinct_at = max(cursor.next_distinct_at, timestamp + 3610)
-                if pending and (unresolved or reversed_clock):
-                    pending['next_attempt_at'] = max(pending['next_attempt_at'], timestamp + 60)
+                if pending and (pending['first_dispatch_at'] is not None or reversed_clock):
+                    completion = pending['last_completion_at']
+                    retry_wait = max(60.0, pending['next_attempt_at'] - completion) if completion is not None else 60.0
+                    pending['next_attempt_at'] = max(pending['next_attempt_at'], timestamp + retry_wait)
                 if unresolved or reversed_clock:
                     add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Restart after an unresolved request or clock reversal; delivery timing is uncertain.')
                 persist_quarantine = True

@@ -229,9 +229,12 @@ def _failure_keys() -> set[str]:
 
 
 def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldown(
-    recorder: _Recorder, tmp_path: Path
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Legacy name: per-key cooldown is retired; repeats obey the shared hourly policy."""
+    elapsed = [0.0]
+    monotonic = time.monotonic
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: monotonic() + elapsed[0])
     for cooldown in (0, 21600):
         folder = tmp_path / str(cooldown)
         monitor = _monitor(recorder, folder, settings=_settings(recorder, cooldown_seconds=cooldown))
@@ -251,6 +254,7 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
         assert all(row['label'] in email['text'] for row in summary['incidents'])
         assert 'Omitted recorded groups:' in email['text'] and '<html>' in email['html']
         assert all(post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded')
+        elapsed[0] += 60
         second = monitor.tick(NOW + timedelta(minutes=1))
         assert set(second.failed) >= expected
         assert len(_emails(recorder)) == before + 1
@@ -1693,6 +1697,7 @@ def test_notification_quota_requires_monotonic_hour_despite_small_clock_correcti
     recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, correction: str,
 ) -> None:
     from origo.alerts.summary import plan_notification
+
     from .test_alert_summary import _now, _summary
 
     now, summary = _now(), _summary()
@@ -1739,7 +1744,9 @@ def test_truncated_http_error_body_keeps_pending_retry_and_detector_tick_running
     import urllib.error
     import urllib.request
     from email.message import Message
+
     from origo.alerts.summary import attempt_delivery, plan_notification
+
     from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
 
     calls: list[str] = []
@@ -1757,6 +1764,7 @@ def test_truncated_http_error_body_keeps_pending_retry_and_detector_tick_running
                             completion_clock=lambda: previous, sender=initial_timeout) == 'uncertain'
     assert cursor.pending_notification is not None
     original = cursor.pending_notification.copy()
+    monitor.notification_clock = (previous.timestamp(), time.monotonic() - 60)
 
     class TruncatedErrorBody(io.BytesIO):
         def read(self, size: int | None = -1) -> bytes:
@@ -1789,9 +1797,11 @@ def test_notification_storage_failure_bounds_large_recorded_frame_before_fallbac
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     from typing import Literal
+
     from origo.observatory import Document, NotificationObservation, ObservationFrame
-    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now
     from origo.workers import law_page as page
+
+    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now
 
     calls: list[str] = []
     monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
@@ -1852,8 +1862,15 @@ def test_clock_correction_survives_failed_save_and_committed_minute_return(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from origo.alerts.summary import plan_notification
-    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now, _summary
     from origo.workers import law_page as page
+
+    from .test_alert_summary import (
+        CAPTURES,
+        _document,
+        _monitor_with_recorded_reads,
+        _now,
+        _summary,
+    )
 
     calls: list[str] = []
     monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
@@ -1908,6 +1925,7 @@ def test_pending_retry_waits_for_monotonic_delay_after_clock_correction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_after: int,
 ) -> None:
     from origo.alerts.summary import plan_notification
+
     from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
 
     monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, [])
@@ -1939,3 +1957,50 @@ def test_pending_retry_waits_for_monotonic_delay_after_clock_correction(
         assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'idempotency_key'))
         assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else 'uncertain')
     assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after
+
+
+@pytest.mark.parametrize('retry_after', [60, 120])
+@pytest.mark.parametrize('disposition', ['retryable', 'uncertain'])
+def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_jump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_after: int, disposition: str,
+) -> None:
+    from typing import Literal
+
+    from origo.alerts.summary import plan_notification
+
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, [])
+    now = _now()
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def unavailable(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        raise DeliveryError('injected provider failure',
+                            disposition=cast(Literal['retryable', 'uncertain'], disposition), retry_after=retry_after)
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', unavailable)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == disposition
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+    # Restart one real second later, after the wall clock jumped beyond the stored retry.
+    monitor.notification_clock = None
+    recovery = now + timedelta(seconds=retry_after + 60)
+    clock[0] += 1
+    for elapsed in (0, retry_after - 1, retry_after):
+        clock[0] = 1001.0 + elapsed
+        adjusted_now = recovery + timedelta(seconds=elapsed)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15).pending_notification
+        assert saved is not None
+        assert saved['next_attempt_at'] == recovery.timestamp() + retry_after
+        assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'payload_base64', 'idempotency_key'))
+        assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else disposition)
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after + 1

@@ -279,8 +279,10 @@ Evidence older than 24 hours is disclosed as lost, never marked delivered.
 Cursor writes use a mode-0600 temporary file, fsync, atomic replacement and directory
 fsync. Failed durable reservation prohibits POST. Process restarts after any prior dispatch
 reserve another conservative hour (wall time alone cannot prove elapsed real time); legacy migration is persisted once.
-Within a process, monotonic elapsed time preserves the remaining dispatch wait across every
-forward clock correction; a clock discrepancy above 120 seconds resets the conservative hour. Mail failures
+An attempted pending batch also waits its recorded retry delay again after restart, at least
+60 seconds; its original expiry remains fixed. Within a process, monotonic elapsed time
+preserves the remaining dispatch and retry waits across every forward clock correction;
+a clock discrepancy above 120 seconds resets the conservative hour. Mail failures
 are WARNING/check metadata, so they do not create recursive ERROR-log alerts.
 Detector cursors advance independently of mail success. The worker-heartbeats volume
 holds private intent and is shared by workers, but is absent from the public page.

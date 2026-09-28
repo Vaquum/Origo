@@ -551,10 +551,11 @@ class TapeCache:
             delays: Document = {}
             if record:
                 prior = self.samples.get((_instant(record.get('sampling_slot')) - timedelta(hours=1)).isoformat())
+                compatible = prior is not None and prior.get('policy') == _sample_brief(record).get('policy') and bool(prior.get('policy'))
                 for feed in _objects(record.get('feeds')):
                     key = str(feed.get('source_key'))
                     current = _number(_object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('age_seconds'))
-                    previous = _number(_object(prior.get('ages')).get(key)) if prior else None
+                    previous = _number(_object(prior.get('ages')).get(key)) if prior and compatible else None
                     delays[key] = current - previous if current is not None and previous is not None else None
             all_gates: dict[str, Document] = {}
             for key, versions in self.definitions.items():

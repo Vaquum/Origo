@@ -1106,6 +1106,12 @@ def _figure(tab: Page, key: str) -> str:
     return tab.locator(f'[data-overview="{key}"]').inner_text()
 
 
+def _refresh_protocol_summary(tab: Page) -> None:
+    current = page._decode(str(tab.evaluate('JSON.stringify(data)')).encode())
+    summary = page.build_summary(current, page._object(current['catalog']), [], now=page._instant(current['checked_at']) + timedelta(seconds=1))
+    tab.evaluate('summary=>{data.operator_summary=summary;render()}', summary)
+
+
 def test_served_page_layout_contract() -> None:
     tabs = re.findall(r'<button[^>]*role="tab"[^>]*>', page.PAGE)
     assert [re.search(r'data-view="([^"]+)"', tag).group(1) for tag in tabs] == ['overview', 'sources', 'laws', 'recovery']
@@ -1453,12 +1459,14 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
             tab.locator('[data-close]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status=savedOutput.status;p.reason=savedOutput.reason;render()}")
         assert 'current' in node.inner_text().lower()
+        _refresh_protocol_summary(tab)  # The shared adapter now owns Overview rollups.
         tab.locator('[data-view="overview"]').click()
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '1 / 10'
         assert '9 unknown' in _figure(tab, 'outputs')
         tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='FAILED';p.reason='artifact_missing';render()}")
         assert node.locator('.FAIL,.FAILED').count() == 1
+        _refresh_protocol_summary(tab)
         tab.locator('[data-view="overview"]').click()
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '0 / 10'
         assert '9 unknown' in _figure(tab, 'outputs')
@@ -1567,7 +1575,10 @@ def test_operational_history_totals_preserve_intervals_and_limits(
             cache._sample(item)
         cache.loading, cache.operations_limited = loading, limited
         cache._refresh_operations()
-        return cache, page._object(page._object(cache.current(now)['operations_history'])['error_lines'])
+        current = cache.current(now)
+        summary = page.build_summary(current, page._object(current['catalog']), [], now=now)
+        (root / 'operator-summary.json').write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')))
+        return cache, page._object(page._object(current['operations_history'])['error_lines'])
 
     complete = [record(terminal-timedelta(minutes=59-index)) for index in range(60)]
     _, horizons = totals(complete)

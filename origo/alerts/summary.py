@@ -24,8 +24,8 @@ from origo.observatory import (
     SummaryCard,
     badge,
     coverage_text,
+    incident_lines,
     incident_rank,
-    repeat_text,
 )
 
 BODY_BYTES = 64 * 1024
@@ -115,15 +115,6 @@ def dashboard_link(base: str | None, target: dict[str, object]) -> str | None:
     return base + ('?' + urllib.parse.urlencode(parameters) if parameters else '')
 
 
-def _state(status: str) -> str:
-    return {
-        'FAIL': 'failing',
-        'UNKNOWN': 'unverified',
-        'EXPECTED_WAIT': 'expected wait',
-        'PASS': 'passing',
-    }[status]
-
-
 def _subject(incidents: list[Incident]) -> str:
     if not incidents:
         return 'Origo: operator summary'
@@ -147,60 +138,6 @@ def _card_lines(card: SummaryCard) -> list[str]:
         coverage_text(card['coverage']),
         card['trend']['description'],
     ]
-
-
-def _incident_lines(incident: Incident, detail: int) -> list[str]:
-    lifecycle = str(incident['lifecycle']).replace('_', ' ')
-    if incident['lifecycle'] == 'recovered' and not incident['had_eligible_failure']:
-        lifecycle = 'verification restored'
-    lines = [
-        incident['label'],
-        f'{lifecycle} · currently {_state(incident["status"])} · {incident["verification"]}',
-        repeat_text(incident),
-        coverage_text(incident['coverage']),
-        (
-            f'First observed: {incident["first_seen"] or "Not recorded"}'
-            if incident['coverage']['reason'] == 'complete_episode'
-            else f'Observed since at least {incident["first_seen"]}'
-            if incident['first_seen']
-            else 'First observed: Not recorded'
-        )
-        + f'; last observed: {incident["last_seen"] or "Not recorded"}',
-        incident['trend']['description'],
-    ]
-    failing_minutes = incident.get('failing_minutes')
-    if failing_minutes is not None:
-        missing_minutes = max(
-            0, incident['coverage']['expected_slots'] - incident['coverage']['observed_slots']
-        )
-        lines.append(
-            f'{failing_minutes} observed failing minutes; {missing_minutes} missing minute checks. Elapsed duration is not continuous downtime.'
-        )
-    if incident.get('recovery_pending', False):
-        lines.append(
-            'Recovery pending: one passing observation; a second consecutive pass is required.'
-        )
-    for transition in incident.get('transitions', []):
-        lines.append(str(transition))
-    measurements = incident['measurements']
-    for measurement in measurements[:detail]:
-        value = 'Not recorded' if measurement['value'] is None else str(measurement['value'])
-        threshold = (
-            ''
-            if measurement['threshold'] is None
-            else f'; threshold {measurement["threshold"]} {measurement["unit"]}'
-        )
-        lines.append(
-            f'{measurement["name"]}: {value} {measurement["unit"]}{threshold}; observed {measurement["observed_at"]}'
-        )
-    if len(measurements) > detail:
-        lines.append(f'{len(measurements) - detail} measurement details omitted.')
-    if not measurements:
-        lines.append('Measurements: Not recorded.')
-    # Original locators remain evidence detail, separate from the operator explanation.
-    if detail and incident['evidence_refs']:
-        lines.append('Evidence: ' + '; '.join(incident['evidence_refs'][:detail]))
-    return [line for line in lines if line]
 
 
 def _paragraph(line: str, *, strong: bool = False) -> str:
@@ -307,7 +244,7 @@ def _render(
     html_parts.append('<h2 style="font-size:20px;margin:24px 0 12px">Observed incidents</h2>')
     text_parts.append('Observed incidents')
     for incident in incidents:
-        lines = _incident_lines(incident, detail)
+        lines = incident_lines(incident, detail)
         text_parts.append('\n'.join(lines))
         html_parts.append(
             f'<div data-group-id="{html.escape(incident["group_id"], quote=True)}" style="padding:12px 0;border-top:1px solid {THEME["line"]}">'
@@ -606,6 +543,17 @@ def attempt_delivery(
     )
     started_monotonic = time.monotonic()
     persist()
+    dispatch_at = timestamp + max(0.0, time.monotonic() - started_monotonic)
+    if dispatch_at >= pending['expires_at'] - REQUEST_TIMEOUT_SECONDS:
+        _retire(
+            cursor,
+            pending,
+            'uncertain',
+            dispatch_at,
+            'Snapshot expired while persisting the attempt reservation; no request started.',
+        )
+        persist()
+        return 'expired'
     transport = sender or send_alert
 
     def completed() -> float:
@@ -671,7 +619,7 @@ def _string(data: dict[str, object], key: str, *, nullable: bool = False) -> str
     value = data.get(key)
     if value is None and nullable and key in data:
         return None
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f'Private notification {key} must be a nonempty string.')
     return value
 
@@ -752,7 +700,11 @@ def validate_pending(value: object) -> PendingNotification:
     pending = cast(PendingNotification, data)
     if pending['expires_at'] != pending['prepared_at'] + GLOBAL_INTERVAL_SECONDS:
         raise ValueError('Notification expiry must remain fixed at preparation plus one hour.')
-    if not 1 <= len(pending['idempotency_key']) <= 256:
+    if (
+        not 1 <= len(pending['idempotency_key']) <= 256
+        or '\r' in pending['idempotency_key']
+        or '\n' in pending['idempotency_key']
+    ):
         raise ValueError('Notification idempotency key exceeds its bound.')
     if len(json.dumps(data, ensure_ascii=False).encode()) > CURSOR_BYTES:
         raise ValueError('Private notification envelope exceeds 256 KiB.')

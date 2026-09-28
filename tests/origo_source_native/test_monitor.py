@@ -357,7 +357,8 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         assert 'receipt_failed:depth:depth200_snapshots' not in outcome.failed
         alive = [post for post in _check_posts(recorder) if post['check_name'] == 'workers_alive']
         assert alive and alive[0]['passed'] is False
-        assert 'Receipt' in _emails(recorder)[0]['text'] or 'Omitted recorded groups:' in _emails(recorder)[0]['text']
+        assert 'Worker heartbeats' in _emails(recorder)[0]['text']
+        assert 'Omitted recorded groups:' in _emails(recorder)[0]['text']
         assert 'receipt_failed:depth:depth20_snapshots' in alive[0]['metadata']['keys']
     finally:
         client.disconnect()
@@ -516,6 +517,34 @@ def test_send_alert_posts_to_resend(recorder: _Recorder) -> None:
         send_alert(payload, api_key=settings.resend_api_key, api_url='http://127.0.0.1:1/emails',
                    idempotency_key='stored-batch')
     assert unavailable.value.disposition == 'uncertain'
+
+
+
+def test_pending_snapshot_expires_during_slow_private_cursor_save(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.alerts.summary import attempt_delivery, plan_notification
+    from origo.observatory import build_summary
+
+    capture_root = REPO_ROOT / 'tests/fixtures/law/alerts'
+    current = json.loads((capture_root / 'current.json').read_text())
+    catalog = json.loads((capture_root / 'catalog.json').read_text())
+    observed = datetime.fromisoformat(current['checked_at'])
+    summary = build_summary(current, catalog, [], now=observed)
+    cursor = Cursor.load(tmp_path / 'slow-save.json', observed, 15)
+    settings = _settings(recorder)
+    assert plan_notification(cursor, summary, settings, observed, True, transitions=True)
+    elapsed = [0.0]
+    monkeypatch.setattr('origo.alerts.summary.time.monotonic', lambda: elapsed[0])
+    writes = []
+    def persist() -> None:
+        cursor.save(tmp_path / 'slow-save.json')
+        writes.append(True)
+        elapsed[0] += 51
+    assert attempt_delivery(cursor, settings, observed + timedelta(seconds=3540), persist) == 'expired'
+    assert len(writes) == 2 and not _emails(recorder)
+    assert cursor.pending_notification is None and cursor.notified_through is None
+    assert cursor.last_delivery is not None and 'no request started' in cursor.last_delivery['reason']
 
 
 def test_monitor_checks_are_declared_in_definitions() -> None:
@@ -1074,7 +1103,9 @@ def test_law_tape_failure_keeps_other_checks_and_delivery_running(
     outcome = monitor.tick(NOW)
     assert 'detector_failed:law' in outcome.failed
     assert set(post['check_name'] for post in _check_posts(recorder)) == set(MONITOR_CHECK_NAMES)
-    assert 'detector_failed:law' in _emails(recorder)[0]['text']
+    assert 'History is incomplete' in _emails(recorder)[0]['text']
+    assert 'Data laws: ◌ unknown' in _emails(recorder)[0]['text']
+    assert any('detector_failed:law' in post['metadata'].get('keys', '') for post in _check_posts(recorder))
     assert _failure_keys() <= set(outcome.failed)
 
 

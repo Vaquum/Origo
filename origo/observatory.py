@@ -396,7 +396,7 @@ def measurement_trend(current: NotificationObservation, current_at: str,
     if not current['complete'] or not previous['complete']:
         return unavailable_trend('incomplete_endpoints')
     family = current['check'].removeprefix('law.').split(':', 1)[0]
-    metric = 'missing_slots' if family == 'D1' else 'age_seconds' if family in ('R1', 'M1') else ''
+    metric = 'missing_slots' if family == 'D1' else 'age_seconds' if family in ('R1', 'M1') else 'valid_days' if family in ('C2', 'M2') else ''
     left = next((item for item in previous['measurements'] if item['name'] == metric), None)
     right = next((item for item in current['measurements'] if item['name'] == metric), None)
     if not metric or left is None or right is None or left['value'] is None or right['value'] is None:
@@ -411,9 +411,11 @@ def measurement_trend(current: NotificationObservation, current_at: str,
                        f"{left.get('window_start') or 'Start not recorded'} → {left.get('window_end')}; "
                        f"{right.get('window_start') or 'Start not recorded'} → {right.get('window_end')}. "
                        'Repair versus old gaps leaving the window cannot be determined from these counts.')
+    elif family in ('C2', 'M2'):
+        description = f'{delta:+g} validated days in the checked calendar · point-to-point observation; this does not establish recovery.'
     else:
         description = ('0s · unchanged' if delta == 0 else f"{'−' if delta < 0 else '+'}{duration(abs(delta))} · {'less lag' if delta < 0 else 'more lag'}") + ' · point-to-point observation'
-    return {'value': delta, 'unit': 'minutes' if family == 'D1' else 'seconds', 'current_at': current_at,
+    return {'value': delta, 'unit': 'minutes' if family == 'D1' else 'days' if family in ('C2', 'M2') else 'seconds', 'current_at': current_at,
             'previous_at': previous_at, 'description': description, 'unavailable_reason': None}
 
 
@@ -436,7 +438,8 @@ class _Episode:
     start_known: bool = False
     complete: bool = True
     last_event: str | None = None
-    quiet_slots: int = 0
+    quiet_seconds: float = 0
+    last_read_end: str | None = None
     transitions: list[NotificationTransition] = field(default_factory=lambda: [])
 
     def transition(self, slot: str, description: str) -> None:
@@ -524,23 +527,29 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
     check = observation['check'] if observation is not None else episode.observation['check']
     read_key = observation['read_window_key'] if observation is not None else episode.observation['read_window_key']
     read = frame['read_windows'].get(read_key or '')
-    verified = frame['checks_complete'].get(check, False) and read is not None and read['complete'] and not read['counts_limited']
+    read_start = read['window_start'] if read else None
+    read_end = read['window_end'] if read else None
+    read_seconds = (_instant(read_end) - _instant(read_start)).total_seconds() if read_start and read_end else 0
+    verified = (frame['checks_complete'].get(check, False) and read is not None and read['complete']
+                and not read['counts_limited'] and read['count'] is not None and read_seconds > 0
+                and (observation is not None or frame['omitted_groups'] == 0))
+    compatible = observation is None or observation['definition_version'] == episode.observation['definition_version']
     if observation is not None:
         verified = verified and observation['complete']
         episode.observation = observation
-    if not contiguous and episode.previous_slot is not None:
+    if (not contiguous or not compatible) and episode.previous_slot is not None:
         episode.complete = False
-        episode.quiet_slots = 0
+        episode.quiet_seconds = 0
     episode.previous_slot = slot
     episode.observed_slots += int(verified)
     episode.complete = episode.complete and verified
     previous_verification = episode.verification
     if observation is not None and observation['status'] == 'FAIL':
         episode.status, episode.verification = 'FAIL', 'verified'
-        if not episode.active or episode.quiet_slots >= 1440:
+        if not episode.active or episode.quiet_seconds >= 86400:
             episode.lifecycle = 'new'
             episode.first_seen, episode.observations = slot, 0
-            episode.start_known = episode.quiet_slots >= 1440
+            episode.start_known = episode.quiet_seconds >= 86400
             episode.transition(slot, 'New historical event episode')
         else:
             episode.lifecycle = 'ongoing'
@@ -549,10 +558,10 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
         episode.active, episode.had_failure = True, True
         episode.last_event = episode.last_seen = slot
         episode.observations += 1
-        episode.quiet_slots = 0
+        episode.quiet_seconds = 0
     elif not verified or observation is not None and observation['status'] == 'UNKNOWN':
         episode.status, episode.verification = 'UNKNOWN', 'unverified'
-        episode.quiet_slots = 0
+        episode.quiet_seconds = 0
         if not episode.active:
             episode.active, episode.lifecycle = True, 'new'
             episode.first_seen = slot
@@ -560,9 +569,14 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
         elif previous_verification != 'unverified':
             episode.transition(slot, 'Unverified; event history incomplete')
     else:
-        episode.quiet_slots += 1
+        if episode.last_read_end is None or read_start is not None and _instant(read_start) >= _instant(episode.last_read_end):
+            episode.quiet_seconds = (episode.quiet_seconds if read_start == episode.last_read_end else 0) + read_seconds
+        else:
+            episode.quiet_seconds = 0
+            episode.complete = False
         episode.status, episode.verification = 'PASS', 'verified'
         episode.lifecycle = 'ongoing' if episode.last_event and _instant(slot) - _instant(episode.last_event) < timedelta(hours=1) else 'historical_events'
+    episode.last_read_end = read_end
 
 
 def _reduce(history: Sequence[ObservationFrame], now: datetime) -> tuple[list[ObservationFrame], dict[str, _Episode]]:
@@ -579,6 +593,8 @@ def _reduce(history: Sequence[ObservationFrame], now: datetime) -> tuple[list[Ob
                 _event(episode, observation, frame)
             else:
                 _condition(episode, observation, frame)
+            if _instant(frame['sampling_slot']) < now.replace(second=0, microsecond=0) - timedelta(minutes=1439):
+                episode.observations = episode.failing_minutes = episode.observed_slots = 0
     captured_slots = {frame['sampling_slot'] for frame in frames if 'notification_transitions' in frame}
     for key, episode in episodes.items():
         recorded = [transition for frame in frames for transition in frame.get('notification_transitions', [])
@@ -867,6 +883,8 @@ def measurement_label(name: str) -> str:
         'collectors_serving': 'Collectors serving', 'collectors_expected': 'Expected collectors',
         'lag_seconds': 'Publication delay', 'grace_seconds': 'Publication allowance',
         'event_count': 'Observed events', 'heartbeat_age_seconds': 'Worker heartbeat age',
+        'committed_age_seconds': 'Committed capture age', 'response_age_seconds': 'Collector response age',
+        'durable_capture_age_seconds': 'Durable capture age', 'spool_bytes': 'Capture storage used',
     }.get(name, name.replace('_', ' ').capitalize())
 
 

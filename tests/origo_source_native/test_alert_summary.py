@@ -6,6 +6,7 @@ import copy
 import hashlib
 import html
 import json
+import resource
 import subprocess
 import sys
 import threading
@@ -54,7 +55,7 @@ from origo.workers import monitor as monitor_module
 from origo.workers.monitor import Cursor, Finding, LawTape, Monitor, held_law_keys, law_findings
 from origo.workers.report import Reporter
 from origo.law import LawReport
-from origo.law_catalog import LawCatalog, Scalar
+from origo.law_catalog import LawCatalog, Scalar, build_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPTURES = ROOT / 'tests/fixtures/law/alerts'
@@ -231,6 +232,9 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
     assert 'Omitted recorded groups:' in content.text
     for key in ('ink', 'paper', 'green'):
         assert THEME[key] in content.html
+    hostile['delivery_status'] *= 10000
+    with pytest.raises(ValueError, match='64 KiB'):
+        render_email(hostile, dashboard_url=None, dagit_written=True)
 
 
 def test_repeat_trends_preserve_evidence_coverage() -> None:
@@ -305,6 +309,20 @@ def test_lifecycle_preserves_transient_and_unverified_incidents() -> None:
     eligible = _through(frames, '00:31')
     before, after = (lifecycle_transitions(items, now=datetime.fromisoformat(items[-1]['sampling_slot'])) for items in (eligible[:-1], eligible))
     assert before == after, 'Repeated eligible failure must not create a state transition.'
+    # Persist the actual replayed transition at its original recorded slot. Removing
+    # earlier history must not relabel an ongoing incident as a fresh notification.
+    recorded = copy.deepcopy(frames)
+    all_transitions = lifecycle_transitions(recorded, now=datetime.fromisoformat(recorded[-1]['sampling_slot']))
+    for frame in recorded:
+        frame['notification_transitions'] = [event for event in all_transitions if event['sampling_slot'] == frame['sampling_slot']]
+    for first in (31, 180, 267, 330, 590):
+        retained = recorded[first:]
+        transitions = lifecycle_transitions(retained, now=datetime.fromisoformat(retained[-1]['sampling_slot']))
+        assert transitions == [event for event in all_transitions if event['sampling_slot'] >= retained[0]['sampling_slot']]
+    ongoing = [frame for frame in recorded if '00:31' <= frame['sampling_slot'][11:16] <= '02:00']
+    assert not lifecycle_transitions(ongoing, now=datetime.fromisoformat(ongoing[-1]['sampling_slot']))
+    fresh = next(copy.deepcopy(frame) for frame in frames if frame['sampling_slot'][11:16] == '02:01')
+    assert not lifecycle_transitions([*ongoing, fresh], now=datetime.fromisoformat(fresh['sampling_slot']))
 
 
 def test_all_notifications_obey_global_hourly_budget(tmp_path: Path) -> None:
@@ -503,13 +521,21 @@ def _monitor_with_recorded_reads(root: Path, monkeypatch: pytest.MonkeyPatch, ca
         monitor.pending_report = cast(LawReport, copy.deepcopy(report))
         return law_findings(monitor.pending_report)
     monkeypatch.setattr(monitor, '_dagster_findings', dagster)
-    monkeypatch.setattr(monitor, '_worker_findings', lambda _cursor, _end: read('workers_alive'))
-    monkeypatch.setattr(monitor, '_collector_findings', lambda _minute: read('collectors_serving'))
-    monkeypatch.setattr(monitor, '_log_findings', lambda _cursor, _end: read('no_error_logs'))
+    def workers(_cursor: Cursor, _end: datetime) -> list[Finding]:
+        return read('workers_alive')
+    def collectors(_minute: datetime) -> list[Finding]:
+        return read('collectors_serving')
+    def logs(_cursor: Cursor, _end: datetime) -> list[Finding]:
+        return read('no_error_logs')
+    def no_findings(*_args: object) -> list[Finding]:
+        return []
+    monkeypatch.setattr(monitor, '_worker_findings', workers)
+    monkeypatch.setattr(monitor, '_collector_findings', collectors)
+    monkeypatch.setattr(monitor, '_log_findings', logs)
     monkeypatch.setattr(monitor, '_publication_findings', lambda: read('publication_current'))
     monkeypatch.setattr(monitor, '_law_findings', law)
-    monkeypatch.setattr(monitor, '_history_findings', lambda _cursor, _now: [])
-    monkeypatch.setattr(monitor, '_page_findings', lambda: [])
+    monkeypatch.setattr(monitor, '_history_findings', no_findings)
+    monkeypatch.setattr(monitor, '_page_findings', no_findings)
     return monitor
 
 
@@ -587,13 +613,86 @@ def _assert_monitor_failure_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
                     assert frame['read_windows']['error_lines']['count'] == 0
 
 
+
+def _measure_monitor_replay(root: Path) -> Document:
+    script = r'''
+import base64
+import copy
+import json
+import resource
+import sys
+import runpy
+import time
+import zlib
+from datetime import datetime, timedelta
+from pathlib import Path
+import pytest
+test_helpers = runpy.run_path(sys.argv[1])
+_monitor_with_recorded_reads = test_helpers['_monitor_with_recorded_reads']
+_now, _document, _recorded_frames = (test_helpers[key] for key in ('_now', '_document', '_recorded_frames'))
+CAPTURES = test_helpers['CAPTURES']
+from origo.observatory import build_summary, lifecycle_transitions
+from origo.workers.monitor import _NotificationHistory
+
+with pytest.MonkeyPatch.context() as patch:
+    directory = sys.argv[2]
+    monitor = _monitor_with_recorded_reads(Path(directory), patch, [])
+    monitor.settings = None
+    now = _now()
+    monitor.tick(now)
+    frame = monitor.notification_history.observations()[-1]
+    original_measurements = [row['measurements'] for row in frame['observations']]
+    replay = _NotificationHistory(Path(directory) / 'load-protocol-only')
+    for minute in range(1440):
+        slot = (now.replace(second=0, microsecond=0) - timedelta(minutes=1439-minute)).isoformat()
+        envelope = {**frame, 'sampling_slot': slot}
+        raw = json.dumps({'frame': base64.b64encode(zlib.compress(json.dumps(envelope, separators=(',', ':')).encode())).decode(), 'brief': None}, separators=(',', ':')).encode()
+        replay.frames[slot] = raw
+    index_bytes = sys.getsizeof(replay.frames) + sum(sys.getsizeof(key) + sys.getsizeof(raw) for key, raw in replay.frames.items())
+    started = time.monotonic()
+    frames = replay.observations()
+    decoded_seconds = time.monotonic()-started
+    assert [row['measurements'] for row in frames[0]['observations']] == original_measurements
+    current, catalog = (_document(CAPTURES/name) for name in ('current.json', 'catalog.json'))
+    started = time.monotonic()
+    summary = build_summary(current, catalog, frames, now=now)
+    summary_seconds = time.monotonic()-started
+    started = time.monotonic()
+    lifecycle_transitions(frames, now=now)
+    reducer_seconds = time.monotonic()-started
+    actual = _recorded_frames('r1-perp-20260928')
+    started = time.monotonic()
+    build_summary(current, catalog, actual, now=now)
+    actual_seconds = time.monotonic()-started
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 if sys.platform.startswith('linux') else 1024*1024)
+    result={'load_kind':'1440 protocol envelopes reuse one actual captured all-law/operational frame; source measurement values/times unchanged','groups_per_frame':len(frame['observations']),'measurements_per_frame':sum(len(row['measurements']) for row in frame['observations']),'encoded_frame_bytes':max(map(len,replay.frames.values())),'frames':len(frames),'retained_index_bytes':index_bytes,'observations_seconds':decoded_seconds,'build_summary_seconds':summary_seconds,'lifecycle_reducer_seconds':reducer_seconds,'once_each_total_seconds':decoded_seconds+summary_seconds+reducer_seconds,'genuine_r1_frames':len(actual),'genuine_r1_summary_seconds':actual_seconds,'peak_rss_mib':rss}
+    print(json.dumps(result,indent=2))
+'''
+    measured = subprocess.run([sys.executable, '-c', script, str(Path(__file__)), str(root)],
+                              cwd=ROOT, check=True, capture_output=True, text=True)
+    result = cast(Document, json.loads(measured.stdout))
+    (root / 'monitor-replay-metrics.json').write_text(measured.stdout)
+    return result
+
 def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from .test_law_page import _measure_memory
     _assert_monitor_failure_paths(tmp_path / 'failure-paths', monkeypatch)
+    measured_monitor = _measure_monitor_replay(tmp_path / 'monitor-benchmark')
+    assert measured_monitor['frames'] == 1440 and measured_monitor['groups_per_frame'] == 18
+    assert float(str(measured_monitor['retained_index_bytes'])) <= 16 * 1024 * 1024
+    assert float(str(measured_monitor['once_each_total_seconds'])) < 1
+    assert float(str(measured_monitor['peak_rss_mib'])) < 1024
+    assert measured_monitor['genuine_r1_frames'] == 711
+    assert float(str(measured_monitor['genuine_r1_summary_seconds'])) < 1
     baseline = _document(ROOT / 'tests/fixtures/law/overview-baseline-58b45de.json')
     report = page._object(baseline['report'])
     assert len(json.dumps(report, separators=(',', ':')).encode()) == baseline['compact_report_bytes'] == 126790
     assert page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024 and page.MAX_RECORD == 1024 * 1024
+    original_catalog = _document(CAPTURES / 'catalog.json')
+    rebuilt = build_catalog(str(original_catalog['deployed_sha']))
+    original_versions = {str(gate['id']): gate['definition_version'] for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
+    rebuilt_versions = {gate['id']: gate['definition_version'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
+    assert rebuilt_versions == original_versions and len(original_versions) == 17
     with _serving(tmp_path) as (url, cache, summary):
         with urllib.request.urlopen(url + '/law.json', timeout=5) as response:
             assert len(response.read()) <= 160 * 1024, 'Actual current wire must include summary within160KiB.'
@@ -651,6 +750,34 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
     old.write_bytes(segment.read_bytes())
     replay.refresh(_now())
     assert not old.exists() and retained_file.exists()
+    # Protocol overload duplicates an existing recorded row; it asserts byte admission,
+    # never a claim that these duplicate envelopes are additional source incidents.
+    overloaded = copy.deepcopy(frame)
+    overloaded['observations'] *= 100
+    bounded = monitor_module._NotificationHistory(tmp_path / 'bounded-sidecar')
+    bounded.append(overloaded, None, _now())
+    bounded_line = next(bounded.root.glob('notification-observations-*')).read_bytes()
+    assert len(bounded_line) <= 8193 and len(overloaded['observations']) <= 64
+    assert overloaded['omitted_groups'] and not overloaded['complete']
+    raw_decoded, _ = bounded.decode(bounded_line)
+    assert raw_decoded == overloaded
+    retained_history = monitor_module._NotificationHistory(tmp_path / 'retained-history')
+    for recorded in _recorded_frames('r1-perp-20260928'):
+        retained_history.append(recorded, None, _now())
+    retained_segment = next(retained_history.root.glob('notification-observations-*'))
+    original_lines = retained_segment.read_bytes()
+    # Repeat the original protocol bytes to exceed replay admission without inventing observations.
+    repeats = 1 + (2 * 1024 * 1024 // len(original_lines))
+    retained_segment.write_bytes(original_lines * repeats)
+    bounded_replay = monitor_module._NotificationHistory(retained_history.root)
+    started = time.monotonic()
+    bounded_replay.refresh(_now())
+    assert time.monotonic() - started <= 1
+    assert retained_segment.stat().st_size - bounded_replay.starts[retained_segment] <= 1024 * 1024
+    assert bounded_replay.loading
+    assert sum(len(raw) for raw in bounded_replay.frames.values()) <= 16 * 1024 * 1024
+    rss_mib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 if sys.platform.startswith('linux') else 1024 * 1024)
+    assert rss_mib < 1024
     # A due immutable retry may use a committed slot without repeating any detector.
     monitor.cursor_path = tmp_path / 'resume.cursor.json'
     monitor.notification_clock = None
@@ -686,10 +813,10 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
 
 
 def test_public_dashboard_url_is_deployed_and_validated(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    from tests.tools.test_deploy_compose_bind import test_dashboard_url_is_optional_in_both_monitor_compose_paths
-    from tests.tools.test_deploy_workflow import test_optional_dashboard_url_reaches_generated_deploy_environment
-    test_dashboard_url_is_optional_in_both_monitor_compose_paths()
-    test_optional_dashboard_url_reaches_generated_deploy_environment()
+    subprocess.run([sys.executable, '-m', 'pytest', '-q',
+        'tests/tools/test_deploy_compose_bind.py::test_dashboard_url_is_optional_in_both_monitor_compose_paths',
+        'tests/tools/test_deploy_workflow.py::test_optional_dashboard_url_reaches_generated_deploy_environment'],
+        cwd=ROOT, check=True, capture_output=True, text=True)
     def no_network(*_args: object, **_kwargs: object) -> None:
         raise AssertionError('URL configuration must not issue DNS or network probes.')
     monkeypatch.setattr(transport.urllib.request, 'urlopen', no_network)

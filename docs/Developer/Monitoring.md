@@ -283,7 +283,9 @@ holds private intent and is shared by workers, but is absent from the public pag
 
 `notification-observations-YYYY-MM-DD.jsonl` records compact typed frames from existing
 detector reads even when a law sample fails. It preserves original detector keys and
-actual sampled eligibility, scalar values, read bounds/counts/caps and omissions.
+actual sampled eligibility, original lifecycle transitions, scalar values, read bounds/counts/caps and omissions.
+Transitions are recorded at capture time; moving the 24-hour replay boundary cannot
+turn an ongoing condition into a new notification.
 Unavailable measurements remain unavailable; no extra queries or probes reconstruct them.
 Frames use bounded lossless zlib/base64 encoding: 8 KiB per line, at most 64 groups and
 128 KiB decoded. This keeps repetitive typed field names from consuming the observation

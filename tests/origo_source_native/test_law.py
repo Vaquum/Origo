@@ -570,6 +570,55 @@ def test_market_state_calendar_uses_real_days_and_frozen_start(
         assert unknown['status'] == 'UNKNOWN' and unknown['evidence']['unknown_days'] == 1
 
 
+
+def test_detail_components_keep_the_cube_laws_known(
+    law_case: LawCase, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = law_case.runtime
+    detail = ('market_state_detail', 'market_state_detail_latest')
+    declared = runtime.spec
+    assert {c.key for c in declared.components} >= set(detail)
+    previous = replace(declared, components=tuple(c for c in declared.components if c.key not in detail))
+    names: tuple[law.LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2')
+
+    def evaluated(now: datetime) -> tuple[dict[str, law.PredicateReport], dict[str, law.ProjectionObservation]]:
+        reports: list[law.LawReport] = []
+        for spec in (declared, previous):
+            monkeypatch.setattr(law, 'SOURCE_REGISTRY', tuple(spec if s.key == SOURCE else s for s in law.SOURCE_REGISTRY))
+            reports.append(law_case.report(now))
+        predicates = {name: predicate(reports[0], name) for name in names}
+        # The detail components change no cube law, declared or not.
+        assert predicates == {name: predicate(reports[1], name) for name in names}
+        assert not {str(p['reason']) for p in predicates.values()} & {
+            'proof_inventory_invalid', 'profile_mismatch', 'cube_profile_mismatch'
+        }
+        return predicates, {p['id']: p for p in reports[0]['projections']}
+
+    # Accepted before the detail group: the history the sweep has not reached.
+    law_case.minute(0)
+    runtime.build('2024-12-31')
+    minute, day = START + timedelta(minutes=1, seconds=5), datetime(2025, 1, 1, 5, tzinfo=UTC)
+    predicates, nodes = evaluated(minute)
+    assert predicates['R1']['status'] == predicates['M1']['status'] == 'PASS'
+    for key in detail:
+        assert (nodes[f'{SOURCE}:{key}']['status'], nodes[f'{SOURCE}:{key}']['reason']) == ('UNKNOWN', 'component_proof_missing')
+    evaluated(day)
+    # The canonical day attached while the minute is not yet reached; then the minute too.
+    runtime.enable_components('market_state_detail')
+    runtime.upgrade_components('2024-12-31')
+    predicates, nodes = evaluated(minute)
+    assert predicates['R1']['status'] == predicates['M1']['status'] == 'PASS'
+    assert (nodes[f'{SOURCE}:market_state_detail']['status'], nodes[f'{SOURCE}:market_state_detail']['reason']) == (
+        'CURRENT', 'validated_activation'
+    )
+    assert nodes[f'{SOURCE}:market_state_detail_latest']['reason'] == 'component_proof_missing'
+    evaluated(day)
+    runtime.upgrade_components(START.strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
+    predicates, nodes = evaluated(minute)
+    assert predicates['R1']['status'] == predicates['M1']['status'] == 'PASS'
+    assert nodes[f'{SOURCE}:market_state_detail_latest']['status'] == 'CURRENT'
+    evaluated(day)
+
 def test_market_state_missing_declaration_remains_unknown(
     law_case: LawCase, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

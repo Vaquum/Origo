@@ -1,0 +1,13 @@
+{
+  "url": "https://data.binance.vision/data/spot/daily/trades/BTCUSDT/BTCUSDT-trades-2025-10-10.zip",
+  "date": "2025-10-10",
+  "zip_sha256": "11702a1bd4004f14683980cd489bdd99828e176d1acb90360453dd55961a7d87",
+  "checksum_sidecar": "11702a1bd4004f14683980cd489bdd99828e176d1acb90360453dd55961a7d87  BTCUSDT-trades-2025-10-10.zip",
+  "csv_member": "BTCUSDT-trades-2025-10-10.csv",
+  "official_row_count": 11404522,
+  "selected_row_start": 7426500,
+  "selected_row_stop": 7464072,
+  "selected_sha256": "2eb2b52bb1988de12c0703479548eb0a5d286982c148eb8a6355aff0289ca457",
+  "captured_at": "2026-09-28T10:58:40.249726+00:00",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

@@ -1,0 +1,13 @@
+{
+  "url": "https://data.binance.vision/data/spot/daily/trades/BTCUSDT/BTCUSDT-trades-2021-05-19.zip",
+  "date": "2021-05-19",
+  "zip_sha256": "b52f319aec4a291d113f171bdf031e097b0af4950cff4b93e336f649117a6c51",
+  "checksum_sidecar": "b52f319aec4a291d113f171bdf031e097b0af4950cff4b93e336f649117a6c51  BTCUSDT-trades-2021-05-19.zip",
+  "csv_member": "BTCUSDT-trades-2021-05-19.csv",
+  "official_row_count": 6331062,
+  "selected_row_start": 2855000,
+  "selected_row_stop": 2861000,
+  "selected_sha256": "5d8710ad4ae909e9752a4ef1ee28dce059027ec0eb7222e39b39f3e6e00643d9",
+  "captured_at": "2026-09-28T10:58:34.196713+00:00",
+  "packaging": "unmodified CSV rows extracted from checksum-verified official ZIP"
+}

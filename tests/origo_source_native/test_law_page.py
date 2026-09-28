@@ -1478,10 +1478,10 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
         tab.evaluate("()=>{window.originalStages=structuredClone(data.last_report.projections);for(const p of data.last_report.projections){p.status='UNKNOWN';p.reason='not_observed'}render()}")
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 10'
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 56'
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 58'
         tab.evaluate("()=>{const known=originalStages.find(p=>!p.id.includes(':consumer:')&&p.status==='CURRENT');Object.assign(data.last_report.projections.find(p=>p.id===known.id),known);render()}")
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 56'
-        assert '55 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 58'
+        assert '57 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
         tab.evaluate("()=>{data.last_report.projections=originalStages;render()}")
         before = len(requests)
         age = tab.locator('#sample-age').inner_text()

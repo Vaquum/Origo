@@ -383,13 +383,19 @@ def test_verdict_judges_a_real_run_directory(
     }
     report = bench.judge(run.name, meta, samples, evidence, **inputs)
     passed = {key: value['passed'] for key, value in report['criteria'].items()}
-    # A custom corpus is not the frozen protocol, and this ClickHouse runs no live feeds; every
-    # other criterion holds on this real run.
+    # A custom corpus is not the frozen protocol, and this ClickHouse runs no live feeds. The
+    # frozen R4 inventory allows only PRD-0022's two physical tables, and this image also creates
+    # the detail component's two (PRD-0023). Every other criterion holds on this real run.
     assert passed == {
         'F': False, 'P0': True, 'E0': True, 'P1': True, 'Q1': True, 'Q2': True, 'Q3': True, 'S': True,
-        'N1': True, 'N2': True, 'N3': True, 'N4': True, 'R1': passed['R1'], 'R2': True, 'R3': True, 'R4': True,
+        'N1': True, 'N2': True, 'N3': True, 'N4': True, 'R1': passed['R1'], 'R2': True, 'R3': True, 'R4': False,
         'K1': False, 'K2': False, 'O1': True,
     }
+    assert report['criteria']['R4']['physical'] == sorted((
+        *bench.PROJECTION_TABLES,
+        'binance_spot_trades_market_state_detail_latest_revisions',
+        'binance_spot_trades_market_state_detail_revisions',
+    ))
     assert report['voids'] == [] and str(report['verdict']).startswith('FAIL F')
     assert report['criteria']['R1']['rss_peak_bytes'] > 0 and report['criteria']['O1']['answered_ok'] == len(samples)
     assert [row['statement'] for row in report['reference_cost']] == ['reference']

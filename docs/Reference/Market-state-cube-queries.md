@@ -152,9 +152,10 @@ this order:
 How they are measured:
 
 - **The trade path** is the last-trade price as a step function of time. Each move between
-  consecutive trades belongs to the later trade's column and is split across the rows it
-  passes, each row taking its half-open part; a move ending exactly on a row edge gives the
-  upper row nothing.
+  consecutive trades belongs to the later trade's column. It covers the price span between the
+  two trades, rising or falling alike, and each half-open row takes the part of that span
+  inside it. A row whose lower edge is the top of the span gets nothing: a rise from 125 to
+  250 and a fall from 250 to 125 both give all 125 USDT to the row [125, 250).
 - **Dwell.** Each price holds from its trade until the next trade. Trades at one timestamp are
   separate steps: a sweep through several prices at one instant adds path and no time. With a
   price bound, a column's dwell is its time inside the selected rows, not its whole time.
@@ -180,8 +181,9 @@ Useful derivations:
 - **Path per row height:** `path_length ÷ pR`. It is not a count of row crossings: chop inside
   one row adds path without crossing anything.
 - **Time at price:** a cell's `dwell` as a share of its column's dwell.
-- **A column's open, high, low and close:** request a `pR` at least as wide as the price
-  range, so each column is one cell.
+- **A column's open, high, low and close:** request a `pR` whose single row holds the whole
+  price range, so each column is one cell. Rows are aligned to multiples of `pR`, so width
+  alone is not enough: [31875, 32125) crosses 32000 and needs `pR` 64000, not 250.
 
 A request with measures reads only partitions that hold both the cube and its detail
 component, so its `data_cutoff` can be earlier than a request's without them while history

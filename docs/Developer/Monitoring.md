@@ -242,8 +242,8 @@ reset held eligibility even within one stable operator incident.
 Dashboard and mail use `origo.observatory` for the same named laws, cards, status,
 measurements, copy and evidence coverage. HTML and plain text are the same ranked
 snapshot, with explicit omitted groups, observed/prepared times and incomplete history.
-Each body is capped at 64 KiB. The optional `ORIGO_ALERT_PUBLIC_DASHBOARD_URL` must be
-a public HTTP(S) `/law` URL without credentials or fragments; invalid configuration
+Each body is capped at 64 KiB. The optional `ORIGO_ALERT_DASHBOARD_URL` must be
+an operator-facing HTTP(S) `/law` URL without credentials or fragments; invalid configuration
 omits the link and explains why. The private health URL is never used as an email link.
 
 Conditions group by source/predicate or component identity, independently of reasons.

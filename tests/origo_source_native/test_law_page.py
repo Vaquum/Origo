@@ -1805,6 +1805,41 @@ def test_missing_law_sample_preserves_fresh_recorded_operational_cards(tmp_path:
     cards = {str(card['id']): card for card in page._objects(actual['cards'])}
     assert all(cards[key]['status'] == 'UNKNOWN' for key in page.LAW_NAMES)
     assert cards['workers']['value'] == '7 / 7' and cards['workers']['status'] == 'PASS'
+    server = page.LawServer(('127.0.0.1', 0), cache, lambda: now)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            url = f'http://127.0.0.1:{server.server_port}/law'
+            tab.goto(url)
+            tab.wait_for_function('() => !refreshing')
+            assert tab.locator('.overview-card').count() == len(page.LAW_NAMES)
+            assert tab.locator('.overview-card .badge.UNKNOWN').count() == len(page.LAW_NAMES)
+            assert tab.locator('[data-overview="workers"] .overview-value').inner_text() == cards['workers']['value']
+            assert tab.locator('[data-overview="workers"] .badge.PASS').count() == 1
+            assert tab.evaluate('data.last_report') is None
+            assert tab.evaluate('data.catalog.version') == catalog['version']
+            tab.evaluate('refresh()')
+            assert tab.locator('[data-overview="workers"] .badge.PASS').count() == 1
+            # Corrupt only the catalog envelope; genuine measurements stay unchanged.
+            inconsistent = {**_get(url + '.json'), 'operator_summary': {**actual, 'catalog_version': 'mismatched'}}
+            tab.route('**/law.json', lambda route: route.fulfill(json=inconsistent))
+            tab.evaluate('refresh()')
+            assert tab.evaluate('data.reason') == 'observation_service_unavailable'
+            assert tab.locator('[data-overview="workers"] .badge.UNKNOWN').count() == 1
+            tab.unroute('**/law.json')
+            tab.route('**/law/catalog.json', lambda route: route.fulfill(json={**catalog, 'version': 'mismatched'}))
+            tab.reload()
+            tab.wait_for_function('() => !refreshing')
+            assert tab.locator('.overview-card,.overview-secondary').count() == 0
+            assert 'No current status can be verified' in tab.locator('#message').inner_text()
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
     sidecar.unlink()
     assert page._object(cache.current(now)['operator_summary'])['status'] == 'UNKNOWN'
     assert all(card['status'] == 'UNKNOWN' for card in page._objects(page._object(cache.current(now)['operator_summary'])['cards']))

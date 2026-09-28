@@ -531,8 +531,8 @@ class _NotificationHistory:
         if brief is not None and observed >= now.replace(second=0, microsecond=0) - timedelta(hours=72, minutes=1):
             self.briefs[slot] = brief
 
-    def append(self, frame: ObservationFrame, report: Document | None, now: datetime) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    def encode(frame: ObservationFrame, report: Document | None) -> bytes:
         brief = _sample_brief(report) if report is not None else None
         rows = frame['observations']
         omitted = frame['omitted_groups'] or 0
@@ -550,6 +550,11 @@ class _NotificationHistory:
             omitted += 1
             frame['omitted_groups'] = omitted
             frame['complete'] = False
+        return raw
+
+    def append(self, frame: ObservationFrame, report: Document | None, now: datetime) -> None:
+        raw = self.encode(frame, report)
+        self.root.mkdir(parents=True, exist_ok=True)
         slot = frame['sampling_slot']
         if slot in self.frames:
             # A retry of a sampled minute cannot manufacture another observation.
@@ -879,9 +884,13 @@ class Monitor:
             # Current evidence remains usable with an explicitly incomplete history.
             if frame is not None:
                 frame['complete'] = False
-                raw = json.dumps({'frame': base64.b64encode(zlib.compress(json.dumps(frame).encode())).decode(), 'brief': None}).encode()
-                self.notification_history.remember(raw, now)
-                history = [item for item in history if item['sampling_slot'] != frame['sampling_slot']] + [frame]
+                try:
+                    raw = self.notification_history.encode(frame, None)
+                    self.notification_history.remember(raw, now)
+                    history = [item for item in history if item['sampling_slot'] != frame['sampling_slot']] + [frame]
+                except (ValueError, TypeError, KeyError, zlib.error) as fallback_error:
+                    notification_fault = f'{notification_fault}; current evidence unavailable: {fallback_error}'[:300]
+                    log.warning('Notification current evidence unavailable: %s', fallback_error)
         by_check: dict[CheckName, list[Finding]] = {name: [] for name in CHECK_NAMES}
         for finding in findings:
             by_check[finding.check].append(finding)
@@ -1415,6 +1424,7 @@ class Monitor:
 
     def _notification_clock(self, cursor: Cursor, now: datetime) -> None:
         timestamp, monotonic = now.timestamp(), time.monotonic()
+        persist_quarantine = False
         if self.notification_clock is None:
             pending = cursor.pending_notification
             unresolved = pending is not None and pending['attempt_started_at'] is not None and pending['last_completion_at'] is None
@@ -1427,19 +1437,40 @@ class Monitor:
                     pending['next_attempt_at'] = max(pending['next_attempt_at'], timestamp + 60)
                 if unresolved or reversed_clock:
                     add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Restart after an unresolved request or clock reversal; delivery timing is uncertain.')
-                cursor.clock_checked_at = timestamp
-                try:
-                    cursor.save(self.cursor_path)
-                except (OSError, ValueError) as error:
-                    cursor.notification_fault = f'Clock quarantine persistence failed: {error}'[:300]
-                    log.warning('%s', cursor.notification_fault)
+                persist_quarantine = True
         else:
             old_wall, old_mono = self.notification_clock
-            if abs((timestamp - old_wall) - (monotonic - old_mono)) > 120:
+            elapsed = max(0.0, monotonic - old_mono)
+            remaining = cursor.next_distinct_at - old_wall - elapsed
+            if remaining > 0:
+                deadline = timestamp + remaining
+                if deadline > cursor.next_distinct_at:
+                    # Every forward correction consumes wall time, never the remaining
+                    # monotonic quarantine, even when many small corrections accumulate.
+                    cursor.next_distinct_at = deadline
+                    persist_quarantine = True
+            pending = cursor.pending_notification
+            if pending is not None:
+                retry_remaining = pending['next_attempt_at'] - old_wall - elapsed
+                retry_deadline = timestamp + retry_remaining
+                if retry_remaining > 0 and retry_deadline > pending['next_attempt_at']:
+                    pending['next_attempt_at'] = retry_deadline
+                    persist_quarantine = True
+            if abs((timestamp - old_wall) - elapsed) > 120:
                 cursor.next_distinct_at = max(cursor.next_distinct_at, timestamp + 3610)
                 add_loss_interval(cursor, now.isoformat(), now.isoformat(), 'Wall clock changed; notification dispatch is quarantined for one hour.')
-        self.notification_clock = (timestamp, monotonic)
+                persist_quarantine = True
         cursor.clock_checked_at = timestamp
+        if persist_quarantine:
+            try:
+                cursor.save(self.cursor_path)
+            except (OSError, ValueError) as error:
+                cursor.notification_fault = f'Clock quarantine persistence failed: {error}'[:300]
+                log.warning('%s', cursor.notification_fault)
+            else:
+                self.notification_clock = (timestamp, monotonic)
+        else:
+            self.notification_clock = (timestamp, monotonic)
 
     def _dagster_findings(self, cursor: Cursor, window_end: datetime) -> tuple[list[Finding], bool]:
         """Findings from Dagster and whether the failure queries ran, so the failure cursor

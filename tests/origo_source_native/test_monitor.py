@@ -1686,3 +1686,256 @@ def test_capture_heartbeat_cannot_clear_reader_failure(
     assert perp['predicates']['R1']['status'] == 'FAIL'
     assert perp['predicates']['R1']['reason'] == 'reader_empty'
     assert perp['predicates']['R1']['evidence']['budget_seconds'] == 300
+
+
+@pytest.mark.parametrize('correction', ['single', 'cumulative'])
+def test_notification_quota_requires_monotonic_hour_despite_small_clock_corrections(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, correction: str,
+) -> None:
+    from origo.alerts.summary import plan_notification
+    from .test_alert_summary import _now, _summary
+
+    now, summary = _now(), _summary()
+    monitor = _monitor(recorder, tmp_path)
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def accepted(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        return f'local-provider-{len(dispatches)}'
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', accepted)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, summary, monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == 'acknowledged'
+    points = [(3540, 3630), (3609, 3699), (3610, 3700)] if correction == 'single' else [
+        (minute * 59, minute * 60) for minute in range(1, 63)
+    ]
+    for elapsed, wall_elapsed in points:
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = now + timedelta(seconds=wall_elapsed)
+        # Each tick reloads the durable quota; adjusted deadlines cannot live only in memory.
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        assert saved.next_distinct_at == cursor.next_distinct_at
+        prepared = plan_notification(cursor, summary, monitor.settings, adjusted_now, True, transitions=True)
+        if elapsed < 3610:
+            assert not prepared, (correction, elapsed, wall_elapsed)
+        if prepared:
+            assert monitor._resume_notification(cursor, adjusted_now) == 'acknowledged'
+    assert len(dispatches) == 2
+    assert dispatches[1] - dispatches[0] >= 3600
+
+
+@pytest.mark.parametrize('status', [429, 503])
+def test_truncated_http_error_body_keeps_pending_retry_and_detector_tick_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int,
+) -> None:
+    import http.client
+    import urllib.error
+    import urllib.request
+    from email.message import Message
+    from origo.alerts.summary import attempt_delivery, plan_notification
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now = _now()
+    previous = now - timedelta(minutes=1)
+    cursor = Cursor.load(monitor.cursor_path, previous, 15)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, previous, True, transitions=True)
+
+    def initial_timeout(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        raise DeliveryError('injected initial timeout', disposition='uncertain')
+
+    assert attempt_delivery(cursor, monitor.settings, previous, lambda: cursor.save(monitor.cursor_path),
+                            completion_clock=lambda: previous, sender=initial_timeout) == 'uncertain'
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+
+    class TruncatedErrorBody(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            raise http.client.IncompleteRead(b'partial transport response')
+
+    def failed_response(request: urllib.request.Request, timeout: float) -> object:
+        assert request.get_header('Idempotency-key') == original['idempotency_key']
+        calls.append('retry')
+        headers = Message()
+        headers['Retry-After'] = '120'
+        raise urllib.error.HTTPError(request.full_url, status, 'injected provider failure', headers, TruncatedErrorBody())
+
+    monkeypatch.setattr('origo.alerts.email.urllib.request.urlopen', failed_response)
+    outcome = monitor.tick(now)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert calls[0] == 'retry' and calls.count('dagit') == len(MONITOR_CHECK_NAMES)
+    restored = Cursor.load(monitor.cursor_path, now, 15)
+    pending = restored.pending_notification
+    assert pending is not None and pending['attempts'] == 2
+    assert pending['payload_sha256'] == original['payload_sha256']
+    assert pending['idempotency_key'] == original['idempotency_key']
+    assert pending['outcome'] == ('retryable' if status == 429 else 'uncertain')
+    assert pending['next_attempt_at'] >= now.timestamp() + 120
+    assert restored.failures_after == now.timestamp()
+    assert restored.receipts_after == restored.logs_after == (now - timedelta(seconds=DELIVERY_LAG_SECONDS)).isoformat()
+
+
+@pytest.mark.parametrize('fault', ['directory', 'append'])
+def test_notification_storage_failure_bounds_large_recorded_frame_before_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    from typing import Literal
+    from origo.observatory import Document, NotificationObservation, ObservationFrame
+    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now
+    from origo.workers import law_page as page
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now = _now()
+    report = page._object(_document(CAPTURES / 'current.json')['last_report'])
+    original_frame = monitor._observation_frame
+    captured_frames: list[ObservationFrame] = []
+
+    def large_frame(report_arg: LawReport | None, findings: list[Finding], held: set[str],
+                    cursor: Cursor, reads: dict[str, bool], at: datetime) -> ObservationFrame:
+        frame = original_frame(report_arg, findings, held, cursor, reads, at)
+        observations: list[NotificationObservation] = []
+        # These are original captured gate identities, times and outcomes. NOT_EVALUATED
+        # is explicitly unavailable evidence, with no invented readings or eligibility.
+        for event in page._objects(report['gates']):
+            outcome = str(event['outcome'])
+            observations.append(NotificationObservation(
+                group_id=str(event['gate_id']), check=str(event['gate_id']), scope='', kind='condition',
+                status=cast(Literal['PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT'], outcome if outcome in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT') else 'UNKNOWN'),
+                definition_version=str(event['definition_version']), detector_keys=[], eligible=None,
+                read_window_key=None, measurements=[], evidence_refs=[str(event['evidence_id'])],
+                complete=outcome in ('PASS', 'FAIL', 'EXPECTED_WAIT'),
+            ))
+        assert len(observations) > 64
+        frame['observations'] = observations
+        captured_frames.append(frame)
+        return frame
+
+    monkeypatch.setattr(monitor, '_observation_frame', large_frame)
+    if fault == 'directory':
+        blocked = tmp_path / 'unavailable-notification-directory'
+        blocked.write_text('injected directory creation fault')
+        monitor.notification_history.root = blocked
+    else:
+        def failed_append(frame: ObservationFrame, report_arg: Document | None, at: datetime) -> None:
+            assert len(frame['observations']) > 64
+            raise OSError('injected failure before sidecar truncation')
+        monkeypatch.setattr(monitor.notification_history, 'append', failed_append)
+    monkeypatch.setattr('origo.alerts.summary.send_alert', lambda *args, **kwargs: 'local-provider-ack')
+    outcome = monitor.tick(now)
+    assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
+    assert calls.count('dagit') == len(MONITOR_CHECK_NAMES)
+    frame = captured_frames[0]
+    assert len(frame['observations']) <= 64
+    assert frame['omitted_groups'] and not frame['complete']
+    retained = monitor.notification_history.frames[frame['sampling_slot']]
+    assert len(retained) <= 8192
+    decoded, _ = monitor.notification_history.decode(retained)
+    assert len(decoded['observations']) <= 64 and not decoded['complete']
+    assert len(json.dumps(decoded, separators=(',', ':')).encode()) <= 128 * 1024
+    restored = Cursor.load(monitor.cursor_path, now, 15)
+    assert restored.failures_after == now.timestamp()
+    assert restored.receipts_after == restored.logs_after == (now - timedelta(seconds=DELIVERY_LAG_SECONDS)).isoformat()
+    assert restored.expired_through is not None
+
+
+def test_clock_correction_survives_failed_save_and_committed_minute_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.alerts.summary import plan_notification
+    from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now, _summary
+    from origo.workers import law_page as page
+
+    calls: list[str] = []
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
+    now, summary = _now(), _summary()
+    initial = now - timedelta(minutes=2)
+    cursor = Cursor.load(monitor.cursor_path, initial, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (initial.timestamp(), clock[0])
+    monitor.law_tape.last = cast(LawReport, page._object(_document(CAPTURES / 'current.json')['last_report']))
+    dispatches: list[float] = []
+
+    def accepted(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        return f'local-provider-{len(dispatches)}'
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', accepted)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, summary, monitor.settings, initial, True, transitions=True)
+    assert monitor._resume_notification(cursor, initial) == 'acknowledged'
+    original_deadline = cursor.next_distinct_at
+    original_anchor = monitor.notification_clock
+
+    def failed_save(cursor: Cursor, path: Path) -> None:
+        raise OSError('injected corrected clock reservation persistence fault')
+
+    clock[0] += 60
+    with monkeypatch.context() as failing:
+        failing.setattr(Cursor, 'save', failed_save)
+        result = monitor.tick(now)
+    assert result.processed == () and calls == []
+    assert monitor.notification_clock == original_anchor
+    assert Cursor.load(monitor.cursor_path, now, 15).next_distinct_at == original_deadline
+    clock[0] += 5
+    result = monitor.tick(now + timedelta(seconds=5))
+    assert result.processed == () and calls == []
+    assert Cursor.load(monitor.cursor_path, now, 15).next_distinct_at == original_deadline + 60
+    for elapsed in (3550, 3609, 3610):
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = initial + timedelta(seconds=elapsed + 60)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        prepared = plan_notification(cursor, summary, monitor.settings, adjusted_now, True, transitions=True)
+        assert prepared is (elapsed == 3610)
+        if prepared:
+            assert monitor._resume_notification(cursor, adjusted_now) == 'acknowledged'
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] >= 3600
+
+
+@pytest.mark.parametrize('retry_after', [60, 120])
+def test_pending_retry_waits_for_monotonic_delay_after_clock_correction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_after: int,
+) -> None:
+    from origo.alerts.summary import plan_notification
+    from .test_alert_summary import _monitor_with_recorded_reads, _now, _summary
+
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, [])
+    now = _now()
+    cursor = Cursor.load(monitor.cursor_path, now, 15)
+    clock = [1000.0]
+    monkeypatch.setattr('origo.workers.monitor.time.monotonic', lambda: clock[0])
+    monitor.notification_clock = (now.timestamp(), clock[0])
+    dispatches: list[float] = []
+
+    def uncertain(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        dispatches.append(clock[0])
+        raise DeliveryError('injected local timeout', disposition='uncertain', retry_after=retry_after)
+
+    monkeypatch.setattr('origo.alerts.summary.send_alert', uncertain)
+    assert monitor.settings is not None
+    assert plan_notification(cursor, _summary(), monitor.settings, now, True, transitions=True)
+    assert monitor._resume_notification(cursor, now) == 'uncertain'
+    assert cursor.pending_notification is not None
+    original = cursor.pending_notification.copy()
+    for elapsed in (1, retry_after - 1, retry_after):
+        clock[0] = 1000.0 + elapsed
+        adjusted_now = now + timedelta(seconds=elapsed + 59)
+        cursor = Cursor.load(monitor.cursor_path, adjusted_now, 15)
+        monitor._notification_clock(cursor, adjusted_now)
+        saved = Cursor.load(monitor.cursor_path, adjusted_now, 15).pending_notification
+        assert saved is not None
+        assert saved['next_attempt_at'] == now.timestamp() + retry_after + 59
+        assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'idempotency_key'))
+        assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else 'uncertain')
+    assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after

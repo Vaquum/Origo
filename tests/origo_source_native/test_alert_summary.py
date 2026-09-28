@@ -23,6 +23,7 @@ from typing import Literal, cast
 import pytest
 from playwright.sync_api import sync_playwright
 
+from origo import observatory
 from origo.alerts import email as transport
 from origo.alerts import summary as delivery
 from origo.alerts.email import AlertSettings, DeliveryError
@@ -237,6 +238,21 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
         render_email(hostile, dashboard_url=None, dagit_written=True)
 
 
+def _assert_missing_current_measurement_has_no_trend() -> None:
+    frames = copy.deepcopy(_through(_recorded_frames('r1-perp-20260928'), '02:00'))
+    retained_measurements = frames[-2]['observations'][0]['measurements']
+    # Inject an omitted sidecar group, preserving every retained source measurement.
+    frames[-1]['observations'] = []
+    frames[-1]['omitted_groups'] = 1
+    frames[-1]['complete'] = False
+    incident = _summary(frames, datetime.fromisoformat(frames[-1]['sampling_slot']))['incidents'][0]
+    assert incident['measurements'] == retained_measurements
+    assert incident['verification'] == 'unverified'
+    assert incident['trend']['value'] is None, 'An omitted current group cannot supply the current hourly endpoint.'
+    assert incident['trend']['unavailable_reason'] == 'current_observation_missing'
+    assert incident['trend']['current_at'] is None
+
+
 def test_repeat_trends_preserve_evidence_coverage() -> None:
     frames = _recorded_frames('r1-perp-20260928')
     selected = _through(frames, '02:00')
@@ -267,9 +283,97 @@ def test_repeat_trends_preserve_evidence_coverage() -> None:
     assert measurement_trend(current, selected[-1]['sampling_slot'], incompatible,
                              selected[-61]['sampling_slot'])['value'] is None
     assert _summary(frames)['cards'][10]['value'] == '33'
+    _assert_missing_current_measurement_has_no_trend()
+
+
+def _assert_resumed_failure_notifies_at_eligibility() -> None:
+    frames = _recorded_frames('r1-perp-20260924')
+    for first_slot in ('00:00', '09:31'):
+        selected = [frame for frame in frames if first_slot <= frame['sampling_slot'][11:16] <= '09:37']
+        transitions = lifecycle_transitions(selected, now=datetime.fromisoformat(selected[-1]['sampling_slot']))
+        resumed = [event for event in transitions if '09:32' <= event['sampling_slot'][11:16] <= '09:37']
+        assert [(event['sampling_slot'][11:16], event['description']) for event in resumed] == [
+            ('09:36', 'Ongoing · Verification restored')
+        ], 'Restored failure must notify once, on the fifth same-key recorded FAIL.'
+        assert resumed[0]['lifecycle'] == 'ongoing'
+        held = _through(selected, '09:35')
+        incident = _summary(held, datetime.fromisoformat(held[-1]['sampling_slot']))['incidents'][0]
+        assert incident['status'] == 'FAIL' and incident['verification'] == 'verified'
+    # The initial lifecycle is injected protocol state; all following FAIL values,
+    # reason-bearing keys, original times and hold decisions are the genuine replay.
+    initial = next(frame for frame in frames if frame['sampling_slot'][11:16] == '09:31')
+    episode = observatory._Episode(initial['observations'][0], active=True, had_failure=True,
+                                   verification='expected_wait', lifecycle='expected_wait',
+                                   status='EXPECTED_WAIT', previous_slot=initial['sampling_slot'])
+    for frame in frames:
+        if '09:32' <= frame['sampling_slot'][11:16] <= '09:37':
+            observatory._condition(episode, frame['observations'][0], frame)
+            if not frame['observations'][0]['eligible']:
+                assert not episode.transitions
+    assert [(event['sampling_slot'][11:16], event['description']) for event in episode.transitions] == [
+        ('09:36', 'Ongoing · Expected wait ended')
+    ]
+    assert episode.lifecycle == 'ongoing' and episode.had_failure
+
+
+def _quiet_event_protocol_frames() -> list[ObservationFrame]:
+    """Exercise the event protocol using recorded aggregate quiet reads, not invented service events."""
+    frames: list[ObservationFrame] = []
+    for name in ('current-0608.json', 'current-0611.json', 'current.json'):
+        report = page._object(_document(CAPTURES / name)['last_report'])
+        gate = next(event for event in page._objects(report['gates']) if event['gate_id'] == 'monitor.no_error_logs')
+        evidence = page._object(gate['evidence'])
+        count = evidence['error_lines']
+        assert isinstance(count, int) and count == 0 and gate['outcome'] == 'PASS'
+        observation: NotificationObservation = {
+            'group_id': str(gate['gate_id']), 'check': 'no_error_logs', 'scope': '',
+            'kind': 'event_stream', 'status': 'PASS', 'definition_version': str(gate['definition_version']),
+            'detector_keys': [], 'eligible': False, 'read_window_key': 'error_lines',
+            'measurements': [{'name': 'event_count', 'value': count, 'unit': 'error lines', 'threshold': None,
+                              'observed_at': str(gate['evaluated_at']), 'definition_version': str(gate['definition_version'])}],
+            'evidence_refs': [str(gate['evidence_id'])], 'complete': True,
+        }
+        frames.append({'sampling_slot': str(report['sampling_slot']), 'catalog_version': str(report['catalog_version']),
+                       'law_sample_ref': None, 'law_observed': True, 'checks_complete': {'no_error_logs': True},
+                       'read_windows': {'error_lines': {'window_start': str(evidence['window_start']),
+                                                      'window_end': str(evidence['window_end']), 'count': count,
+                                                      'counts_limited': evidence['counts_limited'] is True, 'complete': True}},
+                       'observations': [observation] if not frames else [], 'omitted_groups': 0, 'complete': True})
+    # Later event frames omit the group after a successful quiet aggregate read.
+    # Coverage failure only: the captured count and all source values stay intact.
+    frames[0]['checks_complete']['no_error_logs'] = False
+    frames[0]['read_windows']['error_lines']['complete'] = False
+    frames[0]['complete'] = False
+    return frames
+
+
+def _assert_quiet_event_verification_transition() -> None:
+    frames = _quiet_event_protocol_frames()
+    now = datetime.fromisoformat(frames[-1]['sampling_slot'])
+    transitions = lifecycle_transitions(frames, now=now)
+    assert [(event['sampling_slot'], event['description']) for event in transitions] == [
+        (frames[0]['sampling_slot'], 'New · Unverified'),
+        (frames[1]['sampling_slot'], 'Verification restored · No further events observed'),
+    ], 'A successful quiet read must notify restored verification exactly once.'
+    assert all(event['lifecycle'] != 'recovered' for event in transitions)
+
+
+def _assert_quiet_event_does_not_promise_recovery() -> None:
+    frames = _quiet_event_protocol_frames()
+    for count in (2, 3):
+        selected = frames[:count]
+        incident = _summary(selected, datetime.fromisoformat(selected[-1]['sampling_slot']))['incidents'][0]
+        assert incident['kind'] == 'event_stream' and incident['verification'] == 'verified'
+        assert incident['lifecycle'] == 'historical_events' and incident['status'] == 'PASS'
+        assert incident.get('recovery_pending') is False, 'Quiet event reads do not confirm condition recovery.'
+        assert not any('Recovery pending' in line or 'second consecutive pass' in line
+                       for line in incident.get('display_lines', []))
 
 
 def test_lifecycle_preserves_transient_and_unverified_incidents() -> None:
+    _assert_resumed_failure_notifies_at_eligibility()
+    _assert_quiet_event_verification_transition()
+    _assert_quiet_event_does_not_promise_recovery()
     frames = _recorded_frames('r1-perp-20260928')
     def incident_at(clock: str) -> Document:
         selected = _through(frames, clock)
@@ -689,10 +793,18 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
     assert len(json.dumps(report, separators=(',', ':')).encode()) == baseline['compact_report_bytes'] == 126790
     assert page.MAX_SAMPLE_BYTES == 96 * 1024 * 1024 and page.MAX_RECORD == 1024 * 1024
     original_catalog = _document(CAPTURES / 'catalog.json')
-    rebuilt = build_catalog(str(original_catalog['deployed_sha']))
-    original_versions = {str(gate['id']): gate['definition_version'] for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
-    rebuilt_versions = {gate['id']: gate['definition_version'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
-    assert rebuilt_versions == original_versions and len(original_versions) == 17
+    # The captures predate a main-branch law change. Their hashes/provenance remain
+    # historical evidence; this PR's invariance oracle is its current main base.
+    base_sha = subprocess.run(['git', 'merge-base', 'HEAD', 'origin/main'], cwd=ROOT,
+                              check=True, capture_output=True, text=True).stdout.strip()
+    for relative in ('origo/law.py', 'origo/law_catalog.py'):
+        base_source = subprocess.run(['git', 'show', f'{base_sha}:{relative}'], cwd=ROOT,
+                                     check=True, capture_output=True).stdout
+        assert (ROOT / relative).read_bytes() == base_source, relative
+    rebuilt = build_catalog(base_sha)
+    original_ids = {str(gate['id']) for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
+    rebuilt_ids = {gate['id'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
+    assert rebuilt_ids == original_ids and len(original_ids) == 17
     with _serving(tmp_path) as (url, cache, summary):
         with urllib.request.urlopen(url + '/law.json', timeout=5) as response:
             assert len(response.read()) <= 160 * 1024, 'Actual current wire must include summary within160KiB.'

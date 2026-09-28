@@ -427,6 +427,7 @@ class _Episode:
     previous_slot: str | None = None
     lifecycle: Lifecycle = 'ongoing'
     verification: Verification = 'verified'
+    failure_resume: Verification | None = None
     status: SummaryStatus = 'PASS'
     active: bool = False
     had_failure: bool = False
@@ -467,6 +468,8 @@ def _condition(episode: _Episode, observation: NotificationObservation | None, f
         episode.observed_slots += int(observation['complete'])
     episode.previous_slot = slot
     episode.status = _status(state)
+    if state != 'FAIL':
+        episode.failure_resume = None
     episode.complete = episode.complete and observation is not None and observation['complete']
     if state in ('FAIL', 'UNKNOWN'):
         if not old_active and old_status == 'PASS' and episode.first_seen is not None:
@@ -489,6 +492,8 @@ def _condition(episode: _Episode, observation: NotificationObservation | None, f
             elif old_verification != 'unverified':
                 episode.transition(slot, 'Unverified; incident remains unresolved')
         elif observation is not None and observation['eligible'] is True:
+            resumed_from = episode.failure_resume or old_verification
+            episode.failure_resume = None
             episode.verification = 'verified'
             episode.active = True
             episode.had_failure = True
@@ -497,10 +502,12 @@ def _condition(episode: _Episode, observation: NotificationObservation | None, f
                 episode.transition(slot, 'Reopened' if episode.was_recovered else 'New')
             else:
                 episode.lifecycle = 'ongoing'
-                if old_verification == 'unverified':
-                    episode.transition(slot, 'Ongoing · Verification restored')
+                if resumed_from != 'verified':
+                    episode.transition(slot, 'Ongoing · Verification restored' if resumed_from == 'unverified' else 'Ongoing · Expected wait ended')
         else:
-            # A held predicate remains a recorded failure, but cannot open an episode.
+            # Keep the deferred transition while current evidence is already verified.
+            if old_active and old_verification != 'verified':
+                episode.failure_resume = old_verification
             episode.verification = 'verified'
     elif state == 'EXPECTED_WAIT':
         episode.passes = 0
@@ -576,6 +583,8 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
             episode.complete = False
         episode.status, episode.verification = 'PASS', 'verified'
         episode.lifecycle = 'ongoing' if episode.last_event and _instant(slot) - _instant(episode.last_event) < timedelta(hours=1) else 'historical_events'
+        if previous_verification == 'unverified':
+            episode.transition(slot, 'Verification restored · No further events observed')
     episode.last_read_end = read_end
 
 
@@ -612,7 +621,8 @@ def lifecycle_transitions(history: Sequence[ObservationFrame], *, now: datetime)
 
 def _incident(key: str, episode: _Episode, frames: Sequence[ObservationFrame], now: datetime) -> Incident:
     observation = episode.observation
-    end = frames[-1]['sampling_slot'] if frames else None
+    current_present = bool(frames) and any(item['group_id'] == key for item in frames[-1]['observations'])
+    end = frames[-1]['sampling_slot'] if current_present else None
     previous_at = (_instant(end) - timedelta(hours=1)).isoformat() if end else None
     previous = next((item for frame in frames if frame['sampling_slot'] == previous_at for item in frame['observations'] if item['group_id'] == key), None)
     family = observation['check'].removeprefix('law.').split(':', 1)[0]
@@ -627,9 +637,9 @@ def _incident(key: str, episode: _Episode, frames: Sequence[ObservationFrame], n
             'had_eligible_failure': episode.had_failure, 'verification': episode.verification, 'label': label,
             'first_seen': episode.first_seen, 'last_seen': episode.last_seen, 'observations': episode.observations,
             'coverage': coverage, 'measurements': observation['measurements'],
-            'trend': measurement_trend(observation, end, previous, previous_at) if end else unavailable_trend(),
+            'trend': measurement_trend(observation, end, previous, previous_at) if end else unavailable_trend('current_observation_missing'),
             'evidence_refs': observation['evidence_refs'], 'scope_count': 1,
-            'recovery_pending': episode.active and episode.status == 'PASS', 'failing_minutes': episode.failing_minutes,
+            'recovery_pending': observation['kind'] == 'condition' and episode.active and episode.status == 'PASS', 'failing_minutes': episode.failing_minutes,
             'transitions': [f"{item['description']} at {item['sampling_slot']}" for item in episode.transitions]}
 
 

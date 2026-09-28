@@ -258,7 +258,20 @@ def send_alert(
             raw = response.read(RESPONSE_BYTES + 1)
             retry_after = _retry_after(response.headers.get('Retry-After'))
     except urllib.error.HTTPError as error:
-        raw = error.read(RESPONSE_BYTES)
+        try:
+            raw = error.read(RESPONSE_BYTES)
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            TimeoutError,
+            OSError,
+        ) as body_error:
+            raise DeliveryError(
+                f'Resend HTTP {error.code} body read failed ({type(body_error).__name__}); acceptance is uncertain.',
+                disposition='retryable' if error.code == 429 else 'uncertain',
+                status=error.code,
+                retry_after=_retry_after(error.headers.get('Retry-After')),
+            ) from body_error
         raise _http_error(
             error.code, raw, _retry_after(error.headers.get('Retry-After'))
         ) from error

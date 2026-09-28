@@ -58,3 +58,34 @@ it does not prove real Docker rollout downtime,
 provider overlap, busy-minute parity or production freshness. Those require the
 retained authentic corpus and actual process/deployment interruption measurements;
 production closeout remains on [PRD460](https://github.com/Vaquum/Origo/issues/460).
+
+## Offline resource evidence
+
+Run the resource harness against an already recorded corpus using a local application
+image with the Origo runtime dependencies installed:
+
+```bash
+python3 tests/fixtures/binance/futures/recent_trades/replay_resources.py \
+  --corpus tests/fixtures/binance/futures/recent_trades/2026-09-21 \
+  --output tests/fixtures/binance/futures/recent_trades/2026-09-21/resource-replay \
+  --image trades-warehouse-dagster:latest
+```
+
+Each cadence runs in a fresh Docker container with one CPU, 512 MiB memory, swap disabled,
+no network, a read-only checkout and a separate temporary spool volume. The harness
+streams original response bundles, executes the capture/spool code and persistent
+provider pacing, and supplies only recorded HTTP responses. Historical repair
+requires the exact recorded request parameters; parity requests are counted
+separately and never dispatched as operational repair. Repair retains its seven-page
+allowance per minute. The two-times run compresses recorded time for an offline
+processing test; it does not establish twice the provider budget or live capacity.
+
+`resource-replay-report.json` binds the measured runtime and harness hashes, image ID,
+dependency versions and input bundle hashes. Its run directories retain the attempt
+ledgers, Docker limits and process/cgroup memory peaks. The report includes queue debt
+at capture end and after a bounded 120-second recorded-time drain; missing responses,
+late processing, unmatched failures or unconsumed bridge evidence remain failures.
+The old September 21 corpus demonstrates the harness only: its largest complete
+minute has 9,948 captured trades and it contains no observed overlap break. It cannot
+certify the required busy-minute or historical-repair capacity. A qualifying
+`resources.json` must refer to the same registered corpus as the acceptance tests.

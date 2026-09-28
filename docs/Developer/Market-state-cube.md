@@ -441,3 +441,40 @@ pytest tests/origo_source_native/test_market_state_detail.py -q
 pytest tests/origo_source_native/test_market_state_query.py -q -k "measures or column_prices or divide_exactly or keep_their"
 pytest tests/origo_source_native/test_market_state_registration.py -q -k detail
 ```
+
+Pre-merge evidence on 2026-09-28, in a disposable ClickHouse 25.3.2.39. The lifecycle built
+2026-02-05, the busiest day (15,364,010 trades), from its official archive, served unchanged with
+its checksum sidecar. Memory is the query log's `memory_usage`, under the builder's 1 thread
+and 2 GiB:
+
+- **Fresh**, both groups enabled: the whole build took 97 s. The detail insert took 3.2 s at
+  8.1 MiB, and its checks 1.8 s at 4.0 MiB.
+- **Native upgrade** of the day built with the cube only: 28 s, the same revision and build at
+  generation 2, with no archive request. The detail insert took 5.3 s at 99.6 MiB, and its
+  checks 4.2 s at 95.4 MiB.
+- **Busiest minute**, 20:15 (42,387 trades), as a provisional partition: the detail insert took
+  100 ms at 4.2 MiB.
+
+At production size, a request without measures runs the v3.27.2 statements at the same cost.
+Over ten alternating runs of each, history to 2024-06-29 at the finest grid (4.3 million cells)
+took a median 2.28 s against 2.33 s on v3.27.2. The whole history at 3,600 s × 1,000 USDT took
+1.36 s against 1.40 s. With every measure, the request to 2024-06-29 took 5.7 s against 1.7 s
+without measures in the same process, and wrote 526 MB against 207 MB. Its detail statement
+peaked at 1.90 GiB of the 4 GiB limit.
+
+Native GUI acceptance on 2026-09-28 used the committed, checksum-proven 2025-01-01 capture in a
+disposable ClickHouse/Dagster environment:
+
+- v3.27.2 retained the day at generation 1 with the cube.
+- This image's compatibility check, bootstrap and rollout then enabled the detail group.
+- Every sensor and schedule was stopped on the Automation page, so that only the operator acted.
+- Selecting the day in the native partition bar and launching one run attached the detail
+  component at generation 2.
+- Native **Re-execute all** kept generation 2.
+
+Both runs succeeded in about 4.5 seconds, and both read only the archive's checksum sidecar.
+SQL confirmed all eight earlier hashes, the revision and the build unchanged, with one raw build
+and one receipt per component. The 1,539 detail cells accounted for all 12,000 captured trades,
+their 123.48987 BTC and 667.76 USDT of path, and 1,536 columns held 86,400 s of dwell. The cube's
+15 cells kept their 12,000 trades and 5,310 taker buys. This does not establish production
+capacity or complete historical coverage.

@@ -1,3 +1,7 @@
+# v3.28.0
+
+- Share recorded operator summaries between the law dashboard and HTML/text email; group incident lifecycles, preserve repeat/trend coverage, and bound distinct dispatches to hourly with durable immutable retries.
+
 # v3.27.2
 
 - Capture recent raw-perp trades in a durable spool and repair verified missing ranges before existing source activation.

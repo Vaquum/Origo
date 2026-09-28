@@ -92,6 +92,7 @@ services:
       - ORIGO_ALERT_RESEND_API_KEY=${ORIGO_ALERT_RESEND_API_KEY:-}
       - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-}
       - ORIGO_ALERT_EMAIL_TO=${ORIGO_ALERT_EMAIL_TO:-}
+      - ORIGO_ALERT_DASHBOARD_URL=${ORIGO_ALERT_DASHBOARD_URL:-}
     volumes:
       - .:/opt/app
       - worker-heartbeats:/opt/origo/heartbeats

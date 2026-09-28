@@ -641,3 +641,13 @@ def test_market_state_api_is_deployed_on_loopback_with_bounded_resources() -> No
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert 'provisional-binance-perp-aggtrades law market-state \\' in workflow
     test_all_published_ports_bind_loopback()
+
+
+def test_dashboard_url_is_optional_in_both_monitor_compose_paths() -> None:
+    for filename in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        compose = (REPO_ROOT / filename).read_text()
+        monitor = compose.split('  monitor:\n', 1)[1].split('  law:\n', 1)[0]
+        assert 'ORIGO_ALERT_DASHBOARD_URL=${ORIGO_ALERT_DASHBOARD_URL:-}' in monitor
+        assert compose.count('ORIGO_ALERT_DASHBOARD_URL=') == 1
+        assert 'ORIGO_ALERT_DASHBOARD_URL:?' not in compose
+        assert 'ORIGO_LAW_PAGE_URL=http://law:8485/healthz' in monitor

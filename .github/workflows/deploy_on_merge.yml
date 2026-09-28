@@ -32,6 +32,7 @@ jobs:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       ORIGO_ALERT_EMAIL_FROM: ${{ vars.ORIGO_ALERT_EMAIL_FROM || 'onboarding@resend.dev' }}
       ORIGO_ALERT_EMAIL_TO: ${{ vars.ORIGO_ALERT_EMAIL_TO }}
+      ORIGO_ALERT_DASHBOARD_URL: ${{ vars.ORIGO_ALERT_DASHBOARD_URL }}
 
     steps:
       - name: Checkout repository
@@ -160,6 +161,7 @@ jobs:
               "RESEND_API_KEY": os.environ["RESEND_API_KEY"],
               "ORIGO_ALERT_EMAIL_FROM": os.environ["ORIGO_ALERT_EMAIL_FROM"],
               "ORIGO_ALERT_EMAIL_TO": os.environ["ORIGO_ALERT_EMAIL_TO"],
+              "ORIGO_ALERT_DASHBOARD_URL": os.environ.get("ORIGO_ALERT_DASHBOARD_URL", ""),
           }
 
           for key, value in values.items():

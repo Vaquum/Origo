@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,6 +90,26 @@ jobs:
 
           suites = ElementTree.parse('perp-capture.xml').getroot().findall('testsuite')
           assert sum(int(suite.attrib['tests']) for suite in suites) == 18
+          for outcome in ('skipped', 'failures', 'errors'):
+              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
+          PYTHON
+
+      - name: Execute shared notification acceptance tests
+        run: |
+          pytest -q --junitxml=notification-summary.xml \
+            tests/origo_source_native/test_alert_summary.py::test_dashboard_and_email_share_recorded_summary \
+            tests/origo_source_native/test_alert_summary.py::test_html_email_matches_dashboard_and_text \
+            tests/origo_source_native/test_alert_summary.py::test_repeat_trends_preserve_evidence_coverage \
+            tests/origo_source_native/test_alert_summary.py::test_lifecycle_preserves_transient_and_unverified_incidents \
+            tests/origo_source_native/test_alert_summary.py::test_all_notifications_obey_global_hourly_budget \
+            tests/origo_source_native/test_alert_summary.py::test_retry_restart_and_storage_faults_preserve_delivery \
+            tests/origo_source_native/test_alert_summary.py::test_monitor_pipeline_preserves_law_and_resource_contracts \
+            tests/origo_source_native/test_alert_summary.py::test_public_dashboard_url_is_deployed_and_validated
+          python - <<'PYTHON'
+          from xml.etree import ElementTree
+
+          suites = ElementTree.parse('notification-summary.xml').getroot().findall('testsuite')
+          assert sum(int(suite.attrib['tests']) for suite in suites) == 8
           for outcome in ('skipped', 'failures', 'errors'):
               assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
           PYTHON

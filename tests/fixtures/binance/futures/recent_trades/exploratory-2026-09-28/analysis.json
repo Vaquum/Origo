@@ -1,0 +1,111 @@
+{
+  "origin": "computed only from every preserved response in registered interval",
+  "attempts": 1760,
+  "failures": 0,
+  "observed_missing_overlap": 1,
+  "unrepaired_gaps": [
+    {
+      "left_trade_id": 8125241304,
+      "left_time_ms": 1790580195484,
+      "right_trade_id": 8125241351,
+      "right_time_ms": 1790580195849,
+      "response_at": "2026-09-28T07:23:15.990513+00:00"
+    }
+  ],
+  "stale_or_repeated_responses": 288,
+  "conflicting_shared_rows": 0,
+  "total_requested_weight": 8800,
+  "bracketed_observed_minute_counts": [
+    {
+      "minute": "2026-09-28T07:11:00+00:00",
+      "rows": 618,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:12:00+00:00",
+      "rows": 1407,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:13:00+00:00",
+      "rows": 1138,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:14:00+00:00",
+      "rows": 2251,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:15:00+00:00",
+      "rows": 1890,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:16:00+00:00",
+      "rows": 2149,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:17:00+00:00",
+      "rows": 1561,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:18:00+00:00",
+      "rows": 1224,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:19:00+00:00",
+      "rows": 1469,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:20:00+00:00",
+      "rows": 1559,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:21:00+00:00",
+      "rows": 1528,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:22:00+00:00",
+      "rows": 1559,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:23:00+00:00",
+      "rows": 3954,
+      "overlap_proven": false
+    },
+    {
+      "minute": "2026-09-28T07:24:00+00:00",
+      "rows": 3886,
+      "overlap_proven": true
+    },
+    {
+      "minute": "2026-09-28T07:25:00+00:00",
+      "rows": 2597,
+      "overlap_proven": true
+    }
+  ],
+  "response_seconds": {
+    "p50": 0.30330585400224663,
+    "p95": 0.3960129750033957,
+    "max": 1.394996707997052
+  },
+  "poll_start_gap_seconds": {
+    "p50": 0.505008,
+    "p95": 0.507013,
+    "max": 1.398302
+  },
+  "max_used_weight_1m": 600,
+  "max_observed_bracketed_minute_rows": 3954,
+  "qualifying_busy_minimum_rows": 17967,
+  "qualifies_busy_acceptance": false,
+  "archive_parity": "not available before next-day publication",
+  "production_freshness_or_latency_claim": false
+}

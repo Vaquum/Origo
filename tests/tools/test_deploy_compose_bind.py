@@ -352,6 +352,14 @@ function docker() {
           *) return 3 ;;
         esac
         return "$PREFLIGHT_EXIT" ;;
+      'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=provisional-binance-perp-trades')
+        printf 'perp\n' ;;
+      'stop perp') printf 'stop-perp\n' >> "$CALLS" ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --no-deps --force-recreate provisional-binance-perp-trades')
+        printf 'repair-only\n' >> "$CALLS" ;;
+      'inspect --format {{range .Config.Env}}'*) printf repair-only ;;
+      'compose -p test -f docker-compose.deploy.yml up -d --no-deps perp-capture')
+        printf 'capture\n' >> "$CALLS" ;;
       'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit'|'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker')
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
@@ -363,7 +371,7 @@ function docker() {
 }
 """
     for setup_exit, preflight_exit, expected in (
-        ('0', '0', ['setup', 'preflight', 'recreate', 'up', 'after-up']),
+        ('0', '0', ['setup', 'preflight', 'stop-perp', 'repair-only', 'capture', 'recreate', 'up', 'after-up']),
         ('1', '0', ['setup']),
         ('0', '1', ['setup', 'preflight']),
     ):
@@ -521,14 +529,14 @@ def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
     raw_perp = compose.split('  provisional-binance-perp-trades:\n', 1)[1].split(
         '  provisional-binance-spot-aggtrades:', 1
     )[0]
-    assert compose.count('network_mode: host') == 1
+    assert compose.count('network_mode: host') == 2
     for declaration in (
         'network_mode: host',
         'hostname: ${ORIGO_PERP_WORKER_HOSTNAME:?deployment identity required}',
         'CLICKHOUSE_HOST: 127.0.0.1',
         'DAGSTER_WEBSERVER_URL: http://127.0.0.1:4000',
         'ORIGO_PROVISIONAL_SOURCE: binance_perp_trades',
-        'ORIGO_BINANCE_PERP_EGRESS_IPS: 37.27.112.140,37.27.112.144',
+        'ORIGO_BINANCE_PERP_EGRESS_IPS: 37.27.112.144',
     ):
         assert declaration in raw_perp
     assert 'ports:' not in raw_perp

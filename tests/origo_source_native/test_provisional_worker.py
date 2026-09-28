@@ -811,3 +811,53 @@ def test_dedicated_publication_does_not_block_minute_ingestion(
     assert not requests
     assert all(series == spec.key for series, _, _, _ in query_origo(RECEIPTS))
     assert reporter.materializations[0][2]['publications'] == 0
+
+
+@pytest.mark.parametrize('hours_later', [0, 48])
+def test_pending_perp_frontier_never_records_failed_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hours_later: int,
+) -> None:
+    from unittest.mock import Mock
+
+    from origo.sources.adapters import binance_perp_rest as perp
+    from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+
+    adapter = perp.BinancePerpProvisional()
+    spec = replace(BINANCE_PERP_TRADES_SPEC, provisional=adapter)
+    store = Mock(spec=SourceStore)
+    store.active_intervals.return_value = ()
+    store.anchor.return_value = ANCHOR
+    store.records.return_value = []
+    store.enabled_groups.return_value = ()
+    monkeypatch.setenv('ORIGO_PERP_CAPTURE_ROOT', str(tmp_path / 'spool'))
+    pending = Mock(return_value='pending')
+    repair = Mock()
+    monkeypatch.setattr(perp, 'classify_spooled_partition', pending)
+    monkeypatch.setattr(perp, 'repair_spooled_gaps', repair)
+    now = NOW + timedelta(hours=hours_later)
+    feed = _feed(spec, tmp_path, _Dagster(), _Reporter(), clock=lambda: now)
+    attempt = Mock(side_effect=AssertionError('A pending minute must not enter retry handling.'))
+    monkeypatch.setattr(feed, '_may_attempt', attempt)
+    assert feed._build_intervals(cast(SourceStore, store), spec, now) == ([], [])
+    repair.assert_called_once_with(
+        tmp_path / 'spool', adapter.partition(KEY), egress_ip='37.27.112.144'
+    )
+    attempt.assert_not_called()
+
+
+def test_perp_acknowledges_only_existing_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from origo.sources.adapters import binance_perp_rest as perp
+    from origo.sources.contracts import Partition
+
+    adapter = perp.BinancePerpProvisional()
+    day = ANCHOR.replace(hour=0, minute=0)
+    canonical = Partition(day.date().isoformat(), day, day + timedelta(days=1))
+    monkeypatch.setenv('ORIGO_PERP_CAPTURE_ROOT', str(tmp_path / 'spool'))
+    acknowledge = Mock()
+    monkeypatch.setattr(perp, 'acknowledge_spooled_revision', acknowledge)
+    adapter.candidates(NOW, ANCHOR, (canonical,))
+    acknowledge.assert_called_once_with(tmp_path / 'spool', canonical)

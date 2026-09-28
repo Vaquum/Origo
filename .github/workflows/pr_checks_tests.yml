@@ -62,6 +62,36 @@ jobs:
               assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
           PYTHON
 
+      - name: Execute recent-perp capture acceptance tests
+        run: |
+          pytest -q --junitxml=perp-capture.xml \
+            tests/origo_source_native/test_binance_perp_capture.py::test_recent_capture_matches_historical_and_archive \
+            tests/origo_source_native/test_binance_perp_capture.py::test_overlap_preserves_real_id_skips_and_rejects_conflicts \
+            tests/origo_source_native/test_binance_perp_spool.py::test_only_proven_closed_minutes_can_activate \
+            tests/origo_source_native/test_binance_perp_spool.py::test_restart_recovers_only_durable_capture \
+            tests/origo_source_native/test_binance_perp_spool.py::test_bounds_and_cleanup_preserve_unacknowledged_data \
+            tests/origo_source_native/test_binance_perp_spool.py::test_spool_repair_and_canonical_replacement_preserve_outputs \
+            tests/origo_source_native/test_binance_perp_capture.py::test_capture_obeys_ip_budget_and_provider_backoff \
+            tests/origo_source_native/test_binance_perp_capture.py::test_capture_continues_during_slow_repair_and_publication \
+            tests/origo_source_native/test_perp_capture_deploy.py::test_capture_deploy_recovers_overlap_or_verified_bridge \
+            tests/origo_source_native/test_perp_capture_deploy.py::test_rollback_preserves_spool_and_exclusive_ip_roles \
+            tests/origo_source_native/test_monitor.py::test_capture_health_uses_bounded_local_evidence \
+            tests/origo_source_native/test_binance_perp_capture.py::test_authentic_busy_capture_stays_within_resource_budget \
+            tests/origo_source_native/test_binance_perp_spool.py::test_spool_rejects_wrong_identity_and_open_partitions \
+            tests/origo_source_native/test_binance_perp_spool.py::test_verified_bridge_repairs_only_missing_rows \
+            tests/origo_source_native/test_binance_perp_spool.py::test_bridge_restart_and_cross_minute_reuse \
+            tests/origo_source_native/test_monitor.py::test_capture_heartbeat_cannot_clear_reader_failure \
+            tests/origo_source_native/test_binance_perp_capture.py::test_closeout_rejects_missing_or_unknown_observations \
+            tests/origo_source_native/test_binance_perp_capture.py::test_stalled_capture_lock_remains_visible_and_recovers
+          python - <<'PYTHON'
+          from xml.etree import ElementTree
+
+          suites = ElementTree.parse('perp-capture.xml').getroot().findall('testsuite')
+          assert sum(int(suite.attrib['tests']) for suite in suites) == 18
+          for outcome in ('skipped', 'failures', 'errors'):
+              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
+          PYTHON
+
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
 

@@ -53,8 +53,10 @@ mix pacing, concurrency and network. They do not isolate every provider latency.
 
 ## Deployment and failure boundaries
 
-Automatic raw-perp minutes use `.140`/`.144` by absolute-minute modulo over the
-configured one/two-address pool. Other sources and native repairs keep `.167`.
+S449 introduced `.140`/`.144` minute assignment. S461 dedicates `.140` to recent
+capture and configures automatic historical repair on singleton `.144`. Generic
+one/two-address adapter behavior remains available; other sources and native
+repairs keep `.167`.
 The same address controls socket binding and the persistent host/IP limiter;
 pool changes preserve existing cooldown/circuit files. No automatic failover.
 A lost address can block the contiguous frontier and occupy the oldest-gap slots;
@@ -64,9 +66,10 @@ Deployment validates a temporary copy of the actual host Netplan configuration,
 then adds secondary addresses without replacing primary routes. Candidate checks
 are local binding/default-route checks; provider/dependency outages do not block
 pre-up deployment. Containers detach stdin from the SSH-delivered script.
-Rollback uses a revert PR, without a separate saved-state mechanism.
+Rollback first retires the exact capture service before a revert can restore
+dual-IP repair; see [capture deployment](binance_perp_capture.md).
 
-Host networking applies only to this worker. It uses existing loopback services
+Host networking applies to raw-perp repair and capture. Repair uses existing loopback services
 and a deployment diagnostic hostname; no new listener is introduced. Any future
 listener requires explicit loopback binding review. These identifiers do not
 implement the ownership/lease work proposed in #439.

@@ -212,6 +212,15 @@ services:
     environment:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+      ORIGO_PERP_CAPTURE_ROOT: /var/lib/origo-perp-capture
+    volumes:
+      - .:/opt/app
+      - ./parquet_data:/opt/parquet
+      - ./arrow_data:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+      - perp-capture:/var/lib/origo-perp-capture
 
   provisional-binance-spot-aggtrades:
     <<: *provisional-worker
@@ -224,6 +233,34 @@ services:
     environment:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
+
+  perp-capture:
+    build: .
+    image: origo-dagster:latest
+    network_mode: host
+    user: "0:0"
+    environment:
+      PYTHONPATH: /opt/app
+      PYTHONDONTWRITEBYTECODE: "1"
+      ORIGO_PERP_CAPTURE_ROOT: /var/lib/origo-perp-capture
+      ORIGO_SOURCE_LOCK_DIR: /opt/origo/locks
+    volumes:
+      - perp-capture:/var/lib/origo-perp-capture
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    command: python -m origo.workers.perp_capture
+    cpus: 1
+    mem_limit: 512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.perp_capture", "--check"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
 
   market-state:
     build: .
@@ -267,3 +304,5 @@ volumes:
   law-samples:
 
   market-state:
+
+  perp-capture:

@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import (
     WORKER_HEARTBEAT_ENV,
@@ -236,8 +237,13 @@ class ProvisionalFeed:
         if adapter is None:
             raise ValueError('No provisional adapter is declared.')
         covered = store.active_intervals()
-        ordered = list(adapter.candidates(now, store.anchor(), covered))
         frontier = self._frontier_gap_key(store, spec, now)
+        # Acknowledge accepted coverage and reclaim it before repair needs spool space.
+        ordered = list(adapter.candidates(now, store.anchor(), covered))
+        if isinstance(adapter, BinancePerpProvisional) and frontier is not None:
+            # Spend one bounded bridge allowance on the actual reader gap, even
+            # outside the ordinary candidate lookback. Pending work has no receipt.
+            adapter.repair_pending(adapter.partition(frontier))
         if frontier is not None and all(partition.key != frontier for partition in ordered):
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
             if not any(interval.start <= gap_start < interval.end for interval in covered):
@@ -254,7 +260,8 @@ class ProvisionalFeed:
         admitted = [
             partition
             for partition in ordered
-            if self._may_attempt(
+            if (not isinstance(adapter, BinancePerpProvisional) or adapter.admits(partition))
+            and self._may_attempt(
                 store,
                 spec,
                 series=spec.key,

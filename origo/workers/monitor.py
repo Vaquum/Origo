@@ -110,6 +110,9 @@ CHECK_NAMES: tuple[CheckName, ...] = (
 DEFAULT_WEBSERVER_URL = 'http://dagit:3000'
 # The market state query service (origo.workers.market_state_api) is expected from first start.
 MARKET_STATE_API_FEED = 'market_state_api'
+PERP_CAPTURE_FEED = 'perp_capture'
+CAPTURE_STATUS_BYTES = 16 * 1024
+CAPTURE_SPOOL_BYTES = 16 * 1024**3
 PROBE_TIMEOUT_SECONDS = 10
 # ClickHouse rows are read up to this far behind the clock: Vector delivers a log line
 # seconds after its stamp and a worker stamps a receipt before inserting it, so a row
@@ -1089,7 +1092,8 @@ class Monitor:
             heartbeat_path(self.heartbeat_dir, f'provisional_{spec.key}')
             for spec in SOURCE_REGISTRY
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
-        } | {heartbeat_path(self.heartbeat_dir, MARKET_STATE_API_FEED)}
+        } | {heartbeat_path(self.heartbeat_dir, MARKET_STATE_API_FEED),
+             heartbeat_path(self.heartbeat_dir, PERP_CAPTURE_FEED)}
         self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
         return sorted(self.heartbeat_inventory | expected)
 
@@ -1138,6 +1142,46 @@ class Monitor:
             )
         return findings
 
+    def _capture_finding(self, now: datetime) -> Finding | None:
+        path = self.heartbeat_dir / 'perp_capture.status.json'
+        try:
+            with path.open('rb') as stream:
+                if os.fstat(stream.fileno()).st_size > CAPTURE_STATUS_BYTES:
+                    raise ValueError('Capture status exceeds 16 KiB')
+                decoded: object = json.loads(stream.read(CAPTURE_STATUS_BYTES))
+            if not isinstance(decoded, dict):
+                raise ValueError('Capture status must be an object')
+            status = cast(dict[str, object], decoded)
+            if status.get('schema_version') != 1:
+                raise ValueError('Unsupported capture status version')
+            for field in ('committed_at', 'last_response_at', 'last_durable_capture_at'):
+                stamp = status.get(field)
+                if not isinstance(stamp, str):
+                    raise ValueError(f'Capture has no {field}')
+                parsed = datetime.fromisoformat(stamp)
+                if parsed.tzinfo is None:
+                    raise ValueError(f'Capture {field} has no timezone')
+                age = (now - parsed).total_seconds()
+                if age > HEARTBEAT_MAX_AGE_SECONDS or age < -60:
+                    raise ValueError(f'Capture {field} is stale or in the future')
+            used = status.get('spool_bytes')
+            if type(used) is not int or used < 0 or used >= CAPTURE_SPOOL_BYTES:
+                raise ValueError('Capture spool capacity reached or invalid')
+            error = status.get('error_code')
+            if error is not None:
+                if not isinstance(error, str) or not error:
+                    raise ValueError('Capture error code is invalid')
+                return Finding(
+                    f'collector_capture:{error}', 'collectors_serving',
+                    'Raw-perp capture needs repair', error[:200],
+                )
+        except (OSError, ValueError, TypeError) as error:
+            return Finding(
+                'collector_capture:unavailable', 'collectors_serving',
+                'Raw-perp durable capture unavailable', f'{type(error).__name__}: {error}'[:300],
+            )
+        return None
+
     def _collector_findings(self, minute: datetime) -> list[Finding]:
         findings: list[Finding] = []
         for probe in self.probes:
@@ -1164,9 +1208,12 @@ class Monitor:
                         f'{reason} ({minute.isoformat()}).',
                     )
                 )
+        capture = self._capture_finding(minute + timedelta(minutes=1))
+        if capture is not None:
+            findings.append(capture)
         self.tick_evidence['collectors_serving'] = {
-            'collectors_serving': len(self.probes) - len(findings),
-            'collectors_expected': len(self.probes),
+            'collectors_serving': len(self.probes) + 1 - len(findings),
+            'collectors_expected': len(self.probes) + 1,
         }
         return findings
 

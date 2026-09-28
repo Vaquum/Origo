@@ -58,6 +58,18 @@ one tick per minute, restarted by the watchdog when a tick hangs:
 The monitor expects a heartbeat for every enabled provisional source, including one
 that has never started, and ignores the retired shared `provisional.heartbeat`.
 
+Raw-perp capture is an independently observed collector (`perp-capture`,
+`origo.workers.perp_capture`). The monitor expects `perp_capture.heartbeat` before
+first start. `workers_alive` reports a missing/stale process; `collectors_serving`
+reads `/opt/origo/heartbeats/perp_capture.status.json` once per tick, capped at
+16 KiB, with no spool scan, database read or provider call. It distinguishes absent
+or malformed status, stale durable capture, missing overlap, provider backoff and
+storage pressure. Status publication or a fresh heartbeat cannot make stale durable
+capture healthy. Capture status is the authoritative local acquisition fact; the
+existing R1/data_current reader law remains independent and red while readers lag.
+The status file lives on the shared heartbeat volume; the monitor never mounts the
+capture spool. Capture failures use the existing Dagit checks, logs and alert path.
+
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
 - **Heartbeat.** It touches `market_state_api.heartbeat` at start and after every tick. The

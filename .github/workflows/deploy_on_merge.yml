@@ -195,11 +195,30 @@ jobs:
           bash deploy/prepare_binance_egress.sh
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '
           import os, socket
-          for ip in os.environ["ORIGO_BINANCE_PERP_EGRESS_IPS"].split(","):
+          for ip in ("37.27.112.140", "37.27.112.144"):
               with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
                   connection.bind((ip, 0))
                   print(connection.getsockname()[0])
           ' </dev/null
+          # Capture owns .140 only after every previous raw-perp repair process retires.
+          prior_perp_ids="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter label=com.docker.compose.service=provisional-binance-perp-trades)"
+          if [ -n "$prior_perp_ids" ]; then
+            docker stop $prior_perp_ids </dev/null
+          fi
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --force-recreate provisional-binance-perp-trades </dev/null
+          perp_ids="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter label=com.docker.compose.service=provisional-binance-perp-trades)"
+          if [ -z "$perp_ids" ]; then
+            echo 'Raw-perp repair did not start; capture handover refused' >&2
+            exit 1
+          fi
+          for worker in $perp_ids; do
+            role="$(docker inspect --format '{{range .Config.Env}}{{if eq . "ORIGO_BINANCE_PERP_EGRESS_IPS=37.27.112.144"}}repair-only{{end}}{{end}}' "$worker")"
+            if [ "$role" != repair-only ]; then
+              echo 'Raw-perp repair still owns capture IP; handover refused' >&2
+              exit 1
+            fi
+          done
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps perp-capture </dev/null
           # Save only worker identity; never serialize container environments.
           prior_workers=()
           for worker in $(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit); do

@@ -4,33 +4,20 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import ClassVar
 
-from ..contracts import Partition, Revision, Row
+from ..contracts import Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
-from .binance_perp_daily import parse_decimal, timestamp_datetime
-from .binance_provisional import BinanceProvisionalBase, _bool, _int, _text
-
-
-def historical_row(row: Mapping[str, object]) -> Row:
-    timestamp = _int(row, 'time')
-    if len(str(timestamp)) != 13:
-        raise ValueError('The frozen provisional perp timestamp contract is milliseconds.')
-    price = parse_decimal(_text(row, 'price'))
-    quantity = parse_decimal(_text(row, 'qty'))
-    # fapi rounds quoteQty to cents (observed '76.04' for the authoritative
-    # '76.0435'); validate the field as a schema tripwire, then recompute the
-    # exact quote so the provisional row matches the canonical archive row.
-    parse_decimal(_text(row, 'quoteQty'))
-    return (
-        _int(row, 'id'),
-        price,
-        quantity,
-        (price * quantity).normalize(),
-        timestamp,
-        _bool(row, 'isBuyerMaker'),
-        timestamp_datetime(timestamp),
-    )
+from .binance_perp_spool import (
+    acknowledge_spooled_revision,
+    classify_spooled_partition,
+    cleanup_spool,
+    historical_row,
+    read_spooled_revision,
+    repair_spooled_gaps,
+)
+from .binance_provisional import BinanceProvisionalBase
 
 
 def now_utc() -> datetime:
@@ -56,7 +43,51 @@ class BinancePerpProvisional(BinanceProvisionalBase):
     CREDENTIAL_REQUIRED: ClassVar[bool] = True
     PAGING_BACKTRACK_IDS: ClassVar[int] = 1000
 
+    def candidates(
+        self, now: datetime, anchor: datetime, covered: tuple[Partition, ...]
+    ) -> tuple[Partition, ...]:
+        root = self._capture_root()
+        if root is not None:
+            for interval in covered:
+                acknowledge_spooled_revision(root, interval)
+            cleanup_spool(root)
+        candidates = BinanceProvisionalBase.candidates(self, now, anchor, covered)
+        return tuple(partition for partition in candidates if self.admits(partition))
+
+    @staticmethod
+    def _capture_root() -> Path | None:
+        configured = os.environ.get('ORIGO_PERP_CAPTURE_ROOT')
+        return Path(configured) if configured else None
+
+    def repair_pending(self, partition: Partition) -> None:
+        root = self._capture_root()
+        if root is not None:
+            repair_spooled_gaps(root, partition, egress_ip='37.27.112.144')
+
+    def admits(self, partition: Partition) -> bool:
+        root = self._capture_root()
+        return root is None or classify_spooled_partition(root, partition) != 'pending'
+
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
+        if (
+            not partition.provisional
+            or partition.end > self._now_utc()
+            or partition != self.partition(partition.key)
+        ):
+            raise ValueError('Only exact closed perp minute partitions may be fetched.')
+        if os.environ.get(self.LATEST_SYMBOL_ENV, 'BTCUSDT') != 'BTCUSDT':
+            raise ValueError('This source declares BTCUSDT only.')
+        root = self._capture_root()
+        if root is not None:
+            revision = read_spooled_revision(root, partition)
+            if revision is not None:
+                return revision
+            if not self.admits(partition):
+                self.repair_pending(partition)
+                revision = read_spooled_revision(root, partition)
+                if revision is not None:
+                    return revision
+                raise SourceError('CAPTURE_PENDING', 'Captured minute awaits verified continuity.')
         configured = os.environ.get('ORIGO_BINANCE_PERP_EGRESS_IPS')
         selected = self
         if configured is not None:

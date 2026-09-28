@@ -1,3 +1,7 @@
+# v3.27.2
+
+- Capture recent raw-perp trades in a durable spool and repair verified missing ranges before existing source activation.
+
 # v3.27.1
 
 - Tune the market state query service from production measurements.

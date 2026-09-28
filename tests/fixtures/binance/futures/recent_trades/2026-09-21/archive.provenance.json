@@ -1,0 +1,14 @@
+{
+  "url": "https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2026-09-21.zip",
+  "downloaded_at": "2026-09-28T07:15:01.811935+00:00",
+  "archive_sha256": "d022186dc18da58b91af8da4a6c1beda4f7fe147dcd0c1de240c22a0e7119f5b",
+  "checksum_url": "https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2026-09-21.zip.CHECKSUM",
+  "checksum_line": "d022186dc18da58b91af8da4a6c1beda4f7fe147dcd0c1de240c22a0e7119f5b  BTCUSDT-trades-2026-09-21.zip",
+  "archive_member": "BTCUSDT-trades-2026-09-21.csv",
+  "extract_file": "minutes-15-11-15-12.csv",
+  "extract_sha256": "bd5af92108ba679244fdced57b8f94b605bc4afa39f62445a57baed4a268dfb8",
+  "from_time": "2026-09-21T15:11:00+00:00",
+  "to_time": "2026-09-21T15:13:00+00:00",
+  "row_count": 16595,
+  "purpose": "Small authentic corpus parity only; not qualifying >=17967 busy acceptance"
+}

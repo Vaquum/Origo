@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import socket
@@ -181,10 +182,17 @@ def _monitor(
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
     workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY if spec.provisional is not None]
-    for feed in (*workers, 'market_state_api'):
+    for feed in (*workers, 'market_state_api', 'perp_capture'):
         heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
         if not heartbeat.exists():
             touch_heartbeat(heartbeat)
+    status = {
+        'schema_version': 1, 'committed_at': NOW.isoformat(),
+        'last_response_at': NOW.isoformat(), 'last_durable_capture_at': NOW.isoformat(),
+        'complete_through': None, 'segment_id': None, 'spool_bytes': 0,
+        'last_poll_gap_seconds': None, 'error_code': None,
+    }
+    (tmp_path / 'heartbeats' / 'perp_capture.status.json').write_text(json.dumps(status))
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -365,7 +373,7 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
-    assert len(monitor._heartbeats()) == 5
+    assert len(monitor._heartbeats()) == 6
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(
@@ -1392,7 +1400,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 5 and workers['workers_expected'] == 6
+    assert workers['workers_fresh'] == 6 and workers['workers_expected'] == 7
     assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
@@ -1401,7 +1409,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 1
+    assert evidence('collectors_serving')['collectors_serving'] == 2
     assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
@@ -1422,9 +1430,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 6
+    assert evidence('workers_alive')['workers_expected'] == 7
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 5
+    assert evidence('workers_alive')['workers_fresh'] == 6
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
@@ -1539,3 +1547,71 @@ def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:
         held = held_law_keys(cursor, [fresh, history], (NOW + timedelta(minutes=minute)).isoformat())
         assert (fresh.key in held) == (minute < 4)
         assert history.key not in held
+
+
+def test_capture_health_uses_bounded_local_evidence(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    path = monitor.heartbeat_dir / 'perp_capture.status.json'
+    healthy = path.read_bytes()
+    assert monitor._capture_finding(NOW) is None
+    heartbeat_path(monitor.heartbeat_dir, 'perp_capture').unlink()
+    assert 'heartbeat_stale:perp_capture' in monitor.tick(NOW).failed
+    # The collector's local status remains separate from its process heartbeat.
+    assert monitor._capture_finding(NOW) is None
+    for error in ('CAPTURE_OVERLAP_BREAK', 'PROVIDER_HTTP_429', 'CAPTURE_CAPACITY'):
+        status = json.loads(healthy)
+        status['error_code'] = error
+        path.write_text(json.dumps(status))
+        finding = monitor._capture_finding(NOW)
+        assert finding is not None and finding.key == f'collector_capture:{error}'
+    status = json.loads(healthy)
+    status['last_durable_capture_at'] = (NOW - timedelta(seconds=181)).isoformat()
+    path.write_text(json.dumps(status))
+    assert monitor._capture_finding(NOW) is not None
+    # A status outside the envelope must be rejected before any payload read.
+    path.write_bytes(b' ' * (16 * 1024 + 1))
+    finding = monitor._capture_finding(NOW)
+    assert finding is not None and '16 KiB' in finding.detail
+    path.unlink()
+    assert monitor._capture_finding(NOW) is not None
+    path.write_bytes(healthy)
+    reads: list[int] = []
+    original = Path.open
+
+    class ObservedFile(io.BufferedReader):
+        def read(self, size: int | None = -1) -> bytes:
+            assert size is not None
+            reads.append(size)
+            return super().read(size)
+
+    def opened(file: Path, mode: str = 'r') -> IO[bytes] | IO[str]:
+        if file == path:
+            assert mode == 'rb'
+            return ObservedFile(io.FileIO(file, 'r'))
+        return original(file, mode)
+
+    monkeypatch.setattr(Path, 'open', opened)
+    assert monitor._capture_finding(NOW) is None
+    assert reads == [16 * 1024]
+
+
+def test_capture_heartbeat_cannot_clear_reader_failure(
+    recorder: _Recorder, tmp_path: Path
+) -> None:
+    monitor = _monitor(recorder, tmp_path)
+    assert monitor._capture_finding(NOW) is None
+    # Empty-reader evidence must remain unavailable despite healthy acquisition.
+    outcome = monitor.tick(NOW)
+    assert any(key.startswith('law:') for key in outcome.failed)
+    checks = {post['check_name']: post['passed'] for post in _check_posts(recorder)}
+    assert checks['workers_alive'] is True
+    assert checks['collectors_serving'] is True
+    assert checks['data_current'] is False
+    report = monitor.law_tape.last
+    assert report is not None
+    perp = next(feed for feed in report['feeds'] if feed['source_key'] == 'binance_perp_trades')
+    assert perp['predicates']['R1']['status'] == 'FAIL'
+    assert perp['predicates']['R1']['reason'] == 'reader_empty'
+    assert perp['predicates']['R1']['evidence']['budget_seconds'] == 300

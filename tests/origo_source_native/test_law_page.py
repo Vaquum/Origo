@@ -1276,13 +1276,19 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         thread.join(timeout=2)
 
 
-def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
+@pytest.mark.parametrize('font_family', [None, 'Verdana, sans-serif'])
+def test_overview_layout_and_navigation_at_desktop_and_mobile_sizes(
+    production_serving: tuple[str, page.TapeCache, page.Document, datetime], font_family: str | None,
+) -> None:
     url, _, _, _ = production_serving
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page(viewport={'width': 1366, 'height': 900}, has_touch=True)
         tab.goto(url+'/law')
         tab.locator('.overview-card').first.wait_for()
+        # Wider font metrics must preserve the same viewport contract.
+        if font_family is not None:
+            tab.evaluate('font => document.body.style.fontFamily = font', font_family)
         assert tab.locator('[role="tab"]').all_text_contents() == ['Overview', 'Sources', 'Laws', 'Recovery']
         for item in tab.locator('.overview-card,.overview-secondary,#monitor-band,#inventory-band').all():
             box = item.bounding_box()

@@ -107,6 +107,8 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
         'dollar_latest',
         'market_state',
         'market_state_latest',
+        'market_state_detail',
+        'market_state_detail_latest',
     }
     assert {consumer.key for consumer in store.spec.consumers} == {'mount', 'huggingface'}
     assert store.execute('EXISTS TABLE origo.source_activation_log') == [(0,)]

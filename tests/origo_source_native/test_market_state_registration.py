@@ -245,9 +245,114 @@ def test_market_state_upgrade_resumes_without_duplicate_rows(
     assert registered_cube.archive.fetched == 1
 
 
+
+def _assert_detail_upgrade(runtime: SourceRuntime, before: StateRecord, after: StateRecord) -> None:
+    assert (after.build_id, after.revision, after.generation) == (before.build_id, before.revision, before.generation + 1)
+    assert dict(before.component_hashes).items() <= dict(after.component_hashes).items()
+    added = 'market_state_detail_latest' if before.partition.provisional else 'market_state_detail'
+    assert set(dict(after.component_hashes)) - set(dict(before.component_hashes)) == {added}
+    assert runtime.store.missing_components(after) == ()
+    table = runtime.store.component_table(added)
+    raw = runtime.store.component_table('raw_latest' if before.partition.provisional else 'raw')
+    assert runtime.store.execute(
+        f'SELECT sum(toUInt64(trade_count)), count(), uniqExact(time_index, price_index) FROM {table} '
+        'WHERE build_id=%(build)s', {'build': after.build_id},
+    )[0][:1] == runtime.store.execute(f'SELECT count() FROM {raw} WHERE build_id=%(build)s', {'build': after.build_id})[0]
+    rows, keys = runtime.store.execute(
+        f'SELECT count(), uniqExact(time_index, price_index) FROM {table} WHERE build_id=%(build)s',
+        {'build': after.build_id},
+    )[0]
+    assert rows == keys and isinstance(rows, int) and rows > 0
+
+
+@pytest.mark.parametrize('interruption', [None, 'after_copy', 'before_activation'])
+def test_market_state_detail_upgrade_preserves_existing_products(
+    registered_cube: CubeRuntime, monkeypatch: pytest.MonkeyPatch, interruption: str | None
+) -> None:
+    runtime = registered_cube.runtime
+    runtime.enable_components('market_state')
+    records = (runtime.build(_DAY), runtime.build(_MINUTE, provisional=True))
+    original = {record.partition.key: _physical(runtime, record) for record in records}
+    assert [len(record.component_hashes) for record in records] == [8, 4]
+    runtime.enable_components('market_state_detail')
+    assert [item.key for item in runtime.store.missing_components(records[0])] == ['market_state_detail']
+    assert [item.key for item in runtime.store.missing_components(records[1])] == ['market_state_detail_latest']
+    if interruption is not None:
+        execute = runtime.store.execute
+        interrupted = False
+
+        def fail_once(
+            query: str, params: object | None = None, *, settings: Mapping[str, object] | None = None
+        ) -> list[Row]:
+            nonlocal interrupted
+            copying = query.startswith('INSERT INTO origo.binance_spot_trades_market_state_detail_revisions')
+            activating = query.startswith('INSERT INTO origo.source_activation_log')
+            if interruption == 'before_activation' and activating and not interrupted:
+                interrupted = True
+                raise OSError('Injected interruption after receipt, before activation')
+            result = execute(query, params, settings=settings)
+            if interruption == 'after_copy' and copying and not interrupted:
+                interrupted = True
+                raise OSError('Injected lost acknowledgement after projection rows')
+            return result
+
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime.store, 'execute', fail_once)
+            with pytest.raises(SourceError, match='Additive projection upgrade failed'):
+                runtime.upgrade_components(_DAY)
+        assert interrupted
+        assert runtime.store.record(records[0].partition) == records[0]
+        assert _physical(runtime, records[0]) == original[_DAY]
+        assert runtime.store.execute(
+            "SELECT DISTINCT blocking_scope FROM origo.source_failure_log WHERE event_type='FAILED'"
+        ) == [('NONE',)]
+    for record in records:
+        after = runtime.upgrade_components(record.partition.key, provisional=record.partition.provisional)
+        _assert_detail_upgrade(runtime, record, after)
+        expanded = _physical(runtime, after)
+        assert {key: expanded[key] for key in original[record.partition.key]} == original[record.partition.key]
+        assert runtime.upgrade_components(record.partition.key, provisional=record.partition.provisional) == after
+    assert runtime.build(_DAY) == runtime.store.record(records[0].partition)
+    assert (registered_cube.archive.fetched, registered_cube.minutes.fetched) == (1, 1)
+    assert runtime.store.execute(
+        "SELECT count() FROM origo.source_component_log WHERE component='market_state_detail'"
+    ) == [(1,)]
+
+
+def test_detail_components_set_the_rollback_floor(
+    registered_cube: CubeRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = registered_cube.runtime
+    previous = replace(
+        runtime.spec,
+        components=tuple(item for item in runtime.spec.components if item.activation_group != 'market_state_detail'),
+    )
+    assert [item.key for item in previous.components if item.key.startswith('market_state')] == [
+        'market_state', 'market_state_latest'
+    ]
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (previous,))
+    runtime.enable_components('market_state')
+    runtime.build(_DAY)
+    runtime.build(_MINUTE, provisional=True)
+    assert compatibility.undeclared_components() == {}
+    runtime.enable_components('market_state_detail')
+    runtime.upgrade_components(_DAY)
+    runtime.upgrade_components(_MINUTE, provisional=True)
+    # An image with only the v3.27.2 components cannot read the activated detail keys.
+    assert compatibility.undeclared_components() == {
+        runtime.spec.key: ['market_state_detail', 'market_state_detail_latest']
+    }
+    with pytest.raises(SystemExit, match='market_state_detail'):
+        compatibility.main()
+    with pytest.raises(SourceError, match='undeclared'):
+        SourceStore(runtime.store.client, 'origo', previous).enabled_groups()
+    # This image declares them.
+    monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (runtime.spec,))
+    assert compatibility.undeclared_components() == {}
+
 def test_market_state_registration_applies_from_2021(registered_cube: CubeRuntime) -> None:
     runtime = registered_cube.runtime
-    assert len(runtime.spec.components) == 12
+    assert len(runtime.spec.components) == 14
     assert BINANCE_SPOT_TRADES_SPEC.partitions.first_day.isoformat() == '2017-08-17'
     cube = [item for item in runtime.spec.components if item.activation_group == 'market_state']
     assert {item.key for item in cube} == {'market_state', 'market_state_latest'}
@@ -456,9 +561,9 @@ def test_market_state_deployment_enablement_is_fenced(
                 pending.result(timeout=0.1)
             assert runtime.store.enabled_groups() == frozenset()
         pending.result(timeout=10)
-    assert runtime.store.enabled_groups() == frozenset({'market_state'})
+    assert runtime.store.enabled_groups() == frozenset({'market_state', 'market_state_detail'})
     runtime.enable_components('market_state')
-    assert runtime.store.execute('SELECT count() FROM origo.source_component_rollout_log') == [(1,)]
+    assert runtime.store.execute('SELECT count() FROM origo.source_component_rollout_log') == [(2,)]
     with pytest.raises(ValueError, match='Unknown component activation group'):
         runtime.enable_components('undeclared')
 

@@ -150,9 +150,10 @@ class _Proof:
 
     def verdict(self) -> PredicateReport:
         expected = PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
-        extra: set[str] = {'market_state_latest' if self.provisional else 'market_state'} if (
-            self.source == MARKET_STATE_SOURCE and self.end > CUBE_START
-        ) else set()
+        extra: set[str] = (
+            {'market_state_latest', 'market_state_detail_latest'} if self.provisional
+            else {'market_state', 'market_state_detail'}
+        ) if self.source == MARKET_STATE_SOURCE and self.end > CUBE_START else set()
         activated = set(self.hashes)
         if (not set(expected) <= activated or activated - set(expected) - extra
                 or any(item[0] not in set(expected) | extra for item in self.components)):
@@ -443,11 +444,13 @@ def _cube_observations(observations: list[ProjectionObservation], predicates: di
 def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetime) -> tuple[FeedReport, list[ProjectionObservation]]:
     declared = {c.key for c in spec.components}
     cube: set[str] = {'market_state', 'market_state_latest'} if spec.key == MARKET_STATE_SOURCE else set()
+    # The cube's detail components (PRD-0023) are optional; M1 and M2 judge only the cube.
+    optional: set[str] = cube | ({'market_state_detail', 'market_state_detail_latest'} if cube else set[str]())
     canonical = {c.key for c in spec.components if not c.provisional}
     provisional = declared - canonical
     if (not set(CANONICAL_COMPONENTS) <= canonical or not set(PROVISIONAL_COMPONENTS) <= provisional
-            or canonical - set(CANONICAL_COMPONENTS) - (cube & {'market_state'})
-            or provisional - set(PROVISIONAL_COMPONENTS) - (cube & {'market_state_latest'})):
+            or canonical - set(CANONICAL_COMPONENTS) - {key for key in optional if not key.endswith('_latest')}
+            or provisional - set(PROVISIONAL_COMPONENTS) - {key for key in optional if key.endswith('_latest')}):
         names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
         return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)

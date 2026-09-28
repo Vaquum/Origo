@@ -355,3 +355,126 @@ consumer() {
    `report-final.md`.
 
 The run directory stays on the host.
+
+## Detail component — slice #480
+
+[PRD-0023](https://github.com/Vaquum/Origo/issues/478) adds trade-by-trade path length and
+dwell, base volume and trade prices per base cell. They live in their own component pair,
+`market_state_detail` and `market_state_detail_latest`, in the activation group
+`market_state_detail`, applicable from 2021-01-01. The PRD-0022 components, their statements
+and hashes are unchanged. Amendment A02 of #462 records the changed locked rows.
+
+`build_market_state_detail` reads the same private `raw` or `raw_latest` table as the cube:
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `time_index`, `price_index` | UInt64 | The cube's base cell, from exactly the cube builder's expressions |
+| `first_event_at` | DateTime64(6) | The earliest trade, move or held instant of the cell inside its partition; the validation time column |
+| `trade_count` | UInt32 | Trades in the cell |
+| `base_volume` | UInt64 | Satoshis, `round(quantity × 1e8)` |
+| `path_length` | UInt64 | Cents the trade path travelled inside the cell |
+| `dwell` | UInt32 | Microseconds the price held inside the cell |
+| `high`, `low` | Float64 | The cell's extreme trade prices as stored |
+| `first_trade_at/id/price`, `last_trade_at/id/price` | DateTime64(6), UInt64, Float64 | The cell's first and last trade by trade ID |
+
+A cell without trades stores zeros for its counts, volume and prices, and `first_event_at` as
+its trade times; the query reads prices only from cells with trades.
+
+- **Path.** Prices convert to cents by `round(price × 100)`. Each move between consecutive
+  trades, in (datetime, trade ID) order, belongs to the later trade's column and is split
+  across the half-open 125-USDT rows it passes.
+- **Dwell.** Each price holds from its trade to the next. The partition's last price holds
+  until its end, and its first trade's price also covers its start. Every base column's dwell
+  therefore sums to its time inside the partition. A partition without trades has no dwell.
+- **One pass.** Each trade aggregates into its own cell. A move or hold that leaves the cell
+  is kept as a descriptor and expanded into the other cells afterwards, so the work per trade
+  stays constant. The builder runs with 1 thread and 2 GiB, as the cube's does.
+- **Identities.** After the insert the build fails as `COMPONENT_CONTENT_INVALID` if:
+  - a price is more than 0.01 from whole cents, or a quantity from whole satoshis, or a
+    trade's row from its price disagrees with its row in cents;
+  - a trade ID does not increase with (datetime, trade ID) order;
+  - the cells' trade counts or satoshis differ from the raw partition's;
+  - their path differs from Σ |Δ cents| of the raw trades;
+  - any base column's dwell differs from its time inside the partition.
+
+A provisional minute is measured from its own trades in `raw_latest`, which keeps REST's
+milliseconds. Until its day replaces it, it lacks the move into its first trade, credits its
+start to its first trade's row, has no dwell without trades, and its times are milliseconds.
+
+**Rollout.** Deployment creates both detail revisions tables and current views when the new
+image starts, and `origo.sources.rollout` enables the group on every deploy, so there is no
+off switch: a builder failure is fixed forward. Every fresh partition then builds the detail
+component, and native reconciliation attaches it to accepted days and minutes in the slots
+repairs leave, as for #469: about 2,092 days at four a minute, about nine hours. Each attach
+activates the same revision and build at the next generation, so while it runs every result's
+`state_token` and pins change although no product does. Capacity evidence is keyed to the
+enabled groups, so the first backfill after deployment runs with the capacity probe.
+
+**Rollback floor.** This release is the binary rollback floor once a detail key is activated:
+`python -m origo.sources.compatibility` refuses every image that does not declare the detail
+components, and such an image's `enabled_groups()` fails on the enabled group. Native rollback
+to a retained older generation stays supported by this image, but reconciliation attaches the
+missing detail again, so it is no off switch either.
+
+**Monitoring.** Each detail component has the generic projection observation in `/law` and
+Dagit, `UNKNOWN` with `component_proof_missing` until the partition it reads holds the key.
+The laws accept the detail keys as optional on both lanes; M1 and M2 keep judging the
+PRD-0022 cube, and no law is added. Protocol v1 of #476 counts every physical `market_state`
+table in R4, so R4 fails once this release has created the detail tables.
+
+**Queries.** A request with `measures` pins only partitions holding both components, runs
+PRD-0022's cells statement unchanged beside a statement over the detail component, and merges
+the two cell streams. With `path_length` or `dwell`, its automatic price extent comes from the
+detail rows. Detail sums stay integers until the service divides each once, correctly rounded
+above 2⁵³. Results with measures carry `schema_version` 2; requests without them run exactly
+the v3.27.2 statements and write the v3.27.2 schemas and metadata.
+
+The new captures are contiguous row ranges of official archives, 0-based and stop-exclusive:
+2023-03-24 [587331, 589331) around the 9,157 s halt; 2021-05-19 [2855000, 2861000), the
+−2,023 USDT move and a row eight moves crossed without a trade; 2025-10-10 [7426500, 7464072),
+a minute boundary where the row changes and a burst of 24,433 trades at one timestamp with a
++3,005 USDT move. Inside its traded span each yields exactly its whole day's moved-through
+cells.
+
+```sh
+pytest tests/origo_source_native/test_market_state_detail.py -q
+pytest tests/origo_source_native/test_market_state_query.py -q -k "measures or column_prices or divide_exactly or keep_their"
+pytest tests/origo_source_native/test_market_state_registration.py -q -k detail
+```
+
+Pre-merge evidence on 2026-09-28, in a disposable ClickHouse 25.3.2.39. The lifecycle built
+2026-02-05, the busiest day (15,364,010 trades), from its official archive, served unchanged with
+its checksum sidecar. Memory is the query log's `memory_usage`, under the builder's 1 thread
+and 2 GiB:
+
+- **Fresh**, both groups enabled: the whole build took 97 s. The detail insert took 3.2 s at
+  8.1 MiB, and its checks 1.8 s at 4.0 MiB.
+- **Native upgrade** of the day built with the cube only: 28 s, the same revision and build at
+  generation 2, with no archive request. The detail insert took 5.3 s at 99.6 MiB, and its
+  checks 4.2 s at 95.4 MiB.
+- **Busiest minute**, 20:15 (42,387 trades), as a provisional partition: the detail insert took
+  100 ms at 4.2 MiB.
+
+At production size, a request without measures runs the v3.27.2 statements at the same cost.
+Over ten alternating runs of each, history to 2024-06-29 at the finest grid (4.3 million cells)
+took a median 2.28 s against 2.33 s on v3.27.2. The whole history at 3,600 s × 1,000 USDT took
+1.36 s against 1.40 s. With every measure, the request to 2024-06-29 took 5.7 s against 1.7 s
+without measures in the same process, and wrote 526 MB against 207 MB. Its detail statement
+peaked at 1.90 GiB of the 4 GiB limit.
+
+Native GUI acceptance on 2026-09-28 used the committed, checksum-proven 2025-01-01 capture in a
+disposable ClickHouse/Dagster environment:
+
+- v3.27.2 retained the day at generation 1 with the cube.
+- This image's compatibility check, bootstrap and rollout then enabled the detail group.
+- Every sensor and schedule was stopped on the Automation page, so that only the operator acted.
+- Selecting the day in the native partition bar and launching one run attached the detail
+  component at generation 2.
+- Native **Re-execute all** kept generation 2.
+
+Both runs succeeded in about 4.5 seconds, and both read only the archive's checksum sidecar.
+SQL confirmed all eight earlier hashes, the revision and the build unchanged, with one raw build
+and one receipt per component. The 1,539 detail cells accounted for all 12,000 captured trades,
+their 123.48987 BTC and 667.76 USDT of path, and 1,536 columns held 86,400 s of dwell. The cube's
+15 cells kept their 12,000 trades and 5,310 taker buys. This does not establish production
+capacity or complete historical coverage.

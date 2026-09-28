@@ -4,8 +4,10 @@ The market state cube ([PRD-0022](https://github.com/Vaquum/Origo/issues/462)) t
 BTCUSDT spot trades since 2021-01-01 into a grid of time columns and price rows. A local
 service answers one selection at a time with two Arrow IPC files: `cells.arrow` holds every
 cell that has trades, and `summary.arrow` holds the grid totals, both POCs and the source
-state the result was read from. Files expire 24 hours after they were last read through the
-cube reader.
+state the result was read from. On request, the cells also carry the base volume, path length,
+dwell and trade prices of [PRD-0023](https://github.com/Vaquum/Origo/issues/478) (see
+[Measures](#measures)). Files expire 24 hours after they were last read through the cube
+reader.
 
 ## Calling the service
 
@@ -44,13 +46,15 @@ and a missing key means the same as `null`:
 | `p1`, `p2` | JSON number or decimal string | Price range in USDT, at least 0. |
 | `tR` | JSON number | Column width: 56.25 × 2ⁿ seconds (56.25, 112.5, 225, …, 900, 3600, …). |
 | `pR` | JSON number | Row height: 125 × 2ᵐ USDT (125, 250, 500, 1000, …). |
+| `measures` | JSON array of names | Detail measures to add, each at most once, in any order: `base_volume`, `path_length`, `dwell`, `high`, `low`, `open`, `close`. `[]` adds none. See [Measures](#measures). |
 
 - **Rounding.** Supplied bounds round to the nearest edge of the 56.25 s × 125 USDT base
   lattice; an exact midpoint rounds up. Time edges count from 2021-01-01 00:00:00 UTC.
 - **Omitted time bounds** cover the whole history: from 2021-01-01 to the data cutoff,
   rounded up to the next base edge so the latest trades are included.
 - **Omitted price bounds** cover the occupied rows inside the selected time window,
-  regardless of any price bound you supplied.
+  regardless of any price bound you supplied. With `path_length` or `dwell`, a row the path
+  moved through or held in is occupied too.
 - **Defaults.** `tR` defaults to 56.25 and `pR` to 125.
 - **Clipping.** A time range reaching outside the covered history is clipped, and
   `clipped` says so. Nothing is clipped on price.
@@ -121,12 +125,70 @@ cells.
 
 Both files carry schema metadata `origo.market_state`, a JSON object holding:
 
-- `schema_version` 1;
-- the request as received;
+- `schema_version` 1, or 2 for a request with measures;
+- the request as received, with `measures` only when some were requested;
 - the grid: `t0`, `tR`, `pR` and both exponents;
 - the data cutoff and the state token;
 - `pins`, the `[partition_key, generation, revision, build_id]` of every partition the
   result read.
+
+## Measures
+
+A request that names `measures` adds their columns to `cells.arrow` after the six above, in
+this order:
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `base_volume` | float64 | Base volume in BTC, the sum of the trades' quantities |
+| `path_length` | float64 | USDT the price travelled inside the cell, trade by trade |
+| `dwell` | float64 | Seconds the price spent inside the cell |
+| `high`, `low` | float64, null without trades | The cell's highest and lowest trade price |
+| `open`, `open_at` | float64 and timestamp[us, UTC], null without trades | The cell's first trade by trade ID: its price and time |
+| `close`, `close_at` | float64 and timestamp[us, UTC], null without trades | The cell's last trade by trade ID: its price and time |
+
+`open` adds `open_at`, and `close` adds `close_at`. `summary.arrow` adds a total for each of
+`base_volume`, `path_length` and `dwell` that was requested, after its other fields.
+
+How they are measured:
+
+- **The trade path** is the last-trade price as a step function of time. Each move between
+  consecutive trades belongs to the later trade's column. It covers the price span between the
+  two trades, rising or falling alike, and each half-open row takes the part of that span
+  inside it. A row whose lower edge is the top of the span gets nothing: a rise from 125 to
+  250 and a fall from 250 to 125 both give all 125 USDT to the row [125, 250).
+- **Dwell.** Each price holds from its trade until the next trade. Trades at one timestamp are
+  separate steps: a sweep through several prices at one instant adds path and no time. With a
+  price bound, a column's dwell is its time inside the selected rows, not its whole time.
+- **Partitions.** Each day, and each provisional minute until its day replaces it, is
+  measured from its own trades. Its last price holds until its end, and its first trade's
+  price also covers its start before that trade. A partition without trades has no path or
+  dwell, and dwell never crosses a partition, so uncovered time is never credited. A
+  provisional minute lacks the move
+  into its first trade, credits its start to its first trade's row, has no dwell without
+  trades, and has millisecond times.
+- **Cells without trades.** A row the path crossed or a price held in without trading has
+  path length or dwell but no trades. Such cells appear only when `path_length` or `dwell` is
+  requested. Their four measures above are zero and their prices null, they count in
+  `cell_count`, and they belong to the automatic price extent.
+- **Exact sums.** Base volume, path length and dwell are stored as integers (satoshis, cents
+  and microseconds) and summed as integers. Each cell value and each summary total is its
+  integer sum divided once, correctly rounded. A summary total is therefore not `math.fsum`
+  of the emitted cells, which can differ from it in the last bit.
+
+Useful derivations:
+
+- **VWAP** of a cell, or of the whole grid from the totals: `volume ÷ base_volume`.
+- **Path per row height:** `path_length ÷ pR`. It is not a count of row crossings: chop inside
+  one row adds path without crossing anything.
+- **Time at price:** a cell's `dwell` as a share of its column's dwell.
+- **A column's open, high, low and close:** request a `pR` whose single row holds the whole
+  price range, so each column is one cell. Rows are aligned to multiples of `pR`, so width
+  alone is not enough: [31875, 32125) crosses 32000 and needs `pR` 64000, not 250.
+
+A request with measures reads only partitions that hold both the cube and its detail
+component, so its `data_cutoff` can be earlier than a request's without them while history
+is being upgraded; `outside_coverage` then reports that earlier cutoff. A request without
+measures runs exactly as before.
 
 ## Expiry
 
@@ -156,7 +218,8 @@ The 400 reasons are:
 - `invalid_price`: not a finite, non-negative number, or at or beyond 2⁵³ USDT;
 - `bounds_out_of_order`;
 - `unsupported_resolution`: not an exact dyadic multiple of the base width, or beyond the
-  Float64 range.
+  Float64 range;
+- `invalid_measures`: not an array of distinct names from the list above.
 
 The reader raises `MarketStateError` with the status and body. It retries only connection
 failures during renewals, for up to 120 s; a query is never retried.
@@ -172,3 +235,7 @@ failures during renewals, for up to 120 s; a query is never retried.
 - **Latency:** the PRD's target is that most requests finish in a few seconds, including full
   history at 56.25 s × 125 USDT: 4.3 M cells in a 207 MB file. The acceptance run of #476
   measures every case in production, and its report is posted on #462.
+- **Measures** run a second statement over the detail component beside the cells statement,
+  with the same limits. At full history and the finest grid, every measure took about three
+  times as long and wrote 2.5 times the bytes of the same request without, in a production-size
+  measurement for PRD-0023.

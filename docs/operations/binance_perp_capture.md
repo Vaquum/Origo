@@ -26,9 +26,9 @@ networking is required to bind the existing host address; it is not network isol
 
 A pre-capture workflow has no capture-retirement logic. Before deploying a revert,
 stop and remove only containers carrying the current project's capture service
-label. Run this block with the deployment's existing `PROJECT_NAME`; retain the
-spool and shared limiter volumes. This is the explicitly reviewed rollback step,
-not a claim that a blind revert or `up -d` removes an orphan.
+label. Run this block from the deployment directory with its existing environment
+and `PROJECT_NAME`; retain the spool and shared limiter volumes. This is the explicitly
+reviewed rollback step, not a claim that a blind revert or `up -d` removes an orphan.
 
 ```bash
 set -euo pipefail
@@ -42,50 +42,33 @@ if [ -n "$remaining" ]; then
   echo 'Capture retirement incomplete; rollback refused' >&2
   exit 1
 fi
+docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps --entrypoint rm monitor -f /opt/origo/heartbeats/perp_capture.heartbeat /opt/origo/heartbeats/perp_capture.status.json /opt/origo/heartbeats/perp_capture.status.tmp
 ```
+
+The one-off command removes only retired capture liveness/status files from the
+shared heartbeat volume. This prevents the pre-capture monitor's heartbeat inventory
+from reporting a permanently stale collector. It starts no monitor process or dependency;
+a removal failure blocks rollback. Other worker heartbeats and cooldowns remain intact.
 
 Only after this succeeds may the revert restore dual-IP repair. Removing the stopped
 container disables its `unless-stopped` restart policy without deleting any volume.
 No global orphan removal, `down -v`, limiter reset or spool deletion is permitted.
 
-## Evidence status
+## Regression evidence and live validation
 
-Executed deployment-shell tests prove role ordering, failed-handover refusal and
-exact project/service retirement. An isolated process test SIGTERMs and restarts
-the real collector over authentic September 21 responses, preserving overlap and
-the exact 9,948 rows of a complete minute. Its transport and cadence are replayed;
-it does not prove real Docker rollout downtime,
-provider overlap, busy-minute parity or production freshness. Those require the
-retained authentic corpus and actual process/deployment interruption measurements;
-production closeout remains on [PRD460](https://github.com/Vaquum/Origo/issues/460).
+CI replays committed genuine recent responses from September 21 against their
+checksum-verified archive extract and the retained partial historical crosscheck.
+A separate processing regression uses the existing high-volume historical corpus,
+explicitly as offline delivery input. It verifies actual trade preservation and
+spool/process bounds; it does not claim that those pages came from the recent
+endpoint during a busy minute.
 
-## Offline resource evidence
+The normal source-native test suite runs these regressions without network access,
+new capture data, a future daily archive, acceptance manifests or saved code-hash
+attestations. Runtime edits are checked by executing the tests again.
 
-Run the resource harness against an already recorded corpus using a local application
-image with the Origo runtime dependencies installed:
-
-```bash
-python3 tests/fixtures/binance/futures/recent_trades/replay_resources.py \
-  --corpus tests/fixtures/binance/futures/recent_trades/2026-09-21 \
-  --output tests/fixtures/binance/futures/recent_trades/2026-09-21/resource-replay \
-  --image trades-warehouse-dagster:latest
-```
-
-Each cadence runs in a fresh Docker container with one CPU, 512 MiB memory, swap disabled,
-no network, a read-only checkout and a separate temporary spool volume. The harness
-streams original response bundles, executes the capture/spool code and persistent
-provider pacing, and supplies only recorded HTTP responses. Historical repair
-requires the exact recorded request parameters; parity requests are counted
-separately and never dispatched as operational repair. Repair retains its seven-page
-allowance per minute. The two-times run compresses recorded time for an offline
-processing test; it does not establish twice the provider budget or live capacity.
-
-`resource-replay-report.json` binds the measured runtime and harness hashes, image ID,
-dependency versions and input bundle hashes. Its run directories retain the attempt
-ledgers, Docker limits and process/cgroup memory peaks. The report includes queue debt
-at capture end and after a bounded 120-second recorded-time drain; missing responses,
-late processing, unmatched failures or unconsumed bridge evidence remain failures.
-The old September 21 corpus demonstrates the harness only: its largest complete
-minute has 9,948 captured trades and it contains no observed overlap break. It cannot
-certify the required busy-minute or historical-repair capacity. A qualifying
-`resources.json` must refer to the same registered corpus as the acceptance tests.
+Provider throughput, observed gap-repair cost, actual rollout recovery and the
+six-hour production freshness/cost window remain live validation on
+[PRD460](https://github.com/Vaquum/Origo/issues/460). CI and a merge do not certify
+those production results. Experimental captures and one-off replay measurements
+are retained locally and in this PR's earlier commits, outside the routine CI path.

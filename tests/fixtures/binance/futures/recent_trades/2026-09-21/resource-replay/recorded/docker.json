@@ -1,9 +1,0 @@
-{
-  "exit_code": 0,
-  "oom_killed": false,
-  "image_id": "sha256:603dca7fd521de04cc470ebbb204b2161ab3ed0c9d5e1ec45552cef63c600d5b",
-  "network_mode": "none",
-  "nano_cpus": 1000000000,
-  "memory_bytes": 536870912,
-  "memory_swap_bytes": 536870912
-}

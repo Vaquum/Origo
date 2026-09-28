@@ -1,7 +1,0 @@
-{
-  "attempts": 1760,
-  "failures": 0,
-  "finished_at": "2026-09-28T07:26:38.865681+00:00",
-  "stop_reason": "interval_complete",
-  "sha256": "ea02f20323481ee96cd9b1b0611ffc37292b5543f71cf6239ec4b215526d5878"
-}

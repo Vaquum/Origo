@@ -238,11 +238,12 @@ class ProvisionalFeed:
             raise ValueError('No provisional adapter is declared.')
         covered = store.active_intervals()
         frontier = self._frontier_gap_key(store, spec, now)
+        # Acknowledge accepted coverage and reclaim it before repair needs spool space.
+        ordered = list(adapter.candidates(now, store.anchor(), covered))
         if isinstance(adapter, BinancePerpProvisional) and frontier is not None:
             # Spend one bounded bridge allowance on the actual reader gap, even
             # outside the ordinary candidate lookback. Pending work has no receipt.
             adapter.repair_pending(adapter.partition(frontier))
-        ordered = list(adapter.candidates(now, store.anchor(), covered))
         if frontier is not None and all(partition.key != frontier for partition in ordered):
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
             if not any(interval.start <= gap_start < interval.end for interval in covered):

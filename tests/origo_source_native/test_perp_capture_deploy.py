@@ -87,6 +87,8 @@ def test_rollback_preserves_spool_and_exclusive_ip_roles(tmp_path: Path) -> None
     spool.mkdir()
     checkpoint = spool / 'ownership-checkpoint'
     checkpoint.write_text('committed control state')
+    budget = tmp_path / 'limiter.state'
+    budget.write_text('persisted provider cooldown')
     stub = r'''
 PROJECT_NAME=isolated-capture-test
 function docker() {
@@ -100,25 +102,43 @@ function docker() {
       printf 'remove\n' >> "$CALLS"
       if [ "$CASE" = remove-failed ]; then return 1; fi
       touch "$REMOVED" ;;
+    'compose -p isolated-capture-test -f docker-compose.deploy.yml run --rm --no-deps --entrypoint rm monitor -f /opt/origo/heartbeats/perp_capture.heartbeat /opt/origo/heartbeats/perp_capture.status.json /opt/origo/heartbeats/perp_capture.status.tmp')
+      printf 'retire-heartbeat\n' >> "$CALLS"
+      if [ "$CASE" = heartbeat-failed ]; then return 1; fi
+      rm -f "$HEARTBEATS/perp_capture.heartbeat" "$HEARTBEATS/perp_capture.status.json" "$HEARTBEATS/perp_capture.status.tmp" ;;
     *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 3 ;;
   esac
 }
 '''
-    for case in ('ok', 'stop-failed', 'remove-failed', 'orphan-remains'):
+    for case in ('ok', 'stop-failed', 'remove-failed', 'orphan-remains', 'heartbeat-failed'):
+        heartbeats = tmp_path / f'{case}-heartbeats'
+        heartbeats.mkdir()
+        for name in ('perp_capture.heartbeat', 'perp_capture.status.json', 'perp_capture.status.tmp',
+                     'provisional_binance_perp_trades.heartbeat'):
+            (heartbeats / name).write_text('existing worker evidence')
         calls, removed = tmp_path / f'{case}-calls', tmp_path / f'{case}-removed'
         result = subprocess.run(
             ['bash', '-s'], input=stub + rollback + '\nprintf "dual-ip\\n" >> "$CALLS"\n',
             text=True, capture_output=True, check=False,
-            env={**os.environ, 'CASE': case, 'CALLS': str(calls), 'REMOVED': str(removed)},
+            env={**os.environ, 'CASE': case, 'CALLS': str(calls), 'REMOVED': str(removed),
+                 'HEARTBEATS': str(heartbeats)},
         )
         observed = calls.read_text().splitlines()
         assert checkpoint.read_text() == 'committed control state'
+        assert budget.read_text() == 'persisted provider cooldown'
+        assert (heartbeats / 'provisional_binance_perp_trades.heartbeat').read_text() == 'existing worker evidence'
         if case == 'ok':
             assert result.returncode == 0, result.stderr
-            assert observed == ['stop', 'remove', 'dual-ip']
+            assert observed == ['stop', 'remove', 'retire-heartbeat', 'dual-ip']
+            # The old monitor inventories every heartbeat file; retired capture must be absent.
+            assert [path.name for path in heartbeats.glob('*.heartbeat')] == [
+                'provisional_binance_perp_trades.heartbeat'
+            ]
+            assert not list(heartbeats.glob('perp_capture.*'))
         else:
             assert result.returncode != 0, case
             assert 'dual-ip' not in observed
+            assert (heartbeats / 'perp_capture.heartbeat').exists()
 
 
 def test_capture_deploy_recovers_overlap_or_verified_bridge(tmp_path: Path) -> None:
@@ -135,7 +155,9 @@ def test_capture_deploy_recovers_overlap_or_verified_bridge(tmp_path: Path) -> N
     from datetime import UTC, datetime, timedelta
 
     from origo.sources.adapters.binance_perp_spool import (
-        capture_state, historical_row, read_spooled_revision,
+        capture_state,
+        historical_row,
+        read_spooled_revision,
     )
     from origo.sources.contracts import Partition
 

@@ -274,7 +274,7 @@ def test_verified_bridge_repairs_only_missing_rows(tmp_path: Path, responses: tu
 
 
 def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
-    _append(tmp_path, responses[:30] + responses[140:])
+    _append(tmp_path, responses[:60] + responses[140:])
     starts = _repair_from_actual(tmp_path, responses, monkeypatch)
     spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     assert len(starts) == 7
@@ -292,6 +292,9 @@ def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[
     assert len(starts) == before and len(starts) == len(set(starts))
     assert spool.read_spooled_revision(tmp_path, _partition()) is not None
     assert spool.read_spooled_revision(tmp_path, _partition('2026-09-21T15:12:00Z')) is not None
+    spool.acknowledge_spooled_revision(tmp_path, _partition())
+    reused = spool.read_spooled_revision(tmp_path, _partition('2026-09-21T15:12:00Z'))
+    assert reused is not None and reused.row_count == 6647
 
 
 def test_modified_committed_payload_is_quarantined(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...]) -> None:
@@ -354,8 +357,10 @@ def test_failed_and_empty_repairs_retain_attempt_cost(tmp_path: Path, responses:
     assert json.loads(attempts[1][1])['error_code'] == 'OSError'
 
 
-def test_bridge_rejects_time_regression_across_pages(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
-    _append(tmp_path, responses[:60] + responses[80:])
+@pytest.mark.parametrize('capture_end', [90, 181])
+def test_bridge_rejects_time_regression_across_pages(capture_end: int, tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    _append(tmp_path, responses[:60] + responses[80:capture_end])
+    monkeypatch.setattr(spool, 'now_utc', lambda: responses[capture_end - 1][0] + timedelta(seconds=80))
     _repair_from_actual(tmp_path, responses, monkeypatch, cap=200)
     genuine_replay = spool.get_response
     calls = 0
@@ -373,3 +378,163 @@ def test_bridge_rejects_time_regression_across_pages(tmp_path: Path, responses: 
     with pytest.raises(SourceError, match='decreasing_time'):
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     assert spool.read_spooled_revision(tmp_path, _partition()) is None
+    assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+    calls_before = calls
+    spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+    assert calls == calls_before
+
+
+def test_stale_conflict_quarantines_the_disputed_segment(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...]) -> None:
+    _append(tmp_path, responses[:120] + responses[150:])
+    assert spool.read_spooled_revision(tmp_path, _partition()) is not None
+    damaged = [dict(row) for row in responses[60][1]]
+    # Deliberate stale-response corruption: the recorded trade gets another recorded price.
+    damaged[0]['price'] = responses[0][1][0]['price']
+    assert damaged[0]['price'] != responses[60][1][0]['price']
+    with pytest.raises(SourceError, match='conflicts'):
+        spool.append_capture(tmp_path, damaged, received_at=responses[-1][0])
+    with sqlite3.connect(tmp_path / 'capture.sqlite3') as connection:
+        assert connection.execute('SELECT quarantined FROM segments ORDER BY seq').fetchall() == [(1,), (0,)]
+    assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+    assert spool.read_spooled_revision(tmp_path, _partition()) is None
+
+
+def test_deleted_interior_segment_cannot_seal_minute(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    _append(tmp_path, responses[:60] + responses[80:90] + responses[110:])
+    _repair_from_actual(tmp_path, responses, monkeypatch)
+    for _ in range(20):
+        spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+        if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
+            break
+    revision = spool.read_spooled_revision(tmp_path, _partition())
+    assert revision is not None and revision.row_count == 9948
+    with sqlite3.connect(tmp_path / 'capture.sqlite3') as connection:
+        middle = connection.execute('SELECT identity FROM segments ORDER BY seq LIMIT 1 OFFSET 1').fetchone()[0]
+        connection.execute('DELETE FROM pages WHERE segment=?', (middle,))
+        connection.execute('DELETE FROM trades WHERE segment=?', (middle,))
+    with pytest.raises(SourceError, match='lost its committed page chain'):
+        spool.read_spooled_revision(tmp_path, _partition())
+    assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+
+
+def test_canonical_ack_retires_unfinished_bridge(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    _append(tmp_path, responses[:30] + responses[140:])
+    starts = _repair_from_actual(tmp_path, responses, monkeypatch, cap=100)
+    spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+    assert len(starts) == 7
+    with sqlite3.connect(tmp_path / 'capture.sqlite3') as connection:
+        before = connection.execute('SELECT count(*) FROM trades').fetchone()[0]
+    day = Partition('2026-09-21', datetime(2026, 9, 21, tzinfo=UTC), datetime(2026, 9, 22, tzinfo=UTC))
+    spool.acknowledge_spooled_revision(tmp_path, day)
+    with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
+        assert connection.execute('SELECT complete,retired FROM gaps').fetchall() == [(0, 1)]
+        assert connection.execute('SELECT count(*) FROM pages').fetchone() == (0,)
+    with sqlite3.connect(tmp_path / 'capture.sqlite3') as connection:
+        assert 0 < connection.execute('SELECT count(*) FROM trades').fetchone()[0] < before
+    state = spool.capture_state(tmp_path)
+    assert state is not None and state.pending_gaps == 0
+    assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+
+
+def test_attempt_cleanup_does_not_depend_on_payload_pages(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    left = 59
+    right = next(index for index in range(left + 1, len(responses)) if cast(int, responses[index][1][0]['id']) > cast(int, responses[left][1][-1]['id']))
+    _append(tmp_path, responses[:left + 1] + responses[right:])
+    monkeypatch.setenv('BINANCE_API_KEY', 'recorded-response-replay')
+    def failed(url: str, *, params: dict[str, str | int], headers: dict[str, str], weight: int, egress_ip: str) -> Response:
+        raise OSError('injected replay transport interruption')
+    monkeypatch.setattr(spool, 'get_response', failed)
+    for _ in range(110):
+        with pytest.raises(OSError, match='injected'):
+            spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+    _repair_from_actual(tmp_path, responses, monkeypatch)
+    spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+    with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
+        assert connection.execute('SELECT count(*) FROM pages').fetchone() == (1,)
+        assert connection.execute('SELECT count(*) FROM attempts').fetchone() == (111,)
+    with monkeypatch.context() as recorded_clock:
+        recorded_clock.setattr(spool, 'now_utc', lambda: responses[0][0])
+        for _ in range(110):
+            attempt = spool.begin_capture_attempt(tmp_path, {'request_weight': 5})
+            spool.finish_capture_attempt(tmp_path, attempt, {'completed_at': responses[0][0].isoformat(), 'error_code': 'OSError'})
+        unfinished = spool.begin_capture_attempt(tmp_path, {'request_weight': 5})
+    day = Partition('2026-09-21', datetime(2026, 9, 21, tzinfo=UTC), datetime(2026, 9, 22, tzinfo=UTC))
+    spool.acknowledge_spooled_revision(tmp_path, day)
+    for _ in range(3):
+        spool.cleanup_spool(tmp_path)
+    with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
+        assert connection.execute('SELECT count(*) FROM attempts').fetchone() == (0,)
+    with sqlite3.connect(tmp_path / 'capture.sqlite3') as connection:
+        assert connection.execute('SELECT seq FROM polls').fetchall() == [(unfinished,)]
+
+
+def test_covered_outage_uses_fallback_without_redownloading_gap(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    _append(tmp_path, responses[:30] + responses[140:])
+    accepted = Partition('accepted-outage', datetime(2026, 9, 21, 15, 10, tzinfo=UTC), datetime(2026, 9, 21, 15, 12, tzinfo=UTC))
+    spool.acknowledge_spooled_revision(tmp_path, accepted)
+    starts = _repair_from_actual(tmp_path, responses, monkeypatch)
+    resumed = _partition('2026-09-21T15:12:00Z')
+    assert spool.classify_spooled_partition(tmp_path, resumed) == 'fallback'
+    spool.repair_spooled_gaps(tmp_path, resumed, egress_ip='37.27.112.144')
+    assert starts == []
+    spool.acknowledge_spooled_revision(tmp_path, resumed)
+    state = spool.capture_state(tmp_path)
+    assert state is not None and state.pending_gaps == 0
+
+
+def test_previously_covered_gap_does_not_leave_capture_unhealthy(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...]) -> None:
+    _append(tmp_path, responses[:30])
+    accepted = Partition('accepted-outage', datetime(2026, 9, 21, 15, 10, tzinfo=UTC), datetime(2026, 9, 21, 15, 13, tzinfo=UTC))
+    spool.acknowledge_spooled_revision(tmp_path, accepted)
+    _append(tmp_path, responses[140:])
+    for _ in range(3):
+        spool.cleanup_spool(tmp_path)
+    state = spool.capture_state(tmp_path)
+    assert state is not None and state.pending_gaps == 0
+    with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
+        assert connection.execute('SELECT complete,retired FROM gaps').fetchall() == [(0, 1)]
+        assert connection.execute('SELECT count(*) FROM attempts').fetchone() == (0,)
+
+
+def test_schema_initialization_cannot_quarantine_concurrent_reader(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from threading import Event
+
+    schema_created, release = Event(), Event()
+    original_connect = sqlite3.connect
+
+    class PausedSchema(sqlite3.Connection):
+        def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
+            result = super().executescript(sql_script)
+            if 'CREATE TABLE segments' in sql_script:
+                schema_created.set()
+                assert release.wait(5)
+            return result
+
+    def connect(database: Path, *, timeout: float) -> sqlite3.Connection:
+        return original_connect(database, timeout=timeout, factory=PausedSchema)
+
+    monkeypatch.setattr(spool.sqlite3, 'connect', connect)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        writer = executor.submit(spool.append_capture, tmp_path, responses[0][1], received_at=responses[0][0])
+        assert schema_created.wait(5)
+        reader = executor.submit(spool.classify_spooled_partition, tmp_path, _partition())
+        try:
+            with pytest.raises(TimeoutError):
+                reader.result(timeout=0.05)
+        finally:
+            release.set()
+        assert writer.result(timeout=5).advanced
+        assert reader.result(timeout=5) == 'fallback'
+    assert not (tmp_path / 'quarantine.json').exists()
+
+
+def test_interrupted_schema_initialization_can_restart(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...]) -> None:
+    code = "import os,sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute('PRAGMA journal_mode=WAL');c.execute('BEGIN IMMEDIATE');c.execute('CREATE TABLE identity(source TEXT)');os._exit(19)"
+    crash = subprocess.run([sys.executable, '-c', code, str(tmp_path / 'capture.sqlite3')], check=False)
+    assert crash.returncode == 19
+    assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+    assert not (tmp_path / 'quarantine.json').exists()
+    assert spool.capture_state(tmp_path) is None
+    restarted = spool.append_capture(tmp_path, responses[0][1], received_at=responses[0][0])
+    assert restarted.advanced

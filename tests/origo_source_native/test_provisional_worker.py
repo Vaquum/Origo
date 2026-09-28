@@ -861,3 +861,49 @@ def test_perp_acknowledges_only_existing_coverage(
     monkeypatch.setattr(perp, 'acknowledge_spooled_revision', acknowledge)
     adapter.candidates(NOW, ANCHOR, (canonical,))
     acknowledge.assert_called_once_with(tmp_path / 'spool', canonical)
+
+
+def test_perp_reclaims_accepted_capture_before_repair_at_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from origo.sources.adapters import binance_perp_rest as perp
+    from origo.sources.adapters import binance_perp_spool as spool
+    from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+    from origo.sources.contracts import SourceError
+
+    from .test_binance_perp_spool import _append, _repair_from_actual, responses
+
+    recorded = responses.__wrapped__()
+    root = tmp_path / 'spool'
+    # Lose genuine responses in the last complete minute; earlier coverage is reclaimable.
+    _append(root, recorded[:120] + recorded[150:])
+    adapter = perp.BinancePerpProvisional()
+    frontier = adapter.partition('2026-09-21T15:12:00Z')
+    covered = tuple(adapter.partition(f'2026-09-21T15:{minute}:00Z') for minute in ('10', '11'))
+    now = recorded[-1][0] + timedelta(hours=2)
+    monkeypatch.setattr(spool, 'now_utc', lambda: now)
+    monkeypatch.setenv('ORIGO_PERP_CAPTURE_ROOT', str(root))
+    requested = _repair_from_actual(root, recorded, monkeypatch)
+    monkeypatch.setattr(spool, 'REPAIR_PAGE_BUDGET', 1)
+    before = spool.spool_bytes(root)
+    monkeypatch.setattr(spool, 'SPOOL_LIMIT_BYTES', before + 8 * 1024**2)
+    assert spool.classify_spooled_partition(root, frontier) == 'pending'
+    with pytest.raises(SourceError, match='capacity'):
+        adapter.repair_pending(frontier)
+    assert requested == []
+
+    spec = replace(BINANCE_PERP_TRADES_SPEC, provisional=adapter)
+    store = Mock(spec=SourceStore)
+    store.active_intervals.return_value = covered
+    store.anchor.return_value = covered[0].start
+    store.records.return_value = [Mock(partition=covered[-1])]
+    store.enabled_groups.return_value = ()
+    feed = _feed(spec, tmp_path, _Dagster(), _Reporter(), clock=lambda: now)
+    monkeypatch.setattr(feed, '_may_attempt', lambda *args, **kwargs: False)
+    assert feed._build_intervals(cast(SourceStore, store), spec, now) == ([], [])
+    assert len(requested) == 1, 'Reclaiming accepted rows must unblock actual bridge work.'
+    assert spool.spool_bytes(root) < before
+    assert spool.classify_spooled_partition(root, frontier) == 'pending'
+    assert spool.capture_state(root) is not None

@@ -135,10 +135,17 @@ def _database(root: Path, owner: Literal['capture', 'repair'], *, create: bool =
     path = root / f'{owner}.sqlite3'
     if not create and not path.exists():
         raise SourceError('CAPTURE_MISSING', 'The durable capture store is absent.')
+    initialization = (root / f'{owner}.init.lock').open('a+')
+    fcntl.flock(initialization, fcntl.LOCK_EX)
     connection = sqlite3.connect(path, timeout=1)
     try:
         version = connection.execute('PRAGMA user_version').fetchone()[0]
-        if version not in (0, _SCHEMA_VERSION) or (version == 0 and not create):
+        if version not in (0, _SCHEMA_VERSION):
+            raise SourceError('CAPTURE_SCHEMA', 'Unsupported durable perp spool schema.')
+        if version == 0 and not create:
+            tables = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
+            if tables is None:
+                raise SourceError('CAPTURE_MISSING', 'The durable capture store has not been initialized.')
             raise SourceError('CAPTURE_SCHEMA', 'Unsupported durable perp spool schema.')
         if version == 0:
             connection.execute('PRAGMA auto_vacuum=INCREMENTAL')
@@ -148,6 +155,7 @@ def _database(root: Path, owner: Literal['capture', 'repair'], *, create: bool =
         if version == 0:
             if owner == 'capture':
                 connection.executescript('''
+                    BEGIN IMMEDIATE;
                     CREATE TABLE identity(source TEXT NOT NULL, symbol TEXT NOT NULL);
                     INSERT INTO identity VALUES ('binance_perp_trades', 'BTCUSDT');
                     CREATE TABLE segments(seq INTEGER PRIMARY KEY, identity TEXT UNIQUE,
@@ -168,6 +176,7 @@ def _database(root: Path, owner: Literal['capture', 'repair'], *, create: bool =
                 ''')
             else:
                 connection.executescript('''
+                    BEGIN IMMEDIATE;
                     CREATE TABLE identity(source TEXT NOT NULL, symbol TEXT NOT NULL);
                     INSERT INTO identity VALUES ('binance_perp_trades', 'BTCUSDT');
                     CREATE TABLE gaps(identity TEXT PRIMARY KEY, left_id INTEGER,
@@ -190,10 +199,13 @@ def _database(root: Path, owner: Literal['capture', 'repair'], *, create: bool =
         identity = connection.execute('SELECT source,symbol FROM identity').fetchall()
         if identity != [(_SOURCE, _SYMBOL)]:
             raise SourceError('CAPTURE_IDENTITY', 'The perp spool source or symbol differs.')
+        fcntl.flock(initialization, fcntl.LOCK_UN)
+        initialization.close()
         yield connection
     except sqlite3.DatabaseError as error:
         raise SourceError('CAPTURE_STORAGE', 'The durable perp spool cannot be read or written.') from error
     finally:
+        initialization.close()
         connection.close()
 
 
@@ -231,14 +243,14 @@ def _pending_gaps(root: Path, capture: sqlite3.Connection) -> int:
     count = int(capture.execute('SELECT max(count(*) - 1, 0) FROM segments').fetchone()[0])
     if (root / 'repair.sqlite3').exists():
         with _database(root, 'repair') as repair:
-            count -= int(repair.execute('SELECT count(*) FROM gaps WHERE complete=1').fetchone()[0])
+            count -= int(repair.execute('SELECT count(*) FROM gaps WHERE complete=1 OR retired=1').fetchone()[0])
     return max(0, count)
 
 
 def capture_state(root: Path) -> CaptureCommit | None:
     if not (root / 'capture.sqlite3').exists():
         return None
-    with _database(root, 'capture') as connection:
+    with _database(root, 'capture', create=True) as connection:
         return _commit(root, connection, advanced=False)
 
 
@@ -289,7 +301,7 @@ def append_capture(root: Path, rows: Sequence[Mapping[str, object]], *,
     serialized_evidence = json.dumps(dict(evidence or {}), sort_keys=True)
     if len(serialized_evidence.encode()) > 16384:
         raise SourceError('CAPTURE_EVIDENCE_CAPACITY', 'Capture response evidence exceeds 16 KiB.')
-    conflict = False
+    conflicts: set[str] = set()
     result: CaptureCommit | None = None
     with _database(root, 'capture', create=True) as connection:
         connection.execute('BEGIN IMMEDIATE')
@@ -306,16 +318,16 @@ def append_capture(root: Path, rows: Sequence[Mapping[str, object]], *,
         if previous is not None and previous.quarantined:
             raise SourceError('CAPTURE_QUARANTINED', 'Capture is quarantined pending explicit historical repair.')
         for trade_id, _, payload in records:
-            saved = connection.execute('SELECT payload FROM trades WHERE id=?', (trade_id,)).fetchone()
+            saved = connection.execute('SELECT payload,segment FROM trades WHERE id=?', (trade_id,)).fetchone()
             if saved is not None and str(saved[0]) != payload:
-                conflict = True
+                conflicts.add(str(saved[1]))
         overlap = previous is not None and any(row[0] == previous.last_id for row in records)
         if previous is not None and records[0][0] <= previous.last_id < records[-1][0] and not overlap:
-            conflict = True
+            conflicts.add(previous.identity)
         if previous is not None and not overlap and records[-1][0] > previous.last_id and records[0][1] < previous.last_ms:
-            conflict = True
-        if conflict:
-            connection.execute('UPDATE segments SET quarantined=1 WHERE identity=?', (previous.identity if previous else '',))
+            conflicts.add(previous.identity)
+        if conflicts:
+            connection.executemany('UPDATE segments SET quarantined=1 WHERE identity=?', ((identity,) for identity in conflicts))
             connection.commit()
         else:
             advanced = previous is None or records[-1][0] > previous.last_id
@@ -344,7 +356,7 @@ def append_capture(root: Path, rows: Sequence[Mapping[str, object]], *,
             result = _commit(root, connection, advanced=advanced)
             if result is None:
                 raise SourceError('CAPTURE_STORAGE', 'A committed capture lacks its checkpoint.')
-    if conflict:
+    if conflicts:
         raise SourceError('CAPTURE_CONFLICT', 'An actual trade conflicts with durable capture; segment quarantined.')
     if result is None:
         raise SourceError('CAPTURE_STORAGE', 'The capture transaction did not return a checkpoint.')
@@ -392,6 +404,8 @@ def _coverage(root: Path, partition: Partition) -> tuple[Literal['ready', 'pendi
             segments = _segments(connection, start_ms, end_ms)
             checkpoint = connection.execute('SELECT durable_at FROM state WHERE singleton=1').fetchone()
     except SourceError as error:
+        if error.code == 'CAPTURE_MISSING':
+            return 'fallback', (), ()
         if error.code not in {'CAPTURE_SCHEMA', 'CAPTURE_STORAGE'}:
             raise
         _quarantine(root, error)
@@ -399,20 +413,22 @@ def _coverage(root: Path, partition: Partition) -> tuple[Literal['ready', 'pendi
     if not segments or segments[0].first_ms >= start_ms or any(segment.quarantined for segment in segments):
         return 'fallback', segments, ()
     gaps = tuple(_gap(left, right) for left, right in pairwise(segments))
+    pending = bool(gaps)
+    if gaps and (root / 'repair.sqlite3').exists():
+        pending = False
+        with _database(root, 'repair') as connection:
+            for gap in gaps:
+                complete = connection.execute('SELECT complete,retired,error FROM gaps WHERE identity=?', (gap.identity,)).fetchone()
+                if complete is not None and (complete[1] or complete[2] is not None):
+                    return 'fallback', segments, gaps
+                if complete != (1, 0, None):
+                    if gap.left.last_ms < start_ms and _covered_until(connection, gap.left.last_ms // 60000 * 60000) >= start_ms:
+                        return 'fallback', segments, gaps
+                    pending = True
     if segments[-1].last_ms < end_ms:
         healthy = checkpoint is not None and (now_utc() - datetime.fromisoformat(str(checkpoint[0]))).total_seconds() <= CAPTURE_PROGRESS_SECONDS
         return ('pending' if healthy else 'fallback'), segments, gaps
-    if gaps:
-        if not (root / 'repair.sqlite3').exists():
-            return 'pending', segments, gaps
-        with _database(root, 'repair') as connection:
-            for gap in gaps:
-                complete = connection.execute('SELECT complete,retired FROM gaps WHERE identity=?', (gap.identity,)).fetchone()
-                if complete == (1, 1):
-                    return 'fallback', segments, gaps
-                if complete != (1, 0):
-                    return 'pending', segments, gaps
-    return 'ready', segments, gaps
+    return ('pending' if pending else 'ready'), segments, gaps
 
 
 def classify_spooled_partition(root: Path, partition: Partition) -> Literal['ready', 'pending', 'fallback']:
@@ -456,6 +472,27 @@ def _validate_bridge_chain(connection: sqlite3.Connection, gap: _Gap) -> None:
         witness = connection.execute('SELECT payload FROM trades WHERE gap=? AND id=?', (gap.identity, trade_id)).fetchone()
         if witness is None or str(witness[0]) != str(payload):
             raise SourceError('CAPTURE_CHAIN', 'The committed bridge endpoint differs from its pinned witness.')
+
+
+def _validate_capture_chain(connection: sqlite3.Connection, segments: tuple[_Segment, ...],
+                            start_ms: int, end_ms: int) -> None:
+    for segment in segments:
+        first, last = segment.first_id, segment.last_id
+        if segment.first_ms < start_ms:
+            before = connection.execute('SELECT id FROM trades WHERE segment=? AND time<? ORDER BY id DESC LIMIT 1', (segment.identity, start_ms)).fetchone()
+            if before is None:
+                raise SourceError('CAPTURE_CHAIN', 'A capture segment has lost its before-start witness.')
+            first = int(before[0])
+        if segment.last_ms >= end_ms:
+            after = connection.execute('SELECT id FROM trades WHERE segment=? AND time>=? ORDER BY id LIMIT 1', (segment.identity, end_ms)).fetchone()
+            if after is None:
+                raise SourceError('CAPTURE_CHAIN', 'A capture segment has lost its end witness.')
+            last = int(after[0])
+        pages = connection.execute('SELECT first_id,last_id,previous_id FROM pages WHERE segment=? AND first_id<=? AND last_id>=? ORDER BY first_id', (segment.identity, last, first)).fetchall()
+        if not pages or not pages[0][0] <= first <= pages[0][1] or not pages[-1][0] <= last <= pages[-1][1]:
+            raise SourceError('CAPTURE_CHAIN', 'A capture segment has lost its committed page chain.')
+        if any(right[2] != left[1] for left, right in pairwise(pages)):
+            raise SourceError('CAPTURE_CHAIN', 'Committed capture pages do not form the recorded overlap chain.')
 
 
 def _validate_pages(connection: sqlite3.Connection, records: list[tuple[int, int, str]], *,
@@ -511,6 +548,7 @@ def _read_spooled_revision(root: Path, partition: Partition) -> Revision | None:
     start_ms, end_ms = _partition(partition)
     with _database(root, 'capture') as connection:
         connection.execute('BEGIN')
+        _validate_capture_chain(connection, segments, start_ms, end_ms)
         records = _minute_rows(connection, start_ms, end_ms)
         page_ids, requests = _validate_pages(connection, records)
     if gaps:
@@ -600,13 +638,13 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
             repair.commit()
         while requests < REPAIR_PAGE_BUDGET:
             with _database(root, 'repair') as repair:
-                checkpoint = repair.execute('SELECT next_id,complete,error,left_payload,right_payload FROM gaps WHERE identity=?', (gap.identity,)).fetchone()
+                checkpoint = repair.execute('SELECT next_id,complete,error,left_payload,right_payload,retired FROM gaps WHERE identity=?', (gap.identity,)).fetchone()
             if checkpoint is None:
                 raise SourceError('CAPTURE_STORAGE', 'The durable bridge checkpoint is absent.')
-            if int(checkpoint[1]) == 1:
+            if int(checkpoint[1]) == 1 or int(checkpoint[5]) == 1:
                 break
             if checkpoint[2] is not None:
-                return
+                raise SourceError('CAPTURE_BRIDGE_CONFLICT', f'Historical bridge rejected: {checkpoint[2]}.')
             next_id = int(checkpoint[0])
             requests += 1
             params: dict[str, str | int] = {'symbol': _SYMBOL, 'limit': 500, 'fromId': next_id}
@@ -719,16 +757,27 @@ def cleanup_spool(root: Path) -> None:
         fcntl.flock(readers, fcntl.LOCK_EX)
         try:
             with _database(root, 'capture') as capture, _database(root, 'repair') as repair:
-                gaps = repair.execute('SELECT identity,left_payload,right_payload,complete FROM gaps').fetchall()
-                for gap_id, left_payload, right_payload, complete in gaps:
+                segments = tuple(_Segment(str(row[0]), int(row[1]), int(row[2]), int(row[3]), int(row[4]), bool(row[5]))
+                    for row in capture.execute('SELECT identity,first_id,last_id,first_ms,last_ms,quarantined FROM segments ORDER BY seq'))
+                for left, right in pairwise(segments):
+                    first_minute, end_minute = left.last_ms // 60000 * 60000, (right.first_ms // 60000 + 1) * 60000
+                    if _covered_until(repair, first_minute) >= end_minute and repair.execute('SELECT 1 FROM gaps WHERE left_id=?', (left.last_id,)).fetchone() is None:
+                        gap = _gap(left, right)
+                        repair.execute('INSERT INTO gaps(identity,left_id,right_id,left_payload,right_payload,next_id,created_at,retired) VALUES (?,?,?,?,?,?,?,1)',
+                            (gap.identity, left.last_id, right.first_id, _witness(capture, left.last_id), _witness(capture, right.first_id), left.last_id, now_utc().isoformat()))
+                repair.commit()
+                gaps = repair.execute('SELECT identity,left_payload,right_payload FROM gaps').fetchall()
+                for gap_id, left_payload, right_payload in gaps:
                     left_row, right_row = _unwire(str(left_payload)), _unwire(str(right_payload))
                     first_ms, last_ms = cast(int, left_row[4]), cast(int, right_row[4])
                     first_minute, end_minute = first_ms // 60000 * 60000, (last_ms // 60000 + 1) * 60000
-                    if int(complete) != 1 or last_ms >= cutoff or _covered_until(repair, first_minute) < end_minute:
+                    if _covered_until(repair, first_minute) < end_minute:
                         continue
-                    # Keep the completed topology/witness tombstone after payload retirement.
+                    # Active coverage supersedes both finished and unfinished bridges.
                     repair.execute('UPDATE gaps SET retired=1 WHERE identity=?', (gap_id,))
                     repair.commit()
+                    if last_ms >= cutoff:
+                        continue
                     pages = repair.execute('SELECT first_id,last_id FROM pages WHERE gap=? ORDER BY first_id LIMIT ?', (gap_id, remaining_pages)).fetchall()
                     for first_id, last_id in pages:
                         size = int(repair.execute('SELECT coalesce(sum(length(payload)),0) FROM trades WHERE gap=? AND id BETWEEN ? AND ?', (gap_id, first_id, last_id)).fetchone()[0])
@@ -736,7 +785,6 @@ def cleanup_spool(root: Path) -> None:
                             return
                         repair.execute('DELETE FROM trades WHERE gap=? AND id BETWEEN ? AND ?', (gap_id, first_id, last_id))
                         repair.execute('DELETE FROM pages WHERE gap=? AND first_id=?', (gap_id, first_id))
-                        repair.execute('DELETE FROM attempts WHERE seq IN (SELECT seq FROM attempts WHERE gap=? ORDER BY seq LIMIT 100)', (gap_id,))
                         _reclaim(repair)
                         remaining -= size
                         remaining_pages -= 1
@@ -760,10 +808,35 @@ def cleanup_spool(root: Path) -> None:
                         if first is None:
                             raise SourceError('CAPTURE_STORAGE', 'Cleanup removed a required overlap witness.')
                         capture.execute('UPDATE segments SET first_id=?,first_ms=? WHERE identity=?', (first[0], first[1], identity))
-                        capture.execute('DELETE FROM polls WHERE seq IN (SELECT seq FROM polls WHERE last_id<=? AND received_at<? ORDER BY seq LIMIT 100)', (last_page_id, datetime.fromtimestamp(cutoff / 1000, UTC).isoformat()))
                         _reclaim(capture)
                         remaining -= size
                         remaining_pages -= 1
+                # Attempts have their own lifecycle: failed requests own no payload page.
+                while remaining_pages:
+                    attempts = repair.execute("SELECT seq,length(params)+coalesce(length(outcome),0) FROM attempts WHERE gap IN (SELECT identity FROM gaps WHERE retired=1 AND json_extract(right_payload,'$.time')<?) ORDER BY seq LIMIT ?", (cutoff, min(100, remaining_pages))).fetchall()
+                    if not attempts:
+                        break
+                    size = sum(int(row[1]) for row in attempts)
+                    if size > remaining:
+                        return
+                    repair.executemany('DELETE FROM attempts WHERE seq=?', ((row[0],) for row in attempts))
+                    _reclaim(repair)
+                    remaining -= size
+                    remaining_pages -= len(attempts)
+                for start_ms, end_ms in repair.execute('SELECT start_ms,end_ms FROM acknowledgments'):
+                    start = datetime.fromtimestamp(int(start_ms) / 1000, UTC).isoformat()
+                    end = datetime.fromtimestamp(min(int(end_ms), cutoff) / 1000, UTC).isoformat()
+                    while remaining_pages:
+                        polls = capture.execute("SELECT seq,length(evidence) FROM polls WHERE received_at>=? AND received_at<? AND (last_id IS NOT NULL OR json_extract(evidence,'$.completed_at') IS NOT NULL) ORDER BY seq LIMIT ?", (start, end, min(100, remaining_pages))).fetchall()
+                        if not polls:
+                            break
+                        size = sum(int(row[1]) for row in polls)
+                        if size > remaining:
+                            return
+                        capture.executemany('DELETE FROM polls WHERE seq=?', ((row[0],) for row in polls))
+                        _reclaim(capture)
+                        remaining -= size
+                        remaining_pages -= len(polls)
                 _reclaim(capture)
                 _reclaim(repair)
         finally:

@@ -334,7 +334,11 @@ def add_loss_interval(cursor: DeliveryCursor, start: str, end: str, reason: str)
 
 
 def prune_unsent(cursor: DeliveryCursor, now: datetime) -> None:
-    cutoff = (now.astimezone(UTC) - timedelta(seconds=UNSENT_HORIZON_SECONDS)).isoformat()
+    # Acknowledgements and replay coverage refer to minute sampling slots.
+    cutoff = (
+        now.astimezone(UTC).replace(second=0, microsecond=0)
+        - timedelta(seconds=UNSENT_HORIZON_SECONDS)
+    ).isoformat()
     baseline = _later(cursor.notified_through, cursor.expired_through)
     if baseline is not None and datetime.fromisoformat(baseline) < datetime.fromisoformat(cutoff):
         add_loss_interval(
@@ -359,7 +363,9 @@ def plan_notification(
     digest_due = utc_now.hour >= settings.digest_hour_utc and cursor.last_digest_date != today
     if not transitions and not digest_due:
         return False
-    prune_unsent(cursor, utc_now)
+    evidence_end = summary['coverage']['window_end']
+    if evidence_end is not None:
+        prune_unsent(cursor, datetime.fromisoformat(evidence_end))
     disclosed = [interval.copy() for interval in cursor.lost_intervals]
     prepared = summary.copy()
     prepared['prepared_at'] = utc_now.isoformat()

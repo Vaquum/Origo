@@ -429,7 +429,82 @@ def test_lifecycle_preserves_transient_and_unverified_incidents() -> None:
     assert not lifecycle_transitions([*ongoing, fresh], now=datetime.fromisoformat(fresh['sampling_slot']))
 
 
+def _assert_digest_loss_uses_evidence_slots(tmp_path: Path) -> None:
+    # Advance delivery clocks only; retain the genuine summary and source timestamps.
+    summary, now, settings = _summary(), _now(), _settings()
+    path = tmp_path / 'acknowledged-digest.json'
+    cursor = _cursor(path, now)
+    assert plan_notification(cursor, summary, settings, now, True, transitions=False)
+    def accepted(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        assert payload and idempotency_key
+        return 'local-digest-acknowledgement'
+    assert attempt_delivery(cursor, settings, now, lambda: cursor.save(path),
+                            completion_clock=lambda: now, sender=accepted) == 'acknowledged'
+    assert cursor.notified_through == summary['sampling_slot']
+    assert cursor.notified_through is not None
+    watermark = datetime.fromisoformat(cursor.notified_through)
+    assert watermark.second == watermark.microsecond == 0
+    for seconds in (0, 5.25, 59.999999):
+        next_day = watermark + timedelta(days=1, seconds=seconds)
+        restored = _cursor(path, next_day)
+        # The monitor prunes before preparation, which invokes the same pruning again.
+        delivery.prune_unsent(restored, next_day)
+        assert restored.lost_intervals == [], 'A later second in the same minute is not lost evidence.'
+        assert restored.expired_through is None
+        assert plan_notification(restored, summary, settings, next_day, True, transitions=False)
+        pending = restored.pending_notification
+        assert pending is not None and pending.get('disclosed_intervals') == []
+        payload = cast(dict[str, str], json.loads(base64.b64decode(pending['payload_base64'])))
+        assert payload['subject'] == f'Origo daily digest {next_day.date().isoformat()}'
+        assert 'exceeded the 24-hour replay horizon' not in payload['text'] + payload['html']
+    # A whole unsent minute beyond the retained boundary still creates a disclosure.
+    late = watermark + timedelta(days=1, minutes=1, seconds=5)
+    overdue = _cursor(path, late)
+    cutoff = watermark + timedelta(minutes=1)
+    delivery.prune_unsent(overdue, late)
+    assert overdue.notified_through == watermark.isoformat()
+    assert overdue.expired_through == cutoff.isoformat()
+    assert overdue.lost_intervals == [{'start': watermark.isoformat(), 'end': cutoff.isoformat(),
+                                     'reason': 'Unsent evidence exceeded the 24-hour replay horizon.'}]
+    delivery.prune_unsent(overdue, late + timedelta(seconds=20))
+    assert len(overdue.lost_intervals) == 1 and overdue.expired_through == cutoff.isoformat()
+    assert plan_notification(overdue, summary, settings, late, True, transitions=False)
+    pending = overdue.pending_notification
+    assert pending is not None and pending.get('disclosed_intervals') == overdue.lost_intervals
+    payload = cast(dict[str, str], json.loads(base64.b64decode(pending['payload_base64'])))
+    for body in (payload['text'], payload['html']):
+        assert 'Unsent evidence exceeded the 24-hour replay horizon.' in body
+        assert cutoff.isoformat() in body
+    late_path = tmp_path / 'late-digest.json'
+    assert attempt_delivery(overdue, settings, late, lambda: overdue.save(late_path),
+                            completion_clock=lambda: late, sender=accepted) == 'acknowledged'
+    assert overdue.lost_intervals == []
+    delivery.prune_unsent(overdue, late + timedelta(seconds=20))
+    assert overdue.lost_intervals == [], 'Acknowledged loss must not recur within the same evidence slot.'
+    # A slow tick crosses a minute while preparing the same genuine evidence snapshot.
+    snapshot_end = summary['coverage']['window_end']
+    assert snapshot_end is not None
+    observed = datetime.fromisoformat(snapshot_end)
+    horizon = observed - timedelta(days=1)
+    for older_minutes, monitor_pruned in ((0, True), (1, True), (1, False)):
+        crossed = _cursor(tmp_path / f'crossed-minute-{older_minutes}-{monitor_pruned}.json', now)
+        crossed.notified_through = (horizon - timedelta(minutes=older_minutes)).isoformat()
+        expected_loss = [{'start': crossed.notified_through, 'end': horizon.isoformat(),
+                          'reason': 'Unsent evidence exceeded the 24-hour replay horizon.'}] if older_minutes else []
+        if monitor_pruned:
+            delivery.prune_unsent(crossed, observed + timedelta(seconds=59))
+            assert crossed.lost_intervals == expected_loss
+        dispatch_time = observed + timedelta(seconds=65)
+        assert plan_notification(crossed, summary, settings, dispatch_time, True, transitions=False)
+        assert crossed.lost_intervals == expected_loss, 'Preparation latency cannot expire evidence still in the snapshot.'
+        pending = crossed.pending_notification
+        assert pending is not None and pending.get('disclosed_intervals') == expected_loss
+        assert pending['prepared_at'] == dispatch_time.timestamp()
+        assert pending['evidence_end'] == summary['sampling_slot']
+
+
 def test_all_notifications_obey_global_hourly_budget(tmp_path: Path) -> None:
+    _assert_digest_loss_uses_evidence_slots(tmp_path)
     # Clock inputs exercise scheduling only; the captured operator observations remain unchanged.
     summary, start = _summary(), _now().replace(hour=6, minute=40, second=0, microsecond=0)
     for cooldown in (0, 21600):

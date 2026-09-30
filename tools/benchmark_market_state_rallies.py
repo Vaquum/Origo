@@ -144,6 +144,33 @@ def _float(value: object) -> float:
     return float(value)
 
 
+def _same_deployment(
+    expected_id: object,
+    expected_image: object,
+    expected_pid: object,
+    observed_id: object,
+    observed_image: object,
+    observed_pid: object,
+) -> bool:
+    return (
+        isinstance(expected_id, str)
+        and bool(expected_id)
+        and isinstance(expected_image, str)
+        and bool(expected_image)
+        and isinstance(expected_pid, int)
+        and not isinstance(expected_pid, bool)
+        and expected_pid > 0
+        and isinstance(observed_pid, int)
+        and not isinstance(observed_pid, bool)
+        and (observed_id, observed_image, observed_pid) == (expected_id, expected_image, expected_pid)
+    )
+
+
+def _same_latency(reported: object, retained: object) -> bool:
+    measured = _float(retained)
+    return measured >= 0 and _float(reported) == measured
+
+
 def _utc(value: object) -> datetime:
     at = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
     if at.utcoffset() is None:
@@ -1365,6 +1392,9 @@ def _merged_deployment(prod: Production, archive: Archive) -> dict[str, object]:
     ):
         raise ValueError('Deployed container differs from the frozen 2 CPU / 2 GiB envelope.')
     snapshot = _object(evidence['snapshot'])
+    info = _object(snapshot['container'])
+    if not _same_deployment(deployment['id'], deployment['image'], deployment['pid'], info['id'], info['image'], info['pid']):
+        raise ValueError('The deployed container changed during merge preflight.')
     observed = {str(_object(value)['name']) for value in _list(snapshot['heartbeats'])}
     missing = set(_required_heartbeats()) - observed
     if missing:
@@ -1565,9 +1595,15 @@ def acceptance(url: str, report_path: Path) -> int:
     return 0 if report['status'] == 'PASS' else 1
 
 
-def _validate_resources(root: Path, measured: Mapping[str, int]) -> list[str]:
+def _validate_resources(
+    root: Path, measured: Mapping[str, int], deployment: Mapping[str, object]
+) -> list[str]:
     failures: list[str] = []
     before = _object(json.loads((root / 'before.json').read_bytes()))
+    for name in ('before.json', 'after.json', 'reuse-before.json', 'reuse-after.json'):
+        info = _object(_object(json.loads((root / name).read_bytes()))['container'])
+        if not _same_deployment(deployment['id'], deployment['image'], deployment['pid'], info['id'], info['image'], info['pid']):
+            failures.append(f'{name}: container identity differs from the frozen deployment.')
     events_before = str(_object(before['cgroup'])['memory.events'])
     old_events = {line.split()[0]: int(line.split()[1]) for line in events_before.splitlines()}
     observed_heartbeats = {str(_object(value)['name']) for value in _list(before['heartbeats'])}
@@ -1581,6 +1617,8 @@ def _validate_resources(root: Path, measured: Mapping[str, int]) -> list[str]:
             snapshot = _object(json.loads(line))
             snapshots += 1
             info, rss, cgroup = (_object(snapshot[key]) for key in ('container', 'rss', 'cgroup'))
+            if not _same_deployment(deployment['id'], deployment['image'], deployment['pid'], info['id'], info['image'], info['pid']):
+                failures.append('Sampled container identity differs from the frozen deployment.')
             if (
                 info['memory'] != LIMITS['container_bytes']
                 or info['nanocpus'] != LIMITS['container_nanocpus']
@@ -1952,6 +1990,9 @@ def validate_report(
             failures.append('Manifest commitment differs.')
         deployment = _object(json.loads((evidence_root / 'deployment.json').read_bytes()))
         deployed = _object(deployment['deployment'])
+        initial = _object(_object(deployment['snapshot'])['container'])
+        if not _same_deployment(deployed['id'], deployed['image'], deployed['pid'], initial['id'], initial['image'], initial['pid']):
+            failures.append('Preflight container identity differs from the frozen deployment.')
         merge_sha = str(manifest['merge_sha'])
         if not re.fullmatch(r'[0-9a-f]{40}', merge_sha) or not str(deployed['image']).endswith(
             ':' + merge_sha
@@ -1981,8 +2022,6 @@ def validate_report(
         }
         samples = [_object(value) for value in _list(report['samples'])]
         actual = {(str(sample['case_id']), str(sample['round'])) for sample in samples}
-        if report.get('latencies') != _latencies(samples):
-            failures.append('Recorded end-to-end p50/p95/max do not match measured rounds.')
         if actual != expected or len(samples) != len(expected):
             failures.append('Required 24 cases x 6 measured rounds are missing/duplicated/skipped.')
         proofs = [_object(value) for value in _list(report['proof_samples'])]
@@ -1991,12 +2030,24 @@ def validate_report(
         ) != len(proof_cases):
             failures.append('Authentic boundary/positive proof cases are incomplete.')
         result_ids: set[str] = set()
+        retained_timings: list[dict[str, object]] = []
         for sample in (*samples, *proofs):
             case_id = str(sample['case_id'])
             case = cases.get(case_id, proof_cases.get(case_id))
             if case is None:
                 raise ValueError('Unfrozen discovery case.')
-            response = _object(json.loads((evidence_root / str(sample['response'])).read_bytes()))
+            name = str(sample['response'])
+            if name != f'{case_id}-{sample["round"]}-response.json' or name not in names:
+                raise ValueError('Unregistered/mismatched immutable response evidence.')
+            response = _object(json.loads((evidence_root / name).read_bytes()))
+            if (
+                response['case_id'] != case_id
+                or response['round'] != sample['round']
+                or not _same_latency(sample['seconds'], response['seconds'])
+            ):
+                failures.append(f'{case_id}: sample identity/timing differs from retained response.')
+            if case_id in cases:
+                retained_timings.append({'case_id': case_id, 'seconds': response['seconds']})
             if _utc(response['started_at']) <= _utc(manifest['frozen_at']):
                 failures.append('Measurements preceded the immutable manifest.')
             answer = _object(response['answer'])
@@ -2116,6 +2167,8 @@ def validate_report(
                 != _object(deployment['source_files'])['origo/query/rally_detection.py']
             ):
                 failures.append('Result detector build differs from deployed source.')
+        if report.get('latencies') != _latencies(retained_timings):
+            failures.append('Recorded end-to-end p50/p95/max do not match retained response timings.')
         features = {
             'partial': 0,
             'endpoint_overlap': 0,
@@ -2204,7 +2257,7 @@ def validate_report(
         for row in (*capacity_rows, *after_capacity_rows):
             key = str(row['source_key'])
             measured[key] = max(measured.get(key, 0), _integer(row['working_set_bytes']))
-        failures.extend(_validate_resources(evidence_root, measured))
+        failures.extend(_validate_resources(evidence_root, measured, deployed))
         failures.extend(
             _validate_statements(
                 _object(json.loads((evidence_root / 'statements.json').read_bytes())), result_ids

@@ -87,7 +87,9 @@ unmerged or mismatched deployment. The report, companion checksum and immutable
 `verify-report` recomputes the verdict from evidence; missing/skipped cases, unverifiable
 facts, synthetic records, identity mismatch, undeclared tolerance, enlarged deployment
 or threshold breach fail verification. Unit tests validate these rules without
-claiming a production PASS.
+claiming a production PASS. Every resource observation is bound to the frozen
+container ID, image and process ID. Latency statistics are recomputed from retained
+response timings; relabelled rounds and altered report timings are rejected.
 
 ## Approved corrected-source deferral
 

@@ -1,3 +1,7 @@
+# v3.29.1
+
+- Stop the perp capture worker crash-looping (#485): when the repair container closed its last SQLite connection and deleted `repair.sqlite3-wal` or `repair.sqlite3-shm` between the spool size walk's directory listing and its `stat`, capture died with `FileNotFoundError` and restarted, over a thousand times since the 2026-09-28 deploy. The walk now leaves the `-wal` and `-shm` sidecars out; capacity already reserves 8 MiB of headroom for them.
+
 # v3.29.0
 
 - Share recorded operator summaries between the law dashboard and HTML/text email; group incident lifecycles, preserve repeat/trend coverage, and bound distinct dispatches to hourly with durable immutable retries.

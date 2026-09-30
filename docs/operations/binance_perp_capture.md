@@ -17,8 +17,9 @@ must account for that interruption before the affected minutes can activate.
 Capture has one CPU, 512 MiB RAM, a read-only root filesystem, no capabilities and
 `no-new-privileges`. UID 0 is deliberate: the existing shared lock/heartbeat volumes
 are root-owned. Only the spool, locks and heartbeat mounts are writable. The spool
-owns the 16 GiB total byte ceiling, including partial/bridge/control artifacts;
-Compose named volumes do not impose a filesystem quota. Capture has no listener,
+owns the 16 GiB total byte ceiling, including partial/bridge/control artifacts but not
+the SQLite `-wal`/`-shm` sidecars, which appear and vanish with connections (capacity
+reserves 8 MiB of headroom for them); Compose named volumes do not impose a filesystem quota. Capture has no listener,
 API key, database credential, Docker socket or inherited worker environment. Host
 networking is required to bind the existing host address; it is not network isolation.
 

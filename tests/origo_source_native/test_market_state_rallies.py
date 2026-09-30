@@ -7,6 +7,7 @@ import importlib
 import inspect
 import json
 import math
+import os
 import sqlite3
 import shutil
 import threading
@@ -1001,6 +1002,36 @@ def test_frozen_acceptance_protocol_and_report_verdict(tmp_path: Path) -> None:
     assert not failure_policy('unrelated', 'FAILED')
     assert not failure_policy(None, 'FAILED')
     assert not failure_policy('market_state_api', None)
+    # Scalar binding probes use unchanged capture identities and an actual local
+    # timing; they do not manufacture container observations or production reports.
+    same_deployment = cast(Callable[[object, object, object, object, object, object], bool], getattr(benchmark, '_same_deployment'))
+    entries = _object(_proof()['files'])
+    first, second = _object(entries['june-27-raw.parquet']), _object(entries['startup-raw.parquet'])
+    first_id = _object(_object(first['acquisition'])['params'])['build']
+    second_id = _object(_object(second['acquisition'])['params'])['build']
+    pid = os.getpid()
+    assert same_deployment(first_id, first['sha256'], pid, first_id, first['sha256'], pid)
+    for observed_id, observed_image, observed_pid in (
+        (second_id, first['sha256'], pid),
+        (first_id, second['sha256'], pid),
+        (first_id, first['sha256'], os.getppid()),
+    ):
+        assert not same_deployment(first_id, first['sha256'], pid, observed_id, observed_image, observed_pid)
+    assert not same_deployment('', first['sha256'], pid, '', first['sha256'], pid)
+    assert not same_deployment(first_id, '', pid, first_id, '', pid)
+    assert not same_deployment(first_id, first['sha256'], True, first_id, first['sha256'], True)
+    started = time.perf_counter()
+    checksum = hashlib.sha256((FIXTURES / 'june-27-raw.parquet').read_bytes()).hexdigest()
+    elapsed = time.perf_counter() - started
+    assert checksum == first['sha256'] and elapsed > 0
+    retained = _object(json.loads(json.dumps({'seconds': elapsed})))['seconds']
+    same_latency = cast(Callable[[object, object], bool], getattr(benchmark, '_same_latency'))
+    assert same_latency(elapsed, retained)
+    assert not same_latency(math.nextafter(elapsed, math.inf), retained)
+    assert not same_latency(-elapsed, -elapsed)
+    for invalid in (math.nan, None, True):
+        with pytest.raises(ValueError):
+            same_latency(invalid, retained)
     manifest = benchmark.frozen_manifest()
     assert 'market_state_api.heartbeat' in _list(manifest['required_heartbeats'])
     assert 'perp_capture.heartbeat' in _list(manifest['required_heartbeats'])

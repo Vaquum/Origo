@@ -35,13 +35,15 @@ _INSTRUMENT = re.compile(r'[A-Z0-9]+', re.ASCII)
 _BUDGET_CHECK: ContextVar[Callable[[], None] | None] = ContextVar('rally_budget_check', default=None)
 
 
-@contextmanager
-def budget_scope(check: Callable[[], None]) -> Iterator[None]:
+def _budget_context(check: Callable[[], None]) -> Iterator[None]:
     token = _BUDGET_CHECK.set(check)
     try:
         yield
     finally:
         _BUDGET_CHECK.reset(token)
+
+
+_budget_scope = contextmanager(_budget_context)
 
 
 def _budget_check() -> None:

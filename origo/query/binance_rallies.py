@@ -33,12 +33,16 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from importlib import import_module
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
 import numpy as np
 import polars as pl
+from numpy.typing import NDArray
+
+from origo.query.rally_detection import RallyDefinition, RallyTrades, detect_rallies
 
 DEFINITION_VERSION = 'r30v1'
 TARGET_BPS = 30
@@ -433,22 +437,29 @@ def _detect(
             reader.trades(pinned, low, high),
         ]
     )
-    # Trade-ID order is time order: the source adapters enforce strictly increasing IDs with
-    # non-decreasing timestamps, so `times` is sorted for every search below.
-    ids = trades['trade_id'].to_numpy()
-    times = trades['timestamp'].dt.epoch('us').to_numpy()
-    prices = trades['price'].to_numpy()
+    ids = cast(NDArray[np.uint64], trades['trade_id'].to_numpy())
+    times = cast(NDArray[np.int64], trades['timestamp'].dt.epoch('us').to_numpy())
+    columns = RallyTrades(
+        ids,
+        times,
+        cast(NDArray[np.float64], trades['price'].to_numpy()),
+        cast(NDArray[np.float64], trades['quote_quantity'].to_numpy()),
+        cast(NDArray[np.bool_], trades['is_buyer_maker'].to_numpy()),
+    )
+    detection = detect_rallies(
+        trades=columns,
+        definition=RallyDefinition('first_hit', 'bps', Decimal(30), anchor_minutes=1),
+        source=TRADES_SOURCE,
+        instrument='BTCUSDT',
+        analysis_start=_EPOCH + anchors[0] * _US,
+        analysis_end=_EPOCH + high * _US,
+        known_at=_EPOCH + high * _US,
+        coverage=None,
+        anchors_us=np.asarray(anchors, dtype=np.int64),
+    )
     rallies: list[_Rally] = []
-    for anchor in anchors:
-        first = int(np.searchsorted(times, anchor))
-        if first == 0 or times[first - 1] < anchor - _LOOKBACK:
-            continue
-        stop = int(np.searchsorted(times, _limit(anchor, end)))
-        hits = np.flatnonzero(prices[first:stop] >= prices[first - 1] * TARGET)
-        if hits.size == 0:
-            continue
-        reference, hit = first - 1, first + int(hits[0])
-        # The rows start `lead` before the anchor, at the record the boundary names there.
+    for event in detection.events:
+        anchor = _parse_id(event.rally_id)
         start = anchor - lead
         opening = int(np.searchsorted(times, start))
         if boundary == 'before':
@@ -458,12 +469,12 @@ def _detect(
             _Rally(
                 anchor,
                 start,
-                int(ids[reference]),
-                int(times[reference]),
-                float(prices[reference]),
-                int(ids[hit]),
-                int(times[hit]),
-                float(prices[hit]),
+                event.reference_trade_id,
+                _utc_us(event.reference_at),
+                event.reference_price,
+                event.end_trade_id,
+                _utc_us(event.end_at),
+                event.end_price,
                 None if opening < 0 else int(ids[opening]),
             )
         )

@@ -1,0 +1,84 @@
+{
+  "archive": {
+    "provider_url": "https://data.binance.vision/data/spot/daily/trades/BTCUSDT/BTCUSDT-trades-2017-08-17.zip",
+    "provider_object_sha256": "a23fe0dae54b7143d5cffb42184e1a05afe7124aaca641cd438297ce83c9f9ec",
+    "capture": "tests/fixtures/binance/spot/daily/trades/revisioned/BTCUSDT-trades-2017-08-17.csv",
+    "capture_sha256": "f1ca7241eba6cf27aac03ac32bea5c4e8a7c88b725b8f2f6276e6b178230d557",
+    "row_count": 3427,
+    "row_start": 0,
+    "row_stop": 3427,
+    "first_native_id": 0,
+    "last_native_id": 3426,
+    "native_timestamp_unit": "milliseconds",
+    "first_timestamp_us": 1502942428322000,
+    "last_timestamp_us": 1503014320719000,
+    "coverage": [
+      "2017-08-17T00:00:00Z",
+      "2017-08-18T00:00:00Z"
+    ],
+    "coverage_basis": "Complete official checksum-verified daily archive; every CSV row retained."
+  },
+  "production_excerpt": {
+    "capture": "tests/origo_source_native/fixtures/binance_rallies/BTCUSDT-spot-trades-2026-06-27T1138-1155.parquet",
+    "capture_sha256": "c433006724daabbca30b8be0a832f143b603206d6b75449e0f3b10b6075a24cf",
+    "provider_query_receipt": "tests/origo_source_native/fixtures/binance_rallies/provenance.json",
+    "row_count": 22661,
+    "first_native_id": 6453962827,
+    "last_native_id": 6453985487,
+    "native_timestamp_unit": "microseconds",
+    "first_timestamp_us": 1782560280316177,
+    "last_timestamp_us": 1782561299847971,
+    "coverage": null,
+    "gap_policy": "Legacy unverified reads; SQL excerpts do not establish verified source coverage."
+  },
+  "parameters": {
+    "target_equality": {
+      "anchor_us": 1502942460000000,
+      "reference_trade_id": 2,
+      "hit_trade_id": 3,
+      "parameter": "44.77317739377096",
+      "operation": "float(reference_price) * (1.0 + float(Decimal(parameter)) / 10000.0) == float(hit_price)"
+    },
+    "pullback_equality": {
+      "anchor_us": 1502942580000000,
+      "reference_trade_id": 4,
+      "hit_trade_id": 65,
+      "target": "30",
+      "parameter": "44.94739006111511",
+      "drawdown": 19.24000000000069,
+      "operation": "float(reference_price) * float(Decimal(parameter)) / 10000.0 == maximum_running_high_minus_current_price_before_first_hit"
+    },
+    "bps_swing": {
+      "target": "30",
+      "reversal": "20"
+    },
+    "atr_anchored": {
+      "target": "0.5",
+      "pullback": "0.5",
+      "anchor_minutes": 7
+    },
+    "atr_swing": {
+      "target": "0.1",
+      "reversal": "0.1"
+    }
+  },
+  "parameter_search_method": "For unchanged archive anchor/reference/first-hit prices, calculate candidate user bps parameters from observed ratios or maximum running drawdown, then search adjacent Float64 parameter values using numpy.nextafter until the declared literal Float64 operation exactly equals the authentic price/drawdown. Only user parameters change. Tests recalculate the exact operation independently.",
+  "parameter_search_changes_market_records": false,
+  "expectation_method": "Brute-force native-order anchored scan and independently nested swing-extremum scans over untouched provider columns. ATR groups every official archive trade into native UTC 15-minute bars, requires exactly fifteen consecutive bars and uses chronological math.fsum of fourteen true ranges. Member volume uses independent chronological math.fsum. Existing expected.json records independently established 989 and four legacy labels. Prefix and coverage tests withhold observation/evidence or select unchanged provider records; they do not alter a market record.",
+  "volume_tolerance": {
+    "relative": 1e-12,
+    "absolute": 1e-08
+  },
+  "expectations": {
+    "full_day_bps_swing": {
+      "events": 134,
+      "tied_confirmation_events": 9,
+      "target": "30",
+      "reversal": "20"
+    },
+    "legacy_labels": {
+      "full_day": 989,
+      "production_excerpt": 4
+    }
+  }
+}

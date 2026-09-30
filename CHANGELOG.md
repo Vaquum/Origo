@@ -1,3 +1,8 @@
+# v3.30.0
+
+- Add exact trade-level First hit, Controlled advance and Swing rally definitions with bps or causal ATR14-SMA on UTC 15-minute bars, frozen event extents and native confirmation IDs (#488).
+- Share the detector with the supported spot rally exporter while preserving r30v1 IDs, first-hit arithmetic, file schemas, reference/lead-in bounds and legacy read-span accounting.
+
 # v3.29.1
 
 - Stop the perp capture worker crash-looping (#485): when the repair container closed its last SQLite connection and deleted `repair.sqlite3-wal` or `repair.sqlite3-shm` between the spool size walk's directory listing and its `stat`, capture died with `FileNotFoundError` and restarted, over a thousand times since the 2026-09-28 deploy. The walk now leaves the `-wal` and `-shm` sidecars out; capacity already reserves 8 MiB of headroom for them.

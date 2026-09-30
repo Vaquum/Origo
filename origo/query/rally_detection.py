@@ -6,7 +6,9 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -30,6 +32,30 @@ _DEADLINE_US = ANCHORED_DEADLINE_MINUTES * _MINUTE_US
 _LOOKBACK_US = 24 * 60 * _MINUTE_US
 _SOURCE = re.compile(r'[a-z][a-z0-9_]*', re.ASCII)
 _INSTRUMENT = re.compile(r'[A-Z0-9]+', re.ASCII)
+_BUDGET_CHECK: ContextVar[Callable[[], None] | None] = ContextVar('rally_budget_check', default=None)
+
+
+@contextmanager
+def budget_scope(check: Callable[[], None]) -> Iterator[None]:
+    token = _BUDGET_CHECK.set(check)
+    try:
+        yield
+    finally:
+        _BUDGET_CHECK.reset(token)
+
+
+def _budget_check() -> None:
+    check = _BUDGET_CHECK.get()
+    if check is not None:
+        check()
+
+
+def _quote_values(values: NDArray[np.float64], makers: NDArray[np.bool_] | None = None) -> Iterator[float]:
+    for index, value in enumerate(values):
+        if index and index % 4096 == 0:
+            _budget_check()
+        if makers is None or not bool(makers[index]):
+            yield float(value)
 
 
 @dataclass(frozen=True)
@@ -396,18 +422,19 @@ def _event(
     context: _Context, reference: int, first: int, last: int, confirmation: int,
     anchor: int | None,
 ) -> RallyEvent:
+    _budget_check()
     trades = context.trades
     reference_price, end_price = float(trades.price[reference]), float(trades.price[last])
     prices = trades.price[first:last + 1]
     peaks = np.maximum.accumulate(prices)
     if anchor is not None:
         np.maximum(peaks, reference_price, out=peaks)
+    _budget_check()
     max_drawdown = float(np.max(peaks - prices))
     quotes, makers = trades.quote_quantity[first:last + 1], trades.is_buyer_maker[first:last + 1]
-    volume = math.fsum(float(value) for value in quotes)
-    buy_volume = math.fsum(
-        float(value) for value, maker in zip(quotes, makers, strict=True) if not bool(maker)
-    )
+    volume = math.fsum(_quote_values(quotes))
+    buy_volume = math.fsum(_quote_values(quotes, makers))
+    _budget_check()
     buy_count = len(makers) - int(np.count_nonzero(makers))
     prefix = f'{context.source}:{context.instrument}:rally_v1:{context.fingerprint}'
     if anchor is None:
@@ -455,6 +482,7 @@ def _anchored(context: _Context, anchors: NDArray[np.int64]) -> RallyDetection:
     diagnostics: list[RallyDiagnostic] = []
     trades = context.trades
     for value in anchors:
+        _budget_check()
         anchor = int(value)
         first = int(np.searchsorted(trades.timestamp_us, anchor))
         reference = first - 1
@@ -521,6 +549,8 @@ def _swing_segment(
     if reason is not None:
         diagnostics.append(_diagnostic('unknown_context', int(trades.timestamp_us[first]), reason))
     for index in range(first + 1, stop):
+        if (index - first) % 4096 == 0:
+            _budget_check()
         price = float(trades.price[index])
         extreme_price = float(trades.price[extreme])
         if state == 'unseeded':
@@ -553,6 +583,7 @@ def _swing_segment(
             peak = index
         elif _reversed(float(trades.price[peak]), price, atr, context):
             events.append(_event(context, extreme, extreme, peak, index, None))
+            _budget_check()
             state, extreme = 'down', index
             atr, reason = context.freeze(index)
             if reason is not None:
@@ -596,8 +627,10 @@ def detect_rallies(
     bars: Sequence[RallyBar] = (),
     anchors_us: NDArray[np.int64] | None = None,
 ) -> RallyDetection:
+    _budget_check()
     parameters = _parameters(definition)
     _validate_trades(trades)
+    _budget_check()
     if not isinstance(cast(object, source), str) or _SOURCE.fullmatch(source) is None:
         raise ValueError('source must match [a-z][a-z0-9_]*.')
     if not isinstance(cast(object, instrument), str) or _INSTRUMENT.fullmatch(instrument) is None:

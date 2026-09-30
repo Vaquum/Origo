@@ -478,3 +478,50 @@ and one receipt per component. The 1,539 detail cells accounted for all 12,000 c
 their 123.48987 BTC and 667.76 USDT of path, and 1,536 columns held 86,400 s of dwell. The cube's
 15 cells kept their 12,000 trades and 5,310 taker buys. This does not establish production
 capacity or complete historical coverage.
+
+## Exact rally query — slice #489
+
+`origo.query.market_state_rallies` implements compact held-pack admission, pinned
+native reads, causal context, the shared detector and streamed canonical Arrow
+publication. It exposes no projection endpoint. The existing query worker owns one
+rally slot inside its two heavy slots. Source storage, schemas, deployment and
+monitoring remain in their existing ownership paths.
+
+Admission reconstructs contiguous accepted cube coverage from 2021-01-01 and verifies
+all held pins before reading. Subsequent revalidation compares only admitted native
+identities and coverage: generation-only additions and unrelated revisions do not
+invalidate unchanged event evidence. A shared heavy fence protects the final cleanup
+log check; cleanup never waits through the discovery scan. Reclaimed or changed
+relevant inputs discard staging before publication.
+
+Native bulk and returned predecessor rows occupy five NumPy columns (33 bytes/row),
+with separate count preflight before allocation. ATR adds exactly its native completed
+15-minute bar context. Whole base-cell columns are separately bounded and include all
+accepted partition fragments. Count-based partiality therefore includes nonmembers
+outside the raw analysis interval. Membership is aggregated one event at a time;
+there is no materialized trade × rally join. Both Arrow batching and detector scans
+cooperate with the absolute deadline and current worker memory admission through a
+context-local budget hook; the public detector signature stays unchanged.
+
+`ResultStore` persists one of two owned inventories in `lifecycle.sqlite`: ordinary
+`cells.arrow`/`summary.arrow`, or rally
+`rallies.arrow`/`rally_cells.arrow`/`summary.arrow`. Publication validates the exact
+inventory before fsynced rename. Reading any rally member renews all three; expiry
+retires all three atomically. Recovery retains the registered group policy. Failed
+publication or response delivery removes the owned result.
+
+The existing query receipt's error summary includes rally OK/rejected/failed totals
+and completed native input/output bytes. Its columns, series and monitor path are
+unchanged. Existing container logs record each discovery POST, actual detector call
+and publication; acceptance reads those authoritative records.
+
+Run the authentic HTTP, engine, lifecycle and reader checks with:
+
+```sh
+PYTHONPATH=. pytest tests/origo_source_native/test_market_state_rallies.py -q
+```
+
+These checks use checksum-bound production captures and unchanged provider trades.
+The [frozen deployment protocol](Rally-query-acceptance.md) separately owns production
+resource, concurrency, ingestion and transport-reuse acceptance. Local tests do not
+establish deployment or Explorer GUI performance.

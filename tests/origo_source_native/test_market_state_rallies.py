@@ -285,6 +285,16 @@ def _table(response: Mapping[str, object], key: str) -> pl.DataFrame:
     return pl.read_ipc(str(response[key]))
 
 
+class DeadlineReads(Protocol):
+    def connect(self) -> object: ...
+    def close(self) -> None: ...
+
+
+class DeadlinePool(Protocol):
+    def urlopen(self, method: str, url: str, *, preload_content: bool) -> object: ...
+    def close(self) -> None: ...
+
+
 class Benchmark(Protocol):
     def frozen_manifest(self) -> dict[str, object]: ...
     def validate_report(self, report: Mapping[str, object], manifest: Mapping[str, object] | None = None, evidence_root: Path | None = None) -> list[str]: ...
@@ -842,7 +852,7 @@ def test_state_cleanup_disconnect_and_deadline(native_service: NativeService, mo
             started = time.monotonic()
             wall = started + 0.2
             if operation == 'constructor_headers':
-                reads = market_state_rallies._Reads(native_service.runtime, wall, str(uuid4()))
+                reads = cast(Callable[[SourceRuntime, float, str], DeadlineReads], getattr(market_state_rallies, '_Reads'))(native_service.runtime, wall, str(uuid4()))
                 with monkeypatch.context() as address:
                     address.setenv('CLICKHOUSE_HOST', '127.0.0.1')
                     address.setenv('CLICKHOUSE_HTTP_PORT', str(delayed_server.server_port))
@@ -852,7 +862,7 @@ def test_state_cleanup_disconnect_and_deadline(native_service: NativeService, mo
                     finally:
                         reads.close()
             else:
-                pool = market_state_rallies._DeadlinePool(wall)
+                pool = cast(Callable[[float], DeadlinePool], getattr(market_state_rallies, '_DeadlinePool'))(wall)
                 try:
                     with pytest.raises(RallyError) as interrupted:
                         try:
@@ -860,7 +870,7 @@ def test_state_cleanup_disconnect_and_deadline(native_service: NativeService, mo
                             if operation == 'stream':
                                 tuple(market_state.ipc.open_stream(response))
                         finally:
-                            market_state_rallies._remaining(wall)
+                            cast(Callable[[float], float], getattr(market_state_rallies, '_remaining'))(wall)
                 finally:
                     pool.close()
             assert interrupted.value.reason == 'rally_deadline_exceeded'

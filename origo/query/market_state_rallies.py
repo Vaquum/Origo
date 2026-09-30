@@ -22,6 +22,7 @@ from decimal import Decimal
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, cast
+from urllib.parse import unquote_plus, urlsplit
 from uuid import UUID
 
 import numpy as np
@@ -312,6 +313,16 @@ class _DeadlinePool(PoolManager):
 
     def urlopen(self, method: str, url: str, redirect: bool = True, **kw: object) -> BaseHTTPResponse:
         remaining = _remaining(self.deadline)
+        parts = urlsplit(url)
+        parameters = parts.query.split('&') if parts.query else []
+        execution_limit = f'max_execution_time={min(60.0, remaining)}'
+        for index, parameter in enumerate(parameters):
+            if unquote_plus(parameter.partition('=')[0]) == 'max_execution_time':
+                parameters[index] = execution_limit
+                break
+        else:
+            parameters.append(execution_limit)
+        url = parts._replace(query='&'.join(parameters)).geturl()
         kw['timeout'] = Timeout(total=remaining, connect=min(10.0, remaining), read=remaining)
         kw['retries'] = False
         try:

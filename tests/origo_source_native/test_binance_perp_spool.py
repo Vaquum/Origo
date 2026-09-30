@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import errno
 import gzip
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -306,6 +308,27 @@ def test_modified_committed_payload_is_quarantined(tmp_path: Path, responses: tu
         spool.read_spooled_revision(tmp_path, _partition())
     assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
     assert json.loads((tmp_path / 'quarantine.json').read_text())['code'] == 'CAPTURE_PAYLOAD_HASH'
+
+
+def test_spool_bytes_never_stats_sqlite_sidecars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / 'capture.sqlite3').write_bytes(b'x' * 10)
+    (tmp_path / 'partial.bin').write_bytes(b'y' * 3)
+    (tmp_path / 'repair.sqlite3-wal').write_bytes(b'w' * 7)
+    (tmp_path / 'repair.sqlite3-shm').write_bytes(b's' * 5)
+    real_stat = os.stat
+    sidecar_stats: dict[str, int] = {}
+
+    def vanishing_stat(path: str | os.PathLike[str], *, follow_symlinks: bool = True) -> os.stat_result:
+        name = os.fspath(path)
+        if name.endswith(('-wal', '-shm')):
+            sidecar_stats[name] = sidecar_stats.get(name, 0) + 1
+            if sidecar_stats[name] > 1:
+                raise FileNotFoundError(errno.ENOENT, 'The repair process deleted the sidecar mid-walk.', name)
+        return real_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, 'stat', vanishing_stat)
+    assert spool.spool_bytes(tmp_path) == 13
+    assert sidecar_stats == {}
 
 
 def test_capacity_recovers_after_acknowledged_reclamation(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:

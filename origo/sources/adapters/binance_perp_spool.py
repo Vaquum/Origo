@@ -119,7 +119,11 @@ def _sync_directory(root: Path) -> None:
 
 
 def spool_bytes(root: Path) -> int:
-    return sum(path.stat().st_size for path in root.rglob('*') if path.is_file())
+    # SQLite creates and deletes the -wal/-shm sidecars as the capture and repair
+    # containers open and close connections, so statting one races its deletion.
+    # _capacity reserves headroom for them instead of counting them.
+    return sum(path.stat().st_size for path in root.rglob('*')
+               if not path.name.endswith(('-wal', '-shm')) and path.is_file())
 
 
 def _capacity(root: Path, extra: int = 0) -> None:

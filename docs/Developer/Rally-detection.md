@@ -28,7 +28,7 @@ The detector preserves native ordering and rejects invalid columns. Timestamp ti
 | `controlled_advance` | `target`, `pullback`, `anchor_minutes` | First hit, provided the running-maximum pullback barrier was never exceeded |
 | `swing` | `target`, `reversal` | Observed trough through final peak; confirmed by a later reversal |
 
-Irrelevant fields are rejected. Anchored cadence is an integer `1..1440`, excluding Boolean values. Bps target/pullback are `(0,10000]`; bps reversal is `(0,10000)`. ATR quantities are `(0,100]`. Decimal values must be finite, convert to a positive finite Float64 and change the relevant bps multiplier. Intermediate thresholds and distances must remain finite and positive.
+Irrelevant fields are rejected. Anchored cadence is an integer `1..1440`, excluding Boolean values. Bps target/pullback are `(0,10000]`; bps reversal is `(0,10000)`. ATR quantities are `(0,100]`. Decimal values must be finite, convert to a positive finite Float64 and change the relevant bps multiplier. Bps reversal must also remain below `10000.0` after Float64 conversion. Intermediate thresholds and distances must remain finite and positive.
 
 Anchors are UTC minutes aligned to the Unix epoch cadence. Optional `anchors_us` selects a strictly increasing aligned subset inside the analysis interval; it is unavailable for swing. Ordinary cube discovery supplies no explicit subset.
 
@@ -72,7 +72,7 @@ At the observation edge an unresolved initial leg is `left_censored`; an establi
 2. Each subsequent bar supplies `max(high-low, abs(high-previous_close), abs(low-previous_close))`.
 3. Sum those 14 Float64 values chronologically with `math.fsum` and divide by `14.0`.
 
-An uncovered required interval yields `uncovered_atr_bar`; a covered interval with no bar yields `empty_atr_bar`. There is no forward fill, search for earlier nonempty bars, Wilder smoothing, future bar or Explorer indicator dependency.
+An uncovered required interval yields `uncovered_atr_bar`; a covered interval with no bar yields `empty_atr_bar`. Fifteen flat bars yielding zero ATR produce `unknown_context` with reason `zero_atr`; other completed events remain available. There is no forward fill, search for earlier nonempty bars, Wilder smoothing, future bar or Explorer indicator dependency.
 
 ## Events and identity
 

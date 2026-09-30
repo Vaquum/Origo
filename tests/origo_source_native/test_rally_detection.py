@@ -348,6 +348,7 @@ def test_mode_parameters_and_definition_fingerprint() -> None:
         PRESET, replace(PRESET, target=Decimal('10000'), anchor_minutes=1440),
         RallyDefinition('controlled_advance', 'bps', Decimal('30'), pullback=Decimal('10000'), anchor_minutes=1),
         RallyDefinition('swing', 'bps', Decimal('30'), reversal=Decimal('9999')),
+        RallyDefinition('swing', 'bps', Decimal('30'), reversal=Decimal('1e-12')),
         RallyDefinition('swing', 'atr', Decimal('100'), reversal=Decimal('100')),
     )
     for definition in valid:
@@ -366,6 +367,7 @@ def test_mode_parameters_and_definition_fingerprint() -> None:
         RallyDefinition('controlled_advance', 'bps', Decimal('30'), anchor_minutes=1),
         RallyDefinition('controlled_advance', 'bps', Decimal('30'), pullback=Decimal('0'), anchor_minutes=1),
         RallyDefinition('swing', 'bps', Decimal('30'), reversal=Decimal('10000')),
+        RallyDefinition('swing', 'bps', Decimal('30'), reversal=Decimal('9999.99999999999999999')),
         RallyDefinition('swing', 'bps', Decimal('30'), reversal=Decimal('1e-20')),
         RallyDefinition('swing', 'atr', Decimal('100.1'), reversal=Decimal('1')),
         RallyDefinition('swing', 'atr', Decimal('1'), reversal=Decimal('100.1')),

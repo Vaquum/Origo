@@ -151,6 +151,8 @@ class _ATR:
             ))
             previous_close = bar.close
         value = math.fsum(ranges) / 14.0
+        if value == 0.0:
+            return None, 'zero_atr'
         _positive(value, 'frozen ATR')
         return value, None
 
@@ -197,10 +199,12 @@ def _number(value: Decimal, name: str, scale: Scale) -> float:
     if value <= 0 or value > maximum or (scale == 'bps' and name == 'reversal' and value == maximum):
         raise ValueError(f'{name} is outside the {scale} parameter domain.')
     numeric = _positive(float(value), name)
-    if scale == 'bps' and (
-        1.0 + numeric / 10000.0 == 1.0 or 1.0 - numeric / 10000.0 == 1.0
-    ):
-        raise ValueError(f'{name} is too small to change a Float64 bps multiplier.')
+    if scale == 'bps':
+        if name == 'reversal' and numeric >= 10000.0:
+            raise ValueError(f'{name} is outside the Float64 bps parameter domain.')
+        multiplier = 1.0 - numeric / 10000.0 if name == 'reversal' else 1.0 + numeric / 10000.0
+        if multiplier == 1.0:
+            raise ValueError(f'{name} is too small to change its Float64 bps multiplier.')
     return numeric
 
 

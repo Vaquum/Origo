@@ -955,7 +955,8 @@ def test_shared_slots_resource_admission_and_receipts(native_service: NativeServ
         if len(calls) == 3:
             raise RallyError(504, 'rally_deadline_exceeded', 'Test cooperative interruption on unchanged native records.')
 
-    with rally_detection.budget_scope(interrupt), pytest.raises(RallyError) as interrupted:
+    budget_scope = cast(Callable[[Callable[[], None]], AbstractContextManager[None]], getattr(rally_detection, '_budget_scope'))
+    with budget_scope(interrupt), pytest.raises(RallyError) as interrupted:
         detect_rallies(trades=_native(), definition=RallyDefinition('swing', 'bps', Decimal('3'), reversal=Decimal('1')), source=SOURCE, instrument='BTCUSDT', analysis_start=START, analysis_end=END, known_at=END, coverage=((START, END),))
     assert interrupted.value.status == 504 and len(calls) == 3
     assert not tuple(native_service.store.staging.iterdir())

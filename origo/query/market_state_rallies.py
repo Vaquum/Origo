@@ -15,7 +15,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence, Set
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -633,7 +633,8 @@ def _native_bars(trades: RallyTrades, plan: _Plan, deadline: float) -> tuple[Ral
 
 def _detect(trades: RallyTrades, bars: Sequence[RallyBar], plan: _Plan, deadline: float, *, result_id: str) -> RallyDetection:
     _remaining(deadline)
-    with detector.budget_scope(lambda: _resource_guard(deadline)):
+    budget_scope = cast(Callable[[Callable[[], None]], AbstractContextManager[None]], getattr(detector, '_budget_scope'))
+    with budget_scope(lambda: _resource_guard(deadline)):
         log.info('market state rally %s detector_call', result_id)
         result = detect_rallies(
             trades=trades, definition=plan.request.definition,

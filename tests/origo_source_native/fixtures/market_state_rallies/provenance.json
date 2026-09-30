@@ -1,0 +1,302 @@
+{
+  "captured_at": "2026-09-30T20:15:28.205217+00:00",
+  "production_host": "37.27.112.167",
+  "source": "binance_spot_trades",
+  "instrument": "BTCUSDT",
+  "method": "SELECT-only authenticated production reads; no source writes, jobs, deployment or altered market records. Native state and rows are replayed unchanged in the disposable test database.",
+  "source_state": {
+    "file": "source-state.json.gz",
+    "sha256": "9213eb64a0d3b2a70745f2d609e7e611df25628e5240f64e80e7aaee3e653880",
+    "uncompressed_sha256": "3acdf273e5d3ca97625173724b595e7292c3d0ac8f7bc78f5f76364c3231e153",
+    "accepted_rows": 4545,
+    "held_cube_pins": 3312,
+    "held_pin_bytes": 422828,
+    "data_cutoff": "2026-09-30T20:14:00.000000+00:00",
+    "pack_pin_digest": "84e920c2271ab75ebe34eaddebc08a87cb64cae97b99c7d86ef7d61589f98229"
+  },
+  "files": {
+    "june-27-cells.parquet": {
+      "sha256": "ab1c668fbe25b3b46f92083ed607557a4b44368e1fbfd0326d73af5d4809c39d",
+      "bytes": 60523,
+      "row_count": 1755,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_market_state_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (1) ORDER BY time_index,price_index",
+        "params": {
+          "day": "2026-06-27",
+          "revision": "663f81f2e09114d80003a0ec4a27ea2c54edc8de18297fc0f07812b65e3d0db4",
+          "build": "18e8bf1f-54c6-4f3b-8df8-6d9315006644"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:17:58.498920+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "time_index",
+        "price_index",
+        "first_trade_at",
+        "volume",
+        "trade_count",
+        "taker_buy_volume",
+        "taker_buy_trade_count"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state."
+    },
+    "june-27-raw.parquet": {
+      "sha256": "634949d559fc43856b337272979fa63332b094a9fb2fb43b34dc35b2c5c261d6",
+      "bytes": 2191127,
+      "row_count": 240600,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_raw_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (datetime >= toDateTime64('2026-06-27 07:44:03.750000',6,'UTC') AND datetime < toDateTime64('2026-06-27 11:55:18.750000',6,'UTC')) ORDER BY trade_id",
+        "params": {
+          "day": "2026-06-27",
+          "revision": "663f81f2e09114d80003a0ec4a27ea2c54edc8de18297fc0f07812b65e3d0db4",
+          "build": "18e8bf1f-54c6-4f3b-8df8-6d9315006644"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:17:55.875123+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "trade_id",
+        "price",
+        "quantity",
+        "quote_quantity",
+        "timestamp",
+        "is_buyer_maker",
+        "is_best_match",
+        "datetime"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state.",
+      "native_id_range": [
+        6453745500,
+        6453986099
+      ],
+      "timestamp_range": [
+        "2026-06-27T07:44:03.881042+00:00",
+        "2026-06-27T11:55:17.214416+00:00"
+      ],
+      "native_timestamp_unit": "microseconds",
+      "native_column_sha256": "928ed710fe291415a03547e39e15534c31114c1b499739a5c2b27a3fdb2ec4c5"
+    },
+    "march-24-cells.parquet": {
+      "sha256": "d96b0a14ff21b361546d55445600c7172812cfc7f95ea5d2e70a60152ea62697",
+      "bytes": 56534,
+      "row_count": 1608,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_market_state_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (1) ORDER BY time_index,price_index",
+        "params": {
+          "day": "2023-03-24",
+          "revision": "bceaa0b664b055318c22e509d33c04d532da143e7de41ca2fc3457100439c587",
+          "build": "1d792a5f-810a-4d88-a701-8f5eb37629b7"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:18:03.400990+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "time_index",
+        "price_index",
+        "first_trade_at",
+        "volume",
+        "trade_count",
+        "taker_buy_volume",
+        "taker_buy_trade_count"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state."
+    },
+    "march-24-empty-raw.parquet": {
+      "sha256": "f3698321b72e0d08a59a8f043b51910ad880b048bccc4d971d320371b645ac97",
+      "bytes": 1837128,
+      "row_count": 91760,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_raw_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (datetime >= toDateTime64('2023-03-24 10:15:00',6,'UTC') AND datetime < toDateTime64('2023-03-24 14:05:37.500000',6,'UTC')) ORDER BY trade_id",
+        "params": {
+          "day": "2023-03-24",
+          "revision": "bceaa0b664b055318c22e509d33c04d532da143e7de41ca2fc3457100439c587",
+          "build": "1d792a5f-810a-4d88-a701-8f5eb37629b7"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:18:01.054424+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "trade_id",
+        "price",
+        "quantity",
+        "quote_quantity",
+        "timestamp",
+        "is_buyer_maker",
+        "is_best_match",
+        "datetime"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state.",
+      "native_id_range": [
+        3055402658,
+        3055494417
+      ],
+      "timestamp_range": [
+        "2023-03-24T10:15:00+00:00",
+        "2023-03-24T14:05:37.436000+00:00"
+      ],
+      "native_timestamp_unit": "milliseconds",
+      "native_column_sha256": "fbf0a3b9ad825201d742e035fe1abfaf1aa942c73dd5d1a4415af6a2d5150bbb"
+    },
+    "startup-cells.parquet": {
+      "sha256": "60e1b8b4627980557020d84128f934a5cb319e24c092b6ed1dafdc218d25d8df",
+      "bytes": 63737,
+      "row_count": 1879,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_market_state_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (1) ORDER BY time_index,price_index",
+        "params": {
+          "day": "2021-01-01",
+          "revision": "f3aa413a8e5724f897c6c067e257c0b20627b21c85f4124b642c19d1da036161",
+          "build": "f559e270-c75a-4981-80ca-edc842141103"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:21:51.183393+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "time_index",
+        "price_index",
+        "first_trade_at",
+        "volume",
+        "trade_count",
+        "taker_buy_volume",
+        "taker_buy_trade_count"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state."
+    },
+    "startup-raw.parquet": {
+      "sha256": "3e8309ae2da3935ee50b0ab366886d16d8a0870751c6c5134796ee486b778cc5",
+      "bytes": 161233,
+      "row_count": 6376,
+      "acquisition": {
+        "query": "SELECT * FROM origo.binance_spot_trades_raw_revisions WHERE partition_key=%(day)s AND revision=%(revision)s AND build_id=toUUID(%(build)s) AND (datetime >= toDateTime64('2021-01-01 00:00:00',6,'UTC') AND datetime < toDateTime64('2021-01-01 00:05:37.500000',6,'UTC')) ORDER BY trade_id",
+        "params": {
+          "day": "2021-01-01",
+          "revision": "f3aa413a8e5724f897c6c067e257c0b20627b21c85f4124b642c19d1da036161",
+          "build": "f559e270-c75a-4981-80ca-edc842141103"
+        },
+        "settings": {
+          "max_threads": 4,
+          "max_memory_usage": 4294967296,
+          "max_execution_time": 60,
+          "max_bytes_before_external_group_by": 0,
+          "max_bytes_before_external_sort": 0,
+          "log_comment": "rally_fixture_native_readonly"
+        },
+        "captured_at": "2026-09-30T20:21:49.463375+00:00"
+      },
+      "columns": [
+        "source_date",
+        "partition_key",
+        "revision",
+        "build_id",
+        "trade_id",
+        "price",
+        "quantity",
+        "quote_quantity",
+        "timestamp",
+        "is_buyer_maker",
+        "is_best_match",
+        "datetime"
+      ],
+      "coverage_basis": "Complete pinned native source read under retained canonical build, backed by authentic full-archive component receipt and accepted contiguous source state.",
+      "native_id_range": [
+        536781294,
+        536787669
+      ],
+      "timestamp_range": [
+        "2021-01-01T00:00:00.058000+00:00",
+        "2021-01-01T00:05:37.211000+00:00"
+      ],
+      "native_timestamp_unit": "milliseconds",
+      "native_column_sha256": "e7e0681a03cffbed57cb84f227895600c9a7871371cb4f2abf7150f5cb3532a4"
+    }
+  },
+  "missing_proofs": {
+    "authentic_corrected_revision": "The complete native source_activation_log returned no partition with more than one revision; no authentic corrected before/after raw content is available. This is an explicit user-approved deferral; corrected-content production acceptance awaits authentic before/after records and is not replaced by fabricated records."
+  },
+  "volume_tolerance": {
+    "absolute": 1e-08,
+    "relative": 1e-12
+  },
+  "generation_evidence": {
+    "partition_key": "2026-06-27",
+    "native_generations": [
+      1,
+      2,
+      3
+    ],
+    "unchanged_raw_revision_and_build": true,
+    "generation_1": "Authentic raw-only activation; no market_state cube component yet.",
+    "generation_2": "Authentic market_state attachment; first eligible held-cube pack.",
+    "generation_3": "Authentic market_state_detail attachment; held pack, relevant identity and event hashes remain compatible with generation 2."
+  },
+  "coverage_intervals": {
+    "june-27-raw.parquet": [
+      "2026-06-27T07:44:03.750000Z",
+      "2026-06-27T11:55:18.750000Z"
+    ],
+    "march-24-empty-raw.parquet": [
+      "2023-03-24T10:15:00.000000Z",
+      "2023-03-24T14:05:37.500000Z"
+    ],
+    "startup-raw.parquet": [
+      "2021-01-01T00:00:00.000000Z",
+      "2021-01-01T00:05:37.500000Z"
+    ]
+  },
+  "coverage_receipt_rule": "Intervals are bounded complete native raw reads under the accepted revision/build, backed by native full-archive component receipts; excerpts alone do not establish coverage. Whole surrounding base-cell counts come from complete native market_state component captures."
+}

@@ -1046,7 +1046,28 @@ def test_frozen_acceptance_protocol_and_report_verdict(tmp_path: Path) -> None:
     for invalid in (math.nan, None, True):
         with pytest.raises(ValueError):
             same_latency(invalid, retained)
+    # Capture timestamps are opaque scalar probes, not manufactured monitoring evidence.
+    continuous = cast(Callable[[datetime, datetime, tuple[datetime, ...]], bool], getattr(benchmark, '_continuous_monitoring'))
+    captures = tuple(sorted(
+        datetime.fromisoformat(str(_object(_object(value)['acquisition'])['captured_at']))
+        for value in entries.values()
+    ))
+    assert len(captures) == 6
+    assert (captures[4] - captures[3]).total_seconds() > 180
+    short = captures[:4]
+    assert continuous(short[0], short[-1], short)
+    assert continuous(short[0], short[-1], captures)
+    assert not continuous(captures[0], captures[-1], captures)
+    assert not continuous(captures[3], captures[-1], captures[4:])
+    assert not continuous(captures[0], captures[4], short)
+    assert not continuous(short[0], short[-1], captures[4:])
+    assert not continuous(short[0], short[-1], short[:1])
+    assert not continuous(short[0], short[-1], ())
+    assert not continuous(short[0], short[-1], (short[0], *short))
+    assert not continuous(short[0], short[-1], tuple(reversed(short)))
+    assert not continuous(short[-1], short[0], short)
     manifest = benchmark.frozen_manifest()
+    assert _integer(_object(manifest['limits'])['heartbeat_seconds']) == 180
     assert 'market_state_api.heartbeat' in _list(manifest['required_heartbeats'])
     assert 'perp_capture.heartbeat' in _list(manifest['required_heartbeats'])
     cases = [_object(case) for case in _list(manifest['cases'])]

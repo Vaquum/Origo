@@ -90,6 +90,10 @@ or threshold breach fail verification. Unit tests validate these rules without
 claiming a production PASS. Every resource observation is bound to the frozen
 container ID, image and process ID. Latency statistics are recomputed from retained
 response timings; relabelled rounds and altered report timings are rejected.
+Resource timestamps must be strictly increasing. Monitoring covers the entire
+before/after interval with gaps of at most 180 seconds, including both boundaries;
+later snapshots cannot fill missing interval coverage. Boundary snapshots receive
+the same heartbeat and resource checks as periodic samples.
 
 ## Approved corrected-source deferral
 

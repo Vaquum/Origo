@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
+from itertools import chain, pairwise
 from pathlib import Path
 from typing import Final, Protocol, cast
 from uuid import UUID
@@ -80,6 +81,7 @@ LIMITS: Final = {
     'disk_margin_bytes': 8 * 1024**3,
     'access_p95_seconds': 1,
     'ingestion_seconds': 1800,
+    'heartbeat_seconds': 180,
     'local_actions': 200,
 }
 
@@ -169,6 +171,21 @@ def _same_deployment(
 def _same_latency(reported: object, retained: object) -> bool:
     measured = _float(retained)
     return measured >= 0 and _float(reported) == measured
+
+
+def _continuous_monitoring(
+    start: datetime, end: datetime, observations: Sequence[datetime]
+) -> bool:
+    if start >= end or any(
+        right <= left for left, right in pairwise(observations)
+    ):
+        return False
+    inside = tuple(at for at in observations if start <= at <= end)
+    maximum = timedelta(seconds=LIMITS['heartbeat_seconds'])
+    return len(inside) >= 2 and all(
+        right - left <= maximum
+        for left, right in pairwise((start, *inside, end))
+    )
 
 
 def _utc(value: object) -> datetime:
@@ -1600,8 +1617,11 @@ def _validate_resources(
 ) -> list[str]:
     failures: list[str] = []
     before = _object(json.loads((root / 'before.json').read_bytes()))
+    boundaries: list[dict[str, object]] = []
     for name in ('before.json', 'after.json', 'reuse-before.json', 'reuse-after.json'):
-        info = _object(_object(json.loads((root / name).read_bytes()))['container'])
+        snapshot = _object(json.loads((root / name).read_bytes()))
+        boundaries.append(snapshot)
+        info = _object(snapshot['container'])
         if not _same_deployment(deployment['id'], deployment['image'], deployment['pid'], info['id'], info['image'], info['pid']):
             failures.append(f'{name}: container identity differs from the frozen deployment.')
     events_before = str(_object(before['cgroup'])['memory.events'])
@@ -1611,11 +1631,14 @@ def _validate_resources(
     expected_heartbeats = required_heartbeats | observed_heartbeats
     if not required_heartbeats <= observed_heartbeats:
         failures.append('Required real worker heartbeats are unavailable.')
-    snapshots = 0
+    observations: list[datetime] = []
     with (root / 'resources.jsonl').open() as handle:
-        for line in handle:
-            snapshot = _object(json.loads(line))
-            snapshots += 1
+        for sampled, snapshot in chain(
+            ((False, snapshot) for snapshot in boundaries),
+            ((True, _object(json.loads(line))) for line in handle),
+        ):
+            if sampled:
+                observations.append(_utc(snapshot['at']))
             info, rss, cgroup = (_object(snapshot[key]) for key in ('container', 'rss', 'cgroup'))
             if not _same_deployment(deployment['id'], deployment['image'], deployment['pid'], info['id'], info['image'], info['pid']):
                 failures.append('Sampled container identity differs from the frozen deployment.')
@@ -1667,10 +1690,12 @@ def _validate_resources(
             }
             at = _utc(snapshot['at']).timestamp()
             if not expected_heartbeats <= seen.keys() or any(
-                at - seen[name] > 180 for name in expected_heartbeats
+                at - seen[name] > LIMITS['heartbeat_seconds'] for name in expected_heartbeats
             ):
                 failures.append('A real worker heartbeat is missing/stale.')
-    if snapshots < 2:
+    if not _continuous_monitoring(
+        _utc(before['at']), _utc(boundaries[1]['at']), observations
+    ):
         failures.append('Missing continuous container/resource/heartbeat observations.')
     return sorted(set(failures))
 

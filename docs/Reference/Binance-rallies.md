@@ -2,7 +2,9 @@
 
 `origo.query.binance_rallies.export_binance_rallies` finds Binance BTCUSDT spot rallies and writes them to three Arrow files, with their trades and depth-200 order book. A rally is a UTC minute from which the price reaches 30 basis points above the last trade before that minute, within 240 minutes. You select rallies by a UTC time range or by rally ID, and each rally's rows can include a lead-in of minutes before it.
 
-Only spot is available. Perpetual rallies will follow as their own slice under [PRD-0006](https://github.com/Vaquum/Origo/issues/313), once Origo has a perpetual order book.
+Only spot is available. Perpetual retrieval is tracked separately in [slice #490](https://github.com/Vaquum/Origo/issues/490), after Origo has a native perpetual order book.
+
+The exporter uses the shared [rally detector](../Developer/Rally-detection.md) with the fixed spot preset. Its `r30v1` IDs, 30-bps Float64 comparator, 240-minute exclusive deadline, lead-in, book retrieval and Arrow schemas remain unchanged. Parameterized cube queries are tracked in [slice #489](https://github.com/Vaquum/Origo/issues/489).
 
 The export reads Origo's ClickHouse, which listens only on the production host. It therefore runs inside the production Dagster container.
 

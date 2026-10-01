@@ -433,8 +433,10 @@ the smaller of 60 seconds or the remaining wall deadline.
 | 507 | `result_storage_full` | Result budget or ingestion disk floor would be breached |
 | 500 | `export_failed` | Export failed; nothing published |
 
-Rally validation/budget errors include `reason`, `detail` and applicable field/budget
-attributes. The reader preserves HTTP status and JSON body in `MarketStateError`.
+Responses from `RallyError` (400, 409, 413 and 504) include `error`, `reason`,
+`detail` and applicable field/budget attributes. The 507 storage response contains
+only `error`, `used_bytes`, `budget_bytes`, `free_bytes` and `floor_bytes`. The reader
+preserves HTTP status and JSON body in `MarketStateError`.
 The [frozen acceptance protocol](../Developer/Rally-query-acceptance.md) requires
 continuous monitoring with no gap over 180 seconds, including workload boundaries;
 merging the implementation does not establish a production PASS.

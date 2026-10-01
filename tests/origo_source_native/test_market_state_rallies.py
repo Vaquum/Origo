@@ -984,11 +984,25 @@ def test_public_reader_numbers_timeout_and_rally_paths(native_service: NativeSer
     assert identities[0] == identities[1] == identities[2]
     decimal = market_state_reader.rallies(_body(target=Decimal('30.5')), url=native_service.url)
     assert decimal.response['definition_fingerprint'] == definition_fingerprint(RallyDefinition('first_hit', 'bps', Decimal('30.5'), anchor_minutes=1))
+    for definition in (
+        RallyDefinition('first_hit', 'atr', Decimal('0.1'), anchor_minutes=1),
+        RallyDefinition('controlled_advance', 'atr', Decimal('0.1'), pullback=Decimal('0.1'), anchor_minutes=1),
+        RallyDefinition('swing', 'atr', Decimal('0.1'), reversal=Decimal('0.1')),
+    ):
+        request = _body(mode=definition.mode, scale=definition.scale, target=definition.target)
+        fields = _object(request['definition'])
+        if definition.pullback is not None:
+            fields['pullback'] = definition.pullback
+        if definition.reversal is not None:
+            fields['reversal'] = definition.reversal
+        result = market_state_reader.rallies(request, url=native_service.url)
+        assert result.response['definition_fingerprint'] == definition_fingerprint(definition)
+        _assert_native_membership(result.response, definition)
     for timeout in (0.0, -1.0, 300.1, float('inf'), float('nan')):
         with pytest.raises(ValueError):
             market_state_reader.rallies(_body(), url=native_service.url, timeout_seconds=timeout)
     with pytest.raises(ValueError):
-        market_state_reader.rallies(_body(target=Decimal('30.12345678901234567890123456789')), url=native_service.url)
+        market_state_reader.rallies(_body(scale='atr', target=Decimal('0.1000000000000000001')), url=native_service.url)
 
 
 def test_frozen_acceptance_protocol_and_report_verdict(tmp_path: Path) -> None:

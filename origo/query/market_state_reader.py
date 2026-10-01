@@ -282,7 +282,7 @@ def _number(value: int | float | Decimal) -> int | float:
     if isinstance(value, Decimal):
         if value == value.to_integral_value():
             return int(value)
-        if Decimal(float(value)) != value:
+        if Decimal(json.dumps(float(value))) != value:
             raise ValueError(f'{value} has no exact JSON number form here; pass int or float.')
         return float(value)
     return value

@@ -1,7 +1,8 @@
 """Query the market state cube and read its results through the supported reader (PRD-0022).
 
 ``query`` asks the local service for a selection and returns the paths of its two Arrow IPC
-files. ``open_file`` and ``read_table`` read such a file through the cube reader: before every
+files. ``rallies`` discovers exact events once and returns three canonical rally files.
+``open_file`` and ``read_table`` read through the cube reader: before every
 read the reader tells the service, which renews the file's 24-hour clock (amendment A01), and
 the bytes are returned only after the service confirms the file still exists. A read of a
 file already reclaimed raises ``FileNotFoundError``. Plain ``pyarrow`` or memory-mapped reads
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import time
 import urllib.error
@@ -60,6 +62,7 @@ class ArrowFileReader(Protocol):
     @property
     def schema(self) -> object: ...
     def read_all(self) -> ArrowTable: ...
+    def get_batch(self, index: int) -> ArrowTable: ...
 
 
 class _PyArrow(Protocol):
@@ -85,6 +88,50 @@ class MarketStateResult:
     summary: str
     expires_at: datetime
     response: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class MarketStateRallyResult:
+    result_id: str
+    rallies: str
+    rally_cells: str
+    summary: str
+    expires_at: datetime
+    response: Mapping[str, object]
+
+
+def rallies(
+    request: Mapping[str, object],
+    *,
+    url: str = DEFAULT_URL,
+    timeout_seconds: float = 300.0,
+) -> MarketStateRallyResult:
+    """Discover once; retained files supply later grid/filter/replay views without another POST."""
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(cast(object, timeout_seconds), (int, float))
+        or not math.isfinite(timeout_seconds)
+        or not 0 < timeout_seconds <= QUERY_TIMEOUT_SECONDS
+    ):
+        raise ValueError('timeout_seconds must be finite, positive and at most 300 seconds.')
+    body = dict(request)
+    definition = body.get('definition')
+    if isinstance(definition, Mapping):
+        normalized = dict(cast(Mapping[str, object], definition))
+        for key in ('target', 'pullback', 'reversal', 'anchor_minutes'):
+            value = normalized.get(key)
+            if isinstance(value, (int, float, Decimal)):
+                normalized[key] = _number(value)
+        body['definition'] = normalized
+    response = _post(url, '/v1/market-state/rallies', body, timeout_seconds)
+    return MarketStateRallyResult(
+        str(response['result_id']),
+        str(response['rallies']),
+        str(response['rally_cells']),
+        str(response['summary']),
+        datetime.fromisoformat(str(response['expires_at'])),
+        response,
+    )
 
 
 def query(

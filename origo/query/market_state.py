@@ -44,7 +44,7 @@ from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from importlib import import_module
 from pathlib import Path
-from typing import Final, Protocol, cast
+from typing import Final, Protocol, TypeAlias, cast
 from uuid import UUID
 
 import numpy as np
@@ -1124,3 +1124,18 @@ def _integer(value: object) -> int:
     if not isinstance(value, int):
         raise TypeError(f'Expected an integer, got {type(value).__name__}.')
     return value
+
+
+ArrowProtocol: TypeAlias = _PyArrow
+ArrowBatch: TypeAlias = _Batch
+ArrowSchema: TypeAlias = _Schema
+HttpClient: TypeAlias = _HttpClient
+ExternalData: TypeAlias = _External
+utc_micros = _micros
+parse_utc_time = _time
+reject_json_constant = _constant
+unique_json_object = _object
+state_record = _record
+external_identities = _external
+add_identities = _add_identities
+CUBE_COMPONENTS: Final = _CUBE_COMPONENTS

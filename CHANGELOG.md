@@ -1,8 +1,3 @@
-# v3.31.0
-
-- Discover exact BTCUSDT spot rallies from a compact held-cube commitment, with native memberships, content evidence and local grid/filter/replay reuse (#489).
-- Publish immutable rally Arrow triples with group renewal/expiry, shared worker admission and a frozen read-only deployment acceptance command.
-
 # v3.30.0
 
 - Add exact trade-level First hit, Controlled advance and Swing rally definitions with bps or causal ATR14-SMA on UTC 15-minute bars, frozen event extents and native confirmation IDs (#488).

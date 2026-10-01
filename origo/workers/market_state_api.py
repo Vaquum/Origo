@@ -36,19 +36,10 @@ from uuid import uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query.market_state import Request, RequestError, iso, parse_request, statement_settings, write_result
-from origo.query.market_state_rallies import (
-    RALLY_DEADLINE_SECONDS,
-    RallyDiscoveryRequest,
-    RallyError,
-    parse_rally_request,
-    rally_prelude,
-    write_rally_result,
-)
 from origo.query.market_state_results import (
     FLOOR_MARGIN_BYTES,
     IDLE_EXPIRY_SECONDS,
     MAX_CONCURRENT_QUERIES,
-    RALLY_RESULT_FILES,
     RESULT_ROOT,
     ResultStore,
     StorageFull,
@@ -108,11 +99,6 @@ class MarketStateApi:
     ) -> None:
         self.store, self.reporter, self.lock_root, self.port = store, reporter, lock_root, port
         self.queries = threading.BoundedSemaphore(MAX_CONCURRENT_QUERIES)
-        self.rally_queries = threading.BoundedSemaphore(1)
-        self._rally_outcomes: Counter[Status] = Counter()
-        self._rally_input_bytes = 0
-        self._rally_output_bytes = 0
-        self._rally_completed_bytes: dict[str, tuple[int, int]] = {}
         self._lock = threading.Lock()
         self._outcomes: Counter[tuple[Status, str]] = Counter({('FAILED', 'EXPORT_INTERRUPTED'): interrupted} if interrupted else {})
         self._invalid = 0
@@ -155,131 +141,6 @@ class MarketStateApi:
         finally:
             self.queries.release()
 
-    def reject_rally_request(self, reason: str) -> None:
-        self._count_invalid()
-        self._count_rally('REJECTED', reason)
-
-    def rallies(self, raw: bytes, deliver: Callable[[Answer], bool]) -> None:
-        deadline = time.monotonic() + RALLY_DEADLINE_SECONDS
-        answer = self._rally_answer(raw, deadline)
-        delivered = deliver(answer)
-        status, payload, _ = answer
-        if status == 200:
-            result_id = str(payload['result_id'])
-            with self._lock:
-                input_bytes, output_bytes = self._rally_completed_bytes.pop(result_id)
-            if not delivered:
-                self.store.discard(result_id)
-                self._count_rally('REJECTED', 'CLIENT_DISCONNECTED', input_bytes, output_bytes)
-            else:
-                self._count_rally('OK', 'RALLY_DISCOVERY_OK', input_bytes, output_bytes)
-                with self._lock:
-                    self._token = str(payload['relevant_pin_digest'])
-
-    def _rally_answer(self, raw: bytes, deadline: float) -> Answer:
-        try:
-            request = parse_rally_request(raw)
-        except RequestError as error:
-            self._count_invalid()
-            self._count_rally('REJECTED', error.reason)
-            return error.status, error.body(), {}
-        if not self.rally_queries.acquire(blocking=False):
-            self._count_rally('REJECTED', 'RALLY_BUSY')
-            return 503, {'error': 'busy'}, {'Retry-After': '5'}
-        try:
-            if not self.queries.acquire(blocking=False):
-                self._count_rally('REJECTED', 'QUERY_BUSY')
-                return 503, {'error': 'busy'}, {'Retry-After': '5'}
-            try:
-                return self._export_rally(request, deadline)
-            finally:
-                self.queries.release()
-        finally:
-            self.rally_queries.release()
-
-    def _export_rally(self, request: RallyDiscoveryRequest, deadline: float) -> Answer:
-        result_id = str(uuid4())
-        try:
-            runtime, client = _runtime(self.lock_root, deadline=deadline)
-            try:
-                answer, paths = self._publish_rally(runtime, request, result_id, deadline)
-            finally:
-                client.disconnect()
-        except RequestError as error:
-            self._count_rally('FAILED' if error.status >= 500 else 'REJECTED', error.reason)
-            return error.status, error.body(), {}
-        except StorageFull as error:
-            self._count_rally('REJECTED', 'RESULT_STORAGE_FULL')
-            log.error('market state rally storage full: %s', error)
-            return 507, {
-                'error': 'result_storage_full', 'used_bytes': error.used, 'budget_bytes': error.budget,
-                'free_bytes': error.free, 'floor_bytes': error.floor,
-            }, {}
-        except SourceError as error:
-            if error.code == 'SOURCE_MAINTENANCE':
-                self._count_rally('REJECTED', 'SOURCE_MAINTENANCE')
-                return 503, {'error': 'source_maintenance'}, {'Retry-After': '5'}
-            return self._rally_failed(error, deadline)
-        except Exception as error:
-            return self._rally_failed(error, deadline)
-        created = datetime.now(UTC)
-        return 200, {
-            **answer, **dict(zip(('rallies', 'rally_cells', 'summary'), map(str, paths), strict=True)),
-            'expires_after_seconds': IDLE_EXPIRY_SECONDS,
-            'expires_at': iso(created + timedelta(seconds=IDLE_EXPIRY_SECONDS)),
-        }, {}
-
-    def _publish_rally(
-        self, runtime: SourceRuntime, request: RallyDiscoveryRequest, result_id: str, deadline: float,
-    ) -> tuple[dict[str, object], tuple[Path, ...]]:
-        started = time.monotonic()
-        measured = rally_prelude(runtime, result_id=result_id, deadline=deadline)
-        floor = _floor_from_measured(measured, self.store.disk(self.store.root).total)
-        _rally_remaining(deadline)
-        self.store.admit(result_id, 0, floor)
-        try:
-            staging = self.store.register(result_id)
-            answer = write_rally_result(
-                runtime, request, staging, result_id=result_id,
-                guard=lambda staged: self._rally_staging(result_id, staged, floor, deadline),
-                deadline=deadline,
-            )
-            input_bytes = int(str(answer.pop('input_bytes')))
-            output_bytes = int(str(answer.pop('output_bytes')))
-            _rally_remaining(deadline)
-            paths = self.store.publish(result_id, files=RALLY_RESULT_FILES)
-            _rally_remaining(deadline)
-        except BaseException:
-            self.store.discard(result_id)
-            raise
-        with self._lock:
-            self._rally_completed_bytes[result_id] = input_bytes, output_bytes
-        log.info(
-            'market state rally %s published total_ms=%d rss_peak_bytes=%d',
-            result_id, _elapsed(started), _rss_bytes(),
-        )
-        return answer, paths
-
-    def _rally_staging(self, result_id: str, staged: int, floor: int, deadline: float) -> None:
-        _rally_remaining(deadline)
-        self.store.admit(result_id, staged, floor)
-
-    def _rally_failed(self, error: Exception, deadline: float) -> Answer:
-        if time.monotonic() >= deadline:
-            expired = RallyError(504, 'rally_deadline_exceeded', 'The rally discovery wall deadline expired.')
-            self._count_rally('FAILED', expired.reason)
-            return expired.status, expired.body(), {}
-        log.exception('market state rally failed')
-        self._count_rally('FAILED', 'EXPORT_FAILED')
-        return 500, {'error': 'export_failed', 'reason': failure_code(error)}, {}
-
-    def _count_rally(self, status: Status, code: str, input_bytes: int = 0, output_bytes: int = 0) -> None:
-        with self._lock:
-            self._rally_outcomes[status] += 1
-            self._outcomes[(status, code)] += 1
-            self._rally_input_bytes += input_bytes
-            self._rally_output_bytes += output_bytes
-
     def access(self, raw: bytes) -> Answer:
         try:
             value = json.loads(raw)
@@ -310,8 +171,6 @@ class MarketStateApi:
         status, code, message = cleanup
         with self._lock:
             outcomes, invalid, token = Counter(self._outcomes), self._invalid, self._token
-            rally_outcomes = Counter(self._rally_outcomes)
-            rally_input_bytes, rally_output_bytes = self._rally_input_bytes, self._rally_output_bytes
         receipts: list[tuple[str, int, str, int, Status, str, str]] = [
             (CLEANUP_SERIES, reclaimed, '', _elapsed(started), status, code, message)
         ]
@@ -319,10 +178,6 @@ class MarketStateApi:
             worst: Status = next(level for level in _PRECEDENCE if any(key[0] == level for key in outcomes))
             first = '' if worst == 'OK' else next(key[1] for key in sorted(outcomes) if key[0] == worst)
             summary = ' '.join(f'{level.lower()}={count}' + (f':{reason}' if reason else '') for (level, reason), count in sorted(outcomes.items()))
-            if rally_outcomes:
-                summary += ' ' + ' '.join(
-                    f'rally_discovery_{level.lower()}={rally_outcomes[level]}' for level in ('OK', 'REJECTED', 'FAILED')
-                ) + f' rally_input_bytes={rally_input_bytes} rally_output_bytes={rally_output_bytes}'
             receipts.append((QUERY_SERIES, sum(outcomes.values()), token, 0, worst, first, summary))
             if worst == 'FAILED':
                 failed.append(QUERY_SERIES)
@@ -331,10 +186,6 @@ class MarketStateApi:
                 self._outcomes.subtract(outcomes)
                 self._outcomes = +self._outcomes
                 self._invalid -= invalid
-                self._rally_outcomes.subtract(rally_outcomes)
-                self._rally_outcomes = +self._rally_outcomes
-                self._rally_input_bytes -= rally_input_bytes
-                self._rally_output_bytes -= rally_output_bytes
         results, size = self.store.usage()
         self.reporter.materialized(
             ASSET,
@@ -464,10 +315,6 @@ def source_floor(store: SourceStore, total_bytes: int, settings: Mapping[str, ob
         settings,
     )
     measured = {str(row[0]): int(str(row[1])) for row in rows}
-    return _floor_from_measured(measured, total_bytes)
-
-
-def _floor_from_measured(measured: Mapping[str, int], total_bytes: int) -> int:
     reserve = (total_bytes * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10
     for spec in SOURCE_REGISTRY:
         working = measured.get(spec.key, 0) * CAPACITY_WORKING_SET_FACTOR * spec.orchestration.canonical_concurrency
@@ -501,15 +348,11 @@ class ApiHandler(BaseHTTPRequestHandler):
     timeout = REQUEST_TIMEOUT_SECONDS
 
     def do_POST(self) -> None:
-        if self.path == '/v1/market-state/rallies':
-            log.info('market state rally discovery_post')
         api = cast(ApiServer, self.server).api
         try:
             declared = self.headers.get('Content-Length')
             length = -1 if declared is None or self.headers.get('Transfer-Encoding') else int(declared)
             if length < 0 or length > 65_536:
-                if self.path == '/v1/market-state/rallies':
-                    api.reject_rally_request('invalid_json')
                 # Chunked or unsized bodies are refused rather than read as an empty request.
                 self.close_connection = True
                 self._send(400, {'error': 'invalid_request', 'reason': 'invalid_json', 'detail': 'A Content-Length body of at most 65536 bytes is required.'}, {})
@@ -519,9 +362,6 @@ class ApiHandler(BaseHTTPRequestHandler):
             if self.path == '/v1/market-state/query':
                 api.query(raw, lambda reply: self._send(*reply))
                 return
-            if self.path == '/v1/market-state/rallies':
-                api.rallies(raw, lambda reply: self._send(*reply))
-                return
             if self.path == '/v1/market-state/access':
                 answer = api.access(raw)
             else:
@@ -529,8 +369,6 @@ class ApiHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError) as error:
             self.close_connection = True
             log.warning('market state request unreadable: %s', type(error).__name__)
-            if self.path == '/v1/market-state/rallies':
-                api.reject_rally_request('request_unreadable')
             return
         except Exception:
             log.exception('market state request failed: %s', self.path)
@@ -602,16 +440,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_forever(api, heartbeat=heartbeat)
 
 
-def _rally_remaining(deadline: float) -> float:
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise RallyError(504, 'rally_deadline_exceeded', 'The rally discovery wall deadline expired.')
-    return remaining
-
-
-def _runtime(lock_root: Path, *, deadline: float | None = None) -> tuple[SourceRuntime, Client]:
-    if deadline is not None:
-        _rally_remaining(deadline)
+def _runtime(lock_root: Path) -> tuple[SourceRuntime, Client]:
     settings = get_clickhouse_settings()
     client = cast(Client, make_clickhouse_client(settings))
     store = SourceStore(client, settings.database, BINANCE_SPOT_TRADES_SPEC)

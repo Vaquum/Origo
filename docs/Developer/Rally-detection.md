@@ -1,6 +1,6 @@
 # Rally detection
 
-`origo.query.rally_detection.detect_rallies` detects completed upward price events from native trade columns. It has no database, HTTP, grid or display dependency. [Slice #488](https://github.com/Vaquum/Origo/issues/488) specifies its contract; [#489](https://github.com/Vaquum/Origo/issues/489) supplies cube admission, reads, publication and result filters.
+`origo.query.rally_detection.detect_rallies` detects completed upward price events from native trade columns. It has no database, HTTP, grid or display dependency. [Slice #488](https://github.com/Vaquum/Origo/issues/488) specifies its contract; [#489](https://github.com/Vaquum/Origo/issues/489) supplies cube admission, reads and publication. Consumers apply result filters locally.
 
 ## Inputs
 

@@ -1,3 +1,7 @@
+# v3.31.1
+
+- Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.
+
 # v3.31.0
 
 - Discover exact BTCUSDT spot rallies from a compact held-cube commitment, with native memberships, content evidence and local grid/filter/replay reuse (#489).

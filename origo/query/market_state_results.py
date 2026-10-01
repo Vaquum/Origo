@@ -1,11 +1,11 @@
 """Result files of the market state query service and their 24-hour idle expiry (PRD-0022 L16).
 
-A result is ``results/<uuid>/`` with ``cells.arrow`` and ``summary.arrow``. ``lifecycle.sqlite``
+A result is ``results/<uuid>/`` with an ordinary Arrow pair or an immutable rally triple. ``lifecycle.sqlite``
 owns every result from before its staging directory exists: ``register`` records the id,
 ``publish`` writes the file rows with creation as the first access and renames the synced
 staging directory into place, and ``recover`` rolls every interrupted step back or forward.
 Every read through the cube reader (``origo.query.market_state_reader``) calls ``access``,
-which renews that file's clock unless the file is already retired; ``expire`` retires a file
+which renews an ordinary file or all three rally files unless already retired; ``expire`` retires a file
 idle for 24 hours in the same kind of immediate transaction and only then unlinks it, so a
 read and a deletion never both win. Recovery, cleanup and bookkeeping touch only registered
 results, never follow a symlink and never renew a clock.
@@ -37,6 +37,8 @@ QUERY_RESERVATION_BYTES: Final = 512 * 1024**2
 # Free space never falls within this margin of the largest source capacity reserve.
 FLOOR_MARGIN_BYTES: Final = 8 * 1024**3
 RESULT_FILES: Final = ('cells.arrow', 'summary.arrow')
+RALLY_RESULT_FILES: Final = ('rallies.arrow', 'rally_cells.arrow', 'summary.arrow')
+_REGISTERED_FILES: Final = tuple(dict.fromkeys((*RESULT_FILES, *RALLY_RESULT_FILES)))
 # The canonical text of a result id, exactly as ``str(uuid4())`` writes it.
 _RESULT_ID: Final = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
@@ -48,6 +50,8 @@ _SCHEMA: Final = (
         result_id TEXT NOT NULL, name TEXT NOT NULL, bytes INTEGER NOT NULL,
         last_access_ns INTEGER NOT NULL, retired INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (result_id, name))""",
+    """CREATE TABLE IF NOT EXISTS result_groups (
+        result_id TEXT PRIMARY KEY, inventory TEXT NOT NULL, grouped INTEGER NOT NULL)""",
 )
 
 
@@ -99,8 +103,16 @@ class ResultStore:
         finally:
             connection.close()
         with self._transaction() as connection:
+            legacy = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='result_groups'"
+            ).fetchone()[0] == 0
             for statement in _SCHEMA:
                 connection.execute(statement)
+            if legacy:
+                connection.execute(
+                    'INSERT INTO result_groups (result_id, inventory, grouped) '
+                    'SELECT result_id, ?, 0 FROM results', (','.join(RESULT_FILES),),
+                )
 
     def recover(self) -> int:
         """After a restart, roll every registered step back or forward; returns interrupted queries."""
@@ -114,6 +126,7 @@ class ResultStore:
                 if _owned_directory(staging):
                     shutil.rmtree(staging)
                 with self._transaction() as connection:
+                    connection.execute('DELETE FROM result_groups WHERE result_id = ?', (identity,))
                     connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
                 interrupted += 1
             elif state == 'discarding':
@@ -125,6 +138,7 @@ class ResultStore:
             elif not _owned_directory(final):
                 with self._transaction() as connection:
                     connection.execute('DELETE FROM files WHERE result_id = ?', (identity,))
+                    connection.execute('DELETE FROM result_groups WHERE result_id = ?', (identity,))
                     connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
         self._reclaim()
         return interrupted
@@ -136,6 +150,10 @@ class ResultStore:
             connection.execute(
                 "INSERT INTO results (result_id, state, created_ns) VALUES (?, 'staging', ?)",
                 (identity, self.clock()),
+            )
+            connection.execute(
+                'INSERT INTO result_groups (result_id, inventory, grouped) VALUES (?, ?, 0)',
+                (identity, ','.join(RESULT_FILES)),
             )
         staging = self.staging / identity
         staging.mkdir()
@@ -159,26 +177,38 @@ class ResultStore:
                 raise StorageFull(used, self.budget_bytes, disk.free, floor_bytes)
             self._staged[result_id] = staged_bytes
 
-    def publish(self, result_id: str) -> tuple[Path, Path]:
+    def publish(
+        self, result_id: str, *, files: tuple[str, ...] = RESULT_FILES,
+    ) -> tuple[Path, ...]:
+        if files not in (RESULT_FILES, RALLY_RESULT_FILES):
+            raise ValueError('Result inventory must be the ordinary pair or rally triple.')
         identity = str(UUID(result_id))
         staging, final = self.staging / identity, self.results / identity
-        for name in RESULT_FILES:
+        if not _owned_directory(staging) or {entry.name for entry in staging.iterdir()} != set(files):
+            raise ValueError('Staging must contain exactly the registered result inventory.')
+        if any(not (staging / name).is_file() or (staging / name).is_symlink() for name in files):
+            raise ValueError('Result inventory must contain regular owned files.')
+        for name in files:
             (staging / name).chmod(0o644)
             _sync(staging / name)
         _sync(staging)
         now = self.clock()
         with self._transaction() as connection:
+            connection.execute(
+                'UPDATE result_groups SET inventory = ?, grouped = ? WHERE result_id = ?',
+                (','.join(files), int(files == RALLY_RESULT_FILES), identity),
+            )
             connection.execute("UPDATE results SET state = 'published' WHERE result_id = ?", (identity,))
             connection.executemany(
                 'INSERT INTO files (result_id, name, bytes, last_access_ns) VALUES (?, ?, ?, ?)',
-                [(identity, name, (staging / name).stat().st_size, now) for name in RESULT_FILES],
+                [(identity, name, (staging / name).stat().st_size, now) for name in files],
             )
         staging.rename(final)
         _sync(self.staging)
         _sync(self.results)
         with self._lock:
             self._staged.pop(identity, None)
-        return final / RESULT_FILES[0], final / RESULT_FILES[1]
+        return tuple(final / name for name in files)
 
     def discard(self, result_id: str) -> None:
         """Remove a result whose paths were never returned, in whatever state it reached.
@@ -202,6 +232,7 @@ class ResultStore:
                 shutil.rmtree(directory)
         with self._transaction() as connection:
             connection.execute('DELETE FROM files WHERE result_id = ?', (identity,))
+            connection.execute('DELETE FROM result_groups WHERE result_id = ?', (identity,))
             connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
 
     def access(self, result_id: str, name: str) -> datetime | None:
@@ -212,18 +243,34 @@ class ResultStore:
             ).fetchone()
             if row is None or row[0]:
                 return None
+            inventory, grouped = _inventory(connection, result_id)
+            if name not in inventory:
+                raise RuntimeError('Recorded file lies outside its registered inventory.')
             now = self.clock()
-            connection.execute(
-                'UPDATE files SET last_access_ns = ? WHERE result_id = ? AND name = ?', (now, result_id, name)
-            )
+            if grouped:
+                connection.execute(
+                    'UPDATE files SET last_access_ns = ? WHERE result_id = ?', (now, result_id),
+                )
+            else:
+                connection.execute(
+                    'UPDATE files SET last_access_ns = ? WHERE result_id = ? AND name = ?', (now, result_id, name),
+                )
         return _instant(now + _EXPIRY_NS)
 
     def expire(self) -> int:
         """Retire and remove every file idle for 24 hours; returns the files removed."""
         with self._transaction() as connection:
+            now = self.clock()
             connection.execute(
-                'UPDATE files SET retired = 1 WHERE retired = 0 AND last_access_ns + ? <= ?',
-                (_EXPIRY_NS, self.clock()),
+                'UPDATE files SET retired = 1 WHERE retired = 0 AND last_access_ns + ? <= ? '
+                'AND result_id IN (SELECT result_id FROM result_groups WHERE grouped = 0)',
+                (_EXPIRY_NS, now),
+            )
+            connection.execute(
+                'UPDATE files SET retired = 1 WHERE retired = 0 AND result_id IN ('
+                'SELECT f.result_id FROM files f JOIN result_groups g USING (result_id) '
+                'WHERE g.grouped = 1 GROUP BY f.result_id HAVING max(f.last_access_ns) + ? <= ?)',
+                (_EXPIRY_NS, now),
             )
         return self._reclaim()
 
@@ -238,10 +285,11 @@ class ResultStore:
     def _reclaim(self) -> int:
         with self._transaction() as connection:
             retired = connection.execute('SELECT result_id, name FROM files WHERE retired = 1').fetchall()
+            inventories = {str(result_id): _inventory(connection, str(result_id))[0] for result_id, _ in retired}
         removed = 0
         for result_id, name in retired:
             identity, file_name = str(UUID(str(result_id))), str(name)
-            if file_name not in RESULT_FILES:
+            if file_name not in inventories[identity]:
                 raise RuntimeError(f'Refusing to remove an unrecognised result file: {file_name!r}.')
             directory = self.results / identity
             target = directory / file_name
@@ -256,6 +304,7 @@ class ResultStore:
                     'SELECT count(*) FROM files WHERE result_id = ?', (identity,)
                 ).fetchone()[0]
                 if not remaining:
+                    connection.execute('DELETE FROM result_groups WHERE result_id = ?', (identity,))
                     connection.execute('DELETE FROM results WHERE result_id = ?', (identity,))
             if not remaining and _owned_directory(directory) and not any(directory.iterdir()):
                 directory.rmdir()
@@ -279,15 +328,27 @@ class ResultStore:
 
 
 def parse_result_path(path: str) -> tuple[str, str] | None:
-    """The ``(result_id, name)`` of ``.../<uuid>/<cells|summary>.arrow``; ``None`` otherwise.
+    """The ``(result_id, name)`` of a registered Arrow path; ``None`` otherwise.
 
     Only the last two components count, so a caller may mount the volume anywhere; the
     filesystem is never consulted.
     """
     parts = path.replace('\\', '/').split('/')
-    if len(parts) < 2 or parts[-1] not in RESULT_FILES or not _RESULT_ID.fullmatch(parts[-2]):
+    if len(parts) < 2 or parts[-1] not in _REGISTERED_FILES or not _RESULT_ID.fullmatch(parts[-2]):
         return None
     return parts[-2], parts[-1]
+
+
+def _inventory(connection: sqlite3.Connection, result_id: str) -> tuple[tuple[str, ...], bool]:
+    row = connection.execute(
+        'SELECT inventory, grouped FROM result_groups WHERE result_id = ?', (result_id,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f'Missing owned result inventory: {result_id}.')
+    files, grouped = tuple(str(row[0]).split(',')), int(row[1])
+    if files not in (RESULT_FILES, RALLY_RESULT_FILES) or grouped != int(files == RALLY_RESULT_FILES):
+        raise RuntimeError(f'Invalid owned result inventory: {result_id}.')
+    return files, bool(grouped)
 
 
 def _owned_directory(path: Path) -> bool:

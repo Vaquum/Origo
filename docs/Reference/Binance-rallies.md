@@ -4,7 +4,7 @@
 
 Only spot is available. Perpetual retrieval is tracked separately in [slice #490](https://github.com/Vaquum/Origo/issues/490), after Origo has a native perpetual order book.
 
-The exporter uses the shared [rally detector](../Developer/Rally-detection.md) with the fixed spot preset. Its `r30v1` IDs, 30-bps Float64 comparator, 240-minute exclusive deadline, lead-in, book retrieval and Arrow schemas remain unchanged. Parameterized cube queries are tracked in [slice #489](https://github.com/Vaquum/Origo/issues/489).
+The exporter uses the shared [rally detector](../Developer/Rally-detection.md) with the fixed spot preset. Its `r30v1` IDs, 30-bps Float64 comparator, 240-minute exclusive deadline, lead-in, book retrieval and Arrow schemas remain unchanged. For parameterized First hit, Controlled advance and Swing with exact cube memberships, use the [cube rally endpoint](Market-state-cube-queries.md#exact-rally-discovery). That endpoint publishes event contributions and diagnostics; this exporter retains its separate trade/book files and lead-in contract.
 
 The export reads Origo's ClickHouse, which listens only on the production host. It therefore runs inside the production Dagster container.
 

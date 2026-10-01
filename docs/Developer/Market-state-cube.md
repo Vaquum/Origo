@@ -4,13 +4,32 @@
 Review concerns implementation correctness, performance, resource use and proof.
 Only an explicit operator amendment changes L01–L17.
 
+## Delivered contracts
+
+The following changes are merged on `main` as of 2026-10-01. The cube remains
+BTCUSDT **spot**, from 2021-01-01; the perpetual capture fixes do not add a
+perpetual cube or book-backed rally retrieval.
+
+| Capability | Merged PRs | Contract |
+| --- | --- | --- |
+| Base cells, native rollout, coverage and rollback floor | [#467](https://github.com/Vaquum/Origo/pull/467), [#470](https://github.com/Vaquum/Origo/pull/470), [#473](https://github.com/Vaquum/Origo/pull/473) | [Base projection](#base-projection--slice-466) and [rollout](#registration-and-operational-rollout--slice-469) |
+| Pinned sparse queries, Arrow expiry and resource tuning | [#475](https://github.com/Vaquum/Origo/pull/475), [#477](https://github.com/Vaquum/Origo/pull/477) | [Query reference](../Reference/Market-state-cube-queries.md) |
+| Path, dwell, base volume and OHLC measures | [#483](https://github.com/Vaquum/Origo/pull/483) | [Detail component](#detail-component--slice-480) |
+| First hit, Controlled advance and Swing definitions | [#491](https://github.com/Vaquum/Origo/pull/491) | [Detector arithmetic](Rally-detection.md) |
+| Exact rally memberships and immutable Arrow triples | [#493](https://github.com/Vaquum/Origo/pull/493) | [Rally query](#exact-rally-query--slice-489) and [deployment acceptance](Rally-query-acceptance.md) |
+
+The separate [Cube Explorer](../Reference/Market-state-cube-queries.md#cube-explorer)
+owns the GUI. Its current controls consume ordinary cube results; selectable rally
+marks and membership dimming remain Explorer #50. Merged code and recorded local
+measurements do not establish final production or Explorer acceptance.
+
 ## Base projection — slice #466
 
 `origo.sources.profiles.market_state` supplies two component declarations over one
 logical base projection. Slice #469 registers both in the live spot source,
 with applicability from 2021-01-01 and a persisted `market_state` activation group.
-The base projection and its operational lifecycle do not yet deliver the query
-API, Arrow file lifecycle or whole-history performance acceptance.
+The base projection and its operational lifecycle are the inputs to the separately
+delivered query API, Arrow lifecycle and frozen acceptance protocol below.
 
 The builder reads its build-owned, validated `raw` or `raw_latest` table and writes
 the corresponding precreated `market_state` or `market_state_latest` table.
@@ -406,8 +425,10 @@ image starts, and `origo.sources.rollout` enables the group on every deploy, so 
 off switch: a builder failure is fixed forward. Every fresh partition then builds the detail
 component, and native reconciliation attaches it to accepted days and minutes in the slots
 repairs leave, as for #469: about 2,092 days at four a minute, about nine hours. Each attach
-activates the same revision and build at the next generation, so while it runs every result's
-`state_token` and pins change although no product does. Capacity evidence is keyed to the
+activates the same revision and build at the next generation. Ordinary query pins and
+`state_token` change when selected partitions gain that generation, although their earlier
+products are unchanged. Consumers comparing native identity use revision and build ID;
+rally commitments and evidence exclude generation-only additions. Capacity evidence is keyed to the
 enabled groups, so the first backfill after deployment runs with the capacity probe.
 
 **Rollback floor.** This release is the binary rollback floor once a detail key is activated:

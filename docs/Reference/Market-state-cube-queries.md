@@ -2,12 +2,14 @@
 
 The market state cube ([PRD-0022](https://github.com/Vaquum/Origo/issues/462)) turns Binance
 BTCUSDT spot trades since 2021-01-01 into a grid of time columns and price rows. A local
-service answers one selection at a time with two Arrow IPC files: `cells.arrow` holds every
-cell that has trades, and `summary.arrow` holds the grid totals, both POCs and the source
-state the result was read from. On request, the cells also carry the base volume, path length,
+service answers ordinary selections with two Arrow IPC files: `cells.arrow` holds occupied
+cells (including trade-free path/dwell cells when requested), and `summary.arrow` holds the
+grid totals, both POCs and the source state the result was read from. On request, the cells also carry the base volume, path length,
 dwell and trade prices of [PRD-0023](https://github.com/Vaquum/Origo/issues/478) (see
 [Measures](#measures)). Files expire 24 hours after they were last read through the cube
-reader.
+reader. [Exact rally discovery](#exact-rally-discovery) additionally returns immutable event,
+base-cell contribution and diagnostic files. The separate [Cube Explorer](#cube-explorer)
+consumes these data contracts; its rally controls remain pending.
 
 ## Calling the service
 
@@ -93,7 +95,8 @@ and a missing key means the same as `null`:
 
 ## Files
 
-`cells.arrow` holds one row per cell with trades, ordered by `(time_index, price_index)`:
+`cells.arrow` holds one row per occupied cell, ordered by `(time_index, price_index)`.
+Without detail measures, occupation requires trades:
 
 | Column | Type | Meaning |
 | --- | --- | --- |
@@ -104,7 +107,8 @@ and a missing key means the same as `null`:
 | `taker_buy_volume` | float64 | USDT volume of trades where the buyer is not the maker |
 | `taker_buy_trade_count` | uint64 | Individual taker-buy trades |
 
-Cells without trades are omitted; all four of their measures are zero.
+Cells without trades are omitted by default. With `path_length` or `dwell`, occupied
+trade-free cells are emitted with these four additive measures zero (see [Measures](#measures)).
 
 `summary.arrow` holds exactly one row:
 
@@ -126,7 +130,8 @@ cells.
 Both files carry schema metadata `origo.market_state`, a JSON object holding:
 
 - `schema_version` 1, or 2 for a request with measures;
-- the request as received, with `measures` only when some were requested;
+- the normalized request before lattice rounding: UTC timestamps, decimal price strings,
+  default resolutions and canonical measure order; `measures` appears only when nonempty;
 - the grid: `t0`, `tR`, `pR` and both exponents;
 - the data cutoff and the state token;
 - `pins`, the `[partition_key, generation, revision, build_id]` of every partition the
@@ -201,6 +206,8 @@ or `pyarrow.memory_map` reads of the same path work but do not renew the file.
 
 ## Errors
 
+These errors describe ordinary queries; [rally errors](#rally-errors) have their own contract.
+
 | Status | Body | When |
 | --- | --- | --- |
 | 400 | `{"error": "invalid_request", "reason": …, "field": …}` | See the reasons below |
@@ -233,8 +240,10 @@ failures during renewals, for up to 120 s; a query is never retried.
 - **Disk floor:** results never lower free disk below the largest source capacity reserve
   plus 8 GiB.
 - **Latency:** the PRD's target is that most requests finish in a few seconds, including full
-  history at 56.25 s × 125 USDT: 4.3 M cells in a 207 MB file. The acceptance run of #476
-  measures every case in production, and its report is posted on #462.
+  history at 56.25 s × 125 USDT: 4.3 M cells in a 207 MB file in the recorded measurement.
+  The frozen protocol is in #476; final acceptance remains tracked on #462. Its original
+  R4 physical-table inventory also counts the subsequently added detail tables, as recorded
+  in the [detail rollout](../Developer/Market-state-cube.md#detail-component--slice-480).
 - **Measures** run a second statement over the detail component beside the cells statement,
   with the same limits. At full history and the finest grid, every measure took about three
   times as long and wrote 2.5 times the bytes of the same request without, in a production-size
@@ -246,9 +255,21 @@ failures during renewals, for up to 120 s; a query is never retried.
 [PRD-0025](https://github.com/Vaquum/Origo/issues/487). It takes at most 64 KiB:
 
 ```python
+import hashlib
+import json
+from datetime import UTC, datetime
 from decimal import Decimal
-from origo.query.market_state_reader import rallies, read_table
+from origo.query.market_state_reader import query, rallies, read_table
 
+held = query()  # Whole-history held pack; retain its files and metadata.
+metadata = json.loads(read_table(held.summary).schema.metadata[b'origo.market_state'])
+pins = {key: [revision, build_id] for key, _, revision, build_id in metadata['pins']}
+cutoff = datetime.fromisoformat(metadata['data_cutoff']).astimezone(UTC)
+commitment = [cutoff.isoformat(timespec='microseconds'), sorted(pins.items())]
+held_cube_state = {
+    'data_cutoff': cutoff.isoformat(timespec='microseconds'),
+    'pack_pin_digest': hashlib.sha256(json.dumps(commitment, separators=(',', ':')).encode('utf-8')).hexdigest(),
+}
 request = {
     'definition': {'mode': 'first_hit', 'scale': 'bps', 'target': Decimal('30'), 'anchor_minutes': 1},
     'analysis': {'start': '2026-06-27T11:39:00Z', 'end': '2026-06-27T11:55:00Z'},
@@ -260,7 +281,21 @@ contributions = read_table(result.rally_cells)
 diagnostics = read_table(result.summary)
 ```
 
-`held_cube_state` contains the already held pack's `data_cutoff` and `pack_pin_digest`.
+### Rally request
+
+All three objects are required. Unknown keys, duplicate JSON keys, nonfinite numbers,
+Boolean quantities and decimal strings in definition quantities are rejected.
+
+| Object | Fields |
+| --- | --- |
+| `definition` | `mode`, `scale`, numeric `target`, and only the parameters required by that mode |
+| `analysis` | Offset-aware ISO 8601 `start` and `end`; exact half-open bounds, without cube-grid rounding |
+| `expected_state` | Held `data_cutoff` and lowercase SHA-256 `pack_pin_digest` |
+
+Use a **whole-history held pack**: its pins must cover the contiguous cube from
+2021-01-01 through its held cutoff. An ordinary query's `state_token` or the pins
+of a partial time selection cannot substitute for this commitment.
+`held_cube_state` contains that pack's `data_cutoff` and `pack_pin_digest`.
 Compute the digest as SHA-256 of UTF-8 compact JSON
 `[cutoff.isoformat(timespec='microseconds'), sorted(pins.items())]`, with UTC `+00:00`
 and each pin value `[revision, build_id]`. Generation is excluded. Concrete pins stay
@@ -285,16 +320,75 @@ The immutable result contains three Arrow IPC files with shared JSON metadata
 | `rally_cells.arrow` | Sparse event × base-cell contributions: exact members, four additive measures, first/last member IDs and times, whole base-cell count/volume and count-based `partial`. |
 | `summary.arrow` | One typed row: confirmed count, left/right-censored and unknown-context counts, and `diagnostics_as_of`. Empty results retain all three schemas. |
 
-IDs and counts are UInt64; times are UTC microseconds. Swing's confirmation trade
-is outside membership. Contributions may overlap across events and must never be
-summed as a deduplicated union without accounting for overlap. Event measures are
+### Rally Arrow schemas
+
+`rallies.arrow` is ordered by `(start_at, rally_id)`:
+
+| Columns | Arrow type | Meaning |
+| --- | --- | --- |
+| `rally_id`, `definition_version`, `definition_fingerprint` | string | Semantic event and definition identity |
+| `anchor_at` | timestamp[us, UTC], nullable | UTC anchor; null for Swing |
+| `reference_trade_id`, `start_trade_id`, `end_trade_id`, `confirmation_trade_id` | uint64 | Exact native reference, inclusive member endpoints and confirmation |
+| `reference_at`, `start_at`, `end_at`, `confirmed_at` | timestamp[us, UTC] | Actual native trade times |
+| `reference_price`, `start_price`, `end_price` | float64 | Recorded USDT prices |
+| `return_bps`, `duration_seconds`, `max_drawdown` | float64 | Return in bps, duration in seconds, maximum drawdown in USDT; see detector arithmetic |
+| `volume`, `taker_buy_volume` | float64 | Member quote volume in USDT |
+| `trade_count`, `taker_buy_trade_count` | uint64 | Member trade counts |
+| `event_evidence_hash` | string | Versioned content evidence SHA-256 |
+| `evidence_version` | uint8 | `1` |
+
+`rally_cells.arrow` is ordered by `(rally_id, base_time_index, base_price_index)`:
+
+| Columns | Arrow type | Meaning |
+| --- | --- | --- |
+| `rally_id` | string | Owning event |
+| `base_time_index`, `base_price_index` | uint64 | Fixed 56.25-second × 125-USDT lattice, time origin 2021-01-01 |
+| `volume`, `taker_buy_volume` | float64 | Member quote volume in USDT |
+| `trade_count`, `taker_buy_trade_count` | uint64 | Exact member counts |
+| `whole_base_trade_count`, `whole_base_volume` | uint64, float64 respectively | All trades in the accepted whole base cell, including nonmembers outside analysis |
+| `partial` | bool | `trade_count < whole_base_trade_count`; never a volume tolerance |
+| `first_trade_id`, `last_trade_id` | uint64 | First and last member in the cell |
+| `first_at`, `last_at` | timestamp[us, UTC] | Their actual times |
+
+`summary.arrow` has exactly one row: `rally_count`, `left_censored_count`,
+`right_censored_count`, `unknown_context_count` are uint64; `diagnostics_as_of` is
+timestamp[us, UTC]. Every field except `anchor_at` is non-nullable. UInt64 native
+IDs must remain lossless in consumers, including IDs beyond JavaScript's exact Number range.
+
+Swing's confirmation trade is outside membership. Contributions may overlap across
+events and must never be summed as a deduplicated union without accounting for overlap. Event measures are
 `volume`, `trade_count`, `taker_buy_volume` and `taker_buy_trade_count`; path length,
 dwell and indicators are explicitly unavailable for event-only membership.
 
-The response includes the three paths, expiry, normalized analysis and observation
-ceiling, definition/membership versions, whole-pack and relevant-source digests,
-actual bulk/probe accounting and diagnostic counts. Shared metadata additionally
-records relevant pins, source builds, detector build hash and diagnostic reasons.
+### Rally response and metadata
+
+`MarketStateRallyResult` exposes `result_id`, `rallies`, `rally_cells`, `summary`,
+`expires_at` and the complete `response` mapping. The HTTP response includes:
+
+- the three paths, `expires_at`, `expires_after_seconds` (86400);
+- `definition_version`, `definition_fingerprint`, `membership_version`;
+- normalized `analysis`, exclusive `observation_ceiling`, `data_cutoff`, `canonical_through`;
+- whole-pack `pack_pin_digest` and relevant-source `relevant_pin_digest`;
+- `bulk_read` (`start`, `end`, `rows`) and `reference_probe` (`max_lookback_seconds`,
+  `max_rows_per_anchor`, `returned_rows`);
+- `rally_count`, the three censored/context counts, `diagnostics_as_of`;
+- `available_event_measures`, `unavailable_event_measures`.
+
+All files carry the same JSON metadata under `origo.market_state_rallies`, with
+`schema_version=1`, `membership_version=1`, `evidence_version=1`, `result_id`,
+`source`, `instrument`, `definition_version`, `definition_fingerprint`,
+`normalized_definition`, `analysis`, `observation_ceiling`, `data_cutoff`,
+`canonical_through`, `pack_pin_digest`, `relevant_pin_digest`, `relevant_pins`,
+`bulk_read`, `reference_probe`, `detector_build`, `source_builds`, `diagnostics_as_of`,
+`diagnostic_counts`, `diagnostic_reasons`, `available_event_measures` and
+`unavailable_event_measures`. `relevant_pins` holds `[partition_key, revision, build_id]`;
+`detector_build` is the detector source SHA-256. Paths and expiry belong
+to the HTTP envelope; input/output byte accounting is retained in query receipts,
+and `event_evidence_hash` belongs to each event row.
+
+Whole-pack admission checks the held history; relevant-source revalidation concerns
+the native analysis, causal context and whole-cell inputs actually read. A new generation
+that retains revision/build identity does not invalidate unchanged event evidence.
 Semantic IDs exclude grid, filters and source revisions. Version-1 evidence hashes
 include typed event fields, exact little-endian native member IDs and canonical
 contribution rows; whole-cell context and source identities are excluded.
@@ -309,7 +403,11 @@ analysis/definition.
 Any supported-reader read renews the entire rally triple for 24 hours. Ordinary
 results retain their per-file expiry. Direct memory-mapped reads do not renew it.
 The reader performs one POST without retries and accepts a finite positive timeout
-of at most 300 seconds.
+of at most 300 seconds. Decimal parameters such as `Decimal('0.1')` are accepted
+when the emitted JSON number preserves the same decimal value. Precision loss raises
+`ValueError` before a POST; strings are not an alternative for rally quantities.
+
+### Rally limits and errors
 
 Admission limits are a 48-hour actual bulk scan, 8,000,000 native rows, 256 MiB of
 five typed native columns, 512 MiB of canonical files and a 295-second server wall
@@ -317,6 +415,46 @@ deadline. Bounded returned predecessor probes count toward rows/bytes, with thei
 24-hour search bounds disclosed separately. Whole-cell columns are additional
 bounded working data. Aggregate worker memory must remain within 1.5 GiB in the
 existing 2 GiB container. One rally and two total heavy queries may run concurrently.
-Budget refusals identify their limit; `503` busy/maintenance responses carry
-`Retry-After: 5`. Relevant identity changes return `409 source_state_changed`;
-storage admission returns `507`, and an expired server deadline returns `504`.
+ATR warmup is part of the 48-hour bulk limit; an analysis window shorter than 48 hours
+can still exceed it. Each ClickHouse statement uses four threads, 4 GiB, no spill and
+the smaller of 60 seconds or the remaining wall deadline.
+
+#### Rally errors
+
+| Status | `error` | Meaning/action |
+| --- | --- | --- |
+| 400 | `invalid_json`, `invalid_request`, `unknown_field`, `invalid_definition`, `invalid_time`, `time_zone_required`, `invalid_expected_state`, `analysis_before_cube_start`, `bounds_out_of_order` | Correct the indicated request field; nothing published |
+| 400 | `analysis_read_span_exceeded` | Bulk including warmup exceeds 48 hours; response gives `bulk_start`, `bulk_end`, `maximum_bulk_seconds`, `maximum_analysis_end` |
+| 409 | `pack_state_changed` | Explicitly refresh the held pack; response supplies `required_cutoff` and `required_span` |
+| 409 | `source_state_changed` | Relevant native identity, coverage or count evidence changed; discard the attempt and refresh |
+| 413 | `rally_input_budget_exceeded`, `rally_working_memory_exceeded`, `rally_output_budget_exceeded` | A row/byte or memory reservation exceeds admission; response names required and budget values |
+| 503 | `busy`, `source_maintenance` | Rally/heavy slot or source fence unavailable, or a read build was reclaimed; `Retry-After: 5` |
+| 504 | `rally_deadline_exceeded` | Absolute server deadline expired; no partial result |
+| 507 | `result_storage_full` | Result budget or ingestion disk floor would be breached |
+| 500 | `export_failed` | Export failed; nothing published |
+
+Rally validation/budget errors include `reason`, `detail` and applicable field/budget
+attributes. The reader preserves HTTP status and JSON body in `MarketStateError`.
+The [frozen acceptance protocol](../Developer/Rally-query-acceptance.md) requires
+continuous monitoring with no gap over 180 seconds, including workload boundaries;
+merging the implementation does not establish a production PASS.
+
+## Cube Explorer
+
+The separate [Cube Explorer](https://github.com/Vaquum/Market-State-Cube-Explorer#explore)
+consumes ordinary cube queries through its bridge. It provides Cells/Columns/Rows
+measures, independent and shared profile tracks, saved calibration and executable
+legends, Lines families, Inspect and replay. Its [data semantics](https://github.com/Vaquum/Market-State-Cube-Explorer/blob/main/docs/data-and-semantics.md)
+and [visual contract](https://github.com/Vaquum/Market-State-Cube-Explorer/blob/main/docs/visual-contract.md)
+own the GUI behavior.
+
+The latest merged GUI changes include fractional-cutoff motion handling, one paint
+inside selections, named session VWAP/CME Inspect references ([#56](https://github.com/Vaquum/Market-State-Cube-Explorer/pull/56)),
+and reduced layout/popover/formatter work during drawing ([#58](https://github.com/Vaquum/Market-State-Cube-Explorer/pull/58)).
+
+Selectable rally events and membership dimming remain [Explorer #50](https://github.com/Vaquum/Market-State-Cube-Explorer/issues/50).
+Existing daily/four-hour Structure swings use Wilder's 14-bar ATR and a reversal
+greater than three ATRs; they differ from native-trade rally discovery's `ATR14-SMA15min`.
+The [completion matrix](https://github.com/Vaquum/Market-State-Cube-Explorer/blob/main/docs/completion-matrix.md#parent-done-when)
+retains outstanding operator, designated-machine and production evidence. Draw-cost
+measurements and merged GUI work do not substitute for that acceptance.

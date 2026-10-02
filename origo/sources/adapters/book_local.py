@@ -49,9 +49,11 @@ def _fetch(root: Path, market: Market, partition: Partition) -> Revision:
     key = _revision_key(minutes)
 
     def rows() -> Iterator[Row]:
-        with source_lock(root, f'book_spool_{market}', 'sealed', shared=True, wait=True):
-            for minute in minutes:
-                yield from payload_rows(read_payload(root, minute), minute)
+        for minute in minutes:
+            with source_lock(root, f'book_spool_{market}', 'sealed', shared=True, wait=True):
+                payload = read_payload(root, minute)
+            # Database insertion and validation cannot hold up the capture's next seal.
+            yield from payload_rows(payload, minute)
 
     return Revision(
         key,

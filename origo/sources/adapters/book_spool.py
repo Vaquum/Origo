@@ -93,8 +93,13 @@ def _metadata(path: Path) -> SealedMinute:
     return cast(SealedMinute, dict(value))
 
 
-def spool_bytes(root: Path, market: Market) -> int:
+def _spool_bytes(root: Path, market: Market) -> int:
     return sum(path.stat().st_size for path in (root / market).rglob('*') if path.is_file())
+
+
+def spool_bytes(root: Path, market: Market) -> int:
+    with source_lock(root, f'book_spool_{market}', 'sealed', shared=True, wait=True):
+        return _spool_bytes(root, market)
 
 
 def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
@@ -112,7 +117,7 @@ def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
             if _metadata(path) != minute or read_payload(root, minute) != payload:
                 raise SourceError('BOOK_SEAL_CHANGED', 'An immutable book minute changed.')
             return
-        if spool_bytes(root, market) + len(packed) + len(metadata) > BOOK_SPOOL_MAX_BYTES:
+        if _spool_bytes(root, market) + len(packed) + len(metadata) > BOOK_SPOOL_MAX_BYTES:
             raise SourceError('BOOK_SPOOL_FULL', 'Unacknowledged book input cannot be discarded.')
         atomic_write(path.with_suffix('.gz'), packed)
         atomic_write(path, metadata)

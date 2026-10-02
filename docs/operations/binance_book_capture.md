@@ -44,6 +44,9 @@ and 60 samples are sealed. Immutable minute metadata binds compressed local inpu
 by SHA-256. The spool allows 16 GiB per market and refuses to discard unacknowledged
 input when full. Accepted canonical days retain minute metadata; their payloads
 can be removed after two days. Forced rebuilds after payload removal fail visibly.
+Spool accounting shares the mutation fence so acknowledged cleanup cannot race
+a status read. Readers release that fence after loading one bounded minute payload;
+validation and database insertion cannot block the next capture seal.
 CryptoHFTData history/gap reconstruction belongs to the separate vendor slice;
 this implementation does not claim that recovery is already connected.
 

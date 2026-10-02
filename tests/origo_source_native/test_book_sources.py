@@ -319,3 +319,52 @@ def test_real_depth200_hash_page_stays_within_memory_budget(
         assert 0 < int(str(peaks[0][0])) < 256 * 1024**2
     finally:
         client.disconnect()
+
+
+def test_slow_local_book_reader_does_not_hold_the_capture_seal_lock(
+    book_runtime: SourceRuntime,
+) -> None:
+    from origo.sources.adapters.book_spool import spool_bytes
+    from origo.sources.locking import source_lock
+
+    runtime = book_runtime
+    root = runtime.lock_root.parent / 'spool'
+    market = _market(runtime)
+    adapter = runtime.spec.provisional
+    assert adapter is not None
+    revision = adapter.fetch(adapter.partition(_keys(runtime)[-1]))
+    rows = iter(revision.rows())
+    next(rows)
+    # A paused real-data reader must leave the writer free, without waiting or REST.
+    with source_lock(root, f'book_spool_{market}', 'sealed'):
+        assert root.is_dir()
+    assert spool_bytes(root, market) > 0
+
+
+def test_spool_accounting_waits_for_payload_cleanup(
+    book_runtime: SourceRuntime,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from origo.sources.adapters.book_spool import spool_bytes
+    from origo.sources.locking import source_lock
+
+    runtime = book_runtime
+    root = runtime.lock_root.parent / 'spool'
+    market = _market(runtime)
+    started = Event()
+
+    def measure() -> int:
+        started.set()
+        return spool_bytes(root, market)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with source_lock(root, f'book_spool_{market}', 'sealed'):
+            pending = pool.submit(measure)
+            assert started.wait(timeout=1)
+            with pytest.raises(TimeoutError):
+                pending.result(timeout=0.2)
+            # Withhold one original payload under the same fence used by acknowledged cleanup.
+            next((root / market).rglob('*.seal.gz')).unlink()
+        assert pending.result(timeout=5) > 0

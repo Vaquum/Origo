@@ -243,7 +243,10 @@ def test_native_backfill_failure_and_retry_preserve_verified_minutes(
             return (10**12, 9 * 10**11, 10**8, 9 * 10**7)
 
     # Only local capacity metadata is controlled; native jobs read the real book spool.
-    monkeypatch.setattr(capacity, '_volumes', lambda runtime: (Volume(),))
+    def volumes(runtime: SourceRuntime) -> tuple[Volume, ...]:
+        return (Volume(),)
+
+    monkeypatch.setattr(capacity, '_volumes', volumes)
     runtime = book_runtime
     minute = runtime.build(_keys(runtime)[-1], provisional=True)
     bundle = build_source_bundle(runtime.spec)

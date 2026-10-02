@@ -128,6 +128,7 @@ def binary_hash(
     are bound into the root; negative floating-point zero is normalized.
     Retained v1 proofs continue using their original encoding.
     """
+    chunk_rows = component.hash_chunk_rows or HASH_CHUNK_ROWS
     columns = ', '.join(
         f'if({c.name}=0, toFloat64(0), {c.name})' if c.sql_type == 'Float64' else c.name
         for c in component.columns
@@ -136,7 +137,7 @@ def binary_hash(
     header = json.dumps([(c.name, c.sql_type) for c in component.columns], separators=(',', ':'))
     digest = hashlib.sha256(b'origo-source-rowbinary-chunks-v2\n' + header.encode() + b'\n')
     digest.update(schema_version.to_bytes(8, 'big'))
-    digest.update(HASH_CHUNK_ROWS.to_bytes(8, 'big'))
+    digest.update(chunk_rows.to_bytes(8, 'big'))
     bindings = dict(params or {})
     seek = '1'
     chunk = 0
@@ -148,7 +149,7 @@ def binary_hash(
             FROM (
                 SELECT {ordering}, formatRow('RowBinary', {columns}) AS encoded
                 FROM {table} WHERE ({predicate}) AND ({seek})
-                ORDER BY {ordering} LIMIT {HASH_CHUNK_ROWS}
+                ORDER BY {ordering} LIMIT {chunk_rows}
             )""",
             bindings,
             settings={'read_in_order_use_buffering': 0},
@@ -159,7 +160,7 @@ def binary_hash(
         digest.update(chunk.to_bytes(8, 'big'))
         digest.update(size.to_bytes(8, 'big'))
         digest.update(bytes.fromhex(str(chunk_hash)))
-        if size < HASH_CHUNK_ROWS:
+        if size < chunk_rows:
             break
         if not isinstance(last, tuple):
             raise TypeError('Component hash cursor must be a tuple.')
@@ -197,7 +198,13 @@ def binary_hash(
 
 def validation_query(component: ComponentSpec, table: str, predicate: str) -> str:
     finite = (
-        ' AND '.join(f'isFinite({c.name})' for c in component.columns if c.sql_type == 'Float64')
+        ' AND '.join(
+            f'isFinite({c.name})'
+            if c.sql_type == 'Float64'
+            else f'arrayAll(level -> isFinite(level.1) AND isFinite(level.2), {c.name})'
+            for c in component.columns
+            if c.sql_type in ('Float64', 'Array(Tuple(Float64, Float64))')
+        )
         or '1'
     )
     return (

@@ -70,6 +70,16 @@ existing R1/data_current reader law remains independent and red while readers la
 The status file lives on the shared heartbeat volume; the monitor never mounts the
 capture spool. Capture failures use the existing Dagit checks, logs and alert path.
 
+Native Binance books have separate `book-capture-spot` and `book-capture-perp` processes.
+The monitor expects `book_capture_<market>.heartbeat` for each enabled book source.
+`collectors_serving` reads each `book_capture_<market>.status.json` once, capped at
+16 KiB: verified sequence state, exchange/receive ages, durable seal age, spool use,
+seed attempts/charged weight and connection attempts. A fresh heartbeat does not
+make stale market data healthy. These reads make zero Binance requests and never
+scan the spool; findings use the existing Dagit checks, log and alert path. The
+provisional workers read only sealed local minutes; their own receipts and feed
+materializations remain the native ingestion evidence.
+
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
 - **Heartbeat.** It touches `market_state_api.heartbeat` at start and after every tick. The

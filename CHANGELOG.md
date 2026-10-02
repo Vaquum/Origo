@@ -1,3 +1,7 @@
+# v3.32.0
+
+- Add CANARY spot and perpetual Binance book sources from one bounded WebSocket capture per market; native readers and backfills use sealed local minutes without Binance REST polling.
+
 # v3.31.1
 
 - Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.

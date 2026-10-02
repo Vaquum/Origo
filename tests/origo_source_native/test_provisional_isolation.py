@@ -48,7 +48,7 @@ def test_source_selector_accepts_only_enabled_provisional_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     enabled = provisional.selected_specs({})
-    assert len(enabled) == 4
+    assert len(enabled) == 6
     for spec in enabled:
         assert provisional.selected_specs({'ORIGO_PROVISIONAL_SOURCE': spec.key}) == (spec,)
     for source in ('', 'unknown'):

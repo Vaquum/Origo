@@ -155,7 +155,7 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = (REPO_ROOT / name).read_text()
         assert 'ORIGO_WORKER_HEARTBEAT' not in compose
-        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == 4
+        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == 6
 
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
@@ -186,7 +186,7 @@ function docker() {
         printf '%s\n' 'old-ui ui-host' ;;
       'inspect --format {{.Id}} '*)
         printf '%s\n' "${@: -1}" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -256,7 +256,7 @@ function docker() {
         printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         printf 'up\n' >> "$CALLS" ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -364,7 +364,7 @@ function docker() {
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
@@ -576,7 +576,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
 
 def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state'
+    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book'
     assert command in workflow
     assert workflow.index('bash deploy/prepare_binance_egress.sh') < workflow.index(command)
     assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')
@@ -639,7 +639,7 @@ def test_market_state_api_is_deployed_on_loopback_with_bounded_resources() -> No
     assert '  market-state:\n    # Compose-managed with a pinned name' in deploy[1]
     assert 'name: tdw-control-plane_market-state' in deploy[1]
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert 'provisional-binance-perp-aggtrades law market-state \\' in workflow
+    assert 'provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \\' in workflow
     test_all_published_ports_bind_loopback()
 
 

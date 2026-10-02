@@ -1,0 +1,27 @@
+{
+  "captured_utc_date": "2026-10-02",
+  "independent_check": "snapshot-02.json reconstructed to the same sequence ID",
+  "market": "perp",
+  "origin": "Binance public market endpoints; original bytes, no invented rows or shifted timestamps",
+  "recording_notes": "Initial spot overlap exposed cancellation race; fixed receive cancellation and repeated briefly using only remaining second spot snapshot. Incomplete gzip tails from interrupted first capture omitted.",
+  "rest_endpoint": "https://fapi.binance.com/fapi/v1/depth",
+  "rest_request_count": 2,
+  "rest_weight": 40,
+  "sha256": {
+    "handover-02.json": "700dcc1720e0c268353089dd660938b567029c052037b4db33a91a0940c7bcaa",
+    "handover-03.json": "963f188d80b331460edc7f7fddfe1c2063d9f0660dbdc1688f27aa85ea062430",
+    "raw/2026-10-02/11-13-01.jsonl.gz": "1b6d0fc6b4d3ada9a3995d8e999028295decaccfb87a751b64b2d31e5e1feaa9",
+    "raw/2026-10-02/11-14-01.jsonl.gz": "24666c1a94c737fa3690a2ce9089dd67279398308a994b10193bf4407ca67b65",
+    "raw/2026-10-02/11-15-01.jsonl.gz": "a2ee655b2c296219d7b2c070e88644685050c2c63853a193dae07153c9864cd4",
+    "raw/2026-10-02/11-15-02.jsonl.gz": "534fa7b8a250cd50a385d38bb493a73db909319f6bfbd3488052b20c540aa9d6",
+    "raw/2026-10-02/11-16-02.jsonl.gz": "21b8964f7fa22b8637328af4436f0803fc43dc3fd83a60ff756be8e10088946d",
+    "rest-comparison.json": "3f60fa3c7a50673e6831610972b2facabc8c1b86c535c70cdccaef7cc704db15",
+    "snapshot-01.evidence.json": "a7790c310d1c1d3d65e4af8eaafd2a3672c8a630bc24913f885116af198ad7ec",
+    "snapshot-01.json": "dec9b38848d1135c8a4b032c21b503dd009df87af3746454cbc88fbe2db8e14b",
+    "snapshot-02.evidence.json": "57f4f8990d5cde12eaf39dc91122a7c4a7eb0d11d1961b9966afbfdd14dd385f",
+    "snapshot-02.json": "2eb5b29c5689c1ed6d88dc6dc745c7b78c8a9b88294d6edc16a638595e7080bd"
+  },
+  "shared_ledger": "ORIGO_SOURCE_LOCK_DIR=/opt/origo/locks; egress_ip=None; primary route 37.27.112.167",
+  "stream_endpoint": "wss://fstream.binance.com/public/ws/btcusdt@depth@100ms",
+  "symbol": "BTCUSDT"
+}

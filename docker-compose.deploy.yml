@@ -40,6 +40,7 @@ services:
       - source-locks:/opt/origo/locks
       - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
+      - book-spool:/var/lib/origo-book-spool
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
     depends_on:
@@ -70,6 +71,7 @@ services:
       - source-locks:/opt/origo/locks
       - source-publications:/opt/origo/shadow
       - clickhouse-data:/opt/origo/clickhouse-data:ro
+      - book-spool:/var/lib/origo-book-spool
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
     depends_on:
@@ -249,6 +251,87 @@ services:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
 
+  provisional-binance-spot-book:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_book
+      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
+    volumes:
+      - tdw-parquet:/opt/parquet
+      - tdw-arrow:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+      - book-spool:/var/lib/origo-book-spool
+
+  book-capture-spot:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      PYTHONPATH: /opt/app
+      PYTHONDONTWRITEBYTECODE: "1"
+      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
+      ORIGO_SOURCE_LOCK_DIR: /opt/origo/locks
+      ORIGO_BOOK_TOP20_TOKEN: ${ORIGO_BOOK_TOP20_TOKEN:?ORIGO_BOOK_TOP20_TOKEN is required}
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - book-spool:/var/lib/origo-book-spool
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    command: python -m origo.workers.book_capture --market spot
+    cpus: 1
+    mem_limit: 512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.book_capture", "--market", "spot", "--check"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  provisional-binance-perp-book:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_book
+      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
+    volumes:
+      - tdw-parquet:/opt/parquet
+      - tdw-arrow:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+      - book-spool:/var/lib/origo-book-spool
+
+  book-capture-perp:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    environment:
+      PYTHONPATH: /opt/app
+      PYTHONDONTWRITEBYTECODE: "1"
+      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
+      ORIGO_SOURCE_LOCK_DIR: /opt/origo/locks
+    volumes:
+      - book-spool:/var/lib/origo-book-spool
+      - source-locks:/opt/origo/locks
+      - worker-heartbeats:/opt/origo/heartbeats
+    command: python -m origo.workers.book_capture --market perp
+    cpus: 1
+    mem_limit: 512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.book_capture", "--market", "perp", "--check"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
   perp-capture:
     image: ${APP_IMAGE:?APP_IMAGE is required}
     network_mode: host
@@ -348,3 +431,5 @@ volumes:
     name: tdw-control-plane_market-state
 
   perp-capture:
+
+  book-spool:

@@ -1,4 +1,4 @@
-"""Recorded operational evidence, shared by the public page and notification mail."""
+"""Recorded operational evidence, shared by the law page and notification mail."""
 from __future__ import annotations
 
 import base64

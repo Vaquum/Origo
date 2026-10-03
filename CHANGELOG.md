@@ -1,3 +1,7 @@
+# v3.31.2
+
+- Publish the law page on host loopback only (`127.0.0.1:8484`); it was reachable without a login at `http://37.27.112.167:8484/law`. Caddy from Vaquum/Portal serves it at https://origo.vaquum.fi behind the Portal login. The compose guard drops its `0.0.0.0` exception, and AGENTS.md, the monitoring guide and the page docstrings no longer call `/law` public.
+
 # v3.31.1
 
 - Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.

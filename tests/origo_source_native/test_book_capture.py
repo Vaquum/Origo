@@ -544,7 +544,10 @@ def test_spool_status_and_sealing_do_not_walk_retained_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
 ) -> None:
     from origo.sources.adapters.book_spool import (
-        reconcile_spool_bytes, remove_spool_payloads, seal_minute, spool_bytes,
+        reconcile_spool_bytes,
+        remove_spool_payloads,
+        seal_minute,
+        spool_bytes,
     )
     from origo.sources.locking import source_lock
 

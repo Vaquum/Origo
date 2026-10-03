@@ -7,7 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_FILE = REPO_ROOT / 'AGENTS.md'
 RULESET_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_ruleset.yml'
-EXPECTED_SHA256 = '908930fe6affee9b200b736c684fba6e0a60e3e08b28d4a07e2059524fbf6014'
+EXPECTED_SHA256 = 'd5ad7f6380255317c2385ccf5303c29dbea7571bdda86f4cbd354283eba82776'
 
 
 def test_repo_agents_file_exists_and_has_expected_sha256() -> None:
@@ -36,7 +36,8 @@ def test_pr_checks_ruleset_runs_agents_contract() -> None:
 def test_law_exception_preserves_ten_laws_and_monitor_authority() -> None:
     text = AGENTS_FILE.read_text()
     assert 'The monitor worker is the sole detector and alert sender' in text
-    assert 'public read-only summary' in text
+    assert 'is a read-only summary of the monitor' in text
+    assert 'served at https://origo.vaquum.fi behind the Portal login' in text
     assert 'Do not add another dashboard, alert path' in text
     test_repo_agents_file_contains_zero_bang_authority_and_ten_laws()
     test_repo_agents_file_exists_and_has_expected_sha256()

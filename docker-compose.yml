@@ -119,7 +119,7 @@ services:
     image: origo-dagster:latest
     command: python -m origo.workers.law_page
     ports:
-      - "0.0.0.0:8484:8484"
+      - "127.0.0.1:8484:8484"
     volumes:
       - law-samples:/var/lib/origo-law:ro
     cpus: 0.5

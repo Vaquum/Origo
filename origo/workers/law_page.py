@@ -1,4 +1,4 @@
-"""Read-only public view of the monitor's observation tape."""
+"""Read-only view of the monitor's observation tape."""
 from __future__ import annotations
 
 import argparse

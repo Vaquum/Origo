@@ -140,7 +140,6 @@ def test_all_published_ports_bind_loopback() -> None:
         f'{p.service}: {p.raw}'
         for p in _published_ports()
         if p.host_ip != LOOPBACK
-        and (p.service, p.host_ip, p.published, p.target) != ('law', '0.0.0.0', '8484', '8484')
     ]
     assert exposed == []
 
@@ -552,7 +551,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
     for filename in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         text = (REPO_ROOT / filename).read_text()
         law = text.split('  law:\n', 1)[1].split('  vector:\n', 1)[0]
-        assert '"0.0.0.0:8484:8484"' in law
+        assert '"127.0.0.1:8484:8484"' in law
         assert 'law-samples:/var/lib/origo-law:ro' in law
         assert 'read_only: true' in law and 'cpus: 0.5' in law and 'mem_limit: 256m' in law
         assert '"--check"' in law

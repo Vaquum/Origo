@@ -3,6 +3,14 @@
 - Add CANARY spot and perpetual Binance book sources from one bounded WebSocket capture per market; native readers and backfills use sealed local minutes without Binance REST polling.
 - Keep deployment recovery independent of provider cooldown, admit only sealed minutes, and account spool bytes without scanning retained history on the capture loop.
 
+# v3.31.3
+
+- Publish the law page on host loopback only (`127.0.0.1:8484`); it was reachable without a login at `http://37.27.112.167:8484/law`. Caddy from Vaquum/Portal serves it at https://origo.vaquum.fi behind the Portal login. The compose guard drops its `0.0.0.0` exception, and AGENTS.md, the monitoring guide and the page docstrings no longer call `/law` public.
+
+# v3.31.2
+
+- Stop TTL merges on `origo.container_log` while `test_overview_evidence_reuses_reads_and_preserves_unknowns` runs. The test stamps its fault rows from the fixed `NOW` (2026-09-17), and the table drops parts 14 days past their timestamp, so since 2026-10-01 those rows expired on insert and `no_error_logs` counted `0` instead of `1`, failing `pr_checks_tests` on unrelated PRs. The test's clock, boundaries and assertions are unchanged.
+
 # v3.31.1
 
 - Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.

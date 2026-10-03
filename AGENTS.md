@@ -54,7 +54,7 @@ Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and
 
 ## Monitoring
 
-Before investigating any failure, read and follow [docs/Developer/Monitoring.md](docs/Developer/Monitoring.md): Dagit first, ClickHouse second, Docker third, the external collectors last. Every monitored fact has one store; Dagit is the investigation pane. The monitor worker is the sole detector and alert sender; its operational state is a cursor for notification and historical-import positions. The authorized /law exception is a public read-only summary of the monitor's append-only observation tape, not a second truth database or detector. Do not add another dashboard, alert path or per-minute Dagster run in place of a worker receipt.
+Before investigating any failure, read and follow [docs/Developer/Monitoring.md](docs/Developer/Monitoring.md): Dagit first, ClickHouse second, Docker third, the external collectors last. Every monitored fact has one store; Dagit is the investigation pane. The monitor worker is the sole detector and alert sender; its operational state is a cursor for notification and historical-import positions. The authorized /law exception is a read-only summary of the monitor's append-only observation tape, not a second truth database or detector. It is served at https://origo.vaquum.fi behind the Portal login. Do not add another dashboard, alert path or per-minute Dagster run in place of a worker receipt.
 
 ## Beyond the laws
 

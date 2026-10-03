@@ -184,7 +184,7 @@ watchdog's exit is in `origo.container_log`.
 - Investigate in the order above. Do not start from `docker logs`.
 
 
-## Public reader law
+## Reader law page
 
 `/law` opens on Overview: fresh trades, daily archive readiness, historical calendar
 coverage, depth minutes and market state cube freshness/history. Compact secondary figures show exact-current
@@ -295,7 +295,7 @@ preserves the remaining dispatch and retry waits across every forward clock corr
 a clock discrepancy above 120 seconds resets the conservative hour. Mail failures
 are WARNING/check metadata, so they do not create recursive ERROR-log alerts.
 Detector cursors advance independently of mail success. The worker-heartbeats volume
-holds private intent and is shared by workers, but is absent from the public page.
+holds private intent and is shared by workers, but is absent from the law page.
 
 `notification-observations-YYYY-MM-DD.jsonl` records compact typed frames from existing
 detector reads even when a law sample fails. It preserves original detector keys and
@@ -307,15 +307,17 @@ Frames use bounded lossless zlib/base64 encoding: 8 KiB per line, at most 64 gro
 128 KiB decoded. This keeps repetitive typed field names from consuming the observation
 budget. Replay is capped at 1 MiB and one second per tick with a 16 MiB compact index.
 Segments retain 30 days; closeout evidence is separate. `operator-summary.json` is a
-replaceable public derivative capped at 16 KiB, containing no recipient or mail payload.
+replaceable page derivative capped at 16 KiB, containing no recipient or mail payload.
 
-Only the monitor mounts `/var/lib/origo-law` writable. The public page has a read-only
+Only the monitor mounts `/var/lib/origo-law` writable. The page has a read-only
 mount, no database/exchange/mail credentials and no backend query path. Page requests
 read bounded caches/tape only; API history is catalog-ID restricted, at most 30 days
 and 1,000 original events per page. Missing, corrupt or 120-second-old evidence
 is UNKNOWN. HTTP health means the page serves, independently of its data verdict;
 red data never blocks deployment or recovery. Health probes use an unpublished internal
-port (8485), independently of public request slots. The page runs without root privileges.
+port (8485), independently of request slots. The page runs without root privileges.
+Compose publishes port 8484 on host loopback only (`127.0.0.1:8484`); Caddy from Vaquum/Portal
+serves it at https://origo.vaquum.fi behind the Portal login.
 Historical gaps remain not observed.
 
 The dedicated `law_reader` profile permits only reads, one concurrent single-threaded
@@ -376,7 +378,7 @@ remains independent of history, every 30 seconds with a five-second deadline; th
 sample expires at 120 seconds. All lazy history shares at most two concurrent
 requests, bounded queues and five-second deadlines, including pagination. Selection
 changes cancel superseded work. The eight-entry cache, 5,000 client events, 1,000
-server events per page, 30-day range, 1 MiB record limit and four public slots remain.
+server events per page, 30-day range, 1 MiB record limit and four request slots remain.
 
 The recorded six-source/54-projection baseline is 126,790 compact JSON bytes. Its
 Overview additions must stay within 8 KiB and the result within 160 KiB. Local replay

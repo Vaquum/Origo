@@ -1445,9 +1445,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
 
     client = law_case.client
     ensure_monitoring_tables(client, 'origo')
-    # Preserve the replayed operational faults past production's diagnostic retention.
-    client.execute('ALTER TABLE origo.container_log REMOVE TTL')
     tracked = _TrackedClient(client)
+    # container_log drops parts 14 days past their timestamp; rows stamped from the fixed NOW must survive.
+    client.execute('SYSTEM STOP TTL MERGES origo.container_log')
     now = NOW.replace(microsecond=250000)
     since = (NOW - timedelta(minutes=2)).replace(microsecond=750000)
     until = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
@@ -1548,6 +1548,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     assert len(required) == 16 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
     monkeypatch.setattr('origo.sources.registry.SOURCE_REGISTRY', ())
     assert build_catalog(catalog['deployed_sha'])['law_gate_ids'] == required
+    client.execute('SYSTEM START TTL MERGES origo.container_log')
 
 
 def test_publication_policy_evidence_reuses_existing_decisions(

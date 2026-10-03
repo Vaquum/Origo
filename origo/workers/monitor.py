@@ -15,7 +15,7 @@ Every minute the tick evaluates seven checks on the ``origo_monitor`` asset:
 Evaluations precede mail preparation. Dashboard and HTML/text mail share one recorded
 operator summary. Lifecycle changes and today's digest share a global hourly dispatch
 budget; retries preserve an immutable private intent in the existing cursor. Compact
-notification observations extend the public tape without introducing another detector.
+notification observations extend the law tape without introducing another detector.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # v3.31.2
 
-- Stamp `test_overview_evidence_reuses_reads_and_preserves_unknowns`'s fault rows from the wall clock instead of the fixed `NOW` (2026-09-17). `origo.container_log` drops partitions 14 days after their timestamp, so since 2026-10-01 its rows expired on insert and `no_error_logs` counted `0` instead of `1`, failing `pr_checks_tests` on unrelated PRs. The fractional-second boundaries the test checks are unchanged, only their base moves.
+- Stop TTL merges on `origo.container_log` while `test_overview_evidence_reuses_reads_and_preserves_unknowns` runs. The test stamps its fault rows from the fixed `NOW` (2026-09-17), and the table drops parts 14 days past their timestamp, so since 2026-10-01 those rows expired on insert and `no_error_logs` counted `0` instead of `1`, failing `pr_checks_tests` on unrelated PRs. The test's clock, boundaries and assertions are unchanged.
 
 # v3.31.1
 

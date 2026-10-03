@@ -14,6 +14,7 @@ from .contracts import (
     Row,
     Snapshot,
     SourceError,
+    SourceReadPolicy,
     StateRecord,
     identifier,
     table_name,
@@ -239,6 +240,14 @@ class SourceStore:
                 argMax(a.component_hashes, a.generation) AS component_hashes
             FROM {self.table('source_activation_log')} a
             GROUP BY source_key, partition_key, provisional""")
+        from .registry import SOURCE_REGISTRY
+
+        policies = {source.key: source.read_policy for source in SOURCE_REGISTRY}
+        policies[self.spec.key] = self.spec.read_policy
+        available = ', '.join(
+            f"'{identifier(key)}'" for key, policy in sorted(policies.items())
+            if policy == SourceReadPolicy.AVAILABLE
+        ) or "''"
         self.execute(f"""CREATE OR REPLACE VIEW {self.table('source_current_partitions')} AS
             WITH covered AS (
                 SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
@@ -260,7 +269,7 @@ class SourceStore:
                 FROM ranked GROUP BY source_key
             )
             SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
-            WHERE NOT e.provisional OR e.partition_end<=f.frontier""")
+            WHERE NOT e.provisional OR e.source_key IN ({available}) OR e.partition_end<=f.frontier""")
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_capacity_log')} (
             source_key String, volume_id String, working_set_bytes UInt64,
             dagster_run_id String, successful UInt8, measured_at DateTime64(6, 'UTC')
@@ -549,6 +558,8 @@ class SourceStore:
                 for day in canonical
             )
         ]
+        if self.spec.read_policy == SourceReadPolicy.AVAILABLE:
+            return tuple(eligible)
         for record in eligible:
             if record.partition.start > frontier:
                 break

@@ -1,3 +1,10 @@
+# v3.32.0
+
+- Add CANARY spot and perpetual Binance book sources from one bounded WebSocket capture per market; native readers and backfills use sealed local minutes without Binance REST polling.
+- Keep deployment recovery independent of provider cooldown, admit only sealed minutes, and account spool bytes without scanning retained history on the capture loop.
+
+- Complete rotation when standby arrives later without rewinding the book or reseeding; malformed decimal frames report failure and reconnect instead of leaving a dead receiver.
+
 # v3.31.3
 
 - Publish the law page on host loopback only (`127.0.0.1:8484`); it was reachable without a login at `http://37.27.112.167:8484/law`. Caddy from Vaquum/Portal serves it at https://origo.vaquum.fi behind the Portal login. The compose guard drops its `0.0.0.0` exception, and AGENTS.md, the monitoring guide and the page docstrings no longer call `/law` public.

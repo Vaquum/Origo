@@ -88,6 +88,11 @@ class Client(Protocol):
     def disconnect(self) -> None: ...
 
 
+class SourceReadPolicy(StrEnum):
+    CONTIGUOUS = 'contiguous'
+    AVAILABLE = 'available'
+
+
 class RolloutStage(StrEnum):
     DORMANT = 'DORMANT'
     CANARY = 'CANARY'
@@ -172,6 +177,7 @@ class Column:
             'DateTime',
             'DateTime64(3)',
             'DateTime64(6)',
+            'Array(Tuple(Float64, Float64))',
         }:
             raise ValueError(f'Unsupported component column type: {self.sql_type}')
 
@@ -199,9 +205,14 @@ class ComponentSpec:
     current_target: str | None = None
     start_at: datetime | None = None
     activation_group: str | None = None
+    hash_chunk_rows: int | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
+        if self.hash_chunk_rows is not None and (
+            type(self.hash_chunk_rows) is not int or self.hash_chunk_rows < 1
+        ):
+            raise ValueError('Component hash chunks require a positive row count.')
         if self.activation_group is not None:
             identifier(self.activation_group)
         if self.start_at is not None and self.start_at.tzinfo != UTC:
@@ -289,6 +300,7 @@ class RevisionedSourceSpec:
     # Rows a retired pipeline wrote into a table it shared with another pipeline, as
     # (table name, SQL predicate); setup deletes them wherever the table remains.
     retired_rows: tuple[tuple[str, str], ...] = ()
+    read_policy: SourceReadPolicy = SourceReadPolicy.CONTIGUOUS
 
     def __post_init__(self) -> None:
         identifier(self.key)

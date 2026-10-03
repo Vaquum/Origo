@@ -214,6 +214,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 
 def build_catalog(deployed_sha: str) -> LawCatalog:
     from origo.law import LAW_ANCHORS, LAW_INVENTORY, MARKET_STATE_SOURCE
+    from origo.sources.adapters.book_local import LocalBookCanonical
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -265,6 +266,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
 
     for spec in SOURCE_REGISTRY:
         key = spec.key
+        local_book = isinstance(spec.canonical, LocalBookCanonical)
         nodes: list[ProjectionDescriptor] = [
             {
                 'id': f'{key}:{component.key}',
@@ -355,7 +357,12 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             evidence='source_activation_log; source_failure_log',
         )
         for check, condition in (
-            ('official_revision', 'The official archive must revalidate the activated revision.'),
+            (
+                'official_revision',
+                'Local seals must revalidate the activated revision.'
+                if local_book
+                else 'The official archive must revalidate the activated revision.',
+            ),
             ('components', 'All retained component proofs must match the active build.'),
             (
                 'review_state',
@@ -428,7 +435,9 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ('canonical_mask', 'Canonical days replace overlapping provisional minutes.'),
             (
                 'first_gap',
-                'Provisional partitions after the first missing interval are excluded from current readers.',
+                'Sealed provisional intervals remain readable beyond a gap.'
+                if local_book
+                else 'Provisional partitions after the first missing interval are excluded from current readers.',
             ),
         ):
             add(
@@ -440,56 +449,57 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 evidence='source_current_partitions; source_anchor_log',
                 cadence='periodic',
             )
-        add(
-            f'provider.archive_availability:{key}',
-            [key],
-            'sources.lifecycle:SourceRuntime.discover',
-            'Canonical archive ingestion',
-            'Latest-day archive absence waits; an older missing archive fails.',
-            role='defer',
-            evidence='source_observation_log; source_failure_log',
-        )
-        for condition, owner, description, limits in (
-            (
-                'archive_checksum',
-                'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
-                'Archive bytes must match the official SHA-256 sidecar.',
-                {},
-            ),
-            (
-                'archive_member',
-                'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
-                'The ZIP must contain exactly the expected dated CSV member.',
-                {},
-            ),
-            (
-                'archive_rows',
-                'sources.adapters.binance_archive:parse_archive_rows',
-                'The archive must be nonempty, have its declared field count, unique increasing IDs, ordered timestamps and rows inside its UTC day.',
-                {'field_count': int(str(getattr(spec.canonical, 'FIELD_COUNT')))},
-            ),
-            (
-                'aggregate_anomalies',
-                'sources.adapters.binance_archive:BinanceArchiveDaily.clean_agg_rows',
-                'Only identical duplicate aggregate rows and declared sentinel rows may be removed; conflicting or unmatched backward IDs fail.',
-                {
-                    'max_anomaly_ids': _threshold(
-                        'sources.adapters.binance_archive:_MAX_ANOMALY_IDS'
-                    )
-                },
-            ),
-        ):
-            if condition == 'aggregate_anomalies' and 'aggtrades' not in key:
-                continue
+        if not local_book:
             add(
-                f'provider.response_completeness.{condition}:{key}',
+                f'provider.archive_availability:{key}',
                 [key],
-                owner,
-                'Canonical archive validation',
-                description,
-                limits,
-                evidence='source_observation_log archive evidence; source_failure_log',
+                'sources.lifecycle:SourceRuntime.discover',
+                'Canonical archive ingestion',
+                'Latest-day archive absence waits; an older missing archive fails.',
+                role='defer',
+                evidence='source_observation_log; source_failure_log',
             )
+            for condition, owner, description, limits in (
+                (
+                    'archive_checksum',
+                    'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
+                    'Archive bytes must match the official SHA-256 sidecar.',
+                    {},
+                ),
+                (
+                    'archive_member',
+                    'sources.adapters.binance_archive:BinanceArchiveDaily.fetch',
+                    'The ZIP must contain exactly the expected dated CSV member.',
+                    {},
+                ),
+                (
+                    'archive_rows',
+                    'sources.adapters.binance_archive:parse_archive_rows',
+                    'The archive must be nonempty, have its declared field count, unique increasing IDs, ordered timestamps and rows inside its UTC day.',
+                    {'field_count': int(str(getattr(spec.canonical, 'FIELD_COUNT')))},
+                ),
+                (
+                    'aggregate_anomalies',
+                    'sources.adapters.binance_archive:BinanceArchiveDaily.clean_agg_rows',
+                    'Only identical duplicate aggregate rows and declared sentinel rows may be removed; conflicting or unmatched backward IDs fail.',
+                    {
+                        'max_anomaly_ids': _threshold(
+                            'sources.adapters.binance_archive:_MAX_ANOMALY_IDS'
+                        )
+                    },
+                ),
+            ):
+                if condition == 'aggregate_anomalies' and 'aggtrades' not in key:
+                    continue
+                add(
+                    f'provider.response_completeness.{condition}:{key}',
+                    [key],
+                    owner,
+                    'Canonical archive validation',
+                    description,
+                    limits,
+                    evidence='source_observation_log archive evidence; source_failure_log',
+                )
         add(
             f'sensor.retry.terminal_state:{key}',
             [key],
@@ -654,7 +664,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     role='defer',
                     evidence='source_failure_log RENDER_DEFERRED',
                 )
-        if spec.provisional is not None:
+        if spec.provisional is not None and not local_book:
             add(
                 f'provider.response_completeness.request_contract:{key}',
                 [key],
@@ -746,6 +756,103 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     evidence='source_observation_log; source_failure_log; worker_minute_log',
                 )
 
+        if local_book:
+            for condition, owner, description, limits in (
+                (
+                    'closed',
+                    'sources.adapters.book_local:LocalBookProvisional.candidates',
+                    'Only sealed closed minutes at or after the source anchor are eligible.',
+                    {},
+                ),
+                (
+                    'covered',
+                    'sources.adapters.book_local:LocalBookProvisional.candidates',
+                    'Already covered minutes are excluded.',
+                    {},
+                ),
+                (
+                    'catchup',
+                    'sources.adapters.book_local:LocalBookProvisional.candidates',
+                    'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
+                    {
+                        'lookback_hours': _threshold(
+                            'sources.adapters.book_local:BOOK_CATCHUP_LOOKBACK_HOURS'
+                        )
+                    },
+                ),
+                (
+                    'retry',
+                    'workers.provisional:ProvisionalFeed._may_attempt',
+                    'Failed minute attempts wait exponential backoff capped by source retry delay.',
+                    {'retry_delay_seconds': spec.orchestration.retry_delay},
+                ),
+                (
+                    'concurrent',
+                    'workers.provisional:ProvisionalFeed._build_intervals',
+                    'Minute work cannot exceed the worker thread limit.',
+                    {'workers': _threshold('workers.provisional:PROVISIONAL_MAX_WORKERS')},
+                ),
+            ):
+                add(
+                    f'worker.minute_admission.{condition}:{key}',
+                    [key],
+                    owner,
+                    'Minute admission',
+                    description,
+                    limits,
+                    role='defer',
+                    evidence='local book seals; worker_minute_log',
+                )
+            for condition, owner, description, limits in (
+                (
+                    'daily_grid',
+                    'sources.adapters.book_local:_minutes',
+                    'Canonical UTC days require every sealed minute; gaps cannot activate partial canonical data.',
+                    {'minutes': 1440},
+                ),
+                (
+                    'sealed_payload',
+                    'sources.adapters.book_spool:read_payload',
+                    'Local minute payload bytes must match their immutable SHA-256 seal.',
+                    {},
+                ),
+                (
+                    'sample_grid',
+                    'sources.adapters.book_spool:payload_rows',
+                    'Every minute has 600 depth20 and 60 depth200 samples with ordered event clocks, positive uncrossed levels and shared top20.',
+                    {'depth20_samples': 600, 'depth200_samples': 60},
+                ),
+                (
+                    'seed_budget',
+                    'workers.book_capture:AttemptBudget.seed',
+                    'Seed reservations persist across replacement and use the existing primary-route weighted REST limiter.',
+                    {
+                        'attempts_per_hour': _threshold(
+                            'workers.book_capture:BOOK_MAX_SEED_ATTEMPTS_PER_HOUR'
+                        )
+                    },
+                ),
+                (
+                    'connection_budget',
+                    'workers.book_capture:AttemptBudget.connect',
+                    'Connection reservations persist across replacement; verified overlap requires no routine REST seed.',
+                    {
+                        'attempts_per_five_minutes': _threshold(
+                            'workers.book_capture:BOOK_MAX_CONNECTION_ATTEMPTS_PER_5M'
+                        )
+                    },
+                ),
+            ):
+                add(
+                    f'book.capture.{condition}:{key}',
+                    [key],
+                    owner,
+                    'Local book acquisition and activation',
+                    description,
+                    limits,
+                    evidence='local book seals/status; source_failure_log; worker_minute_log',
+                )
+
     for spec in DEPTH_SPECS:
         key = spec.projection_table_name
         nodes = [
@@ -821,7 +928,13 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         'law_gate_ids': [
             f'law.{predicate}:{source}'
             for source in LAW_INVENTORY
-            for predicate in (('R1', 'C1', 'C2', 'M1', 'M2') if source == MARKET_STATE_SOURCE else ('R1', 'C1', 'C2') if source in LAW_ANCHORS else ('D1',))
+            for predicate in (
+                ('R1', 'C1', 'C2', 'M1', 'M2')
+                if source == MARKET_STATE_SOURCE
+                else ('R1', 'C1', 'C2')
+                if source in LAW_ANCHORS
+                else ('D1',)
+            )
         ],
     }
     catalog['version'] = _hash(catalog)
@@ -964,19 +1077,37 @@ def _operational_gates(add: _AddGate) -> None:
             )
     market_source = str(_resolve('law:MARKET_STATE_SOURCE'))
     for predicate, owner, condition, thresholds in (
-        ('M1', 'law:_m1',
-         'The reader-selected market state generation must contain activated cube proof and matching physical trade and taker-buy counts in its bounded base-cell window; reader age stays within the spot freshness budget.',
-         {'budget_seconds': _threshold('law:R1_SPOT_BUDGET_SECONDS'),
-          'base_time_us': _threshold('sources.profiles.market_state:BASE_TIME_US')}),
-        ('M2', 'law:_m2',
-         'Every canonical UTC day from the cube anchor through the due archive frontier must have activated market state proof. Unactivated additions and absent days never count as coverage.',
-         {'anchor': str(_resolve('sources.profiles.market_state:CUBE_START'))}),
+        (
+            'M1',
+            'law:_m1',
+            'The reader-selected market state generation must contain activated cube proof and matching physical trade and taker-buy counts in its bounded base-cell window; reader age stays within the spot freshness budget.',
+            {
+                'budget_seconds': _threshold('law:R1_SPOT_BUDGET_SECONDS'),
+                'base_time_us': _threshold('sources.profiles.market_state:BASE_TIME_US'),
+            },
+        ),
+        (
+            'M2',
+            'law:_m2',
+            'Every canonical UTC day from the cube anchor through the due archive frontier must have activated market state proof. Unactivated additions and absent days never count as coverage.',
+            {'anchor': str(_resolve('sources.profiles.market_state:CUBE_START'))},
+        ),
     ):
-        add(f'law.{predicate}:{market_source}',
-            [market_source, f'{market_source}:market_state', f'{market_source}:market_state_latest'],
-            owner, 'Market state cube law observation', condition, thresholds,
-            role='observe', cadence='periodic',
-            evidence='law sample active component proofs and bounded reader-selected count query')
+        add(
+            f'law.{predicate}:{market_source}',
+            [
+                market_source,
+                f'{market_source}:market_state',
+                f'{market_source}:market_state_latest',
+            ],
+            owner,
+            'Market state cube law observation',
+            condition,
+            thresholds,
+            role='observe',
+            cadence='periodic',
+            evidence='law sample active component proofs and bounded reader-selected count query',
+        )
     for spec in DEPTH_SPECS:
         add(
             f'law.D1:{spec.projection_table_name}',

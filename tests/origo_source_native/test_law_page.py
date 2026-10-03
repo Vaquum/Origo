@@ -1488,6 +1488,7 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
 
 def test_overview_unknowns_override_stale_or_mismatched_numbers(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
     url, _, _, _ = production_serving
+    stages = sum(len(source['projections']) for source in build_catalog(SHA)['sources'])
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()
@@ -1500,10 +1501,10 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
         tab.evaluate("()=>{window.originalStages=structuredClone(data.last_report.projections);for(const p of data.last_report.projections){p.status='UNKNOWN';p.reason='not_observed'}render()}")
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 10'
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == 'Unknown / 58'
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == f'Unknown / {stages}'
         tab.evaluate("()=>{const known=originalStages.find(p=>!p.id.includes(':consumer:')&&p.status==='CURRENT');Object.assign(data.last_report.projections.find(p=>p.id===known.id),known);render()}")
-        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == '1 / 58'
-        assert '57 unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
+        assert tab.locator('#metrics .metric strong').nth(1).inner_text() == f'1 / {stages}'
+        assert f'{stages - 1} unknown' in tab.locator('#metrics .metric').nth(1).inner_text().lower()
         tab.evaluate("()=>{data.last_report.projections=originalStages;render()}")
         before = len(requests)
         age = tab.locator('#sample-age').inner_text()

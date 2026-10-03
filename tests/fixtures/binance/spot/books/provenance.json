@@ -1,0 +1,33 @@
+{
+  "captured_utc_date": "2026-10-02",
+  "independent_check": "wss://stream.binance.com:9443/ws/btcusdt@depth20@100ms",
+  "market": "spot",
+  "origin": "Binance public market endpoints; original bytes, no invented rows or shifted timestamps",
+  "recording_notes": "Initial spot overlap exposed cancellation race; fixed receive cancellation and repeated briefly using only remaining second spot snapshot. Incomplete gzip tails from interrupted first capture omitted.",
+  "rest_endpoint": "https://api.binance.com/api/v3/depth",
+  "rest_request_count": 2,
+  "rest_weight": 500,
+  "sha256": {
+    "handover-02.json": "397c7dbd6c5ded4eece4bda91d799e0de2030e85903a141317df6c5c8a3c1e24",
+    "partial-comparison.json": "9bca52dde31de46cb7c99d76028b760ce304a8b9f15451e69f8927330a34d890",
+    "raw/2026-10-02/11-13-01.jsonl.gz": "983e676d2a3fa48252e538497f748876b3740f76c652b289a4d4d0ef4959122f",
+    "raw/2026-10-02/11-14-01.jsonl.gz": "c777138abfe8e72458bce8152f8b19785c96248987f913056cc846f9098aea32",
+    "raw/2026-10-02/11-21-01.jsonl.gz": "ae6dc5d88032ae915d4048550995472bd9df20195a77595f708621f00c746788",
+    "raw/2026-10-02/11-21-99.jsonl.gz": "a877d0351d10bb08983e7cc90b1f03adacb78078a351bb9ba8c8630c385a00c1",
+    "raw/2026-10-02/11-22-01.jsonl.gz": "6539cdf5f812d10eeb25b6e4da406eb8b2e6c5c98cad8dceb918595d2cb5a203",
+    "raw/2026-10-02/11-22-99.jsonl.gz": "2f2ee703993fc9f172519d70d520955f33fde237d5f11fb9ac491e3a8babf480",
+    "raw/2026-10-02/11-23-01.jsonl.gz": "0f4e5d66a8c8124c731274e01aef278ae5ebd73dec4c4f3a0ffda511e7d44400",
+    "raw/2026-10-02/11-23-02.jsonl.gz": "5e70f36373ba01b24fc743c438dd5944267027ed248f09501949fa7dd74eb53f",
+    "raw/2026-10-02/11-23-99.jsonl.gz": "145ca0fcca3085e94501daccd81cb9f67d51b91b0b09a72eeb0094da73b21f79",
+    "raw/2026-10-02/11-24-02.jsonl.gz": "b576b6b38ca103626511f32d462339ef51aea8c901321c513eb856a5feb20690",
+    "raw/2026-10-02/11-24-99.jsonl.gz": "efe728d2983a99ab2d65e81aeee7efcf3313b6a3513b68b49b7158a87722ab3f",
+    "snapshot-01.evidence.json": "ce1c4b652491a08747581ef8e67484e520f4887328fc5952f92a9ab6ca23b35f",
+    "snapshot-01.json": "6b0bf61c983cfb200621c4cb732bb11f8caf99c3fd866c99375b9c1f4c20645c",
+    "snapshot-02.evidence.json": "a5a95edac400953b953dc70ee05523370599ab1cf62c7a5135c181b9bfd89fcd",
+    "snapshot-02.json": "8719028010d69d3b2686d5230e2374c46a914f59abcfcb81c5f04705a2747f05",
+    "stopped.json": "4b5922b59d41d058e937ff41419eb59758c18886f676d319246fb680e3947e52"
+  },
+  "shared_ledger": "ORIGO_SOURCE_LOCK_DIR=/opt/origo/locks; egress_ip=None; primary route 37.27.112.167",
+  "stream_endpoint": "wss://stream.binance.com:9443/ws/btcusdt@depth@100ms",
+  "symbol": "BTCUSDT"
+}

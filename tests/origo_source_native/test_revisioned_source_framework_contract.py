@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2] / 'origo/sources'
 def test_spot_trades_is_registered_live_without_changing_existing_definitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert SOURCE_REGISTRY == (
+    assert SOURCE_REGISTRY[:4] == (
         BINANCE_SPOT_TRADES_SPEC,
         BINANCE_PERP_TRADES_SPEC,
         BINANCE_SPOT_AGGTRADES_SPEC,

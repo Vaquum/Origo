@@ -90,6 +90,8 @@ from .dagster_reader import DagsterReader, RunFailure
 from .depth import DEPTH_SPECS, DepthFeed
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
+from .book_capture import BOOK_MAX_EVENT_AGE_SECONDS, STATUS_MAX_BYTES, status_path
+from origo.sources.adapters.book_spool import BOOK_SPOOL_MAX_BYTES, object_mapping
 from .runtime import (
     HEARTBEAT_MAX_AGE_SECONDS,
     TickOutcome,
@@ -756,6 +758,7 @@ class Monitor:
         self.event_counts: dict[str, int] = {}
         self.condition_states: dict[str, tuple[str, str, bool]] = {}
         self.capture_evidence: dict[str, int | float | None] = {}
+        self.book_evidence: dict[str, dict[str, int | float | None]] = {}
 
     def tick(self, now: datetime) -> TickOutcome:
         tick_started = time.monotonic()
@@ -1311,7 +1314,9 @@ class Monitor:
                        'committed_age_seconds', 'response_age_seconds', 'durable_capture_age_seconds', 'spool_bytes',
                        'queued_runs', 'queue_threshold', 'unhealthy_daemons', 'workers_fresh',
                        'workers_expected', 'workers_unknown', 'collectors_serving', 'collectors_expected',
-                       'lag_seconds', 'grace_seconds', 'event_count', 'heartbeat_age_seconds')
+                       'lag_seconds', 'grace_seconds', 'event_count', 'heartbeat_age_seconds',
+                       'last_event_age_seconds', 'last_received_age_seconds', 'last_seal_age_seconds',
+                       'seed_total', 'seed_weight', 'connection_total')
             for name in allowed:
                 value = values.get(name)
                 if name not in values:
@@ -1319,7 +1324,7 @@ class Monitor:
                 threshold = values.get('budget_seconds') if name == 'age_seconds' else values.get('max_missing') if name == 'missing_slots' else values.get('grace_seconds') if name == 'lag_seconds' else values.get('queue_threshold') if name == 'queued_runs' else values.get('expected_days') if name == 'valid_days' else HEARTBEAT_MAX_AGE_SECONDS if name in ('committed_age_seconds', 'response_age_seconds', 'durable_capture_age_seconds') else CAPTURE_SPOOL_BYTES if name == 'spool_bytes' else None
                 measurements.append(Measurement(
                     name=name, value=value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None,
-                    unit='seconds' if name.endswith('_seconds') else 'minutes' if name in ('missing_slots', 'expected_slots') else {'run_failure': 'failed runs', 'check_failed': 'failed check evaluations', 'failed_receipts': 'failed receipts', 'error_logs': 'error lines'}.get(check, 'events') if name == 'event_count' else 'workers' if name.startswith('workers_') else 'collectors' if name.startswith('collectors_') else 'runs' if name in ('queued_runs', 'queue_threshold') else 'daemons' if name == 'unhealthy_daemons' else 'rows' if name == 'raw_proof_rows' else 'bytes' if name == 'spool_bytes' else 'days',
+                    unit='seconds' if name.endswith('_seconds') else 'minutes' if name in ('missing_slots', 'expected_slots') else {'run_failure': 'failed runs', 'check_failed': 'failed check evaluations', 'failed_receipts': 'failed receipts', 'error_logs': 'error lines'}.get(check, 'events') if name == 'event_count' else 'workers' if name.startswith('workers_') else 'collectors' if name.startswith('collectors_') else 'runs' if name in ('queued_runs', 'queue_threshold') else 'daemons' if name == 'unhealthy_daemons' else 'rows' if name == 'raw_proof_rows' else 'bytes' if name == 'spool_bytes' else 'weight' if name == 'seed_weight' else 'attempts' if name in ('seed_total', 'connection_total') else 'days',
                     threshold=threshold if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) else None,
                     observed_at=now.isoformat(), definition_version=version,
                 ))
@@ -1357,11 +1362,11 @@ class Monitor:
             status: Literal['FAIL', 'UNKNOWN', 'PASS', 'EXPECTED_WAIT'] = 'UNKNOWN' if parts[0] in ('detector_failed', 'publication_manifest_unreadable') or item.key == 'collector_capture:unavailable' or item.key.startswith('law:') else 'FAIL'
             prior = observations.get(group)
             keys = [*prior['detector_keys'], item.key] if prior else [item.key]
-            values: Mapping[str, object] = {'event_count': self.event_counts.get(item.key)} if event else {'heartbeat_age_seconds': None} if parts[0] == 'heartbeat_stale' else self.tick_evidence.get(item.check, {}) if parts[0] in ('queue_backlog', 'dagster_unreachable') else self.capture_evidence if parts[0] == 'collector_capture' else {'collectors_serving': 0, 'collectors_expected': 1} if parts[0] == 'collector_silent' else {}
+            values: Mapping[str, object] = {'event_count': self.event_counts.get(item.key)} if event else {'heartbeat_age_seconds': None} if parts[0] == 'heartbeat_stale' else self.tick_evidence.get(item.check, {}) if parts[0] in ('queue_backlog', 'dagster_unreachable') else self.book_evidence.get(item.key, {}) if parts[0] == 'collector_book' else self.capture_evidence if parts[0] == 'collector_capture' else {'collectors_serving': 0, 'collectors_expected': 1} if parts[0] == 'collector_silent' else {}
             observations[group] = observation(group, ('failed_receipts' if parts[0] == 'receipt_failed' else parts[0]) if event else item.check, 'Raw-perp capture' if parts[0] == 'collector_capture' else ':'.join(parts[1:]), status, keys, event=event, evidence=values, reference=item.key)
         for group, (check, scope, healthy) in self.condition_states.items():
             if group not in observations:
-                observations[group] = observation(group, check, scope, 'PASS' if healthy else 'UNKNOWN', [], evidence={'heartbeat_age_seconds': None} if group.startswith('heartbeat_stale:') else None)
+                observations[group] = observation(group, check, scope, 'PASS' if healthy else 'UNKNOWN', [], evidence={'heartbeat_age_seconds': None} if group.startswith('heartbeat_stale:') else self.book_evidence.get(group) if group.startswith('collector_book:') else None)
         for group, policy in self.publication_policy.items():
             if policy['reason'] == 'not_applicable':
                 continue
@@ -1569,7 +1574,12 @@ class Monitor:
             for spec in SOURCE_REGISTRY
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
         } | {heartbeat_path(self.heartbeat_dir, MARKET_STATE_API_FEED),
-             heartbeat_path(self.heartbeat_dir, PERP_CAPTURE_FEED)}
+             heartbeat_path(self.heartbeat_dir, PERP_CAPTURE_FEED)} | {
+            heartbeat_path(self.heartbeat_dir, f'book_capture_{market}')
+            for market in ('spot', 'perp')
+            if any(spec.key == f'binance_{market}_book' and spec.rollout_stage != RolloutStage.DORMANT
+                   for spec in SOURCE_REGISTRY)
+        }
         self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
         return sorted(self.heartbeat_inventory | expected)
 
@@ -1666,6 +1676,57 @@ class Monitor:
             )
         return None
 
+    def _book_capture_findings(self, now: datetime) -> list[Finding]:
+        findings: list[Finding] = []
+        self.book_evidence = {}
+        for market in ('spot', 'perp'):
+            if not any(spec.key == f'binance_{market}_book' and spec.rollout_stage != RolloutStage.DORMANT
+                       for spec in SOURCE_REGISTRY):
+                continue
+            key = f'collector_book:{market}'
+            evidence: dict[str, int | float | None] = {}
+            self.book_evidence[key] = evidence
+            try:
+                with status_path(self.heartbeat_dir, market).open('rb') as stream:
+                    raw = stream.read(STATUS_MAX_BYTES + 1)
+                if len(raw) > STATUS_MAX_BYTES:
+                    raise ValueError('Book capture status exceeds 16 KiB')
+                status = object_mapping(json.loads(raw))
+                if status.get('schema_version') != 1 or status.get('market') != market:
+                    raise ValueError('Book capture status identity is invalid')
+                for field, maximum in (('committed_at', HEARTBEAT_MAX_AGE_SECONDS),
+                                       ('last_event_at', BOOK_MAX_EVENT_AGE_SECONDS),
+                                       ('last_received_at', BOOK_MAX_EVENT_AGE_SECONDS),
+                                       ('last_seal_at', HEARTBEAT_MAX_AGE_SECONDS)):
+                    stamp = status.get(field)
+                    if not isinstance(stamp, str):
+                        raise ValueError(f'Book capture has no {field}')
+                    instant = datetime.fromisoformat(stamp)
+                    if instant.utcoffset() != timedelta(0):
+                        raise ValueError(f'Book capture {field} is not UTC')
+                    age = (now - instant).total_seconds()
+                    evidence[field.removesuffix('_at') + '_age_seconds'] = age
+                    if not 0 <= age <= maximum:
+                        raise ValueError(f'Book capture {field} is stale or in the future')
+                used = status.get('spool_bytes')
+                if type(used) is not int or not 0 <= used < BOOK_SPOOL_MAX_BYTES:
+                    raise ValueError('Book spool capacity reached or invalid')
+                evidence['spool_bytes'] = used
+                attempts = object_mapping(status.get('attempts'))
+                for field in ('seed_total', 'seed_weight', 'connection_total'):
+                    value = attempts.get(field)
+                    if type(value) is not int or value < 0:
+                        raise ValueError(f'Book capture {field} is invalid')
+                    evidence[field] = value
+                if status.get('book_verified') is not True or status.get('error_code') is not None:
+                    raise ValueError(f"Book capture paused: {status.get('error_code')}")
+            except (OSError, ValueError, TypeError) as error:
+                findings.append(Finding(key, 'collectors_serving', f'{market} book capture unavailable',
+                                        f'{type(error).__name__}: {error}'[:300]))
+            self.condition_states[key] = ('collectors_serving', f'{market} book capture',
+                                          not any(finding.key == key for finding in findings))
+        return findings
+
     def _collector_findings(self, minute: datetime) -> list[Finding]:
         findings: list[Finding] = []
         for probe in self.probes:
@@ -1697,9 +1758,11 @@ class Monitor:
         self.condition_states['collector_capture'] = ('collectors_serving', 'Raw-perp capture', capture is None)
         if capture is not None:
             findings.append(capture)
+        findings.extend(self._book_capture_findings(datetime.now(UTC)))
+        expected = len(self.probes) + 1 + len(self.book_evidence)
         self.tick_evidence['collectors_serving'] = {
-            'collectors_serving': len(self.probes) + 1 - len(findings),
-            'collectors_expected': len(self.probes) + 1,
+            'collectors_serving': expected - len(findings),
+            'collectors_expected': expected,
         }
         return findings
 

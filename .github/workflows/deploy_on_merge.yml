@@ -99,6 +99,7 @@ jobs:
           BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
           RESEND_API_KEY: test-key
           ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
@@ -133,6 +134,7 @@ jobs:
           BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
         run: |
           DEPLOY_ENV_FILE="/tmp/origo-deploy.env"
           trap 'rm -f "$DEPLOY_ENV_FILE"' EXIT
@@ -153,6 +155,7 @@ jobs:
               "BINANCE_SPOT_DEPTH200_BASE_URL": os.environ["BINANCE_SPOT_DEPTH200_BASE_URL"],
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
+              "ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
               "ORIGO_PERP_WORKER_HOSTNAME": os.environ["ORIGO_PERP_WORKER_HOSTNAME"],
@@ -236,7 +239,7 @@ jobs:
           # Retiring the container also retires its local child run processes.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
           # so wait for the exec into dagster-daemon before recovery contends for the queue lock.

@@ -28,6 +28,7 @@ from origo.law_catalog import (
     unknown_observations,
 )
 from origo.sources import registry
+from origo.sources.adapters.book_local import BOOK_CATCHUP_LOOKBACK_HOURS, LocalBookCanonical
 from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
@@ -127,10 +128,15 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
         assert not gate['id'].startswith(('ci.', 'merge.'))
     for spec in registry.SOURCE_REGISTRY:
         key = spec.key
-        assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
-            'lookback_hours': PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
-            'catchup_minutes': PROVISIONAL_CATCHUP_MINUTES,
-        }
+        if isinstance(spec.canonical, LocalBookCanonical):
+            assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
+                'lookback_hours': BOOK_CATCHUP_LOOKBACK_HOURS,
+            }
+        else:
+            assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
+                'lookback_hours': PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
+                'catchup_minutes': PROVISIONAL_CATCHUP_MINUTES,
+            }
         assert (
             gates[f'worker.minute_admission.concurrent:{key}']['thresholds']['workers']
             == PROVISIONAL_MAX_WORKERS
@@ -155,19 +161,25 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             'partitions': HEALTH_RECONCILIATION_BATCH_SIZE,
         }
         assert spec.provisional is not None
-        page_cap = int(getattr(spec.provisional, 'PAGE_CAP'))
-        assert page_cap == (512 if key == 'binance_perp_trades' else 100)
-        assert gates[f'provider.response_completeness.page_cap:{key}']['thresholds'] == {
-            'pages': page_cap,
-        }
+        if isinstance(spec.canonical, LocalBookCanonical):
+            assert gates[f'book.capture.seed_budget:{key}']['thresholds'] == {'attempts_per_hour': 3}
+            assert gates[f'book.capture.connection_budget:{key}']['thresholds'] == {'attempts_per_five_minutes': 5}
+            assert f'provider.response_completeness.page_cap:{key}' not in gates
+        else:
+            page_cap = int(getattr(spec.provisional, 'PAGE_CAP'))
+            assert page_cap == (512 if key == 'binance_perp_trades' else 100)
+            assert gates[f'provider.response_completeness.page_cap:{key}']['thresholds'] == {
+                'pages': page_cap,
+            }
         assert (
             gates[f'sensor.retry.budget:{key}']['thresholds']['retry_count']
             == spec.orchestration.retry_count
         )
     for spec in registry.SOURCE_REGISTRY:
-        for family in (
-            'provider.response_completeness.empty_minute',
-            'provider.response_completeness.request_contract',
+        provider_families = ('book.capture.daily_grid', 'book.capture.sealed_payload',
+                             'book.capture.sample_grid') if isinstance(spec.canonical, LocalBookCanonical) else (
+            'provider.response_completeness.empty_minute', 'provider.response_completeness.request_contract')
+        for family in (*provider_families,
             'sensor.retry.terminal_state',
             'sensor.reconciliation.native_run',
             'sensor.reconciliation.terminal_verdict',

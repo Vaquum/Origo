@@ -25,6 +25,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
+from origo.sources.adapters.book_spool import Market
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import (
@@ -189,7 +190,7 @@ def _monitor(
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
     workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY if spec.provisional is not None]
-    for feed in (*workers, 'market_state_api', 'perp_capture'):
+    for feed in (*workers, 'market_state_api', 'perp_capture', 'book_capture_spot', 'book_capture_perp'):
         heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
         if not heartbeat.exists():
             touch_heartbeat(heartbeat)
@@ -200,6 +201,15 @@ def _monitor(
         'last_poll_gap_seconds': None, 'error_code': None,
     }
     (tmp_path / 'heartbeats' / 'perp_capture.status.json').write_text(json.dumps(status))
+    # Controlled operational evidence; real market rows live in the book capture fixtures.
+    stamp = datetime.now(UTC)
+    for market in ('spot', 'perp'):
+        book_status = {'schema_version': 1, 'market': market, 'committed_at': stamp.isoformat(),
+                       'last_event_at': stamp.isoformat(), 'last_received_at': stamp.isoformat(),
+                       'last_seal_at': (stamp - timedelta(seconds=60)).isoformat(),
+                       'book_verified': True, 'spool_bytes': 0, 'error_code': None,
+                       'attempts': {'seed_total': 0, 'seed_weight': 0, 'connection_total': 0}}
+        (tmp_path / 'heartbeats' / f'book_capture_{market}.status.json').write_text(json.dumps(book_status))
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -385,7 +395,7 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
-    assert len(monitor._heartbeats()) == 6
+    assert len(monitor._heartbeats()) == 10
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(
@@ -1476,7 +1486,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 6 and workers['workers_expected'] == 7
+    assert workers['workers_fresh'] == 10 and workers['workers_expected'] == 11
     assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
@@ -1485,7 +1495,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 2
+    assert evidence('collectors_serving')['collectors_serving'] == 4
     assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
@@ -1506,9 +1516,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 7
+    assert evidence('workers_alive')['workers_expected'] == 11
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 6
+    assert evidence('workers_alive')['workers_fresh'] == 10
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
@@ -2007,3 +2017,40 @@ def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_
         assert all(saved[key] == original[key] for key in ('prepared_at', 'expires_at', 'payload_sha256', 'payload_base64', 'idempotency_key'))
         assert monitor._resume_notification(cursor, adjusted_now) == ('waiting' if elapsed < retry_after else disposition)
     assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after + 1
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_book_capture_health_uses_bounded_local_evidence(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    from origo.workers import book_capture
+    from .test_book_capture import replay
+    from origo.sources.adapters.book_spool import object_mapping
+
+    def forbidden(*args: object, **kwargs: object) -> object:
+        pytest.fail('Monitor and health reads must never request Binance data.')
+    monkeypatch.setattr(book_capture, 'get_response', forbidden)
+    monitor = _monitor(recorder, tmp_path)
+    # This capture clock comes from a real recorded exchange event and receive timestamp.
+    sampler = replay(tmp_path / 'spool', market)
+    assert sampler.last_received is not None
+    now = sampler.last_received
+    path = book_capture.status_path(monitor.heartbeat_dir, market)
+    book_capture.publish_status(sampler, book_capture.AttemptBudget(tmp_path / 'locks', market), path, None)
+    status = dict(object_mapping(json.loads(path.read_bytes())))
+    status['committed_at'] = now.isoformat()
+    path.write_text(json.dumps(status))
+    # Isolate the recorded acquisition evidence for this market.
+    monitor_book_registry = tuple(spec for spec in SOURCE_REGISTRY if spec.key == f'binance_{market}_book')
+    monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', monitor_book_registry)
+    assert monitor._book_capture_findings(now) == []
+    assert monitor.book_evidence[f'collector_book:{market}']['spool_bytes']
+    assert monitor._book_capture_findings(now + timedelta(seconds=6))[0].key == f'collector_book:{market}'
+    status['book_verified'] = False
+    status['error_code'] = 'BOOK_ATTEMPT_LIMIT'
+    path.write_text(json.dumps(status))
+    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'
+    path.write_bytes(path.read_bytes() + b' ' * (16 * 1024))
+    assert 'exceeds 16 KiB' in monitor._book_capture_findings(now)[0].detail
+    path.unlink()
+    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'

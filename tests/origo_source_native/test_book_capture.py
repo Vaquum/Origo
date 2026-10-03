@@ -632,7 +632,11 @@ def test_spool_limit_preserves_unacknowledged_real_input(
 def test_sampling_rejects_a_stale_recorded_book_before_sealing(
     tmp_path: Path, market: Market,
 ) -> None:
-    sampler = book_capture.BookSampler(tmp_path, market)
+    class QuietSampler(book_capture.BookSampler):
+        def advance_clock(self, event_ms: int) -> None:
+            self._sample_until(event_ms)
+
+    sampler = QuietSampler(tmp_path, market)
     sampler.seed(seed_payload(market))
     events = tuple(recorded_events(market))
     for received, event in events:
@@ -643,7 +647,7 @@ def test_sampling_rejects_a_stale_recorded_book_before_sealing(
     later_event = events[-1][1]
     assert later_event.event_ms - sampler.book.event_ms > 5000
     with pytest.raises(SourceError) as stale:
-        sampler._sample_until(later_event.event_ms)
+        sampler.advance_clock(later_event.event_ms)
     assert stale.value.code == 'BOOK_EVENT_STALE'
     assert sampler.book is None and sampler.lines == [] and sampler.last_seal is None
     assert not tuple((tmp_path / market).rglob('*.seal.json'))

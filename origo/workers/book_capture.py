@@ -261,6 +261,9 @@ class BookSampler:
         assert book is not None and book.event_ms is not None and self.next_grid is not None
         while self.next_grid < event_ms:
             grid = self.next_grid
+            if grid - book.event_ms > BOOK_MAX_EVENT_AGE_SECONDS * 1000:
+                self.invalidate()
+                raise SourceError('BOOK_EVENT_STALE', 'Book became stale before the next grid sample.')
             minute = grid // 60000 * 60000
             if minute != self.minute:
                 self._seal()

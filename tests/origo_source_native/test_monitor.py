@@ -1445,6 +1445,8 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
 
     client = law_case.client
     ensure_monitoring_tables(client, 'origo')
+    # Preserve the replayed operational faults past production's diagnostic retention.
+    client.execute('ALTER TABLE origo.container_log REMOVE TTL')
     tracked = _TrackedClient(client)
     now = NOW.replace(microsecond=250000)
     since = (NOW - timedelta(minutes=2)).replace(microsecond=750000)
@@ -1483,7 +1485,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 6 and workers['workers_expected'] == 7
+    assert workers['workers_fresh'] == 10 and workers['workers_expected'] == 11
     assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
@@ -1492,7 +1494,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 2
+    assert evidence('collectors_serving')['collectors_serving'] == 4
     assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
@@ -1513,9 +1515,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 7
+    assert evidence('workers_alive')['workers_expected'] == 11
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 6
+    assert evidence('workers_alive')['workers_fresh'] == 10
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2

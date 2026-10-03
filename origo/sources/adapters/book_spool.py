@@ -93,13 +93,60 @@ def _metadata(path: Path) -> SealedMinute:
     return cast(SealedMinute, dict(value))
 
 
+def _usage_path(root: Path, market: Market) -> Path:
+    return root / f'book_spool_{market}' / 'bytes'
+
+
+def _save_usage(root: Path, market: Market, size: int) -> None:
+    if size < 0:
+        raise ValueError('Book spool byte accounting cannot be negative.')
+    atomic_write(_usage_path(root, market), str(size).encode())
+
+
 def _spool_bytes(root: Path, market: Market) -> int:
-    return sum(path.stat().st_size for path in (root / market).rglob('*') if path.is_file())
+    with _usage_path(root, market).open('rb') as stream:
+        raw = stream.read(32)
+    if not raw or not raw.isdigit() or len(raw) == 32:
+        raise ValueError('Book spool byte accounting is invalid.')
+    return int(raw)
+
+
+def reconcile_spool_bytes(root: Path, market: Market) -> int:
+    # One startup walk repairs accounting after interrupted writes/deletes.
+    with source_lock(root, f'book_spool_{market}', 'sealed', wait=True):
+        size = sum(path.stat().st_size for path in (root / market).rglob('*') if path.is_file())
+        _save_usage(root, market, size)
+        return size
 
 
 def spool_bytes(root: Path, market: Market) -> int:
+    if not _usage_path(root, market).exists():
+        reconcile_spool_bytes(root, market)
     with source_lock(root, f'book_spool_{market}', 'sealed', shared=True, wait=True):
         return _spool_bytes(root, market)
+
+
+def write_spool_file(root: Path, market: Market, path: Path, payload: bytes) -> None:
+    """Write accounted input while the caller owns the exclusive seal fence."""
+    size = _spool_bytes(root, market)
+    previous = path.stat().st_size if path.exists() else 0
+    target = size + len(payload) - previous
+    # Reserve growth before the write; interruption can only overstate usage until startup.
+    if target > size:
+        _save_usage(root, market, target)
+    atomic_write(path, payload)
+    if target < size:
+        _save_usage(root, market, target)
+
+
+def remove_spool_payloads(root: Path, market: Market, directory: Path) -> None:
+    """Remove acknowledged payloads while the caller owns the exclusive seal fence."""
+    size = _spool_bytes(root, market)
+    paths = tuple(directory.glob('*.seal.gz'))
+    removed = sum(path.stat().st_size for path in paths)
+    for path in paths:
+        path.unlink()
+    _save_usage(root, market, size - removed)
 
 
 def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
@@ -112,6 +159,8 @@ def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
     metadata = json.dumps(minute, separators=(',', ':'), allow_nan=False).encode()
     path = _path(root, market, start)
     packed = gzip.compress(payload, mtime=0)
+    if not _usage_path(root, market).exists():
+        reconcile_spool_bytes(root, market)
     with source_lock(root, f'book_spool_{market}', 'sealed', wait=True):
         if path.exists():
             if _metadata(path) != minute or read_payload(root, minute) != payload:
@@ -119,8 +168,8 @@ def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
             return
         if _spool_bytes(root, market) + len(packed) + len(metadata) > BOOK_SPOOL_MAX_BYTES:
             raise SourceError('BOOK_SPOOL_FULL', 'Unacknowledged book input cannot be discarded.')
-        atomic_write(path.with_suffix('.gz'), packed)
-        atomic_write(path, metadata)
+        write_spool_file(root, market, path.with_suffix('.gz'), packed)
+        write_spool_file(root, market, path, metadata)
         _metadata(path)
 
 

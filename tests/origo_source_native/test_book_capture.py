@@ -517,3 +517,112 @@ def test_capture_shutdown_with_real_frames_does_not_hang(
 
     asyncio.run(verify())
     assert len(seeds) == 1
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_provisional_admission_waits_for_actual_seals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    sampler = replay(tmp_path / 'spool', market)
+    assert sampler.last_seal is not None
+    day = sampler.last_seal.replace(hour=0, minute=0, second=0, microsecond=0)
+    minutes = sealed_minutes(sampler.root, market, day, day + timedelta(days=1))
+    assert len(minutes) == 2
+    adapter = LocalBookProvisional(market)
+    monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(sampler.root))
+    keys = tuple(datetime.fromisoformat(m['minute_start']).strftime('%Y-%m-%dT%H:%MZ') for m in minutes)
+    # The just-closed unsealed minute and every earlier capture gap stay ineligible.
+    for now in (sampler.last_seal + timedelta(minutes=1), sampler.last_seal + timedelta(hours=37)):
+        assert tuple(p.key for p in adapter.candidates(now, day, ())) == keys
+        covered = (adapter.partition(keys[0]),)
+        assert tuple(p.key for p in adapter.candidates(now, day, covered)) == keys[1:]
+    assert adapter.candidates(day + timedelta(days=1), day + timedelta(days=1), ()) == ()
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_spool_status_and_sealing_do_not_walk_retained_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    from origo.sources.adapters.book_spool import (
+        reconcile_spool_bytes, remove_spool_payloads, seal_minute, spool_bytes,
+    )
+    from origo.sources.locking import source_lock
+
+    sampler = replay(tmp_path / 'recorded', market)
+    assert sampler.last_seal is not None
+    day = sampler.last_seal.replace(hour=0, minute=0, second=0, microsecond=0)
+    minutes = sealed_minutes(sampler.root, market, day, day + timedelta(days=1))
+    payloads = tuple(read_payload(sampler.root, minute) for minute in minutes)
+    root = tmp_path / 'capture'
+    assert reconcile_spool_bytes(root, market) == 0
+
+    def forbidden_walk(*args: object, **kwargs: object) -> Iterator[Path]:
+        pytest.fail('Capture status and sealing must not walk retained history.')
+
+    monkeypatch.setattr(Path, 'rglob', forbidden_walk)
+    directory = root / market / day.strftime('%Y-%m-%d')
+    for minute, payload in zip(minutes, payloads, strict=True):
+        seal_minute(root, minute, payload)
+        expected = sum(path.stat().st_size for path in directory.iterdir())
+        assert spool_bytes(root, market) == expected
+        seal_minute(root, minute, payload)
+        assert spool_bytes(root, market) == expected
+    with source_lock(root, f'book_spool_{market}', 'sealed'):
+        remove_spool_payloads(root, market, directory)
+    assert spool_bytes(root, market) == sum(path.stat().st_size for path in directory.iterdir())
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_spool_startup_repairs_interrupted_reservations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    from origo.sources.adapters import book_spool
+
+    sampler = replay(tmp_path / 'recorded', market)
+    assert sampler.last_seal is not None
+    start = sampler.last_seal - timedelta(minutes=1)
+    minute = sealed_minutes(sampler.root, market, start, sampler.last_seal)[0]
+    payload = read_payload(sampler.root, minute)
+    root = tmp_path / 'interrupted'
+    book_spool.reconcile_spool_bytes(root, market)
+    atomic = book_spool.atomic_write
+
+    def interrupted(path: Path, body: bytes) -> None:
+        if path.suffix == '.gz':
+            raise OSError('Injected interruption after durable byte reservation.')
+        atomic(path, body)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(book_spool, 'atomic_write', interrupted)
+        with pytest.raises(OSError, match='Injected interruption'):
+            book_spool.seal_minute(root, minute, payload)
+    assert book_spool.spool_bytes(root, market) > 0
+    assert book_spool.reconcile_spool_bytes(root, market) == 0
+    book_spool.seal_minute(root, minute, payload)
+    before = book_spool.spool_bytes(root, market)
+    assert book_spool.reconcile_spool_bytes(root, market) == before
+    assert book_spool.read_payload(root, minute) == payload
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_spool_limit_preserves_unacknowledged_real_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    from origo.sources.adapters import book_spool
+
+    sampler = replay(tmp_path / 'recorded', market)
+    assert sampler.last_seal is not None
+    day = sampler.last_seal.replace(hour=0, minute=0, second=0, microsecond=0)
+    minutes = sealed_minutes(sampler.root, market, day, day + timedelta(days=1))
+    assert len(minutes) == 2
+    payloads = tuple(read_payload(sampler.root, minute) for minute in minutes)
+    root = tmp_path / 'bounded'
+    book_spool.seal_minute(root, minutes[0], payloads[0])
+    used = book_spool.spool_bytes(root, market)
+    monkeypatch.setattr(book_spool, 'BOOK_SPOOL_MAX_BYTES', used)
+    with pytest.raises(SourceError) as full:
+        book_spool.seal_minute(root, minutes[1], payloads[1])
+    assert full.value.code == 'BOOK_SPOOL_FULL'
+    assert book_spool.spool_bytes(root, market) == used
+    assert book_spool.read_payload(root, minutes[0]) == payloads[0]
+    assert book_spool.sealed_minutes(root, market, day, day + timedelta(days=1)) == minutes[:1]

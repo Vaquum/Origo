@@ -761,7 +761,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 (
                     'closed',
                     'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Only closed minutes at or after the source anchor are eligible.',
+                    'Only sealed closed minutes at or after the source anchor are eligible.',
                     {},
                 ),
                 (
@@ -773,7 +773,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 (
                     'catchup',
                     'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Closed lookback minutes and older retained sealed minutes remain candidates.',
+                    'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
                     {
                         'lookback_hours': _threshold(
                             'sources.adapters.book_local:BOOK_CATCHUP_LOOKBACK_HOURS'

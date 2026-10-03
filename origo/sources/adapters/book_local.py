@@ -13,11 +13,12 @@ from ..locking import source_lock
 from .book_spool import (
     Market,
     SealedMinute,
-    atomic_write,
     object_mapping,
     payload_rows,
     read_payload,
+    remove_spool_payloads,
     sealed_minutes,
+    write_spool_file,
 )
 
 
@@ -88,11 +89,10 @@ def _acknowledge(root: Path, market: Market, covered: tuple[Partition, ...], now
                 'end': day.end.isoformat(),
                 'cleanup_complete': False,
             }
-            atomic_write(acknowledgment, json.dumps(evidence, separators=(',', ':')).encode())
-            for path in directory.glob('*.seal.gz'):
-                path.unlink()
+            write_spool_file(root, market, acknowledgment, json.dumps(evidence, separators=(',', ':')).encode())
+            remove_spool_payloads(root, market, directory)
             evidence['cleanup_complete'] = True
-            atomic_write(acknowledgment, json.dumps(evidence, separators=(',', ':')).encode())
+            write_spool_file(root, market, acknowledgment, json.dumps(evidence, separators=(',', ':')).encode())
 
 
 @dataclass(frozen=True)
@@ -138,11 +138,11 @@ class LocalBookProvisional:
         root = book_root()
         closed = now.astimezone(UTC).replace(second=0, microsecond=0)
         _acknowledge(root, self.market, covered, now)
-        starts = {
-            closed - timedelta(minutes=i)
-            for i in range(1, BOOK_CATCHUP_LOOKBACK_HOURS * 60 + 1)
-            if closed - timedelta(minutes=i) >= anchor
-        }
+        lookback_start = max(anchor, closed - timedelta(hours=BOOK_CATCHUP_LOOKBACK_HOURS))
+        starts: set[datetime] = {
+            datetime.fromisoformat(minute['minute_start'])
+            for minute in sealed_minutes(root, self.market, lookback_start, closed)
+        } if lookback_start < closed else set()
         market_root = root / self.market
         if market_root.exists():
             for directory in sorted(market_root.iterdir()):
@@ -150,7 +150,7 @@ class LocalBookProvisional:
                     raise ValueError('Book market spool contains an unexpected file.')
                 day = datetime.strptime(directory.name, '%Y-%m-%d').replace(tzinfo=UTC)
                 if (
-                    day >= closed
+                    day >= lookback_start
                     or day + timedelta(days=1) <= anchor
                     or any(
                         not interval.provisional and interval.start <= day < interval.end
@@ -161,7 +161,7 @@ class LocalBookProvisional:
                 starts.update(
                     datetime.fromisoformat(minute['minute_start'])
                     for minute in sealed_minutes(
-                        root, self.market, max(day, anchor), min(day + timedelta(days=1), closed)
+                        root, self.market, max(day, anchor), min(day + timedelta(days=1), lookback_start)
                     )
                     if day + timedelta(days=1) > anchor
                 )

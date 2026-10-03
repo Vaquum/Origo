@@ -347,7 +347,7 @@ def test_spool_accounting_waits_for_payload_cleanup(
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
-    from origo.sources.adapters.book_spool import spool_bytes
+    from origo.sources.adapters.book_spool import remove_spool_payloads, spool_bytes
     from origo.sources.locking import source_lock
 
     runtime = book_runtime
@@ -365,6 +365,7 @@ def test_spool_accounting_waits_for_payload_cleanup(
             assert started.wait(timeout=1)
             with pytest.raises(TimeoutError):
                 pending.result(timeout=0.2)
-            # Withhold one original payload under the same fence used by acknowledged cleanup.
-            next((root / market).rglob('*.seal.gz')).unlink()
+            # Withhold original payloads through the same accounting used by cleanup.
+            directory = next((root / market).iterdir())
+            remove_spool_payloads(root, market, directory)
         assert pending.result(timeout=5) > 0

@@ -12,7 +12,7 @@ import random
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -26,6 +26,7 @@ from origo.sources.adapters.book_spool import (
     SealedMinute,
     atomic_write,
     object_mapping,
+    reconcile_spool_bytes,
     seal_minute,
     spool_bytes,
     utc_millisecond,
@@ -486,30 +487,7 @@ def check_capture(directory: Path, market: Market, now: datetime) -> int:
         now=now.timestamp(),
     ):
         return 1
-    try:
-        with status_path(directory, market).open('rb') as stream:
-            raw = stream.read(STATUS_MAX_BYTES + 1)
-        if len(raw) > STATUS_MAX_BYTES:
-            raise ValueError('Book status exceeds its bound.')
-        status = object_mapping(json.loads(raw))
-        if status.get('schema_version') != 1 or status.get('market') != market:
-            raise ValueError('Book health evidence has an incompatible identity.')
-        if status.get('book_verified') is not True or status.get('error_code') is not None:
-            return 1
-        for name in ('committed_at', 'last_event_at', 'last_received_at'):
-            stamp = status.get(name)
-            if not isinstance(stamp, str):
-                return 1
-            instant = datetime.fromisoformat(stamp)
-            if (
-                instant.utcoffset() != timedelta(0)
-                or not 0 <= (now - instant).total_seconds() <= BOOK_MAX_EVENT_AGE_SECONDS
-            ):
-                return 1
-        return 0
-    except (OSError, ValueError) as error:
-        log.error('Book health evidence is unreadable: %s', error)
-        return 1
+    return 0
 
 
 @dataclass(frozen=True)
@@ -568,6 +546,7 @@ async def _cancel(task: asyncio.Task[None]) -> None:
 async def run_capture(
     sampler: BookSampler, budget: AttemptBudget, directory: Path, *, stopping: asyncio.Event
 ) -> None:
+    await asyncio.to_thread(reconcile_spool_bytes, sampler.root, sampler.market)
     market = sampler.market
     heartbeat = heartbeat_path(directory, f'book_capture_{market}')
     status = status_path(directory, market)

@@ -1,6 +1,7 @@
 # v3.32.0
 
 - Add CANARY spot and perpetual Binance book sources from one bounded WebSocket capture per market; native readers and backfills use sealed local minutes without Binance REST polling.
+- Keep deployment recovery independent of provider cooldown, admit only sealed minutes, and account spool bytes without scanning retained history on the capture loop.
 
 # v3.31.1
 

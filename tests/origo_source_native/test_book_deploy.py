@@ -78,3 +78,35 @@ def test_capture_services_share_writable_limiter_volume_and_preserve_cooldown_on
         replacement.seed()
     assert replacement.evidence()['seed_total'] == 2
     assert not calls and ledger.read_text() == '9999999999 9999999999'
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_provider_pause_does_not_block_capture_process_health(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from origo.workers import book_capture
+    from origo.workers.runtime import heartbeat_path, touch_heartbeat
+
+    def unavailable(*args: object, **kwargs: object) -> binance_daily.Response:
+        raise binance_daily.SourceError('PROVIDER_RATE_CIRCUIT', 'Controlled provider cooldown.')
+
+    monkeypatch.setattr(book_capture, 'get_response', unavailable)
+    budget = AttemptBudget(tmp_path / 'locks', market)
+    sampler = book_capture.BookSampler(tmp_path / 'spool', market)
+    for _ in range(3):
+        with pytest.raises(binance_daily.SourceError, match='Controlled provider cooldown'):
+            budget.seed()
+    with pytest.raises(binance_daily.SourceError) as limited:
+        budget.seed()
+    assert limited.value.code == 'BOOK_ATTEMPT_LIMIT'
+    directory = tmp_path / 'heartbeats'
+    touch_heartbeat(heartbeat_path(directory, f'book_capture_{market}'))
+    book_capture.publish_status(sampler, budget, book_capture.status_path(directory, market), limited.value.code)
+    now = datetime.now(UTC)
+    assert book_capture.check_capture(directory, market, now) == 0
+    assert sampler.book is None
+    with pytest.raises(binance_daily.SourceError) as unavailable_book:
+        sampler.top20(now)
+    assert unavailable_book.value.code == 'BOOK_UNAVAILABLE'
+    assert book_capture.check_capture(directory, market, now + timedelta(seconds=181)) == 1

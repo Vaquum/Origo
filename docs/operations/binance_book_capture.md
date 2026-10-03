@@ -44,8 +44,10 @@ and 60 samples are sealed. Immutable minute metadata binds compressed local inpu
 by SHA-256. The spool allows 16 GiB per market and refuses to discard unacknowledged
 input when full. Accepted canonical days retain minute metadata; their payloads
 can be removed after two days. Forced rebuilds after payload removal fail visibly.
-Spool accounting shares the mutation fence so acknowledged cleanup cannot race
-a status read. Readers release that fence after loading one bounded minute payload;
+Spool byte accounting is updated under the mutation fence at seal/cleanup time;
+status reads load one bounded counter and never scan retained days. Capture reconciles
+the counter once at startup in a background thread, repairing interrupted writes.
+Acknowledged cleanup cannot race a status read. Readers release that fence after loading one bounded minute payload;
 validation and database insertion cannot block the next capture seal.
 CryptoHFTData history/gap reconstruction belongs to the separate vendor slice;
 this implementation does not claim that recovery is already connected.
@@ -76,7 +78,9 @@ Perpetual capture has no listener. Consumer repointing remains a separate change
 The existing monitor reads `book_capture_<market>.status.json` on the shared
 heartbeat volume, at most 16 KiB per market per tick. It observes acquisition age,
 seal age, spool use, seed count/charged weight and connection count. It makes no
-provider call and mounts no spool. Findings appear in Dagit's existing
+provider call and mounts no spool. Container health checks process liveness even
+while seed limits or the provider circuit pause acquisition; these conditions remain
+visible as acquisition failures in the monitor and never block deployment recovery. Findings appear in Dagit's existing
 `origo_monitor` checks; minute build receipts and source failures keep their native
 stores. Investigate Dagit, ClickHouse, Docker, then external collectors.
 

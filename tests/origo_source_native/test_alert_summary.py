@@ -122,7 +122,7 @@ def _through(frames: list[ObservationFrame], time_of_day: str) -> list[Observati
 def _settings(**changes: object) -> AlertSettings:
     settings = AlertSettings('local-transport-credential', 'https://api.resend.com/emails',
                              'monitor@example.com', ('operator@example.com',), 21600, 200, 7,
-                             'http://37.27.112.167:8484/law')
+                             'https://origo.vaquum.fi/law')
     return replace(settings, **changes)
 
 
@@ -210,7 +210,7 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
                     assert node.locator('.overview-value').inner_text() == card['value']
                     assert node.locator('.badge').inner_text() == card['badge']
                 tab.screenshot(path=str(tmp_path / f'dashboard-local-preview-{width}.png'), full_page=True)
-                content = render_email(summary, dashboard_url='http://37.27.112.167:8484/law', dagit_written=True)
+                content = render_email(summary, dashboard_url='https://origo.vaquum.fi/law', dagit_written=True)
                 assert max(len(content.html.encode()), len(content.text.encode())) <= BODY_BYTES
                 assert '<script' not in content.html and '<img' not in content.html
                 tab.set_content(content.html)
@@ -1007,7 +1007,7 @@ def test_public_dashboard_url_is_deployed_and_validated(monkeypatch: pytest.Monk
     def no_network(*_args: object, **_kwargs: object) -> None:
         raise AssertionError('URL configuration must not issue DNS or network probes.')
     monkeypatch.setattr(transport.urllib.request, 'urlopen', no_network)
-    for value in ('http://37.27.112.167:8484/law', 'https://10.0.0.10/law', 'http://100.64.0.1/law', 'https://ops.example.com/law/', 'https://[fd00::1]/law'):
+    for value in ('https://origo.vaquum.fi/law', 'https://10.0.0.10/law', 'http://100.64.0.1/law', 'https://ops.example.com/law/', 'https://[fd00::1]/law'):
         assert transport.validate_dashboard_url(value) is not None
     for value in ('http://law/law', 'https://localhost/law', 'http://local.localhost/law', 'http://127.0.0.1/law', 'http://169.254.0.1/law', 'http://224.0.0.1/law', 'http://0.0.0.0/law', 'http://[::]/law', 'http://user:password@ops.example.com/law', 'https://ops.example.com/other', 'https://ops.example.com/law?x=1', 'https://ops.example.com/law#gate'):
         with pytest.raises(ValueError):

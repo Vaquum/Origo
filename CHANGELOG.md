@@ -1,3 +1,7 @@
+# v3.31.2
+
+- Stop TTL merges on `origo.container_log` while `test_overview_evidence_reuses_reads_and_preserves_unknowns` runs. The test stamps its fault rows from the fixed `NOW` (2026-09-17), and the table drops parts 14 days past their timestamp, so since 2026-10-01 those rows expired on insert and `no_error_logs` counted `0` instead of `1`, failing `pr_checks_tests` on unrelated PRs. The test's clock, boundaries and assertions are unchanged.
+
 # v3.31.1
 
 - Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.

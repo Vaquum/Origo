@@ -10,10 +10,11 @@ import math
 import os
 import random
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
@@ -79,7 +80,10 @@ def _levels(value: object, *, zeros: bool) -> tuple[Level, ...]:
         price, quantity = cast(list[object], item)
         if not isinstance(price, str) or not isinstance(quantity, str):
             raise ValueError('Book values require decimal strings.')
-        p, q = Decimal(price), Decimal(quantity)
+        try:
+            p, q = Decimal(price), Decimal(quantity)
+        except InvalidOperation as error:
+            raise ValueError('Book values require numeric decimal strings.') from error
         if not p.is_finite() or not q.is_finite() or p <= 0 or q < 0 or (not zeros and q == 0):
             raise ValueError('Book values must be finite and positive, except deletion quantities.')
         levels.append((p, q))
@@ -563,6 +567,7 @@ async def run_capture(
     standby: int | None = None
     tasks: dict[int, asyncio.Task[None]] = {}
     opened: dict[int, float] = {}
+    overlap: deque[bytes] = deque(maxlen=512)
 
     async def connect(session: aiohttp.ClientSession) -> int:
         nonlocal sequence
@@ -607,6 +612,7 @@ async def run_capture(
                     ):
                         try:
                             standby = await connect(session)
+                            overlap.clear()
                         except (SourceError, aiohttp.ClientError, OSError) as error:
                             # A failed overlap must not discard a still-verified active book.
                             log.warning('%s rotation delayed: %s', market, error)
@@ -636,14 +642,21 @@ async def run_capture(
                     assert event is not None
                     if packet.stream_id == standby:
                         book = sampler.book
-                        if book is None or book.obsolete(event) or not book.bridges(event):
+                        # Match a recent active update or bridge its last ID without rewinding.
+                        if book is None or not book.verified or (
+                            hashlib.sha256(repr(event).encode()).digest() not in overlap
+                            if book.obsolete(event) else not book.bridges(event)
+                        ):
                             continue
                         assert active is not None
                         await retire(active)
                         active, standby = standby, None
+                        overlap.clear()
                     if sampler.book is None:
                         await initialize()
-                    sampler.accept(event, received_at=packet.received_at)
+                    applied = sampler.accept(event, received_at=packet.received_at)
+                    if applied and standby is not None:
+                        overlap.append(hashlib.sha256(repr(event).encode()).digest())
                     failures = 0
                     if time.monotonic() - last_publish >= 1:
                         publish_status(sampler, budget, status, None)

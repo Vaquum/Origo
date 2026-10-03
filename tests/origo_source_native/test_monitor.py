@@ -25,6 +25,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
+from origo.sources.adapters.book_spool import Market
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import (
@@ -2018,8 +2019,9 @@ def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_
     assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after + 1
 
 
+@pytest.mark.parametrize('market', ['spot', 'perp'])
 def test_book_capture_health_uses_bounded_local_evidence(
-    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
 ) -> None:
     from origo.workers import book_capture
     from .test_book_capture import replay
@@ -2030,25 +2032,25 @@ def test_book_capture_health_uses_bounded_local_evidence(
     monkeypatch.setattr(book_capture, 'get_response', forbidden)
     monitor = _monitor(recorder, tmp_path)
     # This capture clock comes from a real recorded exchange event and receive timestamp.
-    sampler = replay(tmp_path / 'spool', 'spot')
+    sampler = replay(tmp_path / 'spool', market)
     assert sampler.last_received is not None
     now = sampler.last_received
-    path = book_capture.status_path(monitor.heartbeat_dir, 'spot')
-    book_capture.publish_status(sampler, book_capture.AttemptBudget(tmp_path / 'locks', 'spot'), path, None)
+    path = book_capture.status_path(monitor.heartbeat_dir, market)
+    book_capture.publish_status(sampler, book_capture.AttemptBudget(tmp_path / 'locks', market), path, None)
     status = dict(object_mapping(json.loads(path.read_bytes())))
     status['committed_at'] = now.isoformat()
     path.write_text(json.dumps(status))
-    # Isolate this acquisition fact; the perpetual path is already covered by the same parametrized capture tests.
-    monitor_book_registry = tuple(spec for spec in SOURCE_REGISTRY if spec.key == 'binance_spot_book')
+    # Isolate the recorded acquisition evidence for this market.
+    monitor_book_registry = tuple(spec for spec in SOURCE_REGISTRY if spec.key == f'binance_{market}_book')
     monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', monitor_book_registry)
     assert monitor._book_capture_findings(now) == []
-    assert monitor.book_evidence['collector_book:spot']['spool_bytes']
-    assert monitor._book_capture_findings(now + timedelta(seconds=6))[0].key == 'collector_book:spot'
+    assert monitor.book_evidence[f'collector_book:{market}']['spool_bytes']
+    assert monitor._book_capture_findings(now + timedelta(seconds=6))[0].key == f'collector_book:{market}'
     status['book_verified'] = False
     status['error_code'] = 'BOOK_ATTEMPT_LIMIT'
     path.write_text(json.dumps(status))
-    assert monitor._book_capture_findings(now)[0].key == 'collector_book:spot'
+    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'
     path.write_bytes(path.read_bytes() + b' ' * (16 * 1024))
     assert 'exceeds 16 KiB' in monitor._book_capture_findings(now)[0].detail
     path.unlink()
-    assert monitor._book_capture_findings(now)[0].key == 'collector_book:spot'
+    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'

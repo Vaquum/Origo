@@ -651,3 +651,165 @@ def test_sampling_rejects_a_stale_recorded_book_before_sealing(
     assert stale.value.code == 'BOOK_EVENT_STALE'
     assert sampler.book is None and sampler.lines == [] and sampler.last_seal is None
     assert not tuple((tmp_path / market).rglob('*.seal.json'))
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+@pytest.mark.parametrize('lag_updates', [0, 3])
+def test_later_standby_handover_preserves_real_minutes_without_reseeding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market, lag_updates: int,
+) -> None:
+    expected = replay(tmp_path / 'expected', market)
+    sampler = book_capture.BookSampler(tmp_path / 'capture', market)
+    sampler.seed(seed_payload(market))
+    events = tuple(recorded_events(market))
+    for stamp, event in events[:100]:
+        sampler.accept(event, received_at=stamp)
+    assert sampler.book is not None and sampler.book.verified
+    remaining = [(stamp, event) for stamp, event in events[100:] if event.last > sampler.book.last]
+    budget = book_capture.AttemptBudget(tmp_path / 'locks', market)
+    monkeypatch.setattr(book_capture, 'BOOK_ROTATION_SECONDS', 0)
+
+    def forbidden(*args: object, **kwargs: object) -> binance_daily.Response:
+        pytest.fail('Delayed standby must hand over without a REST seed.')
+
+    monkeypatch.setattr(book_capture, 'get_response', forbidden)
+
+    async def verify() -> None:
+        stopping = asyncio.Event()
+        retired = asyncio.Event()
+        receivers: dict[int, asyncio.Queue[book_capture.StreamPacket]] = {}
+
+        async def receive(
+            session: object, market: Market, stream: int,
+            queue: asyncio.Queue[book_capture.StreamPacket],
+        ) -> None:
+            receivers[stream] = queue
+            if stream == 2:
+                # Advance only the operating rotation interval, never the market clocks.
+                monkeypatch.setattr(book_capture, 'BOOK_ROTATION_SECONDS', 23 * 3600)
+            try:
+                await asyncio.Event().wait()
+            finally:
+                if stream == 1:
+                    retired.set()
+
+        async def applied(last: int) -> None:
+            while sampler.book is None or sampler.book.last < last:
+                await asyncio.sleep(0)
+
+        async def send() -> None:
+            while len(receivers) < 2:
+                await asyncio.sleep(0)
+            # A real frame from before overlap cannot justify retiring the active stream.
+            stamp, old = events[99]
+            await receivers[2].put(book_capture.StreamPacket(2, stamp, old))
+            await asyncio.sleep(0.01)
+            assert not retired.is_set()
+            # The active stream always leads; standby arrives one or several updates later.
+            for stamp, event in remaining[:lag_updates + 1]:
+                await receivers[1].put(book_capture.StreamPacket(1, stamp, event))
+                await applied(event.last)
+            stamp, duplicate = remaining[0]
+            await receivers[2].put(book_capture.StreamPacket(2, stamp, duplicate))
+            await asyncio.wait_for(retired.wait(), timeout=1)
+            assert sampler.book is not None
+            assert sampler.book.last == remaining[lag_updates][1].last
+            for stamp, event in remaining[1:]:
+                await receivers[2].put(book_capture.StreamPacket(2, stamp, event))
+                await applied(event.last)
+            assert sampler.book is not None and sampler.book.verified
+            assert expected.book is not None
+            assert sampler.book.top(200) == expected.book.top(200)
+            assert sampler.last_seal == expected.last_seal
+            stopping.set()
+
+        monkeypatch.setattr(book_capture, '_receive', receive)
+        sender = asyncio.create_task(send())
+        try:
+            await asyncio.wait_for(
+                book_capture.run_capture(sampler, budget, tmp_path / 'heartbeats', stopping=stopping),
+                timeout=10,
+            )
+            await sender
+        finally:
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+
+    asyncio.run(verify())
+    assert budget.evidence()['seed_total'] == 0
+    assert budget.evidence()['connection_total'] == 2
+    assert expected.last_seal is not None
+    day = expected.last_seal.replace(hour=0, minute=0, second=0, microsecond=0)
+    expected_minutes = sealed_minutes(expected.root, market, day, day + timedelta(days=1))
+    actual_minutes = sealed_minutes(sampler.root, market, day, day + timedelta(days=1))
+    assert actual_minutes == expected_minutes
+    assert all(read_payload(sampler.root, minute) == read_payload(expected.root, minute)
+               for minute in expected_minutes)
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+@pytest.mark.parametrize('field', [0, 1])
+def test_malformed_decimal_frame_reports_failure_and_reconnects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market, field: int,
+) -> None:
+    packets = [(stamp, raw, book_capture.DepthEvent.parse(raw, market))
+               for stream, stamp, raw in recorded_packets(market) if stream != 99][:150]
+    stamps = {event.last: stamp for stamp, _, event in packets}
+    invalid = dict(object_mapping(json.loads(packets[0][1])))
+    levels = cast(list[list[str]], invalid['b'])
+    # Protocol corruption is rejected; no invented market value can enter the book.
+    levels[0][field] = 'not-a-decimal'
+    sampler = book_capture.BookSampler(tmp_path / 'spool', market)
+    seeds: list[str] = []
+
+    def seed(url: str, **kwargs: object) -> binance_daily.Response:
+        seeds.append(url)
+        return binance_daily.Response(seed_payload(market), {}, 200)
+
+    monkeypatch.setattr(book_capture, 'get_response', seed)
+    def immediate_retry(lower: float, upper: float) -> float:
+        return 0.0
+
+    monkeypatch.setattr(book_capture.random, 'uniform', immediate_retry)
+
+    async def verify() -> None:
+        stopping = asyncio.Event()
+        connections: list[int] = []
+        accept = sampler.accept
+
+        def recorded_clock(event: book_capture.DepthEvent, *, received_at: datetime) -> bool:
+            applied = accept(event, received_at=stamps[event.last])
+            if applied:
+                assert len(connections) == 2 and sampler.book is not None and sampler.book.verified
+                stopping.set()
+            return applied
+
+        async def handler(request: web.Request) -> web.WebSocketResponse:
+            socket = web.WebSocketResponse()
+            await socket.prepare(request)
+            connections.append(1)
+            if len(connections) == 1:
+                await socket.send_str(json.dumps(invalid))
+            else:
+                for _, raw, _ in packets:
+                    await socket.send_str(raw.decode())
+            async for _ in socket:
+                raise RuntimeError('Capture sends no application messages.')
+            return socket
+
+        monkeypatch.setattr(sampler, 'accept', recorded_clock)
+        app = web.Application()
+        app.router.add_get('/ws', handler)
+        async with TestServer(app) as server:
+            monkeypatch.setitem(book_capture.STREAM_URL, market,
+                                str(server.make_url('/ws')).replace('http:', 'ws:', 1))
+            budget = book_capture.AttemptBudget(tmp_path / 'locks', market)
+            await asyncio.wait_for(
+                book_capture.run_capture(sampler, budget, tmp_path / 'heartbeats', stopping=stopping),
+                timeout=3,
+            )
+            assert budget.evidence()['connection_total'] == 2
+            assert budget.evidence()['seed_total'] == 1
+
+    asyncio.run(verify())
+    assert seeds == [book_capture.SEED_URL[market]]

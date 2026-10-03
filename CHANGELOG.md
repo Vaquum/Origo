@@ -1,3 +1,7 @@
+# v3.31.2
+
+- Stamp `test_overview_evidence_reuses_reads_and_preserves_unknowns`'s fault rows from the wall clock instead of the fixed `NOW` (2026-09-17). `origo.container_log` drops partitions 14 days after their timestamp, so since 2026-10-01 its rows expired on insert and `no_error_logs` counted `0` instead of `1`, failing `pr_checks_tests` on unrelated PRs. The fractional-second boundaries the test checks are unchanged, only their base moves.
+
 # v3.31.1
 
 - Update cube documentation for merged query, detail and rally contracts, complete rally schemas/errors, whole-pack commitments and current Explorer capabilities and acceptance boundaries.

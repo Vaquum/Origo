@@ -1437,8 +1437,10 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     client = law_case.client
     ensure_monitoring_tables(client, 'origo')
     tracked = _TrackedClient(client)
-    now = NOW.replace(microsecond=250000)
-    since = (NOW - timedelta(minutes=2)).replace(microsecond=750000)
+    # container_log drops rows 14 days after their timestamp, so this test stamps from the wall clock.
+    base = datetime.now(UTC).replace(second=0, microsecond=0)
+    now = base.replace(microsecond=250000)
+    since = (base - timedelta(minutes=2)).replace(microsecond=750000)
     until = now - timedelta(seconds=DELIVERY_LAG_SECONDS)
     # Fault envelopes around fractional query boundaries; no market rows are invented.
     stamps = [since.replace(microsecond=500000), until.replace(microsecond=125000)]
@@ -1492,7 +1494,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     assert saved.receipts_after == saved.logs_after == until.isoformat()
 
     # Exactly the bounded page size is already a lower bound, even without proof of row1001.
-    stamp = (NOW - timedelta(seconds=30)).replace(tzinfo=None)
+    stamp = (base - timedelta(seconds=30)).replace(tzinfo=None)
     client.execute('INSERT INTO origo.worker_minute_log VALUES', [
         ('depth', f'cap_fault:{index}', stamp, 0, '', 1, 'FAILED', 'PROTOCOL_FAULT',
          'cap test', 'test', stamp) for index in range(999)

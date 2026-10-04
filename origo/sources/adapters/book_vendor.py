@@ -23,7 +23,8 @@ CRYPTOHFT_BATCH_ROWS = 8192
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
 # keep both sources together below the vendor's anonymous 60 requests/minute.
 CRYPTOHFT_REQUEST_WEIGHT = 40
-BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 15 * 60
+# The :15 schedule has five minutes for admission, replay and activation.
+BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 20 * 60
 HOUR_KEY_FORMAT = '%Y-%m-%dT%HZ'
 _COLUMNS = (
     'received_time',

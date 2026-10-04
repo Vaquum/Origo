@@ -556,17 +556,19 @@ class SourceRuntime:
                 self.failures.recover(operation='rollback', partition=record.partition.key)
                 return restored
 
-    def _retire_pre_anchor_requests(self) -> None:
-        """Retain failed discovery evidence outside the declared source calendar."""
+    def _retire_obsolete_requests(self) -> None:
+        """Retain failures for requests outside the current canonical calendar."""
         rows = self.store.execute(
             f"""SELECT any(operation), argMax(error_code, event_time),
             argMax(partition_key, event_time), argMax(blocking_scope, event_time),
             argMax(event_id, event_time)
             FROM {self.store.table('source_failure_log')}
-            WHERE source_key=%(source)s AND partition_key < %(first)s
+            WHERE source_key=%(source)s AND (partition_key < %(first)s
+              OR (%(hourly)s AND length(partition_key)=10))
               AND operation IN ('canonical', 'discovery', 'audit')
             GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
-            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat()},
+            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
+             'hourly': self.spec.partitions.interval == 'hour'},
         )
         for operation, code, key, scope, event in rows:
             if not isinstance(event, UUID):
@@ -574,13 +576,15 @@ class SourceRuntime:
             self.failures.record(
                 operation=str(operation), error_code=str(code), partition=str(key),
                 scope=str(scope), event_type='RECOVERED', related_event=event,
-                details={'reason': 'request precedes the declared source calendar'},
+                details={'reason': 'request precedes the declared source calendar'
+                         if str(key) < self.spec.partitions.first_day.isoformat()
+                         else 'daily request superseded by the hourly canonical calendar'},
             )
 
     def audit(self) -> tuple[str, ...]:
         self.spec.require_enabled('audit')
         self.require_shared_mount()
-        self._retire_pre_anchor_requests()
+        self._retire_obsolete_requests()
         records = self.store.records(canonical_only=True)
         changed: list[str] = []
         cutoff = datetime.now(UTC) - timedelta(days=14)
@@ -592,11 +596,13 @@ class SourceRuntime:
         )
         pending = self.store.execute(
             f"""SELECT partition_key FROM {self.store.table('source_discovery_log')}
-            WHERE source_key=%(source)s AND partition_key >= %(first)s AND partition_key NOT IN (
+            WHERE source_key=%(source)s AND partition_key >= %(first)s
+              AND (NOT %(hourly)s OR length(partition_key)=14) AND partition_key NOT IN (
                 SELECT partition_key FROM {self.store.table('source_active_partitions')}
                 WHERE source_key=%(source)s AND NOT provisional
             ) GROUP BY partition_key ORDER BY min(requested_at) LIMIT 5""",
-            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat()},
+            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
+             'hourly': self.spec.partitions.interval == 'hour'},
         )
         for row in pending:
             partition = self.spec.canonical.partition(str(row[0]))

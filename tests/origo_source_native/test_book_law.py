@@ -112,12 +112,12 @@ def test_hourly_authority_deadline_and_history_are_independent_of_reader_livenes
     authoritative_book_runtime: SourceRuntime,
 ) -> None:
     runtime = authoritative_book_runtime
-    now = hour_partition(REAL_HOUR).end + timedelta(minutes=16)
+    now = hour_partition(REAL_HOUR).end + timedelta(minutes=21)
     report = law.evaluate(runtime.store.client, 'origo', now)
     c1 = _predicate(report, runtime.spec.key, 'C1')
     assert c1['status'] == 'FAIL' and c1['reason'] == 'canonical_hour_missing'
     assert c1['evidence']['hour'] == REAL_HOUR
-    assert c1['evidence']['deadline'] == '2026-10-04T10:15:00+00:00'
+    assert c1['evidence']['deadline'] == '2026-10-04T10:20:00+00:00'
     assert _predicate(report, runtime.spec.key, 'C2')['status'] == 'FAIL'
 
 
@@ -145,30 +145,58 @@ def test_book_sources_are_required_hourly_reader_laws() -> None:
             key = f'law.{predicate}:{source}'
             assert key in catalog['law_gate_ids'] and gates[key]['cadence'] == 'periodic'
         assert gates[f'law.C1:{source}']['thresholds'] == {
-            'delivery_grace_seconds': 900,
+            'delivery_grace_seconds': 1200,
             'canonical_interval': 'hour',
         }
 
 
-def test_hourly_audit_preserves_and_retires_pre_anchor_discovery_evidence(
+@pytest.mark.parametrize('key', ['2026-10-03', '2026-10-04', '2026-10-05'])
+def test_hourly_audit_preserves_obsolete_requests_and_retries_hours(
     authoritative_book_runtime: SourceRuntime,
+    key: str,
 ) -> None:
     runtime = authoritative_book_runtime
-    key = '2026-10-03'
+    requested = datetime.now(UTC)
     runtime.store.execute(
         'INSERT INTO origo.source_discovery_log VALUES',
-        [(runtime.spec.key, key, datetime.now(UTC))],
+        [(runtime.spec.key, key, requested - timedelta(minutes=1)),
+         (runtime.spec.key, REAL_HOUR, requested)],
     )
     runtime.failures.record(
         operation='discovery', partition=key, error_code='BOOK_MINUTES_MISSING', scope='PARTITION'
     )
-    assert runtime.audit() == ()
+    assert runtime.audit() == (REAL_HOUR,)
+    assert runtime.audit() == (REAL_HOUR,)
     assert runtime.store.execute(
         'SELECT event_type FROM origo.source_failure_log WHERE source_key=%(source)s AND partition_key=%(key)s ORDER BY event_time',
         {'source': runtime.spec.key, 'key': key},
     ) == [('FAILED',), ('RECOVERED',)]
-    assert runtime.store.execute('SELECT partition_key FROM origo.source_discovery_log') == [(key,)]
+    assert runtime.store.execute(
+        'SELECT partition_key FROM origo.source_discovery_log ORDER BY partition_key'
+    ) == [(value,) for value in sorted((key, REAL_HOUR))]
     assert runtime.store.records(canonical_only=True) == ()
+
+
+def test_hourly_schedule_has_an_activation_window_before_c1_deadline(
+    authoritative_book_runtime: SourceRuntime,
+) -> None:
+    runtime = authoritative_book_runtime
+    partition = hour_partition(REAL_HOUR)
+    launch = partition.end + timedelta(
+        minutes=int(runtime.spec.orchestration.canonical_cron.split()[0])
+    )
+    assert runtime.spec.canonical.candidate(launch) == partition
+    pending = law.evaluate(runtime.store.client, 'origo', launch)
+    c1 = _predicate(pending, runtime.spec.key, 'C1')
+    assert c1['status'] == 'NOT_DUE'
+    deadline = datetime.fromisoformat(str(c1['evidence']['deadline']))
+    assert deadline - launch == timedelta(minutes=5)
+    processing = launch + timedelta(minutes=1)
+    assert law._c1([], runtime.spec.key, processing)['status'] == 'NOT_DUE'
+    assert law._c1([], runtime.spec.key, deadline)['status'] == 'FAIL'
+    runtime.build(REAL_HOUR)
+    ready = law.evaluate(runtime.store.client, 'origo', processing)
+    assert _predicate(ready, runtime.spec.key, 'C1')['status'] == 'PASS'
 
 
 def test_native_hourly_backfill_orders_completion_after_canonical_build() -> None:

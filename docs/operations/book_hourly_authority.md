@@ -10,7 +10,10 @@ the shared canonical contract; trades and aggregate trades retain `day`.
 
 The canonical schedules run at minute 15 of each UTC hour and select the previous
 closed hour. The existing audit retries up to five requested unactivated partitions
-and checks revisions through the provider object ETag. Discovery uses a one-byte
+and checks revisions through the provider object ETag. C1 requires activation by
+minute 20, allowing five minutes after the trigger for admission, download, replay
+and component validation. Missing authority remains NOT_DUE during that window and
+fails at the deadline. Discovery uses a one-byte
 range request; a build downloads one vendor Parquet file, retains its input SHA-256,
 replays native update IDs and exchange timestamps through the capture's sampler,
 and proves a complete hour before the ordinary atomic activation. The same native
@@ -47,6 +50,9 @@ provisional minute keys, so activation and failure recovery cannot collide.
 The immutable source/history anchor is **2026-10-04 00:00 UTC**. Older vendor
 history is not admitted by this calendar. The audit ignores requests before that
 anchor and appends a recovery reason to their prior failures, retaining the events.
+Retained daily discovery keys from the former book calendar are also excluded from
+hourly retries; their failures receive an appended retirement reason and their
+requests remain in the discovery log. Required C2 continues to expose missing hours.
 A full day of accepted canonical hours permits local spool payload cleanup after
 two days; incomplete days retain unacknowledged input and immutable seals remain.
 

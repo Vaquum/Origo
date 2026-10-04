@@ -6,7 +6,7 @@ import json
 import math
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -38,7 +38,7 @@ from origo.query.market_state import (
 from origo.query.market_state_reader import query, read_table
 from origo.query.market_state_results import ResultStore
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-from origo.sources.contracts import Partition, PartitionPolicy, Revision, SourceError
+from origo.sources.contracts import Partition, PartitionPolicy, Revision, Row, SourceError
 from origo.sources.hashing import content_hash, state_token
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.locking import source_lock
@@ -332,6 +332,68 @@ def test_pocs_and_totals_follow_emitted_cells(cube: SourceRuntime, tmp_path: Pat
         assert [(cell['time_index'], cell['price_index'], cell['trade_count']) for cell in free.cells] == [(62, 231, 5)]
         assert free.summary['taker_buy_trade_count'] == 0 and free.summary['taker_buy_volume'] == 0.0
         assert free.summary['taker_buy_poc'] is None and free.summary['poc'] == 28937.5
+
+
+@pytest.mark.parametrize('scenario', [
+    'empty', 'missing_first_day', 'canonical_gap', 'cube_component_gap', 'minute_gap',
+    'contiguous', 'canonical_replacement', 'detail_component_gap',
+])
+@pytest.mark.parametrize('detail', [False, True])
+def test_pin_matches_current_view_for_recorded_coverage(
+    cube: SourceRuntime, monkeypatch: pytest.MonkeyPatch, scenario: str, detail: bool
+) -> None:
+    runtime = cube
+    if scenario == 'cube_component_gap':
+        runtime.build(DAY2)
+    runtime.enable_components('market_state')
+    if scenario != 'detail_component_gap':
+        runtime.enable_components('market_state_detail')
+    if scenario == 'missing_first_day':
+        runtime.build(DAY2)
+    elif scenario in ('canonical_gap', 'cube_component_gap'):
+        runtime.build(DAY1)
+        runtime.build(DAY3)
+    elif scenario == 'minute_gap':
+        built(runtime, DAY1, minutes=(MINUTES[0], MINUTES[2]))
+    elif scenario in ('contiguous', 'canonical_replacement'):
+        built(runtime, DAY1, minutes=MINUTES)
+        if scenario == 'canonical_replacement':
+            runtime.build(DAY2)
+    elif scenario == 'detail_component_gap':
+        runtime.build(DAY1)
+        runtime.enable_components('market_state_detail')
+        runtime.build(DAY2)
+
+    # Both selectors read states built from checksum-proven canonical captures and their
+    # actual provisional minutes, including a canonical day superseding those minutes.
+    current_rows = runtime.store.execute(
+        "SELECT partition_key, provisional, partition_start, partition_end, generation, "
+        "revision, build_id, component_hashes FROM origo.source_current_partitions "
+        "WHERE source_key=%(source)s ORDER BY partition_start, provisional",
+        {'source': runtime.spec.key}, QUERY_SETTINGS,
+    )
+    execute = runtime.store.execute
+    selected: list[Row] = []
+
+    def capture(
+        statement: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[Row]:
+        rows = execute(statement, params, settings)
+        selected.extend(rows)
+        return rows
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime.store, 'execute', capture)
+        actual = pin(runtime.store, QUERY_SETTINGS, detail=detail)
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime.store, 'execute', lambda *args: current_rows)
+        expected = pin(runtime.store, QUERY_SETTINGS, detail=detail)
+    assert selected == current_rows
+    assert actual == expected
+    if scenario == 'detail_component_gap':
+        assert [record.partition.key for record in actual.records] == ([] if detail else [DAY1, DAY2])
+    elif scenario == 'canonical_replacement':
+        assert [record.partition.key for record in actual.records] == [DAY1, DAY2]
 
 
 @pytest.mark.parametrize('scenario', ['missing_first_day', 'interior_day_without_the_cube', 'missing_minute'])

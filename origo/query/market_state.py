@@ -319,9 +319,29 @@ def pin(store: SourceStore, settings: Mapping[str, object], *, detail: bool = Fa
     """Pin the current accepted partitions; coverage ends at the first one without the cube,
     or with ``detail``, the first one without both the cube and its detail component."""
     rows = store.execute(
-        f"""SELECT partition_key, provisional, partition_start, partition_end, generation,
-        revision, build_id, component_hashes
-        FROM {store.table('source_current_partitions')} WHERE source_key=%(source)s
+        f"""WITH covered AS (
+            SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
+                PARTITION BY source_key ORDER BY partition_start, provisional
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS canonical_end
+            FROM {store.table('source_active_partitions')} a WHERE source_key=%(source)s
+        ), eligible AS (
+            SELECT * EXCEPT canonical_end FROM covered
+            WHERE NOT provisional OR partition_start>=canonical_end
+        ), ranked AS (
+            SELECT e.*, anchor, max(partition_end) OVER (
+                PARTITION BY e.source_key ORDER BY partition_start, partition_end
+                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_end
+            FROM eligible e INNER JOIN {store.table('source_anchor_log')} n ON e.source_key=n.source_key
+        ), bounded AS (
+            SELECT *, if(countIf(partition_start>greatest(prior_end, anchor)) OVER (PARTITION BY source_key)=0,
+                max(partition_end) OVER (PARTITION BY source_key),
+                minIf(partition_start, partition_start>greatest(prior_end, anchor))
+                    OVER (PARTITION BY source_key)) AS frontier
+            FROM ranked
+        )
+        SELECT partition_key, provisional, partition_start, partition_end, generation,
+            revision, build_id, component_hashes
+        FROM bounded WHERE NOT provisional OR partition_end<=frontier
         ORDER BY partition_start, provisional""",
         {'source': SOURCE},
         settings,

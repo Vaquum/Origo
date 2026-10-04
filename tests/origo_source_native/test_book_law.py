@@ -21,6 +21,8 @@ from origo.sources.storage import SourceStore
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.law_catalog import build_catalog
 
+from .test_book_sources import book_runtime as book_runtime, _keys
+
 from .test_book_vendor import (
     REAL_HOUR,
     original_vendor_archive as original_vendor_archive,
@@ -169,26 +171,48 @@ def test_hourly_audit_preserves_and_retires_pre_anchor_discovery_evidence(
     assert runtime.store.records(canonical_only=True) == ()
 
 
-def test_native_hourly_backfill_builds_all_projections_before_completion(
-    authoritative_book_runtime: SourceRuntime,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from dagster import Definitions, DagsterInstance
+def test_native_hourly_backfill_orders_completion_after_canonical_build() -> None:
+    from dagster import AssetKey, Definitions
     from origo.sources.bundle import build_source_bundle
 
-    runtime = authoritative_book_runtime
-    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
-    bundle = build_source_bundle(runtime.spec)
-    defs = Definitions(
-        assets=bundle.assets, jobs=bundle.jobs, schedules=bundle.schedules, sensors=bundle.sensors
-    )
-    job = defs.get_job_def(f'backfill_{runtime.spec.key}_source_job')
-    with DagsterInstance.ephemeral() as instance:
-        result = job.execute_in_process(partition_key=REAL_HOUR, instance=instance)
-    assert result.success
-    record = runtime.store.records(canonical_only=True)[0]
-    assert record.partition.key == REAL_HOUR
-    assert {key for key, _ in record.component_hashes} == set(BOOK_COMPONENT_KEYS)
-    assert runtime.store.execute(
-        "SELECT count() FROM origo.source_failure_log WHERE event_type='FAILED'"
-    ) == [(0,)]
+    for spec in (BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
+        bundle = build_source_bundle(spec)
+        defs = Definitions(
+            assets=bundle.assets,
+            jobs=bundle.jobs,
+            schedules=bundle.schedules,
+            sensors=bundle.sensors,
+        )
+        job = defs.get_job_def(f'backfill_{spec.key}_source_job')
+        reconcile = job.asset_layer.asset_graph.get(AssetKey(f'reconcile_{spec.key}_source_origo'))
+        assert AssetKey(f'build_{spec.key}_canonical_revision_origo') in reconcile.parent_keys
+
+
+def test_fresh_book_minute_does_not_hide_a_provisional_gap(book_runtime: SourceRuntime) -> None:
+    runtime = book_runtime
+    record = runtime.build(_keys(runtime)[-1], provisional=True)
+    now = record.partition.end + timedelta(seconds=30)
+    query = law._Queries(runtime.store.client)
+    edges = law._edge(query, 'origo', runtime.spec.key, now)
+    proofs = law._proofs(query, 'origo', runtime.spec.key, str(record.build_id))
+    result = law._r1(query, 'origo', runtime.spec, now, edges, proofs)
+    assert result['status'] == 'FAIL' and result['reason'] == 'reader_book_minutes_missing'
+    assert result['evidence']['age_seconds'] == 30
+    assert result['evidence']['covered_minutes'] == 1
+    missing = result['evidence']['missing_minutes']
+    assert isinstance(missing, int) and missing > 0
+    assert [result['evidence']['rows_' + key] for key in BOOK_COMPONENT_KEYS] == [600, 60, 1, 1]
+
+
+def test_book_tail_proofs_include_distinct_minute_builds(book_runtime: SourceRuntime) -> None:
+    runtime = book_runtime
+    keys = _keys(runtime)
+    first = runtime.build(keys[0], provisional=True)
+    last = runtime.build(keys[-1], provisional=True)
+    assert first.build_id != last.build_id
+    query = law._Queries(runtime.store.client)
+    proofs = law._proofs(query, 'origo', runtime.spec.key, str(last.build_id), first.partition.start)
+    assert {proof.build for proof in proofs if proof.provisional} == {str(first.build_id), str(last.build_id)}
+    now = last.partition.end + timedelta(seconds=30)
+    result = law._r1(query, 'origo', runtime.spec, now, law._edge(query, 'origo', runtime.spec.key, now), proofs)
+    assert result['evidence']['covered_minutes'] == 2

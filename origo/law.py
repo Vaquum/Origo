@@ -183,18 +183,25 @@ class _Proof:
                        raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
 
 
-def _proofs(query: _Queries, database: str, source: str, build: str) -> list[_Proof]:
+def _proofs(query: _Queries, database: str, source: str, build: str,
+            tail_start: datetime | None = None) -> list[_Proof]:
+    selected = '(NOT provisional OR toString(build_id)=%(build)s'
+    if tail_start is not None:
+        selected += ' OR partition_start>=%(tail)s'
+    selected += ')'
+    component_selected = selected.replace('partition_start>=%(tail)s', 'partition_key>=%(tail_key)s')
     rows = query(f"""SELECT a.partition_key, a.provisional, a.partition_start, a.partition_end,
         a.revision, a.build_id, a.component_hashes, p.proofs
         FROM {database}.source_active_partitions a LEFT JOIN (
             SELECT source_key, partition_key, provisional, revision, build_id,
                 groupArray((component, row_count, content_hash, completed_at)) AS proofs
             FROM {database}.source_component_log
-            WHERE source_key=%(source)s AND (NOT provisional OR toString(build_id)=%(build)s)
+            WHERE source_key=%(source)s AND {component_selected}
             GROUP BY source_key, partition_key, provisional, revision, build_id
         ) p USING (source_key, partition_key, provisional, revision, build_id)
-        WHERE source_key=%(source)s AND (NOT provisional OR toString(build_id)=%(build)s)""",
-        {'source': source, 'build': build})
+        WHERE source_key=%(source)s AND {selected}""",
+        {'source': source, 'build': build, 'tail': tail_start,
+         'tail_key': tail_start.strftime('%Y-%m-%dT%H:%M:%SZ') if tail_start is not None else ''})
     return [_Proof.read(row, source) for row in rows]
 
 
@@ -513,7 +520,8 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
         names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
         return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)
-    proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '')
+    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if spec.partitions.interval == 'hour' else None
+    proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '', tail_start)
     def observed(call: Callable[[], PredicateReport]) -> PredicateReport:
         try:
             return call()

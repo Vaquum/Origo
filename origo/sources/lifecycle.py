@@ -807,7 +807,7 @@ class SourceRuntime:
                 component=None if row[4] is None else str(row[4]),
                 event_type='RECOVERED',
                 related_event=row[6],
-                details={'reason': 'superseded by the canonical partition'},
+                details={'reason': 'superseded by the canonical ' + self.spec.partitions.interval},
             )
 
     def _recover_committed_failure(self, record: StateRecord) -> None:

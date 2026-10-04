@@ -146,10 +146,12 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
 
     market, body, _ = original_vendor_archive
     # Delete real checkpoint rows; preserve every update and timestamp.
-    table = pq.read_table(pa.BufferReader(body))
-    update = table.filter(pc.equal(table['event_type'], 'update'))
+    archive = pq.ParquetFile(pa.BufferReader(body))
     path = tmp_path / 'missing-checkpoint.parquet'
-    pq.write_table(update, path)
+    with pq.ParquetWriter(path, archive.schema_arrow, compression='zstd') as writer:
+        for batch in archive.iter_batches(batch_size=vendor.CRYPTOHFT_BATCH_ROWS):
+            table = pa.Table.from_batches([batch])
+            writer.write_table(table.filter(pc.equal(table['event_type'], 'update')))
     with pytest.raises(SourceError) as failure:
         vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
     assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'

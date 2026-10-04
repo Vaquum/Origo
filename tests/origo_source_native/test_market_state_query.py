@@ -425,6 +425,7 @@ def test_pin_reuses_decoding_without_reusing_source_state(
     assert first == second and first.records[0] is second.records[0]
     assert market_state._cached_record.cache_info().hits == len(selections[0])
     assert market_state._cached_record.cache_info().maxsize == 8192
+    assert market_state._record(list(selections[0][0])) == first.records[0]
 
     # Upgrade the actual captured day; the warm decoder must see its new generation and hashes.
     original_day = first.records[0]

@@ -1,3 +1,7 @@
+# v3.32.1
+
+- Compute market-state accepted coverage in one pass when pinning a query, retaining canonical/provisional, gap and component rules while avoiding repeated manifest work.
+
 # v3.32.0
 
 - Add CANARY spot and perpetual Binance book sources from one bounded WebSocket capture per market; native readers and backfills use sealed local minutes without Binance REST polling.

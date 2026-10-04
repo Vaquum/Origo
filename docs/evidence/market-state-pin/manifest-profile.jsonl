@@ -1,0 +1,14 @@
+{"diagnostic_only": true, "kind": "current", "pair": "initial", "ms": 187.59160488843918, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": "initial", "ms": 118.87091398239136, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 0, "ms": 185.38210541009903, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 0, "ms": 105.7593896985054, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 1, "ms": 111.35846376419067, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 1, "ms": 187.59427219629288, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 2, "ms": 183.7514564394951, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 2, "ms": 152.13242173194885, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 3, "ms": 110.0911945104599, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 3, "ms": 175.10442435741425, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 4, "ms": 187.06465512514114, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 4, "ms": 145.00027894973755, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "single_pass", "pair": 5, "ms": 103.84249687194824, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}
+{"diagnostic_only": true, "kind": "current", "pair": 5, "ms": 166.7858362197876, "rows": 3943, "digest": "9ef3ccc66aa0add266fbdc25dd16ca5688e14a48f3c6e95ecc1ed994622f6b25"}

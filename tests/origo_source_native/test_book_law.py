@@ -216,3 +216,34 @@ def test_book_tail_proofs_include_distinct_minute_builds(book_runtime: SourceRun
     now = last.partition.end + timedelta(seconds=30)
     result = law._r1(query, 'origo', runtime.spec, now, law._edge(query, 'origo', runtime.spec.key, now), proofs)
     assert result['evidence']['covered_minutes'] == 2
+
+
+def test_hourly_authority_replaces_overlapping_provisional_book_rows(
+    authoritative_book_runtime: SourceRuntime,
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.adapters.book_vendor import replay_hour
+
+    runtime = authoritative_book_runtime
+    market, body, _ = original_vendor_archive
+    archive = tmp_path / 'original.parquet'
+    archive.write_bytes(body)
+    spool = tmp_path / 'spool'
+    partition = hour_partition(REAL_HOUR)
+    replay_hour(archive, market, partition, spool)
+    monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(spool))
+    minute = runtime.build(partition.start.strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
+    prefix = 'origo.' + runtime.spec.names.prefix
+    assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_current') == [(600,)]
+    assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_latest_current') == [(600,)]
+    canonical = runtime.build(REAL_HOUR)
+    assert runtime.store.records() == (canonical,)
+    assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_current') == [(36000,)]
+    assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_latest_current') == [(0,)]
+    assert runtime.store.execute(
+        f'SELECT count() FROM {prefix}_depth20_latest_revisions WHERE build_id=%(build)s',
+        {'build': minute.build_id},
+    ) == [(600,)]
+    assert runtime.build(REAL_HOUR) == canonical

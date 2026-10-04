@@ -11,6 +11,7 @@ import pytest
 from dagster import AssetKey, DagsterInstance, Definitions
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters.book_local import LocalBookCanonical
 from origo.sources.adapters.book_spool import Market, payload_rows, read_payload, sealed_minutes
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
@@ -48,6 +49,7 @@ def book_runtime(
     spec = replace(
         declared,
         partitions=PartitionPolicy((first - timedelta(days=1)).date()),
+        canonical=LocalBookCanonical(market),
         orchestration=replace(declared.orchestration, retry_count=0),
     )
     monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(tmp_path / 'spool'))
@@ -73,7 +75,7 @@ def _keys(runtime: SourceRuntime) -> tuple[str, ...]:
         root, _market(runtime), datetime(2026, 10, 2, tzinfo=UTC), datetime(2026, 10, 3, tzinfo=UTC)
     )
     return tuple(
-        datetime.fromisoformat(minute['minute_start']).strftime('%Y-%m-%dT%H:%MZ')
+        datetime.fromisoformat(minute['minute_start']).strftime('%Y-%m-%dT%H:%M:%SZ')
         for minute in minutes
     )
 
@@ -369,3 +371,24 @@ def test_spool_accounting_waits_for_payload_cleanup(
             directory = next((root / market).iterdir())
             remove_spool_payloads(root, market, directory)
         assert pending.result(timeout=5) > 0
+
+
+def test_book_worker_uses_the_common_frontier_keys(book_runtime: SourceRuntime) -> None:
+    from origo.workers.provisional import ProvisionalFeed
+    from origo.workers.report import Reporter
+    from origo.workers.dagster_reader import DagsterReader
+    from origo.workers.receipts import ensure_monitoring_tables
+
+    runtime = book_runtime
+    keys = _keys(runtime)
+    assert runtime.spec.provisional is not None
+    now = runtime.spec.provisional.partition(keys[-1]).end + timedelta(seconds=1)
+    ensure_monitoring_tables(runtime.store.client, runtime.store.database)
+    feed = ProvisionalFeed([runtime.spec], publication_root=runtime.lock_root / 'files',
+                           reporter=Reporter('http://127.0.0.1:1'), dagster=DagsterReader('http://127.0.0.1:1'))
+    built, failed = feed._build_intervals(runtime.store, runtime.spec, now)
+    assert built and all(key.endswith(':00Z') for key in built)
+    assert set(keys) <= {record.partition.key for record in runtime.store.records()}
+    # The older unrecorded anchor remains an explicit failed repair, not a tick crash.
+    assert len(failed) == 1
+    assert runtime.store.execute("SELECT uniqExact(error_code) FROM origo.worker_minute_log WHERE status='FAILED'") == [(1,)]

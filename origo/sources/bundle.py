@@ -19,6 +19,7 @@ from dagster import (
     Config,
     DagsterRunStatus,
     DailyPartitionsDefinition,
+    HourlyPartitionsDefinition,
     DataVersion,
     DefaultScheduleStatus,
     DefaultSensorStatus,
@@ -368,8 +369,13 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         check_specs=[AssetCheckSpec(name='source_health', asset=name)]
         if operation == 'reconcile'
         else None,
-        partitions_def=DailyPartitionsDefinition(
-            start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
+        partitions_def=(
+            HourlyPartitionsDefinition(
+                start_date=spec.partitions.first_day.isoformat() + 'T00:00:00Z',
+                fmt='%Y-%m-%dT%H:%M:%SZ', timezone='UTC',
+            ) if spec.partitions.interval == 'hour' else DailyPartitionsDefinition(
+                start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
+            )
         )
         if operation in ('canonical', 'repair', 'certify')
         else None,
@@ -786,6 +792,9 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             return SkipReason(f'{spec.key} is DORMANT.')
         now = context.scheduled_execution_time or datetime.now(UTC)
         partition = spec.canonical.candidate(now)
+        anchor = datetime.combine(spec.partitions.first_day, datetime.min.time(), UTC)
+        if partition.start < anchor:
+            return SkipReason(f'{spec.key} {partition.key} precedes its source calendar.')
         settings = get_clickhouse_settings()
         client = make_clickhouse_client(settings)
         try:

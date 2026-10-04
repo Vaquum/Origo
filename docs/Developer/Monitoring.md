@@ -186,15 +186,15 @@ watchdog's exit is in `origo.container_log`.
 
 ## Reader law page
 
-`/law` opens on Overview: fresh trades, daily archive readiness, historical calendar
+`/law` opens on Overview: fresh sources, authoritative archive readiness, historical calendar
 coverage, depth minutes and market state cube freshness/history. Compact secondary figures show exact-current
 outputs, worker heartbeats, queue, collectors, observed incidents and the core-law
 clear window. Operational checks are separate from data health; healthy heartbeats
 do not prove successful work. Every figure opens its original evidence.
 
 Sources shows each declared source and projection with its consumer outputs. Laws
-shows only the named data laws over 30 UTC days: live trades are fresh, yesterday's
-archive is ready, historical coverage is complete, depth minutes are complete, market state cube is fresh, and market state history is complete.
+shows only the named data laws over 30 UTC days: live sources are fresh, authoritative
+archives are ready, historical coverage is complete, depth minutes are complete, market state cube is fresh, and market state history is complete.
 Required law membership comes from the frozen evaluator inventory through the
 catalog's `law_gate_ids`; missing members remain UNKNOWN. The separate inventory
 guard remains mandatory. Friendly headings are page copy: original descriptors,
@@ -212,11 +212,24 @@ revision-age timeout in the existing policy. Dagit destinations are linked only
 when an operator-facing URL is recorded; otherwise the exact asset/check is text.
 Source/projection inventory comes from source and depth declarations, never UI lists.
 
-`data_current` evaluates R1 (readable selected minute and reader end), C1 (yesterday's
-canonical activation after its market deadline), C2 (older canonical calendar) and D1
+`data_current` evaluates R1 (readable selected minute and reader end), C1 (the latest due
+canonical activation at the source's declared interval), C2 (older canonical calendar) and D1
 (distinct depth minutes with a 60-second delivery grace). Worker liveness cannot make missing reader data green.
 Spot/perp freshness budgets are initially 180/300 seconds. Missing daily archives are
 NOT_DUE before 04:30/10:30 UTC respectively; arrivals are validated immediately.
+The enabled CANARY `binance_spot_book` and `binance_perp_book` are required
+R1/C1/C2 members, using the same detector, observation tape, notifications and
+Overview/Sources/Laws/Recovery views. R1 checks a readable closed minute's physical
+600/60/1/1 rows at the selected revision/build, all four component proofs, freshness
+and missing provisional minutes since accepted hourly authority (bounded to the
+last 24 hours). C1 requires the latest closed hour by minute 15 UTC; C2 counts every
+older distinct authoritative hour from the immutable **2026-10-04 UTC** anchor.
+Missing hourly archives are NOT_DUE before grace, FAIL afterward; unavailable proof
+is UNKNOWN. Neither CANARY rollout nor healthy capture makes missing readers green.
+Sources lists canonical and provisional depth20, depth200 and both minute metrics,
+with activation hash, build identity and data-through evidence. Recovery displays
+hourly authority and hourly coverage counts for books, retaining daily units for trades.
+
 Projection activation is not formal certification approval or a physical full-history audit.
 
 The BTCUSDT market state cube has separate M1/M2 predicates under

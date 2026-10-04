@@ -29,7 +29,7 @@ a visible gap until the applicable limit expires.
 A planned rotation starts after 23 hours, before the provider's 24-hour connection
 limit. The initialized book transfers only after the new stream bridges its last
 update ID; a verified handover makes no REST request. Sampling, local `/top20`
-readers, native minute/day builds, retries, backfills, health and monitoring make
+readers, native minute/hour builds, retries, backfills, health and monitoring make
 zero Binance REST requests. None increases the shared API allowance.
 
 ## Time, completeness and native operations
@@ -49,21 +49,21 @@ status reads load one bounded counter and never scan retained days. Capture reco
 the counter once at startup in a background thread, repairing interrupted writes.
 Acknowledged cleanup cannot race a status read. Readers release that fence after loading one bounded minute payload;
 validation and database insertion cannot block the next capture seal.
-CryptoHFTData history/gap reconstruction belongs to the separate vendor slice;
-this implementation does not claim that recovery is already connected.
+[Hourly CryptoHFTData authority](book_hourly_authority.md) replaces provisional
+minutes, including capture gaps, through the same canonical source activation.
 
 The source's `available` policy exposes verified minutes beyond a gap. Trade
-sources retain their existing `contiguous` policy. Daily canonical activation still
-requires all 1,440 sealed minutes. Each registered source inherits native Dagster
+sources retain their existing `contiguous` policy. Hourly canonical activation requires all
+60 vendor-reconstructed minutes. Each registered source inherits native Dagster
 setup, schedules, sensors, failure records and retry controls. Its independent
 provisional worker builds all four declared projections automatically.
 
 The native jobs are `backfill_binance_spot_book_source_job` and
 `backfill_binance_perp_book_source_job`. Use Jobs and native partition selection for
-all available days, missing/failed days or selected gaps. One launch builds every
+all available hours, missing/failed hours or selected gaps. One launch builds every
 canonical component; retries reuse verified generations. No operator configuration
 text or separate projection launch is needed. The first partition date is the first
-UTC day after the planned deployment and must be checked against the merge date.
+UTC day after the original capture deployment: 2026-10-04, frozen in source code.
 
 ## Local endpoint and monitoring
 
@@ -82,7 +82,9 @@ provider call and mounts no spool. Container health checks process liveness even
 while seed limits or the provider circuit pause acquisition; these conditions remain
 visible as acquisition failures in the monitor and never block deployment recovery. Findings appear in Dagit's existing
 `origo_monitor` checks; minute build receipts and source failures keep their native
-stores. Investigate Dagit, ClickHouse, Docker, then external collectors.
+stores. R1/C1/C2 reader laws are mandatory for both enabled CANARY sources and
+appear in the existing `/law` Overview, Sources, Laws and Recovery views. Investigate
+Dagit, ClickHouse, Docker, then external collectors.
 
 ## Verification and promotion
 
@@ -100,11 +102,11 @@ request budgets and shared cooldown persistence. Wide component hashing uses
 2,048-row pages; a full page of original depth-200 event states measured 67 MiB
 peak query memory (2,245 states, two pages, 65 ms total on the local test instance).
 The regression ceiling is 256 MiB. Trade hash chunk sizes and identities are unchanged. They do not simulate a complete
-UTC day by inventing market rows or moving timestamps. A positive complete-day
-canonical/backfill run uses ordinary accumulated CANARY input after deployment.
+UTC day by inventing market rows or moving timestamps. Positive hourly authority uses original CryptoHFTData files; no new Binance
+recording or multi-day collection is needed.
 
 Promotion and Render retirement require a separate reviewed change and production
-evidence: full-day native GUI success, capture restart and handover, minute
+evidence: hourly native GUI success, capture restart and handover, minute
 publication p95/max, seed/connection demand, 429/418 attribution and existing-feed
 freshness/gap debt against comparable workload. Replay must add zero REST requests.
 Before deployment, record a finite overlap end and candidate stop/retirement policy;

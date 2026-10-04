@@ -214,7 +214,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 
 def build_catalog(deployed_sha: str) -> LawCatalog:
     from origo.law import LAW_ANCHORS, LAW_INVENTORY, MARKET_STATE_SOURCE
-    from origo.sources.adapters.book_local import LocalBookCanonical
+    from origo.sources.adapters.book_local import LocalBookProvisional
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -266,7 +266,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
 
     for spec in SOURCE_REGISTRY:
         key = spec.key
-        local_book = isinstance(spec.canonical, LocalBookCanonical)
+        local_book = isinstance(spec.provisional, LocalBookProvisional)
         nodes: list[ProjectionDescriptor] = [
             {
                 'id': f'{key}:{component.key}',
@@ -432,7 +432,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 evidence='source_capacity_log; source_failure_log',
             )
         for condition, description in (
-            ('canonical_mask', 'Canonical days replace overlapping provisional minutes.'),
+            ('canonical_mask', 'Canonical partitions replace overlapping provisional minutes.'),
             (
                 'first_gap',
                 'Sealed provisional intervals remain readable beyond a gap.'
@@ -805,10 +805,10 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 )
             for condition, owner, description, limits in (
                 (
-                    'daily_grid',
-                    'sources.adapters.book_local:_minutes',
-                    'Canonical UTC days require every sealed minute; gaps cannot activate partial canonical data.',
-                    {'minutes': 1440},
+                    'hourly_grid',
+                    'sources.adapters.book_vendor:replay_hour',
+                    'Canonical vendor UTC hours require all 60 validated minutes; gaps cannot activate partial authoritative data.',
+                    {'minutes': 60},
                 ),
                 (
                     'sealed_payload',
@@ -1046,21 +1046,22 @@ def _operational_gates(add: _AddGate) -> None:
         if spec.key not in anchors:
             continue
         market = 'SPOT' if '_spot_' in spec.key else 'PERP'
+        hourly = spec.partitions.interval == 'hour'
         deadline = cast(tuple[int, int], _resolve(f'law:C1_{market}_DEADLINE'))
         for predicate, condition, thresholds in (
             (
                 'R1',
-                'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
+                'Reader age must be within budget and the selected fully closed covered minute must contain every required book grid.' if hourly else 'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
                 {'budget_seconds': _threshold(f'law:R1_{market}_BUDGET_SECONDS')},
             ),
             (
                 'C1',
-                'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'The latest closed UTC hour must have complete validated vendor canonical proofs; absence is NOT_DUE before delivery grace and FAIL afterward.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The frozen anchor through the hour before the latest closed hour must contain every distinct canonical hour and active component proof.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):
@@ -1129,7 +1130,7 @@ def _operational_gates(add: _AddGate) -> None:
         [],
         'law:evaluate',
         'Core law coverage observation',
-        'Frozen law members remain required; every LIVE registered source needs an explicit law mapping.',
+        'Frozen law members remain required; every enabled registered source needs an explicit law mapping.',
         role='observe',
         cadence='periodic',
         evidence='registry; law sample',

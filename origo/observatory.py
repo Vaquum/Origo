@@ -144,8 +144,8 @@ class NotificationTransition(TypedDict):
 
 
 LAW_NAMES: dict[str, str] = {
-    'R1': 'Live trades are fresh',
-    'C1': 'Yesterday’s archive is ready',
+    'R1': 'Live source data is fresh',
+    'C1': 'Authoritative archives are ready',
     'C2': 'Historical coverage is complete',
     'D1': 'Depth minutes are complete',
     'M1': 'Market state cube is fresh',
@@ -153,7 +153,7 @@ LAW_NAMES: dict[str, str] = {
 }
 LAW_COPY: dict[str, str] = {
     'R1': 'Checks the selected reader frontier and actual rows in its closed minute.',
-    'C1': 'Checks yesterday’s validated archive against its recorded delivery deadline.',
+    'C1': 'Checks each source’s latest validated daily or hourly archive against its recorded delivery deadline.',
     'C2': 'Checks the historical calendar and anchor using canonical proofs, not a physical full-history scan.',
     'D1': 'Counts distinct depth minutes in the checked rolling day, with the recorded grace and missing-minute allowance.',
     'M1': 'Checks activated cube evidence and matching trade and taker-buy counts in the selected reader window.',
@@ -396,7 +396,7 @@ def measurement_trend(current: NotificationObservation, current_at: str,
     if not current['complete'] or not previous['complete']:
         return unavailable_trend('incomplete_endpoints')
     family = current['check'].removeprefix('law.').split(':', 1)[0]
-    metric = 'missing_slots' if family == 'D1' else 'age_seconds' if family in ('R1', 'M1') else 'valid_days' if family in ('C2', 'M2') else ''
+    metric = 'missing_slots' if family == 'D1' else 'age_seconds' if family in ('R1', 'M1') else ('valid_hours' if any(m['name'] == 'valid_hours' for m in current['measurements']) else 'valid_days') if family in ('C2', 'M2') else ''
     left = next((item for item in previous['measurements'] if item['name'] == metric), None)
     right = next((item for item in current['measurements'] if item['name'] == metric), None)
     if not metric or left is None or right is None or left['value'] is None or right['value'] is None:
@@ -412,10 +412,10 @@ def measurement_trend(current: NotificationObservation, current_at: str,
                        f"{right.get('window_start') or 'Start not recorded'} → {right.get('window_end')}. "
                        'Repair versus old gaps leaving the window cannot be determined from these counts.')
     elif family in ('C2', 'M2'):
-        description = f'{delta:+g} validated days in the checked calendar · point-to-point observation; this does not establish recovery.'
+        description = f'{delta:+g} validated {"hours" if metric == "valid_hours" else "days"} in the checked calendar · point-to-point observation; this does not establish recovery.'
     else:
         description = ('0s · unchanged' if delta == 0 else f"{'−' if delta < 0 else '+'}{duration(abs(delta))} · {'less lag' if delta < 0 else 'more lag'}") + ' · point-to-point observation'
-    return {'value': delta, 'unit': 'minutes' if family == 'D1' else 'days' if family in ('C2', 'M2') else 'seconds', 'current_at': current_at,
+    return {'value': delta, 'unit': 'minutes' if family == 'D1' else ('hours' if metric == 'valid_hours' else 'days') if family in ('C2', 'M2') else 'seconds', 'current_at': current_at,
             'previous_at': previous_at, 'description': description, 'unavailable_reason': None}
 
 
@@ -887,6 +887,7 @@ def measurement_label(name: str) -> str:
         'expected_slots': 'Checked minutes', 'raw_proof_rows': 'Recorded source rows',
         'day_count': 'Recorded days', 'expected_days': 'Expected days', 'valid_days': 'Validated days',
         'missing_days': 'Missing days', 'unknown_days': 'Unverified days',
+        'expected_hours': 'Expected hours', 'valid_hours': 'Validated hours', 'missing_hours': 'Missing hours', 'first_invalid_hour': 'First invalid hour', 'hour': 'Authoritative hour', 'canonical_interval': 'Authority interval',
         'queued_runs': 'Queued runs', 'queue_threshold': 'Queue threshold',
         'unhealthy_daemons': 'Unhealthy daemons', 'workers_fresh': 'Fresh worker heartbeats',
         'workers_expected': 'Expected workers', 'workers_unknown': 'Unverified workers',

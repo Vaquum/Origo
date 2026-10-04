@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from dagster import AssetsDefinition, JobDefinition, ScheduleDefinition, SensorDefinition
@@ -157,6 +157,7 @@ class SourceNames:
 @dataclass(frozen=True)
 class PartitionPolicy:
     first_day: date
+    interval: Literal['day', 'hour'] = 'day'
 
 
 @dataclass(frozen=True)

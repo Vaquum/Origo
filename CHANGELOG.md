@@ -1,3 +1,9 @@
+# v3.33.0
+
+- Add CryptoHFTData hourly authority to the existing native spot/perpetual book sources; canonical hours atomically replace provisional minutes across all four projections without Binance requests.
+- Require CANARY book R1 freshness/completeness, C1 hourly authority and C2 historical coverage in the existing monitor and `/law` views, with exact component activation evidence.
+- Fix the book provisional key format used by the common minute worker and retire pre-anchor canonical discovery attempts without deleting their failure evidence.
+
 # v3.32.1
 
 - Compute market-state accepted coverage in one pass when pinning a query, retaining canonical/provisional, gap and component rules while avoiding repeated manifest work.

@@ -10,6 +10,7 @@ import math
 import os
 import random
 import time
+from bisect import bisect_left, insort
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -64,7 +65,7 @@ log = logging.getLogger(__name__)
 Level = tuple[Decimal, Decimal]
 
 
-def _integer(value: object) -> int:
+def parse_book_integer(value: object) -> int:
     if type(value) is not int or value < 0:
         raise ValueError('Book clocks and update IDs require nonnegative integers.')
     return value
@@ -109,10 +110,10 @@ class DepthEvent:
         if value.get('e') != 'depthUpdate' or value.get('s') != 'BTCUSDT':
             raise ValueError('The capture owns BTCUSDT diff-depth events only.')
         event = cls(
-            _integer(value.get('E')),
-            _integer(value.get('U')),
-            _integer(value.get('u')),
-            _integer(value.get('pu')) if market == 'perp' else None,
+            parse_book_integer(value.get('E')),
+            parse_book_integer(value.get('U')),
+            parse_book_integer(value.get('u')),
+            parse_book_integer(value.get('pu')) if market == 'perp' else None,
             _levels(value.get('b'), zeros=True),
             _levels(value.get('a'), zeros=True),
         )
@@ -125,7 +126,7 @@ class DiffBook:
     def __init__(self, market: Market, seed: bytes) -> None:
         self.market = market
         value = object_mapping(json.loads(seed))
-        self.last = _integer(value.get('lastUpdateId'))
+        self.last = parse_book_integer(value.get('lastUpdateId'))
         bids, asks = (_levels(value.get(side), zeros=False) for side in ('bids', 'asks'))
         if len(bids) < 200 or len(asks) < 200:
             raise SourceError('BOOK_SEED_TOO_SHALLOW', 'Seed does not prove a 200-level book.')
@@ -133,6 +134,8 @@ class DiffBook:
             raise ValueError('Seed levels are not strictly ordered.')
         self.bids = dict(bids)
         self.asks = dict(asks)
+        self.bid_prices = [price for price, _ in reversed(bids)]
+        self.ask_prices = [price for price, _ in asks]
         self.bid_floor, self.ask_ceiling = bids[-1][0], asks[-1][0]
         self.event_ms: int | None = None
         self.verified = False
@@ -161,8 +164,8 @@ class DiffBook:
     def top(self, depth: int) -> tuple[tuple[Level, ...], tuple[Level, ...]]:
         if self.cached is not None and depth <= 200:
             return self.cached[0][:depth], self.cached[1][:depth]
-        bids = tuple(sorted(self.bids.items(), reverse=True)[:depth])
-        asks = tuple(sorted(self.asks.items())[:depth])
+        bids = tuple((p, self.bids[p]) for p in reversed(self.bid_prices[-depth:]))
+        asks = tuple((p, self.asks[p]) for p in self.ask_prices[:depth])
         if (
             len(bids) != depth
             or len(asks) != depth
@@ -197,10 +200,14 @@ class DiffBook:
                     side is self.asks and price > self.ask_ceiling
                 ):
                     continue
+                prices = self.bid_prices if side is self.bids else self.ask_prices
                 if quantity:
+                    if price not in side:
+                        insort(prices, price)
                     side[price] = quantity
-                else:
-                    side.pop(price, None)
+                elif price in side:
+                    del side[price]
+                    prices.pop(bisect_left(prices, price))
         self.last, self.event_ms = event.last, event.event_ms
         try:
             self.top(200)
@@ -239,6 +246,21 @@ class BookSampler:
     def seed(self, payload: bytes) -> None:
         self.invalidate()
         self.book = DiffBook(self.market, payload)
+
+    def checkpoint(self, payload: bytes, event_ms: int, start_ms: int) -> None:
+        """Accept an archive's exchange-clock checkpoint without a REST seed."""
+        if self.book is not None and self.book.verified:
+            self._sample_until(event_ms)
+        self.seed(payload)
+        assert self.book is not None
+        self.book.top(200)
+        self.book.event_ms, self.book.verified = event_ms, True
+        self.next_grid = max(start_ms, ((event_ms + 99) // 100) * 100)
+
+    def finish(self, end_ms: int) -> None:
+        """Close a proven archive watermark through the same sampling/sealing path."""
+        self._sample_until(end_ms)
+        self._seal()
 
     def _seal(self) -> None:
         book = self.book
@@ -382,7 +404,7 @@ class AttemptBudget:
             ):
                 raise ValueError('Persisted book attempt timestamps are invalid.')
         for name in ('seed_weight', 'seed_total', 'connection_total'):
-            _integer(value.get(name))
+            parse_book_integer(value.get(name))
         return value
 
     def _reserve(self, kind: str) -> dict[str, object]:
@@ -404,9 +426,9 @@ class AttemptBudget:
             )
         value[kind] = [*stamps, now]
         total = f'{kind}_total'
-        value[total] = _integer(value[total]) + 1
+        value[total] = parse_book_integer(value[total]) + 1
         if kind == 'seed':
-            value['seed_weight'] = _integer(value['seed_weight']) + BOOK_SEED_WEIGHT[self.market]
+            value['seed_weight'] = parse_book_integer(value['seed_weight']) + BOOK_SEED_WEIGHT[self.market]
         value['last_error'] = None
         atomic_write(self.path, json.dumps(value, separators=(',', ':'), allow_nan=False).encode())
         return value

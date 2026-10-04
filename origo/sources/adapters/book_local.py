@@ -45,7 +45,7 @@ def _revision_key(minutes: tuple[SealedMinute, ...]) -> str:
     return 'local-book-v1:' + hashlib.sha256(payload).hexdigest()
 
 
-def _fetch(root: Path, market: Market, partition: Partition) -> Revision:
+def fetch_sealed_partition(root: Path, market: Market, partition: Partition) -> Revision:
     minutes = _minutes(root, market, partition)
     key = _revision_key(minutes)
 
@@ -66,7 +66,19 @@ def _fetch(root: Path, market: Market, partition: Partition) -> Revision:
 
 
 def _acknowledge(root: Path, market: Market, covered: tuple[Partition, ...], now: datetime) -> None:
-    for day in covered:
+    # Hourly authority can replace missing local minutes. Payload cleanup still
+    # waits for an entire accepted day, preserving every uncovered hour.
+    canonical = sorted((p for p in covered if not p.provisional), key=lambda p: p.start)
+    days: list[Partition] = []
+    for start in sorted({p.start.replace(hour=0, minute=0, second=0, microsecond=0) for p in canonical}):
+        end = start + timedelta(days=1)
+        frontier = start
+        for part in canonical:
+            if part.start <= frontier < part.end:
+                frontier = min(end, part.end)
+        if frontier == end:
+            days.append(Partition(start.date().isoformat(), start, end))
+    for day in days:
         if day.provisional or day.end > now - timedelta(days=2):
             continue
         directory = root / market / day.start.strftime('%Y-%m-%d')
@@ -79,7 +91,7 @@ def _acknowledge(root: Path, market: Market, covered: tuple[Partition, ...], now
             prior = object_mapping(json.loads(raw))
             if prior.get('cleanup_complete') is True:
                 continue
-        minutes = _minutes(root, market, day)
+        minutes = sealed_minutes(root, market, day.start, day.end)
         with source_lock(root, f'book_spool_{market}', 'sealed', wait=True):
             # Only accepted canonical coverage permits payload deletion. Keep immutable seals
             # so retries can identify and revalidate the retained native generation.
@@ -112,7 +124,7 @@ class LocalBookCanonical:
         return _revision_key(_minutes(book_root(), self.market, partition))
 
     def fetch(self, partition: Partition) -> Revision:
-        return _fetch(book_root(), self.market, partition)
+        return fetch_sealed_partition(book_root(), self.market, partition)
 
     def revalidate(self, partition: Partition, revision: Revision) -> None:
         if self.discover(partition) != revision.key:
@@ -166,16 +178,16 @@ class LocalBookProvisional:
                     if day + timedelta(days=1) > anchor
                 )
         return tuple(
-            self.partition(start.strftime('%Y-%m-%dT%H:%MZ'))
+            self.partition(start.strftime('%Y-%m-%dT%H:%M:%SZ'))
             for start in sorted(starts)
             if not any(interval.start <= start < interval.end for interval in covered)
         )
 
     def partition(self, key: str) -> Partition:
-        start = datetime.strptime(key, '%Y-%m-%dT%H:%MZ').replace(tzinfo=UTC)
-        if start.strftime('%Y-%m-%dT%H:%MZ') != key:
+        start = datetime.strptime(key, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
+        if start.strftime('%Y-%m-%dT%H:%M:%SZ') != key or start.second:
             raise ValueError('Provisional book keys require an exact UTC minute.')
         return Partition(key, start, start + timedelta(minutes=1), provisional=True)
 
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
-        return _fetch(book_root(), self.market, partition)
+        return fetch_sealed_partition(book_root(), self.market, partition)

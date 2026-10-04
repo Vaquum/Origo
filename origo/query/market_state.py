@@ -339,7 +339,7 @@ def pin(store: SourceStore, settings: Mapping[str, object], *, detail: bool = Fa
                     OVER (PARTITION BY source_key)) AS frontier
             FROM ranked
         )
-        SELECT partition_key, provisional, partition_start, partition_end, generation,
+        SELECT DISTINCT partition_key, provisional, partition_start, partition_end, generation,
             revision, build_id, component_hashes
         FROM bounded WHERE NOT provisional OR partition_end<=frontier
         ORDER BY partition_start, provisional""",

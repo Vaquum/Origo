@@ -336,7 +336,7 @@ def test_pocs_and_totals_follow_emitted_cells(cube: SourceRuntime, tmp_path: Pat
 
 @pytest.mark.parametrize('scenario', [
     'empty', 'missing_first_day', 'canonical_gap', 'cube_component_gap', 'minute_gap',
-    'contiguous', 'canonical_replacement', 'detail_component_gap',
+    'contiguous', 'canonical_replacement', 'detail_component_gap', 'repeated_anchor',
 ])
 @pytest.mark.parametrize('detail', [False, True])
 def test_pin_matches_current_view_for_recorded_coverage(
@@ -355,7 +355,7 @@ def test_pin_matches_current_view_for_recorded_coverage(
         runtime.build(DAY3)
     elif scenario == 'minute_gap':
         built(runtime, DAY1, minutes=(MINUTES[0], MINUTES[2]))
-    elif scenario in ('contiguous', 'canonical_replacement'):
+    elif scenario in ('contiguous', 'canonical_replacement', 'repeated_anchor'):
         built(runtime, DAY1, minutes=MINUTES)
         if scenario == 'canonical_replacement':
             runtime.build(DAY2)
@@ -363,6 +363,12 @@ def test_pin_matches_current_view_for_recorded_coverage(
         runtime.build(DAY1)
         runtime.enable_components('market_state_detail')
         runtime.build(DAY2)
+
+    if scenario == 'repeated_anchor':
+        runtime.store.execute(
+            "INSERT INTO origo.source_anchor_log SELECT * FROM origo.source_anchor_log "
+            "WHERE source_key=%(source)s", {'source': runtime.spec.key},
+        )
 
     # Both selectors read states built from checksum-proven canonical captures and their
     # actual provisional minutes, including a canonical day superseding those minutes.
@@ -1048,7 +1054,10 @@ def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, 
     for name, fields in requests.items():
         for absent in ({}, {'measures': None}, {'measures': []}):
             result = run(runtime, tmp_path, **fields, **absent)
-            assert statement_hashes(result.staging.name) == _V3_27_2_STATEMENTS[name], (name, absent)
+            # Only the coverage pin changed in #501; every data/validation statement is frozen.
+            expected = ['c568497fd23856869d2687d89c5f456f0a5c67309b2006cb8dc0ab879f64d1b8',
+                        *_V3_27_2_STATEMENTS[name][1:]]
+            assert statement_hashes(result.staging.name) == expected, (name, absent)
             for file, schema in (('cells.arrow', CELLS_SCHEMA), ('summary.arrow', SUMMARY_SCHEMA)):
                 assert ipc.open_file(result.staging / file).schema.remove_metadata() == schema
                 meta = metadata(result.staging / file)

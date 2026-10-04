@@ -402,6 +402,52 @@ def test_pin_matches_current_view_for_recorded_coverage(
         assert [record.partition.key for record in actual.records] == [DAY1, DAY2]
 
 
+def test_pin_reuses_decoding_without_reusing_source_state(
+    cube: SourceRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = built(cube, DAY1, minutes=MINUTES)
+    market_state._cached_record.cache_clear()
+    execute = runtime.store.execute
+    selections: list[list[Row]] = []
+
+    def capture(
+        statement: str, params: object | None = None, settings: Mapping[str, object] | None = None
+    ) -> list[Row]:
+        rows = execute(statement, params, settings)
+        selections.append(rows)
+        return rows
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime.store, 'execute', capture)
+        first = pin(runtime.store, QUERY_SETTINGS)
+        second = pin(runtime.store, QUERY_SETTINGS)
+    assert len(selections) == 2 and selections[0] == selections[1]
+    assert first == second and first.records[0] is second.records[0]
+    assert market_state._cached_record.cache_info().hits == len(selections[0])
+    assert market_state._cached_record.cache_info().maxsize == 8192
+    assert market_state._record(list(selections[0][0])) == first.records[0]
+
+    # Upgrade the actual captured day; the warm decoder must see its new generation and hashes.
+    original_day = first.records[0]
+    runtime.enable_components('market_state_detail')
+    runtime.upgrade_components(DAY1)
+    upgraded = pin(runtime.store, QUERY_SETTINGS, detail=True)
+    assert upgraded.records[0] is not original_day
+    assert upgraded.records[0].generation > original_day.generation
+    assert 'market_state_detail' not in dict(original_day.component_hashes)
+    assert 'market_state_detail' in dict(upgraded.records[0].component_hashes)
+    assert upgraded.cutoff == datetime(2021, 1, 2, tzinfo=UTC)
+
+    # Canonical acceptance replaces the already cached provisional minutes immediately.
+    runtime.build(DAY2)
+    canonical = pin(runtime.store, QUERY_SETTINGS, detail=True)
+    assert [record.partition.key for record in canonical.records] == [DAY1, DAY2]
+    assert canonical.cutoff == datetime(2021, 1, 3, tzinfo=UTC)
+    assert not any(record.partition.provisional for record in canonical.records)
+    market_state._cached_record.cache_clear()
+    assert pin(runtime.store, QUERY_SETTINGS, detail=True) == canonical
+
+
 @pytest.mark.parametrize('scenario', ['missing_first_day', 'interior_day_without_the_cube', 'missing_minute'])
 def test_coverage_starts_at_2021_and_stops_at_the_first_gap(
     cube: SourceRuntime, tmp_path: Path, scenario: str

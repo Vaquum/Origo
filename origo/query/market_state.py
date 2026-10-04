@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
+from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from typing import Final, Protocol, TypeAlias, cast
@@ -348,7 +349,7 @@ def pin(store: SourceStore, settings: Mapping[str, object], *, detail: bool = Fa
     )
     cursor = canonical_through = CUBE_START
     pinned: list[StateRecord] = []
-    for record in (_record(row) for row in rows):
+    for record in (_cached_record(row) for row in rows):
         if record.partition.end <= CUBE_START:
             continue
         provisional = record.partition.provisional
@@ -1029,6 +1030,10 @@ def _record(row: Sequence[object]) -> StateRecord:
         UUID(str(build_id)),
         tuple(sorted(pairs)),
     )
+
+
+# Pin selects fresh rows on every request; only their immutable decoding is cached.
+_cached_record = lru_cache(maxsize=8192)(_record)
 
 
 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:

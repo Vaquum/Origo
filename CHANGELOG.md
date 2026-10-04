@@ -4,6 +4,10 @@
 - Require CANARY book R1 freshness/completeness, C1 hourly authority and C2 historical coverage in the existing monitor and `/law` views, with exact component activation evidence.
 - Fix the book provisional key format used by the common minute worker and retire pre-anchor canonical discovery attempts without deleting their failure evidence.
 
+# v3.32.2
+
+- Reuse immutable market-state record decoding in a bounded full-row cache while selecting current coverage on every query.
+
 # v3.32.1
 
 - Compute market-state accepted coverage in one pass when pinning a query, retaining canonical/provisional, gap and component rules while avoiding repeated manifest work.

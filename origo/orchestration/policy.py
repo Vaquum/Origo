@@ -95,7 +95,7 @@ def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
         MAINTENANCE_JOB,
     }
     daily = re.fullmatch(r'\d{4}-\d{2}-\d{2}', run.tags.get('dagster/partition', '')) is not None
-    canonical = daily or (run.tags.get('origo_source_operation') == 'canonical' and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:00:00Z', run.tags.get('dagster/partition', '')) is not None)
+    canonical = daily or (run.tags.get('origo_source_operation') == 'canonical' and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}Z', run.tags.get('dagster/partition', '')) is not None)
     default_runtime = str(SHORT_JOB_MAX_RUNTIME_SECONDS if short_job and not bulk else DEFAULT_JOB_MAX_RUNTIME_SECONDS)
     requested_runtime = run.tags.get('dagster/max_runtime', default_runtime)
     maintenance = run.job_name == MAINTENANCE_JOB and not bulk

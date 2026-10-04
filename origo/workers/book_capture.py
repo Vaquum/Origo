@@ -250,12 +250,13 @@ class BookSampler:
     def checkpoint(self, payload: bytes, event_ms: int, start_ms: int) -> None:
         """Accept an archive's exchange-clock checkpoint without a REST seed."""
         if self.book is not None and self.book.verified:
+            if self.book.event_ms is not None and event_ms < self.book.event_ms:
+                raise SourceError('BOOK_VENDOR_ORDERING', 'Archive checkpoint clock moved backward.')
             self._sample_until(event_ms)
-        self.seed(payload)
-        assert self.book is not None
+        self.book = DiffBook(self.market, payload)
         self.book.top(200)
         self.book.event_ms, self.book.verified = event_ms, True
-        self.next_grid = max(start_ms, ((event_ms + 99) // 100) * 100)
+        self.next_grid = max(self.next_grid or start_ms, start_ms, ((event_ms + 99) // 100) * 100)
 
     def finish(self, end_ms: int) -> None:
         """Close a proven archive watermark through the same sampling/sealing path."""

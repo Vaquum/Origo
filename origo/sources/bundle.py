@@ -371,8 +371,8 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         else None,
         partitions_def=(
             HourlyPartitionsDefinition(
-                start_date=spec.partitions.first_day.isoformat() + 'T00:00:00Z',
-                fmt='%Y-%m-%dT%H:%M:%SZ', timezone='UTC',
+                start_date=spec.partitions.first_day.isoformat() + 'T00Z',
+                fmt='%Y-%m-%dT%HZ', timezone='UTC',
             ) if spec.partitions.interval == 'hour' else DailyPartitionsDefinition(
                 start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
             )
@@ -386,7 +386,8 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         deps=(
             [AssetDep(f'build_{spec.key}_canonical_revision_origo')]
             if operation.startswith('consumer_')
-            else [AssetDep(f'publish_{spec.key}_{c.key}') for c in spec.consumers]
+            else ([AssetDep(f'publish_{spec.key}_{c.key}') for c in spec.consumers]
+                  or [AssetDep(f'build_{spec.key}_canonical_revision_origo')])
             if operation == 'reconcile'
             else None
         ),

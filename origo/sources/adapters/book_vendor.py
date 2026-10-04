@@ -24,7 +24,7 @@ CRYPTOHFT_BATCH_ROWS = 8192
 # keep both sources together below the vendor's anonymous 60 requests/minute.
 CRYPTOHFT_REQUEST_WEIGHT = 40
 BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 15 * 60
-HOUR_KEY_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
+HOUR_KEY_FORMAT = '%Y-%m-%dT%HZ'
 _COLUMNS = (
     'received_time',
     'event_time',

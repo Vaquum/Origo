@@ -41,6 +41,9 @@ exposes `backfill_binance_spot_book_source_job` and
 Select hours, missing/failed partitions, or retries; every launch builds all four
 canonical projections and runs ordinary completion checks.
 
+Canonical keys use `YYYY-MM-DDTHHZ`, distinct from the shared second-qualified
+provisional minute keys, so activation and failure recovery cannot collide.
+
 The immutable source/history anchor is **2026-10-04 00:00 UTC**. Older vendor
 history is not admitted by this calendar. The audit ignores requests before that
 anchor and appends a recovery reason to their prior failures, retaining the events.

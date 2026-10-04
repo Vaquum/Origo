@@ -301,7 +301,7 @@ def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     report = _calendar(proofs, slot, source)
     unit = 'hour' if hourly else 'day'
-    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or slot.date() < LAW_ANCHORS[source]):
+    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot.date() < LAW_ANCHORS[source])):
         report = _result('NOT_DUE', 'archive_not_due')
     report['evidence'].update({unit: slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat(), 'deadline': deadline.isoformat(), 'canonical_interval': unit})
     return report

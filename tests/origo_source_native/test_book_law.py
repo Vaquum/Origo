@@ -146,3 +146,49 @@ def test_book_sources_are_required_hourly_reader_laws() -> None:
             'delivery_grace_seconds': 900,
             'canonical_interval': 'hour',
         }
+
+
+def test_hourly_audit_preserves_and_retires_pre_anchor_discovery_evidence(
+    authoritative_book_runtime: SourceRuntime,
+) -> None:
+    runtime = authoritative_book_runtime
+    key = '2026-10-03'
+    runtime.store.execute(
+        'INSERT INTO origo.source_discovery_log VALUES',
+        [(runtime.spec.key, key, datetime.now(UTC))],
+    )
+    runtime.failures.record(
+        operation='discovery', partition=key, error_code='BOOK_MINUTES_MISSING', scope='PARTITION'
+    )
+    assert runtime.audit() == ()
+    assert runtime.store.execute(
+        'SELECT event_type FROM origo.source_failure_log WHERE source_key=%(source)s AND partition_key=%(key)s ORDER BY event_time',
+        {'source': runtime.spec.key, 'key': key},
+    ) == [('FAILED',), ('RECOVERED',)]
+    assert runtime.store.execute('SELECT partition_key FROM origo.source_discovery_log') == [(key,)]
+    assert runtime.store.records(canonical_only=True) == ()
+
+
+def test_native_hourly_backfill_builds_all_projections_before_completion(
+    authoritative_book_runtime: SourceRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dagster import Definitions, DagsterInstance
+    from origo.sources.bundle import build_source_bundle
+
+    runtime = authoritative_book_runtime
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
+    bundle = build_source_bundle(runtime.spec)
+    defs = Definitions(
+        assets=bundle.assets, jobs=bundle.jobs, schedules=bundle.schedules, sensors=bundle.sensors
+    )
+    job = defs.get_job_def(f'backfill_{runtime.spec.key}_source_job')
+    with DagsterInstance.ephemeral() as instance:
+        result = job.execute_in_process(partition_key=REAL_HOUR, instance=instance)
+    assert result.success
+    record = runtime.store.records(canonical_only=True)[0]
+    assert record.partition.key == REAL_HOUR
+    assert {key for key, _ in record.component_hashes} == set(BOOK_COMPONENT_KEYS)
+    assert runtime.store.execute(
+        "SELECT count() FROM origo.source_failure_log WHERE event_type='FAILED'"
+    ) == [(0,)]

@@ -20,7 +20,7 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
-REAL_HOUR = '2026-10-04T09:00:00Z'
+REAL_HOUR = '2026-10-04T09Z'
 
 
 @pytest.fixture(scope='session', params=['spot', 'perp'])
@@ -118,12 +118,19 @@ def test_hourly_book_partitions_reuse_native_source_jobs() -> None:
                 .candidate(datetime(2026, 10, 4, 10, 15, tzinfo=UTC))
                 .key
             )
-            == 20
+            == 14
         )
 
 
 @pytest.mark.parametrize(
-    'key', ['2026-10-04', '2026-10-04T09:01:00Z', '2026-10-04T09:00Z', '2026-10-04T09:00:01Z']
+    'key',
+    [
+        '2026-10-04T09:00:00Z',
+        '2026-10-04',
+        '2026-10-04T09:01:00Z',
+        '2026-10-04T09:00Z',
+        '2026-10-04T09:00:01Z',
+    ],
 )
 def test_hourly_adapter_rejects_nonhour_keys(key: str) -> None:
     with pytest.raises(ValueError):
@@ -171,3 +178,15 @@ def original_vendor_revision(
             vendor.hour_partition(REAL_HOUR)
         )
     return market, revision
+
+
+def test_hourly_and_provisional_keys_cannot_share_partition_identity() -> None:
+    for spec in (BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
+        canonical = spec.canonical.partition(REAL_HOUR)
+        assert spec.provisional is not None
+        minute = spec.provisional.partition(canonical.start.strftime('%Y-%m-%dT%H:%M:%SZ'))
+        assert minute.start == canonical.start and minute.key != canonical.key
+        with pytest.raises(ValueError):
+            spec.provisional.partition(canonical.key)
+        with pytest.raises(ValueError):
+            spec.canonical.partition(minute.key)

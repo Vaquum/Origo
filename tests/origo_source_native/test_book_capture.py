@@ -316,7 +316,7 @@ def test_sampling_readers_local_replay_and_verified_handover_make_no_rest_reques
         for _ in range(100):
             assert sampler.top20(sampler.last_received)['t']
     monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(tmp_path))
-    key = (sampler.last_seal - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%MZ')
+    key = (sampler.last_seal - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     provisional = LocalBookProvisional(market)
     assert len(tuple(provisional.fetch(provisional.partition(key)).rows())) == 660
     with pytest.raises(SourceError) as missing:
@@ -530,7 +530,7 @@ def test_provisional_admission_waits_for_actual_seals(
     assert len(minutes) == 2
     adapter = LocalBookProvisional(market)
     monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(sampler.root))
-    keys = tuple(datetime.fromisoformat(m['minute_start']).strftime('%Y-%m-%dT%H:%MZ') for m in minutes)
+    keys = tuple(datetime.fromisoformat(m['minute_start']).strftime('%Y-%m-%dT%H:%M:%SZ') for m in minutes)
     # The just-closed unsealed minute and every earlier capture gap stay ineligible.
     for now in (sampler.last_seal + timedelta(minutes=1), sampler.last_seal + timedelta(hours=37)):
         assert tuple(p.key for p in adapter.candidates(now, day, ())) == keys

@@ -556,9 +556,35 @@ class SourceRuntime:
                 self.failures.recover(operation='rollback', partition=record.partition.key)
                 return restored
 
+    def _retire_obsolete_requests(self) -> None:
+        """Retain failures for requests outside the current canonical calendar."""
+        rows = self.store.execute(
+            f"""SELECT any(operation), argMax(error_code, event_time),
+            argMax(partition_key, event_time), argMax(blocking_scope, event_time),
+            argMax(event_id, event_time)
+            FROM {self.store.table('source_failure_log')}
+            WHERE source_key=%(source)s AND (partition_key < %(first)s
+              OR (%(hourly)s AND length(partition_key)=10))
+              AND operation IN ('canonical', 'discovery', 'audit')
+            GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
+            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
+             'hourly': self.spec.partitions.interval == 'hour'},
+        )
+        for operation, code, key, scope, event in rows:
+            if not isinstance(event, UUID):
+                raise TypeError('Calendar retirement requires a concrete failure event.')
+            self.failures.record(
+                operation=str(operation), error_code=str(code), partition=str(key),
+                scope=str(scope), event_type='RECOVERED', related_event=event,
+                details={'reason': 'request precedes the declared source calendar'
+                         if str(key) < self.spec.partitions.first_day.isoformat()
+                         else 'daily request superseded by the hourly canonical calendar'},
+            )
+
     def audit(self) -> tuple[str, ...]:
         self.spec.require_enabled('audit')
         self.require_shared_mount()
+        self._retire_obsolete_requests()
         records = self.store.records(canonical_only=True)
         changed: list[str] = []
         cutoff = datetime.now(UTC) - timedelta(days=14)
@@ -570,11 +596,13 @@ class SourceRuntime:
         )
         pending = self.store.execute(
             f"""SELECT partition_key FROM {self.store.table('source_discovery_log')}
-            WHERE source_key=%(source)s AND partition_key NOT IN (
+            WHERE source_key=%(source)s AND partition_key >= %(first)s
+              AND (NOT %(hourly)s OR length(partition_key)=14) AND partition_key NOT IN (
                 SELECT partition_key FROM {self.store.table('source_active_partitions')}
                 WHERE source_key=%(source)s AND NOT provisional
             ) GROUP BY partition_key ORDER BY min(requested_at) LIMIT 5""",
-            {'source': self.spec.key},
+            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
+             'hourly': self.spec.partitions.interval == 'hour'},
         )
         for row in pending:
             partition = self.spec.canonical.partition(str(row[0]))
@@ -763,7 +791,7 @@ class SourceRuntime:
             raise
 
     def _recover_superseded(self, day: str) -> None:
-        """Close open provisional-interval failures inside a day the canonical build now covers."""
+        """Close provisional failures inside the activated canonical partition."""
         rows = self.store.execute(
             f"""SELECT failure_key, any(operation), argMax(error_code, event_time),
             argMax(partition_key, event_time), argMax(component, event_time),
@@ -772,7 +800,7 @@ class SourceRuntime:
             WHERE source_key=%(source)s AND operation IN ('provisional', 'component')
               AND startsWith(ifNull(partition_key, ''), %(prefix)s)
             GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
-            {'source': self.spec.key, 'prefix': day + 'T'},
+            {'source': self.spec.key, 'prefix': day[:13] + ':' if self.spec.partitions.interval == 'hour' else day + 'T'},
         )
         for row in rows:
             if not isinstance(row[6], UUID):
@@ -785,7 +813,7 @@ class SourceRuntime:
                 component=None if row[4] is None else str(row[4]),
                 event_type='RECOVERED',
                 related_event=row[6],
-                details={'reason': 'superseded by the canonical day'},
+                details={'reason': 'superseded by the canonical ' + self.spec.partitions.interval},
             )
 
     def _recover_committed_failure(self, record: StateRecord) -> None:

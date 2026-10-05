@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
 from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
+from origo.sources.profiles.book import BOOK_COMPONENT_KEYS, BOOK_FIRST_DAY
+from origo.sources.adapters.book_vendor import BOOK_HOURLY_DELIVERY_GRACE_SECONDS, HOUR_KEY_FORMAT
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
 
@@ -26,12 +28,15 @@ LAW_INVENTORY = (
     'binance_spot_trades', 'binance_spot_aggtrades',
     'binance_perp_trades', 'binance_perp_aggtrades',
     'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
+    'binance_spot_book', 'binance_perp_book',
 )
 LAW_ANCHORS = {
     'binance_spot_trades': date(2017, 8, 17),
     'binance_spot_aggtrades': date(2017, 8, 17),
     'binance_perp_trades': date(2019, 9, 8),
     'binance_perp_aggtrades': date(2019, 12, 31),
+    'binance_spot_book': BOOK_FIRST_DAY,
+    'binance_perp_book': BOOK_FIRST_DAY,
 }
 R1_SPOT_BUDGET_SECONDS = 180
 R1_PERP_BUDGET_SECONDS = 300
@@ -149,7 +154,8 @@ class _Proof:
         return matches[0] if len(matches) == 1 and matches[0][2] == self.hashes.get(key) else None
 
     def verdict(self) -> PredicateReport:
-        expected = PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
+        book = self.source in ('binance_spot_book', 'binance_perp_book')
+        expected = tuple(key + ('_latest' if self.provisional else '') for key in BOOK_COMPONENT_KEYS) if book else PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
         extra: set[str] = (
             {'market_state_latest', 'market_state_detail_latest'} if self.provisional
             else {'market_state', 'market_state_detail'}
@@ -160,9 +166,16 @@ class _Proof:
             return _result('UNKNOWN', 'proof_inventory_invalid')
         if any(self.component(key) is None for key in expected):
             return _result('UNKNOWN', 'proof_identity_or_hash_invalid')
-        raw = self.component('raw_latest' if self.provisional else 'raw')
+        raw = self.component(('depth20' if book else 'raw') + ('_latest' if self.provisional else ''))
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
+        if book:
+            minutes = (self.end - self.start).total_seconds() / 60
+            counts = {'depth20': 600, 'depth200': 60, 'depth20_1m': 1, 'depth200_1m': 1}
+            for key, count in counts.items():
+                component = self.component(key + ('_latest' if self.provisional else ''))
+                if component is None or component[1] != minutes * count:
+                    return _result('FAIL', 'book_component_grid_incomplete', component=key, expected_rows=int(minutes * count), actual_rows=component[1] if component else None)
         empty = next((item[0] for item in self.components if item[0] in expected and item[1] == 0), None)
         if raw[1] > 0 and empty is not None:
             return _result('FAIL', 'component_proof_empty', empty_component=empty, raw_proof_rows=raw[1])
@@ -170,18 +183,25 @@ class _Proof:
                        raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
 
 
-def _proofs(query: _Queries, database: str, source: str, build: str) -> list[_Proof]:
+def _proofs(query: _Queries, database: str, source: str, build: str,
+            tail_start: datetime | None = None) -> list[_Proof]:
+    selected = '(NOT provisional OR toString(build_id)=%(build)s'
+    if tail_start is not None:
+        selected += ' OR partition_start>=%(tail)s'
+    selected += ')'
+    component_selected = selected.replace('partition_start>=%(tail)s', 'partition_key>=%(tail_key)s')
     rows = query(f"""SELECT a.partition_key, a.provisional, a.partition_start, a.partition_end,
         a.revision, a.build_id, a.component_hashes, p.proofs
         FROM {database}.source_active_partitions a LEFT JOIN (
             SELECT source_key, partition_key, provisional, revision, build_id,
                 groupArray((component, row_count, content_hash, completed_at)) AS proofs
             FROM {database}.source_component_log
-            WHERE source_key=%(source)s AND (NOT provisional OR toString(build_id)=%(build)s)
+            WHERE source_key=%(source)s AND {component_selected}
             GROUP BY source_key, partition_key, provisional, revision, build_id
         ) p USING (source_key, partition_key, provisional, revision, build_id)
-        WHERE source_key=%(source)s AND (NOT provisional OR toString(build_id)=%(build)s)""",
-        {'source': source, 'build': build})
+        WHERE source_key=%(source)s AND {selected}""",
+        {'source': source, 'build': build, 'tail': tail_start,
+         'tail_key': tail_start.strftime('%Y-%m-%dT%H:%M:%SZ') if tail_start is not None else ''})
     return [_Proof.read(row, source) for row in rows]
 
 
@@ -217,71 +237,115 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
     evidence.update(proof['evidence'])
     if proof['status'] != 'PASS':
         return _result(proof['status'], proof['reason'], **evidence)
-    raw = next(component for component in spec.components
-               if component.key == ('raw_latest' if provisional else 'raw'))
-    rows = query(f"""SELECT count() FROM {database}.{identifier(spec.names.prefix)}_{identifier(raw.key)}_revisions
-        WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
-          AND build_id=%(build)s AND {identifier(raw.time_column)}>=%(minute)s
-          AND {identifier(raw.time_column)}<%(end)s""", {
-        'date': _utc(minute).date(), 'key': str(key), 'revision': str(revision), 'build': build,
-        'minute': _utc(minute), 'end': _utc(minute) + timedelta(minutes=1),
-    })
-    evidence['row_count'] = int(str(rows[0][0]))
-    if not evidence['row_count']:
+    book = spec.key in ('binance_spot_book', 'binance_perp_book')
+    keys = BOOK_COMPONENT_KEYS if book else ('raw',)
+    counts: dict[str, int] = {}
+    for component_key in keys:
+        raw = next(component for component in spec.components
+                   if component.key == component_key + ('_latest' if provisional else ''))
+        rows = query(f"""SELECT count() FROM {database}.{identifier(spec.names.prefix)}_{identifier(raw.key)}_revisions
+            WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
+              AND build_id=%(build)s AND {identifier(raw.time_column)}>=%(minute)s
+              AND {identifier(raw.time_column)}<%(end)s""", {
+            'date': _utc(minute).date(), 'key': str(key), 'revision': str(revision), 'build': build,
+            'minute': _utc(minute), 'end': _utc(minute) + timedelta(minutes=1),
+        })
+        counts[component_key] = int(str(rows[0][0]))
+        if book:
+            evidence['rows_' + component_key] = counts[component_key]
+    evidence['row_count'] = counts[keys[0]]
+    if book:
+        for component_key, expected in zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1)):
+            if counts[component_key] != expected:
+                return _result('FAIL', 'reader_book_grid_incomplete', component=component_key, **evidence)
+    elif not evidence['row_count']:
         return _result('FAIL', 'reader_minute_empty', **evidence)
+    if book:
+        canonical_end = max((p.end for p in proofs if not p.provisional and p.verdict()['status'] == 'PASS'),
+                            default=datetime.combine(spec.partitions.first_day, datetime.min.time(), UTC))
+        tail_start = max(canonical_end, now.replace(second=0, microsecond=0) - timedelta(days=1))
+        expected_minutes = max(0, int((_utc(end) - tail_start).total_seconds() // 60))
+        accepted = {p.start for p in proofs if p.provisional and p.end == p.start + timedelta(minutes=1)
+                    and tail_start <= p.start < _utc(end) and p.verdict()['status'] == 'PASS'}
+        evidence.update(tail_start=tail_start.isoformat(), expected_minutes=expected_minutes,
+                        covered_minutes=len(accepted), missing_minutes=expected_minutes - len(accepted))
+        if len(accepted) != expected_minutes:
+            return _result('FAIL', 'reader_book_minutes_missing', **evidence)
     stale = (now - _utc(end)).total_seconds() > budget
     return _result('FAIL' if stale else 'PASS', 'reader_stale' if stale else 'reader_current', **evidence)
 
 
-def _calendar(proofs: list[_Proof], day: date) -> PredicateReport:
-    start = datetime.combine(day, datetime.min.time(), UTC)
-    matches = [p for p in proofs if not p.provisional and
-               (p.key == day.isoformat() or p.start.date() == day)]
+def _interval(source: str) -> timedelta:
+    spec = next(item for item in SOURCE_REGISTRY if item.key == source)
+    return timedelta(hours=1) if spec.partitions.interval == 'hour' else timedelta(days=1)
+
+
+def _floor(now: datetime, source: str) -> datetime:
+    return now.replace(minute=0, second=0, microsecond=0) if _interval(source) == timedelta(hours=1) else now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _calendar(proofs: list[_Proof], slot: date | datetime, source: str | None = None) -> PredicateReport:
+    start = slot if isinstance(slot, datetime) else datetime.combine(slot, datetime.min.time(), UTC)
+    hourly = source is not None and _interval(source) == timedelta(hours=1)
+    key = start.strftime(HOUR_KEY_FORMAT) if hourly else start.date().isoformat()
+    unit = 'hour' if hourly else 'day'
+    matches = [p for p in proofs if not p.provisional and (p.key == key or p.start == start)]
     if not matches:
-        return _result('FAIL', 'canonical_day_missing')
-    if len(matches) != 1 or matches[0].key != day.isoformat() or matches[0].start != start or matches[0].end != start + timedelta(days=1):
-        return _result('UNKNOWN', 'canonical_day_bounds_invalid')
+        return _result('FAIL', f'canonical_{unit}_missing')
+    if len(matches) != 1 or matches[0].key != key or matches[0].start != start or matches[0].end != start + (timedelta(hours=1) if hourly else timedelta(days=1)):
+        return _result('UNKNOWN', f'canonical_{unit}_bounds_invalid')
     return matches[0].verdict()
 
 
 def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
-    hour, minute = C1_PERP_DEADLINE if '_perp_' in source else C1_SPOT_DEADLINE
-    deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    day = now.date() - timedelta(days=1)
-    report = _calendar(proofs, day)
-    if report['reason'] == 'canonical_day_missing' and now < deadline:
+    hourly = _interval(source) == timedelta(hours=1)
+    floor = _floor(now, source)
+    slot = floor - _interval(source)
+    if hourly:
+        deadline = floor + timedelta(seconds=BOOK_HOURLY_DELIVERY_GRACE_SECONDS)
+    else:
+        hour, minute = C1_PERP_DEADLINE if '_perp_' in source else C1_SPOT_DEADLINE
+        deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    report = _calendar(proofs, slot, source)
+    unit = 'hour' if hourly else 'day'
+    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot.date() < LAW_ANCHORS[source])):
         report = _result('NOT_DUE', 'archive_not_due')
-    report['evidence'].update(day=day.isoformat(), deadline=deadline.isoformat())
+    report['evidence'].update({unit: slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat(), 'deadline': deadline.isoformat(), 'canonical_interval': unit})
     return report
 
 
 def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     anchor = LAW_ANCHORS[source]
+    start = datetime.combine(anchor, datetime.min.time(), UTC)
+    interval = _interval(source)
+    hourly = interval == timedelta(hours=1)
+    unit = 'hour' if hourly else 'day'
     rows = query(f'SELECT anchor FROM {database}.source_anchor_log WHERE source_key=%(source)s', {'source': source})
     stored = _utc(rows[0][0]) if len(rows) == 1 else None
-    expected = max(0, (now.date() - timedelta(days=1) - anchor).days)
-    evidence: dict[str, Scalar] = dict(anchor=anchor.isoformat(), stored_anchor=stored.isoformat() if stored else None,
-        expected_days=expected, valid_days=0, first_invalid_day=None)
-    if stored != datetime.combine(anchor, datetime.min.time(), UTC):
+    expected = max(0, int((_floor(now, source) - interval - start) / interval))
+    evidence: dict[str, Scalar] = dict(anchor=anchor.isoformat(), stored_anchor=stored.isoformat() if stored else None)
+    evidence.update({f'expected_{unit}s': expected, f'valid_{unit}s': 0, f'first_invalid_{unit}': None})
+    if stored != start:
         return _result('UNKNOWN', 'anchor_mismatch', **evidence)
     valid = 0
     first: PredicateReport | None = None
-    # Calendar membership is independent of the reader's provisional clipping algorithm.
-    by_day: dict[date, list[_Proof]] = {}
+    by_slot: dict[datetime, list[_Proof]] = {}
     for proof in proofs:
         if not proof.provisional:
-            by_day.setdefault(proof.start.date(), []).append(proof)
+            by_slot.setdefault(proof.start, []).append(proof)
     for offset in range(expected):
-        day = anchor + timedelta(days=offset)
-        result = _calendar(by_day.get(day, []), day)
+        slot = start + interval * offset
+        result = _calendar(by_slot.get(slot, []), slot, source)
         if result['status'] == 'PASS':
             valid += 1
         elif first is None:
             first = result
-            evidence['first_invalid_day'] = day.isoformat()
+            evidence[f'first_invalid_{unit}'] = slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat()
         elif result['status'] == 'FAIL' and first['status'] != 'FAIL':
             first = result
-    evidence['valid_days'] = valid
+    evidence[f'valid_{unit}s'] = valid
+    if hourly:
+        evidence['missing_hours'] = expected - valid
     return _result(first['status'] if first else 'PASS', first['reason'] if first else 'canonical_calendar_complete', **evidence)
 
 
@@ -293,10 +357,10 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
         budget = R1_PERP_BUDGET_SECONDS if '_perp_' in spec.key else R1_SPOT_BUDGET_SECONDS
         current = record is not None and (
             (now - record.end).total_seconds() <= budget if component.provisional
-            else record.end >= now.replace(hour=0, minute=0, second=0, microsecond=0)
+            else record.end >= _floor(now, spec.key)
         )
         waiting = (not component.provisional and record is not None
-                   and record.end == now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+                   and record.end == _floor(now, spec.key) - _interval(spec.key)
                    and _c1(proofs, spec.key, now)['status'] == 'NOT_DUE')
         observation: ProjectionObservation = {
             'id': f'{spec.key}:{component.key}', 'status': 'UNKNOWN' if proof is None else 'FAILED' if proof[1] == 0 else 'CURRENT' if current else 'WAITING' if waiting else 'STALE',
@@ -306,7 +370,7 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
             'reason': 'validated_activation' if proof else 'component_proof_missing',
             'gate_ids': [], 'dagit_url': None,
         }
-        if (record is not None and component.key in ('raw', 'raw_latest')
+        if (record is not None and component.key in (('depth20', 'depth200', 'depth20_1m', 'depth200_1m', 'depth20_latest', 'depth200_latest', 'depth20_1m_latest', 'depth200_1m_latest') if spec.partitions.interval == 'hour' else ('raw', 'raw_latest'))
                 and record.build == r1['evidence'].get('build_id')
                 and r1['evidence'].get('row_count') is not None):
             observation.update(
@@ -448,13 +512,16 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
     optional: set[str] = cube | ({'market_state_detail', 'market_state_detail_latest'} if cube else set[str]())
     canonical = {c.key for c in spec.components if not c.provisional}
     provisional = declared - canonical
-    if (not set(CANONICAL_COMPONENTS) <= canonical or not set(PROVISIONAL_COMPONENTS) <= provisional
-            or canonical - set(CANONICAL_COMPONENTS) - {key for key in optional if not key.endswith('_latest')}
-            or provisional - set(PROVISIONAL_COMPONENTS) - {key for key in optional if key.endswith('_latest')}):
+    expected_canonical = set(BOOK_COMPONENT_KEYS) if spec.partitions.interval == 'hour' else set(CANONICAL_COMPONENTS)
+    expected_provisional = {key + '_latest' for key in BOOK_COMPONENT_KEYS} if spec.partitions.interval == 'hour' else set(PROVISIONAL_COMPONENTS)
+    if (not expected_canonical <= canonical or not expected_provisional <= provisional
+            or canonical - expected_canonical - {key for key in optional if not key.endswith('_latest')}
+            or provisional - expected_provisional - {key for key in optional if key.endswith('_latest')}):
         names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
         return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)
-    proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '')
+    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if spec.partitions.interval == 'hour' else None
+    proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '', tail_start)
     def observed(call: Callable[[], PredicateReport]) -> PredicateReport:
         try:
             return call()
@@ -502,7 +569,7 @@ def evaluate(client: Client, database: str, now: datetime) -> LawReport:
     query = _Queries(client)
     specs = {spec.key: spec for spec in SOURCE_REGISTRY}
     depths = {spec.projection_table_name for spec in DEPTH_SPECS}
-    enabled = {spec.key for spec in SOURCE_REGISTRY if spec.rollout_stage == RolloutStage.LIVE} | depths
+    enabled = {spec.key for spec in SOURCE_REGISTRY if spec.rollout_stage != RolloutStage.DORMANT} | depths
     inventory = list(LAW_INVENTORY) + sorted(enabled - set(LAW_INVENTORY))
     feeds: list[FeedReport] = []
     projections: list[ProjectionObservation] = []

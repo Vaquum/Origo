@@ -60,16 +60,19 @@ and sensors, and the provisional worker builds their provisional tails every min
 change. Changing the stage alone does not turn a shadow renderer into a public
 uploader.
 
-The shared backfill contract is daily UTC canonical partitions. Providers with
-hourly files need an adapter that proves complete daily partitions, or an explicit
-extension of the shared partition contract before using this job. Provider-specific
-parsing, schemas and integrity checks remain engineering work; orchestration is shared.
+The shared backfill contract declares UTC canonical partitions through
+`PartitionPolicy.interval`: `day` by default, or `hour` for hourly authority.
+The shared factory selects native daily or hourly Dagster partitions; the same
+jobs, activation proofs, component builds, pools, failures, retries and consumer
+steps apply to both. Provider-specific parsing, schemas and integrity checks
+remain in the adapter. Book sources declare hourly CryptoHFTData authority;
+trade/aggregate-trade sources retain daily Binance authority.
 
 ### Generated automatically from the registration
 
 | Shared code | What each registered source receives |
 | --- | --- |
-| [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-day state, one native partitioned backfill job, operational jobs, source pools, retry policy, the canonical and audit schedules, the failure/reconciliation sensors, a sensor per canonical-only consumer and the live feed asset the provisional worker materializes. Do not copy these definitions into a source module. |
+| [definitions.py](../../origo/definitions.py), [bundle.py](../../origo/sources/bundle.py), [backfill.py](../../origo/sources/backfill.py) | Assets, per-partition state, one native partitioned backfill job, operational jobs, source pools, retry policy, the canonical and audit schedules, the failure/reconciliation sensors, a sensor per canonical-only consumer and the live feed asset the provisional worker materializes. Do not copy these definitions into a source module. |
 | [workers/provisional.py](../../origo/workers/provisional.py) | The provisional tail: every closed minute of a source with a `ProvisionalAdapter` is built through the source runtime by the provisional worker (`provisional_cron` must be `* * * * *`), and every consumer that pins provisional rows is published by the same worker when the pinned state changed. See [Monitoring.md](Monitoring.md). |
 | [bootstrap.py](../../origo/sources/bootstrap.py), [prepare.py](../../origo/sources/prepare.py) | Recorded deployment preparation, schemas, declared automation states, preserved cursors and readiness checks. The job repeats source preparation idempotently; deployment configures pool limits before workers start. |
 | [lifecycle.py](../../origo/sources/lifecycle.py), [bundle.py](../../origo/sources/bundle.py) | Reconciled generations, automatic capacity measurement and a publication barrier: every selected day and every declared consumer must finish before backfill success. |
@@ -136,9 +139,9 @@ preparation/projection/publication launch is required. The first available day i
 registered in code; the partition calendar advances automatically. A missing
 provider archive is a visible failure, never silently skipped.
 
-The shared factory generates a native daily-partitioned asset job using
+The shared factory generates a native asset job using the declared UTC partition interval and
 `BackfillPolicy.multi_run(max_partitions_per_run=1)`. Dagster launches independent
-daily runs under a code-owned canonical concurrency pool. Native Jobs backfills
+partition runs under a code-owned canonical concurrency pool. Native Jobs backfills
 include the canonical asset, every file consumer and final reconciliation in each
 child run. The canonical step records its reconciled generation against that
 backfill's selected dates in `source_backfill_log`. Until every selected date has

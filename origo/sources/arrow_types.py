@@ -1,6 +1,6 @@
 """Typed boundaries for the untyped Arrow runtime used by native source transport."""
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager
 from io import BytesIO
 from typing import Protocol
@@ -64,3 +64,20 @@ class ArrowCompute(Protocol):
 
 class ArrowColumn(Protocol):
     def to_numpy(self, *, zero_copy_only: bool) -> object: ...
+
+
+class ArrowSchema(Protocol):
+    names: list[str]
+
+
+class ArrowRowBatch(Protocol):
+    def to_pylist(self) -> list[object]: ...
+
+
+class ArrowParquetFile(Protocol):
+    schema_arrow: ArrowSchema
+    def iter_batches(self, *, batch_size: int, columns: list[str]) -> Iterator[ArrowRowBatch]: ...
+
+
+class ArrowParquet(Protocol):
+    def ParquetFile(self, source: str | object) -> ArrowParquetFile: ...

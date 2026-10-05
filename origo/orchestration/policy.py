@@ -95,6 +95,7 @@ def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
         MAINTENANCE_JOB,
     }
     daily = re.fullmatch(r'\d{4}-\d{2}-\d{2}', run.tags.get('dagster/partition', '')) is not None
+    canonical = daily or (run.tags.get('origo_source_operation') == 'canonical' and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}Z', run.tags.get('dagster/partition', '')) is not None)
     default_runtime = str(SHORT_JOB_MAX_RUNTIME_SECONDS if short_job and not bulk else DEFAULT_JOB_MAX_RUNTIME_SECONDS)
     requested_runtime = run.tags.get('dagster/max_runtime', default_runtime)
     maintenance = run.job_name == MAINTENANCE_JOB and not bulk
@@ -103,7 +104,7 @@ def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
         IDENTITY_TAG: request_identity(run),
         **({ROUTINE_JOB_TAG: run.job_name} if not (bulk or maintenance) else {}),
         **({SHARE_TAG: share} if share else {}),
-        'dagster/priority': '300' if maintenance else str(-order) if bulk else '200' if daily else '100',
+        'dagster/priority': '300' if maintenance else str(-order) if bulk else '200' if canonical else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,
     }

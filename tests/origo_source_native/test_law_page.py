@@ -1125,17 +1125,21 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     catalog = build_catalog(str(baseline['deployed_sha']))
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
-    assert len(current) == 17
+    assert len(current) == 23
     original_ids = {str(gate['id']) for gate in original}
     assert {gate['id'] for gate in current} - original_ids == {
-        'law.M1:binance_spot_trades', 'law.M2:binance_spot_trades'}
+        'law.M1:binance_spot_trades', 'law.M2:binance_spot_trades',
+        *(f'law.{predicate}:{source}' for source in ('binance_spot_book', 'binance_perp_book') for predicate in ('R1', 'C1', 'C2'))}
     # The accepted legacy law contract stays unchanged. Its implementation hash
     # advances with the additive proof evaluator; old evidence retains its version.
     current_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
-                          'code': {'path': gate['code']['path']}} for gate in current if gate['id'] in original_ids]
+                          'code': {'path': gate['code']['path']}} for gate in current if gate['id'] in original_ids and gate['id'] != 'law.inventory']
     original_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
-                           'code': {'path': page._object(gate['code'])['path']}} for gate in original]
+                           'code': {'path': page._object(gate['code'])['path']}} for gate in original if gate['id'] != 'law.inventory']
     assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
+    inventory = next(gate for gate in current if gate['id'] == 'law.inventory')
+    assert {source['id'] for source in catalog['sources']} == set(law.LAW_INVENTORY)
+    assert inventory['condition'] == 'Frozen law members remain required; every enabled registered source needs an explicit law mapping.'
     report = page._object(baseline['report'])
     before = page._sample_brief(report)
     assert before['policy'] == baseline['expected_policy'] == '5647749677518a069becefee8dbdafb774d940f23575986b7d2b04c08314da5e'
@@ -1196,7 +1200,7 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         tab.goto(url+'/law')
         tab.locator('.overview-card').first.wait_for()
         assert tab.locator('.overview-card').count() == 6
-        for key, numerator, denominator in (('R1', 4, 4), ('C1', 2, 4), ('C2', 4, 4), ('D1', 2880, 2880)):
+        for key, numerator, denominator in (('R1', 4, 6), ('C1', 2, 6), ('C2', 4, 6), ('D1', 2880, 2880)):
             text = _figure(tab, key).replace(',', '')
             assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
         assert 'not due' in _figure(tab, 'C1').lower()
@@ -1345,26 +1349,26 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         tab = browser.new_page()
         tab.goto(url+'/law?view=gates&family=law.R1')
         tab.locator('.gate').first.wait_for()
-        assert tab.locator('.gate').count() == 4 and tab.locator('#gate-family').input_value() == 'R1'
+        assert tab.locator('.gate').count() == 6 and tab.locator('#gate-family').input_value() == 'R1'
         assert tab.evaluate('state.view') == 'laws'
         assert tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
         tab.locator('#gate-family').select_option('C1')
         tab.go_back()
         tab.wait_for_function("() => state.family === 'R1'")
-        assert tab.locator('.gate').count() == 4 and tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
+        assert tab.locator('.gate').count() == 6 and tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
         tab.go_forward()
         tab.wait_for_function("() => state.family === 'C1'")
-        assert tab.locator('.gate').count() == 4 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
+        assert tab.locator('.gate').count() == 6 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
         tab.goto(url+'/law?view=gates')
         tab.locator('.gate').first.wait_for()
-        assert tab.locator('.law-group').count() == 6 and tab.locator('.gate').count() == 16
+        assert tab.locator('.law-group').count() == 6 and tab.locator('.gate').count() == 22
         assert tab.evaluate("state.view") == 'laws'
         assert all(str(gate).startswith('law.') for gate in tab.locator('.gate [data-gate]').evaluate_all('(items)=>items.map(x=>x.dataset.gate)'))
         # Catalog envelope corruption cannot add an obligation or remove a required denominator.
         tab.evaluate("()=>{const extra=structuredClone(descriptor('law.R1:binance_spot_trades'));extra.id+=':outside-inventory';data.catalog.gates.push(extra);render()}")
-        assert tab.locator('.gate').count() == 16
+        assert tab.locator('.gate').count() == 22
         tab.evaluate("()=>{data.catalog.gates=data.catalog.gates.filter(g=>g.id!=='law.R1:binance_spot_trades');data.last_report.feeds=data.last_report.feeds.filter(f=>f.source_key!=='binance_spot_trades');render()}")
-        assert tab.locator('.gate').count() == 16
+        assert tab.locator('.gate').count() == 22
         assert 'unknown' in tab.locator('.gate').filter(has=tab.locator('[data-gate="law.R1:binance_spot_trades"]')).inner_text().lower()
         tab.reload()
         tab.locator('.gate').first.wait_for()
@@ -1382,7 +1386,7 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
         tab.wait_for_function('() => data !== null')
         assert 'runtime' in tab.locator('#detail').inner_text().lower() or 'runtime' in tab.locator('#message').inner_text().lower()
-        assert tab.locator('.gate').count() <= 16
+        assert tab.locator('.gate').count() <= 22
         browser.close()
 
 

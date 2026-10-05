@@ -32,7 +32,7 @@ def execute_partition_backfill(
     spec.require_enabled('backfill')
     days = tuple(context.partition_keys)
     if len(days) != 1:
-        raise ValueError('Source backfills require one daily partition per native Dagster run.')
+        raise ValueError('Source backfills require one canonical partition per native Dagster run.')
     day = days[0]
     prepare_source(spec, context.instance)
     context.instance.add_run_tags(

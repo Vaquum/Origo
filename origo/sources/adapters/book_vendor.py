@@ -185,6 +185,27 @@ def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> st
         json.dumps([current, dependencies], separators=(',', ':')).encode()).hexdigest()
 
 
+def _boundary_seed_clock(seed: bytes, update: list[dict[str, object]], start_ms: int, market: Market) -> int:
+    from decimal import Decimal
+    from origo.workers.book_capture import BOOK_MAX_EVENT_AGE_SECONDS, DiffBook, parse_book_integer
+
+    snapshot = DiffBook(market, seed)
+    first = update[0]
+    event_ms = parse_book_integer(first['event_time'])
+    if snapshot.last != parse_book_integer(first['final_update_id']) or event_ms != start_ms:
+        raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Initial snapshot does not match the boundary exchange update.')
+    if not 0 <= parse_book_integer(first['received_time']) // 1000000 - event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
+        raise SourceError('BOOK_EVENT_STALE', 'Boundary exchange update is stale or ahead of receipt.')
+    for row in update:
+        price, quantity = Decimal(str(row['price'])), Decimal(str(row['quantity']))
+        bid = row['side'] == 'bid'
+        levels = snapshot.bids if bid else snapshot.asks
+        if (price >= snapshot.bid_floor if bid else price <= snapshot.ask_ceiling):
+            if levels.get(price, Decimal(0)) != quantity:
+                raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Initial snapshot contradicts its native boundary update.')
+    return event_ms
+
+
 def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> Revision:
     from origo.workers.book_capture import (
@@ -200,6 +221,7 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
         int(partition.end.timestamp() * 1000),
     )
     previous_received = 0
+    boundary_update: list[dict[str, object]] = []
     legacy = partition.start < datetime(2026, 8, 19, tzinfo=UTC)
     for frame in _frames((*preludes, path, *following), legacy=legacy):
         first = frame[0]
@@ -235,6 +257,10 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                 if sampler.book is None:
                     sampler.seed(json.dumps(seed).encode())
                     sampler.next_grid = start_ms
+                    if boundary_update:
+                        clock = _boundary_seed_clock(json.dumps(seed).encode(), boundary_update, start_ms, market)
+                        sampler.checkpoint(json.dumps(seed).encode(), clock, start_ms)
+                        boundary_update.clear()
                 elif sampler.book.verified and sampler.book.last == seed['lastUpdateId']:
                     # The matching update supplies the real exchange clock for this
                     # REST snapshot. Its legacy event_time is a collector clock.
@@ -252,6 +278,12 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
         elif first['event_type'] == 'update':
             if sampler.book is None:
                 if event_ms < start_ms:
+                    continue
+                if legacy and event_ms == start_ms and (
+                        not boundary_update or first['final_update_id'] == boundary_update[0]['final_update_id']):
+                    if len(boundary_update) + len(frame) > 100000:
+                        raise SourceError('BOOK_VENDOR_FRAME_BOUND', 'Boundary seed messages exceed their frame bound.')
+                    boundary_update.extend(frame)
                     continue
                 raise SourceError(
                     'BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no initial snapshot.'

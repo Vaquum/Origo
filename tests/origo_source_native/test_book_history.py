@@ -175,3 +175,35 @@ def test_legacy_collector_clock_cannot_close_exchange_hour(
     for row in revision.rows():
         counts[cast(int, row[0])] += 1
     assert counts == {20: 36000, 200: 3600}
+
+
+def test_initial_legacy_snapshot_uses_matching_original_exchange_clock(
+    original_historical_archives: dict[Market, tuple[OriginalArchive, ...]], tmp_path: Path,
+) -> None:
+    from decimal import Decimal
+    from origo.workers.book_capture import parse_book_integer
+
+    archive = original_historical_archives['perp'][1]
+    path = tmp_path / 'original.bin'
+    path.write_bytes(archive.body)
+    path = vendor._prepare_archive(path, tmp_path)
+    update: list[dict[str, object]] = []
+    for frame in vendor._frames((path,), legacy=True):
+        first = frame[0]
+        if first['event_type'] == 'update':
+            update = frame
+        elif update and first['last_update_id'] == update[0]['final_update_id']:
+            seed = {'lastUpdateId': first['last_update_id'], **{
+                name: sorted([[str(row['price']), str(row['quantity'])] for row in frame if row['side'] == side],
+                             key=lambda level: Decimal(level[0]), reverse=side == 'bid')
+                for name, side in (('bids', 'bid'), ('asks', 'ask'))}}
+            payload = json.dumps(seed).encode()
+            actual_exchange_clock = parse_book_integer(update[0]['event_time'])
+            assert vendor._boundary_seed_clock(payload, update, actual_exchange_clock, 'perp') == actual_exchange_clock
+            assert actual_exchange_clock != parse_book_integer(first['event_time'])
+            with pytest.raises(SourceError) as failure:
+                vendor._boundary_seed_clock(payload, update, actual_exchange_clock + 1, 'perp')
+            assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'
+            break
+    else:
+        pytest.fail('Original input has no same-ID update/snapshot pair.')

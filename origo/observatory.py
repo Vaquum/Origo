@@ -153,7 +153,7 @@ LAW_NAMES: dict[str, str] = {
 }
 LAW_COPY: dict[str, str] = {
     'R1': 'Checks the selected reader frontier and actual rows in its closed minute.',
-    'C1': 'Checks each source’s latest validated daily or hourly archive against its recorded delivery deadline.',
+    'C1': 'Checks daily archive deadlines and hourly provider availability, activation and original reader proofs.',
     'C2': 'Checks the historical calendar and anchor using canonical proofs, not a physical full-history scan.',
     'D1': 'Counts distinct depth minutes in the checked rolling day, with the recorded grace and missing-minute allowance.',
     'M1': 'Checks activated cube evidence and matching trade and taker-buy counts in the selected reader window.',
@@ -694,6 +694,11 @@ def _micros(stamp: datetime) -> int:
     return (stamp - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(microseconds=1)
 
 
+def _canonical_policy(feed: Document) -> Json:
+    evidence = _object(_object(_object(feed.get('predicates')).get('C1')).get('evidence'))
+    return 'provider_availability' if evidence.get('canonical_interval') == 'hour' else str(evidence.get('deadline'))[11:16]
+
+
 def sample_brief(report: Document) -> Document:
     feeds = _objects(report.get('feeds'))
     core = sorted((gate, version) for gate, version, _ in map(_identity, _objects(report.get('gates'))) if gate.startswith('law.'))
@@ -702,7 +707,7 @@ def sample_brief(report: Document) -> Document:
     return {
         'slot': report.get('sampling_slot'), 'start': report.get('evaluation_start'),
         'status': report.get('status'), 'version': report.get('schema_version'),
-        'policy': hashlib.sha256(json.dumps([core, report.get('schema_version'), report.get('inventory'), [(feed.get('source_key'), _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('budget_seconds'), _object(_object(_object(feed.get('predicates')).get('C2')).get('evidence')).get('anchor'), str(_object(_object(_object(feed.get('predicates')).get('C1')).get('evidence')).get('deadline'))[11:16], _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('expected_slots'), _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('max_missing')) for feed in feeds]], sort_keys=True).encode()).hexdigest() if complete else None,
+        'policy': hashlib.sha256(json.dumps([core, report.get('schema_version'), report.get('inventory'), [(feed.get('source_key'), _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('budget_seconds'), _object(_object(_object(feed.get('predicates')).get('C2')).get('evidence')).get('anchor'), _canonical_policy(feed), _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('expected_slots'), _object(_object(_object(feed.get('predicates')).get('D1')).get('evidence')).get('max_missing')) for feed in feeds]], sort_keys=True).encode()).hexdigest() if complete else None,
         'ages': {str(feed.get('source_key')): _object(_object(_object(feed.get('predicates')).get('R1')).get('evidence')).get('age_seconds') for feed in feeds},
         'not_due': any(_object(_object(feed.get('predicates')).get('C1')).get('status') == 'NOT_DUE' for feed in feeds),
     }
@@ -887,7 +892,7 @@ def measurement_label(name: str) -> str:
         'expected_slots': 'Checked minutes', 'raw_proof_rows': 'Recorded source rows',
         'day_count': 'Recorded days', 'expected_days': 'Expected days', 'valid_days': 'Validated days',
         'missing_days': 'Missing days', 'unknown_days': 'Unverified days',
-        'expected_hours': 'Expected hours', 'valid_hours': 'Validated hours', 'missing_hours': 'Missing hours', 'first_invalid_hour': 'First invalid hour', 'hour': 'Authoritative hour', 'canonical_interval': 'Authority interval',
+        'expected_hours': 'Expected hours', 'valid_hours': 'Validated hours', 'missing_hours': 'Missing hours', 'first_invalid_hour': 'First invalid hour', 'hour': 'Authoritative hour', 'following_hour': 'Closing input hour', 'required_following_hours': 'Closing input lag hours', 'canonical_interval': 'Authority interval',
         'queued_runs': 'Queued runs', 'queue_threshold': 'Queue threshold',
         'unhealthy_daemons': 'Unhealthy daemons', 'workers_fresh': 'Fresh worker heartbeats',
         'workers_expected': 'Expected workers', 'workers_unknown': 'Unverified workers',

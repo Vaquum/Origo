@@ -47,6 +47,9 @@ from .runtime import (
 
 BOOK_SEED_DEPTH = {'spot': 5000, 'perp': 1000}
 BOOK_SEED_WEIGHT = {'spot': 250, 'perp': 20}
+# BTCUSDT price grids. Reject a changed venue grid rather than assume missing prices.
+BOOK_PRICE_TICK = {'spot': Decimal('0.01'), 'perp': Decimal('0.10')}
+BOOK_MAX_TRACKED_PRICES = 100000
 BOOK_MAX_SEED_ATTEMPTS_PER_HOUR = 3
 BOOK_MAX_CONNECTION_ATTEMPTS_PER_5M = 5
 SEED_URL = {
@@ -137,9 +140,36 @@ class DiffBook:
         self.bid_prices = [price for price, _ in reversed(bids)]
         self.ask_prices = [price for price, _ in asks]
         self.bid_floor, self.ask_ceiling = bids[-1][0], asks[-1][0]
+        self.tick = BOOK_PRICE_TICK[market]
+        if any(price % self.tick for price, _ in (*bids, *asks)):
+            raise SourceError('BOOK_PRICE_GRID', 'Seed prices disagree with the BTCUSDT grid.')
+        self.bid_observed: set[Decimal] = set()
+        self.ask_observed: set[Decimal] = set()
         self.event_ms: int | None = None
         self.verified = False
         self.cached: tuple[tuple[Level, ...], tuple[Level, ...]] | None = None
+
+    def refresh(self, snapshot: DiffBook) -> None:
+        if self.market != snapshot.market or self.last != snapshot.last or not self.verified:
+            raise SourceError('BOOK_SNAPSHOT_CURSOR', 'A refresh requires the same verified update ID.')
+        for old, new, observed, old_bound, new_bound, bid in (
+            (self.bids, snapshot.bids, self.bid_observed, self.bid_floor, snapshot.bid_floor, True),
+            (self.asks, snapshot.asks, self.ask_observed, self.ask_ceiling, snapshot.ask_ceiling, False),
+        ):
+            overlap = {price for price in old.keys() | new.keys() | observed
+                       if (price >= new_bound if bid else price <= new_bound)
+                       and (price in observed or (price >= old_bound if bid else price <= old_bound))}
+            if any(old.get(price, Decimal(0)) != new.get(price, Decimal(0)) for price in overlap):
+                raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'A snapshot disagrees with the verified sequence.')
+        self.bids = {**{p: q for p, q in self.bids.items() if p < snapshot.bid_floor}, **snapshot.bids}
+        self.asks = {**{p: q for p, q in self.asks.items() if p > snapshot.ask_ceiling}, **snapshot.asks}
+        self.bid_prices, self.ask_prices = sorted(self.bids), sorted(self.asks)
+        self.bid_floor = min(self.bid_floor, snapshot.bid_floor)
+        self.ask_ceiling = max(self.ask_ceiling, snapshot.ask_ceiling)
+        self.bid_observed = {p for p in self.bid_observed if p < self.bid_floor}
+        self.ask_observed = {p for p in self.ask_observed if p > self.ask_ceiling}
+        self.cached = None
+        self.top(200)
 
     def bridges(self, event: DepthEvent) -> bool:
         if self.verified:
@@ -173,13 +203,42 @@ class DiffBook:
             or asks[-1][0] > self.ask_ceiling
         ):
             raise SourceError(
-                'BOOK_KNOWN_DEPTH_EXHAUSTED', 'Top depth crosses the seeded known region.'
+                'BOOK_KNOWN_DEPTH_EXHAUSTED', 'Top depth crosses the proven known price region.'
             )
         if bids[0][0] >= asks[0][0]:
             raise SourceError('BOOK_CROSSED', 'Reconstructed book is crossed.')
         if depth == 200:
             self.cached = (bids, asks)
         return bids, asks
+
+    def observe_levels(self, bids: tuple[Level, ...], asks: tuple[Level, ...]) -> None:
+        self.cached = None
+        for side, updates in ((self.bids, bids), (self.asks, asks)):
+            for price, quantity in updates:
+                if price % self.tick:
+                    raise SourceError('BOOK_PRICE_GRID', 'Update prices disagree with the BTCUSDT grid.')
+                if side is self.bids and price < self.bid_floor:
+                    self.bid_observed.add(price)
+                elif side is self.asks and price > self.ask_ceiling:
+                    self.ask_observed.add(price)
+                prices = self.bid_prices if side is self.bids else self.ask_prices
+                if quantity:
+                    if price not in side:
+                        insort(prices, price)
+                    side[price] = quantity
+                elif price in side:
+                    del side[price]
+                    prices.pop(bisect_left(prices, price))
+        # Absolute updates prove each touched price, including zero quantities. Extend
+        # the complete interval only when every intervening venue tick was observed.
+        while self.bid_floor - self.tick in self.bid_observed:
+            self.bid_floor -= self.tick
+            self.bid_observed.remove(self.bid_floor)
+        while self.ask_ceiling + self.tick in self.ask_observed:
+            self.ask_ceiling += self.tick
+            self.ask_observed.remove(self.ask_ceiling)
+        if max(len(self.bids) + len(self.bid_observed), len(self.asks) + len(self.ask_observed)) > BOOK_MAX_TRACKED_PRICES:
+            raise SourceError('BOOK_PRICE_BOUND', 'Tracked book prices exceed the capture bound.')
 
     def apply(self, event: DepthEvent) -> bool:
         if self.obsolete(event):
@@ -192,22 +251,7 @@ class DiffBook:
         if self.event_ms is not None and event.event_ms < self.event_ms:
             self.verified = False
             raise SourceError('BOOK_EVENT_TIME_REGRESSION', 'Exchange event time moved backwards.')
-        self.cached = None
-        for side, updates in ((self.bids, event.bids), (self.asks, event.asks)):
-            for price, quantity in updates:
-                # Updates outside the seeded region cannot prove a complete top200.
-                if (side is self.bids and price < self.bid_floor) or (
-                    side is self.asks and price > self.ask_ceiling
-                ):
-                    continue
-                prices = self.bid_prices if side is self.bids else self.ask_prices
-                if quantity:
-                    if price not in side:
-                        insort(prices, price)
-                    side[price] = quantity
-                elif price in side:
-                    del side[price]
-                    prices.pop(bisect_left(prices, price))
+        self.observe_levels(event.bids, event.asks)
         self.last, self.event_ms = event.last, event.event_ms
         try:
             self.top(200)
@@ -253,7 +297,11 @@ class BookSampler:
             if self.book.event_ms is not None and event_ms < self.book.event_ms:
                 raise SourceError('BOOK_VENDOR_ORDERING', 'Archive checkpoint clock moved backward.')
             self._sample_until(event_ms)
-        self.book = DiffBook(self.market, payload)
+        replacement = DiffBook(self.market, payload)
+        if self.book is not None and self.book.verified and self.book.last == replacement.last:
+            self.book.refresh(replacement)
+        else:
+            self.book = replacement
         self.book.top(200)
         self.book.event_ms, self.book.verified = event_ms, True
         self.next_grid = max(self.next_grid or start_ms, start_ms, ((event_ms + 99) // 100) * 100)
@@ -408,7 +456,7 @@ class AttemptBudget:
             parse_book_integer(value.get(name))
         return value
 
-    def _reserve(self, kind: str) -> dict[str, object]:
+    def _available(self, kind: str) -> tuple[dict[str, object], float, list[float]]:
         value = self._read()
         now = self.clock()
         window, maximum = (
@@ -425,6 +473,14 @@ class AttemptBudget:
             raise SourceError(
                 'BOOK_ATTEMPT_LIMIT', f'{kind} attempts paused until {stamps[0] + window:.3f}.'
             )
+        return value, now, stamps
+
+    def require_seed_capacity(self) -> None:
+        with source_lock(self.root, f'book_capture_{self.market}', 'attempts', wait=True):
+            self._available('seed')
+
+    def _reserve(self, kind: str) -> dict[str, object]:
+        value, now, stamps = self._available(kind)
         value[kind] = [*stamps, now]
         total = f'{kind}_total'
         value[total] = parse_book_integer(value[total]) + 1
@@ -625,6 +681,8 @@ async def run_capture(
                     continue
                 try:
                     if active is None:
+                        if sampler.book is None:
+                            await asyncio.to_thread(budget.require_seed_capacity)
                         active = await connect(session)
                     if (
                         standby is None

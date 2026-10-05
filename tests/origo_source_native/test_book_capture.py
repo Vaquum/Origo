@@ -536,6 +536,10 @@ def test_provisional_admission_waits_for_actual_seals(
         assert tuple(p.key for p in adapter.candidates(now, day, ())) == keys
         covered = (adapter.partition(keys[0]),)
         assert tuple(p.key for p in adapter.candidates(now, day, covered)) == keys[1:]
+    from origo.sources.adapters.book_vendor import hour_partition
+
+    midnight = hour_partition(day.strftime('%Y-%m-%dT%HZ'))
+    assert tuple(p.key for p in adapter.candidates(sampler.last_seal + timedelta(hours=48), day, (midnight,))) == keys
     assert adapter.candidates(day + timedelta(days=1), day + timedelta(days=1), ()) == ()
 
 
@@ -816,3 +820,48 @@ def test_malformed_decimal_frame_reports_failure_and_reconnects(
 
     asyncio.run(verify())
     assert seeds == [book_capture.SEED_URL[market]]
+
+
+@pytest.mark.parametrize('market', ['spot', 'perp'])
+def test_exhausted_seed_capacity_prevents_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
+) -> None:
+    budget = book_capture.AttemptBudget(tmp_path / 'locks', market, clock=lambda: 1000.0)
+    calls: list[str] = []
+
+    def unavailable(url: str, **kwargs: object) -> binance_daily.Response:
+        calls.append(url)
+        raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Unavailable transport.')
+
+    monkeypatch.setattr(book_capture, 'get_response', unavailable)
+    for _ in range(3):
+        with pytest.raises(SourceError):
+            budget.seed()
+    before = dict(budget.evidence())
+
+    async def verify() -> None:
+        stopping = asyncio.Event()
+        publish = book_capture.publish_status
+
+        def status(sampler: book_capture.BookSampler, attempts: book_capture.AttemptBudget,
+                   path: Path, error: str | None) -> None:
+            publish(sampler, attempts, path, error)
+            if error == 'BOOK_ATTEMPT_LIMIT':
+                stopping.set()
+
+        async def forbidden(session: object, market: Market, stream: int,
+                            queue: asyncio.Queue[book_capture.StreamPacket]) -> None:
+            pytest.fail('No connection can recover a book when snapshot capacity is exhausted.')
+
+        monkeypatch.setattr(book_capture, 'publish_status', status)
+        monkeypatch.setattr(book_capture, '_receive', forbidden)
+        await asyncio.wait_for(book_capture.run_capture(
+            book_capture.BookSampler(tmp_path / 'spool', market), budget,
+            tmp_path / 'heartbeats', stopping=stopping), timeout=2)
+
+    asyncio.run(verify())
+    assert budget.evidence() == before
+    assert budget.evidence()['connection_total'] == 0 and len(calls) == 3
+    resumed = book_capture.AttemptBudget(tmp_path / 'locks', market, clock=lambda: 4600.0)
+    resumed.require_seed_capacity()
+    assert resumed.evidence() == before

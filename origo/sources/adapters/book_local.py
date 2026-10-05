@@ -164,10 +164,6 @@ class LocalBookProvisional:
                 if (
                     day >= lookback_start
                     or day + timedelta(days=1) <= anchor
-                    or any(
-                        not interval.provisional and interval.start <= day < interval.end
-                        for interval in covered
-                    )
                 ):
                     continue
                 starts.update(

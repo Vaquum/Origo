@@ -1056,12 +1056,12 @@ def _operational_gates(add: _AddGate) -> None:
             ),
             (
                 'C1',
-                'The latest closed UTC hour must have complete validated vendor canonical proofs; absence is NOT_DUE before delivery grace and FAIL afterward.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'The exchange hour completed by the latest closed receive-time file must have complete canonical proofs, including the final 100-ms sample. Unpublished required inputs are NOT_DUE with fresh native evidence; activation has five minutes after availability. Missing or stale evidence is never a pass.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'activation_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS'), 'availability_max_age_seconds': _threshold('sources.adapters.book_vendor:BOOK_AVAILABILITY_MAX_AGE_SECONDS'), 'required_following_hours': spec.partitions.canonical_lag_hours, 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The frozen anchor through the hour before the latest closed hour must contain every distinct canonical hour and active component proof.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The registered anchor through the hour before C1 must contain every distinct canonical hour and active component proof. The next receive-time file completes each exchange hour; older gaps remain failures.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):

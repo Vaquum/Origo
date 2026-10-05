@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager
 from io import BytesIO
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 
 class ArrowTable(Protocol):
@@ -81,3 +81,7 @@ class ArrowParquetFile(Protocol):
 
 class ArrowParquet(Protocol):
     def ParquetFile(self, source: str | object) -> ArrowParquetFile: ...
+
+
+class ArrowCompression(Protocol):
+    def input_stream(self, source: str, *, compression: str) -> AbstractContextManager[BinaryIO]: ...

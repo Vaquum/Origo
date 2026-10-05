@@ -224,8 +224,26 @@ class SourceStore:
             {'source': self.spec.key},
         )
         if previous:
-            if {_utc(row[0]) for row in previous} != {anchor}:
-                raise RuntimeError('The source coverage anchor is immutable.')
+            prior = {_utc(row[0]) for row in previous}
+            if prior != {anchor}:
+                if len(prior) != 1 or not prior <= set(self.spec.partitions.previous_starts) or anchor != self.spec.partitions.start:
+                    raise RuntimeError('The source coverage anchor is immutable.')
+                previous_anchor = next(iter(prior))
+                self.execute(
+                    f'INSERT INTO {self.table("source_observation_log")} VALUES',
+                    [(self.spec.key, '', json.dumps({'previous_anchor': previous_anchor.isoformat(),
+                                                   'anchor': anchor.isoformat()}), 1, datetime.now(UTC))],
+                )
+                self.execute(
+                    f'ALTER TABLE {self.table("source_anchor_log")} UPDATE anchor=%(anchor)s '
+                    'WHERE source_key=%(source)s AND anchor=%(previous)s',
+                    {'source': self.spec.key, 'anchor': anchor, 'previous': previous_anchor},
+                    settings={'mutations_sync': 2},
+                )
+                persisted = self.execute(f'SELECT anchor FROM {self.table("source_anchor_log")} WHERE source_key=%(source)s',
+                                         {'source': self.spec.key})
+                if len(persisted) != 1 or _utc(persisted[0][0]) != anchor:
+                    raise RuntimeError('The declared source anchor migration did not persist.')
         else:
             self.execute(
                 f'INSERT INTO {self.table("source_anchor_log")} VALUES', [(self.spec.key, anchor)]

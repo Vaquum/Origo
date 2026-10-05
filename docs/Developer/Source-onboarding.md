@@ -67,6 +67,10 @@ jobs, activation proofs, component builds, pools, failures, retries and consumer
 steps apply to both. Provider-specific parsing, schemas and integrity checks
 remain in the adapter. Book sources declare hourly CryptoHFTData authority;
 trade/aggregate-trade sources retain daily Binance authority.
+Hourly calendars may declare the exact first UTC hour through `PartitionPolicy.start`.
+An approved extension lists its exact former starts; setup records and verifies
+that migration without changing active generations. Other anchor changes fail.
+Native partition selection, reconciliation and history evidence use the same start.
 
 ### Generated automatically from the registration
 

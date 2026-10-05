@@ -192,3 +192,61 @@ def test_hourly_and_provisional_keys_cannot_share_partition_identity() -> None:
             spec.provisional.partition(canonical.key)
         with pytest.raises(ValueError):
             spec.canonical.partition(minute.key)
+
+
+def test_real_hour_survives_original_seed_region_without_reseeding(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+) -> None:
+    import json
+    from decimal import Decimal
+    from origo.workers.book_capture import (
+        BOOK_SEED_DEPTH, BookSampler, DepthEvent, DiffBook, parse_book_integer, utc_millisecond,
+    )
+
+    market, body, _ = original_vendor_archive
+    path = tmp_path / 'original.parquet'
+    path.write_bytes(body)
+    frames = iter(vendor._frames((path,)))
+    checkpoint = next(frames)
+    initial = checkpoint[0]
+    sides = {side: sorted([(str(row['price']), str(row['quantity'])) for row in checkpoint
+                           if row['side'] == side], key=lambda pair: Decimal(pair[0]),
+                          reverse=side == 'bid') for side in ('bid', 'ask')}
+    seed = {'lastUpdateId': initial['last_update_id'], 'bids': sides['bid'], 'asks': sides['ask']}
+    full = DiffBook(market, json.dumps(seed).encode())
+    full.verified = True
+    seed['bids'] = sides['bid'][:BOOK_SEED_DEPTH[market]]
+    seed['asks'] = sides['ask'][:BOOK_SEED_DEPTH[market]]
+    sampler = BookSampler(tmp_path / 'grid', market)
+    partition = vendor.hour_partition(REAL_HOUR)
+    sampler.checkpoint(json.dumps(seed).encode(), parse_book_integer(initial['event_time']),
+                       int(partition.start.timestamp() * 1000))
+    assert sampler.book is not None
+    original_floor, original_ceiling = sampler.book.bid_floor, sampler.book.ask_ceiling
+    beyond = 0
+    applied = 0
+    for frame in frames:
+        first = frame[0]
+        assert first['event_type'] == 'update'
+        event = DepthEvent(parse_book_integer(first['event_time']),
+                           parse_book_integer(first['first_update_id']),
+                           parse_book_integer(first['final_update_id']),
+                           parse_book_integer(first['prev_final_update_id']) if market == 'perp' else None,
+                           tuple((Decimal(str(row['price'])), Decimal(str(row['quantity'])))
+                                 for row in frame if row['side'] == 'bid'),
+                           tuple((Decimal(str(row['price'])), Decimal(str(row['quantity'])))
+                                 for row in frame if row['side'] == 'ask'))
+        full.apply(event)
+        sampler.accept(event, received_at=utc_millisecond(parse_book_integer(first['received_time']) // 1000000))
+        assert sampler.book is not None and sampler.book.verified
+        assert sampler.book.top(200) == full.top(200)
+        bids, asks = sampler.book.top(200)
+        assert sampler.book.top(20) == (bids[:20], asks[:20])
+        beyond += bids[-1][0] < original_floor or asks[-1][0] > original_ceiling
+        applied += 1
+    sampler.finish(int(partition.end.timestamp() * 1000))
+    revision = vendor.fetch_sealed_partition(sampler.root, market, partition)
+    assert revision.row_count == 36000
+    assert applied > 10000
+    if market == 'perp':
+        assert beyond > 10000

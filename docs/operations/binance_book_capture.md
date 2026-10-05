@@ -17,9 +17,10 @@ callers. The `.140` recent-trade capture and `.144` historical-repair routes and
 all existing host-family allowances are unchanged.
 
 Seeds are permitted at initialization, proven sequence loss, or exhaustion of the
-seeded known depth region. At most three attempts per market per rolling hour are
+proven known depth region. At most three attempts per market per rolling hour are
 durably reserved before transport; failed and uncertain attempts consume capacity.
-Only one seed per market may be in flight. Connection attempts are capped at five
+Only one seed per market may be in flight. An unseeded collector checks durable
+seed capacity before opening a connection; healthy rotation bypasses that check. Connection attempts are capped at five
 per market per rolling five minutes, with at most two overlapping connections.
 Process replacement retains these reservations and the shared provider cooldown.
 429 responses retain Retry-After pacing; 418 responses retain the provider circuit.
@@ -62,8 +63,8 @@ The native jobs are `backfill_binance_spot_book_source_job` and
 `backfill_binance_perp_book_source_job`. Use Jobs and native partition selection for
 all available hours, missing/failed hours or selected gaps. One launch builds every
 canonical component; retries reuse verified generations. No operator configuration
-text or separate projection launch is needed. The first partition date is the first
-UTC day after the original capture deployment: 2026-10-04, frozen in source code.
+text or separate projection launch is needed. The registered historical calendar follows the first full HCD file hours in
+June 2025; unavailable or unprovable hours remain native failures.
 
 ## Local endpoint and monitoring
 
@@ -111,3 +112,17 @@ publication p95/max, seed/connection demand, 429/418 attribution and existing-fe
 freshness/gap debt against comparable workload. Replay must add zero REST requests.
 Before deployment, record a finite overlap end and candidate stop/retirement policy;
 a failed comparison keeps Render authoritative and never expands Binance quota.
+
+The collector retains all absolute diff quantities, including prices outside the
+initial snapshot. BTCUSDT's versioned grids are 0.01 for spot and 0.10 for perpetual;
+misaligned prices fail. A proven boundary expands only after every intervening
+price tick has an observed absolute quantity, including zero. Unknown intervening
+prices remain unknown; top200 cannot publish across them. At most 100,000 tracked
+prices per side bound memory. This changes retained knowledge, not seed depth,
+seed weight, REST allowance or sequence/freshness requirements.
+
+The original October 4 perpetual file replay matched 136,338 exact update states
+against its full recorded checkpoint, using only its first 1,000 levels to initialize
+the candidate. The former boundary would reject 71,647 of those states; the corrected
+replay seals all 60 real minutes without another snapshot. This proves the recorded
+hour, not unlimited future coverage.

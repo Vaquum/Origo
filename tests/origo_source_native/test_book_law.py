@@ -95,8 +95,8 @@ def test_canary_books_have_the_same_reader_law_contract(
     c2 = _predicate(report, runtime.spec.key, 'C2')
     assert (
         c2['status'] == 'FAIL'
-        and c2['evidence']['expected_hours'] == 9
-        and c2['evidence']['missing_hours'] == 9
+        and c2['evidence']['expected_hours'] == int((hour_partition(REAL_HOUR).start - runtime.spec.partitions.start) / timedelta(hours=1))
+        and c2['evidence']['missing_hours'] == c2['evidence']['expected_hours']
     )
     projections = [p for p in report['projections'] if p['id'].startswith(runtime.spec.key + ':')]
     assert len(projections) == 8
@@ -146,6 +146,8 @@ def test_book_sources_are_required_hourly_reader_laws() -> None:
             assert key in catalog['law_gate_ids'] and gates[key]['cadence'] == 'periodic'
         assert gates[f'law.C1:{source}']['thresholds'] == {
             'delivery_grace_seconds': 1200,
+            'activation_grace_seconds': 300,
+            'availability_max_age_seconds': 1200,
             'canonical_interval': 'hour',
         }
 
@@ -275,3 +277,145 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
         {'build': minute.build_id},
     ) == [(600,)]
     assert runtime.build(REAL_HOUR) == canonical
+
+
+def test_provider_delay_and_activation_use_native_evidence(
+    authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources import lifecycle
+    from origo.sources.contracts import ArchiveNotPublishedYet
+
+    runtime = authoritative_book_runtime
+    partition = hour_partition(REAL_HOUR)
+    now = [partition.end + timedelta(minutes=30)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return now[0]
+
+    monkeypatch.setattr(lifecycle, 'datetime', Clock)
+    available = [False]
+    original = RecordedVendorHour.discover
+
+    def discover(self: RecordedVendorHour, requested: Partition) -> str:
+        if not available[0]:
+            raise ArchiveNotPublishedYet('Actual vendor response controlled as unavailable.')
+        return original(self, requested)
+
+    monkeypatch.setattr(RecordedVendorHour, 'discover', discover)
+    with pytest.raises(ArchiveNotPublishedYet):
+        runtime.discover(partition)
+    assert runtime.store.execute("SELECT count() FROM origo.source_failure_log WHERE event_type='FAILED'") == [(0,)]
+    waiting = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=2)), runtime.spec.key, 'C1')
+    assert waiting['status'] == 'NOT_DUE' and waiting['reason'] == 'archive_not_published'
+    assert waiting['evidence']['provider_available'] is False
+    stale = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=21)), runtime.spec.key, 'C1')
+    assert stale['status'] == 'UNKNOWN' and stale['reason'] == 'archive_availability_stale'
+    available[0] = True
+    now[0] = partition.end + timedelta(minutes=45)
+    runtime.discover(partition)
+    pending = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=1)), runtime.spec.key, 'C1')
+    assert pending['status'] == 'NOT_DUE' and pending['reason'] == 'archive_activation_pending'
+    assert pending['evidence']['deadline'] == (now[0] + timedelta(minutes=5)).isoformat()
+    late = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=5)), runtime.spec.key, 'C1')
+    assert late['status'] == 'FAIL' and late['reason'] == 'canonical_hour_missing'
+    now[0] += timedelta(minutes=6)
+    runtime.build(REAL_HOUR)
+    report = law.evaluate(runtime.store.client, 'origo', now[0])
+    assert _predicate(report, runtime.spec.key, 'C1')['status'] == 'PASS'
+    assert _predicate(report, runtime.spec.key, 'R1')['status'] == 'FAIL'
+    assert _predicate(report, runtime.spec.key, 'C2')['status'] == 'FAIL'
+
+
+def test_hourly_audit_admits_latest_hour_before_old_pending_requests(
+    authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources import lifecycle
+    from origo.sources.contracts import SourceError
+
+    runtime = authoritative_book_runtime
+    now = hour_partition(REAL_HOUR).end + timedelta(minutes=30)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return now
+
+    monkeypatch.setattr(lifecycle, 'datetime', Clock)
+    keys = [f'2025-06-29T{hour:02d}Z' for hour in range(6)] + [REAL_HOUR]
+    runtime.store.execute('INSERT INTO origo.source_discovery_log VALUES',
+                          [(runtime.spec.key, key, now - timedelta(days=1)) for key in keys])
+    visited: list[str] = []
+    original = RecordedVendorHour.discover
+
+    def discover(self: RecordedVendorHour, partition: Partition) -> str:
+        visited.append(partition.key)
+        if partition.key != REAL_HOUR:
+            raise SourceError('PROVIDER_HTTP_404', 'Controlled missing historical provider file.')
+        return original(self, partition)
+
+    monkeypatch.setattr(RecordedVendorHour, 'discover', discover)
+    assert runtime.audit() == (REAL_HOUR,)
+    assert visited[0] == REAL_HOUR and len(visited) == 5
+
+
+def test_declared_history_migration_preserves_existing_generation(
+    authoritative_book_runtime: SourceRuntime,
+) -> None:
+    runtime = authoritative_book_runtime
+    record = runtime.build(REAL_HOUR)
+    previous = runtime.spec.partitions.previous_starts[0]
+    runtime.store.execute(
+        "ALTER TABLE origo.source_anchor_log UPDATE anchor=%(anchor)s WHERE source_key=%(source)s SETTINGS mutations_sync=1",
+        {'anchor': previous, 'source': runtime.spec.key},
+    )
+    runtime.setup()
+    runtime.setup()
+    assert runtime.store.record(record.partition) == record
+    assert runtime.store.anchor() == runtime.spec.partitions.start
+    evidence = runtime.store.execute(
+        "SELECT evidence_json FROM origo.source_observation_log WHERE source_key=%(source)s AND partition_key=''",
+        {'source': runtime.spec.key},
+    )
+    import json
+
+    assert len(evidence) == 1
+    assert json.loads(str(evidence[0][0])) == {
+        'previous_anchor': previous.isoformat(), 'anchor': runtime.spec.partitions.start.isoformat(),
+    }
+    runtime.store.execute(
+        "ALTER TABLE origo.source_anchor_log UPDATE anchor=%(anchor)s WHERE source_key=%(source)s SETTINGS mutations_sync=1",
+        {'anchor': previous - timedelta(hours=1), 'source': runtime.spec.key},
+    )
+    with pytest.raises(RuntimeError, match='immutable'):
+        runtime.setup()
+    assert runtime.store.record(record.partition) == record
+
+
+def test_book_reconciliation_uses_native_hourly_status(
+    authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dagster import DagsterInstance, Definitions, HourlyPartitionsDefinition, build_sensor_context
+    from origo.sources.bundle import build_source_bundle
+
+    runtime = authoritative_book_runtime
+    record = runtime.build(REAL_HOUR)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
+    bundle = build_source_bundle(runtime.spec)
+    definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors, schedules=bundle.schedules)
+    seen: list[object] = []
+    original = DagsterInstance.get_status_by_partition
+
+    def status(self: DagsterInstance, asset_key: object, partition_keys: object, partitions_def: object) -> object:
+        seen.append(partitions_def)
+        return original(self, asset_key, partition_keys, partitions_def)
+
+    monkeypatch.setattr(DagsterInstance, 'get_status_by_partition', status)
+    sensor = next(sensor for sensor in bundle.sensors if sensor.name == f'{runtime.spec.key}_reconciliation_sensor')
+    with DagsterInstance.ephemeral() as instance:
+        context = build_sensor_context(instance=instance, repository_def=definitions.get_repository_def())
+        tick = sensor.evaluate_tick(context)
+    assert len(seen) == 1 and isinstance(seen[0], HourlyPartitionsDefinition)
+    assert seen[0].start == runtime.spec.partitions.start
+    assert any(request.partition_key == record.partition.key for request in tick.run_requests)

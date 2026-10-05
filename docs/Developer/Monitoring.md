@@ -79,6 +79,10 @@ make stale market data healthy. These reads make zero Binance requests and never
 scan the spool; findings use the existing Dagit checks, log and alert path. The
 provisional workers read only sealed local minutes; their own receipts and feed
 materializations remain the native ingestion evidence.
+Hourly book C1 uses existing source observation evidence to distinguish a fresh
+unpublished HCD hour from a file that arrived but was not activated. R1 still
+checks reader rows, freshness and tail gaps; C2 counts missing historical hours.
+The monitor makes no provider request to decide availability.
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:

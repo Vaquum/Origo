@@ -46,9 +46,7 @@ class SourceRuntime:
 
     def setup(self, *, anchor: datetime | None = None) -> None:
         self.spec.require_enabled('setup')
-        selected = anchor or datetime.combine(
-            self.spec.partitions.first_day, datetime.min.time(), UTC
-        )
+        selected = anchor or self.spec.partitions.start
         with source_lock(self.lock_root, self.spec.key, 'setup', wait=True):
             self.store.setup(anchor=selected)
             marker = self.lock_root / self.spec.key / 'domain_id'
@@ -99,14 +97,20 @@ class SourceRuntime:
                 )
         try:
             revision = self.spec.canonical.discover(partition)
+            self._observe_canonical(partition, revision)
             self.failures.recover(operation='discovery', partition=partition.key)
             return revision
+        except ArchiveNotPublishedYet:
+            self._observe_canonical(partition, None)
+            self.failures.recover(operation='discovery', partition=partition.key)
+            raise
         except Exception as error:
             if (
                 isinstance(error, SourceError)
                 and error.code == 'PROVIDER_HTTP_404'
                 and partition.key == self.spec.canonical.candidate(datetime.now(UTC)).key
             ):
+                self._observe_canonical(partition, None)
                 raise ArchiveNotPublishedYet(
                     f'{self.spec.key} partition {partition.key} is not published yet.'
                 ) from error
@@ -118,6 +122,16 @@ class SourceRuntime:
                 partition=partition.key,
             )
             raise
+
+    def _observe_canonical(self, partition: Partition, revision: str | None) -> None:
+        if self.spec.partitions.interval == 'hour':
+            self.store.execute(
+                f'INSERT INTO {self.store.table("source_observation_log")} VALUES',
+                [(self.spec.key, partition.key,
+                  json.dumps({'provider_available': revision is not None, 'revision': revision},
+                             separators=(',', ':')),
+                  int(revision is not None), datetime.now(UTC))],
+            )
 
     def enable_components(self, group: str) -> None:
         self.spec.require_enabled('component_enablement')
@@ -558,6 +572,8 @@ class SourceRuntime:
 
     def _retire_obsolete_requests(self) -> None:
         """Retain failures for requests outside the current canonical calendar."""
+        first = (self.spec.partitions.start.strftime('%Y-%m-%dT%HZ')
+                 if self.spec.partitions.interval == 'hour' else self.spec.partitions.first_day.isoformat())
         rows = self.store.execute(
             f"""SELECT any(operation), argMax(error_code, event_time),
             argMax(partition_key, event_time), argMax(blocking_scope, event_time),
@@ -567,7 +583,7 @@ class SourceRuntime:
               OR (%(hourly)s AND length(partition_key)=10))
               AND operation IN ('canonical', 'discovery', 'audit')
             GROUP BY failure_key HAVING argMax(event_type, event_time)='FAILED' """,
-            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
+            {'source': self.spec.key, 'first': first,
              'hourly': self.spec.partitions.interval == 'hour'},
         )
         for operation, code, key, scope, event in rows:
@@ -577,7 +593,7 @@ class SourceRuntime:
                 operation=str(operation), error_code=str(code), partition=str(key),
                 scope=str(scope), event_type='RECOVERED', related_event=event,
                 details={'reason': 'request precedes the declared source calendar'
-                         if str(key) < self.spec.partitions.first_day.isoformat()
+                         if str(key) < first
                          else 'daily request superseded by the hourly canonical calendar'},
             )
 
@@ -587,7 +603,7 @@ class SourceRuntime:
         self._retire_obsolete_requests()
         records = self.store.records(canonical_only=True)
         changed: list[str] = []
-        cutoff = datetime.now(UTC) - timedelta(days=14)
+        cutoff = datetime.now(UTC) - (timedelta(hours=2) if self.spec.partitions.interval == 'hour' else timedelta(days=14))
         recent = [record for record in records if record.partition.end >= cutoff]
         older = [record for record in records if record.partition.end < cutoff]
         offset = (int(datetime.now(UTC).timestamp()) // 3600 * 50) % max(1, len(older))
@@ -600,9 +616,12 @@ class SourceRuntime:
               AND (NOT %(hourly)s OR length(partition_key)=14) AND partition_key NOT IN (
                 SELECT partition_key FROM {self.store.table('source_active_partitions')}
                 WHERE source_key=%(source)s AND NOT provisional
-            ) GROUP BY partition_key ORDER BY min(requested_at) LIMIT 5""",
-            {'source': self.spec.key, 'first': self.spec.partitions.first_day.isoformat(),
-             'hourly': self.spec.partitions.interval == 'hour'},
+            ) GROUP BY partition_key ORDER BY (%(hourly)s AND partition_key >= %(recent)s) DESC, (%(hourly)s AND partition_key=%(latest)s) DESC, min(requested_at) LIMIT 5""",
+            {'source': self.spec.key, 'first': (self.spec.partitions.start.strftime('%Y-%m-%dT%HZ')
+                                             if self.spec.partitions.interval == 'hour' else self.spec.partitions.first_day.isoformat()),
+             'hourly': self.spec.partitions.interval == 'hour',
+             'latest': self.spec.canonical.candidate(datetime.now(UTC)).key,
+             'recent': (datetime.now(UTC) - timedelta(hours=3)).strftime('%Y-%m-%dT%HZ')},
         )
         for row in pending:
             partition = self.spec.canonical.partition(str(row[0]))

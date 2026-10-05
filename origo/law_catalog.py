@@ -1056,8 +1056,8 @@ def _operational_gates(add: _AddGate) -> None:
             ),
             (
                 'C1',
-                'The latest closed UTC hour must have complete validated vendor canonical proofs; absence is NOT_DUE before delivery grace and FAIL afterward.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'The latest closed UTC hour must have complete vendor canonical proofs. Fresh native evidence of an unpublished archive is NOT_DUE; once available, activation must finish within five minutes. Missing or stale availability evidence is never a pass.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'activation_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS'), 'availability_max_age_seconds': _threshold('sources.adapters.book_vendor:BOOK_AVAILABILITY_MAX_AGE_SECONDS'), 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',

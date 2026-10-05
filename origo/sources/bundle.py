@@ -371,7 +371,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         else None,
         partitions_def=(
             HourlyPartitionsDefinition(
-                start_date=spec.partitions.first_day.isoformat() + 'T00Z',
+                start_date=spec.partitions.start.strftime('%Y-%m-%dT%HZ'),
                 fmt='%Y-%m-%dT%HZ', timezone='UTC',
             ) if spec.partitions.interval == 'hour' else DailyPartitionsDefinition(
                 start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
@@ -793,7 +793,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             return SkipReason(f'{spec.key} is DORMANT.')
         now = context.scheduled_execution_time or datetime.now(UTC)
         partition = spec.canonical.candidate(now)
-        anchor = datetime.combine(spec.partitions.first_day, datetime.min.time(), UTC)
+        anchor = spec.partitions.start
         if partition.start < anchor:
             return SkipReason(f'{spec.key} {partition.key} precedes its source calendar.')
         settings = get_clickhouse_settings()

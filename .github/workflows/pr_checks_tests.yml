@@ -114,6 +114,24 @@ jobs:
               assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
           PYTHON
 
+      - name: Pin and execute book recovery acceptance
+        run: |
+          pytest -q --junitxml=book-recovery.xml \
+            tests/origo_source_native/test_book_vendor.py::test_real_hour_survives_original_seed_region_without_reseeding \
+            tests/origo_source_native/test_book_capture.py::test_exhausted_seed_capacity_prevents_connection \
+            tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence \
+            tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation \
+            tests/origo_source_native/test_book_history.py::test_original_historical_hour_replays_preceding_vendor_snapshot \
+            tests/origo_source_native/test_book_history.py::test_original_spot_history_rejects_unproven_depth
+          python - <<'PYTHON'
+          from xml.etree import ElementTree
+
+          suites = ElementTree.parse('book-recovery.xml').getroot().findall('testsuite')
+          assert sum(int(suite.attrib['tests']) for suite in suites) == 10
+          for outcome in ('skipped', 'failures', 'errors'):
+              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
+          PYTHON
+
       - name: Run Origo source-native runtime tests
         run: pytest tests/origo_source_native -q --maxfail=1
 

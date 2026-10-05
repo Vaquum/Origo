@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
 from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
-from origo.sources.profiles.book import BOOK_COMPONENT_KEYS, BOOK_FIRST_DAY
-from origo.sources.adapters.book_vendor import BOOK_HOURLY_DELIVERY_GRACE_SECONDS, HOUR_KEY_FORMAT
+from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
+from origo.sources.adapters.book_vendor import BOOK_HOURLY_DELIVERY_GRACE_SECONDS, BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS, BOOK_AVAILABILITY_MAX_AGE_SECONDS, HOUR_KEY_FORMAT
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
 
@@ -35,8 +35,8 @@ LAW_ANCHORS = {
     'binance_spot_aggtrades': date(2017, 8, 17),
     'binance_perp_trades': date(2019, 9, 8),
     'binance_perp_aggtrades': date(2019, 12, 31),
-    'binance_spot_book': BOOK_FIRST_DAY,
-    'binance_perp_book': BOOK_FIRST_DAY,
+    'binance_spot_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_spot_book').partitions.start,
+    'binance_perp_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_perp_book').partitions.start,
 }
 R1_SPOT_BUDGET_SECONDS = 180
 R1_PERP_BUDGET_SECONDS = 300
@@ -262,7 +262,7 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
         return _result('FAIL', 'reader_minute_empty', **evidence)
     if book:
         canonical_end = max((p.end for p in proofs if not p.provisional and p.verdict()['status'] == 'PASS'),
-                            default=datetime.combine(spec.partitions.first_day, datetime.min.time(), UTC))
+                            default=spec.partitions.start)
         tail_start = max(canonical_end, now.replace(second=0, microsecond=0) - timedelta(days=1))
         expected_minutes = max(0, int((_utc(end) - tail_start).total_seconds() // 60))
         accepted = {p.start for p in proofs if p.provisional and p.end == p.start + timedelta(minutes=1)
@@ -297,6 +297,11 @@ def _calendar(proofs: list[_Proof], slot: date | datetime, source: str | None = 
     return matches[0].verdict()
 
 
+def _history_anchor(source: str) -> datetime:
+    anchor = LAW_ANCHORS[source]
+    return anchor if isinstance(anchor, datetime) else datetime.combine(anchor, datetime.min.time(), UTC)
+
+
 def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     hourly = _interval(source) == timedelta(hours=1)
     floor = _floor(now, source)
@@ -308,15 +313,47 @@ def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     report = _calendar(proofs, slot, source)
     unit = 'hour' if hourly else 'day'
-    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot.date() < LAW_ANCHORS[source])):
+    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot < _history_anchor(source))):
         report = _result('NOT_DUE', 'archive_not_due')
     report['evidence'].update({unit: slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat(), 'deadline': deadline.isoformat(), 'canonical_interval': unit})
     return report
 
 
+def _book_c1(query: _Queries, database: str, proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
+    report = _c1(proofs, source, now)
+    if report['reason'] not in ('canonical_hour_missing', 'archive_not_due'):
+        return report
+    slot = _floor(now, source) - timedelta(hours=1)
+    rows = query(f"""SELECT argMax(complete, observed_at), max(observed_at),
+        minOrNullIf(observed_at, complete=1)
+        FROM {database}.source_observation_log
+        WHERE source_key=%(source)s AND partition_key=%(partition)s
+          AND JSONHas(evidence_json, 'provider_available')
+        HAVING count()>0""",
+        {'source': source, 'partition': slot.strftime(HOUR_KEY_FORMAT)})
+    if not rows:
+        return report
+    available, observed, first_available = rows[0]
+    observed = _utc(observed)
+    evidence = dict(report['evidence'])
+    evidence['deadline'] = None
+    evidence.update(provider_available=bool(available), provider_observed_at=observed.isoformat(),
+                    authority_delay_seconds=(now - slot - timedelta(hours=1)).total_seconds())
+    if not 0 <= (now - observed).total_seconds() <= BOOK_AVAILABILITY_MAX_AGE_SECONDS:
+        return _result('UNKNOWN', 'archive_availability_stale', **evidence)
+    if not available:
+        if first_available is not None:
+            return _result('FAIL', 'published_archive_unavailable', **evidence)
+        return _result('NOT_DUE', 'archive_not_published', **evidence)
+    deadline = _utc(first_available) + timedelta(seconds=BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS)
+    evidence['deadline'] = deadline.isoformat()
+    return _result('NOT_DUE' if now < deadline else 'FAIL',
+                   'archive_activation_pending' if now < deadline else 'canonical_hour_missing', **evidence)
+
+
 def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     anchor = LAW_ANCHORS[source]
-    start = datetime.combine(anchor, datetime.min.time(), UTC)
+    start = _history_anchor(source)
     interval = _interval(source)
     hourly = interval == timedelta(hours=1)
     unit = 'hour' if hourly else 'day'
@@ -349,7 +386,8 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
     return _result(first['status'] if first else 'PASS', first['reason'] if first else 'canonical_calendar_complete', **evidence)
 
 
-def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime, r1: PredicateReport) -> list[ProjectionObservation]:
+def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime, r1: PredicateReport,
+                 c1: PredicateReport) -> list[ProjectionObservation]:
     observations: list[ProjectionObservation] = []
     for component in spec.components:
         record = max((p for p in proofs if p.provisional == component.provisional), key=lambda p: p.end, default=None)
@@ -361,7 +399,7 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
         )
         waiting = (not component.provisional and record is not None
                    and record.end == _floor(now, spec.key) - _interval(spec.key)
-                   and _c1(proofs, spec.key, now)['status'] == 'NOT_DUE')
+                   and c1['status'] == 'NOT_DUE')
         observation: ProjectionObservation = {
             'id': f'{spec.key}:{component.key}', 'status': 'UNKNOWN' if proof is None else 'FAILED' if proof[1] == 0 else 'CURRENT' if current else 'WAITING' if waiting else 'STALE',
             'observed_at': now.isoformat(), 'evidence_at': proof[3].isoformat() if proof else None,
@@ -530,7 +568,7 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
             return _result('UNKNOWN', 'evaluation_timeout' if isinstance(error, TimeoutError) else 'evidence_unavailable')
 
     predicates: dict[LawPredicate, PredicateReport] = {
-        'C1': _c1(proofs, spec.key, now),
+        'C1': observed(lambda: _book_c1(query, database, proofs, spec.key, now)) if spec.partitions.interval == 'hour' else _c1(proofs, spec.key, now),
         'R1': observed(lambda: _r1(query, database, spec, now, edges, proofs)),
         'C2': observed(lambda: _c2(query, database, proofs, spec.key, now)),
     }
@@ -542,7 +580,7 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
         else:
             predicates['M1'] = _result('UNKNOWN', 'cube_profile_mismatch')
             predicates['M2'] = _result('UNKNOWN', 'cube_profile_mismatch')
-    observations = _projections(spec, proofs, now, predicates['R1'])
+    observations = _projections(spec, proofs, now, predicates['R1'], predicates['C1'])
     if cube:
         _cube_observations(observations, predicates, now)
     return {'source_key': spec.key, 'predicates': predicates}, observations

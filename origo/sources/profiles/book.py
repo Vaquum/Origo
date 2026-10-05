@@ -5,7 +5,8 @@ from datetime import date
 
 from ..contracts import BuildContext, Column, ComponentSpec, Row
 
-BOOK_FIRST_DAY = date(2026, 10, 4)
+BOOK_FIRST_DAY = date(2025, 6, 28)
+BOOK_FIRST_HOUR = {'spot': 7, 'perp': 6}
 BOOK_COMPONENT_KEYS = ('depth20', 'depth200', 'depth20_1m', 'depth200_1m')
 BOOK_SAMPLE_INTERVAL_MS = {20: 100, 200: 1000}
 # A full depth-200 page measured 67 MiB peak query memory on original recorded states.

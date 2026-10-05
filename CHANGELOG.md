@@ -1,3 +1,9 @@
+# v3.34.0
+
+- Retain absolute book updates beyond the initial snapshot and extend the proven price region only across observed BTCUSDT ticks; avoid connecting when durable seed capacity is exhausted.
+- Retry delayed hourly authority through native audit and report provider availability, activation, reader freshness and historical gaps through the existing law monitor.
+- Expose native hourly history from CryptoHFTData's June 2025 files with wrapped archive parsing, bounded preceding snapshots, dependency-bound revisions and an explicit preserved-generation anchor migration. Incomplete recorded hours remain failures.
+
 # v3.33.0
 
 - Add CryptoHFTData hourly authority to the existing native spot/perpetual book sources; canonical hours atomically replace provisional minutes across all four projections without Binance requests.

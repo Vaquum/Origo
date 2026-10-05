@@ -14,6 +14,7 @@ from dagster import (
     DagsterEventType,
     DagsterRunStatus,
     DailyPartitionsDefinition,
+    HourlyPartitionsDefinition,
     DefaultSensorStatus,
     JobDefinition,
     RunRequest,
@@ -292,9 +293,12 @@ def build_reconciliation_sensor(
                 context.instance.get_status_by_partition(
                     AssetKey(asset_name),
                     keys,
-                    DailyPartitionsDefinition(
+                    (HourlyPartitionsDefinition(
+                        start_date=spec.partitions.start.strftime('%Y-%m-%dT%HZ'),
+                        fmt='%Y-%m-%dT%HZ', timezone='UTC',
+                    ) if spec.partitions.interval == 'hour' else DailyPartitionsDefinition(
                         start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
-                    ),
+                    )),
                 )
                 or {}
             )

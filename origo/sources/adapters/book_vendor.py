@@ -127,7 +127,10 @@ def _frames(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[d
                 messages: dict[tuple[object, ...], list[dict[str, object]]] = {}
                 for row in rows:
                     messages.setdefault(_frame_key(row), []).append(row)
-                yield from sorted(messages.values(), key=lambda frame: int(str(frame[0]['received_time'])))
+                # Apply the native update before its same-ID snapshot, even when
+                # another collector received the snapshot first.
+                yield from sorted(messages.values(), key=lambda frame: (
+                    frame[0]['event_type'] == 'snapshot', int(str(frame[0]['received_time']))))
             else:
                 yield rows
 
@@ -238,6 +241,10 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                     sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
             else:
                 sampler.checkpoint(json.dumps(seed).encode(), event_ms, start_ms)
+            if legacy:
+                # A legacy REST snapshot's collector clock is not an exchange
+                # watermark and cannot terminate the requested hour.
+                continue
         elif first['event_type'] == 'update':
             if sampler.book is None:
                 if event_ms < start_ms:

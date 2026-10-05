@@ -9,7 +9,8 @@ the shared canonical contract; trades and aggregate trades retain `day`.
 ## Delivery and activation
 
 The canonical schedules run at minute 15 and select the previous closed UTC hour.
-The existing audit runs every 15 minutes. It retries up to five requested inactive
+The existing audit runs at :05, :20, :35 and :50, keeping its 15-minute cadence
+without launching simultaneously with the :15 canonical refresh. It retries up to five requested inactive
 hours, prioritizing the latest and recent delayed hours before historical requests;
 revision checks cover two recent hours and rotate through 50 older active hours.
 Both sources keep their own canonical pool, bounded to two builds per market.
@@ -93,7 +94,10 @@ published. Provider unavailability fails acceptance rather than substituting dat
 Historical files before August 19, 2026 can have an outer Zstandard wrapper and
 fragmented duplicate-collector messages. The adapter streams decompression, groups
 actual rows by native ID, and uses the matched update's exchange clock for legacy
-REST snapshots. Same-ID snapshots must agree with the verified overlap and extend
+REST snapshots. Updates precede their same-ID snapshots even when collector
+arrival order differs; a REST collector clock cannot close an exchange hour.
+Same-ID snapshots must agree with all proven prices, including observed quantities
+and deletions outside the complete interval, and extend
 known depth without discarding older proven prices. Inputs and market timestamps
 are never fabricated, sorted by a future clock, or shifted.
 
@@ -111,3 +115,28 @@ notice a changed predecessor; revalidation rejects it before activation. Losing
 that derived metadata can cause a rebuild, never accept changed bytes under an old
 identity. Missing files, sequence links, freshness, depth proof, bounds or scratch
 remain explicit failures.
+
+Native GUI acceptance on October 5, 2026 used the registered jobs and a real
+ClickHouse instance on a 4 GiB APFS volume. All-history selection exposed the
+expanded calendars; the ordinary date picker and partition bar selected hours,
+without typed dates, configuration or identifiers. Run
+`42726fa2-c0a7-4d79-bb0e-6d7a917aefea` accepted perpetual `2025-06-28T06Z`
+with 36,000/3,600/60/60 rows and ordinary reconciliation in 73.5 seconds.
+Run `08113fa0-fe6d-4211-9ac6-37fa501c4017` accepted `2025-06-28T14Z` in
+88.9 seconds. Spot `2025-06-28T07Z` failed depth proof, and native Re-execute
+reproduced that failure while retaining every previously accepted generation.
+
+On an Apple M1 Max with 64 GiB RAM, the first perpetual run's ordinary capacity
+receipts measured a peak 117,448,704-byte increase on the shared mounted volume,
+including original/expanded files and replay grids. These paths share one volume;
+their receipts must not be summed. Scratch lives under the existing source lock
+mount so the monitor observes it. The historical replay process measured about
+294 MB peak RSS in a separate local replay. Neither measurement is a universal bound.
+
+Observed single-generation hours used up to about 5.2 MB compressed for spot and
+6.5 MB for perpetual, with 52.24 MB uncompressed per market-hour. Extrapolating
+these samples over approximately 11,140 hours per market suggests about 130 GB
+compressed (1.16 TB uncompressed) for both markets combined. This is a planning
+estimate, not proof of full-range yield or production throughput. Retained
+revisions, concurrent scratch, indexes, logs and ordinary capacity reserves add
+space. Existing admission checks remain mandatory for a full native backfill.

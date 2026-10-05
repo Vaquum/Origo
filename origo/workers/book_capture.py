@@ -152,12 +152,13 @@ class DiffBook:
     def refresh(self, snapshot: DiffBook) -> None:
         if self.market != snapshot.market or self.last != snapshot.last or not self.verified:
             raise SourceError('BOOK_SNAPSHOT_CURSOR', 'A refresh requires the same verified update ID.')
-        for old, new, floor, ceiling in (
-            (self.bids, snapshot.bids, max(self.bid_floor, snapshot.bid_floor), None),
-            (self.asks, snapshot.asks, None, min(self.ask_ceiling, snapshot.ask_ceiling)),
+        for old, new, observed, old_bound, new_bound, bid in (
+            (self.bids, snapshot.bids, self.bid_observed, self.bid_floor, snapshot.bid_floor, True),
+            (self.asks, snapshot.asks, self.ask_observed, self.ask_ceiling, snapshot.ask_ceiling, False),
         ):
-            overlap = {price for price in old.keys() | new.keys()
-                       if (floor is not None and price >= floor) or (ceiling is not None and price <= ceiling)}
+            overlap = {price for price in old.keys() | new.keys() | observed
+                       if (price >= new_bound if bid else price <= new_bound)
+                       and (price in observed or (price >= old_bound if bid else price <= old_bound))}
             if any(old.get(price, Decimal(0)) != new.get(price, Decimal(0)) for price in overlap):
                 raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'A snapshot disagrees with the verified sequence.')
         self.bids = {**{p: q for p, q in self.bids.items() if p < snapshot.bid_floor}, **snapshot.bids}

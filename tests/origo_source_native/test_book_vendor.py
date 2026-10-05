@@ -120,6 +120,8 @@ def test_hourly_book_partitions_reuse_native_source_jobs() -> None:
             )
             == 14
         )
+        assert spec.orchestration.canonical_cron == '15 * * * *'
+        assert spec.orchestration.audit_cron == '5,20,35,50 * * * *'
 
 
 @pytest.mark.parametrize(
@@ -194,6 +196,69 @@ def test_hourly_and_provisional_keys_cannot_share_partition_identity() -> None:
             spec.provisional.partition(canonical.key)
         with pytest.raises(ValueError):
             spec.canonical.partition(minute.key)
+
+
+@pytest.mark.parametrize('deletion', [False, True])
+def test_same_id_snapshot_checks_observed_prices_outside_seed(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+    deletion: bool,
+) -> None:
+    import json
+    from decimal import Decimal
+    from origo.workers.book_capture import BOOK_SEED_DEPTH, DepthEvent, DiffBook, parse_book_integer
+
+    market, body, _ = original_vendor_archive
+    path = tmp_path / 'original.parquet'
+    path.write_bytes(body)
+    frames = iter(vendor._frames((path,)))
+    checkpoint = next(frames)
+    sides = {side: sorted([(str(row['price']), str(row['quantity'])) for row in checkpoint
+                           if row['side'] == side], key=lambda pair: Decimal(pair[0]),
+                          reverse=side == 'bid') for side in ('bid', 'ask')}
+    seed = {'lastUpdateId': checkpoint[0]['last_update_id'], 'bids': sides['bid'], 'asks': sides['ask']}
+    reference = DiffBook(market, json.dumps(seed).encode())
+    reference.verified = True
+    seed['bids'], seed['asks'] = (sides[side][:min(BOOK_SEED_DEPTH[market], len(sides[side]) // 2)]
+                                 for side in ('bid', 'ask'))
+    book = DiffBook(market, json.dumps(seed).encode())
+    book.verified = True
+    for frame in frames:
+        first = frame[0]
+        event = DepthEvent(parse_book_integer(first['event_time']),
+                           parse_book_integer(first['first_update_id']),
+                           parse_book_integer(first['final_update_id']),
+                           parse_book_integer(first['prev_final_update_id']) if market == 'perp' else None,
+                           tuple((Decimal(str(row['price'])), Decimal(str(row['quantity'])))
+                                 for row in frame if row['side'] == 'bid'),
+                           tuple((Decimal(str(row['price'])), Decimal(str(row['quantity'])))
+                                 for row in frame if row['side'] == 'ask'))
+        previous = {'bids': dict(reference.bids), 'asks': dict(reference.asks)}
+        reference.apply(event)
+        book.apply(event)
+        for name, updates, observed in (('bids', event.bids, book.bid_observed),
+                                        ('asks', event.asks, book.ask_observed)):
+            for price, quantity in updates:
+                before = previous[name].get(price, Decimal(0))
+                if price not in observed or (quantity == 0) != deletion or before == quantity:
+                    continue
+                if (name == 'bids' and price < reference.bid_floor) or (name == 'asks' and price > reference.ask_ceiling):
+                    continue
+                current = {'bids': dict(reference.bids), 'asks': dict(reference.asks)}
+                # Fault injection restores this price's actual preceding quantity;
+                # every other value comes from the unchanged recorded update stream.
+                if before:
+                    current[name][price] = before
+                else:
+                    del current[name][price]
+                payload = {'lastUpdateId': book.last,
+                           **{side: [[str(p), str(q)] for p, q in sorted(levels.items(), reverse=side == 'bids')]
+                              for side, levels in current.items()}}
+                with pytest.raises(SourceError) as failure:
+                    book.refresh(DiffBook(market, json.dumps(payload).encode()))
+                assert failure.value.code == 'BOOK_SNAPSHOT_MISMATCH'
+                assert book.top(200) == reference.top(200)
+                return
+    pytest.fail('Original recording lacks the required outside-boundary update.')
 
 
 def test_real_hour_survives_original_seed_region_without_reseeding(

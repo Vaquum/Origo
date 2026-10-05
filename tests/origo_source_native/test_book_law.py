@@ -483,3 +483,34 @@ def test_book_reconciliation_uses_native_hourly_status(
     assert len(seen) == 1 and isinstance(seen[0], HourlyPartitionsDefinition)
     assert seen[0].start == runtime.spec.partitions.start
     assert any(request.partition_key == record.partition.key for request in tick.run_requests)
+
+
+def test_prior_book_authority_is_unverified_until_closing_input_rebuild(
+    authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources.contracts import ArchiveNotPublishedYet
+
+    runtime = authoritative_book_runtime
+    adapter = cast(RecordedVendorHour, runtime.spec.canonical)
+    current = adapter.recorded_revision
+    original = replace(current, key=current.key.replace('cryptohftdata-v2:', 'cryptohftdata-v1:', 1))
+    object.__setattr__(adapter, 'recorded_revision', original)
+    record = runtime.build(REAL_HOUR)
+    now = record.partition.end + timedelta(hours=1, minutes=21)
+    report = law.evaluate(runtime.store.client, 'origo', now)
+    assert _predicate(report, runtime.spec.key, 'C1')['status'] == 'UNKNOWN'
+    assert _predicate(report, runtime.spec.key, 'C1')['reason'] == 'book_closing_input_unverified'
+
+    original_discover = RecordedVendorHour.discover
+    def waiting(self: RecordedVendorHour, partition: Partition) -> str:
+        raise ArchiveNotPublishedYet('Closing file not published during policy upgrade.')
+    monkeypatch.setattr(RecordedVendorHour, 'discover', waiting)
+    assert runtime.audit() == ()
+    assert runtime.store.record(record.partition) == record
+    assert runtime.store.execute("SELECT count() FROM origo.source_failure_log WHERE event_type='FAILED'") == [(0,)]
+    monkeypatch.setattr(RecordedVendorHour, 'discover', original_discover)
+    object.__setattr__(adapter, 'recorded_revision', current)
+    assert REAL_HOUR in runtime.audit()
+    rebuilt = runtime.build(REAL_HOUR)
+    assert rebuilt.generation == record.generation + 1
+    assert _predicate(law.evaluate(runtime.store.client, 'origo', now), runtime.spec.key, 'C1')['status'] == 'PASS'

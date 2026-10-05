@@ -106,7 +106,9 @@ fragmented duplicate-collector messages. The adapter streams decompression, grou
 actual rows by native ID, and uses the matched update's exchange clock for legacy
 REST snapshots. Updates precede their same-ID snapshots even when collector
 arrival order differs; a REST collector clock cannot close an exchange hour.
-Same-ID snapshots must agree with all proven prices, including observed quantities
+An initial legacy snapshot can bind to its preceding same-ID update exactly at
+the requested boundary, using the actual exchange clock and checked quantities;
+otherwise it requires the normal seed bridge. Same-ID snapshots must agree with all proven prices, including observed quantities
 and deletions outside the complete interval, and extend
 known depth without discarding older proven prices. Inputs and market timestamps
 are never fabricated, sorted by a future clock, or shifted.
@@ -122,7 +124,10 @@ concurrent scratch. Full-range import remains a native operator selection.
 
 A revision binds the current object plus every ordered preceding and following
 ETag and original input hash. The v2 revision prefix makes ordinary audit recheck
-previous single-file generations against this completeness policy. Bounded private dependency metadata lets ordinary discovery and audit
+previous single-file generations against this completeness policy. Their retained
+rows remain readable, but `/law` marks their closing-input proof UNKNOWN until the
+ordinary rebuild supplies v2 evidence. Audit can wait for a newer retained hour's
+closing file without recording an outage or discarding its generation. Bounded private dependency metadata lets ordinary discovery and audit
 notice a changed predecessor; revalidation rejects it before activation. Losing
 that derived metadata can cause a rebuild, never accept changed bytes under an old
 identity. Missing files, sequence links, freshness, depth proof, bounds or scratch

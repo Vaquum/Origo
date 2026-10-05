@@ -672,6 +672,13 @@ class SourceRuntime:
                 if revision != record.revision:
                     changed.append(record.partition.key)
                 self.failures.recover(operation='audit', partition=record.partition.key)
+            except ArchiveNotPublishedYet:
+                self._observe_canonical(record.partition, None)
+                get_dagster_logger('origo.sources').info(
+                    'source=%s partition=%s phase=audit_retained_unpublished',
+                    self.spec.key, record.partition.key,
+                )
+                continue
             except (OSError, ValueError, RuntimeError) as error:
                 self.failures.record(
                     operation='audit',

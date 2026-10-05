@@ -155,6 +155,8 @@ class _Proof:
 
     def verdict(self) -> PredicateReport:
         book = self.source in ('binance_spot_book', 'binance_perp_book')
+        if book and not self.provisional and self.revision.startswith('cryptohftdata-v1:'):
+            return _result('UNKNOWN', 'book_closing_input_unverified', revision=self.revision)
         expected = tuple(key + ('_latest' if self.provisional else '') for key in BOOK_COMPONENT_KEYS) if book else PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
         extra: set[str] = (
             {'market_state_latest', 'market_state_detail_latest'} if self.provisional

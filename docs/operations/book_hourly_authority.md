@@ -108,6 +108,8 @@ REST snapshots. Updates precede their same-ID snapshots even when collector
 arrival order differs; a REST collector clock cannot close an exchange hour.
 An initial legacy snapshot can bind to its preceding same-ID update exactly at
 the requested boundary, using the actual exchange clock and checked quantities;
+its observed quantities and deletions outside the seed are retained through the
+same price-knowledge update used by live capture;
 otherwise it requires the normal seed bridge. Same-ID snapshots must agree with all proven prices, including observed quantities
 and deletions outside the complete interval, and extend
 known depth without discarding older proven prices. Inputs and market timestamps

@@ -181,7 +181,7 @@ def test_initial_legacy_snapshot_uses_matching_original_exchange_clock(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]], tmp_path: Path,
 ) -> None:
     from decimal import Decimal
-    from origo.workers.book_capture import parse_book_integer
+    from origo.workers.book_capture import BookSampler, parse_book_integer
 
     archive = original_historical_archives['perp'][1]
     path = tmp_path / 'original.bin'
@@ -197,12 +197,30 @@ def test_initial_legacy_snapshot_uses_matching_original_exchange_clock(
                 name: sorted([[str(row['price']), str(row['quantity'])] for row in frame if row['side'] == side],
                              key=lambda level: Decimal(level[0]), reverse=side == 'bid')
                 for name, side in (('bids', 'bid'), ('asks', 'ask'))}}
+            seed['bids'] = seed['bids'][:200]
+            seed['asks'] = seed['asks'][:200]
+            bid_floor, ask_ceiling = Decimal(seed['bids'][-1][0]), Decimal(seed['asks'][-1][0])
+            outside = [row for row in update if (
+                Decimal(str(row['price'])) < bid_floor if row['side'] == 'bid'
+                else Decimal(str(row['price'])) > ask_ceiling)]
+            if not outside:
+                continue
             payload = json.dumps(seed).encode()
             actual_exchange_clock = parse_book_integer(update[0]['event_time'])
-            assert vendor._boundary_seed_clock(payload, update, actual_exchange_clock, 'perp') == actual_exchange_clock
+            sampler = BookSampler(tmp_path / 'grid', 'perp')
+            vendor._bind_boundary_seed(sampler, payload, update, actual_exchange_clock, 'perp')
+            assert sampler.book is not None and sampler.book.verified
+            assert sampler.book.event_ms == actual_exchange_clock
+            assert sampler.book.last == parse_book_integer(first['last_update_id'])
+            for row in outside:
+                price, quantity = Decimal(str(row['price'])), Decimal(str(row['quantity']))
+                levels = sampler.book.bids if row['side'] == 'bid' else sampler.book.asks
+                observed = sampler.book.bid_observed if row['side'] == 'bid' else sampler.book.ask_observed
+                assert levels.get(price, Decimal(0)) == quantity
+                assert price in observed or (price >= sampler.book.bid_floor if row['side'] == 'bid' else price <= sampler.book.ask_ceiling)
             assert actual_exchange_clock != parse_book_integer(first['event_time'])
             with pytest.raises(SourceError) as failure:
-                vendor._boundary_seed_clock(payload, update, actual_exchange_clock + 1, 'perp')
+                vendor._bind_boundary_seed(sampler, payload, update, actual_exchange_clock + 1, 'perp')
             assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'
             break
     else:

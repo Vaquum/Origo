@@ -10,13 +10,16 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from ..arrow_types import ArrowCompression, ArrowParquet
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
 from .book_local import fetch_sealed_partition
 from .book_spool import Market, atomic_write, object_mapping
+
+if TYPE_CHECKING:
+    from origo.workers.book_capture import BookSampler
 
 CRYPTOHFT_URL = 'https://api.cryptohftdata.com/v1/download'
 CRYPTOHFT_MAX_FILE_BYTES = 256 * 1024**2
@@ -185,25 +188,36 @@ def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> st
         json.dumps([current, dependencies], separators=(',', ':')).encode()).hexdigest()
 
 
-def _boundary_seed_clock(seed: bytes, update: list[dict[str, object]], start_ms: int, market: Market) -> int:
+def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str, object]], start_ms: int, market: Market) -> None:
     from decimal import Decimal
-    from origo.workers.book_capture import BOOK_MAX_EVENT_AGE_SECONDS, DiffBook, parse_book_integer
+    from origo.workers.book_capture import BOOK_MAX_EVENT_AGE_SECONDS, DepthEvent, DiffBook, parse_book_integer
 
-    snapshot = DiffBook(market, seed)
     first = update[0]
-    event_ms = parse_book_integer(first['event_time'])
-    if snapshot.last != parse_book_integer(first['final_update_id']) or event_ms != start_ms:
-        raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Initial snapshot does not match the boundary exchange update.')
-    if not 0 <= parse_book_integer(first['received_time']) // 1000000 - event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
-        raise SourceError('BOOK_EVENT_STALE', 'Boundary exchange update is stale or ahead of receipt.')
+    sides: dict[str, dict[str, str]] = {'bid': {}, 'ask': {}}
     for row in update:
-        price, quantity = Decimal(str(row['price'])), Decimal(str(row['quantity']))
-        bid = row['side'] == 'bid'
-        levels = snapshot.bids if bid else snapshot.asks
-        if (price >= snapshot.bid_floor if bid else price <= snapshot.ask_ceiling):
-            if levels.get(price, Decimal(0)) != quantity:
-                raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Initial snapshot contradicts its native boundary update.')
-    return event_ms
+        side, price, quantity = str(row['side']), str(row['price']), str(row['quantity'])
+        previous = sides[side].setdefault(price, quantity)
+        if Decimal(previous) != Decimal(quantity):
+            raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Boundary collectors disagree about an absolute quantity.')
+    event = DepthEvent.parse(json.dumps({
+        'e': 'depthUpdate', 's': 'BTCUSDT', 'E': first['event_time'],
+        'U': first['first_update_id'], 'u': first['final_update_id'], 'pu': first['prev_final_update_id'],
+        'b': list(map(list, sides['bid'].items())), 'a': list(map(list, sides['ask'].items())),
+    }).encode(), market)
+    snapshot = DiffBook(market, seed)
+    if snapshot.last != event.last or event.event_ms != start_ms:
+        raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Initial snapshot does not match the boundary exchange update.')
+    if not 0 <= parse_book_integer(first['received_time']) // 1000000 - event.event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
+        raise SourceError('BOOK_EVENT_STALE', 'Boundary exchange update is stale or ahead of receipt.')
+    for levels, changes, bound, bid in (
+            (snapshot.bids, event.bids, snapshot.bid_floor, True),
+            (snapshot.asks, event.asks, snapshot.ask_ceiling, False)):
+        if any(levels.get(price, Decimal(0)) != quantity for price, quantity in changes
+               if (price >= bound if bid else price <= bound)):
+            raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Initial snapshot contradicts its native boundary update.')
+    sampler.checkpoint(seed, event.event_ms, start_ms)
+    assert sampler.book is not None
+    sampler.book.observe_levels(event.bids, event.asks)
 
 
 def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
@@ -255,12 +269,12 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             }
             if legacy:
                 if sampler.book is None:
-                    sampler.seed(json.dumps(seed).encode())
-                    sampler.next_grid = start_ms
                     if boundary_update:
-                        clock = _boundary_seed_clock(json.dumps(seed).encode(), boundary_update, start_ms, market)
-                        sampler.checkpoint(json.dumps(seed).encode(), clock, start_ms)
+                        _bind_boundary_seed(sampler, json.dumps(seed).encode(), boundary_update, start_ms, market)
                         boundary_update.clear()
+                    else:
+                        sampler.seed(json.dumps(seed).encode())
+                        sampler.next_grid = start_ms
                 elif sampler.book.verified and sampler.book.last == seed['lastUpdateId']:
                     # The matching update supplies the real exchange clock for this
                     # REST snapshot. Its legacy event_time is a collector clock.

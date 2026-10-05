@@ -211,19 +211,9 @@ class DiffBook:
             self.cached = (bids, asks)
         return bids, asks
 
-    def apply(self, event: DepthEvent) -> bool:
-        if self.obsolete(event):
-            return False
-        if not self.bridges(event):
-            self.verified = False
-            raise SourceError(
-                'BOOK_SEQUENCE_GAP', 'Diff stream does not bridge the last update ID.'
-            )
-        if self.event_ms is not None and event.event_ms < self.event_ms:
-            self.verified = False
-            raise SourceError('BOOK_EVENT_TIME_REGRESSION', 'Exchange event time moved backwards.')
+    def observe_levels(self, bids: tuple[Level, ...], asks: tuple[Level, ...]) -> None:
         self.cached = None
-        for side, updates in ((self.bids, event.bids), (self.asks, event.asks)):
+        for side, updates in ((self.bids, bids), (self.asks, asks)):
             for price, quantity in updates:
                 if price % self.tick:
                     raise SourceError('BOOK_PRICE_GRID', 'Update prices disagree with the BTCUSDT grid.')
@@ -249,6 +239,19 @@ class DiffBook:
             self.ask_observed.remove(self.ask_ceiling)
         if max(len(self.bids) + len(self.bid_observed), len(self.asks) + len(self.ask_observed)) > BOOK_MAX_TRACKED_PRICES:
             raise SourceError('BOOK_PRICE_BOUND', 'Tracked book prices exceed the capture bound.')
+
+    def apply(self, event: DepthEvent) -> bool:
+        if self.obsolete(event):
+            return False
+        if not self.bridges(event):
+            self.verified = False
+            raise SourceError(
+                'BOOK_SEQUENCE_GAP', 'Diff stream does not bridge the last update ID.'
+            )
+        if self.event_ms is not None and event.event_ms < self.event_ms:
+            self.verified = False
+            raise SourceError('BOOK_EVENT_TIME_REGRESSION', 'Exchange event time moved backwards.')
+        self.observe_levels(event.bids, event.asks)
         self.last, self.event_ms = event.last, event.event_ms
         try:
             self.top(200)

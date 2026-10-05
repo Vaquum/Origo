@@ -18,7 +18,7 @@ BINANCE_PERP_BOOK_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     rollout_stage=RolloutStage.CANARY,
     schema_version=1,
     names=SourceNames('binance_perp_book'),
-    partitions=PartitionPolicy(BOOK_FIRST_DAY, interval='hour', first_hour=BOOK_FIRST_HOUR['perp'],
+    partitions=PartitionPolicy(BOOK_FIRST_DAY, interval='hour', first_hour=BOOK_FIRST_HOUR['perp'], canonical_lag_hours=1,
                                previous_starts=(datetime(2026, 10, 4, tzinfo=UTC),)),
     canonical=CryptoHFTBookHourly('perp'),
     provisional=LocalBookProvisional('perp'),

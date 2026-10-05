@@ -892,7 +892,7 @@ def measurement_label(name: str) -> str:
         'expected_slots': 'Checked minutes', 'raw_proof_rows': 'Recorded source rows',
         'day_count': 'Recorded days', 'expected_days': 'Expected days', 'valid_days': 'Validated days',
         'missing_days': 'Missing days', 'unknown_days': 'Unverified days',
-        'expected_hours': 'Expected hours', 'valid_hours': 'Validated hours', 'missing_hours': 'Missing hours', 'first_invalid_hour': 'First invalid hour', 'hour': 'Authoritative hour', 'canonical_interval': 'Authority interval',
+        'expected_hours': 'Expected hours', 'valid_hours': 'Validated hours', 'missing_hours': 'Missing hours', 'first_invalid_hour': 'First invalid hour', 'hour': 'Authoritative hour', 'following_hour': 'Closing input hour', 'required_following_hours': 'Closing input lag hours', 'canonical_interval': 'Authority interval',
         'queued_runs': 'Queued runs', 'queue_threshold': 'Queue threshold',
         'unhealthy_daemons': 'Unhealthy daemons', 'workers_fresh': 'Fresh worker heartbeats',
         'workers_expected': 'Expected workers', 'workers_unknown': 'Unverified workers',

@@ -226,11 +226,15 @@ R1/C1/C2 members, using the same detector, observation tape, notifications and
 Overview/Sources/Laws/Recovery views. R1 checks a readable closed minute's physical
 600/60/1/1 rows at the selected revision/build, all four component proofs, freshness
 and missing provisional minutes since accepted hourly authority (bounded to the
-last 24 hours). C1 requires the latest closed hour by minute 20 UTC, allowing five
-minutes for the minute-15 trigger to download, replay and activate it; C2 counts every
-older distinct authoritative hour from the immutable **2026-10-04 UTC** anchor.
-Missing hourly archives are NOT_DUE before grace, FAIL afterward; unavailable proof
-is UNKNOWN. Neither CANARY rollout nor healthy capture makes missing readers green.
+last 24 hours). HCD receive-time file H+1 contains closing exchange updates for
+hour H. C1 therefore targets the hour completed by the latest closed input file,
+records the required closing-file hour and last availability check, and permits
+fresh unpublished evidence to wait. Availability evidence expires after 20 minutes;
+activation must complete within five minutes of observed availability. C2 counts
+older distinct authoritative hours from the registered start: **2025-06-28 07Z
+spot / 06Z perpetual**. Extending the calendar does not certify unfilled history.
+Missing or stale evidence is not a pass; invalid published inputs remain failures.
+Neither CANARY rollout nor healthy capture makes missing readers green.
 Sources lists canonical and provisional depth20, depth200 and both minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
 hourly authority and hourly coverage counts for books, retaining daily units for trades.

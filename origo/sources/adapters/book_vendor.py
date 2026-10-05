@@ -6,7 +6,7 @@ import itertools
 import json
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,6 +22,7 @@ CRYPTOHFT_URL = 'https://api.cryptohftdata.com/v1/download'
 CRYPTOHFT_MAX_FILE_BYTES = 256 * 1024**2
 CRYPTOHFT_BATCH_ROWS = 8192
 BOOK_MAX_PRELUDE_HOURS = 24
+BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
@@ -68,7 +69,7 @@ def _response(market: Market, partition: Partition, *, metadata: bool) -> Respon
             weight=CRYPTOHFT_REQUEST_WEIGHT,
         )
     except SourceError as error:
-        latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+        latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
         raise
@@ -159,7 +160,7 @@ def _dependencies(market: Market, partition: Partition, current: str) -> tuple[t
     if value.get('current') != current:
         return ()
     items = value.get('dependencies')
-    if not isinstance(items, list) or len(cast(list[object], items)) > BOOK_MAX_PRELUDE_HOURS:
+    if not isinstance(items, list) or len(cast(list[object], items)) > BOOK_MAX_PRELUDE_HOURS + BOOK_MAX_FOLLOWING_HOURS:
         raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependency list is invalid.')
     dependencies: list[tuple[str, str]] = []
     for item in cast(list[object], items):
@@ -169,8 +170,9 @@ def _dependencies(market: Market, partition: Partition, current: str) -> tuple[t
         if not isinstance(key, str) or not isinstance(identity, str):
             raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependency identity is invalid.')
         hour = hour_partition(key)
-        if not timedelta(hours=1) <= partition.start - hour.start <= timedelta(hours=BOOK_MAX_PRELUDE_HOURS):
-            raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependency is outside the preceding-hour bound.')
+        distance = hour.start - partition.start
+        if distance == timedelta(0) or not -timedelta(hours=BOOK_MAX_PRELUDE_HOURS) <= distance <= timedelta(hours=BOOK_MAX_FOLLOWING_HOURS):
+            raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependency is outside the adjacent-hour bounds.')
         dependencies.append((key, identity))
     if [key for key, _ in dependencies] != sorted({key for key, _ in dependencies}):
         raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependencies require distinct ordered hours.')
@@ -178,14 +180,13 @@ def _dependencies(market: Market, partition: Partition, current: str) -> tuple[t
 
 
 def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> str:
-    if not dependencies:
-        return current
-    return 'cryptohftdata-v1:' + hashlib.sha256(
+    # A policy change must revalidate retained generations as well as new builds.
+    return 'cryptohftdata-v2:' + hashlib.sha256(
         json.dumps([current, dependencies], separators=(',', ':')).encode()).hexdigest()
 
 
 def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
-                preludes: tuple[Path, ...] = ()) -> Revision:
+                preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> Revision:
     from origo.workers.book_capture import (
         BookSampler,
         DepthEvent,
@@ -200,7 +201,7 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
     )
     previous_received = 0
     legacy = partition.start < datetime(2026, 8, 19, tzinfo=UTC)
-    for frame in _frames((*preludes, path), legacy=legacy):
+    for frame in _frames((*preludes, path, *following), legacy=legacy):
         first = frame[0]
         received = parse_book_integer(first['received_time'])
         event_ms = parse_book_integer(first['event_time'])
@@ -240,6 +241,9 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                     assert sampler.book.event_ms is not None
                     sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
             else:
+                if (sampler.book is not None and sampler.book.verified
+                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms):
+                    raise SourceError('BOOK_SEQUENCE_GAP', 'Checkpoint skips native updates inside the requested hour.')
                 sampler.checkpoint(json.dumps(seed).encode(), event_ms, start_ms)
             if legacy:
                 # A legacy REST snapshot's collector clock is not an exchange
@@ -280,8 +284,13 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             break
     if sampler.book is None or not sampler.book.verified:
         raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no verified book.')
+    if sampler.book.event_ms is None or sampler.book.event_ms < end_ms - 100:
+        raise SourceError('BOOK_VENDOR_TAIL_MISSING', 'No exchange update witnesses the final 100-ms sample.')
     sampler.finish(end_ms)
-    return fetch_sealed_partition(root, market, partition)
+    result = fetch_sealed_partition(root, market, partition)
+    return replace(result, evidence_json=json.dumps({**json.loads(result.evidence_json),
+                   'terminal_exchange_event_ms': sampler.book.event_ms,
+                   'terminal_update_id': sampler.book.last, 'final_grid_ms': end_ms - 100}, separators=(',', ':')))
 
 
 @dataclass(frozen=True)
@@ -289,7 +298,7 @@ class CryptoHFTBookHourly:
     market: Market
 
     def candidate(self, now: datetime) -> Partition:
-        start = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+        start = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         return self.partition(start.strftime(HOUR_KEY_FORMAT))
 
     def partition(self, key: str) -> Partition:
@@ -298,9 +307,13 @@ class CryptoHFTBookHourly:
     def discover(self, partition: Partition) -> str:
         current = _identity(self.market, partition, _response(self.market, partition, metadata=True))
         dependencies = _dependencies(self.market, partition, current)
+        after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
+        keys = tuple(key for key, _ in dependencies)
+        if after.key not in keys:
+            keys += (after.key,)
         checked = tuple((key, _identity(self.market, hour_partition(key),
                         _response(self.market, hour_partition(key), metadata=True)))
-                        for key, _ in dependencies)
+                        for key in keys)
         return _revision_key(current, checked)
 
     def fetch(self, partition: Partition) -> Revision:
@@ -316,13 +329,14 @@ class CryptoHFTBookHourly:
         archive.write_bytes(response.body)
         dependencies: list[tuple[str, str]] = []
         input_hashes: list[tuple[str, str]] = []
+        following_hashes: list[tuple[str, str]] = []
         preludes: list[Path] = []
         try:
             archive = _prepare_archive(archive, root)
+            used = archive.stat().st_size
             first = next(_frames((archive,)))
             boundary = int(partition.start.timestamp() * 1000)
             if first[0]['event_type'] != 'snapshot' or int(str(first[0]['event_time'])) > boundary:
-                used = archive.stat().st_size
                 for offset in range(1, BOOK_MAX_PRELUDE_HOURS + 1):
                     before = hour_partition((partition.start - timedelta(hours=offset)).strftime(HOUR_KEY_FORMAT))
                     original = _response(self.market, before, metadata=False)
@@ -341,7 +355,19 @@ class CryptoHFTBookHourly:
                         break
                 else:
                     raise SourceError('BOOK_VENDOR_SEED_MISSING', 'No preceding checkpoint within the 24-hour replay bound.')
-            local = replay_hour(archive, self.market, partition, root / 'grid', preludes=tuple(preludes))
+            after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
+            original = _response(self.market, after, metadata=False)
+            if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
+                raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Following vendor archive exceeds its byte bound.')
+            tail = root / 'following.parquet'
+            tail.write_bytes(original.body)
+            tail = _prepare_archive(tail, root)
+            if used + tail.stat().st_size > BOOK_MAX_PRELUDE_BYTES:
+                raise SourceError('BOOK_VENDOR_PRELUDE_BOUND', 'Adjacent archives exceed the replay byte bound.')
+            dependencies.append((after.key, _identity(self.market, after, original)))
+            following_hashes.append((after.key, hashlib.sha256(original.body).hexdigest()))
+            local = replay_hour(archive, self.market, partition, root / 'grid',
+                                preludes=tuple(preludes), following=(tail,))
             key = _revision_key(current, tuple(dependencies))
             if dependencies:
                 payload = json.dumps({'current': current, 'dependencies': dependencies}, separators=(',', ':')).encode()
@@ -367,15 +393,17 @@ class CryptoHFTBookHourly:
                 'file': _file(self.market, partition),
                 'etag': response.headers.get('ETag') or response.headers.get('etag'),
                 'input_sha256': hashlib.sha256(response.body).hexdigest(),
-                'prelude_identities': dependencies,
+                'prelude_identities': [(key, identity) for key, identity in dependencies if key < partition.key],
+                'following_identities': [(key, identity) for key, identity in dependencies if key > partition.key],
                 'prelude_input_sha256': input_hashes,
+                'following_input_sha256': following_hashes,
                 'grid_evidence': json.loads(local.evidence_json),
             },
             separators=(',', ':'),
         )
         return Revision(
-            key, (hashlib.sha256(json.dumps([hashlib.sha256(response.body).hexdigest(), input_hashes], separators=(',', ':')).encode()).hexdigest()
-                  if input_hashes else hashlib.sha256(response.body).hexdigest()), evidence, local.row_count, rows
+            key, (hashlib.sha256(json.dumps([hashlib.sha256(response.body).hexdigest(), input_hashes, following_hashes], separators=(',', ':')).encode()).hexdigest()
+                  if input_hashes or following_hashes else hashlib.sha256(response.body).hexdigest()), evidence, local.row_count, rows
         )
 
     def revalidate(self, partition: Partition, revision: Revision) -> None:

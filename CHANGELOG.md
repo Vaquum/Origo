@@ -2,6 +2,7 @@
 
 - Retain absolute book updates beyond the initial snapshot and extend the proven price region only across observed BTCUSDT ticks; avoid connecting when durable seed capacity is exhausted.
 - Retry delayed hourly authority through native audit and report provider availability, activation, reader freshness and historical gaps through the existing law monitor.
+- Require original closing updates from the following HCD file before hourly activation; keep provisional minutes readable during publication delay and expose the dependency in existing law evidence.
 - Expose native hourly history from CryptoHFTData's June 2025 files with wrapped archive parsing, bounded preceding snapshots, dependency-bound revisions and an explicit preserved-generation anchor migration. Incomplete recorded hours remain failures.
 
 # v3.33.0

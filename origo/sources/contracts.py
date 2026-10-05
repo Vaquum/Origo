@@ -159,6 +159,7 @@ class PartitionPolicy:
     first_day: date
     interval: Literal['day', 'hour'] = 'day'
     first_hour: int = 0
+    canonical_lag_hours: int = 0
     previous_starts: tuple[datetime, ...] = ()
 
     def __post_init__(self) -> None:
@@ -166,6 +167,10 @@ class PartitionPolicy:
             raise ValueError('The first canonical UTC hour must be between 0 and 23.')
         if self.interval == 'day' and self.first_hour:
             raise ValueError('Daily source calendars must begin at midnight.')
+        if type(self.canonical_lag_hours) is not int or self.canonical_lag_hours not in (0, 1):
+            raise ValueError('Canonical hour lag must be zero or one.')
+        if self.interval == 'day' and self.canonical_lag_hours:
+            raise ValueError('Daily source calendars retain their existing availability policy.')
         if any(value.tzinfo != UTC or value.minute or value.second or value.microsecond
                for value in self.previous_starts):
             raise ValueError('Declared prior anchors require exact UTC hours.')

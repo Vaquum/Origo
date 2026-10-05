@@ -8,16 +8,22 @@ the shared canonical contract; trades and aggregate trades retain `day`.
 
 ## Delivery and activation
 
-The canonical schedules run at minute 15 and select the previous closed UTC hour.
+The canonical schedules run at minute 15. To reconstruct exchange hour H, they
+need H's receive-time file and H+1's file: closing exchange updates can arrive in
+the latter. At 12:15 UTC the candidate is therefore 10:00–11:00, using the 10Z and
+11Z files. Native calendars exclude the still-ineligible final hour. This adds
+about one hour to authoritative delivery compared with single-file acceptance;
+WebSocket minutes remain provisional and readable during that delay.
 The existing audit runs at :05, :20, :35 and :50, keeping its 15-minute cadence
 without launching simultaneously with the :15 canonical refresh. It retries up to five requested inactive
-hours, prioritizing the latest and recent delayed hours before historical requests;
+hours, prioritizing the latest and recent delayed hours before least-recently
+checked historical requests; persistent failures cannot permanently occupy all five slots;
 revision checks cover two recent hours and rotate through 50 older active hours.
 Both sources keep their own canonical pool, bounded to two builds per market.
 
 Discovery appends provider availability and original observation time to the
 existing source observation log. A fresh 404 for the latest closed hour is waiting,
-not a discovery failure. C1 reports HCD not published with the last check time;
+not a discovery failure. C1 reports the requested exchange hour, required closing-file hour and last check time;
 stale availability evidence becomes UNKNOWN after 20 minutes. Once availability
 is observed, activation has five minutes. An observed available file that remains
 unactivated then fails. R1 independently judges actual reader freshness and missing
@@ -25,8 +31,12 @@ tail minutes; C2 independently counts historical missing hours. Waiting for HCD
 cannot hide either failure. Before the first observation, the existing initial
 20-minute window applies; absence of evidence after that fails.
 
-A build downloads the original vendor file, retains its SHA-256, replays its native
-update IDs and actual exchange clocks, and requires every grid sample in the hour.
+A build downloads the original current and following vendor files, retains their
+SHA-256 values, replays native update IDs and actual exchange clocks, and requires
+every grid sample in the hour. An actual exchange event must witness the final
+100-ms sample. A checkpoint cannot skip missing updates inside the requested hour;
+a tail shorter than the five-second freshness allowance still fails without that
+witness. Only complete activation masks overlapping provisional minutes.
 The ordinary component checks, dependency revalidation and atomic activation follow.
 Failure preserves the existing active/provisional state and native failure evidence.
 
@@ -66,7 +76,7 @@ partitions and missing hours in C2. Historical yield is not assumed to be 100%.
 
 Deployment admits only the explicitly declared former book anchor,
 2026-10-04 00:00 UTC, and changes it to the registered hourly start under ordinary
-source setup. It records the previous/new anchor in the existing observation log,
+source setup under the existing exclusive maintenance fence. It records the previous/new anchor in the existing observation log,
 verifies the synchronized update, and preserves every active generation. All other
 anchor changes fail. Repeated setup is idempotent. Rolling back code requires an
 explicit corresponding calendar migration; old code rejects the expanded anchor.
@@ -104,13 +114,15 @@ are never fabricated, sorted by a future clock, or shifted.
 Prelude search is bounded to 24 preceding hours, 256 MiB per expanded file and
 1 GiB combined replay input. Original and expanded inputs plus the grid coexist in
 private scratch during a build. Worst-case dependency discovery/revalidation uses
-25 metadata reads and download uses 25 files; the shared 30/minute HCD ledger paces
-all requests. Binance demand is zero. The modern one-file path is unchanged.
+26 metadata reads and download uses 26 files; the shared 30/minute HCD ledger paces
+all requests. Binance demand is zero. Modern hours use the current and following
+files; historical hours can also require preceding inputs.
 The existing capacity monitor measures mounted storage; the bounded pool limits
 concurrent scratch. Full-range import remains a native operator selection.
 
-A historical revision binds the current object plus every ordered prelude ETag and
-input hash. Bounded private dependency metadata lets ordinary discovery and audit
+A revision binds the current object plus every ordered preceding and following
+ETag and original input hash. The v2 revision prefix makes ordinary audit recheck
+previous single-file generations against this completeness policy. Bounded private dependency metadata lets ordinary discovery and audit
 notice a changed predecessor; revalidation rejects it before activation. Losing
 that derived metadata can cause a rebuild, never accept changed bytes under an old
 identity. Missing files, sequence links, freshness, depth proof, bounds or scratch
@@ -119,19 +131,30 @@ remain explicit failures.
 Native GUI acceptance on October 5, 2026 used the registered jobs and a real
 ClickHouse instance on a 4 GiB APFS volume. All-history selection exposed the
 expanded calendars; the ordinary date picker and partition bar selected hours,
-without typed dates, configuration or identifiers. Run
-`42726fa2-c0a7-4d79-bb0e-6d7a917aefea` accepted perpetual `2025-06-28T06Z`
-with 36,000/3,600/60/60 rows and ordinary reconciliation in 73.5 seconds.
-Run `08113fa0-fe6d-4211-9ac6-37fa501c4017` accepted `2025-06-28T14Z` in
-88.9 seconds. Spot `2025-06-28T07Z` failed depth proof, and native Re-execute
-reproduced that failure while retaining every previously accepted generation.
+without typed dates, configuration or identifiers. Final-policy run
+`e1bbc9a9-0e4e-4fe5-bf6e-b4af65946dd4` rebuilt perpetual `2025-06-28T06Z`
+as generation 2, build `25c9f5d5-d80b-4cd8-a41b-1df50782e651`, using original
+05Z/06Z/07Z files. Its four products contain 36,000/3,600/60/60 rows. The terminal
+exchange event is 07:00:00.093 UTC, proving the final 06:59:59.900 sample;
+source content hash is
+`0b1fb41b5178039785f08dd3ba8fea92097a56ef3f473e00371ba3a6037c1e57`.
 
-On an Apple M1 Max with 64 GiB RAM, the first perpetual run's ordinary capacity
-receipts measured a peak 117,448,704-byte increase on the shared mounted volume,
-including original/expanded files and replay grids. These paths share one volume;
-their receipts must not be summed. Scratch lives under the existing source lock
-mount so the monitor observes it. The historical replay process measured about
-294 MB peak RSS in a separate local replay. Neither measurement is a universal bound.
+That run activated its data in a 35-second run but its completion step rejected a
+retained earlier audit failure. Native audit retry
+`1d245530-0d26-47b7-ad3d-dffd9132b5fe` succeeded; native Re-execute all
+`a3afba2e-9736-4e98-9f06-2400e2e4dbad` then completed in 20 seconds,
+retaining generation 2. This distinguishes activation from successful completion.
+The earlier 06Z/14Z runs predate the closing-file policy and are not final-policy
+acceptance. Spot `2025-06-28T07Z` failed depth proof; native Re-execute reproduced
+the failure while retaining already accepted generations.
+
+On an Apple M1 Max with 64 GiB RAM, the final historical rebuild's ordinary
+capacity receipts measured a peak 117,448,704-byte increase on the shared mounted
+volume, including original/expanded files and replay grids. These paths share one
+volume; their receipts must not be summed. Scratch lives under the existing source
+lock mount so the monitor observes it. A separate preceding-file local replay
+measured about 294 MB peak RSS; it predates the closing-file addition and is not a
+final process-memory bound. Neither finite measurement is a universal bound.
 
 Observed single-generation hours used up to about 5.2 MB compressed for spot and
 6.5 MB for perpetual, with 52.24 MB uncompressed per market-hour. Extrapolating

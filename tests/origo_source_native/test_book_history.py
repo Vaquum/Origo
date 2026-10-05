@@ -30,7 +30,7 @@ def original_historical_archives(tmp_path_factory: pytest.TempPathFactory) -> di
     root = tmp_path_factory.mktemp('original-historical-books')
     for market, hour in (('spot', 7), ('perp', 6)):
         captured: list[OriginalArchive] = []
-        for prior in (hour - 1, hour):
+        for prior in (hour - 1, hour, hour + 1):
             partition = vendor.hour_partition(f'2025-06-28T{prior:02d}Z')
             response = requests.get(vendor.CRYPTOHFT_URL, params={'file': vendor._file(cast(Market, market), partition)}, timeout=(5, 60))
             response.raise_for_status()
@@ -70,15 +70,17 @@ def test_original_historical_hour_replays_preceding_vendor_snapshot(
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     assert all(archive.body[:4] == b'\x28\xb5\x2f\xfd' for archive in archives)
     adapter = vendor.CryptoHFTBookHourly(market)
-    partition = archives[-1].partition
+    partition = archives[1].partition
     standalone = adapter.discover(partition)
     revision = adapter.fetch(partition)
     assert revision.key != standalone
     assert len(tuple((tmp_path / 'locks' / 'book_vendor_perp').glob('hour-*'))) == 1
     adapter.revalidate(partition, revision)
     evidence = json.loads(revision.evidence_json)
-    assert evidence['input_sha256'] == hashlib.sha256(archives[-1].body).hexdigest()
+    assert evidence['input_sha256'] == hashlib.sha256(archives[1].body).hexdigest()
     assert evidence['prelude_input_sha256'] == [[archives[0].partition.key, hashlib.sha256(archives[0].body).hexdigest()]]
+    assert evidence['following_input_sha256'] == [[archives[2].partition.key, hashlib.sha256(archives[2].body).hexdigest()]]
+    assert evidence['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
     assert len(evidence['grid_evidence']['sealed_minutes']) == 60
     counts = {20: 0, 200: 0}
     first: dict[int, object] = {}
@@ -98,6 +100,11 @@ def test_original_historical_hour_replays_preceding_vendor_snapshot(
     with pytest.raises(SourceError) as failure:
         adapter.revalidate(partition, revision)
     assert failure.value.code == 'OFFICIAL_REVISION_CHANGED'
+    rewritten.clear()
+    rewritten[vendor._file(market, archives[2].partition)] = 'revised-closing-object'
+    with pytest.raises(SourceError) as failure:
+        adapter.revalidate(partition, revision)
+    assert failure.value.code == 'OFFICIAL_REVISION_CHANGED'
 
 
 def test_original_spot_history_rejects_unproven_depth(
@@ -108,7 +115,7 @@ def test_original_spot_history_rejects_unproven_depth(
     visited, _ = _transport(archives, 'spot', monkeypatch)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     with pytest.raises(SourceError) as failure:
-        vendor.CryptoHFTBookHourly('spot').fetch(archives[-1].partition)
+        vendor.CryptoHFTBookHourly('spot').fetch(archives[1].partition)
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert set(visited) == {vendor._file('spot', archive.partition) for archive in archives}
     assert not tuple((tmp_path / 'locks' / 'book_vendor_spot').iterdir())
@@ -117,7 +124,7 @@ def test_original_spot_history_rejects_unproven_depth(
 def test_legacy_snapshot_received_first_follows_its_native_update(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]], tmp_path: Path,
 ) -> None:
-    archive = original_historical_archives['perp'][-1]
+    archive = original_historical_archives['perp'][1]
     path = tmp_path / 'original.bin'
     path.write_bytes(archive.body)
     path = vendor._prepare_archive(path, tmp_path)
@@ -144,7 +151,7 @@ def test_legacy_collector_clock_cannot_close_exchange_hour(
         path = tmp_path / (archive.partition.key + '.bin')
         path.write_bytes(archive.body)
         paths.append(vendor._prepare_archive(path, tmp_path))
-    partition = archives[-1].partition
+    partition = archives[1].partition
     original_frames = vendor._frames
     replaced = [False]
 
@@ -160,7 +167,8 @@ def test_legacy_collector_clock_cannot_close_exchange_hour(
             yield frame
 
     monkeypatch.setattr(vendor, '_frames', delayed_collector)
-    revision = vendor.replay_hour(paths[-1], 'perp', partition, tmp_path / 'grid', preludes=tuple(paths[:-1]))
+    revision = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'grid',
+                                  preludes=(paths[0],), following=(paths[2],))
     assert replaced[0]
     assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
     counts = {20: 0, 200: 0}

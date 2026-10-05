@@ -15,7 +15,7 @@ from origo.sources.adapters.book_spool import Market
 from origo.sources.adapters.book_vendor import CryptoHFTBookHourly, hour_partition
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
-from origo.sources.contracts import Partition, Revision
+from origo.sources.contracts import Partition, Revision, SourceError
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
@@ -27,6 +27,7 @@ from .test_book_vendor import (
     REAL_HOUR,
     original_vendor_archive as original_vendor_archive,
     original_vendor_revision as original_vendor_revision,
+    original_vendor_following_archive as original_vendor_following_archive,
 )
 
 
@@ -91,8 +92,9 @@ def test_canary_books_have_the_same_reader_law_contract(
     r1 = _predicate(report, runtime.spec.key, 'R1')
     assert r1['status'] == 'PASS' and r1['reason'] == 'reader_current'
     assert [r1['evidence']['rows_' + key] for key in BOOK_COMPONENT_KEYS] == [600, 60, 1, 1]
-    assert _predicate(report, runtime.spec.key, 'C1')['status'] == 'PASS'
-    c2 = _predicate(report, runtime.spec.key, 'C2')
+    matured = law.evaluate(runtime.store.client, 'origo', now + timedelta(hours=1))
+    assert _predicate(matured, runtime.spec.key, 'C1')['status'] == 'PASS'
+    c2 = _predicate(matured, runtime.spec.key, 'C2')
     assert (
         c2['status'] == 'FAIL'
         and c2['evidence']['expected_hours'] == int((hour_partition(REAL_HOUR).start - runtime.spec.partitions.start) / timedelta(hours=1))
@@ -112,12 +114,13 @@ def test_hourly_authority_deadline_and_history_are_independent_of_reader_livenes
     authoritative_book_runtime: SourceRuntime,
 ) -> None:
     runtime = authoritative_book_runtime
-    now = hour_partition(REAL_HOUR).end + timedelta(minutes=21)
+    now = hour_partition(REAL_HOUR).end + timedelta(hours=1, minutes=21)
     report = law.evaluate(runtime.store.client, 'origo', now)
     c1 = _predicate(report, runtime.spec.key, 'C1')
     assert c1['status'] == 'FAIL' and c1['reason'] == 'canonical_hour_missing'
     assert c1['evidence']['hour'] == REAL_HOUR
-    assert c1['evidence']['deadline'] == '2026-10-04T10:20:00+00:00'
+    assert c1['evidence']['deadline'] == '2026-10-04T11:20:00+00:00'
+    assert c1['evidence']['following_hour'] == '2026-10-04T10Z'
     assert _predicate(report, runtime.spec.key, 'C2')['status'] == 'FAIL'
 
 
@@ -131,7 +134,7 @@ def test_hourly_authority_uses_exact_source_component_proofs(
         {'source': runtime.spec.key, 'build': record.build_id},
     )
     report = law.evaluate(
-        runtime.store.client, 'origo', record.partition.end + timedelta(seconds=30)
+        runtime.store.client, 'origo', record.partition.end + timedelta(hours=1, seconds=30)
     )
     assert _predicate(report, runtime.spec.key, 'R1')['status'] == 'UNKNOWN'
     assert _predicate(report, runtime.spec.key, 'C1')['status'] == 'UNKNOWN'
@@ -148,6 +151,7 @@ def test_book_sources_are_required_hourly_reader_laws() -> None:
             'delivery_grace_seconds': 1200,
             'activation_grace_seconds': 300,
             'availability_max_age_seconds': 1200,
+            'required_following_hours': 1,
             'canonical_interval': 'hour',
         }
 
@@ -185,6 +189,7 @@ def test_hourly_schedule_has_an_activation_window_before_c1_deadline(
     runtime = authoritative_book_runtime
     partition = hour_partition(REAL_HOUR)
     launch = partition.end + timedelta(
+        hours=1,
         minutes=int(runtime.spec.orchestration.canonical_cron.split()[0])
     )
     assert runtime.spec.canonical.candidate(launch) == partition
@@ -251,6 +256,7 @@ def test_book_tail_proofs_include_distinct_minute_builds(book_runtime: SourceRun
 def test_hourly_authority_replaces_overlapping_provisional_book_rows(
     authoritative_book_runtime: SourceRuntime,
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -262,7 +268,9 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
     archive.write_bytes(body)
     spool = tmp_path / 'spool'
     partition = hour_partition(REAL_HOUR)
-    replay_hour(archive, market, partition, spool)
+    following = tmp_path / 'following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
+    replay_hour(archive, market, partition, spool, following=(following,))
     monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(spool))
     minute = runtime.build(partition.start.strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
     prefix = 'origo.' + runtime.spec.names.prefix
@@ -277,6 +285,34 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
         {'build': minute.build_id},
     ) == [(600,)]
     assert runtime.build(REAL_HOUR) == canonical
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    truncated = tmp_path / 'truncated.parquet'
+    original = pq.ParquetFile(pa.BufferReader(body))
+    with pq.ParquetWriter(truncated, original.schema_arrow, compression='zstd') as writer:
+        for batch in original.iter_batches(batch_size=8192):
+            table = pa.Table.from_batches([batch])
+            writer.write_table(table.filter(pc.less(table['event_time'], int(partition.end.timestamp() * 1000) - 1000)))
+
+    def changed(self: RecordedVendorHour, requested: Partition) -> str:
+        assert requested.key == REAL_HOUR
+        return 'tail-removal-test:' + self.recorded_revision.key
+
+    def incomplete(self: RecordedVendorHour, requested: Partition) -> Revision:
+        return replay_hour(truncated, market, requested, tmp_path / 'invalid-grid', following=(following,))
+
+    monkeypatch.setattr(RecordedVendorHour, 'discover', changed)
+    monkeypatch.setattr(RecordedVendorHour, 'fetch', incomplete)
+    with pytest.raises(SourceError) as failure:
+        runtime.build(REAL_HOUR)
+    assert failure.value.code == 'BOOK_SEQUENCE_GAP'
+    assert runtime.store.records() == (canonical,)
+    assert runtime.store.execute(
+        f'SELECT count() FROM {prefix}_depth20_latest_revisions WHERE build_id=%(build)s',
+        {'build': minute.build_id},
+    ) == [(600,)]
 
 
 def test_provider_delay_and_activation_use_native_evidence(
@@ -287,7 +323,7 @@ def test_provider_delay_and_activation_use_native_evidence(
 
     runtime = authoritative_book_runtime
     partition = hour_partition(REAL_HOUR)
-    now = [partition.end + timedelta(minutes=30)]
+    now = [partition.end + timedelta(hours=1, minutes=30)]
 
     class Clock(datetime):
         @classmethod
@@ -313,7 +349,7 @@ def test_provider_delay_and_activation_use_native_evidence(
     stale = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=21)), runtime.spec.key, 'C1')
     assert stale['status'] == 'UNKNOWN' and stale['reason'] == 'archive_availability_stale'
     available[0] = True
-    now[0] = partition.end + timedelta(minutes=45)
+    now[0] = partition.end + timedelta(hours=1, minutes=45)
     runtime.discover(partition)
     pending = _predicate(law.evaluate(runtime.store.client, 'origo', now[0] + timedelta(minutes=1)), runtime.spec.key, 'C1')
     assert pending['status'] == 'NOT_DUE' and pending['reason'] == 'archive_activation_pending'
@@ -335,7 +371,7 @@ def test_hourly_audit_admits_latest_hour_before_old_pending_requests(
     from origo.sources.contracts import SourceError
 
     runtime = authoritative_book_runtime
-    now = hour_partition(REAL_HOUR).end + timedelta(minutes=30)
+    now = hour_partition(REAL_HOUR).end + timedelta(hours=1, minutes=30)
 
     class Clock(datetime):
         @classmethod
@@ -358,6 +394,34 @@ def test_hourly_audit_admits_latest_hour_before_old_pending_requests(
     monkeypatch.setattr(RecordedVendorHour, 'discover', discover)
     assert runtime.audit() == (REAL_HOUR,)
     assert visited[0] == REAL_HOUR and len(visited) == 5
+
+
+def test_pending_historical_failures_do_not_starve_later_valid_hour(
+    authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = authoritative_book_runtime
+    now = datetime.now(UTC)
+    keys = [(hour_partition(REAL_HOUR).start - timedelta(hours=offset)).strftime('%Y-%m-%dT%HZ')
+            for offset in range(5, 0, -1)] + [REAL_HOUR]
+    runtime.store.execute('INSERT INTO origo.source_discovery_log VALUES',
+                          [(runtime.spec.key, key, now - timedelta(minutes=6 - index))
+                           for index, key in enumerate(keys)])
+    original = RecordedVendorHour.discover
+
+    def discover(self: RecordedVendorHour, partition: Partition) -> str:
+        if partition.key != REAL_HOUR:
+            raise SourceError('PROVIDER_HTTP_404', 'Controlled persistent historical gap.')
+        return original(self, partition)
+
+    monkeypatch.setattr(RecordedVendorHour, 'discover', discover)
+    assert runtime.audit() == ()
+    assert runtime.audit() == (REAL_HOUR,)
+    record = runtime.build(REAL_HOUR)
+    assert record.partition.key == REAL_HOUR
+    assert runtime.store.execute(
+        "SELECT partition_key,argMax(event_type,event_time) FROM origo.source_failure_log WHERE source_key=%(source)s AND partition_key IN %(keys)s GROUP BY partition_key ORDER BY partition_key",
+        {'source': runtime.spec.key, 'keys': keys[:-1]},
+    ) == [(key, 'FAILED') for key in sorted(keys[:-1])]
 
 
 def test_declared_history_migration_preserves_existing_generation(

@@ -372,7 +372,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         partitions_def=(
             HourlyPartitionsDefinition(
                 start_date=spec.partitions.start.strftime('%Y-%m-%dT%HZ'),
-                fmt='%Y-%m-%dT%HZ', timezone='UTC',
+                fmt='%Y-%m-%dT%HZ', timezone='UTC', end_offset=-spec.partitions.canonical_lag_hours,
             ) if spec.partitions.interval == 'hour' else DailyPartitionsDefinition(
                 start_date=spec.partitions.first_day.isoformat(), timezone='UTC'
             )

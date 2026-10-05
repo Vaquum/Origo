@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -47,9 +48,26 @@ def original_vendor_archive(
     return market, path.read_bytes(), dict(response.headers)
 
 
+@pytest.fixture(scope='session')
+def original_vendor_following_archive(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Market, bytes, dict[str, str]]:
+    import requests
+
+    market = original_vendor_archive[0]
+    partition = vendor.hour_partition('2026-10-04T10Z')
+    response = requests.get(vendor.CRYPTOHFT_URL, params={'file': vendor._file(market, partition)}, timeout=(5, 60))
+    response.raise_for_status()
+    path = tmp_path_factory.mktemp('original-following-hour') / 'input.parquet'
+    path.write_bytes(response.content)
+    return market, path.read_bytes(), dict(response.headers)
+
+
 @pytest.fixture()
 def vendor_transport(
-    original_vendor_archive: tuple[Market, bytes, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]], monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[tuple[Market, bytes, dict[str, str]]]:
     market, body, headers = original_vendor_archive
     expected_file = vendor._file(market, vendor.hour_partition(REAL_HOUR))
@@ -57,10 +75,12 @@ def vendor_transport(
     def captured(
         url: str, *, params: object = None, headers: object = None, weight: int = 0
     ) -> Response:
-        assert url == vendor.CRYPTOHFT_URL and params == {'file': expected_file}
+        assert url == vendor.CRYPTOHFT_URL
         assert weight == vendor.CRYPTOHFT_REQUEST_WEIGHT
+        captured = original_vendor_archive if params == {'file': expected_file} else original_vendor_following_archive
+        assert params in ({'file': expected_file}, {'file': vendor._file(market, vendor.hour_partition('2026-10-04T10Z'))})
         return Response(
-            body[:1] if headers else body, original_vendor_archive[2], 206 if headers else 200
+            captured[1][:1] if headers else captured[1], captured[2], 206 if headers else 200
         )
 
     monkeypatch.setattr(vendor, 'get_response', captured)
@@ -70,11 +90,20 @@ def vendor_transport(
 def test_original_vendor_hour_builds_all_book_grids_without_binance(
     original_vendor_revision: tuple[Market, vendor.Revision],
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
 ) -> None:
     market, revision = original_vendor_revision
     assert market == original_vendor_archive[0]
     partition = vendor.hour_partition(REAL_HOUR)
-    assert revision.content_hash == hashlib.sha256(original_vendor_archive[1]).hexdigest()
+    current_hash = hashlib.sha256(original_vendor_archive[1]).hexdigest()
+    following_hash = hashlib.sha256(original_vendor_following_archive[1]).hexdigest()
+    evidence = json.loads(revision.evidence_json)
+    assert evidence['input_sha256'] == current_hash
+    assert evidence['following_input_sha256'] == [['2026-10-04T10Z', following_hash]]
+    assert revision.content_hash == hashlib.sha256(json.dumps(
+        [current_hash, [], [['2026-10-04T10Z', following_hash]]], separators=(',', ':')
+    ).encode()).hexdigest()
+    assert json.loads(revision.evidence_json)['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
     counts = {20: 0, 200: 0}
     first: dict[int, datetime] = {}
     last: dict[int, datetime] = {}
@@ -159,9 +188,32 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
     assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'
 
 
+def test_truncated_exchange_tail_cannot_complete_an_hour(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+) -> None:
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    market, body, _ = original_vendor_archive
+    partition = vendor.hour_partition(REAL_HOUR)
+    cutoff = int(partition.end.timestamp() * 1000) - 1000
+    archive = pq.ParquetFile(pa.BufferReader(body))
+    path = tmp_path / 'truncated-tail.parquet'
+    # Remove actual final-second records; retain all other original values/clocks.
+    with pq.ParquetWriter(path, archive.schema_arrow, compression='zstd') as writer:
+        for batch in archive.iter_batches(batch_size=vendor.CRYPTOHFT_BATCH_ROWS):
+            table = pa.Table.from_batches([batch])
+            writer.write_table(table.filter(pc.less(table['event_time'], cutoff)))
+    with pytest.raises(SourceError) as failure:
+        vendor.replay_hour(path, market, partition, tmp_path / 'grid')
+    assert failure.value.code == 'BOOK_VENDOR_TAIL_MISSING'
+
+
 @pytest.fixture(scope='session')
 def original_vendor_revision(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Market, vendor.Revision]:
     market, body, headers = original_vendor_archive
@@ -170,10 +222,13 @@ def original_vendor_revision(
         url: str, *, params: object = None, headers: object = None, weight: int = 0
     ) -> Response:
         assert url == vendor.CRYPTOHFT_URL
-        assert params == {'file': vendor._file(market, vendor.hour_partition(REAL_HOUR))}
+        current = {'file': vendor._file(market, vendor.hour_partition(REAL_HOUR))}
+        following = {'file': vendor._file(market, vendor.hour_partition('2026-10-04T10Z'))}
+        assert params in (current, following)
         assert weight == vendor.CRYPTOHFT_REQUEST_WEIGHT
+        captured = original_vendor_archive if params == current else original_vendor_following_archive
         return Response(
-            body[:1] if headers else body, original_vendor_archive[2], 206 if headers else 200
+            captured[1][:1] if headers else captured[1], captured[2], 206 if headers else 200
         )
 
     with pytest.MonkeyPatch.context() as patch:
@@ -262,7 +317,8 @@ def test_same_id_snapshot_checks_observed_prices_outside_seed(
 
 
 def test_real_hour_survives_original_seed_region_without_reseeding(
-    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
 ) -> None:
     import json
     from decimal import Decimal
@@ -273,7 +329,9 @@ def test_real_hour_survives_original_seed_region_without_reseeding(
     market, body, _ = original_vendor_archive
     path = tmp_path / 'original.parquet'
     path.write_bytes(body)
-    frames = iter(vendor._frames((path,)))
+    following = tmp_path / 'following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
+    frames = iter(vendor._frames((path, following)))
     checkpoint = next(frames)
     initial = checkpoint[0]
     sides = {side: sorted([(str(row['price']), str(row['quantity'])) for row in checkpoint
@@ -294,7 +352,8 @@ def test_real_hour_survives_original_seed_region_without_reseeding(
     applied = 0
     for frame in frames:
         first = frame[0]
-        assert first['event_type'] == 'update'
+        if first['event_type'] == 'snapshot':
+            continue  # Prove live continuity without using another HCD checkpoint.
         event = DepthEvent(parse_book_integer(first['event_time']),
                            parse_book_integer(first['first_update_id']),
                            parse_book_integer(first['final_update_id']),
@@ -306,11 +365,16 @@ def test_real_hour_survives_original_seed_region_without_reseeding(
         full.apply(event)
         sampler.accept(event, received_at=utc_millisecond(parse_book_integer(first['received_time']) // 1000000))
         assert sampler.book is not None and sampler.book.verified
+        assert sampler.book.last == full.last == event.last
         assert sampler.book.top(200) == full.top(200)
         bids, asks = sampler.book.top(200)
         assert sampler.book.top(20) == (bids[:20], asks[:20])
         beyond += bids[-1][0] < original_floor or asks[-1][0] > original_ceiling
         applied += 1
+        if event.event_ms >= int(partition.end.timestamp() * 1000):
+            break
+    assert sampler.book is not None and sampler.book.event_ms is not None
+    assert sampler.book.event_ms >= int(partition.end.timestamp() * 1000)
     sampler.finish(int(partition.end.timestamp() * 1000))
     revision = vendor.fetch_sealed_partition(sampler.root, market, partition)
     assert revision.row_count == 36000

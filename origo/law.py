@@ -302,10 +302,16 @@ def _history_anchor(source: str) -> datetime:
     return anchor if isinstance(anchor, datetime) else datetime.combine(anchor, datetime.min.time(), UTC)
 
 
+def _canonical_slot(source: str, now: datetime) -> datetime:
+    if _interval(source) == timedelta(hours=1):
+        return next(spec for spec in SOURCE_REGISTRY if spec.key == source).canonical.candidate(now).start
+    return _floor(now, source) - _interval(source)
+
+
 def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     hourly = _interval(source) == timedelta(hours=1)
     floor = _floor(now, source)
-    slot = floor - _interval(source)
+    slot = _canonical_slot(source, now)
     if hourly:
         deadline = floor + timedelta(seconds=BOOK_HOURLY_DELIVERY_GRACE_SECONDS)
     else:
@@ -316,6 +322,9 @@ def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot < _history_anchor(source))):
         report = _result('NOT_DUE', 'archive_not_due')
     report['evidence'].update({unit: slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat(), 'deadline': deadline.isoformat(), 'canonical_interval': unit})
+    if hourly:
+        report['evidence']['required_following_hours'] = 1
+        report['evidence']['following_hour'] = (slot + timedelta(hours=1)).strftime(HOUR_KEY_FORMAT)
     return report
 
 
@@ -323,7 +332,7 @@ def _book_c1(query: _Queries, database: str, proofs: list[_Proof], source: str, 
     report = _c1(proofs, source, now)
     if report['reason'] not in ('canonical_hour_missing', 'archive_not_due'):
         return report
-    slot = _floor(now, source) - timedelta(hours=1)
+    slot = _canonical_slot(source, now)
     rows = query(f"""SELECT argMax(complete, observed_at), max(observed_at),
         minOrNullIf(observed_at, complete=1)
         FROM {database}.source_observation_log
@@ -359,9 +368,11 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
     unit = 'hour' if hourly else 'day'
     rows = query(f'SELECT anchor FROM {database}.source_anchor_log WHERE source_key=%(source)s', {'source': source})
     stored = _utc(rows[0][0]) if len(rows) == 1 else None
-    expected = max(0, int((_floor(now, source) - interval - start) / interval))
+    expected = max(0, int((_canonical_slot(source, now) - start) / interval))
     evidence: dict[str, Scalar] = dict(anchor=anchor.isoformat(), stored_anchor=stored.isoformat() if stored else None)
     evidence.update({f'expected_{unit}s': expected, f'valid_{unit}s': 0, f'first_invalid_{unit}': None})
+    if hourly:
+        evidence['required_following_hours'] = 1
     if stored != start:
         return _result('UNKNOWN', 'anchor_mismatch', **evidence)
     valid = 0
@@ -395,10 +406,10 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
         budget = R1_PERP_BUDGET_SECONDS if '_perp_' in spec.key else R1_SPOT_BUDGET_SECONDS
         current = record is not None and (
             (now - record.end).total_seconds() <= budget if component.provisional
-            else record.end >= _floor(now, spec.key)
+            else record.end >= _canonical_slot(spec.key, now) + _interval(spec.key)
         )
         waiting = (not component.provisional and record is not None
-                   and record.end == _floor(now, spec.key) - _interval(spec.key)
+                   and record.end == _canonical_slot(spec.key, now)
                    and c1['status'] == 'NOT_DUE')
         observation: ProjectionObservation = {
             'id': f'{spec.key}:{component.key}', 'status': 'UNKNOWN' if proof is None else 'FAILED' if proof[1] == 0 else 'CURRENT' if current else 'WAITING' if waiting else 'STALE',

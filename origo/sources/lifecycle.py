@@ -48,7 +48,19 @@ class SourceRuntime:
         self.spec.require_enabled('setup')
         selected = anchor or self.spec.partitions.start
         with source_lock(self.lock_root, self.spec.key, 'setup', wait=True):
-            self.store.setup(anchor=selected)
+            migrating = False
+            if (self.spec.partitions.previous_starts
+                    and self.store.execute(f'EXISTS TABLE {self.store.table("source_anchor_log")}') == [(1,)]):
+                previous = self.store.execute(
+                    f'SELECT anchor FROM {self.store.table("source_anchor_log")} WHERE source_key=%(source)s',
+                    {'source': self.spec.key},
+                )
+                migrating = bool(previous) and self.store.anchor() != selected
+            if migrating:
+                with source_lock(self.lock_root, self.spec.key, 'heavy', wait=True):
+                    self.store.setup(anchor=selected)
+            else:
+                self.store.setup(anchor=selected)
             marker = self.lock_root / self.spec.key / 'domain_id'
             if not marker.exists():
                 with marker.open('x') as handle:
@@ -611,12 +623,22 @@ class SourceRuntime:
             recent + (older[offset : offset + 50] + older[: max(0, offset + 50 - len(older))])[:50]
         )
         pending = self.store.execute(
-            f"""SELECT partition_key FROM {self.store.table('source_discovery_log')}
+            f"""SELECT d.partition_key FROM (SELECT partition_key, min(requested_at) AS requested
+            FROM {self.store.table('source_discovery_log')}
             WHERE source_key=%(source)s AND partition_key >= %(first)s
               AND (NOT %(hourly)s OR length(partition_key)=14) AND partition_key NOT IN (
                 SELECT partition_key FROM {self.store.table('source_active_partitions')}
                 WHERE source_key=%(source)s AND NOT provisional
-            ) GROUP BY partition_key ORDER BY (%(hourly)s AND partition_key >= %(recent)s) DESC, (%(hourly)s AND partition_key=%(latest)s) DESC, min(requested_at) LIMIT 5""",
+            ) GROUP BY partition_key) AS d
+            LEFT JOIN (SELECT partition_key, max(observed_at) AS checked
+              FROM {self.store.table('source_observation_log')} WHERE source_key=%(source)s
+              GROUP BY partition_key) AS o USING (partition_key)
+            LEFT JOIN (SELECT partition_key, max(event_time) AS failed
+              FROM {self.store.table('source_failure_log')} WHERE source_key=%(source)s
+              GROUP BY partition_key) AS f USING (partition_key)
+            ORDER BY (%(hourly)s AND d.partition_key >= %(recent)s) DESC,
+              (%(hourly)s AND d.partition_key=%(latest)s) DESC,
+              if(%(hourly)s, greatest(o.checked, f.failed), toDateTime64(0, 6)), requested LIMIT 5""",
             {'source': self.spec.key, 'first': (self.spec.partitions.start.strftime('%Y-%m-%dT%HZ')
                                              if self.spec.partitions.interval == 'hour' else self.spec.partitions.first_day.isoformat()),
              'hourly': self.spec.partitions.interval == 'hour',

@@ -74,6 +74,7 @@ def test_original_historical_hour_replays_preceding_vendor_snapshot(
     standalone = adapter.discover(partition)
     revision = adapter.fetch(partition)
     assert revision.key != standalone
+    assert len(tuple((tmp_path / 'locks' / 'book_vendor_perp').glob('hour-*'))) == 1
     adapter.revalidate(partition, revision)
     evidence = json.loads(revision.evidence_json)
     assert evidence['input_sha256'] == hashlib.sha256(archives[-1].body).hexdigest()
@@ -110,4 +111,4 @@ def test_original_spot_history_rejects_unproven_depth(
         vendor.CryptoHFTBookHourly('spot').fetch(archives[-1].partition)
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert set(visited) == {vendor._file('spot', archive.partition) for archive in archives}
-    assert not (tmp_path / 'locks' / 'book_vendor_spot').exists()
+    assert not tuple((tmp_path / 'locks' / 'book_vendor_spot').iterdir())

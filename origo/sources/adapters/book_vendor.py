@@ -301,7 +301,9 @@ class CryptoHFTBookHourly:
         current = _identity(self.market, partition, response)
         if len(response.body) > CRYPTOHFT_MAX_FILE_BYTES:
             raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Hourly archive exceeds its byte bound.')
-        temporary = TemporaryDirectory(prefix='origo-book-hour-')
+        scratch = _dependency_path(self.market, partition).parent
+        scratch.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix='hour-', dir=scratch)
         root = Path(temporary.name)
         archive = root / 'input.parquet'
         archive.write_bytes(response.body)

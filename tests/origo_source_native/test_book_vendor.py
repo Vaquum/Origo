@@ -160,6 +160,7 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
 @pytest.fixture(scope='session')
 def original_vendor_revision(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Market, vendor.Revision]:
     market, body, headers = original_vendor_archive
 
@@ -174,6 +175,7 @@ def original_vendor_revision(
         )
 
     with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path_factory.mktemp('vendor-scratch-locks')))
         patch.setattr(vendor, 'get_response', captured)
         revision = vendor.CryptoHFTBookHourly(market).fetch(vendor.hour_partition(REAL_HOUR))
         assert revision.key == vendor.CryptoHFTBookHourly(market).discover(

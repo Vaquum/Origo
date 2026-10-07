@@ -5,9 +5,11 @@ import base64
 import json
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 REPOSITORY = 'Vaquum/Origo'
@@ -24,8 +26,28 @@ def request(endpoint: str, token: str, body: dict[str, object] | None = None) ->
         headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'},
         method='POST' if body is not None else 'GET',
     )
-    with urlopen(message, timeout=30) as response:
-        return json.load(response)
+    attempt = 0
+    while True:
+        try:
+            with urlopen(message, timeout=30) as response:
+                return json.load(response)
+        except (URLError, TimeoutError) as error:
+            if isinstance(error, HTTPError) and not 500 <= error.code < 600:
+                raise
+            attempt += 1
+            print(f'GitHub request failed ({attempt}/3): {error}', file=sys.stderr)
+            if attempt == 3:
+                raise
+            time.sleep(2 ** attempt)
+
+
+def save_cache(cache: Path, access: dict[str, object]) -> None:
+    pending = cache.with_name(cache.name + '.new')
+    fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, 'w') as handle:
+        json.dump(access, handle)
+    os.replace(pending, cache)
 
 
 def main() -> None:
@@ -47,9 +69,7 @@ def main() -> None:
         access = request(f"app/installations/{os.environ['INSTALLATION_ID']}/access_tokens", jwt, {
             'repositories': ['Origo'], 'permissions': {'administration': 'write'},
         })
-        fd = os.open(cache, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w') as handle:
-            json.dump(access, handle)
+        save_cache(cache, access)
     token = access['token']
     if not isinstance(token, str):
         raise TypeError('GitHub did not return an installation token')

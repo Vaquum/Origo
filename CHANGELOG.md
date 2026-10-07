@@ -1,6 +1,7 @@
 # v3.34.3
 
 - Run the complete runtime suite once with six isolated ClickHouse workers, preserve every original acceptance outcome and unchanged timing assertion, and migrate same-repository jobs to a disposable KVM runner with host-enforced resource limits and repository-only App registration.
+- Retry transient runner API failures and atomically replace refreshed clean images and installation-token caches so interrupted maintenance preserves the previous valid state.
 
 # v3.34.2
 

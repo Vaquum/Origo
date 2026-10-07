@@ -46,8 +46,9 @@ for attempt in {1..60}; do
 done
 [[ $(virsh domstate origo-tests) == 'shut off' ]]
 cd /var/lib/libvirt/images/origo-tests
-qemu-img convert -r 104857600 -O qcow2 runner.qcow2 clean.qcow2
-chmod 444 clean.qcow2
+qemu-img convert -r 104857600 -O qcow2 runner.qcow2 clean.new.qcow2
+chmod 444 clean.new.qcow2
+mv -f clean.new.qcow2 clean.qcow2
 install -m 644 /opt/origo-tests-runner/controller.service /etc/systemd/system/origo-tests-runner.service
 systemctl daemon-reload
 systemctl enable --now origo-tests-runner

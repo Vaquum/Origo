@@ -91,7 +91,16 @@ overlay from the clean image. GitHub's job timeout is 60 minutes. Idle waiting
 does not consume the active-job deadline. Cleanup runs outside the guest;
 test code cannot preserve processes or filesystem state into the next job.
 Stop the controller before refreshing the clean image through the versioned
-activation script. The server operator owns image patching and refresh.
+activation script. Prepare the maintenance guest from the trusted clean image;
+never promote a job's modified disk into it. Image conversion writes a separate
+file and replaces the old clean image only after conversion succeeds, including
+when the guest disk is an overlay backed by that old image.
+The server operator owns image patching and refresh.
+GitHub requests retry network timeouts and HTTP 5xx responses three times with
+two- and four-second delays. Each failure is logged; permanent errors and
+exhausted retries fail the controller. Installation-token cache writes close a
+root-only temporary file before atomically replacing the cache, so interruption
+cannot truncate the previous token.
 
 ## Regression evidence
 

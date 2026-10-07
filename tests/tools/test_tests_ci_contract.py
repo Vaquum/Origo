@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
 from xml.etree import ElementTree
 
 import pytest
@@ -168,3 +173,132 @@ def test_runner_admission_rejects_untrusted_jobs(tmp_path: Path, fault: str) -> 
     result = subprocess.run(['bash', 'deploy/tests-runner/admit-job.sh'], cwd=REPO_ROOT,
                             env=env, capture_output=True, text=True)
     assert (result.returncode == 0) is (fault in {'none', 'dispatch'}), result.stdout + result.stderr
+
+
+@pytest.fixture
+def registration() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        'runner_registration', REPO_ROOT / 'deploy/tests-runner/registration.py',
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize('fault', ['none', 'timeout', 'network', 'server', 'unauthorized', 'exhausted'])
+def test_github_requests_recover_from_transient_errors(
+    registration: ModuleType, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], fault: str,
+) -> None:
+    document = {'pull_request': {'number': 510, 'head': {
+        'sha': '1d4fa1b07b96792c555eb93e54dfe3e96e83e1db',
+        'repo': {'full_name': 'Vaquum/Origo'},
+    }}}
+    attempts: list[int] = []
+    delays: list[int] = []
+
+    def open_request(message: Request, *, timeout: int) -> io.BytesIO:
+        assert message.full_url == 'https://api.github.com/repos/Vaquum/Origo/pulls/510'
+        assert timeout == 30
+        attempts.append(1)
+        if fault == 'unauthorized' or fault == 'exhausted' or (fault != 'none' and len(attempts) == 1):
+            if fault == 'timeout':
+                raise TimeoutError('Interrupted status request')
+            if fault == 'network':
+                raise URLError('Interrupted status connection')
+            raise HTTPError(message.full_url, 401 if fault == 'unauthorized' else 503,
+                            'Controlled HTTP fault', None, None)
+        return io.BytesIO(json.dumps(document).encode())
+
+    monkeypatch.setattr(registration, 'urlopen', open_request)
+    monkeypatch.setattr(registration.time, 'sleep', delays.append)
+    if fault in {'unauthorized', 'exhausted'}:
+        with pytest.raises(HTTPError):
+            registration.request('repos/Vaquum/Origo/pulls/510', 'fixture-credential')
+        assert len(attempts) == (1 if fault == 'unauthorized' else 3)
+        assert delays == ([] if fault == 'unauthorized' else [2, 4])
+    else:
+        assert registration.request('repos/Vaquum/Origo/pulls/510', 'fixture-credential') == document
+        assert len(attempts) == (1 if fault == 'none' else 2)
+        assert delays == ([] if fault == 'none' else [2])
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert captured.err.count('GitHub request failed') == (
+        0 if fault in {'none', 'unauthorized'} else len(attempts) - (fault != 'exhausted')
+    )
+    assert 'fixture-credential' not in captured.err
+
+
+@pytest.mark.parametrize('interruption', ['none', 'writing', 'replacement'])
+def test_token_cache_survives_process_interruption(
+    registration: ModuleType, tmp_path: Path, interruption: str,
+) -> None:
+    document = json.loads((REPO_ROOT / '.github/tests_acceptance.json').read_text())
+    cache = tmp_path / 'access.json'
+    old = {'baseline_sha': document['baseline_sha']}
+    cache.write_text(json.dumps(old))
+    script = '''
+import importlib.util, json, os, signal, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('registration', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+if sys.argv[4] == 'writing':
+    def interrupted_dump(document, handle):
+        handle.write('{')
+        os.kill(os.getpid(), signal.SIGTERM)
+    module.json.dump = interrupted_dump
+elif sys.argv[4] == 'replacement':
+    def interrupted_replace(source, target):
+        os.kill(os.getpid(), signal.SIGTERM)
+    module.os.replace = interrupted_replace
+module.save_cache(Path(sys.argv[2]), json.loads(Path(sys.argv[3]).read_text()))
+'''
+    result = subprocess.run([
+        sys.executable, '-c', script, str(REPO_ROOT / 'deploy/tests-runner/registration.py'),
+        str(cache), str(REPO_ROOT / '.github/tests_acceptance.json'), interruption,
+    ], capture_output=True, text=True)
+    assert result.returncode == (0 if interruption == 'none' else -15), result.stderr
+    assert json.loads(cache.read_text()) == (document if interruption == 'none' else old)
+    registration.save_cache(cache, document)
+    assert json.loads(cache.read_text()) == document
+    assert cache.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize('conversion_fails', [False, True])
+def test_image_refresh_preserves_the_backing_image_on_failure(
+    tmp_path: Path, conversion_fails: bool,
+) -> None:
+    activation = (REPO_ROOT / 'deploy/tests-runner/activate.sh').read_text()
+    conversion = activation.split('cd /var/lib/libvirt/images/origo-tests\n', 1)[1].split(
+        '\ninstall -m 644', 1,
+    )[0]
+    old = (REPO_ROOT / 'deploy/tests-runner/controller.sh').read_bytes()
+    prepared = (REPO_ROOT / 'deploy/tests-runner/registration.py').read_bytes()
+    (tmp_path / 'clean.qcow2').write_bytes(old)
+    (tmp_path / 'prepared').write_bytes(prepared)
+    (tmp_path / 'runner.qcow2').write_text(json.dumps({'backing': 'clean.qcow2'}))
+    binaries = tmp_path / 'bin'
+    binaries.mkdir()
+    qemu = binaries / 'qemu-img'
+    qemu.write_text(f'#!{sys.executable}\n' + '''
+import json, os, sys
+from pathlib import Path
+source, target = map(Path, sys.argv[-2:])
+if target.name == json.loads(source.read_text())['backing']:
+    raise SystemExit('Cannot overwrite the source backing image')
+prepared = Path('prepared').read_bytes()
+target.write_bytes(prepared[:10] if os.environ['CONVERSION_FAILS'] == '1' else prepared)
+if os.environ['CONVERSION_FAILS'] == '1':
+    raise SystemExit(17)
+''')
+    qemu.chmod(0o755)
+    result = subprocess.run(['bash', '-euc', conversion], cwd=tmp_path, env={
+        **os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
+        'CONVERSION_FAILS': '1' if conversion_fails else '0',
+    }, capture_output=True, text=True)
+    assert result.returncode == (17 if conversion_fails else 0), result.stderr
+    assert (tmp_path / 'clean.qcow2').read_bytes() == (old if conversion_fails else prepared)
+    if not conversion_fails:
+        assert (tmp_path / 'clean.qcow2').stat().st_mode & 0o777 == 0o444

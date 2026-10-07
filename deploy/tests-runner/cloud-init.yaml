@@ -1,0 +1,30 @@
+#cloud-config
+hostname: origo-tests
+users:
+  - name: runner
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+package_update: true
+packages:
+  - docker.io
+  - git
+  - curl
+  - python3-venv
+  - qemu-guest-agent
+  - libicu74
+runcmd:
+  - [systemctl, enable, --now, docker]
+  - [usermod, -aG, docker, runner]
+  - [mkdir, -p, /opt/origo-ci]
+  - [chown, runner:runner, /opt/origo-ci]
+  - [bash, -c, 'set -euo pipefail; curl --fail --location --silent --show-error https://astral.sh/uv/install.sh -o /tmp/install-uv.sh; env UV_INSTALL_DIR=/usr/local/bin sh /tmp/install-uv.sh']
+  - [sudo, -u, runner, uv, venv, --python, '3.11', --seed, /opt/origo-ci/venv]
+  - [sudo, -u, runner, git, clone, https://github.com/Vaquum/Origo.git, /opt/origo-ci/Origo]
+  - [sudo, -u, runner, bash, -c, 'cd /opt/origo-ci/Origo && /opt/origo-ci/venv/bin/python -m pip install ".[dev]"']
+  - [sudo, -u, runner, /opt/origo-ci/venv/bin/python, -m, playwright, install, chromium]
+  - [bash, -c, '/opt/origo-ci/venv/bin/python -m playwright install-deps chromium > /opt/origo-ci/browser-deps.log 2>&1']
+  - [mkdir, -p, /opt/actions-runner]
+  - [bash, -c, 'set -euo pipefail; cd /opt/actions-runner; curl --fail --location --silent --show-error https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-x64-2.338.0.tar.gz -o runner.tar.gz; echo "af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32  runner.tar.gz" | sha256sum -c -; tar xzf runner.tar.gz; rm runner.tar.gz; chown -R runner:runner /opt/actions-runner']

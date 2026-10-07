@@ -1,0 +1,19 @@
+[Unit]
+Description=Disposable Origo test runner controller
+After=network-online.target libvirtd.service
+Wants=network-online.target
+Requires=libvirtd.service
+
+[Service]
+Type=simple
+ExecStart=/opt/origo-tests-runner/controller.sh
+ExecStopPost=-/usr/bin/virsh destroy origo-tests
+Restart=always
+RestartSec=15
+TimeoutStopSec=20
+CPUQuota=100%
+MemoryMax=256M
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

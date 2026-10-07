@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo"
-version = "3.34.2"
+version = "3.34.3"
 description = "Event-sourced market data platform for deterministic, replayable financial data access"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["dagster-webserver==1.13.21", "pytest", "playwright==1.63.0"]
+dev = ["dagster-webserver==1.13.21", "pytest", "pytest-xdist==3.8.0", "playwright==1.63.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

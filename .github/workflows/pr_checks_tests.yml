@@ -4,6 +4,16 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner for the complete suite
+        type: choice
+        options: [server, github]
+        default: server
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,13 +21,15 @@ permissions:
 jobs:
   pr_checks_tests:
     name: pr_checks_tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((inputs.runner == 'github' || vars.ORIGO_TESTS_RUNNER == 'github' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && '["ubuntu-latest"]' || '["self-hosted", "linux", "x64", "origo-tests"]') }}
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,110 +42,26 @@ jobs:
       - name: Install browser for dashboard acceptance
         run: python -m playwright install --with-deps chromium
 
-      - name: Pin Overview acceptance test entry points
+      - name: Verify test CI contract
         run: |
-          pytest --collect-only -q \
-            tests/origo_source_native/test_law_page.py::test_overview_totals_match_catalog_and_observed_evidence \
-            tests/origo_source_native/test_monitor.py::test_overview_evidence_reuses_reads_and_preserves_unknowns \
-            tests/origo_source_native/test_law_page.py::test_overview_layout_and_navigation_at_desktop_and_mobile_sizes \
-            tests/origo_source_native/test_law_page.py::test_named_laws_filter_history_and_legacy_links \
-            tests/origo_source_native/test_law_page.py::test_depth_recovery_uses_real_continuity_evidence \
-            tests/origo_source_native/test_law_page.py::test_recovery_comparison_states_and_signed_change \
-            tests/origo_source_native/test_monitor.py::test_publication_policy_evidence_reuses_existing_decisions \
-            tests/origo_source_native/test_law_page.py::test_wait_and_publication_presentations_preserve_raw_evidence \
-            tests/origo_source_native/test_law_page.py::test_overview_unknowns_override_stale_or_mismatched_numbers \
-            tests/origo_source_native/test_law_page.py::test_history_concurrency_deadlines_and_current_refresh \
-            tests/origo_source_native/test_law_page.py::test_named_laws_preserve_original_definitions_and_clear_window \
-            tests/origo_source_native/test_law_page.py::test_served_page_layout_contract \
-            tests/origo_source_native/test_law_page.py::test_operational_history_totals_preserve_intervals_and_limits \
-            tests/origo_source_native/test_law_page.py::test_overview_production_shape_stays_within_resource_budgets
-
-      - name: Execute raw-perp page-budget acceptance tests
-        run: |
-          pytest -q --junitxml=perp-page-budget.xml \
-            tests/origo_source_native/test_binance_perp_efficiency.py::test_busy_perp_minute_exceeds_100_pages_and_matches_archive \
-            tests/origo_source_native/test_binance_perp_efficiency.py::test_perp_page_cap_fails_without_end_witness \
-            tests/origo_source_native/test_binance_perp_efficiency.py::test_perp_fallback_counts_against_page_cap \
-            tests/origo_source_native/test_binance_perp_efficiency.py::test_page_caps_preserve_other_sources_and_request_budgets
-          python - <<'PYTHON'
-          from xml.etree import ElementTree
-
-          suites = ElementTree.parse('perp-page-budget.xml').getroot().findall('testsuite')
-          assert sum(int(suite.attrib['tests']) for suite in suites) == 4
-          for outcome in ('skipped', 'failures', 'errors'):
-              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
-          PYTHON
-
-      - name: Execute recent-perp capture acceptance tests
-        run: |
-          pytest -q --junitxml=perp-capture.xml \
-            tests/origo_source_native/test_binance_perp_capture.py::test_recorded_recent_capture_matches_archive_and_partial_historical_crosscheck \
-            tests/origo_source_native/test_binance_perp_capture.py::test_overlap_preserves_real_id_skips_and_rejects_conflicts \
-            tests/origo_source_native/test_binance_perp_spool.py::test_only_proven_closed_minutes_can_activate \
-            tests/origo_source_native/test_binance_perp_spool.py::test_restart_recovers_only_durable_capture \
-            tests/origo_source_native/test_binance_perp_spool.py::test_bounds_and_cleanup_preserve_unacknowledged_data \
-            tests/origo_source_native/test_binance_perp_spool.py::test_spool_repair_and_canonical_replacement_preserve_outputs \
-            tests/origo_source_native/test_binance_perp_capture.py::test_capture_obeys_ip_budget_and_provider_backoff \
-            tests/origo_source_native/test_binance_perp_capture.py::test_capture_continues_during_slow_repair_and_publication \
-            tests/origo_source_native/test_perp_capture_deploy.py::test_capture_deploy_recovers_overlap_or_verified_bridge \
-            tests/origo_source_native/test_perp_capture_deploy.py::test_rollback_preserves_spool_and_exclusive_ip_roles \
-            tests/origo_source_native/test_monitor.py::test_capture_health_uses_bounded_local_evidence \
-            tests/origo_source_native/test_binance_perp_capture.py::test_historical_busy_minute_offline_delivery_stays_within_spool_and_process_bounds \
-            tests/origo_source_native/test_binance_perp_spool.py::test_spool_rejects_wrong_identity_and_open_partitions \
-            tests/origo_source_native/test_binance_perp_spool.py::test_verified_bridge_repairs_only_missing_rows \
-            tests/origo_source_native/test_binance_perp_spool.py::test_bridge_restart_and_cross_minute_reuse \
-            tests/origo_source_native/test_monitor.py::test_capture_heartbeat_cannot_clear_reader_failure \
-            tests/origo_source_native/test_binance_perp_capture.py::test_closeout_rejects_missing_or_unknown_observations \
-            tests/origo_source_native/test_binance_perp_capture.py::test_stalled_capture_lock_remains_visible_and_recovers
-          python - <<'PYTHON'
-          from xml.etree import ElementTree
-
-          suites = ElementTree.parse('perp-capture.xml').getroot().findall('testsuite')
-          assert sum(int(suite.attrib['tests']) for suite in suites) == 18
-          for outcome in ('skipped', 'failures', 'errors'):
-              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
-          PYTHON
-
-      - name: Execute shared notification acceptance tests
-        run: |
-          pytest -q --junitxml=notification-summary.xml \
-            tests/origo_source_native/test_alert_summary.py::test_dashboard_and_email_share_recorded_summary \
-            tests/origo_source_native/test_alert_summary.py::test_html_email_matches_dashboard_and_text \
-            tests/origo_source_native/test_alert_summary.py::test_repeat_trends_preserve_evidence_coverage \
-            tests/origo_source_native/test_alert_summary.py::test_lifecycle_preserves_transient_and_unverified_incidents \
-            tests/origo_source_native/test_alert_summary.py::test_all_notifications_obey_global_hourly_budget \
-            tests/origo_source_native/test_alert_summary.py::test_retry_restart_and_storage_faults_preserve_delivery \
-            tests/origo_source_native/test_alert_summary.py::test_monitor_pipeline_preserves_law_and_resource_contracts \
-            tests/origo_source_native/test_alert_summary.py::test_public_dashboard_url_is_deployed_and_validated
-          python - <<'PYTHON'
-          from xml.etree import ElementTree
-
-          suites = ElementTree.parse('notification-summary.xml').getroot().findall('testsuite')
-          assert sum(int(suite.attrib['tests']) for suite in suites) == 8
-          for outcome in ('skipped', 'failures', 'errors'):
-              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
-          PYTHON
-
-      - name: Pin and execute book recovery acceptance
-        run: |
-          pytest -q --junitxml=book-recovery.xml \
-            tests/origo_source_native/test_book_vendor.py::test_real_hour_survives_original_seed_region_without_reseeding \
-            tests/origo_source_native/test_book_capture.py::test_exhausted_seed_capacity_prevents_connection \
-            tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence \
-            tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation \
-            tests/origo_source_native/test_book_history.py::test_original_historical_hour_replays_preceding_vendor_snapshot \
-            tests/origo_source_native/test_book_history.py::test_original_spot_history_rejects_unproven_depth
-          python - <<'PYTHON'
-          from xml.etree import ElementTree
-
-          suites = ElementTree.parse('book-recovery.xml').getroot().findall('testsuite')
-          assert sum(int(suite.attrib['tests']) for suite in suites) == 10
-          for outcome in ('skipped', 'failures', 'errors'):
-              assert sum(int(suite.attrib[outcome]) for suite in suites) == 0, outcome
-          PYTHON
+          sudo apt-get install --no-install-recommends --yes shellcheck
+          shellcheck tools/provision_tests_runner.sh deploy/tests-runner/*.sh
+          pytest tests/tools/test_tests_ci_contract.py -q
 
       - name: Run Origo source-native runtime tests
-        run: pytest tests/origo_source_native -q --maxfail=1
+        shell: bash
+        env:
+          TEST_WORKERS: ${{ runner.environment == 'self-hosted' && '6' || '2' }}
+        run: |
+          mkdir -p test-results
+          python -m pip freeze > test-results/dependencies.txt
+          git rev-parse HEAD > test-results/source-sha.txt
+          git rev-parse HEAD:tests/fixtures > test-results/fixtures-tree.txt
+          pytest tests/origo_source_native --collect-only -q > test-results/collection.txt
+          pytest tests/origo_source_native -q --maxfail=1 -n "$TEST_WORKERS" --dist loadfile --no-loadscope-reorder --durations=30 --junitxml=test-results/runtime.xml | tee test-results/runtime.log
+
+      - name: Verify pinned acceptance outcomes
+        run: python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt
 
       - name: Verify daily-archive fixture bundles
         run: |
@@ -143,3 +71,12 @@ jobs:
           for stem in BTCUSDT-trades-2017-08-17 BTCUSDT-trades-2020-01-01; do
             python3 tools/fixture_bundle.py verify --dir tests/fixtures/binance/spot/daily/trades/revisioned --stem "$stem"
           done
+
+      - name: Upload runtime profiling and test outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-tests-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14

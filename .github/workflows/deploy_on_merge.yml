@@ -351,9 +351,10 @@ jobs:
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
             python -m origo.orchestration.verify_deploy --run-id "$launched_run" --since "$verify_since" --deadline-seconds 840 </dev/null &
           verifier=$!
-          # Every container stays running with a steady restart count for 30 samples ten seconds apart,
-          # then must be healthy; a container that is still starting or recovering gets 24 more samples.
-          for sample in $(seq 1 54); do
+          # Every container stays running with a steady restart count for at least 30 samples ten seconds
+          # apart and for as long as the verifier runs, then must be healthy; a container that is still
+          # starting or recovering gets samples until the verifier's own deadline has passed.
+          for sample in $(seq 1 90); do
             sleep 10
             verify_now="$(verify_states)" || exit 1
             if [ "$(printf '%s\n' "$verify_now" | awk '{print $1, $4}' | sort)" != "$(printf '%s\n' "$verify_before" | awk '{print $1, $4}' | sort)" ] \
@@ -361,7 +362,8 @@ jobs:
               printf 'post-up: container states changed during verification\n%s\n' "$verify_now" >&2
               exit 1
             fi
-            if [ "$sample" -ge 30 ] && printf '%s\n' "$verify_now" | awk '$3 != "healthy" && $3 != "none" {bad = 1} END {exit bad}'; then
+            if [ "$sample" -ge 30 ] && ! kill -0 "$verifier" 2>/dev/null \
+              && printf '%s\n' "$verify_now" | awk '$3 != "healthy" && $3 != "none" {bad = 1} END {exit bad}'; then
               break
             fi
           done

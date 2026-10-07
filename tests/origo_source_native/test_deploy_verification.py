@@ -27,11 +27,14 @@ JOB = 'maintain_operational_metadata_job'
 # The deployment script's verification block, run against a stand-in `docker` that answers
 # `compose config --services`, `compose ps -aq`, `inspect` and the verifier exec. The script
 # arrives on stdin (`bash -s`) as it does on the host; `sleep` returns at once. Calls to
-# `inspect` are numbered: call 1 is the baseline, calls 2..55 are samples 1..54.
+# `inspect` are numbered: call 1 is the baseline, calls 2..91 are samples 1..90. The verifier
+# stays alive until call VERIFIER_UNTIL or until the script exits, so a slow maintenance run is
+# a slow verifier.
 HARNESS = r"""
 set -euo pipefail
 PROJECT_NAME=test
 launched_run=run-1
+trap 'touch "$COUNTER.exit"' EXIT
 sleep() { :; }
 docker() {
   if [ "$1" = compose ]; then
@@ -46,6 +49,11 @@ docker() {
         done ;;
       *' exec -T dagster python -m origo.orchestration.verify_deploy'*)
         echo "$*" >> "$LOG"
+        limit=$((SECONDS + 20))
+        while [ "$(cat "$COUNTER" 2>/dev/null || echo 0)" -lt "${VERIFIER_UNTIL:-0}" ] \
+          && [ "$SECONDS" -lt "$limit" ] && [ ! -e "$COUNTER.exit" ]; do
+          /bin/sleep 0.01
+        done
         return "${VERIFIER_STATUS:-0}" ;;
       *) return 99 ;;
     esac
@@ -60,12 +68,13 @@ docker() {
       if [ "$id" = perp-capture ]; then
         case "${SCENARIO:-steady}" in
           rising) [ "$call" -lt 4 ] || restarts=1 ;;
+          late_restart) [ "$call" -lt 45 ] || restarts=1 ;;
           restarting) [ "$call" -lt 4 ] || state=restarting ;;
           exited) [ "$call" -lt 4 ] || state=exited ;;
           starting) health=starting ;;
           unhealthy) health=unhealthy ;;
           recovers) [ "$call" -gt 36 ] || health=unhealthy ;;
-          recovers_too_late) [ "$call" -gt 60 ] || health=unhealthy ;;
+          recovers_too_late) [ "$call" -gt 95 ] || health=unhealthy ;;
         esac
       fi
       echo "$id $state $health $restarts"
@@ -85,6 +94,8 @@ def _block() -> str:
 def _run_block(tmp_path: Path, **environment: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     log = tmp_path / 'verifier.log'
     log.write_text('')
+    (tmp_path / 'counter').unlink(missing_ok=True)
+    (tmp_path / 'counter.exit').unlink(missing_ok=True)
     script = HARNESS + _block() + "echo 'MARKER: reached the end of the script'\n"
     result = subprocess.run(
         ['bash', '-s'],
@@ -94,7 +105,6 @@ def _run_block(tmp_path: Path, **environment: str) -> tuple[subprocess.Completed
         timeout=120,
         env={**os.environ, 'LOG': str(log), 'COUNTER': str(tmp_path / 'counter'), **environment},
     )
-    (tmp_path / 'counter').unlink(missing_ok=True)
     return result, log.read_text().splitlines()
 
 
@@ -112,15 +122,22 @@ def test_deploy_fails_on_a_crash_looping_unhealthy_or_missing_service(tmp_path: 
     assert arguments[arguments.index('--run-id') + 1] == 'run-1'
     assert int(arguments[arguments.index('--since') + 1]) > 0
     assert arguments[arguments.index('--deadline-seconds') + 1] == '840'
+    assert int((tmp_path / 'counter').read_text()) >= 31
 
     settled, _ = _run_block(tmp_path, SCENARIO='recovers')
     assert settled.returncode == 0, settled.stderr
     assert 'MARKER' in settled.stdout
 
+    slow, _ = _run_block(tmp_path, VERIFIER_UNTIL='60')
+    assert slow.returncode == 0, slow.stderr
+    assert 'MARKER' in slow.stdout
+    assert int((tmp_path / 'counter').read_text()) >= 60
+
     changed = 'container states changed during verification'
     not_healthy = 'containers not healthy'
     failing = {
         'rising restart count': ({'SCENARIO': 'rising'}, changed),
+        'restart while the verifier still runs': ({'SCENARIO': 'late_restart', 'VERIFIER_UNTIL': '60'}, changed),
         'restarting': ({'SCENARIO': 'restarting'}, changed),
         'exited': ({'SCENARIO': 'exited'}, changed),
         'health starting after the last sample': ({'SCENARIO': 'starting'}, not_healthy),

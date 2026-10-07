@@ -1,31 +1,34 @@
 # Runtime test CI
 
-`pr_checks_tests` runs the complete `tests/origo_source_native` suite once. Six
-pytest-xdist workers on the server runner share files within one worker
-(`--dist loadfile --no-loadscope-reorder`). Each worker's existing session fixture starts its own
-ClickHouse container, credentials and loopback ports; each test still drops its
-database before and after execution. No production database is used.
-Docker allocates loopback ports atomically. Image builds send only the two
-versioned ClickHouse configuration files, rather than copying the fixture corpus
-into each worker's build context. The pinned deployment image and configuration
-remain identical.
-Law-page and notification-resource modules acquire exclusive process locks;
-other modules acquire shared locks. Their unchanged timing and memory assertions
-run without another test workload competing for the guest. Locks are scoped to
-xdist's run UID. Resource modules are collected first, retaining the original
-serial ordering before workers accumulate large session-scoped vendor inputs.
+`pr_checks_tests` executes every collected case once across two phases. Ordinary
+cases use eight server workers (two on GitHub), with explicit `loadgroup` labels
+and `--no-loadscope-reorder`. Independent scenarios run concurrently; diagnostic
+server cases keep their shared native server together. Book HTTP captures and
+verified sealed grids are prepared once per market behind a process lock in the
+job's temporary directory; workers read them with the native seal/hash validator.
+Every database, Dagster instance and mutable publication/spool directory stays
+private. Placement labels are removed from reports using the exact assigned
+marker; parameter identities remain intact.
 
-The acceptance selectors and parameter counts previously listed in the workflow
-are preserved in `.github/tests_acceptance.json`. `tools/tests_ci.py` verifies
-their actual outcomes in the complete run's JUnit report. All 1,052 baseline node
-IDs are also pinned: execution must equal current collection and include every
-baseline node. Missing selectors,
-incorrect parameter counts, duplicate results, skips, errors and failures fail
-the job. Assertions, real inputs, browser acceptance and performance thresholds
-are unchanged. Daily-archive bundle verification still runs after the suite.
-This inventory controls the migration comparison; it does not establish that
-the test design is economical. A subsequent consolidation must demonstrate
-equivalent contract and fault detection before replacing this baseline.
+Ordinary server temporary files use a 4GiB tmpfs within the existing 24GiB guest
+RAM limit. It is unmounted before the fresh, serial resource process starts.
+The `resource` marker identifies wall-clock/RSS and scheduling-sensitive HTTP/
+catalog lookups; protocol/browser cases without those limits run in parallel.
+The original resource workloads, measurement semantics and numerical limits
+remain unchanged. Dynamic-configuration cases always build a fresh real catalog;
+fixed-configuration protocol cases deep-copy genuine prepared catalogs/reports.
+
+The original 1,052-case inventory and 50 acceptance selectors remain pinned in
+`.github/tests_acceptance.json`, together with the six additional cases on merged
+main (1,058 original identities total). Every retired identity maps to explicit
+passing owners and a named contract; that retirement map is hash-pinned separately.
+`tools/tests_ci.py` rejects missing originals/owners, incomplete execution, duplicate
+identities, any skip/failure/error, contradictory aggregates and empty phase
+reports. Historical contract coverage and actual executed cases are reported
+separately. Daily-archive bundle verification and browser acceptance still run.
+The source/dependency/fixture evidence and phase reports are retained as artifacts.
+ShellCheck runs in the existing parallel lint job; CI contracts retain their
+existing ruleset-job owner.
 
 Same-repository PRs and workflow dispatch use the `origo-tests` self-hosted label.
 Fork PRs run the same complete suite and verifier on GitHub with two workers.
@@ -159,14 +162,13 @@ The first parallel attempt passed 589 cases before a paginated-history assertion
 failed: all events were present but one catalog definition was absent. The
 unchanged lookup deadline is 50ms; the same case passed in isolation. This is
 evidence of scheduling sensitivity, not proof of a production-code defect.
-The exclusive module schedule preserves serial conditions for those checks.
+The migration's exclusive module schedule preserved serial conditions for those checks.
 No production-code path or assertion was edited.
 
 The next run passed 1,050 cases before the notification resource case reported
 2,006 MiB against its unchanged 1,024 MiB limit. That probe uses Linux
 `ru_maxrss`, which also includes pre-exec inherited residency, unlike the
-page probe's `/proc/self/status` measurement. Running resource modules first
-preserves their original serial ordering and prevents prior vendor-session
+page probe's `/proc/self/status` measurement. The migration ran resource modules first to preserve their original serial ordering and prevents prior vendor-session
 inputs from contaminating the subprocess's peak. Qualification must still pass
 the original measurement and threshold; no measurement code is replaced.
 The isolated diagnostic passed in 61.00s and measured 261.37 MiB, with the same
@@ -175,8 +177,7 @@ versus 0.886s in the failed reused worker. This distinguishes peak inheritance
 from extra work in the replay itself.
 
 Keep JUnit, complete collection, dependency freeze, source/fixture hashes and
-per-file timing outside the disposable guest. Qualification compares complete
-passing reports with:
+per-file timing outside the disposable guest. The earlier migration compared complete passing reports with its original verifier and inventory:
 
 ```sh
 python tools/tests_ci.py PARALLEL.xml COLLECTION.txt --baseline BASELINE.xml
@@ -185,3 +186,43 @@ python tools/tests_ci.py PARALLEL.xml COLLECTION.txt --baseline BASELINE.xml
 It requires at least a twofold reduction in pytest wall time; it runs once during
 qualification. CI retains actual job timing and assigned runner identity
 separately, including checkout and dependency preparation.
+
+## Consolidation and future additions
+
+Each test owns an observable contract and names the failure it detects. Extend that owner for a new input, state transition or boundary; do not copy a suite for a source whose differences fit explicit parameters.
+
+| Family | Original work | Retained work |
+| --- | --- | --- |
+| Daily source backfills | Four copied suites, 2,837 lines; repeated day preparation for publication, retry, refresh and direct render | One parameterized owner plus spot-only orchestration, 1,104 lines. All four genuine archives, unavailable days, backfill generation ownership and post-cutoff products remain. |
+| Book reader laws | Six separate full-hour builds per market for readiness, provider delay, proofs, scheduling, migration and reconciliation | One full-hour build per market, with provider availability/deadline stages before it and the same observations and controlled proof/anchor faults after it. Provisional overlap, starvation and closing-input revision upgrades retain their distinct scenarios. |
+| Provisional book input | Replay the genuine hour again only to prepare an overlapping minute | Copy the already verified immutable sealed grid into private test storage. Invalid tail replay remains independent. |
+| Dashboard protocol | Rebuild a real minute and evaluator output for each protocol case | One genuine evaluator output per worker session, deep-copied per case; fixed-configuration catalog preparation is also shared. Database-damage scenarios still build and damage their own source state. |
+| Dashboard scale | Three copies of the same 43,201-sample / 2,505,600-event replay | One fresh-process production-shape replay retains exact index bytes, RSS <256MiB, current read <1s and no limiting. The distinct 1,440-frame monitor replay and its budgets remain. |
+| CI contract checks | Run the same contracts in the runtime and ruleset jobs; nested pytest in dashboard acceptance | Existing ruleset job owns those contracts; lint owns ShellCheck; runtime URL assertions stay in the runtime suite. |
+
+`.github/tests_acceptance.json` retains the original 1,052-case inventory and 50 acceptance selectors. Each retired identity explicitly names its retained owner and contract. `tools/tests_ci.py` rejects an absent owner, an unmapped original, an incomplete collection, any skip/failure/error and duplicate outcomes. It reports actual passing case counts separately from historical contract coverage.
+
+CI first runs ordinary tests with eight workers. Genuine book inputs are prepared once per market for all workers; independent scenarios run concurrently. Dedicated diagnostic-server cases retain their shared-server sequence. Marked wall-clock/RSS and deadline-sensitive cases then run in a fresh serial process. Placement labels do not change test identities. The two JUnit reports are merged and checked against the complete collection.
+
+The merged runner migration baseline is 1,058 passing cases in 1,089.67 seconds (18m09s), with a complete job of 23m02s: [run 37673698503](https://github.com/Vaquum/Origo/actions/runs/37673698503). The dashboard module's first case includes 747 seconds waiting for the former module-wide resource lock; its body does not take that long.
+
+The production host limits remain 12 vCPUs, 24GiB guest RAM, a 100GiB guest disk, 28GiB host memory/swap maximum, 100MiB/s and 2,000 IOPS. Qualification uses the same Python/dependency versions and genuine fixture tree as that baseline. The first consolidation passed 1,035 cases in 874.24 seconds (14m34s: ordinary 623.41s + resource 250.83s). RAM-backed temporary files and cost ordering reduced the same ordinary phase to 447.11s (7m27s). Sharing genuine book preparation and scheduling its independent scenarios passed all 46 book cases in 184.46s (3m04s).
+
+The final ordinary phase passed 1,024 cases in 311.77s and the fresh serial resource phase passed nine in 102.93s. Their complete verified union passed 1,033 cases in **414.69s (6m55s), 2.63 times faster** than the merged baseline. These are summed pytest session wall times, not summed overlapping case durations or a measured Actions job. The resource phase was rerun after a configuration-case correction; its ordinary cases were unchanged. Current-head Actions must qualify the complete workflow in one job.
+
+The pinned inventory protects all 1,058 pre-consolidation cases: 64 retired identities map to 39 parameterized/consolidated owners. Native Python test/support footprint is 36,019 → 34,369 lines (4.6% reduction); the backfill family alone is 2,837 → 1,104 (61.1%). A smaller case count alone is not evidence of preserved coverage.
+
+Compare the real inventories separately during qualification:
+
+```sh
+python tools/tests_ci.py CURRENT.xml CURRENT-COLLECTION.txt \
+  --baseline MERGED-BASELINE.xml --baseline-collection MERGED-COLLECTION.txt
+```
+
+The verifier requires both reports to pass their actual collections and all original contracts before accepting the twofold speedup. The retirement map and both original inventory sets have independent hash pins in the existing ruleset contract suite. Merge qualification also rejects a missing, truncated or empty phase, a cross-phase duplicate and a failed phase.
+
+Temporary external pytest plugins qualify representative failure classes against original and consolidated owners. Making a missing native book component proof pass must fail both the original exact-proof case and the retained canary owner at their UNKNOWN assertion. Blocking an otherwise valid retry after interrupted publication must fail both original and retained source owners at their retry-success assertion. The plugins never enter the committed tree; genuine archives, original source rows and production code remain unchanged.
+
+Qualification also retained three genuine failures caused by caching catalogs in tests that intentionally change configuration; those cases now call the real catalog builder. A separate unchanged monitor replay exceeded its one-second limit by 1ms. Three diagnostic replays measured 0.70–0.72s, and the subsequent complete resource phase passed. That variance remains visible in the saved evidence; no retry, cached measurement or relaxed limit is added to CI.
+
+Book workloads still cost more than trade adapter protocols because their distinct boundaries require genuine depth reconstruction. The retained full-hour cases separately check normal vendor closure, legacy snapshot exchange-clock ordering, continued depth outside the initial seed, truncated-tail rejection, provisional replacement and prior closing-input revisions. Shared preparation removes their repeated input download and baseline replay; independent boundaries remain concurrent. A further collapse must name the fault it still rejects rather than infer equivalence from similar setup.

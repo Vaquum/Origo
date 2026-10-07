@@ -31,16 +31,31 @@ def test_pr_checks_tests_pins_python_and_runtime_suite_command() -> None:
     assert "python-version: '3.11'" in workflow
     assert "python -m pip install --upgrade pip '.[dev]'" in workflow
     assert EXPECTED_TEST_COMMAND in workflow
-    assert '-n "$TEST_WORKERS" --dist loadfile --no-loadscope-reorder --durations=30' in workflow
-    assert '--junitxml=test-results/runtime.xml' in workflow
-    assert 'python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt' in workflow
-    assert 'pytest tests/origo_source_native --collect-only -q > test-results/collection.txt' in workflow
-    assert 'pytest tests/tools/test_tests_ci_contract.py -q' in workflow
+    assert '-n "$TEST_WORKERS" --dist loadgroup --no-loadscope-reorder --durations=30' in workflow
+    assert '--merge test-results/ordinary.xml test-results/resources.xml' in workflow
+    assert (
+        'pytest tests/origo_source_native -q --maxfail=1 -m resource'
+        in workflow
+    )
+    assert (
+        "-m 'not resource'"
+        in workflow
+    )
+    assert '--junitxml=test-results/ordinary.xml' in workflow
+    assert '--junitxml=test-results/resources.xml' in workflow
+    assert (
+        'python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt' in workflow
+    )
+    assert (
+        'pytest tests/origo_source_native --collect-only -q > test-results/collection.txt'
+        in workflow
+    )
+    assert 'tests/tools/test_tests_ci_contract.py' in (REPO_ROOT / '.github/workflows/pr_checks_ruleset.yml').read_text()
     assert "inputs.runner == 'github'" in workflow
     assert 'options: [server, github]' in workflow
     assert 'head.repo.full_name != github.repository' in workflow
     assert '["self-hosted", "linux", "x64", "origo-tests"]' in workflow
-    assert "'[\"ubuntu-latest\"]'" in workflow
+    assert '\'["ubuntu-latest"]\'' in workflow
     assert 'persist-credentials: false' in workflow
     assert 'cancel-in-progress: true' in workflow
     assert 'continue-on-error' not in workflow
@@ -62,6 +77,16 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         '6cd091368c8edeb21b7e3c3cc4a89349724e6cdd9b5f747de3c8b53aac252864'
     )
     assert [group['expected'] for group in manifest] == [15, 4, 18, 8, 10]
+    additions = contract['baseline_additions']
+    assert additions['sha'] == '4288d0a764eb526869cb96dbb6ddd23779927242'
+    assert len(additions['nodes']) == 6
+    assert hashlib.sha256('\n'.join(additions['nodes']).encode()).hexdigest() == (
+        '8a4ce71c94d9f82c3764bda8b4b66b3a9f19108995d118bd0cfeb8ece882de98'
+    )
+    assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
+    assert hashlib.sha256(json.dumps(
+        contract['consolidations'], sort_keys=True, separators=(',', ':'),
+    ).encode()).hexdigest() == '12391bf047bb1dc6ad8afba2414fb2f4e1a1e1bb949a9f4cc2e70d57ace55887'
 
 
 def test_workflow_executes_verification_and_all_provenance_checks() -> None:
@@ -83,7 +108,7 @@ def test_workflow_executes_verification_and_all_provenance_checks() -> None:
         assert stem in runs
     assert runs.count('tools/fixture_bundle.py verify') == 2
     assert 'playwright install --with-deps chromium' in runs
-    assert 'shellcheck tools/provision_tests_runner.sh deploy/tests-runner/*.sh' in runs
+    assert 'shellcheck tools/provision_tests_runner.sh deploy/tests-runner/*.sh' in (REPO_ROOT / '.github/workflows/pr_checks_lint.yml').read_text()
 
 
 @pytest.fixture(scope='module')
@@ -97,7 +122,7 @@ def real_report() -> bytes:
 @pytest.mark.parametrize('fault', [
     'none', 'missing-file', 'malformed', 'empty', 'missing-case', 'missing-ordinary',
     'missing-original', 'duplicate', 'skipped', 'failure', 'error',
-    'aggregate-skipped', 'count', 'renamed-case',
+    'aggregate-skipped', 'count', 'renamed-case', 'missing-addition',
 ])
 def test_report_cli_enforces_actual_outcomes(
     tmp_path: Path, real_report: bytes, fault: str,
@@ -124,6 +149,14 @@ def test_report_cli_enforces_actual_outcomes(
         suite.attrib['tests'] = str(len(cases) - 1)
         if fault == 'missing-original':
             collection.write_text('\n'.join(node for i, node in enumerate(nodes) if i != removed) + '\n')
+    elif fault == 'missing-addition':
+        saved = json.loads(manifest.read_text())
+        saved['baseline_nodes'] = nodes[:2]
+        saved['baseline_additions'] = {'sha': '4288d0a764eb526869cb96dbb6ddd23779927242', 'nodes': nodes[2:]}
+        manifest.write_text(json.dumps(saved))
+        suite.remove(cases[2])
+        suite.attrib['tests'] = '2'
+        collection.write_text('\n'.join(nodes[:2]) + '\n')
     elif fault == 'duplicate':
         suite.append(ElementTree.fromstring(ElementTree.tostring(cases[1])))
         suite.attrib['tests'] = str(len(cases) + 1)
@@ -302,3 +335,102 @@ if os.environ['CONVERSION_FAILS'] == '1':
     assert (tmp_path / 'clean.qcow2').read_bytes() == (old if conversion_fails else prepared)
     if not conversion_fails:
         assert (tmp_path / 'clean.qcow2').stat().st_mode & 0o777 == 0o444
+
+
+@pytest.mark.parametrize('fault', ['none', 'missing-retained', 'unmapped', 'empty-contract', 'empty-retained', 'unknown-original', 'still-executed', 'failed-retained'])
+def test_consolidated_report_requires_explicit_contract_and_passing_owner(
+    tmp_path: Path, real_report: bytes, fault: str,
+) -> None:
+    tree = ElementTree.fromstring(real_report)
+    suite = tree.find('testsuite')
+    assert suite is not None
+    cases = suite.findall('testcase')
+    nodes = [f"{case.attrib['classname'].replace('.', '/')}.py::{case.attrib['name']}" for case in cases]
+    # Exercise report substitution using original records; repository mappings name
+    # the exact source/market owner and are reviewed with the preserved assertions.
+    replacement = {'contract': 'Explicit preserved contract', 'retained': [nodes[0]]}
+    retired = nodes[1]
+    suite.remove(cases[1])
+    suite.attrib['tests'] = '2'
+    if fault == 'missing-retained':
+        replacement['retained'] = [nodes[1]]
+    elif fault == 'empty-contract':
+        replacement['contract'] = ''
+    elif fault == 'empty-retained':
+        replacement['retained'] = []
+    elif fault == 'unknown-original':
+        retired += '[unknown]'
+    elif fault == 'still-executed':
+        retired = nodes[0]
+    elif fault == 'failed-retained':
+        ElementTree.SubElement(cases[0], 'failure')
+    contract = {'baseline_nodes': nodes, 'consolidations': {retired: replacement}, 'groups': [
+        {'name': 'Captured records', 'expected': 3, 'nodes': nodes},
+    ]}
+    if fault == 'unmapped':
+        contract['consolidations'] = {}
+    manifest = tmp_path / 'manifest.json'
+    manifest.write_text(json.dumps(contract))
+    collection = tmp_path / 'collection.txt'
+    collection.write_text('\n'.join([nodes[0], nodes[2]]) + '\n')
+    report = tmp_path / 'report.xml'
+    report.write_bytes(ElementTree.tostring(tree))
+    result = subprocess.run([
+        sys.executable, 'tools/tests_ci.py', str(report), str(collection), '--manifest', str(manifest),
+    ], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert (result.returncode == 0) is (fault == 'none'), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('fault', [
+    'none', 'empty-phase', 'missing-phase', 'truncated-phase', 'duplicate-cross-phase',
+    'failed-phase',
+])
+def test_phase_reports_merge_without_losing_outcomes(
+    tmp_path: Path, real_report: bytes, fault: str,
+) -> None:
+    root = ElementTree.fromstring(real_report)
+    suite = root.find('testsuite')
+    assert suite is not None
+    cases = suite.findall('testcase')
+    nodes = [f"{case.attrib['classname'].replace('.', '/')}.py::{case.attrib['name']}" for case in cases]
+    reports = []
+    for index, subset in enumerate((cases[:2], cases[2:])):
+        phase = ElementTree.Element('testsuites')
+        current = ElementTree.SubElement(phase, 'testsuite', tests=str(len(subset)), skipped='0', failures='0', errors='0', time=str(index + 1))
+        current.extend(subset)
+        report = tmp_path / f'phase-{index}.xml'
+        report.write_bytes(ElementTree.tostring(phase))
+        reports.append(str(report))
+    manifest = tmp_path / 'manifest.json'
+    manifest.write_text(json.dumps({'baseline_nodes': nodes, 'groups': [
+        {'name': 'All original records', 'expected': 3, 'nodes': nodes},
+    ]}))
+    collection = tmp_path / 'collection.txt'
+    collection.write_text('\n'.join(nodes) + '\n')
+    second = Path(reports[1])
+    phase = ElementTree.parse(second)
+    current = phase.find('testsuite')
+    assert current is not None
+    if fault == 'empty-phase':
+        current.remove(current.findall('testcase')[0])
+        current.attrib['tests'] = '0'
+    elif fault == 'duplicate-cross-phase':
+        current.append(cases[0])
+        current.attrib['tests'] = '2'
+    elif fault == 'failed-phase':
+        ElementTree.SubElement(current.findall('testcase')[0], 'failure')
+    phase.write(second)
+    if fault == 'missing-phase':
+        second.unlink()
+    elif fault == 'truncated-phase':
+        second.write_text('<testsuites>')
+    merged = tmp_path / 'merged.xml'
+    result = subprocess.run([
+        sys.executable, 'tools/tests_ci.py', str(merged), str(collection), '--manifest', str(manifest), '--merge', *reports,
+    ], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert (result.returncode == 0) is (fault == 'none'), result.stdout + result.stderr
+    if fault != 'none':
+        return
+    combined = ElementTree.parse(merged)
+    assert len(combined.findall('.//testcase')) == 3
+    assert sum(float(s.attrib['time']) for s in combined.findall('testsuite')) == 3

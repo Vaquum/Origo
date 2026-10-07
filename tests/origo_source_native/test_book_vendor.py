@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import shutil
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -24,9 +26,36 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 REAL_HOUR = '2026-10-04T09Z'
 
 
+@pytest.fixture(scope='session')
+def vendor_session_root(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Path:
+    base = tmp_path_factory.getbasetemp()
+    return base.parent if worker_id != 'master' else base
+
+
+def _original_archive(
+    root: Path, market: Market, partition: Partition,
+) -> tuple[Market, bytes, dict[str, str]]:
+    import requests
+
+    name = f'vendor-{market}-{partition.key}'
+    with (root / f'{name}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = root / f'{name}.input'
+        headers = root / f'{name}.headers.json'
+        if not path.exists():
+            response = requests.get(
+                vendor.CRYPTOHFT_URL,
+                params={'file': vendor._file(market, partition)}, timeout=(5, 60),
+            )
+            response.raise_for_status()
+            path.write_bytes(response.content)
+            headers.write_text(json.dumps(dict(response.headers)))
+        return market, path.read_bytes(), cast(dict[str, str], json.loads(headers.read_text()))
+
+
 @pytest.fixture(scope='session', params=['spot', 'perp'])
 def original_vendor_archive(
-    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+    request: pytest.FixtureRequest, vendor_session_root: Path,
 ) -> tuple[Market, bytes, dict[str, str]]:
     """Real private inputs fetched from the vendor, never committed or published.
 
@@ -36,32 +65,18 @@ def original_vendor_archive(
     market = cast(Market, request.param)
     # Versioned test preparation, not operator configuration. Only this vendor
     # host is contacted, once per market for the complete test session.
-    import requests
-
     partition = vendor.hour_partition(REAL_HOUR)
-    response = requests.get(
-        vendor.CRYPTOHFT_URL, params={'file': vendor._file(market, partition)}, timeout=(5, 60)
-    )
-    response.raise_for_status()
-    path = tmp_path_factory.mktemp('original-vendor-hour') / 'input.parquet'
-    path.write_bytes(response.content)
-    return market, path.read_bytes(), dict(response.headers)
+    return _original_archive(vendor_session_root, market, partition)
 
 
 @pytest.fixture(scope='session')
 def original_vendor_following_archive(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
-    tmp_path_factory: pytest.TempPathFactory,
+    vendor_session_root: Path,
 ) -> tuple[Market, bytes, dict[str, str]]:
-    import requests
-
     market = original_vendor_archive[0]
     partition = vendor.hour_partition('2026-10-04T10Z')
-    response = requests.get(vendor.CRYPTOHFT_URL, params={'file': vendor._file(market, partition)}, timeout=(5, 60))
-    response.raise_for_status()
-    path = tmp_path_factory.mktemp('original-following-hour') / 'input.parquet'
-    path.write_bytes(response.content)
-    return market, path.read_bytes(), dict(response.headers)
+    return _original_archive(vendor_session_root, market, partition)
 
 
 @pytest.fixture()
@@ -211,11 +226,11 @@ def test_truncated_exchange_tail_cannot_complete_an_hour(
 
 
 @pytest.fixture(scope='session')
-def original_vendor_revision(
+def original_vendor_preparation(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
-    tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[Market, vendor.Revision]:
+    vendor_session_root: Path,
+) -> tuple[Market, vendor.Revision, Path]:
     market, body, headers = original_vendor_archive
 
     def captured(
@@ -231,14 +246,47 @@ def original_vendor_revision(
             captured[1][:1] if headers else captured[1], captured[2], 206 if headers else 200
         )
 
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path_factory.mktemp('vendor-scratch-locks')))
-        patch.setattr(vendor, 'get_response', captured)
-        revision = vendor.CryptoHFTBookHourly(market).fetch(vendor.hour_partition(REAL_HOUR))
-        assert revision.key == vendor.CryptoHFTBookHourly(market).discover(
-            vendor.hour_partition(REAL_HOUR)
+    root = vendor_session_root
+    grid = root / f'verified-book-{market}'
+    metadata = root / f'verified-book-{market}.json'
+    with (root / f'verified-book-{market}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not metadata.exists():
+            with pytest.MonkeyPatch.context() as patch:
+                lock_root = root / f'vendor-scratch-{market}'
+                patch.setenv('ORIGO_SOURCE_LOCK_DIR', str(lock_root))
+                patch.setattr(vendor, 'get_response', captured)
+                revision = vendor.CryptoHFTBookHourly(market).fetch(vendor.hour_partition(REAL_HOUR))
+                assert revision.key == vendor.CryptoHFTBookHourly(market).discover(
+                    vendor.hour_partition(REAL_HOUR)
+                )
+            original, = (lock_root / f'book_vendor_{market}').glob('hour-*/grid')
+            shutil.copytree(original, grid)
+            metadata.write_text(json.dumps([
+                revision.key, revision.content_hash, revision.evidence_json, revision.row_count,
+            ]))
+        values = cast(list[object], json.loads(metadata.read_text()))
+        local = vendor.fetch_sealed_partition(grid, market, vendor.hour_partition(REAL_HOUR))
+        revision = replace(
+            local, key=str(values[0]), content_hash=str(values[1]),
+            evidence_json=str(values[2]), row_count=int(str(values[3])),
         )
+    return market, revision, grid
+
+
+@pytest.fixture(scope='session')
+def original_vendor_revision(
+    original_vendor_preparation: tuple[Market, vendor.Revision, Path],
+) -> tuple[Market, vendor.Revision]:
+    market, revision, _ = original_vendor_preparation
     return market, revision
+
+
+@pytest.fixture(scope='session')
+def original_vendor_spool(
+    original_vendor_preparation: tuple[Market, vendor.Revision, Path],
+) -> Path:
+    return original_vendor_preparation[2]
 
 
 def test_hourly_and_provisional_keys_cannot_share_partition_identity() -> None:

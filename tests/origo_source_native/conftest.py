@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import importlib
 import json
 import os
@@ -26,26 +25,43 @@ from .helpers import BINANCE_FIXTURE_ROOT, ORIGO_DATABASE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLICKHOUSE_DOCKERFILE = REPO_ROOT / 'Dockerfile.clickhouse'
-RESOURCE_MODULES = ('test_alert_summary.py', 'test_law_page.py')
+PRIORITY_GROUPS = (
+    'book-perp',
+    'metadata-diagnostics',
+    'test_book_history-test_original_historical_hour_replays_preceding_vendor_snapshot',
+    'book-spot',
+    'test_orchestration-test_a_new_backfill_joins_at_the_served_frontier',
+    'test_binance_perp_spool-test_spool_repair_and_canonical_replacement_preserve_outputs',
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    # Keep resource probes ahead of workers retaining large vendor/session inputs.
-    items.sort(key=lambda item: RESOURCE_MODULES.index(item.path.name)
-               if item.path.name in RESOURCE_MODULES else len(RESOURCE_MODULES))
+    # Immutable book preparation is shared; mutable scenarios run independently.
+    priorities: dict[pytest.Item, int] = {}
+    for item in items:
+        group = f'{item.path.stem}-{item.originalname}'
+        params = item.callspec.params if isinstance(item, pytest.Function) and hasattr(item, 'callspec') else {}
+        if item.path.name in ('test_book_vendor.py', 'test_book_law.py') and 'original_vendor_archive' in params:
+            group = f"book-{params['original_vendor_archive']}"
+            if item.originalname != 'test_original_vendor_hour_builds_all_book_grids_without_binance':
+                group += f'-{item.originalname}'
+        elif 'diagnostic_server' in item.fixturenames:
+            # One real mutable diagnostic server retains its module's sequence.
+            group = 'metadata-diagnostics'
+        item.add_marker(pytest.mark.xdist_group(group))
+        priorities[item] = PRIORITY_GROUPS.index(group) if group in PRIORITY_GROUPS else len(PRIORITY_GROUPS)
+    # Start the measured long-running groups before shorter protocol checks.
+    items.sort(key=lambda item: priorities[item])
 
 
-@pytest.fixture(scope='module', autouse=True)
-def resource_test_schedule(request: pytest.FixtureRequest) -> Iterator[None]:
-    run_uid = os.environ.get('PYTEST_XDIST_TESTRUNUID')
-    if run_uid is None:
-        yield
-    else:
-        # Preserve the serial environment of unchanged wall-clock/resource assertions.
-        exclusive = Path(request.module.__file__).name in RESOURCE_MODULES
-        with (Path('/tmp') / f'origo-tests-{run_uid}.lock').open('w') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-            yield
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item) -> Iterator[object]:
+    report = yield
+    marker = item.get_closest_marker('xdist_group')
+    if marker is not None:
+        # Placement labels are not part of the collected contract identity.
+        report.nodeid = report.nodeid.removesuffix(f'@{marker.args[0]}')
+    return report
 
 
 def _wait_for_clickhouse(host: str, port: int, user: str, password: str) -> None:

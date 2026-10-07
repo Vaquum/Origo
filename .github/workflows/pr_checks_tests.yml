@@ -46,28 +46,43 @@ jobs:
         run: python -m pip install --upgrade pip '.[dev]'
 
       - name: Install browser for dashboard acceptance
-        run: python -m playwright install --with-deps chromium
-
-      - name: Verify test CI contract
         run: |
-          sudo apt-get install --no-install-recommends --yes shellcheck
-          shellcheck tools/provision_tests_runner.sh deploy/tests-runner/*.sh
-          pytest tests/tools/test_tests_ci_contract.py -q
+          if [[ "${{ runner.environment }}" == 'self-hosted' ]]; then
+            # The versioned runner image already installs Chromium system libraries.
+            python -m playwright install chromium
+          else
+            python -m playwright install --with-deps chromium
+          fi
 
       - name: Run Origo source-native runtime tests
         shell: bash
         env:
-          TEST_WORKERS: ${{ runner.environment == 'self-hosted' && '6' || '2' }}
+          TEST_WORKERS: ${{ runner.environment == 'self-hosted' && '8' || '2' }}
         run: |
           mkdir -p test-results
           python -m pip freeze > test-results/dependencies.txt
           git rev-parse HEAD > test-results/source-sha.txt
           git rev-parse HEAD:tests/fixtures > test-results/fixtures-tree.txt
           pytest tests/origo_source_native --collect-only -q > test-results/collection.txt
-          pytest tests/origo_source_native -q --maxfail=1 -n "$TEST_WORKERS" --dist loadfile --no-loadscope-reorder --durations=30 --junitxml=test-results/runtime.xml | tee test-results/runtime.log
+          TEST_TMP="$RUNNER_TEMP/origo-pytest"
+          mkdir -p "$TEST_TMP"
+          if [[ "${{ runner.environment }}" == 'self-hosted' ]]; then
+            # Disposable test files use at most 4GiB of the existing 24GiB guest RAM.
+            sudo mount -t tmpfs -o size=4G,nosuid,nodev tmpfs "$TEST_TMP"
+            sudo chown "$(id -u):$(id -g)" "$TEST_TMP"
+            trap 'sudo umount "$TEST_TMP"' EXIT
+          fi
+          # Ordinary failures return before the dedicated resource qualification.
+          pytest tests/origo_source_native -q --maxfail=1 -m 'not resource' --basetemp="$TEST_TMP" -n "$TEST_WORKERS" --dist loadgroup --no-loadscope-reorder --durations=30 --junitxml=test-results/ordinary.xml | tee test-results/ordinary.log
+          if [[ "${{ runner.environment }}" == 'self-hosted' ]]; then
+            sudo umount "$TEST_TMP"
+            trap - EXIT
+          fi
+          # A fresh, serial process preserves every original wall-clock/RSS limit.
+          pytest tests/origo_source_native -q --maxfail=1 -m resource --durations=30 --junitxml=test-results/resources.xml | tee test-results/resources.log
 
       - name: Verify pinned acceptance outcomes
-        run: python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt
+        run: python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt --merge test-results/ordinary.xml test-results/resources.xml
 
       - name: Verify daily-archive fixture bundles
         run: |

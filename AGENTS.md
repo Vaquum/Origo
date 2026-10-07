@@ -72,6 +72,22 @@ The gates check shape, scope, format, ratchets, and named test suites. They do n
 
 **The smallest possible honest way always.** Slice spec, code, communication, everything, let it be the smallest possible unit size that honestly delivers what is required.
 
+## Test design
+
+Use the same contract matrix for every data source. Additional source-specific tests require a distinct format, state transition or boundary failure; a larger suite is not evidence of better coverage.
+
+Every new test must name the observable contract and the specific failure it detects.
+Extend the existing owner of that contract. A separate case earns its place through a
+different input, state transition or execution boundary; copied assertions do not.
+Use genuine captured source data. Identify deliberate protocol faults explicitly.
+Share immutable expensive preparation; keep mutable database, file and process state isolated.
+Run one full-scale scenario per distinct resource bound and one end-to-end scenario per
+distinct integration boundary. Check downstream rules at the cheapest layer that still
+rejects their failure. Never invoke pytest from another test or copy a suite for another adapter.
+Assert behavior and promised interfaces; incidental wording or code structure is not a contract.
+For consolidation, map removed contracts to retained assertions and demonstrate rejection of
+their relevant failures. Report test-code footprint and full-suite elapsed time before and after.
+
 ## When in doubt, stop
 
 This is collaboration. If the requirement is unclear, if the scope is ambiguous, if a gate's meaning is unobvious, if the fix would require touching something that wasn't asked for — stop and ask the operator. Proceeding through doubt is where harm accumulates.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo"
-version = "3.34.3"
+version = "3.34.4"
 description = "Event-sourced market data platform for deterministic, replayable financial data access"
 readme = "README.md"
 license = "MIT"
@@ -41,6 +41,9 @@ include = ["origo*"]
 [tool.dagster]
 module_name = "origo.definitions"
 code_location_name = "origo"
+
+[tool.pytest.ini_options]
+markers = ["resource: wall-clock/RSS qualification that runs after parallel workers exit"]
 
 # --------------------------------------------------------------------
 # Pyright strict configuration.

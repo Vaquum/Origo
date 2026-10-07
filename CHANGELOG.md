@@ -1,3 +1,7 @@
+# v3.34.4
+
+- Consolidate repeated source acceptance preparation, retain explicit failure contracts, and run resource qualification separately from parallel ordinary tests.
+
 # v3.34.3
 
 - Run the complete runtime suite once with six isolated ClickHouse workers, preserve every original acceptance outcome and unchanged timing assertion, and migrate same-repository jobs to a disposable KVM runner with host-enforced resource limits and repository-only App registration.

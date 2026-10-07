@@ -7,7 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_FILE = REPO_ROOT / 'AGENTS.md'
 RULESET_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_ruleset.yml'
-EXPECTED_SHA256 = 'd5ad7f6380255317c2385ccf5303c29dbea7571bdda86f4cbd354283eba82776'
+EXPECTED_SHA256 = 'fbbde280c8a0bb02361d5d8b1b53de77a5dbf1b7a42771ced012fe766ba69f48'
 
 
 def test_repo_agents_file_exists_and_has_expected_sha256() -> None:

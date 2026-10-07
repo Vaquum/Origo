@@ -14,6 +14,8 @@ from origo.sources.adapters.binance_daily import Response
 from origo.sources.adapters.book_spool import Market
 from origo.sources.contracts import Partition, SourceError
 
+from .test_book_vendor import _original_archive, vendor_session_root as vendor_session_root
+
 
 @dataclass(frozen=True)
 class OriginalArchive:
@@ -23,19 +25,14 @@ class OriginalArchive:
 
 
 @pytest.fixture(scope='session')
-def original_historical_archives(tmp_path_factory: pytest.TempPathFactory) -> dict[Market, tuple[OriginalArchive, ...]]:
-    import requests
-
+def original_historical_archives(vendor_session_root: Path) -> dict[Market, tuple[OriginalArchive, ...]]:
     originals: dict[Market, tuple[OriginalArchive, ...]] = {}
-    root = tmp_path_factory.mktemp('original-historical-books')
     for market, hour in (('spot', 7), ('perp', 6)):
         captured: list[OriginalArchive] = []
         for prior in (hour - 1, hour, hour + 1):
             partition = vendor.hour_partition(f'2025-06-28T{prior:02d}Z')
-            response = requests.get(vendor.CRYPTOHFT_URL, params={'file': vendor._file(cast(Market, market), partition)}, timeout=(5, 60))
-            response.raise_for_status()
-            (root / f'{market}-{prior:02d}.bin').write_bytes(response.content)
-            captured.append(OriginalArchive(partition, response.content, dict(response.headers)))
+            _, body, headers = _original_archive(vendor_session_root, cast(Market, market), partition)
+            captured.append(OriginalArchive(partition, body, headers))
         originals[cast(Market, market)] = tuple(captured)
     return originals
 

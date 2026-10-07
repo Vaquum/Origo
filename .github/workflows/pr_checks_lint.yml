@@ -25,3 +25,7 @@ jobs:
         run: .venv-lint/bin/python -m pip install --upgrade pip 'ruff==0.15.11'
       - name: Run Ruff lint gate
         run: .venv-lint/bin/python -m ruff check tools tests/tools
+      - name: Check runner shell scripts
+        run: |
+          sudo apt-get install --no-install-recommends --yes shellcheck
+          shellcheck tools/provision_tests_runner.sh deploy/tests-runner/*.sh

@@ -2,6 +2,11 @@
 
 - Route the market state law verdicts to the cube projection the reader selected. When the reader selects a canonical partition, `market_state` takes the worst of M1 and M2 (failed over stale over unknown over current) and `market_state_latest` is inactive as `cube_provisional_not_selected`, so a canonical-reader cube count mismatch no longer shows as a failed provisional node beside a current canonical one. Provisional and unknown selections are unchanged.
 
+# v3.34.1
+
+- Fail a deploy that leaves a container crash-looping, exited, unhealthy or missing, whose launched maintenance run does not succeed, or whose enabled provisional source builds no fresh minute after the deploy. After its last stage, `deploy_on_merge.yml` samples every Compose container every ten seconds, for at least five minutes and until the verifier has finished (up to fifteen minutes while one is still starting or recovering), and runs `origo.orchestration.verify_deploy` beside the sampling. The check reads Docker state, the Dagster run and `worker_minute_log` and writes nothing.
+- Cap polars below 2 in `pyproject.toml`, `docker-requirements.txt` and `requirements.txt`. Polars 2.0.0 removed the `memory_map` argument of `read_ipc` that `origo/utils/arrow_store.py` passes, which fails the test job and would fail the next image build.
+
 # v3.34.0
 
 - Retain absolute book updates beyond the initial snapshot and extend the proven price region only across observed BTCUSDT ticks; avoid connecting when durable seed capacity is exhausted.

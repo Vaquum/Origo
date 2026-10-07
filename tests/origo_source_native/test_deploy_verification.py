@@ -50,7 +50,7 @@ docker() {
       *' exec -T dagster python -m origo.orchestration.verify_deploy'*)
         echo "$*" >> "$LOG"
         limit=$((SECONDS + 20))
-        while [ "$(cat "$COUNTER" 2>/dev/null || echo 0)" -lt "${VERIFIER_UNTIL:-0}" ] \
+        while seen=$(cat "$COUNTER" 2>/dev/null); [ "${seen:-0}" -lt "${VERIFIER_UNTIL:-0}" ] \
           && [ "$SECONDS" -lt "$limit" ] && [ ! -e "$COUNTER.exit" ]; do
           /bin/sleep 0.01
         done

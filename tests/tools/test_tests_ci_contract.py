@@ -43,6 +43,8 @@ def test_pr_checks_tests_pins_python_and_runtime_suite_command() -> None:
     )
     assert '--junitxml=test-results/ordinary.xml' in workflow
     assert '--junitxml=test-results/resources.xml' in workflow
+    # Pytest deletes basetemp; the mounted filesystem root cannot be deleted.
+    assert '--basetemp="$TEST_TMP/ordinary"' in workflow
     assert (
         'python tools/tests_ci.py test-results/runtime.xml test-results/collection.txt' in workflow
     )

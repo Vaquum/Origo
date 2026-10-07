@@ -73,7 +73,7 @@ jobs:
             trap 'sudo umount "$TEST_TMP"' EXIT
           fi
           # Ordinary failures return before the dedicated resource qualification.
-          pytest tests/origo_source_native -q --maxfail=1 -m 'not resource' --basetemp="$TEST_TMP" -n "$TEST_WORKERS" --dist loadgroup --no-loadscope-reorder --durations=30 --junitxml=test-results/ordinary.xml | tee test-results/ordinary.log
+          pytest tests/origo_source_native -q --maxfail=1 -m 'not resource' --basetemp="$TEST_TMP/ordinary" -n "$TEST_WORKERS" --dist loadgroup --no-loadscope-reorder --durations=30 --junitxml=test-results/ordinary.xml | tee test-results/ordinary.log
           if [[ "${{ runner.environment }}" == 'self-hosted' ]]; then
             sudo umount "$TEST_TMP"
             trap - EXIT

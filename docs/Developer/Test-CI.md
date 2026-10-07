@@ -36,6 +36,9 @@ for qualification of either complete execution path.
 The required job name remains `pr_checks_tests`. Superseded runs are cancelled;
 the current commit must pass. Reports and the 30 slowest test phases are retained
 as GitHub artifacts for 14 days.
+After Python setup, the workflow registers its shared-library directory with
+the guest's dynamic loader. Deployment checks deliberately launch Python with
+a cleared environment; they must work without inheriting `LD_LIBRARY_PATH`.
 
 ## Runner
 
@@ -129,6 +132,11 @@ The ordered six-worker run passed all 1,052 cases in 1,119.88 seconds (18m40s),
 about 2.72 times faster. This is pytest elapsed time; actual GitHub job elapsed
 time and assignment are verified separately. No original case, assertion,
 workload size or timing/memory threshold was removed.
+The first actual Actions job at `14010f3` ran all 1,058 current cases in
+1,160.84 seconds: 1,057 passed and the nested deployment-environment check failed.
+Its Actions-provided Python binary depended on `LD_LIBRARY_PATH`, which that
+check clears. This job is retained as failed qualification; its runtime result
+does not replace the passing paired benchmark or qualify the migration.
 
 | Longest baseline file | Cases | Summed test phases |
 | --- | ---: | ---: |

@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
@@ -25,6 +25,9 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
 from .test_binance_daily_source_adapter import ARCHIVES, archive_response
+
+if TYPE_CHECKING:
+    from origo.law_catalog import ProjectionObservation
 
 START = datetime(2025, 1, 1, tzinfo=UTC)
 SOURCE = 'binance_spot_trades'
@@ -714,3 +717,139 @@ def test_market_state_receipt_damage_preserves_canonical_product_laws(canonical_
     assert predicate(after, 'M2')['evidence']['unknown_days'] == 1
     assert predicate(after, 'M2')['evidence']['valid_days'] == 0
     assert predicate(after, 'M2')['status'] == 'FAIL'  # Earlier required days are absent too.
+
+
+def _cube_nodes(predicates: dict[law.LawPredicate, law.PredicateReport], now: datetime,
+                observations: list[ProjectionObservation] | None = None) -> dict[str, ProjectionObservation]:
+    nodes = observations if observations is not None else [
+        cast('ProjectionObservation', {
+            'id': f'{SOURCE}:{name}', 'status': 'CURRENT', 'observed_at': '', 'evidence_at': None,
+            'evidence_id': None, 'data_through': None, 'reason': 'validated_activation',
+            'gate_ids': [], 'dagit_url': None,
+        })
+        for name in ('market_state', 'market_state_latest')
+    ]
+    law._cube_observations(nodes, predicates, now)
+    return {node['id'].partition(':')[2]: node for node in nodes}
+
+
+def test_cube_observations_route_m1_to_the_reader_selected_projection() -> None:
+    now = datetime(2025, 1, 1, 0, 2, tzinfo=UTC)
+    complete = law._result('PASS', 'cube_calendar_complete', expected_days=1)
+    history = law._result('FAIL', 'cube_history_incomplete', expected_days=1)
+    unknown_days = law._result('UNKNOWN', 'canonical_day_bounds_invalid', expected_days=1)
+    not_applicable_days = law._result('PASS', 'cube_calendar_complete', expected_days=0)
+    reader = law._result('PASS', 'reader_current', provisional=False)
+
+    def m1(status: law.LawStatus, reason: str, **evidence: law.Scalar) -> law.PredicateReport:
+        return law._result(status, reason, provisional=False, **evidence)
+
+    # Canonical selector: market_state is the worst of M1 and M2, market_state_latest is not selected.
+    # Columns: M1, M2, R1, market_state status / reason, predicates that decide it.
+    canonical = {
+        '1': (m1('PASS', 'cube_reader_current'), complete, reader, 'CURRENT', 'cube_calendar_complete', ['M1', 'M2']),
+        '2': (m1('FAIL', 'cube_counts_mismatch'), complete, reader, 'FAILED', 'cube_counts_mismatch', ['M1']),
+        '3': (m1('FAIL', 'cube_proof_empty'), complete, reader, 'FAILED', 'cube_proof_empty', ['M1']),
+        '4': (m1('FAIL', 'reader_stale'), complete, law._result('FAIL', 'reader_stale', provisional=False),
+              'STALE', 'reader_stale', ['M1']),
+        '5a': (m1('UNKNOWN', 'cube_proof_invalid'), complete, reader, 'UNKNOWN', 'cube_proof_invalid', ['M1']),
+        '5b': (m1('UNKNOWN', 'active_proof_missing'), complete, law._result('UNKNOWN', 'active_proof_missing', provisional=False),
+               'UNKNOWN', 'active_proof_missing', ['M1']),
+        '6': (m1('PASS', 'cube_reader_current'), history, reader, 'FAILED', 'cube_history_incomplete', ['M2']),
+        '7': (m1('PASS', 'cube_reader_current'), unknown_days, reader, 'UNKNOWN', 'canonical_day_bounds_invalid', ['M2']),
+        '8': (m1('FAIL', 'cube_counts_mismatch'), unknown_days, reader, 'FAILED', 'cube_counts_mismatch', ['M1']),
+        '9': (m1('UNKNOWN', 'cube_proof_invalid'), history, reader, 'FAILED', 'cube_history_incomplete', ['M2']),
+        '10': (m1('FAIL', 'reader_stale'), history, law._result('FAIL', 'reader_stale', provisional=False),
+               'FAILED', 'cube_history_incomplete', ['M2']),
+        '11': (law._result('UNKNOWN', 'evidence_unavailable'), complete, reader, 'UNKNOWN', 'evidence_unavailable', ['M1']),
+        '12': (m1('FAIL', 'cube_counts_mismatch'), not_applicable_days, reader, 'FAILED', 'cube_counts_mismatch', ['M1']),
+        '13': (m1('PASS', 'cube_not_applicable'), history, reader, 'FAILED', 'cube_history_incomplete', ['M2']),
+    }
+    for row, (first, second, selected, status, reason, deciding) in canonical.items():
+        nodes = _cube_nodes({'R1': selected, 'M1': first, 'M2': second}, now)
+        cube, latest = nodes['market_state'], nodes['market_state_latest']
+        assert (cube['status'], cube['reason']) == (status, reason), row
+        assert cube['gate_ids'] == [f'law.{name}:{SOURCE}' for name in deciding], row
+        assert cube['evidence_id'] == f'law.{deciding[-1]}:{SOURCE}:{now.isoformat()}', row
+        expected = ('INACTIVE', 'cube_not_applicable' if row == '13' else 'cube_provisional_not_selected')
+        assert (latest['status'], latest['reason']) == expected, row
+    both_left_out = _cube_nodes({'R1': reader, 'M1': m1('PASS', 'cube_not_applicable'), 'M2': not_applicable_days}, now)
+    assert {(node['status'], node['reason']) for node in both_left_out.values()} == {('INACTIVE', 'cube_not_applicable')}
+
+    # Provisional, unknown and early selectors keep each node on its own predicate.
+    def provisional(status: law.LawStatus, reason: str) -> law.PredicateReport:
+        return law._result(status, reason, provisional=True)
+
+    unchanged = {
+        '14': (law._result('PASS', 'reader_current', provisional=True), provisional('FAIL', 'cube_counts_mismatch'), complete,
+               ('CURRENT', 'cube_calendar_complete'), ('FAILED', 'cube_counts_mismatch')),
+        '15': (law._result('PASS', 'reader_current', provisional=True), provisional('PASS', 'cube_reader_current'), history,
+               ('FAILED', 'cube_history_incomplete'), ('CURRENT', 'cube_reader_current')),
+        '16': (law._result('FAIL', 'reader_empty'), law._result('FAIL', 'reader_empty'), complete,
+               ('CURRENT', 'cube_calendar_complete'), ('FAILED', 'reader_empty')),
+        '17': (law._result('UNKNOWN', 'reader_identity_ambiguous'), law._result('UNKNOWN', 'reader_identity_ambiguous'), complete,
+               ('CURRENT', 'cube_calendar_complete'), ('UNKNOWN', 'reader_identity_ambiguous')),
+        '18': (law._result('UNKNOWN', 'evidence_unavailable'), law._result('UNKNOWN', 'evidence_unavailable'), complete,
+               ('CURRENT', 'cube_calendar_complete'), ('UNKNOWN', 'evidence_unavailable')),
+    }
+    for row, (selected, first, second, cube_expected, latest_expected) in unchanged.items():
+        nodes = _cube_nodes({'R1': selected, 'M1': first, 'M2': second}, now)
+        assert (nodes['market_state']['status'], nodes['market_state']['reason']) == cube_expected, row
+        assert (nodes['market_state_latest']['status'], nodes['market_state_latest']['reason']) == latest_expected, row
+        assert nodes['market_state']['gate_ids'] == [f'law.M2:{SOURCE}'], row
+        assert nodes['market_state_latest']['gate_ids'] == [f'law.M1:{SOURCE}'], row
+    for selected in (reader, law._result('PASS', 'reader_current', provisional=True)):
+        early = _cube_nodes({'R1': selected, 'M1': m1('FAIL', 'cube_counts_mismatch'), 'M2': history}, law.CUBE_START)
+        assert {(node['status'], node['reason']) for node in early.values()} == {('INACTIVE', 'cube_not_applicable')}, '19'
+
+    # The same observations recover completely: no residue of the earlier failure.
+    nodes = _cube_nodes({'R1': reader, 'M1': m1('FAIL', 'cube_counts_mismatch'), 'M2': complete}, now)
+    assert nodes['market_state']['status'] == 'FAILED'
+    recovered = _cube_nodes({'R1': reader, 'M1': m1('PASS', 'cube_reader_current'), 'M2': complete}, now,
+                            list(nodes.values()))
+    assert (recovered['market_state']['status'], recovered['market_state']['reason']) == ('CURRENT', 'cube_calendar_complete')
+    assert recovered['market_state']['gate_ids'] == [f'law.M1:{SOURCE}', f'law.M2:{SOURCE}']
+    assert recovered['market_state']['evidence_id'] == f'law.M2:{SOURCE}:{now.isoformat()}'
+
+
+def _projection_nodes(report: law.LawReport) -> dict[str, ProjectionObservation]:
+    return {node['id'].partition(':')[2]: node for node in report['projections']
+            if node['id'].startswith(f'{SOURCE}:market_state')}
+
+
+def test_canonical_reader_cube_damage_fails_the_canonical_market_state_node(
+    canonical_case: LawCase, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical_case.runtime.build('2025-01-01')
+    # One captured day cannot satisfy M2's history since 2021: that node would fail for that reason with or
+    # without the routing, so M2 stays PASS and only the reader's cube counts change.
+    monkeypatch.setattr(law, '_m2', lambda proofs, now: law._result('PASS', 'cube_calendar_complete', expected_days=1))
+    # R1 selects the built canonical day. Its end lies after `now`, so `_r1` clamps the age with
+    # `max(0.0, ...)` and the reader is current.
+    now = START + timedelta(minutes=2, seconds=30)
+    before = canonical_case.report(now)
+    assert predicate(before, 'R1')['status'] == 'PASS'
+    assert predicate(before, 'R1')['evidence']['provisional'] is False
+    assert predicate(before, 'M1')['status'] == 'PASS'
+    nodes = _projection_nodes(before)
+    assert (nodes['market_state']['status'], nodes['market_state']['reason']) == ('CURRENT', 'cube_calendar_complete')
+    assert (nodes['market_state_latest']['status'], nodes['market_state_latest']['reason']) == (
+        'INACTIVE', 'cube_provisional_not_selected')
+    canonical_case.client.execute(
+        "ALTER TABLE origo.binance_spot_trades_market_state_revisions DELETE WHERE partition_key='2025-01-01'",
+        settings={'mutations_sync': 2},
+    )
+    after = canonical_case.report(now)
+    assert predicate(after, 'R1')['status'] == 'PASS'
+    assert predicate(after, 'M1')['status'] == 'FAIL'
+    assert predicate(after, 'M1')['reason'] == 'cube_counts_mismatch'
+    nodes = _projection_nodes(after)
+    cube = nodes['market_state']
+    assert (cube['status'], cube['reason']) == ('FAILED', 'cube_counts_mismatch')
+    assert f'law.M1:{SOURCE}' in cube['gate_ids']
+    assert (cube['evidence_id'] or '').startswith('law.M1:')
+    assert (nodes['market_state_latest']['status'], nodes['market_state_latest']['reason']) == (
+        'INACTIVE', 'cube_provisional_not_selected')
+    # The deletion touches no receipt: the product laws are unchanged.
+    assert predicate(after, 'C1') == predicate(before, 'C1')
+    assert predicate(after, 'C2') == predicate(before, 'C2')

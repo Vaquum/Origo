@@ -11,7 +11,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Iterator
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +24,10 @@ from origo import law
 from origo.law_catalog import build_catalog, gate_evaluation
 from origo.workers import law_page as page
 
+from .test_law import LawCase
+from .test_law import canonical_case as canonical_case
 from .test_law import law_case as law_case
+from .test_law import predicate as law_predicate
 from .test_law import real_law_report as real_law_report
 from .test_monitor import _monitor, _Recorder
 from .test_monitor import recorder as recorder
@@ -45,10 +48,9 @@ def _write(path: Path, records: list[page.Document]) -> None:
             (path.parent / 'operator-summary.json').write_text(json.dumps(summary, ensure_ascii=False, separators=(',', ':')))
 
 
-@pytest.fixture()
-def tape(tmp_path: Path, real_law_report: law.LawReport) -> tuple[Path, page.Document, datetime]:
+def _tape_from(tmp_path: Path, source_report: law.LawReport) -> tuple[Path, page.Document, datetime]:
     catalog = build_catalog(SHA)
-    report = copy.deepcopy(real_law_report)
+    report = copy.deepcopy(source_report)
     report['catalog_version'], report['deployed_sha'] = catalog['version'], SHA
     for feed in report['feeds']:
         for name, predicate in feed['predicates'].items():
@@ -79,7 +81,12 @@ def tape(tmp_path: Path, real_law_report: law.LawReport) -> tuple[Path, page.Doc
 
 
 @pytest.fixture()
-def serving(tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, page.TapeCache, page.Document, datetime]]:
+def tape(tmp_path: Path, real_law_report: law.LawReport) -> tuple[Path, page.Document, datetime]:
+    return _tape_from(tmp_path, real_law_report)
+
+
+@contextmanager
+def _serve(tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, page.TapeCache, page.Document, datetime]]:
     root, report, now = tape
     cache = page.TapeCache(root)
     cache.refresh_latest(now)
@@ -93,6 +100,12 @@ def serving(tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, p
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.fixture()
+def serving(tape: tuple[Path, page.Document, datetime]) -> Iterator[tuple[str, page.TapeCache, page.Document, datetime]]:
+    with _serve(tape) as value:
+        yield value
 
 
 @pytest.fixture()
@@ -1712,6 +1725,36 @@ def test_market_state_laws_and_projection_nodes_render_from_tape(
         assert 'pass' in tab.locator('[data-overview="M1"]').inner_text().lower()
         assert 'fail' in tab.locator('[data-overview="M2"]').inner_text().lower()
         tab.screenshot(path='/tmp/origo-market-state-law-overview.png', full_page=True)
+        browser.close()
+
+
+def test_canonical_reader_cube_damage_renders_on_the_canonical_projection_node(
+    canonical_case: LawCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical_case.runtime.build('2025-01-01')
+    # One captured day cannot satisfy M2's history since 2021, so M2 stays PASS and only the cube counts change.
+    monkeypatch.setattr(law, '_m2', lambda proofs, now: law._result('PASS', 'cube_calendar_complete', expected_days=1))
+    canonical_case.client.execute(
+        "ALTER TABLE origo.binance_spot_trades_market_state_revisions DELETE WHERE partition_key='2025-01-01'",
+        settings={'mutations_sync': 2},
+    )
+    report = canonical_case.report(datetime(2025, 1, 1, 0, 2, 30, tzinfo=UTC))
+    assert law_predicate(report, 'R1')['evidence']['provisional'] is False
+    assert law_predicate(report, 'M1')['reason'] == 'cube_counts_mismatch'
+    with _serve(_tape_from(tmp_path, report)) as (url, _, _, _), sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        tab = browser.new_page()
+        tab.goto(url + '/law?view=sources')
+        cube = tab.locator('[data-projection="binance_spot_trades:market_state"]')
+        latest = tab.locator('[data-projection="binance_spot_trades:market_state_latest"]')
+        assert 'failed' in cube.inner_text().lower()
+        assert 'inactive' in latest.inner_text().lower()
+        cube.click()
+        detail = tab.locator('#detail')
+        assert 'cube counts mismatch' in detail.inner_text().lower()
+        assert 'law.M1:binance_spot_trades' in detail.inner_text()
+        latest.click()
+        assert 'cube provisional not selected' in detail.inner_text().lower()
         browser.close()
 
 

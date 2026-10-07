@@ -23,6 +23,9 @@ baseline node. Missing selectors,
 incorrect parameter counts, duplicate results, skips, errors and failures fail
 the job. Assertions, real inputs, browser acceptance and performance thresholds
 are unchanged. Daily-archive bundle verification still runs after the suite.
+This inventory controls the migration comparison; it does not establish that
+the test design is economical. A subsequent consolidation must demonstrate
+equivalent contract and fault detection before replacing this baseline.
 
 Same-repository PRs and workflow dispatch use the `origo-tests` self-hosted label.
 Fork PRs run the same complete suite and verifier on GitHub with two workers.
@@ -122,6 +125,10 @@ the paired run at SHA `485521924983e3d4fd7f7b7bf3985bc44a26edb3`.
 The host ceilings were installed partway through the serial run; measured disk
 use before installation was below their limits. The parallel run uses them
 throughout. Later additions on main must pass in the actual migrated CI job.
+The ordered six-worker run passed all 1,052 cases in 1,119.88 seconds (18m40s),
+about 2.72 times faster. This is pytest elapsed time; actual GitHub job elapsed
+time and assignment are verified separately. No original case, assertion,
+workload size or timing/memory threshold was removed.
 
 | Longest baseline file | Cases | Summed test phases |
 | --- | ---: | ---: |

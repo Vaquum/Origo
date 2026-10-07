@@ -42,14 +42,6 @@ def test_pr_checks_tests_pins_python_and_runtime_suite_command() -> None:
 
 
 def test_acceptance_manifest_preserves_original_entry_points() -> None:
-    original = subprocess.run(
-        ['git', 'show', '485521924983e3d4fd7f7b7bf3985bc44a26edb3:.github/workflows/pr_checks_tests.yml'],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    original_nodes = set(re.findall(r'tests/origo_source_native/\w+\.py::\w+', original))
     contract = json.loads((REPO_ROOT / '.github/tests_acceptance.json').read_text())
     manifest = contract['groups']
     assert contract['baseline_sha'] == '485521924983e3d4fd7f7b7bf3985bc44a26edb3'
@@ -59,7 +51,11 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     )
     nodes = [node for group in manifest for node in group['nodes']]
     assert len(nodes) == len(set(nodes))
-    assert set(nodes) == original_nodes
+    # Original 50 selectors at SHA 4855219, independently pinned for shallow checkouts.
+    assert len(nodes) == 50
+    assert hashlib.sha256('\n'.join(sorted(nodes)).encode()).hexdigest() == (
+        '6cd091368c8edeb21b7e3c3cc4a89349724e6cdd9b5f747de3c8b53aac252864'
+    )
     assert [group['expected'] for group in manifest] == [15, 4, 18, 8, 10]
 
 

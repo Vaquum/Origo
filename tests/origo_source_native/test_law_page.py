@@ -24,9 +24,10 @@ from origo import law
 from origo.law_catalog import build_catalog, gate_evaluation
 from origo.workers import law_page as page
 
-from .test_law import LawCase, predicate
+from .test_law import LawCase
 from .test_law import canonical_case as canonical_case
 from .test_law import law_case as law_case
+from .test_law import predicate as law_predicate
 from .test_law import real_law_report as real_law_report
 from .test_monitor import _monitor, _Recorder
 from .test_monitor import recorder as recorder
@@ -1738,8 +1739,8 @@ def test_canonical_reader_cube_damage_renders_on_the_canonical_projection_node(
         settings={'mutations_sync': 2},
     )
     report = canonical_case.report(datetime(2025, 1, 1, 0, 2, 30, tzinfo=UTC))
-    assert predicate(report, 'R1')['evidence']['provisional'] is False
-    assert predicate(report, 'M1')['reason'] == 'cube_counts_mismatch'
+    assert law_predicate(report, 'R1')['evidence']['provisional'] is False
+    assert law_predicate(report, 'M1')['reason'] == 'cube_counts_mismatch'
     with _serve(_tape_from(tmp_path, report)) as (url, _, _, _), sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()

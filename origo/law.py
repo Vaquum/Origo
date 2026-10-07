@@ -11,10 +11,15 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
+from origo.sources.adapters.book_vendor import (
+    BOOK_AVAILABILITY_MAX_AGE_SECONDS,
+    BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS,
+    BOOK_HOURLY_DELIVERY_GRACE_SECONDS,
+    HOUR_KEY_FORMAT,
+)
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
-from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
-from origo.sources.adapters.book_vendor import BOOK_HOURLY_DELIVERY_GRACE_SECONDS, BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS, BOOK_AVAILABILITY_MAX_AGE_SECONDS, HOUR_KEY_FORMAT
+from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
 

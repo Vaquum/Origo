@@ -1,3 +1,8 @@
+# v3.34.3
+
+- Run the complete runtime suite once with six isolated ClickHouse workers, preserve every original acceptance outcome and unchanged timing assertion, and migrate same-repository jobs to a disposable KVM runner with host-enforced resource limits and repository-only App registration.
+- Retry transient runner API failures and atomically replace refreshed clean images and installation-token caches so interrupted maintenance preserves the previous valid state.
+
 # v3.34.2
 
 - Route the market state law verdicts to the cube projection the reader selected. When the reader selects a canonical partition, `market_state` takes the worst of M1 and M2 (failed over stale over unknown over current) and `market_state_latest` is inactive as `cube_provisional_not_selected`, so a canonical-reader cube count mismatch no longer shows as a failed provisional node beside a current canonical one. Provisional and unknown selections are unchanged.

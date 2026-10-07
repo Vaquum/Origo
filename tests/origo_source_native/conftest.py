@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import fcntl
 import importlib
+import json
+import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Thread
 from typing import Any
 from uuid import uuid4
@@ -22,12 +26,26 @@ from .helpers import BINANCE_FIXTURE_ROOT, ORIGO_DATABASE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLICKHOUSE_DOCKERFILE = REPO_ROOT / 'Dockerfile.clickhouse'
+RESOURCE_MODULES = ('test_alert_summary.py', 'test_law_page.py')
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(('127.0.0.1', 0))
-        return int(sock.getsockname()[1])
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    # Keep resource probes ahead of workers retaining large vendor/session inputs.
+    items.sort(key=lambda item: RESOURCE_MODULES.index(item.path.name)
+               if item.path.name in RESOURCE_MODULES else len(RESOURCE_MODULES))
+
+
+@pytest.fixture(scope='module', autouse=True)
+def resource_test_schedule(request: pytest.FixtureRequest) -> Iterator[None]:
+    run_uid = os.environ.get('PYTEST_XDIST_TESTRUNUID')
+    if run_uid is None:
+        yield
+    else:
+        # Preserve the serial environment of unchanged wall-clock/resource assertions.
+        exclusive = Path(request.module.__file__).name in RESOURCE_MODULES
+        with (Path('/tmp') / f'origo-tests-{run_uid}.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+            yield
 
 
 def _wait_for_clickhouse(host: str, port: int, user: str, password: str) -> None:
@@ -118,17 +136,17 @@ def clickhouse_settings() -> dict[str, str]:
     if shutil.which('docker') is None:
         pytest.fail('docker CLI is required for tests/origo_source_native')
 
-    image = subprocess.run(
-        ['docker', 'build', '--quiet', '--file', str(CLICKHOUSE_DOCKERFILE), str(REPO_ROOT)],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    with TemporaryDirectory(prefix='origo-tests-image-') as context:
+        for filename in ('clickhouse-config.xml', 'clickhouse-users.xml'):
+            shutil.copyfile(REPO_ROOT / filename, Path(context) / filename)
+        image = subprocess.run(
+            ['docker', 'build', '--quiet', '--file', str(CLICKHOUSE_DOCKERFILE), context],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
     container_name = f'origo-tests-{uuid4().hex[:12]}'
-    native_port = _free_port()
-    http_port = _free_port()
     password = 'test-password'
-    settings = _clickhouse_env(native_port, http_port, password)
 
     subprocess.run(
         [
@@ -143,9 +161,9 @@ def clickhouse_settings() -> dict[str, str]:
             '--tmpfs',
             '/var/log/clickhouse-server:size=64m',
             '--publish',
-            f'127.0.0.1:{native_port}:9000',
+            '127.0.0.1::9000',
             '--publish',
-            f'127.0.0.1:{http_port}:8123',
+            '127.0.0.1::8123',
             '--env',
             'CLICKHOUSE_USER=default',
             '--env',
@@ -158,6 +176,17 @@ def clickhouse_settings() -> dict[str, str]:
     )
 
     try:
+        bindings: dict[str, list[dict[str, str]]] = json.loads(subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .NetworkSettings.Ports}}', container_name],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout)
+        settings = _clickhouse_env(
+            int(bindings['9000/tcp'][0]['HostPort']),
+            int(bindings['8123/tcp'][0]['HostPort']),
+            password,
+        )
         _wait_for_clickhouse(
             settings['CLICKHOUSE_HOST'],
             int(settings['CLICKHOUSE_PORT']),
@@ -176,9 +205,9 @@ def clickhouse_settings() -> dict[str, str]:
 
 @pytest.fixture(scope='session')
 def binance_fixture_server_root_url() -> str:
-    port = _free_port()
     handler = partial(SimpleHTTPRequestHandler, directory=str(BINANCE_FIXTURE_ROOT))
-    server = ThreadingHTTPServer(('127.0.0.1', port), handler)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+    port = server.server_port
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
 

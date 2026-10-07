@@ -225,4 +225,10 @@ Temporary external pytest plugins qualify representative failure classes against
 
 Qualification also retained three genuine failures caused by caching catalogs in tests that intentionally change configuration; those cases now call the real catalog builder. A separate unchanged monitor replay exceeded its one-second limit by 1ms. Three diagnostic replays measured 0.70–0.72s, and the subsequent complete resource phase passed. That variance remains visible in the saved evidence; no retry, cached measurement or relaxed limit is added to CI.
 
+Current-head CI also exposed one-ULP variation between two independent four-thread
+ClickHouse volume reductions. The detail/plain bit-preservation comparison fixes
+both reductions to one thread while retaining every exact equality assertion.
+Independent genuine raw-trade references and the declared-query-settings case
+still exercise the production four-thread path with their existing precision bounds.
+
 Book workloads still cost more than trade adapter protocols because their distinct boundaries require genuine depth reconstruction. The retained full-hour cases separately check normal vendor closure, legacy snapshot exchange-clock ordering, continued depth outside the initial seed, truncated-tail rejection, provisional replacement and prior closing-input revisions. Shared preparation removes their repeated input download and baseline replay; independent boundaries remain concurrent. A further collapse must name the fault it still rejects rather than infer equivalence from similar setup.

@@ -15,6 +15,8 @@ def verify_report(
     root = ElementTree.parse(report).getroot()
     suites = list(root.iter('testsuite'))
     for suite in suites:
+        if int(suite.attrib['tests']) != len(suite.findall('testcase')):
+            raise ValueError('The runtime report test count does not match its suite cases')
         for outcome in ('skipped', 'failures', 'errors'):
             if int(suite.attrib[outcome]) != 0:
                 raise ValueError(f'The runtime report contains {outcome}')

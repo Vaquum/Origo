@@ -385,7 +385,7 @@ def test_consolidated_report_requires_explicit_contract_and_passing_owner(
 
 @pytest.mark.parametrize('fault', [
     'none', 'empty-phase', 'missing-phase', 'truncated-phase', 'duplicate-cross-phase',
-    'failed-phase',
+    'failed-phase', 'compensating-counts',
 ])
 def test_phase_reports_merge_without_losing_outcomes(
     tmp_path: Path, real_report: bytes, fault: str,
@@ -421,6 +421,11 @@ def test_phase_reports_merge_without_losing_outcomes(
         current.attrib['tests'] = '2'
     elif fault == 'failed-phase':
         ElementTree.SubElement(current.findall('testcase')[0], 'failure')
+    elif fault == 'compensating-counts':
+        first = ElementTree.parse(reports[0])
+        first.find('testsuite').attrib['tests'] = '3'
+        first.write(reports[0])
+        current.attrib['tests'] = '0'
     phase.write(second)
     if fault == 'missing-phase':
         second.unlink()

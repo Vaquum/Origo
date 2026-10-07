@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "origo"
-version = "3.34.0"
+version = "3.34.1"
 description = "Event-sourced market data platform for deterministic, replayable financial data access"
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,7 @@ dependencies = [
   "matplotlib",
   "clickhouse-driver",
   "clickhouse_connect",
-  "polars",
+  "polars<2",
   "pyarrow",
   "huggingface_hub",
   "lz4>=4.0.0",

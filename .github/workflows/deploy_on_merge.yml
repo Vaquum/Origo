@@ -326,6 +326,53 @@ jobs:
             exit 1
           fi
           echo "post-up: maintenance launched run $launched_run"
+          echo 'post-up: verification starting'
+          verify_since=$(date +%s)
+          verify_services="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml config --services </dev/null)" || exit 1
+          [ -n "$verify_services" ] || exit 1
+          # One line per container: service, state, health (none without a healthcheck), restart count.
+          verify_states() {
+            local ids states service found
+            ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -aq </dev/null)" || return 1
+            states=""
+            if [ -n "$ids" ]; then
+              states="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' $ids)" || return 1
+            fi
+            for service in $verify_services; do
+              found="$(printf '%s\n' "$states" | awk -v service="$service" '$1 == service')"
+              if [ -n "$found" ]; then
+                printf '%s\n' "$found"
+              else
+                printf '%s missing missing 0\n' "$service"
+              fi
+            done
+          }
+          verify_before="$(verify_states)" || exit 1
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
+            python -m origo.orchestration.verify_deploy --run-id "$launched_run" --since "$verify_since" --deadline-seconds 840 </dev/null &
+          verifier=$!
+          # Every container stays running with a steady restart count for at least 30 samples ten seconds
+          # apart and for as long as the verifier runs, then must be healthy; a container that is still
+          # starting or recovering gets samples until the verifier's own deadline has passed.
+          for sample in $(seq 1 90); do
+            sleep 10
+            verify_now="$(verify_states)" || exit 1
+            if [ "$(printf '%s\n' "$verify_now" | awk '{print $1, $4}' | sort)" != "$(printf '%s\n' "$verify_before" | awk '{print $1, $4}' | sort)" ] \
+              || ! printf '%s\n' "$verify_now" | awk '$2 != "running" {bad = 1} END {exit bad}'; then
+              printf 'post-up: container states changed during verification\n%s\n' "$verify_now" >&2
+              exit 1
+            fi
+            if [ "$sample" -ge 30 ] && ! kill -0 "$verifier" 2>/dev/null \
+              && printf '%s\n' "$verify_now" | awk '$3 != "healthy" && $3 != "none" {bad = 1} END {exit bad}'; then
+              break
+            fi
+          done
+          if ! printf '%s\n' "$verify_now" | awk '$3 != "healthy" && $3 != "none" {bad = 1} END {exit bad}'; then
+            printf 'post-up: containers not healthy\n%s\n' "$verify_now" >&2
+            exit 1
+          fi
+          wait "$verifier"
+          echo 'post-up: deployment verified'
           REMOTE
 
           rm -f "$DEPLOY_ENV_FILE"

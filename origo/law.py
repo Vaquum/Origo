@@ -19,7 +19,7 @@ from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
 
 if TYPE_CHECKING:
-    from origo.law_catalog import GateEvaluation, ProjectionObservation
+    from origo.law_catalog import GateEvaluation, ProjectionObservation, ProjectionStatus
 
 LAW_SCHEMA_VERSION = 1
 LAW_TAPE_ROOT = Path('/var/lib/origo-law')
@@ -538,21 +538,42 @@ def _m2(proofs: list[_Proof], now: datetime) -> PredicateReport:
                    **evidence)
 
 
+CUBE_NODE_RANK = {'CURRENT': 0, 'UNKNOWN': 1, 'STALE': 2, 'FAILED': 3}
+
+
+def _cube_status(result: PredicateReport) -> ProjectionStatus:
+    return ('CURRENT' if result['status'] == 'PASS' else 'UNKNOWN' if result['status'] == 'UNKNOWN'
+            else 'STALE' if result['reason'] == 'reader_stale' else 'FAILED')
+
+
+def _cube_applicable(name: LawPredicate, result: PredicateReport) -> bool:
+    return result['reason'] != 'cube_not_applicable' and not (
+        name == 'M2' and result['evidence'].get('expected_days') == 0)
+
+
 def _cube_observations(observations: list[ProjectionObservation], predicates: dict[LawPredicate, PredicateReport],
                        now: datetime) -> None:
+    canonical = predicates['R1']['evidence'].get('provisional') is False
     for observation in observations:
         component = observation['id'].partition(':')[2]
         if component not in ('market_state', 'market_state_latest'):
             continue
-        name: LawPredicate = 'M1' if component.endswith('_latest') else 'M2'
-        result = predicates[name]
-        observation.update(status='CURRENT' if result['status'] == 'PASS' else 'UNKNOWN' if result['status'] == 'UNKNOWN' else 'STALE' if result['reason'] == 'reader_stale' else 'FAILED',
-            reason=result['reason'], observed_at=now.isoformat(), evidence_at=now.isoformat(),
-            evidence_id=f'law.{name}:{MARKET_STATE_SOURCE}:{now.isoformat()}',
-            gate_ids=[f'law.{name}:{MARKET_STATE_SOURCE}'])
-        if now <= CUBE_START or result['reason'] == 'cube_not_applicable' or (name == 'M2' and result['evidence'].get('expected_days') == 0):
+        latest = component.endswith('_latest')
+        # The canonical node judges the selected reader (M1) with the day history (M2) when the reader
+        # selected a canonical partition; otherwise each node keeps its own predicate.
+        names: tuple[LawPredicate, ...] = ('M1',) if latest else ('M1', 'M2') if canonical else ('M2',)
+        applicable = [name for name in names if _cube_applicable(name, predicates[name])]
+        worst = max((CUBE_NODE_RANK[_cube_status(predicates[name])] for name in applicable), default=0)
+        decisive = [name for name in applicable if CUBE_NODE_RANK[_cube_status(predicates[name])] == worst]
+        source = 'M2' if 'M2' in decisive else decisive[0] if decisive else names[-1]
+        result = predicates[source]
+        observation.update(status=_cube_status(result), reason=result['reason'],
+            observed_at=now.isoformat(), evidence_at=now.isoformat(),
+            evidence_id=f'law.{source}:{MARKET_STATE_SOURCE}:{now.isoformat()}',
+            gate_ids=[f'law.{name}:{MARKET_STATE_SOURCE}' for name in decisive or [source]])
+        if now <= CUBE_START or not applicable:
             observation.update(status='INACTIVE', reason='cube_not_applicable')
-        elif name == 'M1' and result['status'] == 'PASS' and not result['evidence'].get('provisional'):
+        elif latest and canonical:
             observation.update(status='INACTIVE', reason='cube_provisional_not_selected')
 
 

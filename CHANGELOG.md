@@ -1,3 +1,7 @@
+# v3.34.2
+
+- Route the market state law verdicts to the cube projection the reader selected. When the reader selects a canonical partition, `market_state` takes the worst of M1 and M2 (failed over stale over unknown over current) and `market_state_latest` is inactive as `cube_provisional_not_selected`, so a canonical-reader cube count mismatch no longer shows as a failed provisional node beside a current canonical one. Provisional and unknown selections are unchanged.
+
 # v3.34.0
 
 - Retain absolute book updates beyond the initial snapshot and extend the proven price region only across observed BTCUSDT ticks; avoid connecting when durable seed capacity is exhausted.

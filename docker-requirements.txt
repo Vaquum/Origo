@@ -3,7 +3,7 @@ dagit==1.13.21
 clickhouse-driver
 clickhouse-cityhash
 clickhouse_connect
-polars
+polars<2
 pyarrow
 huggingface_hub
 requests

@@ -1135,5 +1135,402 @@
         "tests/origo_source_native/test_book_history.py::test_original_spot_history_rejects_unproven_depth"
       ]
     }
-  ]
+  ],
+  "consolidations": {
+    "tests/origo_source_native/test_book_law.py::test_book_reconciliation_uses_native_hourly_status[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Book reconciliation uses native hourly partitions and requests the verified hour."
+    },
+    "tests/origo_source_native/test_book_law.py::test_book_reconciliation_uses_native_hourly_status[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Book reconciliation uses native hourly partitions and requests the verified hour."
+    },
+    "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Declared anchor upgrade preserves an existing generation; undeclared anchor changes fail."
+    },
+    "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Declared anchor upgrade preserves an existing generation; undeclared anchor changes fail."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_deadline_and_history_are_independent_of_reader_liveness[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Missing canonical hour remains FAIL independently of reader liveness; exact deadline and following hour survive."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_deadline_and_history_are_independent_of_reader_liveness[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Missing canonical hour remains FAIL independently of reader liveness; exact deadline and following hour survive."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_uses_exact_source_component_proofs[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Removing the real depth200_1m proof changes both verified reader and canonical law from PASS to UNKNOWN."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_uses_exact_source_component_proofs[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Removing the real depth200_1m proof changes both verified reader and canonical law from PASS to UNKNOWN."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_schedule_has_an_activation_window_before_c1_deadline[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Hourly candidate and five-minute activation window retain NOT_DUE before deadline, FAIL at deadline and PASS after build."
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_schedule_has_an_activation_window_before_c1_deadline[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Hourly candidate and five-minute activation window retain NOT_DUE before deadline, FAIL at deadline and PASS after build."
+    },
+    "tests/origo_source_native/test_law_page.py::test_thirty_day_replay_cache_fits_page_memory_budget": {
+      "retained": [
+        "tests/origo_source_native/test_law_page.py::test_overview_production_shape_stays_within_resource_budgets"
+      ],
+      "contract": "One fresh-process replay retains 43,201 samples, 2,505,600 events, exact index bytes, peak RSS <256MiB, current read <1s and no limiting, plus production overview budgets."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_perp_agg_files": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_canonical_day_retires_failed_provisional_intervals_inside_it": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_canonical_day_retires_failed_provisional_intervals_inside_it[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: canonical day retires failed provisional intervals inside it, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_file_failure_fails_job_and_retry_keeps_verified_generation": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_huggingface_shadow_renders_locally_without_uploading": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_huggingface_upload_records_every_rendered_series": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_mount_renders_post_cutoff_month_and_sweeps_only_own_staging": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_mount_renders_post_cutoff_month_and_sweeps_only_own_staging[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: mount renders post cutoff month and sweeps only own staging, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_native_backfill_failure_releases_publication[CANCELED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_aggtrades-CANCELED]"
+      ],
+      "contract": "binance_perp_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_native_backfill_failure_releases_publication[COMPLETED_FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_aggtrades-COMPLETED_FAILED]"
+      ],
+      "contract": "binance_perp_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_native_backfill_failure_releases_publication[FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_aggtrades-FAILED]"
+      ],
+      "contract": "binance_perp_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_native_job_backfill_waits_for_own_selected_generations": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_job_backfill_waits_for_own_selected_generations[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: native job backfill waits for own selected generations, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_new_verified_data_automatically_requests_every_canonical_only_consumer": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_publication_follows_canonical_state_across_provisional_refreshes": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_publication_follows_canonical_state_across_provisional_refreshes[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: publication follows canonical state across provisional refreshes, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_perp_agg_unavailable_day_requests_publication_and_preserves_completed_day": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_unavailable_day_requests_publication_and_preserves_completed_day[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: unavailable day requests publication and preserves completed day, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_agg_backfill_job.py::test_source_inventory_is_explicit": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_source_inventory_is_explicit[binance_perp_aggtrades]"
+      ],
+      "contract": "binance_perp_aggtrades: source inventory is explicit, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_perp_files": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_canonical_day_retires_failed_provisional_intervals_inside_it": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_canonical_day_retires_failed_provisional_intervals_inside_it[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: canonical day retires failed provisional intervals inside it, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_file_failure_fails_job_and_retry_keeps_verified_generation": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_huggingface_upload_records_every_rendered_series": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_mount_renders_post_cutoff_month_and_sweeps_only_own_staging": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_mount_renders_post_cutoff_month_and_sweeps_only_own_staging[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: mount renders post cutoff month and sweeps only own staging, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_native_backfill_failure_releases_publication[CANCELED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_trades-CANCELED]"
+      ],
+      "contract": "binance_perp_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_native_backfill_failure_releases_publication[COMPLETED_FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_trades-COMPLETED_FAILED]"
+      ],
+      "contract": "binance_perp_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_native_backfill_failure_releases_publication[FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_perp_trades-FAILED]"
+      ],
+      "contract": "binance_perp_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_native_job_backfill_waits_for_own_selected_generations": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_job_backfill_waits_for_own_selected_generations[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: native job backfill waits for own selected generations, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_new_verified_data_automatically_requests_every_canonical_only_consumer": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_publication_follows_canonical_state_across_provisional_refreshes": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_publication_follows_canonical_state_across_provisional_refreshes[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: publication follows canonical state across provisional refreshes, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_perp_unavailable_day_requests_publication_and_preserves_completed_day": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_unavailable_day_requests_publication_and_preserves_completed_day[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: unavailable day requests publication and preserves completed day, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_perp_backfill_job.py::test_source_inventory_is_explicit": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_source_inventory_is_explicit[binance_perp_trades]"
+      ],
+      "contract": "binance_perp_trades: source inventory is explicit, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_canonical_day_retires_failed_provisional_intervals_inside_it": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_canonical_day_retires_failed_provisional_intervals_inside_it[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: canonical day retires failed provisional intervals inside it, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_file_failure_fails_job_and_retry_keeps_verified_generation": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_native_backfill_failure_releases_publication[CANCELED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_trades-CANCELED]"
+      ],
+      "contract": "binance_spot_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_native_backfill_failure_releases_publication[COMPLETED_FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_trades-COMPLETED_FAILED]"
+      ],
+      "contract": "binance_spot_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_native_backfill_failure_releases_publication[FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_trades-FAILED]"
+      ],
+      "contract": "binance_spot_trades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_native_job_backfill_waits_for_own_selected_generations": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_job_backfill_waits_for_own_selected_generations[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: native job backfill waits for own selected generations, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_new_verified_data_automatically_requests_every_canonical_only_consumer": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_publication_follows_canonical_state_across_provisional_refreshes": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_publication_follows_canonical_state_across_provisional_refreshes[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: publication follows canonical state across provisional refreshes, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_source_inventory_is_explicit": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_source_inventory_is_explicit[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: source inventory is explicit, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_source_backfill_job.py::test_unavailable_day_requests_publication_and_preserves_completed_day": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_unavailable_day_requests_publication_and_preserves_completed_day[binance_spot_trades]"
+      ],
+      "contract": "binance_spot_trades: unavailable day requests publication and preserves completed day, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_spot_agg_files": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_source_inventory_is_explicit": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_source_inventory_is_explicit[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: source inventory is explicit, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_canonical_day_retires_failed_provisional_intervals_inside_it": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_canonical_day_retires_failed_provisional_intervals_inside_it[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: canonical day retires failed provisional intervals inside it, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_file_failure_fails_job_and_retry_keeps_verified_generation": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_huggingface_upload_records_every_rendered_series": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_mount_renders_post_cutoff_month_and_sweeps_only_own_staging": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_mount_renders_post_cutoff_month_and_sweeps_only_own_staging[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: mount renders post cutoff month and sweeps only own staging, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_native_backfill_failure_releases_publication[CANCELED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_aggtrades-CANCELED]"
+      ],
+      "contract": "binance_spot_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_native_backfill_failure_releases_publication[COMPLETED_FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_aggtrades-COMPLETED_FAILED]"
+      ],
+      "contract": "binance_spot_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_native_backfill_failure_releases_publication[FAILED]": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_backfill_failure_releases_publication[binance_spot_aggtrades-FAILED]"
+      ],
+      "contract": "binance_spot_aggtrades: native backfill failure releases publication, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_native_job_backfill_waits_for_own_selected_generations": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_native_job_backfill_waits_for_own_selected_generations[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: native job backfill waits for own selected generations, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_new_verified_data_automatically_requests_every_canonical_only_consumer": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_one_job_prepares_verifies_and_publishes_all_files[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: Real day publication, interrupted file retry without generation/byte changes, instigator restoration, canonical consumer refresh and live/shadow uploads share one verified preparation."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_publication_follows_canonical_state_across_provisional_refreshes": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_publication_follows_canonical_state_across_provisional_refreshes[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: publication follows canonical state across provisional refreshes, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_spot_agg_backfill_job.py::test_spot_agg_unavailable_day_requests_publication_and_preserves_completed_day": {
+      "retained": [
+        "tests/origo_source_native/test_backfill_job.py::test_unavailable_day_requests_publication_and_preserves_completed_day[binance_spot_aggtrades]"
+      ],
+      "contract": "binance_spot_aggtrades: unavailable day requests publication and preserves completed day, with the original genuine source archive and assertions."
+    },
+    "tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+      ],
+      "contract": "Provider unavailability stays non-failed, ages to UNKNOWN, and activation has its native five-minute window; the same full-hour build satisfies readiness and law checks."
+    },
+    "tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+      ],
+      "contract": "Provider unavailability stays non-failed, ages to UNKNOWN, and activation has its native five-minute window; the same full-hour build satisfies readiness and law checks."
+    }
+  },
+  "baseline_additions": {
+    "sha": "4288d0a764eb526869cb96dbb6ddd23779927242",
+    "nodes": [
+      "tests/origo_source_native/test_deploy_verification.py::test_deploy_fails_on_a_crash_looping_unhealthy_or_missing_service",
+      "tests/origo_source_native/test_deploy_verification.py::test_verifier_needs_the_launched_run_and_a_fresh_receipt_from_every_enabled_source",
+      "tests/origo_source_native/test_deploy_verification.py::test_verifier_process_exits_nonzero_and_names_each_unmet_condition",
+      "tests/origo_source_native/test_law.py::test_canonical_reader_cube_damage_fails_the_canonical_market_state_node",
+      "tests/origo_source_native/test_law.py::test_cube_observations_route_m1_to_the_reader_selected_projection",
+      "tests/origo_source_native/test_law_page.py::test_canonical_reader_cube_damage_renders_on_the_canonical_projection_node"
+    ]
+  }
 }

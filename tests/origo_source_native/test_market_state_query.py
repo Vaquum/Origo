@@ -890,6 +890,9 @@ def statement_hashes(result_id: str) -> list[str]:
 def test_measures_match_raw_trades_at_independent_resolutions(
     cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n: int, m: int
 ) -> None:
+    # Compare unchanged measure bits with a fixed reduction order. The raw-trade
+    # reference and declared-settings cases retain the production four-thread path.
+    monkeypatch.setattr(market_state, 'QUERY_SETTINGS', {**QUERY_SETTINGS, 'max_threads': 1})
     runtime = detailed(cube, DAY1, minutes=MINUTES)
     tR, pR = 225 * 2**n // 4 if n >= 2 else [56.25, 112.5][n], 125 * 2**m
     result = run(runtime, tmp_path, tR=tR, pR=pR, measures=list(MEASURES))

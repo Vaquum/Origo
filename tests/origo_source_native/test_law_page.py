@@ -13,6 +13,7 @@ import urllib.request
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -21,19 +22,27 @@ import pytest
 from playwright.sync_api import Page, Route, sync_playwright
 
 from origo import law
-from origo.law_catalog import build_catalog, gate_evaluation
+from origo.law_catalog import LawCatalog, build_catalog, gate_evaluation
 from origo.workers import law_page as page
 
 from .test_law import LawCase
 from .test_law import canonical_case as canonical_case
-from .test_law import law_case as law_case
 from .test_law import predicate as law_predicate
-from .test_law import real_law_report as real_law_report
 from .test_monitor import _monitor, _Recorder
 from .test_monitor import recorder as recorder
 
 SHA = 'ca888afed9bc1681ceebe4c9cfd0502538e2a2d2'
 BASELINE = Path(__file__).parents[1] / 'fixtures/law/overview-baseline-58b45de.json'
+
+
+@cache
+def _catalog_template(deployed_sha: str) -> LawCatalog:
+    return build_catalog(deployed_sha)
+
+
+def _prepared_catalog(deployed_sha: str) -> LawCatalog:
+    # Registry parsing is preparation; each protocol case owns its mutable copy.
+    return copy.deepcopy(_catalog_template(deployed_sha))
 
 
 def _write(path: Path, records: list[page.Document]) -> None:
@@ -49,7 +58,7 @@ def _write(path: Path, records: list[page.Document]) -> None:
 
 
 def _tape_from(tmp_path: Path, source_report: law.LawReport) -> tuple[Path, page.Document, datetime]:
-    catalog = build_catalog(SHA)
+    catalog = _prepared_catalog(SHA)
     report = copy.deepcopy(source_report)
     report['catalog_version'], report['deployed_sha'] = catalog['version'], SHA
     for feed in report['feeds']:
@@ -78,6 +87,35 @@ def _tape_from(tmp_path: Path, source_report: law.LawReport) -> tuple[Path, page
     _write(root / f'samples-{day}.jsonl', [document])
     _write(root / f'gate-events-{day}.jsonl', page._objects(document['gates']))
     return root, document, datetime.fromisoformat(report['evaluation_end']) + timedelta(seconds=1)
+
+
+@pytest.fixture(scope='session')
+def page_law_report(
+    clickhouse_settings: dict[str, str], tmp_path_factory: pytest.TempPathFactory,
+) -> law.LawReport:
+    from .conftest import _drop_origo_database
+    from .test_law import START, _case
+
+    # UI protocol cases share one genuine evaluator output, never mutable storage.
+    _drop_origo_database(clickhouse_settings)
+    with pytest.MonkeyPatch.context() as patch:
+        for key, value in clickhouse_settings.items():
+            patch.setenv(key, value)
+        root = tmp_path_factory.mktemp('page-law-capture')
+        patch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(root / 'source-files'))
+        case = _case(root, START)
+        try:
+            case.minute(0)
+            report = case.report(START + timedelta(minutes=1, seconds=5))
+        finally:
+            case.client.disconnect()
+            _drop_origo_database(clickhouse_settings)
+    return report
+
+
+@pytest.fixture()
+def real_law_report(page_law_report: law.LawReport) -> law.LawReport:
+    return copy.deepcopy(page_law_report)
 
 
 @pytest.fixture()
@@ -290,6 +328,7 @@ def test_gate_history_api_is_catalog_only_paginated_and_gap_honest(tape: tuple[P
     assert len({str(event['evidence_id']) for event in received}) == 1001
 
 
+@pytest.mark.resource
 def test_browser_sources_gates_recovery_and_accessible_drilldown(
     serving: tuple[str, page.TapeCache, page.Document, datetime],
 ) -> None:
@@ -357,6 +396,7 @@ def test_browser_sources_gates_recovery_and_accessible_drilldown(
         browser.close()
 
 
+@pytest.mark.resource
 def test_slow_headers_have_absolute_deadline_and_bounded_capacity(
     serving: tuple[str, page.TapeCache, page.Document, datetime], health_server: int,
 ) -> None:
@@ -469,15 +509,6 @@ print(json.dumps({'rss_mib': rss, 'samples': len(cache.samples), 'events': cache
 """
     measured = subprocess.run([sys.executable, '-c', script, str(root)], check=True, capture_output=True, text=True)
     return page._decode(measured.stdout.encode())
-
-
-def test_thirty_day_replay_cache_fits_page_memory_budget(tape: tuple[Path, page.Document, datetime]) -> None:
-    result = _measure_memory(tape[0])
-    assert result['samples'] == 43201 and result['events'] == 2_505_600
-    assert result['index_bytes'] == 2_505_600 * 16
-    assert float(str(result['rss_mib'])) < 256 and float(str(result['current_seconds'])) < 1
-    assert result['limited'] is False
-    Path('/tmp/origo-law-cache-memory.json').write_text(json.dumps(result, indent=2))
 
 
 def test_browser_recovery_pagination_and_history_lru(
@@ -645,6 +676,7 @@ def test_current_wire_is_small_and_complete_overview_is_separate(
     assert cache.current(now)['catalog']
 
 
+@pytest.mark.resource
 def test_slow_response_and_disconnected_clients_leave_service_available(
     tape: tuple[Path, page.Document, datetime], capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -889,6 +921,7 @@ def test_corrupt_history_records_remain_visibly_incomplete(
     assert result['events'] == ([] if corruption == 'indexed_record' else [original])
 
 
+@pytest.mark.resource
 def test_paginated_history_retains_each_original_catalog_definition(
     serving: tuple[str, page.TapeCache, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -960,7 +993,7 @@ def test_monitor_verdict_history_uses_only_committed_valid_samples(
     from origo.workers.monitor import law_findings
 
     root, report, now = tape
-    catalog = build_catalog(SHA)
+    catalog = _prepared_catalog(SHA)
     descriptor = next(gate for gate in catalog['gates'] if gate['id'] == page.OWN_GATE)
     findings = law_findings(cast(law.LawReport, report))
     assert findings  # The captured fixture truthfully has incomplete source coverage.
@@ -1002,7 +1035,7 @@ def test_empty_not_evaluated_identity_keeps_current_report_available(
     tape: tuple[Path, page.Document, datetime],
 ) -> None:
     root, report, now = tape
-    catalog = build_catalog(SHA)
+    catalog = _prepared_catalog(SHA)
     descriptor = next(gate for gate in catalog['gates'] if gate['id'].startswith('source.component_integrity.'))
     placeholder = gate_evaluation(descriptor, evidence_id='', evaluated_at=str(report['evaluation_start']),
         outcome='NOT_EVALUATED', evidence={}, reason='historical_definition_unavailable', catalog_version=catalog['version'])
@@ -1016,6 +1049,7 @@ def test_empty_not_evaluated_identity_keeps_current_report_available(
 
 
 @pytest.mark.parametrize('budget', ['bytes', 'time'])
+@pytest.mark.resource
 def test_definition_lookup_budget_is_visible_request_local_and_retryable(
     tape: tuple[Path, page.Document, datetime], monkeypatch: pytest.MonkeyPatch, budget: str,
 ) -> None:
@@ -1026,7 +1060,7 @@ def test_definition_lookup_budget_is_visible_request_local_and_retryable(
     for index in range(14):
         # Genuine registry definitions and captured event evidence; replay only deployment/time envelopes.
         sha = f'{index+1:040x}'
-        catalog = build_catalog(sha)
+        catalog = _prepared_catalog(sha)
         versions.append(catalog['version'])
         (root / f'catalog-{catalog["version"]}.json').write_text(json.dumps(catalog))
         records.append({**original, 'deployed_sha': sha, 'catalog_version': catalog['version'],
@@ -1078,7 +1112,7 @@ def test_definition_lookup_budget_is_visible_request_local_and_retryable(
 def production_tape(tmp_path: Path) -> tuple[Path, page.Document, datetime]:
     baseline = page._decode(BASELINE.read_bytes())
     report = copy.deepcopy(page._object(baseline['report']))
-    catalog = build_catalog(str(baseline['deployed_sha']))
+    catalog = _prepared_catalog(str(baseline['deployed_sha']))
     report['catalog_version'] = catalog['version']
     root = tmp_path / 'captured-law'
     root.mkdir()
@@ -1135,7 +1169,7 @@ def test_served_page_layout_contract() -> None:
 
 def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     baseline = page._decode(BASELINE.read_bytes())
-    catalog = build_catalog(str(baseline['deployed_sha']))
+    catalog = _prepared_catalog(str(baseline['deployed_sha']))
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
     assert len(current) == 23
@@ -1175,6 +1209,7 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     assert len(page.consecutive_window(vectors, end.isoformat())) == 4321
 
 
+@pytest.mark.resource
 def test_overview_production_shape_stays_within_resource_budgets(
     production_tape: tuple[Path, page.Document, datetime], operational_report: page.Document,
 ) -> None:
@@ -1505,7 +1540,7 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
 
 def test_overview_unknowns_override_stale_or_mismatched_numbers(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
     url, _, _, _ = production_serving
-    stages = sum(len(source['projections']) for source in build_catalog(SHA)['sources'])
+    stages = sum(len(source['projections']) for source in _prepared_catalog(SHA)['sources'])
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()
@@ -1536,6 +1571,7 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         browser.close()
 
 
+@pytest.mark.resource
 def test_history_concurrency_deadlines_and_current_refresh(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
     url, _, _, _ = production_serving
     with sync_playwright() as playwright:

@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import shutil
 from typing import cast
 from uuid import uuid4
 
@@ -27,7 +28,10 @@ from .test_book_vendor import (
     REAL_HOUR,
     original_vendor_archive as original_vendor_archive,
     original_vendor_revision as original_vendor_revision,
+    original_vendor_preparation as original_vendor_preparation,
+    original_vendor_spool as original_vendor_spool,
     original_vendor_following_archive as original_vendor_following_archive,
+    vendor_session_root as vendor_session_root,
 )
 
 
@@ -74,13 +78,32 @@ def _predicate(report: law.LawReport, source: str, key: law.LawPredicate) -> law
 
 def test_canary_books_have_the_same_reader_law_contract(
     authoritative_book_runtime: SourceRuntime,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = authoritative_book_runtime
-    now = hour_partition(REAL_HOUR).end + timedelta(seconds=30)
+    partition = hour_partition(REAL_HOUR)
+    now = partition.end + timedelta(seconds=30)
     empty = law.evaluate(runtime.store.client, 'origo', now)
     assert _predicate(empty, runtime.spec.key, 'R1')['reason'] == 'reader_empty'
     assert _predicate(empty, runtime.spec.key, 'C1')['status'] == 'NOT_DUE'
-    runtime.build(REAL_HOUR)
+    overdue = law.evaluate(runtime.store.client, 'origo', partition.end + timedelta(hours=1, minutes=21))
+    c1 = _predicate(overdue, runtime.spec.key, 'C1')
+    assert c1['status'] == 'FAIL' and c1['reason'] == 'canonical_hour_missing'
+    assert c1['evidence']['hour'] == REAL_HOUR
+    assert c1['evidence']['deadline'] == '2026-10-04T11:20:00+00:00'
+    assert c1['evidence']['following_hour'] == '2026-10-04T10Z'
+    assert _predicate(overdue, runtime.spec.key, 'C2')['status'] == 'FAIL'
+    launch = partition.end + timedelta(hours=1, minutes=int(runtime.spec.orchestration.canonical_cron.split()[0]))
+    assert runtime.spec.canonical.candidate(launch) == partition
+    pending = _predicate(law.evaluate(runtime.store.client, 'origo', launch), runtime.spec.key, 'C1')
+    assert pending['status'] == 'NOT_DUE'
+    deadline = datetime.fromisoformat(str(pending['evidence']['deadline']))
+    assert deadline - launch == timedelta(minutes=5)
+    processing = launch + timedelta(minutes=1)
+    assert law._c1([], runtime.spec.key, processing)['status'] == 'NOT_DUE'
+    assert law._c1([], runtime.spec.key, deadline)['status'] == 'FAIL'
+    with monkeypatch.context() as patch:
+        _assert_provider_delay_and_activation_use_native_evidence(runtime, patch)
     report = law.evaluate(runtime.store.client, 'origo', now)
     assert runtime.spec.rollout_stage.value == 'CANARY'
     assert {
@@ -108,35 +131,29 @@ def test_canary_books_have_the_same_reader_law_contract(
         if not p['id'].endswith('_latest')
     )
     assert all(p['status'] == 'UNKNOWN' for p in projections if p['id'].endswith('_latest'))
+    assert _predicate(law.evaluate(runtime.store.client, 'origo', processing), runtime.spec.key, 'C1')['status'] == 'PASS'
+    _assert_book_reconciliation_uses_native_hourly_status(runtime, monkeypatch)
+    _assert_hourly_authority_uses_exact_source_component_proofs(runtime)
+    _assert_declared_history_migration_preserves_existing_generation(runtime)
 
 
-def test_hourly_authority_deadline_and_history_are_independent_of_reader_liveness(
+def _assert_hourly_authority_uses_exact_source_component_proofs(
     authoritative_book_runtime: SourceRuntime,
 ) -> None:
     runtime = authoritative_book_runtime
-    now = hour_partition(REAL_HOUR).end + timedelta(hours=1, minutes=21)
-    report = law.evaluate(runtime.store.client, 'origo', now)
-    c1 = _predicate(report, runtime.spec.key, 'C1')
-    assert c1['status'] == 'FAIL' and c1['reason'] == 'canonical_hour_missing'
-    assert c1['evidence']['hour'] == REAL_HOUR
-    assert c1['evidence']['deadline'] == '2026-10-04T11:20:00+00:00'
-    assert c1['evidence']['following_hour'] == '2026-10-04T10Z'
-    assert _predicate(report, runtime.spec.key, 'C2')['status'] == 'FAIL'
-
-
-def test_hourly_authority_uses_exact_source_component_proofs(
-    authoritative_book_runtime: SourceRuntime,
-) -> None:
-    runtime = authoritative_book_runtime
-    record = runtime.build(REAL_HOUR)
+    record = runtime.store.record(hour_partition(REAL_HOUR))
+    assert record is not None
+    now = record.partition.end + timedelta(hours=1, seconds=30)
+    before = law.evaluate(runtime.store.client, 'origo', now)
+    reader_now = record.partition.end + timedelta(seconds=30)
+    assert _predicate(law.evaluate(runtime.store.client, 'origo', reader_now), runtime.spec.key, 'R1')['status'] == 'PASS'
+    assert _predicate(before, runtime.spec.key, 'C1')['status'] == 'PASS'
     runtime.store.execute(
         "ALTER TABLE origo.source_component_log DELETE WHERE source_key=%(source)s AND component='depth200_1m' AND build_id=%(build)s SETTINGS mutations_sync=1",
         {'source': runtime.spec.key, 'build': record.build_id},
     )
-    report = law.evaluate(
-        runtime.store.client, 'origo', record.partition.end + timedelta(hours=1, seconds=30)
-    )
-    assert _predicate(report, runtime.spec.key, 'R1')['status'] == 'UNKNOWN'
+    report = law.evaluate(runtime.store.client, 'origo', now)
+    assert _predicate(law.evaluate(runtime.store.client, 'origo', reader_now), runtime.spec.key, 'R1')['status'] == 'UNKNOWN'
     assert _predicate(report, runtime.spec.key, 'C1')['status'] == 'UNKNOWN'
 
 
@@ -181,29 +198,6 @@ def test_hourly_audit_preserves_obsolete_requests_and_retries_hours(
         'SELECT partition_key FROM origo.source_discovery_log ORDER BY partition_key'
     ) == [(value,) for value in sorted((key, REAL_HOUR))]
     assert runtime.store.records(canonical_only=True) == ()
-
-
-def test_hourly_schedule_has_an_activation_window_before_c1_deadline(
-    authoritative_book_runtime: SourceRuntime,
-) -> None:
-    runtime = authoritative_book_runtime
-    partition = hour_partition(REAL_HOUR)
-    launch = partition.end + timedelta(
-        hours=1,
-        minutes=int(runtime.spec.orchestration.canonical_cron.split()[0])
-    )
-    assert runtime.spec.canonical.candidate(launch) == partition
-    pending = law.evaluate(runtime.store.client, 'origo', launch)
-    c1 = _predicate(pending, runtime.spec.key, 'C1')
-    assert c1['status'] == 'NOT_DUE'
-    deadline = datetime.fromisoformat(str(c1['evidence']['deadline']))
-    assert deadline - launch == timedelta(minutes=5)
-    processing = launch + timedelta(minutes=1)
-    assert law._c1([], runtime.spec.key, processing)['status'] == 'NOT_DUE'
-    assert law._c1([], runtime.spec.key, deadline)['status'] == 'FAIL'
-    runtime.build(REAL_HOUR)
-    ready = law.evaluate(runtime.store.client, 'origo', processing)
-    assert _predicate(ready, runtime.spec.key, 'C1')['status'] == 'PASS'
 
 
 def test_native_hourly_backfill_orders_completion_after_canonical_build() -> None:
@@ -257,6 +251,7 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
     authoritative_book_runtime: SourceRuntime,
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_spool: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -264,13 +259,12 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
 
     runtime = authoritative_book_runtime
     market, body, _ = original_vendor_archive
-    archive = tmp_path / 'original.parquet'
-    archive.write_bytes(body)
     spool = tmp_path / 'spool'
     partition = hour_partition(REAL_HOUR)
     following = tmp_path / 'following.parquet'
     following.write_bytes(original_vendor_following_archive[1])
-    replay_hour(archive, market, partition, spool, following=(following,))
+    # Share the verified immutable replay; mutable test storage stays private.
+    shutil.copytree(original_vendor_spool, spool)
     monkeypatch.setenv('ORIGO_BOOK_SPOOL_ROOT', str(spool))
     minute = runtime.build(partition.start.strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
     prefix = 'origo.' + runtime.spec.names.prefix
@@ -315,7 +309,7 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
     ) == [(600,)]
 
 
-def test_provider_delay_and_activation_use_native_evidence(
+def _assert_provider_delay_and_activation_use_native_evidence(
     authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from origo.sources import lifecycle
@@ -424,11 +418,12 @@ def test_pending_historical_failures_do_not_starve_later_valid_hour(
     ) == [(key, 'FAILED') for key in sorted(keys[:-1])]
 
 
-def test_declared_history_migration_preserves_existing_generation(
+def _assert_declared_history_migration_preserves_existing_generation(
     authoritative_book_runtime: SourceRuntime,
 ) -> None:
     runtime = authoritative_book_runtime
-    record = runtime.build(REAL_HOUR)
+    record = runtime.store.record(hour_partition(REAL_HOUR))
+    assert record is not None
     previous = runtime.spec.partitions.previous_starts[0]
     runtime.store.execute(
         "ALTER TABLE origo.source_anchor_log UPDATE anchor=%(anchor)s WHERE source_key=%(source)s SETTINGS mutations_sync=1",
@@ -457,14 +452,15 @@ def test_declared_history_migration_preserves_existing_generation(
     assert runtime.store.record(record.partition) == record
 
 
-def test_book_reconciliation_uses_native_hourly_status(
+def _assert_book_reconciliation_uses_native_hourly_status(
     authoritative_book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dagster import DagsterInstance, Definitions, HourlyPartitionsDefinition, build_sensor_context
     from origo.sources.bundle import build_source_bundle
 
     runtime = authoritative_book_runtime
-    record = runtime.build(REAL_HOUR)
+    record = runtime.store.record(hour_partition(REAL_HOUR))
+    assert record is not None
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
     bundle = build_source_bundle(runtime.spec)
     definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors, schedules=bundle.schedules)

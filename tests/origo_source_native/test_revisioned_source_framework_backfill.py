@@ -454,7 +454,7 @@ def test_capacity_probe_and_limits_gate_historical_work(
 
     monkeypatch.setattr(binance_daily, 'get_response', no_provider)
     with monkeypatch.context() as patch:
-        patch.setattr(capacity._Volume, 'sample', lambda self: (10**12, 10**11, 10**8, 9 * 10**7))
+        patch.setattr(capacity._Volume, 'sample', lambda self: (10**12, 100_000_000_000 - 1, 10**8, 9 * 10**7))
         assert not _run(backfill_env).success
     assert not attempted
     monkeypatch.setattr(binance_daily, 'get_response', archive_response)

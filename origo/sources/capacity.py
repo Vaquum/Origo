@@ -12,8 +12,7 @@ from dagster import get_dagster_logger
 from .contracts import SourceError
 from .lifecycle import SourceRuntime
 
-CAPACITY_TOTAL_RESERVE_TENTHS = 3
-CAPACITY_WORKING_SET_FACTOR = 2
+CAPACITY_RESERVE_BYTES = 100_000_000_000
 CAPACITY_FREE_INODE_DENOMINATOR = 10
 
 
@@ -100,10 +99,7 @@ class CapacityMonitor:
                     'CAPACITY_MEASUREMENT_REQUIRED',
                     'Launch one representative day with capacity_probe enabled before a range backfill.',
                 )
-            reserve = max(
-                (total * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10,
-                measured * CAPACITY_WORKING_SET_FACTOR * runtime.spec.orchestration.canonical_concurrency,
-            )
+            reserve = CAPACITY_RESERVE_BYTES
             if total <= 0 or free < reserve or inodes <= 0 or available * CAPACITY_FREE_INODE_DENOMINATOR < inodes:
                 raise SourceError(
                     'CAPACITY_RESERVE_BREACHED', f'Storage reserve breached on {volume.path}.'

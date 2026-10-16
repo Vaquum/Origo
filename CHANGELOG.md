@@ -1,3 +1,7 @@
+# v3.34.5
+
+- Set the source free-space reserve to a fixed 100 GB instead of 30% of filesystem capacity or a multiple of the measured working set; query admission and the gate catalog use the same reserve.
+
 # v3.34.4
 
 - Consolidate repeated source acceptance preparation, retain explicit failure contracts, and run resource qualification separately from parallel ordinary tests.

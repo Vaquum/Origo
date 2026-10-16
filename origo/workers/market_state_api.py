@@ -35,7 +35,7 @@ from typing import Final, Literal, cast
 from uuid import uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.query.market_state import Request, RequestError, iso, parse_request, statement_settings, write_result
+from origo.query.market_state import Request, RequestError, iso, parse_request, write_result
 from origo.query.market_state_rallies import (
     RALLY_DEADLINE_SECONDS,
     RallyDiscoveryRequest,
@@ -55,10 +55,9 @@ from origo.query.market_state_results import (
     parse_result_path,
 )
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-from origo.sources.capacity import CAPACITY_TOTAL_RESERVE_TENTHS, CAPACITY_WORKING_SET_FACTOR
+from origo.sources.capacity import CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import Client, SourceError, failure_code
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
 from origo.workers.report import Reporter
@@ -233,8 +232,8 @@ class MarketStateApi:
         self, runtime: SourceRuntime, request: RallyDiscoveryRequest, result_id: str, deadline: float,
     ) -> tuple[dict[str, object], tuple[Path, ...]]:
         started = time.monotonic()
-        measured = rally_prelude(runtime, result_id=result_id, deadline=deadline)
-        floor = _floor_from_measured(measured, self.store.disk(self.store.root).total)
+        rally_prelude(runtime, result_id=result_id, deadline=deadline)
+        floor = source_floor()
         _rally_remaining(deadline)
         self.store.admit(result_id, 0, floor)
         try:
@@ -396,7 +395,7 @@ class MarketStateApi:
         """Admit, write and publish one result; any failure discards the unreturned result."""
         started = time.monotonic()
         runtime.require_shared_mount()
-        floor = source_floor(runtime.store, self.store.disk(self.store.root).total, statement_settings(result_id))
+        floor = source_floor()
         self.store.admit(result_id, 0, floor)
         try:
             staging = self.store.register(result_id)
@@ -452,27 +451,9 @@ class MarketStateApi:
 
 
 
-def source_floor(store: SourceStore, total_bytes: int, settings: Mapping[str, object]) -> int:
-    """The free space admission keeps: the largest source capacity reserve plus a margin.
-
-    Each source's reserve is ``capacity.check``'s, read-only: the larger of 30% of the
-    filesystem and twice its largest measured working set times its canonical concurrency.
-    """
-    rows = store.execute(
-        f'SELECT source_key, max(working_set_bytes) FROM {store.table("source_capacity_log")} GROUP BY source_key',
-        None,
-        settings,
-    )
-    measured = {str(row[0]): int(str(row[1])) for row in rows}
-    return _floor_from_measured(measured, total_bytes)
-
-
-def _floor_from_measured(measured: Mapping[str, int], total_bytes: int) -> int:
-    reserve = (total_bytes * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10
-    for spec in SOURCE_REGISTRY:
-        working = measured.get(spec.key, 0) * CAPACITY_WORKING_SET_FACTOR * spec.orchestration.canonical_concurrency
-        reserve = max(reserve, working)
-    return reserve + FLOOR_MARGIN_BYTES
+def source_floor() -> int:
+    """Keep the source's fixed 100 GB reserve plus the query margin."""
+    return CAPACITY_RESERVE_BYTES + FLOOR_MARGIN_BYTES
 
 
 class ApiServer(ThreadingMixIn, HTTPServer):

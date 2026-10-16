@@ -341,15 +341,13 @@ def test_admission_keeps_the_source_reserve(
 ) -> None:
     runtime = built(cube, DAY1)
     total = 1000 * GIB
-    # Without measurements the 30% term governs; a source whose measured working set x 2 x
-    # canonical concurrency exceeds 30% raises the floor above it.
-    assert source_floor(runtime.store, total, QUERY_SETTINGS) == (total * 3 + 9) // 10 + FLOOR_MARGIN_BYTES
+    assert source_floor() == 100_000_000_000 + FLOOR_MARGIN_BYTES
     runtime.store.execute(
         'INSERT INTO origo.source_capacity_log VALUES',
         [('binance_spot_trades', 'volume', 30 * GIB, 'capacity-probe', 1, datetime.now(UTC))],
     )
-    floor = source_floor(runtime.store, total, QUERY_SETTINGS)
-    assert floor == 30 * GIB * 2 * 8 + FLOOR_MARGIN_BYTES
+    floor = source_floor()
+    assert floor == 100_000_000_000 + FLOOR_MARGIN_BYTES
     free = {'bytes': floor + QUERY_RESERVATION_BYTES}
 
     def disk(path: Path) -> DiskSample:

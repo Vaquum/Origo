@@ -31,7 +31,7 @@ from uuid import UUID
 import numpy as np
 from numpy.typing import NDArray
 
-from origo.sources.capacity import CAPACITY_TOTAL_RESERVE_TENTHS, CAPACITY_WORKING_SET_FACTOR
+from origo.sources.capacity import CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.depth import DEPTH_SPECS
@@ -1667,15 +1667,7 @@ def _validate_resources(
             )
             if stored + reserved > LIMITS['store_bytes']:
                 failures.append('Global result storage/reservation budget exceeded.')
-            capacity = max(
-                (_integer(snapshot['total_bytes']) * CAPACITY_TOTAL_RESERVE_TENTHS + 9) // 10,
-                *(
-                    measured.get(spec.key, 0)
-                    * CAPACITY_WORKING_SET_FACTOR
-                    * spec.orchestration.canonical_concurrency
-                    for spec in SOURCE_REGISTRY
-                ),
-            )
+            capacity = CAPACITY_RESERVE_BYTES
             if _integer(snapshot['staging_count']) > 2:
                 failures.append('More than two heavy query reservations observed.')
             if _integer(snapshot['free_bytes']) - _integer(

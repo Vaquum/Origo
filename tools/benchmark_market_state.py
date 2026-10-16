@@ -330,9 +330,9 @@ def _statements(sample: Mapping[str, object]) -> set[str]:
     """
     rectangle = _mapping(sample['rectangle'])
     if _utc(str(rectangle['t1'])) >= _utc(str(rectangle['t2'])):
-        return {'floor', 'pin'}
+        return {'pin'}
     request = _mapping(sample['request'])
-    expected = {'floor', 'pin', 'validate'}
+    expected = {'pin', 'validate'}
     if request.get('p1') is None or request.get('p2') is None:
         expected.add('extent')
     p1, p2 = rectangle['p1'], rectangle['p2']

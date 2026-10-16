@@ -405,13 +405,9 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ),
             (
                 'byte_reserve',
-                'Free bytes must cover max(ceil(total * reserve_tenths / 10), measured * working_set_factor * concurrency).',
+                'Free bytes must cover the fixed 100 GB reserve.',
                 {
-                    'reserve_tenths': _threshold('sources.capacity:CAPACITY_TOTAL_RESERVE_TENTHS'),
-                    'working_set_factor': _threshold(
-                        'sources.capacity:CAPACITY_WORKING_SET_FACTOR'
-                    ),
-                    'concurrency': spec.orchestration.canonical_concurrency,
+                    'reserve_bytes': _threshold('sources.capacity:CAPACITY_RESERVE_BYTES'),
                 },
             ),
             (

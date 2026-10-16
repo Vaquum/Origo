@@ -463,7 +463,7 @@ def test_capacity_probe_and_limits_gate_historical_work(
         'SELECT min(working_set_bytes)>0 FROM origo.source_capacity_log'
     ) == [(1,)]
     monkeypatch.setattr(binance_daily, 'get_response', no_provider)
-    for metrics in [(10**12, 10**11, 10**8, 9 * 10**7), (10**12, 9 * 10**11, 10**8, 10**6)]:
+    for metrics in [(10**12, 100_000_000_000 - 1, 10**8, 9 * 10**7), (10**12, 9 * 10**11, 10**8, 10**6)]:
         monkeypatch.setattr(capacity._Volume, 'sample', lambda self: metrics)
         result = _run(backfill_env)
         assert not result.success and not attempted
@@ -471,6 +471,25 @@ def test_capacity_probe_and_limits_gate_historical_work(
             'CAPACITY_RESERVE_BREACHED' in entry.user_message
             for entry in instance.all_logs(result.run_id)
         )
+
+
+@pytest.mark.parametrize('total', [10**12, 10**13])
+def test_capacity_admits_100_gb_despite_large_measurements(
+    backfill_env: BackfillEnv, monkeypatch: pytest.MonkeyPatch, total: int
+) -> None:
+    runtime, _instance, _source = backfill_env
+    assert _run(backfill_env, probe=True).success
+    runtime.store.execute(
+        'INSERT INTO origo.source_capacity_log VALUES',
+        [(runtime.spec.key, 'test-volume', 200_000_000_000, 'large-working-set', 1, datetime.now(UTC))],
+    )
+    monkeypatch.setattr(
+        capacity._Volume, 'sample', lambda self: (total, 100_000_000_000, 10**8, 9 * 10**7)
+    )
+    monitor = capacity.CapacityMonitor(runtime, probe=False)
+    monitor.check()
+    assert monitor.start['test-volume'] == 100_000_000_000
+    assert monitor.working['test-volume'] == 200_000_000_000
 
 
 def test_backfill_resume_skips_verified_generations_and_retries_failed_days(

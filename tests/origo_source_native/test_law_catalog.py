@@ -33,7 +33,7 @@ from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
 )
-from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_TOTAL_RESERVE_TENTHS
+from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import RolloutStage, Row, SourceError
 from origo.sources.dagit import (
     HEALTH_IDLE_INTERVAL_SECONDS,
@@ -142,8 +142,8 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             == PROVISIONAL_MAX_WORKERS
         )
         assert (
-            gates[f'source.capacity.byte_reserve:{key}']['thresholds']['reserve_tenths']
-            == CAPACITY_TOTAL_RESERVE_TENTHS
+            gates[f'source.capacity.byte_reserve:{key}']['thresholds']['reserve_bytes']
+            == CAPACITY_RESERVE_BYTES
         )
         assert (
             gates[f'source.capacity.inode_reserve:{key}']['thresholds']['denominator']

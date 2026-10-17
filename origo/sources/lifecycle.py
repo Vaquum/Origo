@@ -14,6 +14,7 @@ from .component_upgrade import ComponentUpgradeError, attach_components
 from .contracts import (
     ArchiveNotPublishedYet,
     BuildContext,
+    CanonicalAuditPolicy,
     Partition,
     Revision,
     RevisionedSourceSpec,
@@ -648,7 +649,9 @@ class SourceRuntime:
         for row in pending:
             partition = self.spec.canonical.partition(str(row[0]))
             try:
-                self.discover(partition)
+                revision = self.discover(partition)
+                if self._audit_rejected(partition, revision):
+                    continue
                 self.failures.recover(operation='audit', partition=partition.key)
                 changed.append(partition.key)
             except ArchiveNotPublishedYet:
@@ -669,6 +672,9 @@ class SourceRuntime:
         for record in candidates:
             try:
                 revision = self.spec.canonical.discover(record.partition)
+                self._observe_canonical(record.partition, revision)
+                if self._audit_rejected(record.partition, revision):
+                    continue
                 if revision != record.revision:
                     changed.append(record.partition.key)
                 self.failures.recover(operation='audit', partition=record.partition.key)
@@ -688,6 +694,16 @@ class SourceRuntime:
                     partition=record.partition.key,
                 )
         return tuple(changed)
+
+    def _audit_rejected(self, partition: Partition, revision: str) -> bool:
+        adapter = self.spec.canonical
+        rejected = isinstance(adapter, CanonicalAuditPolicy) and adapter.rejected_revision(partition, revision)
+        if rejected:
+            get_dagster_logger('origo.sources').info(
+                'source=%s partition=%s revision=%s phase=audit_rejected_unchanged',
+                self.spec.key, partition.key, revision,
+            )
+        return rejected
 
     def repair(self, key: str) -> StateRecord:
         self.spec.require_enabled('repair')
@@ -726,7 +742,12 @@ class SourceRuntime:
                     )
                 else:
                     upgraded = self._upgrade_components(record)
-                    self.failures.recover_partition(partition=key)
+                    adapter = self.spec.canonical
+                    if (isinstance(adapter, CanonicalAuditPolicy)
+                            and adapter.rejected_revision(partition, adapter.discover(partition))):
+                        self.failures.recover(operation='repair', partition=key)
+                    else:
+                        self.failures.recover_partition(partition=key)
                     return upgraded
                 expected = self.store.generation(partition)
                 revision = self.spec.canonical.fetch(partition)

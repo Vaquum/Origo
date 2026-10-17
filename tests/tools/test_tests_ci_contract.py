@@ -90,6 +90,10 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
     ).encode()).hexdigest() == '12391bf047bb1dc6ad8afba2414fb2f4e1a1e1bb949a9f4cc2e70d57ace55887'
     assert contract['required_nodes'] == [
+        'tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[spot]',
+        'tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[perp]',
+        'tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[spot]',
+        'tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[perp]',
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
         'tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof',

@@ -1,3 +1,7 @@
+# v3.34.8
+
+- Skip unchanged rejected hourly book revisions during automatic audit while retaining failures and native explicit retries.
+
 # v3.34.7
 
 - Run trade publication and perpetual repair independently of ingestion; revalidate rejected bridges with bounded retained evidence while preserving reader and file contracts.

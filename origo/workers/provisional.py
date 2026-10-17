@@ -259,6 +259,7 @@ class ProvisionalFeed:
         if (
             isinstance(adapter, BinancePerpProvisional) and frontier is not None
             and not _split_trade_ingestion(spec)
+            and not adapter.admits(adapter.partition(frontier))
         ):
             # Spend one bounded bridge allowance on the actual reader gap, even
             # outside the ordinary candidate lookback. Pending work has no receipt.

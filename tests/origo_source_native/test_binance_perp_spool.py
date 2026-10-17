@@ -15,6 +15,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
+from unittest.mock import Mock
 
 import pytest
 
@@ -341,6 +342,30 @@ def test_rejected_bridge_revalidation_preserves_proof(
         assert hashlib.sha256(body).hexdigest() == evidence['body_sha256']
         assert evidence['reason'].startswith('Injected validator interruption')
         assert (evidence['left_payload'], evidence['right_payload']) == witness
+    # Legacy worker control flow: a rejected (fallback-classified) bridge must
+    # reach minute work without retrying the rejected proof ahead of it.
+    from origo.workers import provisional
+
+    with monkeypatch.context() as legacy:
+        legacy.setenv('ORIGO_TRADE_MAINTENANCE', '0')
+        legacy.setenv('ORIGO_PERP_CAPTURE_ROOT', str(tmp_path))
+        reader = Mock(spec=SourceStore)
+        reader.active_intervals.return_value = ()
+        reader.anchor.return_value = _partition().start
+        reader.enabled_groups.return_value = ()
+        feed = provisional.ProvisionalFeed(
+            [BINANCE_PERP_TRADES_SPEC], publication_root=tmp_path, reporter=Mock(), dagster=Mock(),
+        )
+        legacy.setattr(feed, '_frontier_gap_key', lambda *args: _KEY)
+        legacy.setattr(feed, '_may_attempt', lambda *args, **kwargs: True)
+        build = Mock(return_value=(_KEY, None))
+        legacy.setattr(feed, '_build_one', build)
+        repair = Mock(side_effect=AssertionError('Rejected bridge retried before fallback.'))
+        legacy.setattr(BinancePerpProvisional, 'repair_pending', repair)
+        legacy.setattr(provisional, 'make_clickhouse_client', lambda *args: Mock())
+        legacy.setattr(provisional, 'get_clickhouse_settings', lambda: Mock())
+        assert feed._build_intervals(reader, BINANCE_PERP_TRADES_SPEC, _partition().end)[0]
+        assert build.called and not repair.called
     monkeypatch.setattr(spool, '_rows', original_rows)
     for _ in range(20):
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')

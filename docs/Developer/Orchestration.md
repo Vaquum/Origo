@@ -113,3 +113,10 @@ run-count assertions for this mixed-workload measurement.
 New sources inherit these controls. Their onboarding evidence must still check
 source-specific memory, runtime and shared-hardware contention. Queue isolation
 reserves execution slots; it does not manufacture CPU, RAM, disk or provider quota.
+
+
+### Book throughput qualification
+
+The shared run coordinator admits at most 40 runs: 31 bulk, eight routine and one maintenance. Native book canonical pools have 32 slots per market; sequential one-market bulk leaves a slot for scheduled authority. Audit rebuilds use their existing separate heavy pool. Other source-specific pools do not change. Qualification and continuation select bounded sets no larger than the highest demonstrated safe stage; a larger configured pool is not authorization for a full-range launch. See #525/#526 and `docs/operations/book_hourly_authority.md` for retained-headroom, current-hour and cancellation predicates.
+
+A release-pinned `native_jobs_only_version` equal to `project.version` selects the controller/monitor deployment exception: refuse active bulk and pending component groups, retain capture/provisional/publication IDs, retire only dagster/dagit, refresh monitor catalog, and retain positive recovery, no-op component rollout and live verification. The next required version bump takes the ordinary full writer-retirement/perp-handover path. No component/data schema changes are allowed in the exception.

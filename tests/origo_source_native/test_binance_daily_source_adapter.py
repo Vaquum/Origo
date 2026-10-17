@@ -348,3 +348,139 @@ def test_rate_circuit_opens_only_for_the_limited_host(
         daily, '_request', lambda url, params, headers: _canned_response()
     )
     daily.get_response('https://api.binance.com/api/v3/aggTrades', weight=4)
+
+
+def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
+    import multiprocessing
+    import queue
+    import time
+    import requests
+
+    context = multiprocessing.get_context('fork')
+    entered = context.Queue()
+    outcomes = context.Queue()
+    release = context.Event()
+    ledger = tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state'
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+
+    def request(url, params, headers):
+        label = headers['case']
+        entered.put((label, time.time()))
+        if label == 'slow':
+            assert release.wait(10)
+        value = requests.Response()
+        value.status_code = 429 if label in ('pause1', 'pause2') else 200
+        if value.status_code == 429:
+            value.headers['Retry-After'] = label[-1]
+        value._content = b''
+        value._content_consumed = True
+        return value
+
+    monkeypatch.setattr(daily, '_request', request)
+
+    def worker(label, url='https://api.cryptohftdata.com/v1/download'):
+        try:
+            daily.get_response(url, headers={'case': label}, weight=2)
+            outcomes.put((label, 'ok'))
+        except daily.SourceError as error:
+            outcomes.put((label, error.code))
+
+    slow = context.Process(target=worker, args=('slow',))
+    slow.start()
+    assert entered.get(timeout=10)[0] == 'slow'
+    pauses = [context.Process(target=worker, args=(label,)) for label in ('pause2', 'pause1')]
+    for process in pauses:
+        process.start()
+    assert {entered.get(timeout=10)[0], entered.get(timeout=10)[0]} == {'pause1', 'pause2'}
+    for process in pauses:
+        process.join(10)
+        assert process.exitcode == 0
+    saved_next, saved_pause = map(float, ledger.read_text().split())
+    assert saved_pause > time.time()
+    release.set()
+    slow.join(10)
+    assert slow.exitcode == 0
+    next_request, pause = map(float, ledger.read_text().split())
+    assert next_request >= saved_next and pause >= saved_pause
+    fresh = context.Process(target=worker, args=('fresh',))
+    fresh.start()
+    assert entered.get(timeout=10)[1] >= saved_pause - 0.01
+    fresh.join(10)
+    assert fresh.exitcode == 0
+    results = dict(outcomes.get(timeout=2) for _ in range(4))
+    assert results == {'slow': 'ok', 'pause1': 'PROVIDER_HTTP_429',
+                       'pause2': 'PROVIDER_HTTP_429', 'fresh': 'ok'}
+    # The unrelated Binance path still holds its original eager transfer lock.
+    release.clear()
+    first = context.Process(target=worker, args=('slow', 'https://api.binance.com/api/v3/time'))
+    first.start()
+    assert entered.get(timeout=10)[0] == 'slow'
+    second = context.Process(target=worker, args=('second', 'https://api.binance.com/api/v3/time'))
+    second.start()
+    with pytest.raises(queue.Empty):
+        entered.get(timeout=0.2)
+    release.set()
+    assert entered.get(timeout=10)[0] == 'second'
+    for process in (first, second):
+        process.join(10)
+        assert process.exitcode == 0
+
+
+def test_transfer_failure_preserves_shared_admission(tmp_path, monkeypatch):
+    import multiprocessing
+    import requests
+
+    context = multiprocessing.get_context('fork')
+    entered = context.Queue()
+    outcomes = context.Queue()
+    release = context.Event()
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    ledger = tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state'
+
+    def request(url, params, headers):
+        entered.put(headers['case'])
+        if headers['case'] in ('failure', 'cancel'):
+            assert release.wait(10)
+            raise daily.SourceError('PROVIDER_TRANSPORT_FAILED', 'Controlled protocol failure.')
+        value = requests.Response()
+        value.status_code = 200
+        value._content = b''
+        value._content_consumed = True
+        return value
+
+    monkeypatch.setattr(daily, '_request', request)
+
+    def worker(label):
+        try:
+            daily.get_response('https://api.cryptohftdata.com/v1/download',
+                               headers={'case': label}, weight=2)
+            outcomes.put('ok')
+        except daily.SourceError as error:
+            outcomes.put(error.code)
+
+    failing = context.Process(target=worker, args=('failure',))
+    failing.start()
+    assert entered.get(timeout=10) == 'failure'
+    first_reservation = float(ledger.read_text().split()[0])
+    successful = context.Process(target=worker, args=('success',))
+    successful.start()
+    assert entered.get(timeout=10) == 'success'
+    successful.join(10)
+    saved = ledger.read_text()
+    assert float(saved.split()[0]) >= first_reservation
+    release.set()
+    failing.join(10)
+    assert successful.exitcode == failing.exitcode == 0
+    assert ledger.read_text() == saved
+    assert {outcomes.get(timeout=2), outcomes.get(timeout=2)} == {'ok', 'PROVIDER_TRANSPORT_FAILED'}
+    release.clear()
+    canceled = context.Process(target=worker, args=('cancel',))
+    canceled.start()
+    assert entered.get(timeout=10) == 'cancel'
+    canceled_reservation = float(ledger.read_text().split()[0])
+    canceled.terminate()
+    canceled.join(10)
+    worker('after-cancel')
+    assert entered.get(timeout=10) == 'after-cancel'
+    assert outcomes.get(timeout=2) == 'ok'
+    assert float(ledger.read_text().split()[0]) >= canceled_reservation

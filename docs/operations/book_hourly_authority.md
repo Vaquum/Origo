@@ -19,7 +19,7 @@ without launching simultaneously with the :15 canonical refresh. It retries up t
 hours, prioritizing the latest and recent delayed hours before least-recently
 checked historical requests; persistent failures cannot permanently occupy all five slots;
 revision checks cover two recent hours and rotate through 50 older active hours.
-Both sources keep their own canonical pool, bounded to two builds per market.
+Both sources keep their own canonical pool, bounded to 32 canonical operations per market, with at most 31 bulk runs instance-wide.
 
 Discovery appends provider availability and original observation time to the
 existing source observation log. A fresh 404 for the latest closed hour is waiting,
@@ -144,7 +144,7 @@ are never fabricated, sorted by a future clock, or shifted.
 Prelude search is bounded to 24 preceding hours, 256 MiB per expanded file and
 1 GiB combined replay input. Original and expanded inputs plus the grid coexist in
 private scratch during a build. Worst-case dependency discovery/revalidation uses
-26 metadata reads and download uses 26 files; the shared 30/minute HCD ledger paces
+26 metadata reads and download uses 26 files; the shared HCD ledger (30/minute anonymous, at most 600/minute authenticated) paces
 all requests. Binance demand is zero. Modern hours use the current and following
 files; historical hours can also require preceding inputs.
 The existing capacity monitor measures mounted storage; the bounded pool limits

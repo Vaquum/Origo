@@ -110,3 +110,108 @@ def test_provider_pause_does_not_block_capture_process_health(
         sampler.top20(now)
     assert unavailable_book.value.code == 'BOOK_UNAVAILABLE'
     assert book_capture.check_capture(directory, market, now + timedelta(seconds=181)) == 1
+
+
+def test_vendor_credential_reaches_native_jobs() -> None:
+    for filename in ('docker-compose.yml', 'docker-compose.deploy.yml'):
+        services = yaml.safe_load((ROOT / filename).read_text())['services']
+        for name, service in services.items():
+            environment = service.get('environment', [])
+            values = list(environment) if isinstance(environment, dict) else environment
+            entries = [entry for entry in values if entry.startswith('CRYPTOHFTDATA_API_KEY')]
+            if name in ('dagster', 'dagit'):
+                expected = ('CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:-}'
+                            if filename == 'docker-compose.yml' else
+                            'CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:?CRYPTOHFTDATA_API_KEY must be set}')
+                assert entries == [expected]
+            else:
+                assert not entries
+    workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    assert workflow.count('CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}') == 2
+    assert '"CRYPTOHFTDATA_API_KEY": os.environ["CRYPTOHFTDATA_API_KEY"]' in workflow
+    assert 'umask 077' in workflow
+
+
+def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+    import textwrap
+    import tomllib
+
+    workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    config = tomllib.loads((ROOT / 'pyproject.toml').read_text())
+    pinned = config['tool']['origo']['release']['native_jobs_only_version']
+    assert pinned == config['project']['version']
+    mode_code = workflow.split('          python3 - <<\'PYTHON\' >> "$GITHUB_ENV"\n', 1)[1].split('          PYTHON', 1)[0]
+    mode_code = textwrap.dedent(mode_code)
+    start = workflow.index('          retained_workers=()')
+    end = workflow.index("          echo 'post-up: ClickHouse smoke test starting'", start)
+    script = textwrap.dedent(workflow[start:end])
+    deploy = tmp_path / 'deploy'
+    deploy.mkdir()
+    (deploy / 'prepare_binance_egress.sh').write_text('echo setup >> "$CALLS"\n')
+    stub = r'''
+set -euo pipefail
+PROJECT_NAME=test
+function docker() {
+  printf '%s\n' "$*" >> "$CALLS"
+  case "$*" in
+    *' run --rm --no-deps -T --entrypoint python dagster -')
+      cat >/dev/null
+      [ "$CASE" != preflight-failed ] ;;
+    *' run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades '*) return 0 ;;
+    *' ps -q book-capture-spot '*) printf 'live-capture\n' ;;
+    *' ps -q dagster dagit provisional-worker') printf 'old-daemon\nold-ui\nold-spot\n' ;;
+    *' ps -q dagster dagit') printf 'old-daemon\nold-ui\n' ;;
+    *' ps -q --filter '*service=provisional-binance-perp-trades) return 0 ;;
+    *' ps -q --filter '*service=perp-repair) printf 'repair\n' ;;
+    *'inspect --format {{range .Config.Env}}'*) printf repair-only ;;
+    'inspect --format {{.Id}} {{.Config.Hostname}} '*) printf '%s host-%s\n' "${@: -1}" "${@: -1}" ;;
+    'inspect --format {{.Id}} '*) printf '%s\n' "${@: -1}" ;;
+    *' up -d '*) touch "$REPLACED" ;;
+    'ps -aq --no-trunc') printf 'old-daemon\nold-ui\nold-spot\nnew-daemon\nnew-ui\nlive-capture\n' ;;
+    'inspect --format {{.State.Running}} live-capture') printf true ;;
+    'inspect --format {{.State.Running}} '*)
+      if [ "$CASE" = unretired ]; then printf true; else printf false; fi ;;
+    *' exec -T dagster sh -c '*) return 0 ;;
+    *' exec -T dagster python -m origo.orchestration.recovery '*)
+      [[ "$*" == *'--retired-worker host-old-daemon'* ]] && [[ "$*" == *'--retired-worker host-old-ui'* ]] ;;
+    *' exec -T dagster python -m origo.sources.rollout') return 0 ;;
+    *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
+  esac
+}
+'''
+    for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), ('0.0.0', 'full'),
+                          (pinned, 'preflight-failed'), (pinned, 'unretired')):
+        (tmp_path / 'pyproject.toml').write_text(
+            f'[project]\nversion={json.dumps(version)}\n[tool.origo.release]\nnative_jobs_only_version={json.dumps(pinned)}\n')
+        mode = subprocess.run([sys.executable, '-c', mode_code], cwd=tmp_path,
+                              capture_output=True, text=True, check=True).stdout.strip().split('=')[1]
+        assert (mode == 'true') == (version == pinned)
+        calls = tmp_path / f'calls-{case}'
+        replaced = tmp_path / f'replaced-{case}'
+        result = subprocess.run(['bash', '-s'], input=stub + script, cwd=tmp_path,
+                                env={**os.environ, 'CASE': case, 'CALLS': str(calls),
+                                     'REPLACED': str(replaced), 'ORIGO_NATIVE_JOBS_ONLY': mode},
+                                text=True, capture_output=True)
+        observed = calls.read_text()
+        if case == 'preflight-failed':
+            assert result.returncode != 0 and not replaced.exists()
+        elif case == 'unretired':
+            assert result.returncode != 0 and 'origo.sources.rollout' not in observed
+        else:
+            assert result.returncode == 0, result.stderr
+            assert '--legacy-before' in observed
+            assert 'origo.sources.rollout' in observed
+            if mode == 'true':
+                assert '--force-recreate dagster dagit monitor' in observed
+                assert '--force-recreate dagster dagit provisional-worker' not in observed
+                assert 'up -d --no-deps perp-capture' not in observed and 'setup' not in observed
+                assert 'inspect --format {{.State.Running}} live-capture' in observed
+            else:
+                assert '--force-recreate dagster dagit provisional-worker' in observed
+                assert 'up -d --no-deps perp-capture' in observed and 'setup' in observed
+    assert 'backfill_active(instance, spec)' in script
+    assert 'groups - SourceStore(client, settings.database, spec).enabled_groups()' in script

@@ -49,8 +49,13 @@ def create_run_for_test(instance, **kwargs):
 
 
 @pytest.fixture
-def instance(tmp_path):
+def instance(tmp_path, request):
     config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
+    width = getattr(request, 'param', 10)
+    config['run_coordinator']['config']['max_concurrent_runs'] = width + 9
+    for limit in config['run_coordinator']['config']['tag_concurrency_limits']:
+        if limit.get('value') == 'backfill':
+            limit['limit'] = width
     with instance_for_test(
         temp_dir=str(tmp_path),
         overrides={
@@ -132,9 +137,11 @@ def test_one_pending_refresh_survives_while_a_worker_is_active(instance):
     assert instance.get_run_by_id(first.run_id).status == DagsterRunStatus.STARTED
 
 
+@pytest.mark.parametrize('instance', [10, 31], indirect=True)
 def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instance):
-    for n in range(20):
-        submit(instance, job='backfill_binance_spot_trades_source_job', day=f'2020-03-{n + 1:02d}')
+    width = instance.run_coordinator._max_concurrent_runs - 9
+    for n in range(width + 5):
+        submit(instance, job='backfill_binance_spot_trades_source_job', day=f'2020-{n // 28 + 1:02d}-{n % 28 + 1:02d}')
     for job in (
         'refresh_binance_spot_depth20_data_source_job',
         'refresh_binance_spot_depth200_data_source_job',
@@ -145,8 +152,8 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instanc
             submit(instance, job=job, day=day)
     daemon = QueuedRunCoordinatorDaemon(interval_seconds=1)
     runs = daemon._get_runs_to_dequeue(instance, instance.get_concurrency_config(), time.time())
-    assert len(runs) == 18
-    assert sum(r.tags['origo/workload'] == 'backfill' for r in runs) == 10
+    assert len(runs) == width + 8
+    assert sum(r.tags['origo/workload'] == 'backfill' for r in runs) == width
     assert sum(r.tags['origo/workload'] == 'routine' for r in runs) == 8
     assert runs[0].tags['origo/workload'] == 'routine'
     for job in {r.job_name for r in runs if r.tags['origo/workload'] == 'routine'}:

@@ -209,7 +209,16 @@ jobs:
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
           # Before any container is replaced, the new image must read every activated component.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility </dev/null
+          retained_workers=()
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            retained_ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades provisional-worker publication-binance-spot-trades publication-binance-perp-trades perp-capture perp-repair depth-worker)"
+            if [ -z "$retained_ids" ]; then
+              echo 'Native-only rollout requires existing live workers' >&2
+              exit 1
+            fi
+            for worker in $retained_ids; do
+              retained_workers+=("$(docker inspect --format '{{.Id}}' "$worker")")
+            done
             docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster - <<'PYTHON'
           from dagster import DagsterInstance, DagsterRunStatus, RunsFilter
           from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -344,6 +353,12 @@ jobs:
           echo 'post-up: registered component activation starting'
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster \
             python -m origo.sources.rollout </dev/null
+          for worker_id in "${retained_workers[@]}"; do
+            if [ "$(docker inspect --format '{{.State.Running}}' "$worker_id")" != true ]; then
+              echo "Retained live worker was replaced or stopped: $worker_id" >&2
+              exit 1
+            fi
+          done
           echo 'post-up: ClickHouse smoke test starting'
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster python - <<'PY'
           from origo.utils.get_clickhouse_client import get_clickhouse_client

@@ -588,7 +588,7 @@ def test_rejected_book_revision_is_not_replayed_by_audit(
         monkeypatch.setattr(vendor, 'replay_hour', real_replay)
         vendor._dependency_path(market, partition).unlink()
         assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': []}
-        assert runtime.store.execute('SELECT DISTINCT partition_key FROM origo.source_observation_log WHERE partition_key IN %(keys)s', {'keys': old})
+        assert {str(row[0]) for row in runtime.store.execute('SELECT DISTINCT partition_key FROM origo.source_observation_log WHERE partition_key IN %(keys)s', {'keys': old})} == set(old)
         assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': [REAL_HOUR]}
     canonical = runtime.store.record(partition)
     assert canonical is not None and len(canonical.component_hashes) == 4

@@ -166,7 +166,10 @@ def _dependency_evidence(market: Market, partition: Partition) -> dict[str, obje
 
 
 def _dependencies(market: Market, partition: Partition, current: str) -> tuple[tuple[str, str], ...]:
-    value = _dependency_evidence(market, partition)
+    return _dependency_entries(partition, current, _dependency_evidence(market, partition))
+
+
+def _dependency_entries(partition: Partition, current: str, value: dict[str, object]) -> tuple[tuple[str, str], ...]:
     if value.get('current') != current:
         return ()
     items = value.get('dependencies')
@@ -482,7 +485,7 @@ class CryptoHFTBookHourly:
         current = value.get('current')
         if not isinstance(current, str):
             return False
-        dependencies = _dependencies(self.market, partition, current)
+        dependencies = _dependency_entries(partition, current, value)
         if not dependencies or dependencies[-1][0] != partition.end.strftime(HOUR_KEY_FORMAT):
             return False
         return revision == _revision_key(current, dependencies)

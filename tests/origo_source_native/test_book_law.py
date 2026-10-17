@@ -22,6 +22,7 @@ from origo.sources.storage import SourceStore
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.law_catalog import build_catalog
 
+from .test_book_history import OriginalArchive, _transport, rejection_runtime as rejection_runtime
 from .test_book_sources import book_runtime as book_runtime, _keys
 
 from .test_book_vendor import (
@@ -510,3 +511,99 @@ def test_prior_book_authority_is_unverified_until_closing_input_rebuild(
     rebuilt = runtime.build(REAL_HOUR)
     assert rebuilt.generation == record.generation + 1
     assert _predicate(law.evaluate(runtime.store.client, 'origo', now), runtime.spec.key, 'C1')['status'] == 'PASS'
+
+
+def test_rejected_book_revision_is_not_replayed_by_audit(
+    rejection_runtime: SourceRuntime,
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    from origo.sources.adapters import book_vendor as vendor
+    from origo.sources.bundle import SourceRunConfig, _execute_operation
+
+    runtime = rejection_runtime
+    market, body, headers = original_vendor_archive
+    partition = hour_partition(REAL_HOUR)
+    after = hour_partition('2026-10-04T10Z')
+    visited, rewritten = _transport((OriginalArchive(partition, body, headers),
+                                    OriginalArchive(after, original_vendor_following_archive[1],
+                                                    original_vendor_following_archive[2])), market, monkeypatch)
+    transport = vendor.get_response
+    counts = {'metadata': 0, 'payload': 0, 'replay': 0}
+
+    def counted(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> vendor.Response:
+        counts['metadata' if headers else 'payload'] += 1
+        return transport(url, params=params, headers=headers, weight=weight)
+
+    monkeypatch.setattr(vendor, 'get_response', counted)
+    real_replay = vendor.replay_hour
+
+    def rejected(*args: object, **kwargs: object) -> Revision:
+        counts['replay'] += 1
+        raise SourceError('BOOK_EVENT_STALE', 'Deliberate replay verdict fault; vendor bytes unchanged.')
+
+    monkeypatch.setattr(vendor, 'replay_hour', rejected)
+    runtime.discover(partition)
+    with pytest.raises(ExceptionGroup):
+        _execute_operation(runtime, 'audit', SourceRunConfig())
+    runtime.failures.record(operation='audit', error_code='BOOK_EVENT_STALE', scope='NONE', partition=REAL_HOUR)
+    assert runtime.store.record(partition) is None
+    assert counts['payload'] == 2 and counts['replay'] == 1
+    original_failures = runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id')
+    caplog.set_level('INFO')
+
+    def selected_skip() -> None:
+        nonlocal runtime
+        runtime = replace(runtime, run_id=str(uuid4()), spec=replace(runtime.spec, canonical=CryptoHFTBookHourly(market)))
+        before = dict(counts)
+        observations = runtime.store.execute('SELECT count() FROM origo.source_observation_log WHERE partition_key=%(key)s', {'key': REAL_HOUR})
+        assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': []}
+        assert counts['payload'] == before['payload'] and counts['replay'] == before['replay']
+        assert counts['metadata'] > before['metadata']
+        assert runtime.store.execute('SELECT count() FROM origo.source_observation_log WHERE partition_key=%(key)s', {'key': REAL_HOUR})[0][0] > observations[0][0]
+        assert runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id') == original_failures
+        assert any('phase=audit_rejected_unchanged' in record.message and REAL_HOUR in record.message
+                   and runtime.spec.key in record.message for record in caplog.records)
+
+    selected_skip()
+    selected_skip()
+    assert runtime.store.record(partition) is None
+    # Five controlled old rejected candidates rotate without starving this real hour.
+    old = [(partition.start - timedelta(hours=offset)).strftime('%Y-%m-%dT%HZ') for offset in range(6, 1, -1)]
+    now = datetime.now(UTC)
+    runtime.store.execute('INSERT INTO origo.source_discovery_log VALUES',
+                          [(runtime.spec.key, key, now - timedelta(days=1)) for key in old])
+    discover, rejected_revision = CryptoHFTBookHourly.discover, CryptoHFTBookHourly.rejected_revision
+
+    def control_discover(self: CryptoHFTBookHourly, requested: Partition) -> str:
+        return 'controlled-rejected-candidate:' + requested.key if requested.key in old else discover(self, requested)
+
+    def control_rejected(self: CryptoHFTBookHourly, requested: Partition, revision: str) -> bool:
+        return requested.key in old or rejected_revision(self, requested, revision)
+
+    with monkeypatch.context() as control:
+        control.setattr(CryptoHFTBookHourly, 'discover', control_discover)
+        control.setattr(CryptoHFTBookHourly, 'rejected_revision', control_rejected)
+        monkeypatch.setattr(vendor, 'replay_hour', real_replay)
+        vendor._dependency_path(market, partition).unlink()
+        assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': []}
+        assert runtime.store.execute('SELECT DISTINCT partition_key FROM origo.source_observation_log WHERE partition_key IN %(keys)s', {'keys': old})
+        assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': [REAL_HOUR]}
+    canonical = runtime.store.record(partition)
+    assert canonical is not None and len(canonical.component_hashes) == 4
+    # Remove the controlled requests; no fabricated market records were built.
+    runtime.store.execute('ALTER TABLE origo.source_discovery_log DELETE WHERE partition_key IN %(keys)s SETTINGS mutations_sync=1', {'keys': old})
+    before_coverage = runtime.store.execute('SELECT count() FROM origo.' + runtime.spec.names.prefix + '_depth20_current')
+    assert before_coverage == [(36000,)]
+    monkeypatch.setattr(vendor, 'replay_hour', rejected)
+    rewritten[vendor._file(market, partition)] = 'controlled-replacement-etag'
+    with pytest.raises(ExceptionGroup):
+        _execute_operation(runtime, 'audit', SourceRunConfig())
+    original_failures = runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id')
+    selected_skip()
+    selected_skip()
+    assert runtime.store.record(partition) == canonical
+    assert runtime.store.execute('SELECT count() FROM origo.' + runtime.spec.names.prefix + '_depth20_current') == before_coverage
+    assert runtime.store.execute("SELECT error_code FROM origo.source_failure_log WHERE operation='canonical' GROUP BY failure_key,error_code HAVING argMax(event_type,event_time)='FAILED'") == [('BOOK_EVENT_STALE',)]
+    assert visited

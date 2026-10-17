@@ -2,19 +2,30 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 import pytest
 
 from origo.sources.adapters import book_vendor as vendor
 from origo.sources.adapters.binance_daily import Response
 from origo.sources.adapters.book_spool import Market
+from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
+from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
+from origo.sources.bundle import SourceRunConfig, _execute_operation
 from origo.sources.contracts import Partition, SourceError
+from origo.sources.lifecycle import SourceRuntime
+from origo.sources.storage import SourceStore
 
-from .test_book_vendor import _original_archive, vendor_session_root as vendor_session_root
+from .test_book_vendor import (
+    _original_archive, original_vendor_archive as original_vendor_archive,
+    vendor_session_root as vendor_session_root,
+)
 
 
 @dataclass(frozen=True)
@@ -115,7 +126,11 @@ def test_original_spot_history_rejects_unproven_depth(
         vendor.CryptoHFTBookHourly('spot').fetch(archives[1].partition)
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert set(visited) == {vendor._file('spot', archive.partition) for archive in archives}
-    assert not tuple((tmp_path / 'locks' / 'book_vendor_spot').iterdir())
+    retained = tuple((tmp_path / 'locks' / 'book_vendor_spot').iterdir())
+    assert retained == (vendor._dependency_path('spot', archives[1].partition),)
+    assert retained[0].stat().st_size <= vendor.BOOK_DEPENDENCY_MAX_BYTES
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    assert adapter.rejected_revision(archives[1].partition, adapter.discover(archives[1].partition))
 
 
 def test_legacy_snapshot_received_first_follows_its_native_update(
@@ -222,3 +237,139 @@ def test_initial_legacy_snapshot_uses_matching_original_exchange_clock(
             break
     else:
         pytest.fail('Original input has no same-ID update/snapshot pair.')
+
+
+@pytest.fixture()
+def rejection_runtime(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[SourceRuntime]:
+    from origo.sources import capacity
+
+    market = original_vendor_archive[0]
+    spec = BINANCE_SPOT_BOOK_SPEC if market == 'spot' else BINANCE_PERP_BOOK_SPEC
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    # Control only capacity metadata; replay and canonical operations stay real.
+    monkeypatch.setattr(capacity, '_volumes', lambda runtime: (capacity._Volume('test-volume', tmp_path),))
+    monkeypatch.setattr(capacity._Volume, 'sample', lambda self: (10**12, 9 * 10**11, 10**8, 9 * 10**7))
+    client = make_clickhouse_client(get_clickhouse_settings())
+    runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4()))
+    try:
+        runtime.setup()
+        yield runtime
+    finally:
+        client.disconnect()
+
+
+def test_rejected_book_revision_identity_and_retry(
+    rejection_runtime: SourceRuntime,
+    original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = rejection_runtime
+    adapter = runtime.spec.canonical
+    assert isinstance(adapter, vendor.CryptoHFTBookHourly)
+    archives = original_historical_archives[adapter.market]
+    partition = archives[1].partition
+    visited, rewritten = _transport(archives, adapter.market, monkeypatch)
+    path = vendor._dependency_path(adapter.market, partition)
+    replay = vendor.replay_hour
+    attempts: list[str] = []
+    fault = ['BOOK_SEQUENCE_GAP']
+
+    def rejected(*args: object, **kwargs: object) -> vendor.Revision:
+        attempts.append(fault[0])
+        raise SourceError(fault[0], 'Deliberate replay verdict fault; original vendor bytes unchanged.')
+
+    monkeypatch.setattr(vendor, 'replay_hour', rejected)
+
+    def retry() -> None:
+        with pytest.raises(SourceError) as failure:
+            _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+        assert failure.value.code == fault[0]
+
+    # Discovery and fetch can observe different provider ETags.
+    discovered = adapter.discover(partition)
+    rewritten[vendor._file(adapter.market, partition)] = 'controlled-fetch-time-etag'
+    # Backfill does not enroll previously unrequested failed hours in audit.
+    retry()
+    assert runtime.store.execute('SELECT count() FROM origo.source_discovery_log') == [(0,)]
+    assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': []}
+    assert len(attempts) == 1
+    value = json.loads(path.read_text())
+    assert value['current'] == vendor._identity(adapter.market, partition, Response(archives[1].body,
+        {**archives[1].headers, 'ETag': 'controlled-fetch-time-etag'}, 200))
+    assert not adapter.rejected_revision(partition, discovered)
+    assert value['dependencies'] == [[a.partition.key, vendor._identity(adapter.market, a.partition, Response(a.body, a.headers, 200))]
+                                     for a in (archives[0], archives[2])]
+    assert not tuple(path.parent.glob('hour-*'))
+    runtime.discover(partition)
+    assert adapter.rejected_revision(partition, adapter.discover(partition))
+    # Explicit native retry bypasses automatic suppression for unchanged inputs.
+    retry()
+    assert len(attempts) == 2
+    for archive, code in zip(archives, ('BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED', 'BOOK_SEQUENCE_GAP'), strict=True):
+        rewritten[vendor._file(adapter.market, archive.partition)] = 'controlled-provider-etag-' + archive.partition.key
+        fault[0] = code
+        assert not adapter.rejected_revision(partition, adapter.discover(partition))
+        with pytest.raises(ExceptionGroup):
+            _execute_operation(runtime, 'audit', SourceRunConfig())
+        assert adapter.rejected_revision(partition, adapter.discover(partition))
+    before = len(attempts)
+    monkeypatch.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
+    runtime = replace(runtime, run_id=str(uuid4()), spec=replace(runtime.spec, canonical=vendor.CryptoHFTBookHourly(adapter.market)))
+    assert not runtime.spec.canonical.rejected_revision(partition, runtime.discover(partition))
+    with pytest.raises(ExceptionGroup):
+        _execute_operation(runtime, 'audit', SourceRunConfig())
+    assert len(attempts) == before + 1
+    before = len(attempts)
+    path.unlink()
+    with pytest.raises(ExceptionGroup):
+        _execute_operation(runtime, 'audit', SourceRunConfig())
+    assert len(attempts) == before + 1
+    # Incomplete dependency evidence cannot suppress; malformed evidence fails visibly.
+    value = json.loads(path.read_text())
+    value['dependencies'] = value['dependencies'][:-1]
+    path.write_text(json.dumps(value))
+    assert not adapter.rejected_revision(partition, adapter.discover(partition))
+    path.write_text('{')
+    with pytest.raises(ValueError):
+        adapter.discover(partition)
+    path.unlink()
+    for code in ('PROVIDER_TRANSPORT_FAILED', 'BOOK_VENDOR_SCHEMA'):
+        fault[0] = code
+        retry()
+        assert not path.exists()
+        assert not adapter.rejected_revision(partition, adapter.discover(partition))
+    def interrupted(*args: object, **kwargs: object) -> vendor.Revision:
+        raise OSError('Deliberate filesystem interruption, with original vendor bytes unchanged.')
+
+    monkeypatch.setattr(vendor, 'replay_hour', interrupted)
+    with pytest.raises(OSError):
+        _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+    assert not path.exists()
+    frames = vendor._frames
+
+    def early_failure(*args: object, **kwargs: object) -> Iterator[list[dict[str, object]]]:
+        raise SourceError('BOOK_SEQUENCE_GAP', 'Deliberate early failure before dependency payloads are fetched.')
+
+    monkeypatch.setattr(vendor, '_frames', early_failure)
+    with pytest.raises(SourceError):
+        _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+    assert not path.exists()
+    monkeypatch.setattr(vendor, '_frames', frames)
+    assert visited
+    # A real successful replay clears rejected evidence; ordinary activation recovers.
+    monkeypatch.setattr(vendor, 'replay_hour', replay)
+    if adapter.market == 'spot':
+        with pytest.raises(SourceError, match='depth'):
+            _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+        assert adapter.rejected_revision(partition, adapter.discover(partition))
+    else:
+        result = _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+        assert result['partition_key'] == partition.key
+        assert 'rejection' not in json.loads(path.read_text())
+        assert runtime.store.execute("SELECT failure_key FROM origo.source_failure_log WHERE blocking_scope='PARTITION' GROUP BY failure_key HAVING argMax(event_type,event_time)='FAILED'") == []
+        path.write_text('{')
+        with pytest.raises(ValueError):
+            _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))

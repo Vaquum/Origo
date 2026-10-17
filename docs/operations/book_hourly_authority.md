@@ -55,6 +55,30 @@ Both vendor sources share the existing host-keyed transport ledger, limited to
 backfill, replay, revalidation and monitoring make zero Binance requests. Capture
 seed/connection limits and weighted Binance allowances are unchanged.
 
+## Rejected hourly revisions
+
+After full replay rejects `BOOK_SEQUENCE_GAP`, `BOOK_EVENT_STALE` or
+`BOOK_KNOWN_DEPTH_EXHAUSTED`, the adapter retains only bounded private dependency
+metadata under the existing shared lock mount. The verdict binds actual fetched
+ETags for the current, every used preceding and required following file. Scratch
+payloads and grids are removed. Other errors and early failures are not cached.
+
+Automatic audit still reads fresh metadata for selected pending and retained
+hours. It skips a matching rejected identity before build admission and audit
+recovery, logging `phase=audit_rejected_unchanged`; original failures stay open.
+An inactive rejection remains missing. A rejected replacement preserves the prior
+accepted generation and coverage. An audit containing only skipped work succeeds
+without claiming the rejected hours succeeded. Changed dependency ETags admit a
+new attempt. Missing verdict evidence permits classification once; corrupt
+existing dependency evidence retains its visible failure, including the existing
+active-hour retry block.
+
+`_REJECTION_POLICY_VERSION` applies only to rejected verdicts. Bump it whenever
+replay, dependency selection or BookSampler acceptance semantics change. Accepted
+`cryptohftdata-v2` identities are unchanged. Native explicit canonical retry always
+validates; previously unrequested failed backfill hours retain that retry path
+without new automatic audit enrollment.
+
 ## Operator workflow and coverage
 
 Deployment activates the generated schedules, sensors and provisional workers.
@@ -170,3 +194,22 @@ compressed (1.16 TB uncompressed) for both markets combined. This is a planning
 estimate, not proof of full-range yield or production throughput. Retained
 revisions, concurrent scratch, indexes, logs and ordinary capacity reserves add
 space. Existing admission checks remain mandatory for a full native backfill.
+
+Full-history operations run spot before perpetual through the existing native
+backfill jobs. First verify a three-hour old/mid/recent readiness selection per
+market; include the genuine rejected first spot hour and unrelated valid work in
+the spot selection. Freeze the eligible cutoff and exact selected keys. Account
+accepted outcomes using this backfill's reconciled receipts joined to current
+activations and all four component proofs; bind rejected outcomes to their actual
+validation failure and complete input identity. Exhausted historical 404 retries
+are separate provider gaps. Infrastructure, canceled and unattempted hours remain
+pending. Mixed outcomes can leave the native backfill FAILED and its completion
+step skipped or blocked; retained coverage and open failures remain truthful.
+
+Cancel the native market backfill and queued/running child runs on the first
+capacity failure or a new bulk-attributable C1, R1 or capture breach. Retain the
+selection and resume through native failed/missing controls when existing bounds
+recover. Do not start perpetual while priority spot is blocked. Quotas and pools
+stay unchanged: six requests per modern successful hour plus three per prelude
+imply optimistic lower bounds of 38 hours per market, before existing work,
+retries and contention; actual import can take a week or longer.

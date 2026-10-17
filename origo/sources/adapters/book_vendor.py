@@ -28,6 +28,9 @@ BOOK_MAX_PRELUDE_HOURS = 24
 BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
+# Bump when replay, dependency selection or BookSampler acceptance changes.
+_REJECTION_POLICY_VERSION = 1
+_REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED'})
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
 # keep both sources together below the vendor's anonymous 60 requests/minute.
 CRYPTOHFT_REQUEST_WEIGHT = 40
@@ -151,15 +154,19 @@ def _dependency_path(market: Market, partition: Partition) -> Path:
     return root / f'book_vendor_{market}' / (partition.key + '.dependencies.json')
 
 
-def _dependencies(market: Market, partition: Partition, current: str) -> tuple[tuple[str, str], ...]:
+def _dependency_evidence(market: Market, partition: Partition) -> dict[str, object]:
     path = _dependency_path(market, partition)
     if not path.exists():
-        return ()
+        return {}
     with path.open('rb') as stream:
         raw = stream.read(BOOK_DEPENDENCY_MAX_BYTES + 1)
     if len(raw) > BOOK_DEPENDENCY_MAX_BYTES:
         raise SourceError('BOOK_VENDOR_DEPENDENCY_BOUND', 'Vendor dependency evidence exceeds its bound.')
-    value = object_mapping(json.loads(raw))
+    return dict(object_mapping(json.loads(raw)))
+
+
+def _dependencies(market: Market, partition: Partition, current: str) -> tuple[tuple[str, str], ...]:
+    value = _dependency_evidence(market, partition)
     if value.get('current') != current:
         return ()
     items = value.get('dependencies')
@@ -180,6 +187,17 @@ def _dependencies(market: Market, partition: Partition, current: str) -> tuple[t
     if [key for key, _ in dependencies] != sorted({key for key, _ in dependencies}):
         raise SourceError('BOOK_VENDOR_DEPENDENCIES', 'Vendor dependencies require distinct ordered hours.')
     return tuple(dependencies)
+
+
+def _write_dependencies(market: Market, partition: Partition, current: str,
+                        dependencies: list[tuple[str, str]], *, rejected: str | None = None) -> None:
+    value: dict[str, object] = {'current': current, 'dependencies': dependencies}
+    if rejected is not None:
+        value['rejection'] = {'policy': _REJECTION_POLICY_VERSION, 'code': rejected}
+    payload = json.dumps(value, separators=(',', ':')).encode()
+    if len(payload) > BOOK_DEPENDENCY_MAX_BYTES:
+        raise SourceError('BOOK_VENDOR_DEPENDENCY_BOUND', 'Vendor dependency evidence exceeds its bound.')
+    atomic_write(_dependency_path(market, partition), payload)
 
 
 def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> str:
@@ -412,14 +430,15 @@ class CryptoHFTBookHourly:
                 raise SourceError('BOOK_VENDOR_PRELUDE_BOUND', 'Adjacent archives exceed the replay byte bound.')
             dependencies.append((after.key, _identity(self.market, after, original)))
             following_hashes.append((after.key, hashlib.sha256(original.body).hexdigest()))
-            local = replay_hour(archive, self.market, partition, root / 'grid',
-                                preludes=tuple(preludes), following=(tail,))
             key = _revision_key(current, tuple(dependencies))
-            if dependencies:
-                payload = json.dumps({'current': current, 'dependencies': dependencies}, separators=(',', ':')).encode()
-                if len(payload) > BOOK_DEPENDENCY_MAX_BYTES:
-                    raise SourceError('BOOK_VENDOR_DEPENDENCY_BOUND', 'Vendor dependency evidence exceeds its bound.')
-                atomic_write(_dependency_path(self.market, partition), payload)
+            try:
+                local = replay_hour(archive, self.market, partition, root / 'grid',
+                                    preludes=tuple(preludes), following=(tail,))
+            except SourceError as error:
+                if error.code in _REJECTION_CODES:
+                    _write_dependencies(self.market, partition, current, dependencies, rejected=error.code)
+                raise
+            _write_dependencies(self.market, partition, current, dependencies)
         except BaseException:
             temporary.cleanup()
             raise
@@ -451,6 +470,22 @@ class CryptoHFTBookHourly:
             key, (hashlib.sha256(json.dumps([hashlib.sha256(response.body).hexdigest(), input_hashes, following_hashes], separators=(',', ':')).encode()).hexdigest()
                   if input_hashes or following_hashes else hashlib.sha256(response.body).hexdigest()), evidence, local.row_count, rows
         )
+
+    def rejected_revision(self, partition: Partition, revision: str) -> bool:
+        value = _dependency_evidence(self.market, partition)
+        rejection = value.get('rejection')
+        if not isinstance(rejection, dict):
+            return False
+        verdict = object_mapping(rejection)
+        if verdict.get('policy') != _REJECTION_POLICY_VERSION or verdict.get('code') not in _REJECTION_CODES:
+            return False
+        current = value.get('current')
+        if not isinstance(current, str):
+            return False
+        dependencies = _dependencies(self.market, partition, current)
+        if not dependencies or dependencies[-1][0] != partition.end.strftime(HOUR_KEY_FORMAT):
+            return False
+        return revision == _revision_key(current, dependencies)
 
     def revalidate(self, partition: Partition, revision: Revision) -> None:
         if self.discover(partition) != revision.key:

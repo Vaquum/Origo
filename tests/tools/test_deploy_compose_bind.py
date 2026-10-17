@@ -174,6 +174,7 @@ def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None
     docker = r"""
 set -euo pipefail
 PROJECT_NAME=test
+retained_workers=()
 function docker() {
     case "$*" in
       'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
@@ -241,6 +242,7 @@ def test_cube_activation_requires_all_previous_writers_retired(tmp_path: Path) -
     docker = r"""
 set -euo pipefail
 PROJECT_NAME=test
+retained_workers=()
 function docker() {
     case "$*" in
       'compose -p test -f docker-compose.deploy.yml ps -q dagster dagit')
@@ -330,7 +332,8 @@ def test_egress_preflight_detaches_stdin_and_precedes_replacement(tmp_path: Path
     import textwrap
 
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    start = workflow.index('          bash deploy/prepare_binance_egress.sh')
+    setup = workflow.index('          bash deploy/prepare_binance_egress.sh')
+    start = workflow.rfind('          if [', 0, setup)
     end = workflow.index('          # Bootstrap runs', start)
     invocation = textwrap.dedent(workflow[start:end])
     deploy = tmp_path / 'deploy'
@@ -341,6 +344,7 @@ def test_egress_preflight_detaches_stdin_and_precedes_replacement(tmp_path: Path
     stub = r"""
 set -euo pipefail
 PROJECT_NAME=test
+retained_workers=()
 function docker() {
     case "$*" in
       'compose -p test -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '*)

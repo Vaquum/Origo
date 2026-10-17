@@ -5,11 +5,13 @@ import importlib
 import itertools
 import json
 import os
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
 from typing import TYPE_CHECKING, cast
 
 from ..arrow_types import ArrowCompression, ArrowParquet
@@ -34,6 +36,10 @@ _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNO
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
 # keep both sources together below the vendor's anonymous 60 requests/minute.
 CRYPTOHFT_REQUEST_WEIGHT = 40
+CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT = 2
+CRYPTOHFT_TOKEN_URL = 'https://api.cryptohftdata.com/v1/jwt-token'
+_TOKEN_LOCK = Lock()
+_token: tuple[str, str, float] | None = None
 # The :15 schedule has five minutes for admission, replay and activation.
 BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 20 * 60
 BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS = 5 * 60
@@ -66,19 +72,61 @@ def _file(market: Market, partition: Partition) -> str:
     return f'{exchange}/{partition.start:%Y-%m-%d/%H}/BTCUSDT_orderbook.parquet'
 
 
-def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+def _token_for(key: str, *, rejected: str | None = None) -> str:
+    global _token
+    with _TOKEN_LOCK:
+        if _token is not None and _token[0] == key and time.time() < _token[2] and _token[1] != rejected:
+            return _token[1]
+        response = get_response(
+            CRYPTOHFT_TOKEN_URL, headers={'X-API-Key': key},
+            weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT, method='POST',
+        )
+        try:
+            payload = object_mapping(json.loads(response.body))
+        except (ValueError, TypeError):
+            raise SourceError('BOOK_VENDOR_AUTH_INVALID', 'Provider token response is invalid.') from None
+        token = payload.get('jwt_token')
+        lifetime = payload.get('expires_in', 14400)
+        if (not isinstance(token, str) or not token.strip()
+                or not isinstance(lifetime, (int, float)) or isinstance(lifetime, bool)
+                or not 0 < lifetime < float('inf')
+                or str(payload.get('token_type', 'Bearer')).lower() != 'bearer'):
+            raise SourceError('BOOK_VENDOR_AUTH_INVALID', 'Provider token response is invalid.')
+        _token = (key, token, time.time() + lifetime - min(300, lifetime / 10))
+        return token
+
+
+def _archive_response(market: Market, partition: Partition, *, metadata: bool,
+                      token: str | None) -> Response:
+    headers = {'Authorization': f'Bearer {token}'} if token is not None else {}
+    if metadata:
+        headers['Range'] = 'bytes=0-0'
     try:
         return get_response(
-            CRYPTOHFT_URL,
-            params={'file': _file(market, partition)},
-            headers={'Range': 'bytes=0-0'} if metadata else None,
-            weight=CRYPTOHFT_REQUEST_WEIGHT,
+            CRYPTOHFT_URL, params={'file': _file(market, partition)},
+            headers=headers or None,
+            weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT if token is not None else CRYPTOHFT_REQUEST_WEIGHT,
         )
     except SourceError as error:
         latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
         raise
+
+
+def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+    key = os.environ.get('CRYPTOHFTDATA_API_KEY', '')
+    if not key:
+        return _archive_response(market, partition, metadata=metadata, token=None)
+    token = _token_for(key)
+    for attempt in range(2):
+        try:
+            return _archive_response(market, partition, metadata=metadata, token=token)
+        except SourceError as error:
+            if error.code != 'PROVIDER_HTTP_401' or attempt:
+                raise
+        token = _token_for(key, rejected=token)
+    raise RuntimeError('Provider authentication attempts exhausted.')
 
 
 def _identity(market: Market, partition: Partition, response: Response) -> str:
@@ -89,12 +137,12 @@ def _identity(market: Market, partition: Partition, response: Response) -> str:
     return 'cryptohftdata-v1:' + hashlib.sha256(payload).hexdigest()
 
 
-def _archive_rows(path: Path) -> Iterator[dict[str, object]]:
+def _archive_rows(path: Path, *, columns: tuple[str, ...] = _COLUMNS) -> Iterator[dict[str, object]]:
     parquet = cast(ArrowParquet, importlib.import_module('pyarrow.parquet'))
     archive = parquet.ParquetFile(str(path))
     if not set(_COLUMNS) <= set(archive.schema_arrow.names):
         raise SourceError('BOOK_VENDOR_SCHEMA', 'Hourly archive lacks required order-book columns.')
-    for batch in archive.iter_batches(batch_size=CRYPTOHFT_BATCH_ROWS, columns=list(_COLUMNS)):
+    for batch in archive.iter_batches(batch_size=CRYPTOHFT_BATCH_ROWS, columns=list(columns)):
         for raw in batch.to_pylist():
             yield dict(object_mapping(raw))
 
@@ -144,7 +192,7 @@ def _frames(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[d
 
 def _has_snapshot(path: Path, start_ms: int) -> bool:
     return any(row['event_type'] == 'snapshot' and int(str(row['event_time'])) <= start_ms
-               for row in _archive_rows(path))
+               for row in _archive_rows(path, columns=('event_type', 'event_time')))
 
 
 def _dependency_path(market: Market, partition: Partition) -> Path:

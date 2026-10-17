@@ -69,20 +69,20 @@ def test_run_retries_stay_disabled_until_replacement_is_atomic() -> None:
 
 
 def test_queue_reserves_a_maintenance_lane() -> None:
-    """19 slots: 10 backfill, 8 routine and one lane only the maintenance job can occupy."""
+    """40 slots: 31 backfill, 8 routine and one lane only the maintenance job can occupy."""
     config = _validated_instance_config()
     coordinator = config['run_coordinator']
     assert isinstance(coordinator, dict)
     queue = coordinator['config']
     assert isinstance(queue, dict)
-    assert (queue['max_concurrent_runs'], queue['dequeue_num_workers']) == (19, 19)
+    assert (queue['max_concurrent_runs'], queue['dequeue_num_workers']) == (40, 40)
     limits = {
         (limit['key'], limit['value']): limit['limit']
         for limit in queue['tag_concurrency_limits']
         if isinstance(limit['value'], str)
     }
     assert limits == {
-        ('origo/workload', 'backfill'): 10,
+        ('origo/workload', 'backfill'): 31,
         ('origo/workload', 'routine'): 8,
         ('origo/workload', 'maintenance'): 1,
     }
@@ -148,10 +148,23 @@ def test_queue_preserves_backfill_and_routine_capacity() -> None:
     coordinator = config['run_coordinator']
     assert coordinator['class'] == 'OrigoQueuedRunCoordinator'
     queue = coordinator['config']
-    assert queue['max_concurrent_runs'] == 19
+    assert queue['max_concurrent_runs'] == 40
     assert queue['dequeue_use_threads'] is True
-    assert queue['dequeue_num_workers'] == 19
+    assert queue['dequeue_num_workers'] == 40
     assert queue['dequeue_interval_seconds'] == 1
-    assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 10} in queue['tag_concurrency_limits']
+    assert {'key': 'origo/workload', 'value': 'backfill', 'limit': 31} in queue['tag_concurrency_limits']
     assert {'key': 'origo/workload', 'value': 'routine', 'limit': 8} in queue['tag_concurrency_limits']
     assert config['run_launcher']['class'] == 'OrigoRunLauncher'
+
+
+def test_book_bulk_capacity_preserves_live_lanes() -> None:
+    from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
+    from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
+
+    config = _validated_instance_config()['run_coordinator']['config']
+    limits = {item['value']: item['limit'] for item in config['tag_concurrency_limits']
+              if item['key'] == 'origo/workload'}
+    assert limits == {'backfill': 31, 'routine': 8, 'maintenance': 1}
+    assert config['max_concurrent_runs'] == config['dequeue_num_workers'] == sum(limits.values()) == 40
+    for spec in (BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
+        assert spec.orchestration.canonical_concurrency == limits['backfill'] + 1 == 32

@@ -1542,6 +1542,14 @@
     "tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance",
     "tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof",
     "tests/origo_source_native/test_publication_ownership.py::test_trade_publisher_restart_preserves_ownership_and_files",
-    "tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract"
+    "tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract",
+    "tests/origo_source_native/test_book_deploy.py::test_vendor_credential_reaches_native_jobs",
+    "tests/origo_source_native/test_book_vendor.py::test_vendor_jwt_authentication_rotates_without_url_credentials",
+    "tests/origo_source_native/test_book_vendor.py::test_vendor_authenticated_requests_keep_one_shared_budget",
+    "tests/origo_source_native/test_binance_daily_source_adapter.py::test_http_transfers_do_not_hold_admission_lock",
+    "tests/origo_source_native/test_binance_daily_source_adapter.py::test_transfer_failure_preserves_shared_admission",
+    "tests/origo_source_native/test_dagster_instance_config.py::test_book_bulk_capacity_preserves_live_lanes",
+    "tests/origo_source_native/test_book_vendor.py::test_snapshot_presence_reads_only_original_required_columns",
+    "tests/origo_source_native/test_book_deploy.py::test_native_jobs_only_rollout_expires_with_version"
   ]
 }

@@ -1,3 +1,7 @@
+# v3.34.9
+
+Authenticated shared book transport overlaps native downloads; bounded native bulk capacity preserves a current-hour slot and live capture during controller/monitor rollout. Legacy snapshot searches decode only their predicate columns.
+
 # v3.34.8
 
 - Skip unchanged rejected hourly book revisions during automatic audit while retaining failures and native explicit retries.

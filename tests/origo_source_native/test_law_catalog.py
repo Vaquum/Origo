@@ -201,7 +201,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             gates[f'law.D1:{spec.projection_table_name}']['thresholds']['delivery_grace_seconds']
             == D1_DELIVERY_GRACE_SECONDS
         )
-    assert gates['orchestration.admission.global']['thresholds']['limit'] == 19
+    assert gates['orchestration.admission.global']['thresholds']['limit'] == 40
     assert len([key for key in gates if key.startswith('orchestration.admission.tag:')]) == 5
     assert build_catalog(SHA)['version'] == catalog['version']
     assert code_location(source_lock, SHA)['path'] == 'origo/sources/locking.py'
@@ -343,7 +343,7 @@ def test_installed_package_uses_instance_config_and_package_relative_code(
             "assert Path(law_catalog.__file__).parent == Path(sys.argv[1]) / 'origo'; "
             'catalog = law_catalog.build_catalog(sys.argv[2]); '
             "gate = next(g for g in catalog['gates'] if g['id'] == 'orchestration.admission.global'); "
-            "assert gate['thresholds']['limit'] == 19; "
+            "assert gate['thresholds']['limit'] == 40; "
             "assert law_catalog.code_location(source_lock, sys.argv[2])['path'] == 'origo/sources/locking.py'; "
             'assert law_catalog.code_location(yaml.safe_load, sys.argv[2]) is None',
             str(installed),

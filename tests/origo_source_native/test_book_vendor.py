@@ -429,3 +429,194 @@ def test_real_hour_survives_original_seed_region_without_reseeding(
     assert applied > 10000
     if market == 'perp':
         assert beyond > 10000
+
+
+def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, caplog):
+    clock = [1000.0]
+    calls = []
+    minted = [0]
+    invalid = [False]
+    reject = [0]
+
+    def transport(url, *, params=None, headers=None, weight=0, method='GET'):
+        calls.append((url, params, dict(headers or {}), weight, method))
+        assert 'api_key=' not in url
+        if url == vendor.CRYPTOHFT_TOKEN_URL:
+            assert method == 'POST' and headers == {'X-API-Key': 'control-key'}
+            if invalid[0]:
+                raise SourceError('PROVIDER_HTTP_401', 'Provider returned HTTP 401.')
+            minted[0] += 1
+            return Response(json.dumps({'jwt_token': f'control-token-{minted[0]}',
+                                        'expires_in': 100, 'token_type': 'Bearer'}).encode(), {}, 200)
+        assert method == 'GET' and 'X-API-Key' not in (headers or {})
+        if reject[0]:
+            reject[0] -= 1
+            raise SourceError('PROVIDER_HTTP_401', 'Provider returned HTTP 401.')
+        return Response(b'provider-protocol-body', {'ETag': 'same-object'}, 206 if 'Range' in (headers or {}) else 200)
+
+    monkeypatch.setattr(vendor, '_token', None)
+    monkeypatch.setattr(vendor.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(vendor, 'get_response', transport)
+    monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'control-key')
+    partition = vendor.hour_partition(REAL_HOUR)
+    for market in ('spot', 'perp'):
+        for metadata in (False, True):
+            vendor._response(market, partition, metadata=metadata)
+    assert minted == [1]
+    clock[0] = 1091
+    vendor._response('spot', partition, metadata=True)
+    assert minted == [2]
+    reject[0] = 1
+    vendor._response('perp', partition, metadata=False)
+    assert minted == [3]
+    reject[0] = 2
+    with pytest.raises(SourceError, match='HTTP 401'):
+        vendor._response('spot', partition, metadata=False)
+    assert minted == [4] and reject == [0]
+    # A fresh native process has no token; a rejected key never falls back anonymously.
+    monkeypatch.setattr(vendor, '_token', None)
+    invalid[0] = True
+    before = len(calls)
+    with pytest.raises(SourceError) as failure:
+        vendor._response('spot', partition, metadata=True)
+    assert failure.value.code == 'PROVIDER_HTTP_401'
+    assert len(calls) == before + 1 and calls[-1][0] == vendor.CRYPTOHFT_TOKEN_URL
+    assert all(weight == 2 for _, _, _, weight, _ in calls)
+    # Only an archive 404 can mean unpublished; token mint/refresh failures stay loud.
+    recent = vendor.hour_partition(datetime.now(UTC).strftime('%Y-%m-%dT%HZ'))
+    for refresh in (False, True):
+        monkeypatch.setattr(vendor, '_token', None)
+        token_calls = [0]
+
+        def token_unavailable(url, **kwargs):
+            if url == vendor.CRYPTOHFT_TOKEN_URL:
+                token_calls[0] += 1
+                if not refresh or token_calls[0] > 1:
+                    raise SourceError('PROVIDER_HTTP_404', 'Provider returned HTTP 404.')
+                return Response(b'{"jwt_token":"control-token","expires_in":100}', {}, 200)
+            raise SourceError('PROVIDER_HTTP_401', 'Provider returned HTTP 401.')
+
+        monkeypatch.setattr(vendor, 'get_response', token_unavailable)
+        with pytest.raises(SourceError) as failure:
+            vendor._response('spot', recent, metadata=True)
+        assert failure.value.code == 'PROVIDER_HTTP_404'
+        assert token_calls == [2 if refresh else 1]
+    monkeypatch.setattr(vendor, 'get_response', transport)
+    assert 'control-key' not in caplog.text and 'control-token' not in caplog.text
+    # The key is confined to the token endpoint even if it returns a redirect.
+    import requests
+    from origo.sources.adapters import binance_daily as daily
+    sent = {}
+
+    def post(url, **kwargs):
+        sent.update(kwargs)
+        value = requests.Response()
+        value.status_code = 302
+        value._content = b''
+        value._content_consumed = True
+        value.headers['Location'] = 'https://storage.example/object'
+        return value
+
+    monkeypatch.setattr(daily.requests, 'post', post)
+    with daily._request(vendor.CRYPTOHFT_TOKEN_URL, None, {'X-API-Key': 'control-key'},
+                        method='POST') as redirected:
+        assert redirected.status_code == 302
+    assert sent['allow_redirects'] is False
+    monkeypatch.delenv('CRYPTOHFTDATA_API_KEY')
+    calls.clear()
+    vendor._response('spot', partition, metadata=False)
+    assert calls == [(vendor.CRYPTOHFT_URL, {'file': vendor._file('spot', partition)}, {}, 40, 'GET')]
+
+
+def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypatch):
+    import requests
+    from origo.sources.adapters import binance_daily as daily
+
+    clock = [1000.0]
+    calls = []
+    responses = []
+
+    def response(status=200, headers=None, body=b'protocol'):
+        value = requests.Response()
+        value.status_code = status
+        value.headers.update(headers or {})
+        value._content = body
+        value._content_consumed = True
+        return value
+
+    def request(url, params, headers, egress_ip=None, method='GET'):
+        calls.append((url, dict(headers or {}), method, clock[0]))
+        if url == vendor.CRYPTOHFT_TOKEN_URL:
+            value = response(body=b'{"jwt_token":"control-token","expires_in":14400}')
+        else:
+            value = response(headers={'ETag': 'recorded-object'})
+            value.history = [response(302, {'RateLimit-Remaining': '0', 'RateLimit-Reset': '2',
+                                           'RateLimit-Policy': 'q=60;w=60'})]
+        responses.append(value)
+        return value
+
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'control-key')
+    monkeypatch.setattr(vendor, '_token', None)
+    monkeypatch.setattr(daily, '_request', request)
+    monkeypatch.setattr(daily.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(daily.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    partition = vendor.hour_partition(REAL_HOUR)
+    first = vendor._response('spot', partition, metadata=True)
+    vendor._response('perp', partition, metadata=False)
+    assert len(list(tmp_path.glob('*.state'))) == 1
+    assert calls[0][0] == vendor.CRYPTOHFT_TOKEN_URL
+    assert calls[1][3] >= 1000.1 and calls[2][3] >= calls[1][3] + 2
+    assert daily._read_budget((tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state').open())[1] >= clock[0] + 2
+    assert vendor._identity('spot', partition, first) == vendor._identity(
+        'spot', partition, Response(b'', {'ETag': 'recorded-object'}, 206))
+    # Exercise requests' real cross-host redirect preparation without a network socket.
+    prepared = requests.Request('GET', vendor.CRYPTOHFT_URL,
+                                headers={'Authorization': 'Bearer control-token', 'Range': 'bytes=0-0'}).prepare()
+    redirect = response(302, {'Location': 'https://storage.example/object'})
+    redirect.url = vendor.CRYPTOHFT_URL
+    redirect.request = prepared
+    with requests.Session() as session:
+        next_request = next(session.resolve_redirects(redirect, prepared, yield_requests=True))
+    assert 'Authorization' not in next_request.headers and 'X-API-Key' not in next_request.headers
+    assert next_request.headers['Range'] == 'bytes=0-0'
+    assert all(r._content_consumed for r in responses)
+
+
+def test_snapshot_presence_reads_only_original_required_columns(
+    vendor_session_root, tmp_path, monkeypatch,
+):
+    import pyarrow.parquet as pq
+
+    partition = vendor.hour_partition('2025-06-28T05Z')
+    _, body, _ = _original_archive(vendor_session_root, 'perp', partition)
+    raw = tmp_path / 'original.parquet'
+    raw.write_bytes(body)
+    path = vendor._prepare_archive(raw, tmp_path / 'unwrapped')
+    original = vendor._archive_rows
+    observed = []
+
+    def rows(path, *, columns=vendor._COLUMNS):
+        observed.append(columns)
+        yield from original(path, columns=columns)
+
+    monkeypatch.setattr(vendor, '_archive_rows', rows)
+    for start in (0, int(partition.end.timestamp() * 1000)):
+        expected = any(row['event_type'] == 'snapshot' and int(str(row['event_time'])) <= start
+                       for row in original(path))
+        assert vendor._has_snapshot(path, start) == expected
+    assert observed == [('event_type', 'event_time')] * 2
+    table = pq.read_table(path)
+    damaged = tmp_path / 'missing-column.parquet'
+    pq.write_table(table.drop(['quantity']), damaged)
+    with pytest.raises(SourceError) as failure:
+        vendor._has_snapshot(damaged, 0)
+    assert failure.value.code == 'BOOK_VENDOR_SCHEMA'
+    for value, expected in [('123', True), (123, True)]:
+        monkeypatch.setattr(vendor, '_archive_rows', lambda *a, **k: iter([
+            {'event_type': 'snapshot', 'event_time': value}]))
+        assert vendor._has_snapshot(path, 123) == expected
+    monkeypatch.setattr(vendor, '_archive_rows', lambda *a, **k: iter([
+        {'event_type': 'snapshot', 'event_time': None}]))
+    with pytest.raises(ValueError):
+        vendor._has_snapshot(path, 123)

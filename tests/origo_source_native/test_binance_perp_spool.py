@@ -350,6 +350,7 @@ def test_rejected_bridge_revalidation_preserves_proof(
         legacy.setenv('ORIGO_TRADE_MAINTENANCE', '0')
         legacy.setenv('ORIGO_PERP_CAPTURE_ROOT', str(tmp_path))
         reader = Mock(spec=SourceStore)
+        reader.database = 'origo'
         reader.active_intervals.return_value = ()
         reader.anchor.return_value = _partition().start
         reader.enabled_groups.return_value = ()

@@ -246,7 +246,9 @@ function docker() {
     'compose -p isolated-capture-test -f docker-compose.deploy.yml run --rm --no-deps --entrypoint rm monitor -f '*)
       printf 'retire-heartbeats\n' >> "$CALLS"
       if [ "$CASE" = heartbeat-failed ]; then return 1; fi
-      for selected in "${@:16}"; do rm "$HEARTBEATS/${selected##*/}"; done ;;
+      for selected in "$@"; do
+        case "$selected" in /opt/origo/heartbeats/*.heartbeat) rm "$HEARTBEATS/${selected##*/}" ;; esac
+      done ;;
     *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 3 ;;
   esac
 }

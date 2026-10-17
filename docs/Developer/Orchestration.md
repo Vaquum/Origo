@@ -7,7 +7,7 @@ queues or activate automation in Dagit.
 
 ## Admission and capacity
 
-- Nineteen total run slots: ten historical/backfill runs, eight routine runs and one
+- Forty total run slots: 31 historical/backfill runs, eight routine runs and one
   maintenance run. Each class has its own native tag limit, so routine priority cannot
   consume the backfill allocation and `maintain_operational_metadata_job` (workload
   `maintenance`, priority 300) always has a lane while the other two are full. All
@@ -20,9 +20,10 @@ queues or activate automation in Dagit.
   forward with real service. A newcomer ties with an older backlog's next place and
   queues after it, so concurrent backfills alternate, a stream of new backfills cannot
   starve an older one, and none holds another source's fills back. Deployment recovery keeps the places admission gave and continues after them.
-- Native dequeue uses nineteen launch threads and a one-second poll. Canonical
-  source operations retain their registered eight-worker pool. Ten backfill run
-  slots preserve the existing launch capacity around those eight operations;
+- Native dequeue uses 40 launch threads and a one-second poll. Canonical
+  book operations have 32-worker pools; other sources retain their registered
+  eight-worker pools. The 31 backfill run slots leave one book operation slot
+  for scheduled current authority;
   worker startup and teardown must not reduce source concurrency. Run limits
   and operation pools both apply.
 - Routine runs have higher queue priority; daily partitions (including briefing

@@ -50,8 +50,10 @@ Binance seed or invented state repairs it. Complete hours have 36,000 depth20 ro
 3,600 depth200 rows, and 60 rows in each minute projection. Canonical activation
 masks the overlapping provisional minutes in the existing current-reader views.
 
-Both vendor sources share the existing host-keyed transport ledger, limited to
-30 requests/minute, separately from Binance host-family quotas. Discovery,
+Both vendor sources share the existing host-keyed transport ledger: 30 requests/minute
+anonymously and an authenticated application ceiling of 600/minute. Token mints
+and downloads share admission; stricter API-hop RateLimit policy and exhausted
+windows plus Retry-After remain binding, separately from Binance host-family quotas. Discovery,
 backfill, replay, revalidation and monitoring make zero Binance requests. Capture
 seed/connection limits and weighted Binance allowances are unchanged.
 
@@ -211,7 +213,31 @@ step skipped or blocked; retained coverage and open failures remain truthful.
 Cancel the native market backfill and queued/running child runs on the first
 capacity failure or a new bulk-attributable C1, R1 or capture breach. Retain the
 selection and resume through native failed/missing controls when existing bounds
-recover. Do not start perpetual while priority spot is blocked. Quotas and pools
-stay unchanged: six requests per modern successful hour plus three per prelude
-imply optimistic lower bounds of 38 hours per market, before existing work,
-retries and contention; actual import can take a week or longer.
+recover. Do not start perpetual while priority spot is blocked. The reviewed
+#525/#526 throughput change permits 32 canonical slots per market and 31 global
+bulk runs, with eight routine and one maintenance slot (40 total). The global bulk
+lane also governs other sources, whose source-specific pools stay unchanged.
+
+Before rollout, finish or cancel all existing bulk parents and children. The
+version-pinned controller/monitor exception retains capture/provisional/publication
+container IDs, refuses pending component additions, and refreshes the monitor
+catalog. The next version bump returns to ordinary full rollout.
+
+Qualify exact native selections of 2/4/8/16/32 hours, then continue batches no larger
+than the highest demonstrated safe selected population, at most 31 simultaneous
+bulk. Sustain qualification for 30 minutes across an actual due current hour and
+both audits. Current authority has a canonical slot free from bulk. The active
+agent checks existing evidence at most 60 seconds apart and cancels parent and
+children on capacity/reserve/live failure, HTTP429, SQLite lock or admission-claim
+error. There is no new detached load controller.
+
+Capacity checks observe free space per run, without reserving concurrent scratch.
+Require 100 GB plus measured live consumption, selected maximum scratch, projected
+retained growth and 20 GB margin; retain at least 32 GB available memory and eight
+idle CPU-equivalents at qualified load. Measure legacy prelude/replay and modern
+strata separately, accepted and attempted rates separately, including token mints,
+activation/reconciliation and retries. An unfilled modern hour uses four download
+requests, not six; active replacement adds initial discovery. The target is 12
+active-processing hours per market, with the unchanged 23-hour retry tail separate.
+Unresolved/pending keys block completion; genuine input rejections and exhausted
+provider gaps remain visibly missing.

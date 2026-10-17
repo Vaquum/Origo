@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -50,6 +50,39 @@ def _int(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError('State counter must be an integer.')
     return value
+
+
+def _current_partition_indices(
+    partitions: Sequence[Partition], anchor: datetime, policy: SourceReadPolicy
+) -> tuple[int, ...]:
+    """Select from partition_start/provisional order, retaining half-open coverage."""
+    canonical = [partition for partition in partitions if not partition.provisional]
+    cursor = 0
+    covered_until: datetime | None = None
+    eligible: list[int] = []
+    for index, partition in enumerate(partitions):
+        while cursor < len(canonical) and canonical[cursor].start <= partition.start:
+            end = canonical[cursor].end
+            covered_until = end if covered_until is None else max(covered_until, end)
+            cursor += 1
+        if (
+            not partition.provisional
+            or covered_until is None
+            or partition.start >= covered_until
+        ):
+            eligible.append(index)
+    if policy == SourceReadPolicy.AVAILABLE:
+        return tuple(eligible)
+    frontier = anchor
+    for index in eligible:
+        partition = partitions[index]
+        if partition.start > frontier:
+            break
+        frontier = max(frontier, partition.end)
+    return tuple(
+        index for index in eligible
+        if not partitions[index].provisional or partitions[index].end <= frontier
+    )
 
 
 def ordered_component_rows(
@@ -557,36 +590,18 @@ class SourceStore:
         result: list[StateRecord] = []
         for row in rows:
             result.append(self._state_record(row))
-        canonical = [record for record in result if not record.partition.provisional]
         if canonical_only:
-            return tuple(canonical)
+            return tuple(record for record in result if not record.partition.provisional)
         rows = self.execute(
             f'SELECT anchor FROM {self.table("source_anchor_log")} WHERE source_key=%(source)s',
             {'source': self.spec.key},
         )
         if len(rows) != 1:
             raise RuntimeError('A source must have exactly one immutable coverage anchor.')
-        frontier = _utc(rows[0][0])
-        eligible = [
-            record
-            for record in result
-            if not record.partition.provisional
-            or not any(
-                day.partition.start <= record.partition.start < day.partition.end
-                for day in canonical
-            )
-        ]
-        if self.spec.read_policy == SourceReadPolicy.AVAILABLE:
-            return tuple(eligible)
-        for record in eligible:
-            if record.partition.start > frontier:
-                break
-            frontier = max(frontier, record.partition.end)
-        return tuple(
-            record
-            for record in eligible
-            if not record.partition.provisional or record.partition.end <= frontier
+        selected = _current_partition_indices(
+            [record.partition for record in result], _utc(rows[0][0]), self.spec.read_policy
         )
+        return tuple(result[index] for index in selected)
 
     def snapshot(self, *, canonical_only: bool = False) -> Snapshot:
         records = self.records(canonical_only=canonical_only)

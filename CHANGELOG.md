@@ -1,3 +1,7 @@
+# v3.34.6
+
+- Select current source partitions in one ordered pass; separate trade ingestion from publication and perpetual historical repair while preserving file and reader contracts.
+
 # v3.34.5
 
 - Set the source free-space reserve to a fixed 100 GB instead of 30% of filesystem capacity or a multiple of the measured working set; query admission and the gate catalog use the same reserve.

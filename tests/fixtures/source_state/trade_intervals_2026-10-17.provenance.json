@@ -1,0 +1,18 @@
+{
+  "source": "origo.source_active_partitions and origo.source_anchor_log; production 37.27.112.167",
+  "captured_at": "2026-10-17T09:50:40.187977+00:00",
+  "baseline_sha": "7eb0cf33bf1ac212b830f85083cee9b510a98df6",
+  "full_capture_sha256": "d501ed4431de40d107981e282822f7fe589224d6e78371addb8776d26f0f3e5c",
+  "projection_sha256": "582fa89ef867e0c8802cdea3eb5a57bf27d11b8cc678d7ead13eef61fe1b4a61",
+  "projection_fields": [
+    "partition_key",
+    "provisional",
+    "partition_start",
+    "partition_end"
+  ],
+  "oracle": "Unmodified SourceStore.records() and state_token() in the deployed baseline image, replayed once over the frozen full capture. Full metadata is not fabricated or stored in the interval projection.",
+  "rows": {
+    "binance_spot_trades": 47028,
+    "binance_perp_trades": 41590
+  }
+}

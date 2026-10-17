@@ -1532,5 +1532,8 @@
       "tests/origo_source_native/test_law.py::test_cube_observations_route_m1_to_the_reader_selected_projection",
       "tests/origo_source_native/test_law_page.py::test_canonical_reader_cube_damage_renders_on_the_canonical_projection_node"
     ]
-  }
+  },
+  "required_nodes": [
+    "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals"
+  ]
 }

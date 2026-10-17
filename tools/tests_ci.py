@@ -88,6 +88,15 @@ def verify_report(
             raise ValueError(f'Missing consolidated contract cases: {missing_retained}')
     if missing_original := sorted(set(baseline) - set(identities) - set(consolidations)):
         raise ValueError(f'Missing original runtime tests: {missing_original}')
+    required: object = contract.get('required_nodes', [])
+    if (
+        not isinstance(required, list)
+        or not all(isinstance(node, str) for node in required)
+        or len(required) != len(set(required))
+    ):
+        raise ValueError('Required tests must contain distinct test identities')
+    if use_consolidations and (missing_required := sorted(set(required) - set(identities))):
+        raise ValueError(f'Missing required runtime tests: {missing_required}')
     groups: object = contract['groups']
     if not isinstance(groups, list) or not groups:
         raise ValueError('The acceptance manifest must contain groups')

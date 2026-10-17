@@ -144,7 +144,9 @@ def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(tmp_pat
         for limit in config['run_coordinator']['config']['tag_concurrency_limits']:
             if limit.get('value') == 'backfill':
                 limit['limit'] = width
-        with instance_for_test(temp_dir=str(tmp_path / str(width)), overrides={
+        home = tmp_path / str(width)
+        home.mkdir()
+        with instance_for_test(temp_dir=str(home), overrides={
             key: config[key] for key in ('run_coordinator', 'run_launcher', 'run_monitoring')
         }) as instance:
             _assert_native_queue_capacity(instance, width)

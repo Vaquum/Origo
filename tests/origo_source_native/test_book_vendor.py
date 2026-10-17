@@ -482,6 +482,26 @@ def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, 
     assert failure.value.code == 'PROVIDER_HTTP_401'
     assert len(calls) == before + 1 and calls[-1][0] == vendor.CRYPTOHFT_TOKEN_URL
     assert all(weight == 2 for _, _, _, weight, _ in calls)
+    # Only an archive 404 can mean unpublished; token mint/refresh failures stay loud.
+    recent = vendor.hour_partition(datetime.now(UTC).strftime('%Y-%m-%dT%HZ'))
+    for refresh in (False, True):
+        monkeypatch.setattr(vendor, '_token', None)
+        token_calls = [0]
+
+        def token_unavailable(url, **kwargs):
+            if url == vendor.CRYPTOHFT_TOKEN_URL:
+                token_calls[0] += 1
+                if not refresh or token_calls[0] > 1:
+                    raise SourceError('PROVIDER_HTTP_404', 'Provider returned HTTP 404.')
+                return Response(b'{"jwt_token":"control-token","expires_in":100}', {}, 200)
+            raise SourceError('PROVIDER_HTTP_401', 'Provider returned HTTP 401.')
+
+        monkeypatch.setattr(vendor, 'get_response', token_unavailable)
+        with pytest.raises(SourceError) as failure:
+            vendor._response('spot', recent, metadata=True)
+        assert failure.value.code == 'PROVIDER_HTTP_404'
+        assert token_calls == [2 if refresh else 1]
+    monkeypatch.setattr(vendor, 'get_response', transport)
     assert 'control-key' not in caplog.text and 'control-token' not in caplog.text
     # The key is confined to the token endpoint even if it returns a redirect.
     import requests

@@ -96,36 +96,37 @@ def _token_for(key: str, *, rejected: str | None = None) -> str:
         return token
 
 
-def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+def _archive_response(market: Market, partition: Partition, *, metadata: bool,
+                      token: str | None) -> Response:
+    headers = {'Authorization': f'Bearer {token}'} if token is not None else {}
+    if metadata:
+        headers['Range'] = 'bytes=0-0'
     try:
-        key = os.environ.get('CRYPTOHFTDATA_API_KEY', '')
-        if key:
-            token = _token_for(key)
-            for attempt in range(2):
-                headers = {'Authorization': f'Bearer {token}'}
-                if metadata:
-                    headers['Range'] = 'bytes=0-0'
-                try:
-                    return get_response(
-                        CRYPTOHFT_URL, params={'file': _file(market, partition)},
-                        headers=headers, weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT,
-                    )
-                except SourceError as error:
-                    if error.code != 'PROVIDER_HTTP_401' or attempt:
-                        raise
-                    token = _token_for(key, rejected=token)
-            raise RuntimeError('Provider authentication attempts exhausted.')
         return get_response(
-            CRYPTOHFT_URL,
-            params={'file': _file(market, partition)},
-            headers={'Range': 'bytes=0-0'} if metadata else None,
-            weight=CRYPTOHFT_REQUEST_WEIGHT,
+            CRYPTOHFT_URL, params={'file': _file(market, partition)},
+            headers=headers or None,
+            weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT if token is not None else CRYPTOHFT_REQUEST_WEIGHT,
         )
     except SourceError as error:
         latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
         raise
+
+
+def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+    key = os.environ.get('CRYPTOHFTDATA_API_KEY', '')
+    if not key:
+        return _archive_response(market, partition, metadata=metadata, token=None)
+    token = _token_for(key)
+    for attempt in range(2):
+        try:
+            return _archive_response(market, partition, metadata=metadata, token=token)
+        except SourceError as error:
+            if error.code != 'PROVIDER_HTTP_401' or attempt:
+                raise
+        token = _token_for(key, rejected=token)
+    raise RuntimeError('Provider authentication attempts exhausted.')
 
 
 def _identity(market: Market, partition: Partition, response: Response) -> str:

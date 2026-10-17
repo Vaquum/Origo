@@ -1,6 +1,10 @@
+# v3.34.7
+
+- Run trade publication and perpetual repair independently of ingestion; revalidate rejected bridges with bounded retained evidence while preserving reader and file contracts.
+
 # v3.34.6
 
-- Select current source partitions in one ordered pass; separate trade ingestion from publication and perpetual historical repair while preserving file and reader contracts.
+- Select current source partitions in one ordered pass and pin the retained production-state regression.
 
 # v3.34.5
 

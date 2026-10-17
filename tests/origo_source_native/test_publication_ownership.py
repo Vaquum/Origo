@@ -173,7 +173,10 @@ def test_trade_publisher_restart_preserves_ownership_and_files(
             assert reader.num_record_batches == 1
 
     # Simulate a still-live render from an older process. The worker must use its nonblocking lock.
+    from origo.sources import prepare
+
     monkeypatch.setattr(provisional, 'publication_current', lambda *args, **kwargs: False)
+    monkeypatch.setattr(prepare, 'publication_current', lambda *args, **kwargs: False)
     with source_lock(tmp_path / 'locks', spec.key, 'consumer_mount'):
         failed = publisher().tick(NOW)
         assert failed.failed == (f'{spec.key}:mount',)

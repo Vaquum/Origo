@@ -11,7 +11,7 @@ from decimal import Decimal
 from ipaddress import IPv4Address
 from math import isfinite
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal, TextIO
 from urllib.parse import urlsplit
 
 import requests
@@ -48,6 +48,7 @@ def _request(
     params: Mapping[str, str | int] | None,
     headers: Mapping[str, str] | None,
     egress_ip: str | None = None,
+    method: Literal['GET', 'POST'] = 'GET',
 ) -> requests.Response:
     try:
         if egress_ip is not None:
@@ -57,9 +58,15 @@ def _request(
                 adapter.poolmanager.connection_pool_kw['source_address'] = (egress_ip, 0)
                 session.mount('https://', adapter)
                 session.mount('http://', adapter)
-                return session.get(url, params=params, headers=headers, timeout=(5, 30))
-        return requests.get(url, params=params, headers=headers, timeout=(5, 30))
+                send = session.get if method == 'GET' else session.post
+                return send(url, params=params, headers=headers, timeout=(5, 30))
+        send = requests.get if method == 'GET' else requests.post
+        return send(url, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
+        if _budget_host(url) == 'api.cryptohftdata.com':
+            raise SourceError(
+                'PROVIDER_TRANSPORT_FAILED', f'Provider request failed: {type(error).__name__}.'
+            ) from None
         raise SourceError(
             'PROVIDER_TRANSPORT_FAILED', 'Provider request did not complete.'
         ) from error
@@ -88,11 +95,14 @@ def _weighted_request(
     headers: Mapping[str, str] | None,
     weight: int,
     egress_ip: str | None = None,
+    method: Literal['GET', 'POST'] = 'GET',
 ) -> requests.Response:
     root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
+    if _budget_host(url) == 'api.cryptohftdata.com':
+        return _vendor_request(root, url, params, headers, weight, egress_ip, method)
     # Processes share each host/address allowance; unbound callers keep the legacy file.
     rate, backstop = REST_HOST_BUDGETS.get(_budget_host(url), REST_DEFAULT_BUDGET)
     with _budget_state_file(root, url, egress_ip).open('a+') as state:
@@ -139,6 +149,88 @@ def _weighted_request(
         return response
 
 
+def _read_budget(state: TextIO) -> tuple[float, float]:
+    state.seek(0)
+    saved = state.read().strip()
+    values = tuple(map(float, saved.split())) if saved else (0.0, 0.0)
+    if len(values) != 2 or not all(isfinite(value) and value >= 0 for value in values):
+        raise ValueError('The persisted provider request budget is invalid.')
+    return values[0], values[1]
+
+
+def _save_budget(state: TextIO, next_request: float, pause: float) -> None:
+    state.seek(0)
+    state.truncate()
+    state.write(f'{next_request:.6f} {pause:.6f}')
+    state.flush()
+    os.fsync(state.fileno())
+
+
+def _vendor_pause(response: requests.Response, spacing: float) -> tuple[float, float]:
+    pause = 0.0
+    surcharge = 0.0
+    for hop in (*response.history, response):
+        retry = hop.headers.get('Retry-After')
+        if hop.status_code in (418, 429):
+            if retry is None or not retry.isdigit():
+                raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Provider Retry-After is invalid.')
+            pause = max(pause, time.time() + int(retry))
+        if hop.headers.get('RateLimit-Remaining') == '0':
+            reset = hop.headers.get('RateLimit-Reset')
+            if reset is None or not reset.isdigit():
+                raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Provider RateLimit-Reset is invalid.')
+            pause = max(pause, time.time() + int(reset))
+        policy = hop.headers.get('RateLimit-Policy', '')
+        quota = re.search(r'(?:^|[;,\s])q=(\d+)', policy)
+        window = re.search(r'(?:^|[;,\s])w=(\d+)', policy)
+        limit = hop.headers.get('RateLimit-Limit')
+        reset = hop.headers.get('RateLimit-Reset')
+        if quota and window and int(quota[1]) > 0:
+            surcharge = max(surcharge, int(window[1]) / int(quota[1]) - spacing)
+        elif limit and reset and limit.isdigit() and reset.isdigit() and int(limit) > 0:
+            surcharge = max(surcharge, int(reset) / int(limit) - spacing)
+    return pause, surcharge
+
+
+def _vendor_request(
+    root: Path, url: str, params: Mapping[str, str | int] | None,
+    headers: Mapping[str, str] | None, weight: int, egress_ip: str | None,
+    method: Literal['GET', 'POST'],
+) -> requests.Response:
+    spacing = weight / REST_DEFAULT_BUDGET[0]
+    with _budget_state_file(root, url, egress_ip).open('a+') as state:
+        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+        next_request, pause = _read_budget(state)
+        due = max(time.time(), next_request, pause)
+        _save_budget(state, due + spacing, pause)
+        fcntl.flock(state.fileno(), fcntl.LOCK_UN)
+        while True:
+            time.sleep(max(0.0, due - time.time()))
+            fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+            next_request, pause = _read_budget(state)
+            if time.time() >= pause:
+                fcntl.flock(state.fileno(), fcntl.LOCK_UN)
+                break
+            due = max(next_request, pause)
+            _save_budget(state, due + spacing, pause)
+            fcntl.flock(state.fileno(), fcntl.LOCK_UN)
+        response = (
+            _request(url, params, headers, egress_ip, method)
+            if method != 'GET' else _request(url, params, headers, egress_ip)
+            if egress_ip is not None else _request(url, params, headers)
+        )
+        try:
+            beat_worker()
+            deadline, surcharge = _vendor_pause(response, spacing)
+            fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+            next_request, pause = _read_budget(state)
+            _save_budget(state, max(next_request, deadline) + surcharge, max(pause, deadline))
+        except BaseException:
+            response.close()
+            raise
+        return response
+
+
 def get_response(
     url: str,
     *,
@@ -146,6 +238,7 @@ def get_response(
     headers: Mapping[str, str] | None = None,
     weight: int = 0,
     egress_ip: str | None = None,
+    method: Literal['GET', 'POST'] = 'GET',
 ) -> Response:
     if weight < 0:
         raise ValueError('Binance request weight cannot be negative.')
@@ -153,22 +246,30 @@ def get_response(
         egress_ip = str(IPv4Address(egress_ip))
     try:
         response = (
-            _weighted_request(url, params, headers, weight, egress_ip)
+            _weighted_request(url, params, headers, weight, egress_ip, method)
+            if method != 'GET' and weight
+            else _request(url, params, headers, egress_ip, method)
+            if method != 'GET'
+            else _weighted_request(url, params, headers, weight, egress_ip)
             if weight
             else _request(url, params, headers, egress_ip)
             if egress_ip is not None
             else _request(url, params, headers)
         )
-        if not 200 <= response.status_code < 300:
-            raise SourceError(
-                f'PROVIDER_HTTP_{response.status_code}',
-                f'Provider returned HTTP {response.status_code}.',
-            )
+        try:
+            if not 200 <= response.status_code < 300:
+                raise SourceError(
+                    f'PROVIDER_HTTP_{response.status_code}',
+                    f'Provider returned HTTP {response.status_code}.',
+                )
+            return Response(response.content, dict(response.headers), response.status_code, egress_ip)
+        finally:
+            if _budget_host(url) == 'api.cryptohftdata.com':
+                response.close()
     except SourceError as error:
         if egress_ip is None:
             raise
         raise SourceError(error.code, f'{error} (egress {egress_ip}).') from error
-    return Response(response.content, dict(response.headers), response.status_code, egress_ip)
 
 
 def parse_decimal(text: str) -> Decimal:

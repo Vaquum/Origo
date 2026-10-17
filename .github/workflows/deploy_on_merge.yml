@@ -56,6 +56,13 @@ jobs:
           echo "APP_IMAGE_LATEST=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/origo-dagster:latest" >> "$GITHUB_ENV"
           echo "CLICKHOUSE_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/origo-clickhouse:${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "CLICKHOUSE_IMAGE_LATEST=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/origo-clickhouse:latest" >> "$GITHUB_ENV"
+          python3 - <<'PYTHON' >> "$GITHUB_ENV"
+          import tomllib
+          with open("pyproject.toml", "rb") as source:
+              config = tomllib.load(source)
+          pinned = config.get("tool", {}).get("origo", {}).get("release", {}).get("native_jobs_only_version")
+          print("ORIGO_NATIVE_JOBS_ONLY=" + str(pinned == config["project"]["version"]).lower())
+          PYTHON
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -100,6 +107,7 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
+          CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}
           RESEND_API_KEY: test-key
           ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
@@ -135,7 +143,9 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
+          CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}
         run: |
+          umask 077
           DEPLOY_ENV_FILE="/tmp/origo-deploy.env"
           trap 'rm -f "$DEPLOY_ENV_FILE"' EXIT
 
@@ -156,6 +166,8 @@ jobs:
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
               "ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"],
+              "CRYPTOHFTDATA_API_KEY": os.environ["CRYPTOHFTDATA_API_KEY"],
+              "ORIGO_NATIVE_JOBS_ONLY": os.environ["ORIGO_NATIVE_JOBS_ONLY"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
               "ORIGO_PERP_WORKER_HOSTNAME": os.environ["ORIGO_PERP_WORKER_HOSTNAME"],
@@ -197,6 +209,33 @@ jobs:
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
           # Before any container is replaced, the new image must read every activated component.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility </dev/null
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster - <<'PYTHON'
+          from dagster import DagsterInstance, DagsterRunStatus, RunsFilter
+          from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+          from origo.sources.prepare import backfill_active
+          from origo.sources.registry import SOURCE_REGISTRY
+          from origo.sources.storage import SourceStore
+
+          with DagsterInstance.get() as instance:
+              inflight = instance.get_runs(filters=RunsFilter(
+                  statuses=[DagsterRunStatus.QUEUED, DagsterRunStatus.STARTING,
+                            DagsterRunStatus.STARTED, DagsterRunStatus.CANCELING],
+                  tags={"origo/workload": "backfill"}), limit=1)
+              if inflight or any(backfill_active(instance, spec) for spec in SOURCE_REGISTRY):
+                  raise SystemExit("Native-only rollout requires all bulk parents and children terminal.")
+          settings = get_clickhouse_settings()
+          client = make_clickhouse_client(settings)
+          try:
+              for spec in SOURCE_REGISTRY:
+                  groups = {item.activation_group for item in spec.components if item.activation_group}
+                  if groups - SourceStore(client, settings.database, spec).enabled_groups():
+                      raise SystemExit("Native-only rollout cannot activate new component groups.")
+          finally:
+              client.disconnect()
+          PYTHON
+          fi
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" != true ]; then
           bash deploy/prepare_binance_egress.sh
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '
           import os, socket
@@ -205,7 +244,9 @@ jobs:
                   connection.bind((ip, 0))
                   print(connection.getsockname()[0])
           ' </dev/null
+          fi
           # Capture owns .140 only after every previous raw-perp repair process retires.
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" != true ]; then
           prior_perp_ids="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter label=com.docker.compose.service=provisional-binance-perp-trades)"
           if [ -n "$prior_perp_ids" ]; then
             docker stop $prior_perp_ids </dev/null
@@ -224,23 +265,33 @@ jobs:
             fi
           done
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps perp-capture </dev/null
+          fi
           # Save only worker identity; never serialize container environments.
           prior_workers=()
           for worker in $(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit); do
             prior_workers+=("$(docker inspect --format '{{.Id}} {{.Config.Hostname}}' "$worker")")
           done
           prior_cube_writers=()
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            prior_cube_writer_ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit)"
+          else
           prior_cube_writer_ids="$(docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml ps -q dagster dagit provisional-worker)"
+          fi
           for worker in $prior_cube_writer_ids; do
             prior_cube_writers+=("$(docker inspect --format '{{.Id}}' "$worker")")
           done
           retirement_boundary=$(date +%s)
           # Recreate every cube writer, including on a retry of this same deployment.
           # Retiring the container also retires its local child run processes.
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --wait --wait-timeout 600 --force-recreate dagster dagit monitor \
+              || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
+          else
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
+          fi
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
           # so wait for the exec into dagster-daemon before recovery contends for the queue lock.
           for attempt in $(seq 1 90); do

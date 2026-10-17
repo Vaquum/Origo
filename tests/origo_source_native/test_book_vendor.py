@@ -483,6 +483,25 @@ def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, 
     assert len(calls) == before + 1 and calls[-1][0] == vendor.CRYPTOHFT_TOKEN_URL
     assert all(weight == 2 for _, _, _, weight, _ in calls)
     assert 'control-key' not in caplog.text and 'control-token' not in caplog.text
+    # The key is confined to the token endpoint even if it returns a redirect.
+    import requests
+    from origo.sources.adapters import binance_daily as daily
+    sent = {}
+
+    def post(url, **kwargs):
+        sent.update(kwargs)
+        value = requests.Response()
+        value.status_code = 302
+        value._content = b''
+        value._content_consumed = True
+        value.headers['Location'] = 'https://storage.example/object'
+        return value
+
+    monkeypatch.setattr(daily.requests, 'post', post)
+    with daily._request(vendor.CRYPTOHFT_TOKEN_URL, None, {'X-API-Key': 'control-key'},
+                        method='POST') as redirected:
+        assert redirected.status_code == 302
+    assert sent['allow_redirects'] is False
     monkeypatch.delenv('CRYPTOHFTDATA_API_KEY')
     calls.clear()
     vendor._response('spot', partition, metadata=False)

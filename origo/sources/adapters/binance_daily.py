@@ -58,10 +58,14 @@ def _request(
                 adapter.poolmanager.connection_pool_kw['source_address'] = (egress_ip, 0)
                 session.mount('https://', adapter)
                 session.mount('http://', adapter)
-                send = session.get if method == 'GET' else session.post
-                return send(url, params=params, headers=headers, timeout=(5, 30))
-        send = requests.get if method == 'GET' else requests.post
-        return send(url, params=params, headers=headers, timeout=(5, 30))
+                if method == 'POST':
+                    return session.post(url, params=params, headers=headers, timeout=(5, 30),
+                                        allow_redirects=False)
+                return session.get(url, params=params, headers=headers, timeout=(5, 30))
+        if method == 'POST':
+            return requests.post(url, params=params, headers=headers, timeout=(5, 30),
+                                 allow_redirects=False)
+        return requests.get(url, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
         if _budget_host(url) == 'api.cryptohftdata.com':
             raise SourceError(

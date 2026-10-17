@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import fcntl
 import hashlib
 import json
@@ -24,6 +25,8 @@ from .binance_provisional import _bool, _int, _text
 SPOOL_LIMIT_BYTES = 16 * 1024**3
 MINUTE_LIMIT_BYTES = 32 * 1024**2
 REPAIR_PAGE_BUDGET = 7
+REJECTION_RESPONSE_LIMIT = 8
+REJECTION_RESPONSE_BYTES = 1024**2
 HISTORICAL_LAG_SECONDS = 60
 CAPTURE_PROGRESS_SECONDS = 120
 _LOG = logging.getLogger(__name__)
@@ -439,6 +442,11 @@ def classify_spooled_partition(root: Path, partition: Partition) -> Literal['rea
     return _coverage(root, partition)[0]
 
 
+def spooled_repair_identity(root: Path, partition: Partition) -> str:
+    gaps = _coverage(root, partition)[2]
+    return gaps[0].identity if gaps else partition.key
+
+
 def _minute_rows(connection: sqlite3.Connection, start_ms: int, end_ms: int,
                  *, gap: str | None = None) -> list[tuple[int, int, str]]:
     clause = '' if gap is None else ' AND gap=?'
@@ -606,8 +614,18 @@ def _witness(connection: sqlite3.Connection, trade_id: int) -> str:
 
 def repair_spooled_gaps(root: Path, partition: Partition, *, egress_ip: str) -> None:
     state, _, gaps = _coverage(root, partition)
-    if state != 'pending' or not gaps:
+    if not gaps:
         return
+    if state != 'pending':
+        if not (root / 'repair.sqlite3').exists():
+            return
+        with _database(root, 'repair') as repair:
+            rejected = any(repair.execute(
+                'SELECT 1 FROM gaps WHERE identity=? AND retired=0 AND complete=0 AND error IS NOT NULL',
+                (gap.identity,),
+            ).fetchone() is not None for gap in gaps)
+        if not rejected:
+            return
     if egress_ip != '37.27.112.144':
         raise ValueError('Captured-gap repair requires the dedicated .144 role.')
     credential = os.environ.get('BINANCE_API_KEY')
@@ -639,6 +657,21 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
         with _database(root, 'repair', create=True) as repair:
             repair.execute('INSERT OR IGNORE INTO gaps(identity,left_id,right_id,left_payload,right_payload,next_id,created_at) VALUES (?,?,?,?,?,?,?)',
                            (gap.identity, gap.left.last_id, gap.right.first_id, left, right, gap.left.last_id, now_utc().isoformat()))
+            rejected = repair.execute(
+                'SELECT error FROM gaps WHERE identity=? AND complete=0 AND retired=0',
+                (gap.identity,),
+            ).fetchone()
+            if rejected is not None and rejected[0] is not None:
+                prior = repair.execute(
+                    'SELECT started_at FROM attempts WHERE gap=? ORDER BY seq DESC LIMIT 1',
+                    (gap.identity,),
+                ).fetchone()
+                if prior is not None and now_utc() < datetime.fromisoformat(str(prior[0])) + timedelta(seconds=60):
+                    return
+                # Only an unpublished failed candidate is discarded; witnesses/error remain.
+                repair.execute('DELETE FROM pages WHERE gap=?', (gap.identity,))
+                repair.execute('DELETE FROM trades WHERE gap=?', (gap.identity,))
+                repair.execute('UPDATE gaps SET next_id=? WHERE identity=?', (gap.left.last_id, gap.identity))
             repair.commit()
         while requests < REPAIR_PAGE_BUDGET:
             with _database(root, 'repair') as repair:
@@ -647,13 +680,17 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
                 raise SourceError('CAPTURE_STORAGE', 'The durable bridge checkpoint is absent.')
             if int(checkpoint[1]) == 1 or int(checkpoint[5]) == 1:
                 break
-            if checkpoint[2] is not None:
-                raise SourceError('CAPTURE_BRIDGE_CONFLICT', f'Historical bridge rejected: {checkpoint[2]}.')
             next_id = int(checkpoint[0])
             requests += 1
             params: dict[str, str | int] = {'symbol': _SYMBOL, 'limit': 500, 'fromId': next_id}
             _capacity(root, 65536)
             with _database(root, 'repair') as repair:
+                recent = repair.execute(
+                    'SELECT count(*) FROM attempts WHERE julianday(started_at)>julianday(?)',
+                    ((now_utc() - timedelta(seconds=60)).isoformat(),),
+                ).fetchone()
+                if recent is None or int(recent[0]) >= REPAIR_PAGE_BUDGET:
+                    return
                 attempt = repair.execute('INSERT INTO attempts(gap,started_at,params) VALUES (?,?,?)',
                     (gap.identity, now_utc().isoformat(), json.dumps({'params': params, 'weight': 200, 'egress_ip': egress_ip}, sort_keys=True))).lastrowid
                 repair.commit()
@@ -674,18 +711,50 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
                 repair.commit()
             if response.status != 200:
                 raise SourceError('PROVIDER_HTTP_ERROR', f'Perp bridge provider HTTP {response.status}.')
-            payload: object = json.loads(response.body)
-            if not isinstance(payload, list):
-                raise SourceError('CAPTURE_BRIDGE_SCHEMA', 'Historical bridge response is not a trade list.')
-            untyped_rows = cast(list[object], payload)
-            if any(not isinstance(row, dict) for row in untyped_rows):
-                raise SourceError('CAPTURE_BRIDGE_SCHEMA', 'Historical bridge response is not a trade list.')
-            page = _rows(cast(list[dict[str, object]], untyped_rows))
+            if len(response.body) > REJECTION_RESPONSE_BYTES:
+                raise SourceError('CAPTURE_EVIDENCE_CAPACITY', 'Bridge response exceeds its 1 MiB evidence bound.')
+            _capacity(root, len(response.body) * 2 + 65536)
+            with _database(root, 'repair') as repair:
+                prior_time = repair.execute(
+                    'SELECT time,payload FROM trades WHERE gap=? ORDER BY id DESC LIMIT 1',
+                    (gap.identity,),
+                ).fetchone()
+                retained_evidence = cast(dict[str, object], json.loads(evidence))
+                retained_evidence.update(
+                    body_base64=base64.b64encode(response.body).decode('ascii'),
+                    left_payload=left, right_payload=right,
+                    prior_time=int(prior_time[0]) if prior_time is not None else None,
+                    prior_payload=str(prior_time[1]) if prior_time is not None else None,
+                )
+                repair.execute('UPDATE attempts SET outcome=? WHERE seq=?',
+                               (json.dumps(retained_evidence, sort_keys=True), attempt))
+                stale = repair.execute(
+                    "SELECT seq FROM attempts WHERE json_type(outcome,'$.body_base64')='text' "
+                    'ORDER BY seq DESC LIMIT -1 OFFSET ?', (REJECTION_RESPONSE_LIMIT,),
+                ).fetchall()
+                repair.executemany('DELETE FROM attempts WHERE seq=?', stale)
+                repair.commit()
+            try:
+                payload: object = json.loads(response.body)
+                if not isinstance(payload, list):
+                    raise SourceError('CAPTURE_BRIDGE_SCHEMA', 'Historical bridge response is not a trade list.')
+                untyped_rows = cast(list[object], payload)
+                if any(not isinstance(row, dict) for row in untyped_rows):
+                    raise SourceError('CAPTURE_BRIDGE_SCHEMA', 'Historical bridge response is not a trade list.')
+                page = _rows(cast(list[dict[str, object]], untyped_rows))
+            except (ValueError, SourceError) as error:
+                with _database(root, 'repair') as repair:
+                    repair.execute('UPDATE gaps SET error=? WHERE identity=?', (str(error), gap.identity))
+                    repair.execute("UPDATE attempts SET outcome=json_set(outcome,'$.reason',?) WHERE seq=?",
+                                   (str(error), attempt))
+                    repair.commit()
+                raise
             if not page:
+                with _database(root, 'repair') as repair:
+                    repair.execute('UPDATE attempts SET outcome=? WHERE seq=?', (evidence, attempt))
+                    repair.commit()
                 return
             error: str | None = None
-            with _database(root, 'repair') as repair:
-                prior_time = repair.execute('SELECT time FROM trades WHERE gap=? ORDER BY id DESC LIMIT 1', (gap.identity,)).fetchone()
             if prior_time is not None and page[0][1] < int(prior_time[0]):
                 error = 'decreasing_time'
             if page[0][0] < next_id or page[-1][0] < next_id:
@@ -701,6 +770,8 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
             if error is not None:
                 with _database(root, 'repair') as repair:
                     repair.execute('UPDATE gaps SET error=? WHERE identity=?', (error, gap.identity))
+                    repair.execute("UPDATE attempts SET outcome=json_set(outcome,'$.reason',?) WHERE seq=?",
+                                   (error, attempt))
                     repair.commit()
                 raise SourceError('CAPTURE_BRIDGE_CONFLICT', f'Historical bridge rejected: {error}.')
             retained = tuple(row for row in page if row[0] <= gap.right.first_id)
@@ -710,8 +781,9 @@ def _repair(root: Path, gaps: tuple[_Gap, ...], credential: str, egress_ip: str)
                 repair.executemany('INSERT INTO trades(gap,id,time,payload) VALUES (?,?,?,?)',
                     ((gap.identity, row[0], row[1], row[2]) for row in retained))
                 repair.execute('INSERT INTO pages VALUES (?,?,?,?,?,?)', (gap.identity, retained[0][0], retained[-1][0], hashlib.sha256(response.body).hexdigest(), evidence, hashlib.sha256(''.join(row[2] for row in retained).encode()).hexdigest()))
-                repair.execute('UPDATE gaps SET next_id=?,complete=? WHERE identity=?',
+                repair.execute('UPDATE gaps SET next_id=?,complete=?,error=NULL WHERE identity=?',
                     (page[-1][0] + 1, int(complete), gap.identity))
+                repair.execute('UPDATE attempts SET outcome=? WHERE seq=?', (evidence, attempt))
                 repair.commit()
         if requests >= REPAIR_PAGE_BUDGET:
             return

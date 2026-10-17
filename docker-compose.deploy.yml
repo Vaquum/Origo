@@ -93,6 +93,7 @@ services:
       - DAGSTER_WEBSERVER_URL=http://dagit:3000
       - ORIGO_LAW_PAGE_URL=http://law:8485/healthz
       - ORIGO_LAW_APP_IMAGE=${APP_IMAGE:-local}
+      - ORIGO_TRADE_MAINTENANCE=1
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
       - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
       - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
@@ -199,6 +200,7 @@ services:
       BINANCE_API_KEY: ${BINANCE_API_KEY:?BINANCE_API_KEY is required}
       HUGGINGFACE_DATASET_REPO_ID: ${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
       ORIGO_PROVISIONAL_SOURCE: binance_spot_trades
+      ORIGO_TRADE_MAINTENANCE: "1"
     volumes:
       - tdw-parquet:/opt/parquet
       - tdw-arrow:/opt/arrow
@@ -220,7 +222,7 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  provisional-binance-perp-trades:
+  provisional-binance-perp-trades: &perp-worker
     <<: *provisional-worker
     network_mode: host
     hostname: ${ORIGO_PERP_WORKER_HOSTNAME:?deployment identity required}
@@ -238,6 +240,51 @@ services:
       - source-publications:/opt/origo/shadow
       - worker-heartbeats:/opt/origo/heartbeats
       - perp-capture:/var/lib/origo-perp-capture
+
+  publication-binance-spot-trades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_TRADE_MAINTENANCE: "0"
+    command: python -m origo.workers.provisional --role publication
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--role", "publication", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  publication-binance-perp-trades:
+    <<: *provisional-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+      ORIGO_TRADE_MAINTENANCE: "0"
+    command: python -m origo.workers.provisional --role publication
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--role", "publication", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  perp-repair:
+    <<: *perp-worker
+    environment:
+      <<: *provisional-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_trades
+      ORIGO_TRADE_MAINTENANCE: "0"
+      ORIGO_PERP_CAPTURE_ROOT: /var/lib/origo-perp-capture
+      CLICKHOUSE_HOST: 127.0.0.1
+      DAGSTER_WEBSERVER_URL: http://127.0.0.1:4000
+      ORIGO_BINANCE_PERP_EGRESS_IPS: 37.27.112.144
+    command: python -m origo.workers.provisional --role repair
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--role", "repair", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
 
   provisional-binance-spot-aggtrades:
     <<: *provisional-worker

@@ -15,6 +15,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
+from unittest.mock import Mock
 
 import pytest
 
@@ -150,7 +151,8 @@ def test_spool_repair_and_canonical_replacement_preserve_outputs(tmp_path: Path,
     dropped = tuple(response for index, response in enumerate(responses) if not 60 <= index < 80)
     _append(tmp_path, dropped)
     starts = _repair_from_actual(tmp_path, responses, monkeypatch)
-    for _ in range(20):
+    for tick in range(20):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=3 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -259,7 +261,8 @@ def test_verified_bridge_repairs_only_missing_rows(tmp_path: Path, responses: tu
     _append(tmp_path, responses[:left] + responses[right:])
     assert spool.classify_spooled_partition(tmp_path, _partition()) == 'pending'
     starts = _repair_from_actual(tmp_path, responses, monkeypatch, cap=200)
-    for _ in range(20):
+    for tick in range(20):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=3 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -278,14 +281,19 @@ def test_verified_bridge_repairs_only_missing_rows(tmp_path: Path, responses: tu
 def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
     _append(tmp_path, responses[:60] + responses[140:])
     starts = _repair_from_actual(tmp_path, responses, monkeypatch)
+    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=3))
     spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     assert len(starts) == 7
     assert spool.read_spooled_revision(tmp_path, _partition()) is None
     with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
         next_id = connection.execute('SELECT next_id FROM gaps').fetchone()[0]
     spool.repair_spooled_gaps(tmp_path, _partition('2026-09-21T15:12:00Z'), egress_ip='37.27.112.144')
+    assert len(starts) == 7, 'a restarted caller shares the rolling page budget'
+    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=4))
+    spool.repair_spooled_gaps(tmp_path, _partition('2026-09-21T15:12:00Z'), egress_ip='37.27.112.144')
     assert starts[7] == next_id and len(starts) == 14
-    for _ in range(20):
+    for tick in range(20):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=5 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -298,6 +306,89 @@ def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[
     reused = spool.read_spooled_revision(tmp_path, _partition('2026-09-21T15:12:00Z'))
     assert reused is not None and reused.row_count == 6647
 
+
+
+def test_rejected_bridge_revalidation_preserves_proof(
+    tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Execution fault over unchanged recorded response bytes; the historical mismatch is unknown.
+    _append(tmp_path, responses[:60] + responses[80:])
+    starts = _repair_from_actual(tmp_path, responses, monkeypatch)
+    original_rows = spool._rows
+    clock = [_partition().end + timedelta(minutes=3)]
+    monkeypatch.setattr(spool, 'now_utc', lambda: clock[0])
+
+    def reject(rows: list[dict[str, object]]) -> tuple[tuple[int, int, str], ...]:
+        raise SourceError('CAPTURE_BRIDGE_SCHEMA', 'Injected validator interruption over genuine bytes.')
+
+    monkeypatch.setattr(spool, '_rows', reject)
+    for attempt in range(10):
+        with pytest.raises(SourceError, match='Injected validator interruption'):
+            spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+        assert spool.classify_spooled_partition(tmp_path, _partition()) == 'fallback'
+        spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+        assert len(starts) == attempt + 1, 'rejection cooldown survives a fresh caller'
+        clock[0] += timedelta(seconds=61)
+    with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
+        retained = connection.execute('SELECT outcome FROM attempts').fetchall()
+        assert len(retained) == spool.REJECTION_RESPONSE_LIMIT
+        assert connection.execute('SELECT count(*) FROM pages').fetchone() == (0,)
+        witness = connection.execute('SELECT left_payload,right_payload FROM gaps').fetchone()
+    for outcome, in retained:
+        evidence = json.loads(outcome)
+        body = base64.b64decode(evidence['body_base64'])
+        assert len(body) <= spool.REJECTION_RESPONSE_BYTES
+        assert hashlib.sha256(body).hexdigest() == evidence['body_sha256']
+        assert evidence['reason'].startswith('Injected validator interruption')
+        assert (evidence['left_payload'], evidence['right_payload']) == witness
+    # Legacy worker control flow: a rejected (fallback-classified) bridge must
+    # reach minute work without retrying the rejected proof ahead of it.
+    from origo.workers import provisional
+
+    with monkeypatch.context() as legacy:
+        legacy.setenv('ORIGO_TRADE_MAINTENANCE', '0')
+        legacy.setenv('ORIGO_PERP_CAPTURE_ROOT', str(tmp_path))
+        reader = Mock(spec=SourceStore)
+        reader.database = 'origo'
+        reader.active_intervals.return_value = ()
+        reader.anchor.return_value = _partition().start
+        reader.enabled_groups.return_value = ()
+        feed = provisional.ProvisionalFeed(
+            [BINANCE_PERP_TRADES_SPEC], publication_root=tmp_path, reporter=Mock(), dagster=Mock(),
+        )
+        legacy.setattr(feed, '_frontier_gap_key', lambda *args: _KEY)
+        legacy.setattr(feed, '_may_attempt', lambda *args, **kwargs: True)
+        build = Mock(return_value=(_KEY, None))
+        legacy.setattr(feed, '_build_one', build)
+        repair = Mock(side_effect=AssertionError('Rejected bridge retried before fallback.'))
+        legacy.setattr(BinancePerpProvisional, 'repair_pending', repair)
+        legacy.setattr(provisional, 'make_clickhouse_client', lambda *args: Mock())
+        legacy.setattr(provisional, 'get_clickhouse_settings', lambda: Mock())
+        assert feed._build_intervals(reader, BINANCE_PERP_TRADES_SPEC, _partition().end)[0]
+        assert build.called and not repair.called
+        build.reset_mock()
+        feed.role, feed.name = 'repair', 'perp_repair'
+        assert feed._build_intervals(
+            reader, BINANCE_PERP_TRADES_SPEC, _partition().end + timedelta(minutes=4),
+        )[0]
+        assert build.call_count > 1, 'repair retains the current-plus-five catch-up window'
+        assert not repair.called, 'fallback catch-up never repeats inline bridge work'
+    monkeypatch.setattr(spool, '_rows', original_rows)
+    for _ in range(20):
+        spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+        if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
+            break
+        clock[0] += timedelta(seconds=61)
+    revision = spool.read_spooled_revision(tmp_path, _partition())
+    assert revision is not None
+    expected = tuple(spool.historical_row(row) for row in _actual_rows(responses)
+                     if _partition().start.timestamp() * 1000 <= cast(int, row['time']) < _partition().end.timestamp() * 1000)
+    assert tuple(revision.rows()) == expected
+    assert revision.content_hash == content_hash(expected, schema_version=1)
+    before = len(starts)
+    spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
+    assert len(starts) == before, 'completed proof is immutable'
 
 def test_modified_committed_payload_is_quarantined(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...]) -> None:
     _append(tmp_path, responses)
@@ -346,7 +437,8 @@ def test_capacity_recovers_after_acknowledged_reclamation(tmp_path: Path, respon
 def test_deleted_bridge_page_cannot_seal_minute(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
     _append(tmp_path, responses[:60] + responses[80:])
     _repair_from_actual(tmp_path, responses, monkeypatch, cap=200)
-    for _ in range(20):
+    for tick in range(20):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=3 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -425,7 +517,8 @@ def test_stale_conflict_quarantines_the_disputed_segment(tmp_path: Path, respons
 def test_deleted_interior_segment_cannot_seal_minute(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
     _append(tmp_path, responses[:60] + responses[80:90] + responses[110:])
     _repair_from_actual(tmp_path, responses, monkeypatch)
-    for _ in range(20):
+    for tick in range(20):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=3 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -467,10 +560,13 @@ def test_attempt_cleanup_does_not_depend_on_payload_pages(tmp_path: Path, respon
     def failed(url: str, *, params: dict[str, str | int], headers: dict[str, str], weight: int, egress_ip: str) -> Response:
         raise OSError('injected replay transport interruption')
     monkeypatch.setattr(spool, 'get_response', failed)
-    for _ in range(110):
+    attempt_clock = datetime.now(UTC)
+    for tick in range(110):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: attempt_clock + timedelta(seconds=61 * tick))
         with pytest.raises(OSError, match='injected'):
             spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     _repair_from_actual(tmp_path, responses, monkeypatch)
+    monkeypatch.setattr(spool, 'now_utc', lambda: attempt_clock + timedelta(seconds=61 * 110))
     spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
         assert connection.execute('SELECT count(*) FROM pages').fetchone() == (1,)

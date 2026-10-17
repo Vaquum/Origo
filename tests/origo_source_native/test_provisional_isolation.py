@@ -4,6 +4,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import subprocess
+import sys
+from time import monotonic
 from typing import cast
 from unittest.mock import Mock
 
@@ -18,6 +21,10 @@ from origo.sources.contracts import (
     RolloutStage,
 )
 from origo.sources.storage import SourceStore
+from origo.sources.lifecycle import SourceRuntime
+from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
+from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
+from origo.sources.adapters import binance_perp_spool as spool
 from origo.workers import provisional
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.receipts import (
@@ -31,6 +38,7 @@ from origo.workers.runtime import TickOutcome, touch_heartbeat, utc_now
 from .helpers import ORIGO_DATABASE
 from .test_provisional_worker import ANCHOR, KEY, NOW, RECEIPTS, Query
 from .test_provisional_worker import spot as spot
+from .test_binance_perp_spool import responses as responses, _append, _partition
 
 
 def _feed(
@@ -61,6 +69,84 @@ def test_source_selector_accepts_only_enabled_provisional_sources(
         monkeypatch.setattr(provisional, 'SOURCE_REGISTRY', (disabled,))
         with pytest.raises(ValueError, match='Unknown or disabled provisional source'):
             provisional.build_feed({'ORIGO_PROVISIONAL_SOURCE': disabled.key})
+
+
+def test_trade_ingestion_does_not_wait_for_maintenance(
+    spot: tuple[RevisionedSourceSpec, object],
+    responses: tuple[tuple[datetime, list[dict[str, object]]], ...],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, query_origo: Query,
+) -> None:
+    root = tmp_path / 'capture'
+    _append(root, responses)
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
+    monkeypatch.setenv('ORIGO_PERP_CAPTURE_ROOT', str(root))
+    partition = _partition()
+    spec = replace(BINANCE_PERP_TRADES_SPEC, rollout_stage=RolloutStage.CANARY)
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        SourceRuntime(spec, SourceStore(client, ORIGO_DATABASE, spec), tmp_path / 'locks',
+                      'test:setup').setup(anchor=partition.start)
+    finally:
+        client.disconnect()
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError('Ingestion entered maintenance.')
+
+    monkeypatch.setattr(provisional.ProvisionalFeed, '_publish', forbidden)
+    monkeypatch.setattr(BinancePerpProvisional, 'repair_pending', forbidden)
+    monkeypatch.setattr(spool, 'get_response', forbidden)
+    script = '''
+import fcntl, sys
+files = [open(path, 'a+') for path in sys.argv[1:]]
+for handle in files:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+print('locked', flush=True)
+sys.stdin.readline()
+files[0].close()
+print('read-released', flush=True)
+sys.stdin.readline()
+'''
+    holder = subprocess.Popen(
+        [sys.executable, '-c', script, str(root / 'read.lock'), str(root / 'repair.lock')],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdin is not None
+        assert holder.stdout.readline().strip() == 'locked'
+        started = monotonic()
+        assert _feed(spot[0], tmp_path).tick(NOW).processed == (f'{spot[0].key}:{KEY}',)
+        feed = _feed(spec, tmp_path)
+        now = partition.end + timedelta(seconds=5)
+        deferred = feed.tick(now)
+        assert deferred.processed == () and deferred.failed == ()
+        assert monotonic() - started < 15
+        assert ('CAPTURE_BUSY',) in query_origo(
+            f"SELECT error_code FROM {ORIGO_DATABASE}.worker_minute_log WHERE status='REJECTED'"
+        )
+        holder.stdin.write('release read\n')
+        holder.stdin.flush()
+        assert holder.stdout.readline().strip() == 'read-released'
+        outcome = feed.tick(now)
+        assert outcome.processed == (f'{spec.key}:{partition.key}',) and not outcome.failed
+        assert holder.poll() is None, 'repair remains blocked until after genuine minute activation'
+        assert query_origo(
+            f'SELECT count() FROM {ORIGO_DATABASE}.binance_perp_trades_raw_current'
+        ) == [(9948,)]
+        assert feed.tick(now).processed == ()
+        ticks = query_origo(
+            f'SELECT status FROM {ORIGO_DATABASE}.worker_minute_log '
+            "WHERE series LIKE '%:tick' ORDER BY recorded_at"
+        )
+        assert ticks == [('OK',)] * 4, 'one terminal receipt per whole tick, including empty ticks'
+        monkeypatch.setattr(feed, '_build_intervals', forbidden)
+        assert feed.tick(now).failed == (f'{spec.key}:tick',)
+        assert query_origo(
+            f'SELECT count() FROM {ORIGO_DATABASE}.worker_minute_log '
+            f"WHERE series='{spec.key}:tick' AND status='FAILED'"
+        ) == [(1,)], 'an exceptional whole tick also has exactly one terminal receipt'
+    finally:
+        holder.communicate('release repair\n', timeout=10)
+        assert holder.returncode == 0
 
 
 def test_healthcheck_requires_its_own_source_heartbeat(

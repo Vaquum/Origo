@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+import hashlib
+import json
+import gzip
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -21,6 +26,11 @@ from origo.sources.binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
 from origo.workers.dagster_reader import DagsterReader, DagsterUnreachable
+from origo.sources.contracts import RevisionedSourceSpec, RolloutStage
+from origo.sources.locking import source_lock
+from origo.workers import provisional
+from .test_provisional_worker import spot as spot, _feed, _Dagster, _Reporter, NOW, KEY, Query
+from .helpers import ORIGO_DATABASE
 
 SOURCE = BINANCE_SPOT_TRADES_SPEC.key
 
@@ -123,3 +133,78 @@ def test_publication_ownership_propagates_unreachable(monkeypatch: pytest.Monkey
     monkeypatch.setattr(reader, 'query', unavailable)
     with pytest.raises(DagsterUnreachable, match='HTTP 502'):
         reader.publication_owns_consumer(SOURCE, 'mount')
+
+
+def test_trade_publisher_restart_preserves_ownership_and_files(
+    spot: tuple[RevisionedSourceSpec, object], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    query_origo: Query,
+) -> None:
+    import pyarrow as pa
+
+    spec = replace(spot[0], rollout_stage=RolloutStage.LIVE)
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
+    monkeypatch.setenv('LOCAL_PARQUET_DIR', str(tmp_path / 'parquet'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
+    dagster, reporter = _Dagster(), _Reporter()
+    ingestion = _feed(spec, tmp_path, dagster, reporter)
+    assert ingestion.tick(NOW).processed == (f'{spec.key}:{KEY}',)
+
+    def publisher() -> provisional.ProvisionalFeed:
+        feed = _feed(spec, tmp_path, dagster, reporter,
+                     clock=lambda: datetime.now(UTC) + timedelta(hours=1))
+        feed.name, feed.role = 'trade_publication', 'publication'
+        return feed
+
+    dagster.publication_owned = True
+    assert publisher().tick(NOW).processed == ()
+    assert not list((tmp_path / 'arrow').rglob('*.arrow'))
+    dagster.publication_owned = False
+    assert publisher().tick(NOW).processed == (f'{spec.key}:mount',)
+    destination = tmp_path / 'source-files' / spec.key / 'mount'
+    manifest = json.loads((destination / 'latest.json').read_text())
+    assert manifest['pinned_token']
+    paths = [destination / 'latest.json', *(tmp_path / 'parquet').rglob('*.parquet'),
+             *(tmp_path / 'arrow').rglob('*.arrow')]
+    assert len(paths) > 2
+    hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+    for path in (tmp_path / 'arrow').rglob('*.arrow'):
+        with pa.memory_map(str(path), 'r') as mapped:
+            reader = pa.ipc.open_file(mapped)
+            assert reader.num_record_batches == 1
+
+    # Simulate a still-live render from an older process. The worker must use its nonblocking lock.
+    from origo.sources import prepare
+
+    monkeypatch.setattr(provisional, 'publication_current', lambda *args, **kwargs: False)
+    monkeypatch.setattr(prepare, 'publication_current', lambda *args, **kwargs: False)
+    with source_lock(tmp_path / 'locks', spec.key, 'consumer_mount'):
+        failed = publisher().tick(NOW)
+        assert failed.failed == (f'{spec.key}:mount',)
+        assert ingestion.tick(NOW).processed == ()
+    restarted = publisher()
+    assert restarted.tick(NOW).processed == (f'{spec.key}:mount',)
+    # Missing-file worklist fault uses five genuine retained month identities;
+    # no market rows or state records are invented to reach the real deferral path.
+    from origo.sources import publication
+    from origo.sources.profiles import consumer_base
+
+    captured = json.loads(gzip.decompress((Path(__file__).resolve().parents[1] /
+        'fixtures/source_state/trade_intervals_2026-10-17.json.gz').read_bytes()))
+    months = sorted({row[0][:7] for row in captured['sources'][spec.key]['intervals']})[:5]
+    assert len(months) == 5 and consumer_base.MOUNT_WORKER_MONTH_CAP == 4
+    with monkeypatch.context() as deferred:
+        deferred.setattr(publication, 'publication_current', lambda *args, **kwargs: False)
+        deferred.setattr(consumer_base, 'months_to_render', lambda *args, **kwargs: months)
+        assert publisher().tick(NOW).failed == (f'{spec.key}:mount',)
+        assert ingestion.tick(NOW).processed == ()
+    assert query_origo(
+        f"SELECT error_code FROM {ORIGO_DATABASE}.worker_minute_log WHERE error_code='RENDER_DEFERRED'"
+    ) == [('RENDER_DEFERRED',)]
+    assert {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths} == hashes
+    assert query_origo(
+        f"SELECT DISTINCT feed FROM {ORIGO_DATABASE}.worker_minute_log WHERE series='{spec.key}:mount'"
+    ) == [('trade_publication',)]
+    assert not query_origo(
+        f"SELECT error_code FROM {ORIGO_DATABASE}.worker_minute_log WHERE error_code='WORKER_DIED'"
+    )
+    assert len(reporter.materializations) == 3, 'only ingestion reports the existing live-feed asset'

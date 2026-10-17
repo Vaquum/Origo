@@ -1581,6 +1581,14 @@ class Monitor:
                    for spec in SOURCE_REGISTRY)
         }
         self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
+        if os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1':
+            expected |= {
+                heartbeat_path(self.heartbeat_dir, name) for name in (
+                    'trade_publication_binance_spot_trades',
+                    'trade_publication_binance_perp_trades',
+                    'perp_repair_binance_perp_trades',
+                )
+            }
         return sorted(self.heartbeat_inventory | expected)
 
     def _worker_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:

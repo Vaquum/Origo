@@ -91,6 +91,10 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     ).encode()).hexdigest() == '12391bf047bb1dc6ad8afba2414fb2f4e1a1e1bb949a9f4cc2e70d57ace55887'
     assert contract['required_nodes'] == [
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
+        'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
+        'tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof',
+        'tests/origo_source_native/test_publication_ownership.py::test_trade_publisher_restart_preserves_ownership_and_files',
+        'tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract',
     ]
 
 

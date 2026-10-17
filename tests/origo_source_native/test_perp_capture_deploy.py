@@ -30,7 +30,7 @@ def test_capture_service_has_only_its_owned_resources() -> None:
             'ORIGO_SOURCE_LOCK_DIR',
         }
         assert not {'depends_on', 'ports', 'env_file', 'secrets'} & capture.keys()
-        repair = compose['services']['provisional-binance-perp-trades']
+        repair = compose['services']['perp-repair' if filename == 'docker-compose.deploy.yml' else 'provisional-binance-perp-trades']
         assert 'perp-capture:/var/lib/origo-perp-capture' in repair['volumes']
         if filename == 'docker-compose.deploy.yml':
             assert repair['environment']['ORIGO_BINANCE_PERP_EGRESS_IPS'] == '37.27.112.144'
@@ -50,10 +50,12 @@ function docker() {
     'ps -q --filter label=com.docker.compose.project=isolated-capture-test --filter label=com.docker.compose.service=provisional-binance-perp-trades')
       if [ -f "$CALLS" ] && [ "$CASE" = missing ]; then return 0; fi
       printf 'repair\n' ;;
+    'ps -q --filter label=com.docker.compose.project=isolated-capture-test --filter label=com.docker.compose.service=perp-repair')
+      if [ "$CASE" != missing ]; then printf 'repair\n'; fi ;;
     'stop repair')
       printf 'stop\n' >> "$CALLS"
       if [ "$CASE" = stop-failed ]; then return 1; fi ;;
-    'compose -p isolated-capture-test -f docker-compose.deploy.yml up -d --no-deps --force-recreate provisional-binance-perp-trades')
+    'compose -p isolated-capture-test -f docker-compose.deploy.yml up -d --no-deps --force-recreate perp-repair')
       printf 'repair-only\n' >> "$CALLS"
       if [ "$CASE" = recreate-failed ]; then return 1; fi ;;
     'inspect --format {{range .Config.Env}}'*)

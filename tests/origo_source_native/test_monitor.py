@@ -378,9 +378,11 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         client.disconnect()
 
 
+@pytest.mark.parametrize('split', [False, True])
 def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worker(
-    recorder: _Recorder, tmp_path: Path
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, split: bool,
 ) -> None:
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1' if split else '0')
     monitor = _monitor(recorder, tmp_path)
     directory = tmp_path / 'heartbeats'
     missing = 'provisional_binance_perp_trades'
@@ -392,10 +394,18 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     for path in (retired, heartbeat_path(directory, stale)):
         os.utime(path, (old, old))
     outcome = monitor.tick(NOW)
-    assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
+    expected = {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
-    assert len(monitor._heartbeats()) == 10
+    if split:
+        expected |= {
+            f'heartbeat_stale:{name}' for name in (
+                'trade_publication_binance_spot_trades',
+                'trade_publication_binance_perp_trades', 'perp_repair_binance_perp_trades',
+            )
+        }
+    assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == expected
+    assert len(monitor._heartbeats()) == (13 if split else 10)
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(

@@ -159,3 +159,53 @@ def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
         ).split()
         assert set(provisional) <= set(launch)
         assert 'depth-worker' in launch and 'provisional-worker' in launch
+
+
+def test_trade_maintenance_deploy_and_heartbeat_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.workers import provisional
+
+    services = yaml.safe_load((REPO_ROOT / 'docker-compose.deploy.yml').read_text())['services']
+    workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
+    launch = next(line for line in workflow.splitlines() if 'up -d --wait' in line and 'depth-worker' in line)
+    monkeypatch.setenv('ORIGO_HEARTBEAT_DIR', str(tmp_path))
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '0')
+    for name, role, source, feed in (
+        ('publication-binance-spot-trades', 'publication', 'binance_spot_trades', 'trade_publication'),
+        ('publication-binance-perp-trades', 'publication', 'binance_perp_trades', 'trade_publication'),
+        ('perp-repair', 'repair', 'binance_perp_trades', 'perp_repair'),
+    ):
+        service = services[name]
+        assert name in launch.split()
+        assert service['command'] == f'python -m origo.workers.provisional --role {role}'
+        assert service['environment']['ORIGO_PROVISIONAL_SOURCE'] == source
+        assert service['environment']['ORIGO_TRADE_MAINTENANCE'] == '0'
+        assert service['healthcheck']['test'] == [
+            'CMD', 'python', '-m', 'origo.workers.provisional', '--role', role, '--check'
+        ]
+        assert 'worker-heartbeats:/opt/origo/heartbeats' in service['volumes']
+        monkeypatch.setenv('ORIGO_PROVISIONAL_SOURCE', source)
+        touch_heartbeat(heartbeat_path(tmp_path, f'provisional_{source}'))
+        assert provisional.main(['--role', role, '--check']) == 1
+        own = heartbeat_path(tmp_path, f'{feed}_{source}')
+        touch_heartbeat(own)
+        assert provisional.main(['--role', role, '--check']) == 0
+        stale = own.stat().st_mtime - HEARTBEAT_MAX_AGE_SECONDS - 1
+        os.utime(own, (stale, stale))
+        assert provisional.main(['--role', role, '--check']) == 1
+    assert services['perp-repair']['network_mode'] == 'host'
+    assert services['perp-repair']['environment']['ORIGO_BINANCE_PERP_EGRESS_IPS'] == '37.27.112.144'
+    assert services['provisional-worker']['environment']['ORIGO_TRADE_MAINTENANCE'] == '1'
+    assert 'ORIGO_TRADE_MAINTENANCE=1' in services['monitor']['environment']
+    local = yaml.safe_load((REPO_ROOT / 'docker-compose.yml').read_text())['services']
+    assert not {'perp-repair', 'publication-binance-spot-trades', 'publication-binance-perp-trades'} & local.keys()
+    for role, source in (('repair', 'binance_spot_trades'), ('publication', 'binance_spot_book'),
+                         ('publication', None), ('unknown', 'binance_perp_trades')):
+        if source is None:
+            monkeypatch.delenv('ORIGO_PROVISIONAL_SOURCE', raising=False)
+        else:
+            monkeypatch.setenv('ORIGO_PROVISIONAL_SOURCE', source)
+        with pytest.raises(SystemExit) as error:
+            provisional.main(['--role', role, '--check'])
+        assert error.value.code == 2

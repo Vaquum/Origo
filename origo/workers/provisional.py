@@ -16,6 +16,7 @@ catch-up tick proves liveness instead of tripping the watchdog.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import os
@@ -24,11 +25,20 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal, cast
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
+from origo.sources.adapters.binance_perp_spool import (
+    acknowledge_spooled_revision,
+    classify_spooled_partition,
+    cleanup_spool,
+    read_spooled_revision,
+    spooled_repair_identity,
+)
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import (
     WORKER_HEARTBEAT_ENV,
@@ -60,12 +70,17 @@ from .runtime import (
 )
 
 PROVISIONAL_MAX_WORKERS = 4
+TRADE_SOURCES = ('binance_spot_trades', 'binance_perp_trades')
 DEFAULT_WEBSERVER_URL = 'http://dagit:3000'
 log = logging.getLogger('origo.workers.provisional')
 
 
 def live_feed_asset(spec: RevisionedSourceSpec) -> str:
     return f'{spec.key}_provisional_feed'
+
+
+def _split_trade_ingestion(spec: RevisionedSourceSpec) -> bool:
+    return spec.key in TRADE_SOURCES and os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1'
 
 
 def selected_specs(environ: dict[str, str]) -> tuple[RevisionedSourceSpec, ...]:
@@ -88,6 +103,7 @@ def _rss_bytes() -> int:
 class ProvisionalFeed:
     name = 'provisional'
     lookback_minutes = 15
+    role: Literal['publication', 'repair'] | None = None
 
     def __init__(
         self,
@@ -240,7 +256,10 @@ class ProvisionalFeed:
         frontier = self._frontier_gap_key(store, spec, now)
         # Acknowledge accepted coverage and reclaim it before repair needs spool space.
         ordered = list(adapter.candidates(now, store.anchor(), covered))
-        if isinstance(adapter, BinancePerpProvisional) and frontier is not None:
+        if (
+            isinstance(adapter, BinancePerpProvisional) and frontier is not None
+            and not _split_trade_ingestion(spec)
+        ):
             # Spend one bounded bridge allowance on the actual reader gap, even
             # outside the ordinary candidate lookback. Pending work has no receipt.
             adapter.repair_pending(adapter.partition(frontier))
@@ -275,6 +294,26 @@ class ProvisionalFeed:
             # Connections are not shared across threads: each unit gets its own.
             client = make_clickhouse_client(get_clickhouse_settings())
             try:
+                if isinstance(adapter, BinancePerpProvisional) and _split_trade_ingestion(spec):
+                    root = Path(os.environ['ORIGO_PERP_CAPTURE_ROOT'])
+                    with (root / 'read.lock').open('a+') as reader:
+                        try:
+                            fcntl.flock(reader, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            log.info('source=%s minute=%s capture read deferred', spec.key, partition.key)
+                            record_receipt(
+                                client, store.database, feed=self.name, series=spec.key,
+                                minute=partition.start, rows=0, sha256='', duration_ms=0,
+                                status='REJECTED', error_code='CAPTURE_BUSY',
+                                error='Spool reclamation owns read.lock; ingestion deferred.',
+                            )
+                            return None, None
+                        try:
+                            return self._build_one(
+                                SourceStore(client, store.database, spec), spec, partition, now
+                            )
+                        finally:
+                            fcntl.flock(reader, fcntl.LOCK_UN)
                 return self._build_one(SourceStore(client, store.database, spec), spec, partition, now)
             finally:
                 client.disconnect()
@@ -383,7 +422,73 @@ class ProvisionalFeed:
             self._beat()
         return processed, failed
 
+    def _repair(
+        self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime,
+    ) -> tuple[list[str], list[str]]:
+        adapter = spec.provisional
+        if not isinstance(adapter, BinancePerpProvisional):
+            raise ValueError('Historical trade repair requires the perpetual adapter.')
+        root = Path(os.environ['ORIGO_PERP_CAPTURE_ROOT'])
+        accepted: Partition | None = None
+        for interval in sorted(store.active_intervals(), key=lambda part: part.start):
+            if accepted is None:
+                accepted = interval
+            elif interval.start <= accepted.end:
+                accepted = replace(accepted, end=max(accepted.end, interval.end))
+            else:
+                acknowledge_spooled_revision(root, accepted)
+                self._beat()
+                accepted = interval
+        if accepted is not None:
+            acknowledge_spooled_revision(root, accepted)
+        cleanup_spool(root)
+        self._beat()
+        frontier = self._frontier_gap_key(store, spec, now)
+        if frontier is None:
+            return [], []
+        partition = adapter.partition(frontier)
+        state = classify_spooled_partition(root, partition)
+        if state == 'ready' and read_spooled_revision(root, partition) is not None:
+            return [], []
+        token = spooled_repair_identity(root, partition)
+        series = f'{spec.key}:repair'
+        processed: list[str] = []
+        failed: list[str] = []
+        if state != 'ready' and self._may_attempt(store, spec, series=series, token=token):
+            started = time.monotonic()
+            record_receipt(
+                store.client, store.database, feed=self.name, series=series,
+                minute=now.replace(second=0, microsecond=0), rows=0, sha256=token,
+                duration_ms=0, status='STARTED',
+            )
+            error_code, message = '', ''
+            try:
+                adapter.repair_pending(partition)
+            except Exception as error:
+                log.exception('source=%s bridge repair failed', spec.key)
+                error_code, message = failure_code(error), str(error)
+                failed.append(series)
+            record_receipt(
+                store.client, store.database, feed=self.name, series=series,
+                minute=now.replace(second=0, microsecond=0), rows=0, sha256=token,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                status='FAILED' if error_code else 'OK', error_code=error_code, error=message,
+            )
+        if (
+            classify_spooled_partition(root, partition) in ('fallback', 'ready')
+            and self._may_attempt(store, spec, series=spec.key, minute=partition.start)
+        ):
+            # A rejected bridge must not suppress the established historical-minute path.
+            built, broken = self._build_one(store, spec, partition, now)
+            if built is not None:
+                processed.append(built)
+            if broken is not None:
+                failed.append(broken)
+        self._beat()
+        return processed, failed
+
     def tick(self, now: datetime) -> TickOutcome:
+        tick_started = time.monotonic()
         now = now.astimezone(UTC)
         settings = get_clickhouse_settings()
         client = make_clickhouse_client(settings)
@@ -399,30 +504,48 @@ class ProvisionalFeed:
             for spec in self.specs:
                 store = SourceStore(client, settings.database, spec)
                 started = time.monotonic()
+                split = self.role is None and _split_trade_ingestion(spec)
                 try:
-                    built, broken = self._build_intervals(store, spec, now)
-                    published, unpublished = self._publish(store, spec, now)
+                    if self.role == 'publication':
+                        built, broken = [], []
+                        published, unpublished = self._publish(store, spec, now)
+                    elif self.role == 'repair':
+                        built, broken = self._repair(store, spec, now)
+                        published, unpublished = [], []
+                    else:
+                        built, broken = self._build_intervals(store, spec, now)
+                        published, unpublished = ([], []) if split else self._publish(store, spec, now)
                     processed.extend([*built, *published])
                     failed.extend([*broken, *unpublished])
-                    self.reporter.materialized(
-                        live_feed_asset(spec),
-                        partition=None,
-                        metadata={
-                            'minute': now.replace(second=0, microsecond=0).isoformat(),
-                            'intervals': len(built),
-                            'publications': len(published),
-                            'failed': len(broken) + len(unpublished),
-                            'rss_bytes': _rss_bytes(),
-                            'source_timestamp': now.isoformat(),
-                        },
-                    )
+                    if self.role is None:
+                        self.reporter.materialized(
+                            live_feed_asset(spec),
+                            partition=None,
+                            metadata={
+                                'minute': now.replace(second=0, microsecond=0).isoformat(),
+                                'intervals': len(built),
+                                'publications': len(published),
+                                'failed': len(broken) + len(unpublished),
+                                'rss_bytes': _rss_bytes(),
+                                'source_timestamp': now.isoformat(),
+                            },
+                        )
+                    if split:
+                        record_receipt(
+                            client, settings.database, feed=self.name, series=f'{spec.key}:tick',
+                            minute=now.replace(second=0, microsecond=0), rows=len(built), sha256='',
+                            duration_ms=int((time.monotonic() - tick_started) * 1000),
+                            status='FAILED' if broken else 'OK',
+                            error_code='INGESTION_UNIT_FAILED' if broken else '',
+                            error=', '.join(broken),
+                        )
                 except Exception as error:
                     series = f'{spec.key}:tick'
                     log.exception('source=%s provisional tick failed', spec.key)
                     record_receipt(
                         client, settings.database, feed=self.name, series=series,
                         minute=now.replace(second=0, microsecond=0), rows=0, sha256='',
-                        duration_ms=int((time.monotonic() - started) * 1000),
+                        duration_ms=int((time.monotonic() - (tick_started if split else started)) * 1000),
                         status='FAILED', error_code=failure_code(error), error=str(error),
                     )
                     failed.append(series)
@@ -462,22 +585,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         '--check', action='store_true', help='healthcheck: exit 0 when the heartbeat is fresh'
     )
     parser.add_argument('--once', action='store_true', help='run one tick and exit')
+    parser.add_argument('--role', choices=('publication', 'repair'), help='run independent trade maintenance')
     arguments = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
     specs = selected_specs(dict(os.environ))
+    role = cast(Literal['publication', 'repair'] | None, arguments.role)
+    if role is not None:
+        if len(specs) != 1 or specs[0].key not in TRADE_SOURCES:
+            parser.error('Maintenance requires one trade source in ORIGO_PROVISIONAL_SOURCE.')
+        if role == 'repair' and specs[0].key != 'binance_perp_trades':
+            parser.error('Historical repair supports perpetual trades only.')
+        if os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') != '0':
+            parser.error('Maintenance processes require ORIGO_TRADE_MAINTENANCE=0.')
+    role_name = 'trade_publication' if role == 'publication' else 'perp_repair' if role == 'repair' else ProvisionalFeed.name
     name = (
         f'provisional_{specs[0].key}'
         if 'ORIGO_PROVISIONAL_SOURCE' in os.environ else ProvisionalFeed.name
     )
+    if role is not None:
+        name = f'{role_name}_{specs[0].key}'
     heartbeat = heartbeat_path(heartbeat_directory(), name)
     if arguments.check:
         return check_heartbeat(heartbeat)
+    if role == 'repair' and not os.environ.get('ORIGO_PERP_CAPTURE_ROOT'):
+        parser.error('Historical repair requires ORIGO_PERP_CAPTURE_ROOT.')
     os.environ[WORKER_HEARTBEAT_ENV] = str(heartbeat)
     feed = build_feed(dict(os.environ), heartbeat=heartbeat)
+    feed.role, feed.name = role, role_name
     if arguments.once:
         outcome = feed.tick(datetime.now(UTC))
         print(json.dumps({'minute': outcome.minute.isoformat(), 'processed': list(outcome.processed), 'failed': list(outcome.failed)}))
-        return 0
+        return 1 if role is not None and outcome.failed else 0
     run_forever(feed, heartbeat=heartbeat)
 
 

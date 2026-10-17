@@ -47,7 +47,7 @@ class BinancePerpProvisional(BinanceProvisionalBase):
         self, now: datetime, anchor: datetime, covered: tuple[Partition, ...]
     ) -> tuple[Partition, ...]:
         root = self._capture_root()
-        if root is not None:
+        if root is not None and os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') != '1':
             for interval in covered:
                 acknowledge_spooled_revision(root, interval)
             cleanup_spool(root)
@@ -57,6 +57,8 @@ class BinancePerpProvisional(BinanceProvisionalBase):
     @staticmethod
     def _capture_root() -> Path | None:
         configured = os.environ.get('ORIGO_PERP_CAPTURE_ROOT')
+        if not configured and os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1':
+            raise ValueError('Split perpetual ingestion requires ORIGO_PERP_CAPTURE_ROOT.')
         return Path(configured) if configured else None
 
     def repair_pending(self, partition: Partition) -> None:
@@ -66,7 +68,10 @@ class BinancePerpProvisional(BinanceProvisionalBase):
 
     def admits(self, partition: Partition) -> bool:
         root = self._capture_root()
-        return root is None or classify_spooled_partition(root, partition) != 'pending'
+        if root is None:
+            return True
+        state = classify_spooled_partition(root, partition)
+        return state == 'ready' if os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1' else state != 'pending'
 
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
         if (
@@ -82,6 +87,8 @@ class BinancePerpProvisional(BinanceProvisionalBase):
             revision = read_spooled_revision(root, partition)
             if revision is not None:
                 return revision
+            if os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1':
+                raise SourceError('CAPTURE_PENDING', 'Split ingestion requires ready captured data.')
             if not self.admits(partition):
                 self.repair_pending(partition)
                 revision = read_spooled_revision(root, partition)

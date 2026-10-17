@@ -1534,6 +1534,10 @@
     ]
   },
   "required_nodes": [
-    "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals"
+    "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals",
+    "tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance",
+    "tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof",
+    "tests/origo_source_native/test_publication_ownership.py::test_trade_publisher_restart_preserves_ownership_and_files",
+    "tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract"
   ]
 }

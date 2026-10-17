@@ -149,6 +149,44 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
    silent collector from a silent worker; probe the collector's `/history` endpoint for
    the last completed minute before touching the worker.
 
+Production trade ingestion sets `ORIGO_TRADE_MAINTENANCE=1`. Separate processes of
+`origo.workers.provisional --role publication` own spot/perpetual file publication;
+`--role repair` owns perpetual bridge repair, historical-minute fallback and spool
+reclamation on .144. Capture retains .140. Local/default workers keep inline behavior.
+The existing monitor requires `trade_publication_binance_spot_trades`,
+`trade_publication_binance_perp_trades` and `perp_repair_binance_perp_trades` heartbeats
+before their first start. Their receipt feeds are `trade_publication` and `perp_repair`;
+only ingestors report the live-feed asset and whole `source:tick` ingestion duration.
+An exclusive spool read lock defers ingestion with `CAPTURE_BUSY`, before a build starts.
+Bridge rejection retries preserve witnesses, revalidate fresh bytes and retain at most
+eight rejected responses of at most 1 MiB each. A cleared error alone is never proof.
+File paths, schemas, Arrow single-batch format and Parquet outputs stay unchanged.
+
+### Trade maintenance rollback
+
+Before restoring the previous image **and Compose file**, retire only the three
+maintenance services. Run from the deployment directory with its existing environment
+and `PROJECT_NAME`; stop/remove failure refuses rollback. Preserve capture, outputs,
+spool, limiter and all named volumes. Retire their heartbeats only after every process
+is gone, so the previous monitor cannot discover permanently stale role members.
+
+```bash
+set -euo pipefail
+for service in publication-binance-spot-trades publication-binance-perp-trades perp-repair; do
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter "label=com.docker.compose.service=$service")"
+  if [ -n "$ids" ]; then
+    docker stop $ids </dev/null
+    docker rm $ids </dev/null
+  fi
+  remaining="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter "label=com.docker.compose.service=$service")"
+  if [ -n "$remaining" ]; then
+    echo "Maintenance retirement incomplete: $service; rollback refused" >&2
+    exit 1
+  fi
+done
+docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps --entrypoint rm monitor -f /opt/origo/heartbeats/trade_publication_binance_spot_trades.heartbeat /opt/origo/heartbeats/trade_publication_binance_perp_trades.heartbeat /opt/origo/heartbeats/perp_repair_binance_perp_trades.heartbeat
+```
+
 The live feed asset is materialized at the end of every tick whatever the minutes did,
 so its freshness is the worker's tick and its path to the webserver, not the minutes'
 success: failing or skipped minutes keep the feed fresh and show as `FAILED` receipts,

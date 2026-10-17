@@ -210,8 +210,8 @@ jobs:
           if [ -n "$prior_perp_ids" ]; then
             docker stop $prior_perp_ids </dev/null
           fi
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --force-recreate provisional-binance-perp-trades </dev/null
-          perp_ids="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter label=com.docker.compose.service=provisional-binance-perp-trades)"
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --force-recreate perp-repair </dev/null
+          perp_ids="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter label=com.docker.compose.service=perp-repair)"
           if [ -z "$perp_ids" ]; then
             echo 'Raw-perp repair did not start; capture handover refused' >&2
             exit 1
@@ -239,7 +239,7 @@ jobs:
           # Retiring the container also retires its local child run processes.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
           # so wait for the exec into dagster-daemon before recovery contends for the queue lock.

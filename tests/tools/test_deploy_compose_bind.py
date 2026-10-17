@@ -154,7 +154,10 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = (REPO_ROOT / name).read_text()
         assert 'ORIGO_WORKER_HEARTBEAT' not in compose
-        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == 6
+        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == (8 if name == 'docker-compose.deploy.yml' else 6)
+        if name == 'docker-compose.deploy.yml':
+            assert compose.count('command: python -m origo.workers.provisional --role publication') == 2
+            assert compose.count('command: python -m origo.workers.provisional --role repair') == 1
 
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
@@ -185,7 +188,7 @@ function docker() {
         printf '%s\n' 'old-ui ui-host' ;;
       'inspect --format {{.Id}} '*)
         printf '%s\n' "${@: -1}" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -255,7 +258,7 @@ function docker() {
         printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         printf 'up\n' >> "$CALLS" ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -353,8 +356,10 @@ function docker() {
         return "$PREFLIGHT_EXIT" ;;
       'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=provisional-binance-perp-trades')
         printf 'perp\n' ;;
+      'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=perp-repair')
+        printf 'perp\n' ;;
       'stop perp') printf 'stop-perp\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --no-deps --force-recreate provisional-binance-perp-trades')
+      'compose -p test -f docker-compose.deploy.yml up -d --no-deps --force-recreate perp-repair')
         printf 'repair-only\n' >> "$CALLS" ;;
       'inspect --format {{range .Config.Env}}'*) printf repair-only ;;
       'compose -p test -f docker-compose.deploy.yml up -d --no-deps perp-capture')
@@ -363,7 +368,7 @@ function docker() {
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
@@ -525,8 +530,8 @@ source "$SETUP_SCRIPT"
 
 def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
     compose = DEPLOY_COMPOSE.read_text()
-    raw_perp = compose.split('  provisional-binance-perp-trades:\n', 1)[1].split(
-        '  provisional-binance-spot-aggtrades:', 1
+    raw_perp = compose.split('  provisional-binance-perp-trades: &perp-worker\n', 1)[1].split(
+        '  publication-binance-spot-trades:', 1
     )[0]
     assert compose.count('network_mode: host') == 2
     for declaration in (
@@ -539,6 +544,9 @@ def test_only_raw_perp_uses_host_network_with_deployment_identity() -> None:
     ):
         assert declaration in raw_perp
     assert 'ports:' not in raw_perp
+    repair = compose.split('  perp-repair:', 1)[1].split('  provisional-binance-spot-aggtrades:', 1)[0]
+    assert '<<: *perp-worker' in repair
+    assert 'command: python -m origo.workers.provisional --role repair' in repair
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert (
         'ORIGO_PERP_WORKER_HOSTNAME: perp-${{ github.run_id }}-${{ github.run_attempt }}'
@@ -575,7 +583,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
 
 def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book'
+    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book'
     assert command in workflow
     assert workflow.index('bash deploy/prepare_binance_egress.sh') < workflow.index(command)
     assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')

@@ -220,3 +220,57 @@ raise SystemExit(result)
                 expected[row['id']] = historical_row(row)
     assert tuple(revision.rows()) == tuple(expected[key] for key in sorted(expected))
     assert len(expected) == 9948
+
+
+def test_trade_rollback_retires_only_maintenance_processes(tmp_path: Path) -> None:
+    document = (ROOT / 'docs/Developer/Monitoring.md').read_text()
+    section = document.split('### Trade maintenance rollback', 1)[1]
+    rollback = section.split('```bash\n', 1)[1].split('```', 1)[0]
+    names = ('trade_publication_binance_spot_trades', 'trade_publication_binance_perp_trades',
+             'perp_repair_binance_perp_trades')
+    stub = r'''
+PROJECT_NAME=isolated-capture-test
+function docker() {
+  case "$*" in
+    'ps -aq --filter label=com.docker.compose.project=isolated-capture-test --filter label=com.docker.compose.service='*)
+      selected="${@: -1}"
+      selected="${selected##*=}"
+      if [ ! -f "$RETIRED/$selected" ] || [ "$CASE" = orphan-remains ]; then printf '%s\n' "$selected"; fi ;;
+    'stop '*)
+      printf 'stop %s\n' "${@: -1}" >> "$CALLS"
+      if [ "$CASE" = stop-failed ]; then return 1; fi ;;
+    'rm '*)
+      printf 'remove %s\n' "${@: -1}" >> "$CALLS"
+      if [ "$CASE" = remove-failed ]; then return 1; fi
+      touch "$RETIRED/${@: -1}" ;;
+    'compose -p isolated-capture-test -f docker-compose.deploy.yml run --rm --no-deps --entrypoint rm monitor -f '*)
+      printf 'retire-heartbeats\n' >> "$CALLS"
+      if [ "$CASE" = heartbeat-failed ]; then return 1; fi
+      for selected in "${@:16}"; do rm "$HEARTBEATS/${selected##*/}"; done ;;
+    *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 3 ;;
+  esac
+}
+'''
+    for case in ('ok', 'stop-failed', 'remove-failed', 'orphan-remains', 'heartbeat-failed'):
+        directory = tmp_path / case
+        directory.mkdir()
+        retired = directory / 'retired'
+        retired.mkdir()
+        for name in (*names, 'perp_capture', 'provisional_binance_perp_trades'):
+            (directory / f'{name}.heartbeat').write_text('existing worker evidence')
+        calls = directory / 'calls'
+        result = subprocess.run(['bash', '-s'], input=stub + rollback + '\nprintf "legacy-start\n" >> "$CALLS"\n',
+                                text=True, capture_output=True, check=False,
+                                env={**os.environ, 'CASE': case, 'CALLS': str(calls),
+                                     'RETIRED': str(retired), 'HEARTBEATS': str(directory)})
+        observed = calls.read_text()
+        assert (directory / 'perp_capture.heartbeat').read_text() == 'existing worker evidence'
+        assert (directory / 'provisional_binance_perp_trades.heartbeat').read_text() == 'existing worker evidence'
+        if case == 'ok':
+            assert result.returncode == 0, result.stderr
+            assert 'legacy-start' in observed
+            assert not any((directory / f'{name}.heartbeat').exists() for name in names)
+            assert len(list(retired.iterdir())) == 3
+        else:
+            assert result.returncode != 0, case
+            assert 'legacy-start' not in observed

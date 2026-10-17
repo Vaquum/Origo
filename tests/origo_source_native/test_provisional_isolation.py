@@ -138,6 +138,12 @@ sys.stdin.readline()
             "WHERE series LIKE '%:tick' ORDER BY recorded_at"
         )
         assert ticks == [('OK',)] * 4, 'one terminal receipt per whole tick, including empty ticks'
+        monkeypatch.setattr(feed, '_build_intervals', forbidden)
+        assert feed.tick(now).failed == (f'{spec.key}:tick',)
+        assert query_origo(
+            f'SELECT count() FROM {ORIGO_DATABASE}.worker_minute_log '
+            f"WHERE series='{spec.key}:tick' AND status='FAILED'"
+        ) == [(1,)], 'an exceptional whole tick also has exactly one terminal receipt'
     finally:
         holder.communicate('release repair\n', timeout=10)
         assert holder.returncode == 0

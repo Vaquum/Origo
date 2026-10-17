@@ -280,7 +280,7 @@ def test_verified_bridge_repairs_only_missing_rows(tmp_path: Path, responses: tu
 def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
     _append(tmp_path, responses[:60] + responses[140:])
     starts = _repair_from_actual(tmp_path, responses, monkeypatch)
-    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=1))
+    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=3))
     spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     assert len(starts) == 7
     assert spool.read_spooled_revision(tmp_path, _partition()) is None
@@ -288,11 +288,11 @@ def test_bridge_restart_and_cross_minute_reuse(tmp_path: Path, responses: tuple[
         next_id = connection.execute('SELECT next_id FROM gaps').fetchone()[0]
     spool.repair_spooled_gaps(tmp_path, _partition('2026-09-21T15:12:00Z'), egress_ip='37.27.112.144')
     assert len(starts) == 7, 'a restarted caller shares the rolling page budget'
-    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=2))
+    monkeypatch.setattr(spool, 'now_utc', lambda: _partition().end + timedelta(minutes=4))
     spool.repair_spooled_gaps(tmp_path, _partition('2026-09-21T15:12:00Z'), egress_ip='37.27.112.144')
     assert starts[7] == next_id and len(starts) == 14
     for tick in range(20):
-        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=3 + tick))
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: _partition().end + timedelta(minutes=5 + tick))
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
         if spool.classify_spooled_partition(tmp_path, _partition()) == 'ready':
             break
@@ -527,10 +527,13 @@ def test_attempt_cleanup_does_not_depend_on_payload_pages(tmp_path: Path, respon
     def failed(url: str, *, params: dict[str, str | int], headers: dict[str, str], weight: int, egress_ip: str) -> Response:
         raise OSError('injected replay transport interruption')
     monkeypatch.setattr(spool, 'get_response', failed)
-    for _ in range(110):
+    attempt_clock = datetime.now(UTC)
+    for tick in range(110):
+        monkeypatch.setattr(spool, 'now_utc', lambda tick=tick: attempt_clock + timedelta(seconds=61 * tick))
         with pytest.raises(OSError, match='injected'):
             spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     _repair_from_actual(tmp_path, responses, monkeypatch)
+    monkeypatch.setattr(spool, 'now_utc', lambda: attempt_clock + timedelta(seconds=61 * 110))
     spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')
     with sqlite3.connect(tmp_path / 'repair.sqlite3') as connection:
         assert connection.execute('SELECT count(*) FROM pages').fetchone() == (1,)

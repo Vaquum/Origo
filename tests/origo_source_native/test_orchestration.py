@@ -49,9 +49,9 @@ def create_run_for_test(instance, **kwargs):
 
 
 @pytest.fixture
-def instance(tmp_path, request):
+def instance(tmp_path):
     config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
-    width = getattr(request, 'param', 10)
+    width = 10
     config['run_coordinator']['config']['max_concurrent_runs'] = width + 9
     for limit in config['run_coordinator']['config']['tag_concurrency_limits']:
         if limit.get('value') == 'backfill':
@@ -137,9 +137,20 @@ def test_one_pending_refresh_survives_while_a_worker_is_active(instance):
     assert instance.get_run_by_id(first.run_id).status == DagsterRunStatus.STARTED
 
 
-@pytest.mark.parametrize('instance', [10, 31], indirect=True)
-def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(instance):
-    width = instance.run_coordinator._max_concurrent_runs - 9
+def test_native_queue_reserves_both_workloads_and_contains_one_noisy_job(tmp_path):
+    for width in (10, 31):
+        config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
+        config['run_coordinator']['config']['max_concurrent_runs'] = width + 9
+        for limit in config['run_coordinator']['config']['tag_concurrency_limits']:
+            if limit.get('value') == 'backfill':
+                limit['limit'] = width
+        with instance_for_test(temp_dir=str(tmp_path / str(width)), overrides={
+            key: config[key] for key in ('run_coordinator', 'run_launcher', 'run_monitoring')
+        }) as instance:
+            _assert_native_queue_capacity(instance, width)
+
+
+def _assert_native_queue_capacity(instance, width):
     for n in range(width + 5):
         submit(instance, job='backfill_binance_spot_trades_source_job', day=f'2020-{n // 28 + 1:02d}-{n % 28 + 1:02d}')
     for job in (

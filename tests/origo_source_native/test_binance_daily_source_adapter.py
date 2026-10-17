@@ -360,6 +360,7 @@ def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
     entered = context.Queue()
     outcomes = context.Queue()
     release = context.Event()
+    admitted = context.Barrier(2)
     ledger = tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state'
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
 
@@ -368,6 +369,10 @@ def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
         entered.put((label, time.time()))
         if label == 'slow':
             assert release.wait(10)
+        if label in ('pause1', 'pause2'):
+            admitted.wait(10)
+            if label == 'pause1':
+                time.sleep(0.1)
         value = requests.Response()
         value.status_code = 429 if label in ('pause1', 'pause2') else 200
         if value.status_code == 429:

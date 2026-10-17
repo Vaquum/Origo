@@ -41,7 +41,7 @@ def test_compose_execs_do_not_consume_stdin() -> None:
     execs = [command for command in commands if 'exec -T' in command or 'run --rm --no-deps -T' in command]
     assert len(execs) >= 5, execs
     for command in execs:
-        if 'python - <<' in command:
+        if 'python - <<' in command or '--entrypoint python dagster - <<' in command:
             continue
         assert '</dev/null' in command, command
 

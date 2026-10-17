@@ -39,7 +39,7 @@ CRYPTOHFT_REQUEST_WEIGHT = 40
 CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT = 2
 CRYPTOHFT_TOKEN_URL = 'https://api.cryptohftdata.com/v1/jwt-token'
 _TOKEN_LOCK = Lock()
-_TOKEN: tuple[str, str, float] | None = None
+_token: tuple[str, str, float] | None = None
 # The :15 schedule has five minutes for admission, replay and activation.
 BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 20 * 60
 BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS = 5 * 60
@@ -73,10 +73,10 @@ def _file(market: Market, partition: Partition) -> str:
 
 
 def _token_for(key: str, *, rejected: str | None = None) -> str:
-    global _TOKEN
+    global _token
     with _TOKEN_LOCK:
-        if _TOKEN is not None and _TOKEN[0] == key and time.time() < _TOKEN[2] and _TOKEN[1] != rejected:
-            return _TOKEN[1]
+        if _token is not None and _token[0] == key and time.time() < _token[2] and _token[1] != rejected:
+            return _token[1]
         response = get_response(
             CRYPTOHFT_TOKEN_URL, headers={'X-API-Key': key},
             weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT, method='POST',
@@ -92,7 +92,7 @@ def _token_for(key: str, *, rejected: str | None = None) -> str:
                 or not 0 < lifetime < float('inf')
                 or str(payload.get('token_type', 'Bearer')).lower() != 'bearer'):
             raise SourceError('BOOK_VENDOR_AUTH_INVALID', 'Provider token response is invalid.')
-        _TOKEN = (key, token, time.time() + lifetime - min(300, lifetime / 10))
+        _token = (key, token, time.time() + lifetime - min(300, lifetime / 10))
         return token
 
 

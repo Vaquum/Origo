@@ -454,7 +454,7 @@ def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, 
             raise SourceError('PROVIDER_HTTP_401', 'Provider returned HTTP 401.')
         return Response(b'provider-protocol-body', {'ETag': 'same-object'}, 206 if 'Range' in (headers or {}) else 200)
 
-    monkeypatch.setattr(vendor, '_TOKEN', None)
+    monkeypatch.setattr(vendor, '_token', None)
     monkeypatch.setattr(vendor.time, 'time', lambda: clock[0])
     monkeypatch.setattr(vendor, 'get_response', transport)
     monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'control-key')
@@ -474,7 +474,7 @@ def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, 
         vendor._response('spot', partition, metadata=False)
     assert minted == [4] and reject == [0]
     # A fresh native process has no token; a rejected key never falls back anonymously.
-    monkeypatch.setattr(vendor, '_TOKEN', None)
+    monkeypatch.setattr(vendor, '_token', None)
     invalid[0] = True
     before = len(calls)
     with pytest.raises(SourceError) as failure:
@@ -518,7 +518,7 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
 
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'control-key')
-    monkeypatch.setattr(vendor, '_TOKEN', None)
+    monkeypatch.setattr(vendor, '_token', None)
     monkeypatch.setattr(daily, '_request', request)
     monkeypatch.setattr(daily.time, 'time', lambda: clock[0])
     monkeypatch.setattr(daily.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))

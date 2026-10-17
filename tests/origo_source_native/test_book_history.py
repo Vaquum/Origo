@@ -332,6 +332,13 @@ def test_rejected_book_revision_identity_and_retry(
     value['dependencies'] = value['dependencies'][:-1]
     path.write_text(json.dumps(value))
     assert not adapter.rejected_revision(partition, adapter.discover(partition))
+    value['dependencies'] = [['invalid-hour', 'invalid-identity']]
+    path.write_text(json.dumps(value))
+    rewritten[vendor._file(adapter.market, partition)] = 'changed-current-after-stale-corrupt-evidence'
+    assert not adapter.rejected_revision(partition, adapter.discover(partition))
+    with pytest.raises(ExceptionGroup):
+        _execute_operation(runtime, 'audit', SourceRunConfig())
+    assert adapter.rejected_revision(partition, adapter.discover(partition))
     path.write_text('{')
     with pytest.raises(ValueError):
         adapter.discover(partition)

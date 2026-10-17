@@ -601,6 +601,11 @@ def test_rejected_book_revision_is_not_replayed_by_audit(
     with pytest.raises(ExceptionGroup):
         _execute_operation(runtime, 'audit', SourceRunConfig())
     original_failures = runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id')
+    before = dict(counts)
+    result = _execute_operation(runtime, 'repair', SourceRunConfig(partition_key=REAL_HOUR))
+    assert result['generation'] == canonical.generation
+    assert counts['payload'] == before['payload'] and counts['replay'] == before['replay']
+    assert runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id') == original_failures
     selected_skip()
     selected_skip()
     assert runtime.store.record(partition) == canonical

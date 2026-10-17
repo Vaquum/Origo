@@ -76,7 +76,9 @@ active-hour retry block.
 `_REJECTION_POLICY_VERSION` applies only to rejected verdicts. Bump it whenever
 replay, dependency selection or BookSampler acceptance semantics change. Accepted
 `cryptohftdata-v2` identities are unchanged. Native explicit canonical retry always
-validates; previously unrequested failed backfill hours retain that retry path
+validates; retained-generation repair preserves a known rejected replacement
+failure until actual canonical recovery. Stale evidence for a different current
+ETag cannot block a new attempt; previously unrequested failed backfill hours retain that retry path
 without new automatic audit enrollment.
 
 ## Operator workflow and coverage

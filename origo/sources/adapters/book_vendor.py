@@ -196,7 +196,8 @@ def _write_dependencies(market: Market, partition: Partition, current: str,
                         dependencies: list[tuple[str, str]], *, rejected: str | None = None) -> None:
     value: dict[str, object] = {'current': current, 'dependencies': dependencies}
     if rejected is not None:
-        value['rejection'] = {'policy': _REJECTION_POLICY_VERSION, 'code': rejected}
+        value['rejection'] = {'policy': _REJECTION_POLICY_VERSION, 'code': rejected,
+                              'revision': _revision_key(current, tuple(dependencies))}
     payload = json.dumps(value, separators=(',', ':')).encode()
     if len(payload) > BOOK_DEPENDENCY_MAX_BYTES:
         raise SourceError('BOOK_VENDOR_DEPENDENCY_BOUND', 'Vendor dependency evidence exceeds its bound.')
@@ -481,6 +482,8 @@ class CryptoHFTBookHourly:
             return False
         verdict = object_mapping(rejection)
         if verdict.get('policy') != _REJECTION_POLICY_VERSION or verdict.get('code') not in _REJECTION_CODES:
+            return False
+        if verdict.get('revision') != revision:
             return False
         current = value.get('current')
         if not isinstance(current, str):

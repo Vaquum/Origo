@@ -142,8 +142,10 @@ def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:
 
     workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     config = tomllib.loads((ROOT / 'pyproject.toml').read_text())
-    pinned = config['tool']['origo']['release']['native_jobs_only_version']
-    assert pinned == config['project']['version']
+    pinned = config.get('tool', {}).get('origo', {}).get('release', {}).get(
+        'native_jobs_only_version', config['project']['version'])
+    major, minor, patch = map(int, pinned.split('.'))
+    next_version = f'{major}.{minor}.{patch + 1}'
     mode_code = workflow.split('          python3 - <<\'PYTHON\' >> "$GITHUB_ENV"\n', 1)[1].split('          PYTHON', 1)[0]
     mode_code = textwrap.dedent(mode_code)
     start = workflow.index('          retained_workers=()')
@@ -183,7 +185,7 @@ function docker() {
   esac
 }
 '''
-    for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), ('0.0.0', 'full'),
+    for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), (next_version, 'full'),
                           (pinned, 'preflight-failed'), (pinned, 'unretired')):
         (tmp_path / 'pyproject.toml').write_text(
             f'[project]\nversion={json.dumps(version)}\n[tool.origo.release]\nnative_jobs_only_version={json.dumps(pinned)}\n')

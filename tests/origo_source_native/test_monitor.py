@@ -378,11 +378,10 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         client.disconnect()
 
 
-@pytest.mark.parametrize('split', [False, True])
 def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worker(
-    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, split: bool,
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1' if split else '0')
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '0')
     monitor = _monitor(recorder, tmp_path)
     directory = tmp_path / 'heartbeats'
     missing = 'provisional_binance_perp_trades'
@@ -397,15 +396,22 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     expected = {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
-    if split:
-        expected |= {
-            f'heartbeat_stale:{name}' for name in (
-                'trade_publication_binance_spot_trades',
-                'trade_publication_binance_perp_trades', 'perp_repair_binance_perp_trades',
-            )
-        }
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == expected
-    assert len(monitor._heartbeats()) == (13 if split else 10)
+    assert len(monitor._heartbeats()) == 10
+    monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
+    split = _monitor(recorder, tmp_path / 'split')
+    roles = ('trade_publication_binance_spot_trades',
+             'trade_publication_binance_perp_trades', 'perp_repair_binance_perp_trades')
+    assert len(split._heartbeats()) == 13
+    for name in roles[:2]:
+        touch_heartbeat(heartbeat_path(split.heartbeat_dir, name))
+    stale_role = heartbeat_path(split.heartbeat_dir, roles[2])
+    touch_heartbeat(stale_role)
+    os.utime(stale_role, (old, old))
+    outcome = split.tick(NOW)
+    assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == {
+        f'heartbeat_stale:{roles[2]}'
+    }
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(

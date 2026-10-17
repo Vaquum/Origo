@@ -32,11 +32,11 @@ from typing import Literal, cast
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
+from origo.sources.adapters.binance_provisional import BinanceProvisionalBase
 from origo.sources.adapters.binance_perp_spool import (
     acknowledge_spooled_revision,
     classify_spooled_partition,
     cleanup_spool,
-    read_spooled_revision,
     spooled_repair_identity,
 )
 from origo.sources.bundle import SourceRunConfig, execute_source
@@ -255,9 +255,14 @@ class ProvisionalFeed:
         covered = store.active_intervals()
         frontier = self._frontier_gap_key(store, spec, now)
         # Acknowledge accepted coverage and reclaim it before repair needs spool space.
-        ordered = list(adapter.candidates(now, store.anchor(), covered))
+        ordered = list(
+            BinanceProvisionalBase.candidates(adapter, now, store.anchor(), covered)
+            if self.role == 'repair' and isinstance(adapter, BinancePerpProvisional)
+            else adapter.candidates(now, store.anchor(), covered)
+        )
         if (
             isinstance(adapter, BinancePerpProvisional) and frontier is not None
+            and self.role is None
             and not _split_trade_ingestion(spec)
             and not adapter.admits(adapter.partition(frontier))
         ):
@@ -281,6 +286,10 @@ class ProvisionalFeed:
             partition
             for partition in ordered
             if (not isinstance(adapter, BinancePerpProvisional) or adapter.admits(partition))
+            and (
+                self.role != 'repair'
+                or classify_spooled_partition(Path(os.environ['ORIGO_PERP_CAPTURE_ROOT']), partition) == 'fallback'
+            )
             and self._may_attempt(
                 store,
                 spec,
@@ -449,8 +458,6 @@ class ProvisionalFeed:
             return [], []
         partition = adapter.partition(frontier)
         state = classify_spooled_partition(root, partition)
-        if state == 'ready' and read_spooled_revision(root, partition) is not None:
-            return [], []
         token = spooled_repair_identity(root, partition)
         series = f'{spec.key}:repair'
         processed: list[str] = []
@@ -475,16 +482,9 @@ class ProvisionalFeed:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 status='FAILED' if error_code else 'OK', error_code=error_code, error=message,
             )
-        if (
-            classify_spooled_partition(root, partition) in ('fallback', 'ready')
-            and self._may_attempt(store, spec, series=spec.key, minute=partition.start)
-        ):
-            # A rejected bridge must not suppress the established historical-minute path.
-            built, broken = self._build_one(store, spec, partition, now)
-            if built is not None:
-                processed.append(built)
-            if broken is not None:
-                failed.append(broken)
+        built, broken = self._build_intervals(store, spec, now)
+        processed.extend(built)
+        failed.extend(broken)
         self._beat()
         return processed, failed
 

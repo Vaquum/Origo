@@ -367,6 +367,13 @@ def test_rejected_bridge_revalidation_preserves_proof(
         legacy.setattr(provisional, 'get_clickhouse_settings', lambda: Mock())
         assert feed._build_intervals(reader, BINANCE_PERP_TRADES_SPEC, _partition().end)[0]
         assert build.called and not repair.called
+        build.reset_mock()
+        feed.role, feed.name = 'repair', 'perp_repair'
+        assert feed._build_intervals(
+            reader, BINANCE_PERP_TRADES_SPEC, _partition().end + timedelta(minutes=4),
+        )[0]
+        assert build.call_count > 1, 'repair retains the current-plus-five catch-up window'
+        assert not repair.called, 'fallback catch-up never repeats inline bridge work'
     monkeypatch.setattr(spool, '_rows', original_rows)
     for _ in range(20):
         spool.repair_spooled_gaps(tmp_path, _partition(), egress_ip='37.27.112.144')

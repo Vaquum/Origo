@@ -165,8 +165,8 @@ function docker() {
     *' ps -q book-capture-spot '*) printf 'live-capture\n' ;;
     *' ps -q dagster dagit provisional-worker') printf 'old-daemon\nold-ui\nold-spot\n' ;;
     *' ps -q dagster dagit') printf 'old-daemon\nold-ui\n' ;;
-    *' ps -q --filter '*service=provisional-binance-perp-trades) return 0 ;;
-    *' ps -q --filter '*service=perp-repair) printf 'repair\n' ;;
+    'ps -q --filter '*service=provisional-binance-perp-trades) return 0 ;;
+    'ps -q --filter '*service=perp-repair) printf 'repair\n' ;;
     *'inspect --format {{range .Config.Env}}'*) printf repair-only ;;
     'inspect --format {{.Id}} {{.Config.Hostname}} '*) printf '%s host-%s\n' "${@: -1}" "${@: -1}" ;;
     'inspect --format {{.Id}} '*) printf '%s\n' "${@: -1}" ;;

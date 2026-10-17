@@ -1525,7 +1525,6 @@
   "baseline_additions": {
     "sha": "4288d0a764eb526869cb96dbb6ddd23779927242",
     "nodes": [
-      "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals",
       "tests/origo_source_native/test_deploy_verification.py::test_deploy_fails_on_a_crash_looping_unhealthy_or_missing_service",
       "tests/origo_source_native/test_deploy_verification.py::test_verifier_needs_the_launched_run_and_a_fresh_receipt_from_every_enabled_source",
       "tests/origo_source_native/test_deploy_verification.py::test_verifier_process_exits_nonzero_and_names_each_unmet_condition",
@@ -1533,5 +1532,8 @@
       "tests/origo_source_native/test_law.py::test_cube_observations_route_m1_to_the_reader_selected_projection",
       "tests/origo_source_native/test_law_page.py::test_canonical_reader_cube_damage_renders_on_the_canonical_projection_node"
     ]
-  }
+  },
+  "required_nodes": [
+    "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals"
+  ]
 }

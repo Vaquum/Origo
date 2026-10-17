@@ -89,6 +89,9 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
     ).encode()).hexdigest() == '12391bf047bb1dc6ad8afba2414fb2f4e1a1e1bb949a9f4cc2e70d57ace55887'
+    assert contract['required_nodes'] == [
+        'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
+    ]
 
 
 def test_workflow_executes_verification_and_all_provenance_checks() -> None:
@@ -124,7 +127,7 @@ def real_report() -> bytes:
 @pytest.mark.parametrize('fault', [
     'none', 'missing-file', 'malformed', 'empty', 'missing-case', 'missing-ordinary',
     'missing-original', 'duplicate', 'skipped', 'failure', 'error',
-    'aggregate-skipped', 'count', 'renamed-case', 'missing-addition',
+    'aggregate-skipped', 'count', 'renamed-case', 'missing-addition', 'missing-required',
 ])
 def test_report_cli_enforces_actual_outcomes(
     tmp_path: Path, real_report: bytes, fault: str,
@@ -151,10 +154,13 @@ def test_report_cli_enforces_actual_outcomes(
         suite.attrib['tests'] = str(len(cases) - 1)
         if fault == 'missing-original':
             collection.write_text('\n'.join(node for i, node in enumerate(nodes) if i != removed) + '\n')
-    elif fault == 'missing-addition':
+    elif fault in {'missing-addition', 'missing-required'}:
         saved = json.loads(manifest.read_text())
         saved['baseline_nodes'] = nodes[:2]
-        saved['baseline_additions'] = {'sha': '4288d0a764eb526869cb96dbb6ddd23779927242', 'nodes': nodes[2:]}
+        if fault == 'missing-addition':
+            saved['baseline_additions'] = {'sha': '4288d0a764eb526869cb96dbb6ddd23779927242', 'nodes': nodes[2:]}
+        else:
+            saved['required_nodes'] = nodes[2:]
         manifest.write_text(json.dumps(saved))
         suite.remove(cases[2])
         suite.attrib['tests'] = '2'

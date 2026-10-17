@@ -172,6 +172,7 @@ function docker() {
     *'inspect --format {{range .Config.Env}}'*) printf repair-only ;;
     'inspect --format {{.Id}} {{.Config.Hostname}} '*) printf '%s host-%s\n' "${@: -1}" "${@: -1}" ;;
     'inspect --format {{.Id}} '*) printf '%s\n' "${@: -1}" ;;
+    *' stop dagster dagit') [ "$CASE" != stop-failed ] ;;
     *' up -d '*) touch "$REPLACED" ;;
     'ps -aq --no-trunc') printf 'old-daemon\nold-ui\nold-spot\nnew-daemon\nnew-ui\nlive-capture\n' ;;
     'inspect --format {{.State.Running}} live-capture') printf true ;;
@@ -186,7 +187,7 @@ function docker() {
 }
 '''
     for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), (next_version, 'full'),
-                          (pinned, 'preflight-failed'), (pinned, 'unretired')):
+                          (pinned, 'preflight-failed'), (pinned, 'stop-failed'), (pinned, 'unretired')):
         (tmp_path / 'pyproject.toml').write_text(
             f'[project]\nversion={json.dumps(version)}\n[tool.origo.release]\nnative_jobs_only_version={json.dumps(pinned)}\n')
         mode = subprocess.run([sys.executable, '-c', mode_code], cwd=tmp_path,
@@ -199,7 +200,7 @@ function docker() {
                                      'REPLACED': str(replaced), 'ORIGO_NATIVE_JOBS_ONLY': mode},
                                 text=True, capture_output=True)
         observed = calls.read_text()
-        if case == 'preflight-failed':
+        if case in ('preflight-failed', 'stop-failed'):
             assert result.returncode != 0 and not replaced.exists()
         elif case == 'unretired':
             assert result.returncode != 0 and 'origo.sources.rollout' not in observed
@@ -209,6 +210,7 @@ function docker() {
             assert 'origo.sources.rollout' in observed
             if mode == 'true':
                 assert '--force-recreate dagster dagit monitor' in observed
+                assert observed.index('stop dagster dagit') < observed.index('--force-recreate dagster dagit monitor')
                 assert '--force-recreate dagster dagit provisional-worker' not in observed
                 assert 'up -d --no-deps perp-capture' not in observed and 'setup' not in observed
                 assert 'inspect --format {{.State.Running}} live-capture' in observed

@@ -377,6 +377,8 @@ def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
         value.status_code = 429 if label in ('pause1', 'pause2') else 200
         if value.status_code == 429:
             value.headers['Retry-After'] = label[-1]
+        if label == 'policy':
+            value.headers['RateLimit-Policy'] = 'q=60;w=60'
         value._content = b''
         value._content_consumed = True
         return value
@@ -400,12 +402,12 @@ def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
     for process in pauses:
         process.join(10)
         assert process.exitcode == 0
-    saved_next, saved_pause = map(float, ledger.read_text().split())
+    saved_next, saved_pause = map(float, ledger.read_text().split()[:2])
     assert saved_pause > time.time()
     release.set()
     slow.join(10)
     assert slow.exitcode == 0
-    next_request, pause = map(float, ledger.read_text().split())
+    next_request, pause = map(float, ledger.read_text().split()[:2])
     assert next_request >= saved_next and pause >= saved_pause
     fresh = context.Process(target=worker, args=('fresh',))
     fresh.start()
@@ -415,6 +417,33 @@ def test_http_transfers_do_not_hold_admission_lock(tmp_path, monkeypatch):
     results = dict(outcomes.get(timeout=2) for _ in range(4))
     assert results == {'slow': 'ok', 'pause1': 'PROVIDER_HTTP_429',
                        'pause2': 'PROVIDER_HTTP_429', 'fresh': 'ok'}
+    # Three requests reserve at the old rate before the first policy response.
+    # Waiting processes must rebook, and a later process retains the stricter floor.
+    reservations = context.Queue()
+    original_save = daily._save_budget
+
+    def saved(state, next_request, pause, provider_spacing):
+        original_save(state, next_request, pause, provider_spacing)
+        reservations.put(next_request)
+
+    monkeypatch.setattr(daily, '_save_budget', saved)
+    ledger.write_text(f'{time.time() + 1} 0')
+    policy = context.Process(target=worker, args=('policy',))
+    policy.start()
+    reservations.get(timeout=10)
+    paced = [context.Process(target=worker, args=(label,)) for label in ('paced1', 'paced2')]
+    for process in paced:
+        process.start()
+        reservations.get(timeout=10)
+    starts = dict(entered.get(timeout=10) for _ in range(3))
+    assert starts['policy'] + 0.98 <= min(starts['paced1'], starts['paced2'])
+    assert abs(starts['paced1'] - starts['paced2']) >= 0.98
+    for process in (policy, *paced):
+        process.join(10)
+        assert process.exitcode == 0
+    assert [outcomes.get(timeout=2)[1] for _ in range(3)] == ['ok'] * 3
+    assert float(ledger.read_text().split()[2]) == 1.0
+    monkeypatch.setattr(daily, '_save_budget', original_save)
     # The unrelated Binance path still holds its original eager transfer lock.
     release.clear()
     first = context.Process(target=worker, args=('slow', 'https://api.binance.com/api/v3/time'))

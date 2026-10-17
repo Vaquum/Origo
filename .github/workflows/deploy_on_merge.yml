@@ -290,9 +290,10 @@ jobs:
             prior_cube_writers+=("$(docker inspect --format '{{.Id}}' "$worker")")
           done
           retirement_boundary=$(date +%s)
-          # Recreate every cube writer, including on a retry of this same deployment.
+          # Recreate the selected writers, including on a retry of this same deployment.
           # Retiring the container also retires its local child run processes.
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml stop dagster dagit </dev/null
             docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --wait --wait-timeout 600 --force-recreate dagster dagit monitor \
               || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           else

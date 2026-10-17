@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from ipaddress import IPv4Address
-from math import isfinite
+from math import ceil, isfinite
 from pathlib import Path
 from typing import ClassVar, Literal, TextIO
 from urllib.parse import urlsplit
@@ -153,26 +153,26 @@ def _weighted_request(
         return response
 
 
-def _read_budget(state: TextIO) -> tuple[float, float]:
+def _read_budget(state: TextIO) -> tuple[float, float, float]:
     state.seek(0)
     saved = state.read().strip()
     values = tuple(map(float, saved.split())) if saved else (0.0, 0.0)
-    if len(values) != 2 or not all(isfinite(value) and value >= 0 for value in values):
+    if len(values) not in (2, 3) or not all(isfinite(value) and value >= 0 for value in values):
         raise ValueError('The persisted provider request budget is invalid.')
-    return values[0], values[1]
+    return values[0], values[1], values[2] if len(values) == 3 else 0.0
 
 
-def _save_budget(state: TextIO, next_request: float, pause: float) -> None:
+def _save_budget(state: TextIO, next_request: float, pause: float, provider_spacing: float) -> None:
     state.seek(0)
     state.truncate()
-    state.write(f'{next_request:.6f} {pause:.6f}')
+    state.write(f'{next_request:.6f} {pause:.6f} {provider_spacing:.6f}')
     state.flush()
     os.fsync(state.fileno())
 
 
 def _vendor_pause(response: requests.Response, spacing: float) -> tuple[float, float]:
     pause = 0.0
-    surcharge = 0.0
+    provider_spacing = 0.0
     for hop in (*response.history, response):
         retry = hop.headers.get('Retry-After')
         if hop.status_code in (418, 429):
@@ -190,10 +190,10 @@ def _vendor_pause(response: requests.Response, spacing: float) -> tuple[float, f
         limit = hop.headers.get('RateLimit-Limit')
         reset = hop.headers.get('RateLimit-Reset')
         if quota and window and int(quota[1]) > 0:
-            surcharge = max(surcharge, int(window[1]) / int(quota[1]) - spacing)
+            provider_spacing = max(provider_spacing, int(window[1]) / int(quota[1]))
         elif limit and reset and limit.isdigit() and reset.isdigit() and int(limit) > 0:
-            surcharge = max(surcharge, int(reset) / int(limit) - spacing)
-    return pause, surcharge
+            provider_spacing = max(provider_spacing, int(reset) / int(limit))
+    return pause, ceil(provider_spacing * 1_000_000) / 1_000_000 if provider_spacing > spacing else 0.0
 
 
 def _vendor_request(
@@ -204,19 +204,22 @@ def _vendor_request(
     spacing = weight / REST_DEFAULT_BUDGET[0]
     with _budget_state_file(root, url, egress_ip).open('a+') as state:
         fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-        next_request, pause = _read_budget(state)
+        next_request, pause, provider_spacing = _read_budget(state)
+        reserved_spacing = max(spacing, provider_spacing)
         due = max(time.time(), next_request, pause)
-        _save_budget(state, due + spacing, pause)
+        _save_budget(state, due + reserved_spacing, pause, provider_spacing)
         fcntl.flock(state.fileno(), fcntl.LOCK_UN)
         while True:
             time.sleep(max(0.0, due - time.time()))
             fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-            next_request, pause = _read_budget(state)
-            if time.time() >= pause:
+            next_request, pause, provider_spacing = _read_budget(state)
+            current_spacing = max(spacing, provider_spacing)
+            if time.time() >= pause and current_spacing <= reserved_spacing:
                 fcntl.flock(state.fileno(), fcntl.LOCK_UN)
                 break
-            due = max(next_request, pause)
-            _save_budget(state, due + spacing, pause)
+            due = max(next_request, pause, time.time())
+            reserved_spacing = current_spacing
+            _save_budget(state, due + reserved_spacing, pause, provider_spacing)
             fcntl.flock(state.fileno(), fcntl.LOCK_UN)
         response = (
             _request(url, params, headers, egress_ip, method)
@@ -225,10 +228,12 @@ def _vendor_request(
         )
         try:
             beat_worker()
-            deadline, surcharge = _vendor_pause(response, spacing)
+            deadline, observed_spacing = _vendor_pause(response, spacing)
             fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-            next_request, pause = _read_budget(state)
-            _save_budget(state, max(next_request, deadline) + surcharge, max(pause, deadline))
+            next_request, pause, provider_spacing = _read_budget(state)
+            provider_spacing = max(provider_spacing, observed_spacing)
+            _save_budget(state, max(next_request, deadline, time.time() + observed_spacing),
+                         max(pause, deadline), provider_spacing)
         except BaseException:
             response.close()
             raise

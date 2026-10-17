@@ -241,3 +241,11 @@ requests, not six; active replacement adds initial discovery. The target is 12
 active-processing hours per market, with the unchanged 23-hour retry tail separate.
 Unresolved/pending keys block completion; genuine input rejections and exhausted
 provider gaps remain visibly missing.
+
+
+HCD uses the same shared ledger with a third numeric provider-spacing floor;
+legacy two-field input is accepted and Binance ledger files are unchanged.
+Waiting native requests rebook if a newly observed policy is stricter than their
+reserved rate. Both old controller containers stop before new three-field writers
+start; capture/provisional/publication containers keep running. Keep the extended
+reader in forward repairs; an old two-field HCD image is not a supported rollback.

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from math import ceil
 from pathlib import Path
+from time import perf_counter
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -12,10 +18,10 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters.binance_spot_rest import BinanceSpotProvisional
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-from origo.sources.contracts import Partition, Revision, RolloutStage, Row
+from origo.sources.contracts import Partition, Revision, RolloutStage, Row, SourceReadPolicy
 from origo.sources.hashing import content_hash
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.storage import SourceStore
+from origo.sources.storage import SourceStore, _current_partition_indices
 
 from .test_binance_daily_source_adapter import archive_response
 
@@ -128,3 +134,35 @@ def test_preparation_replaces_existing_view_without_changing_dependent_views(
         assert _current(store) == [(keys[0], 1)]
         assert {name: store.execute(f'SELECT count() FROM origo.{name}') for name in names} == counts
         assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
+
+
+@pytest.mark.resource
+def test_trade_state_selection_matches_retained_intervals() -> None:
+    """Reject changed selection or quadratic work on actual production interval counts."""
+    root = Path(__file__).resolve().parents[1] / 'fixtures/source_state'
+    bundle = (root / 'trade_intervals_2026-10-17.json.gz').read_bytes()
+    provenance = cast(dict[str, object], json.loads(
+        (root / 'trade_intervals_2026-10-17.provenance.json').read_text()
+    ))
+    assert hashlib.sha256(bundle).hexdigest() == provenance['projection_sha256']
+    assert provenance['baseline_sha'] == '7eb0cf33bf1ac212b830f85083cee9b510a98df6'
+    captured = cast(dict[str, object], json.loads(gzip.decompress(bundle)))
+    sources = cast(dict[str, dict[str, object]], captured['sources'])
+    for source, state in sources.items():
+        intervals = cast(list[list[object]], state['intervals'])
+        partitions = tuple(
+            Partition(str(row[0]), datetime.fromisoformat(str(row[2])).replace(tzinfo=UTC),
+                      datetime.fromisoformat(str(row[3])).replace(tzinfo=UTC), bool(row[1]))
+            for row in intervals
+        )
+        assert len(partitions) == cast(dict[str, int], provenance['rows'])[source]
+        anchor = datetime.fromisoformat(str(state['anchor'])).replace(tzinfo=UTC)
+        expected = tuple(cast(list[int], state['expected_indices']))
+        assert _current_partition_indices(partitions, anchor, SourceReadPolicy.CONTIGUOUS) == expected
+        durations: list[float] = []
+        for _ in range(20):
+            started = perf_counter()
+            selected = _current_partition_indices(partitions, anchor, SourceReadPolicy.CONTIGUOUS)
+            durations.append(perf_counter() - started)
+            assert selected == expected
+        assert sorted(durations)[ceil(0.95 * len(durations)) - 1] <= 0.1

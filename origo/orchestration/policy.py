@@ -17,6 +17,7 @@ DEFAULT_JOB_MAX_RUNTIME_SECONDS = 93600
 WORKLOAD_TAG = 'origo/workload'
 IDENTITY_TAG = 'origo/request_identity'
 ROUTINE_JOB_TAG = 'origo/routine_job'
+BOOK_BACKFILL_TAG = 'origo/book_backfill'
 SHARE_TAG = 'origo/backfill_share'
 FRONTIER_KEY = 'origo/backfill_frontier'
 WORKER_TAG = 'origo/worker_container'
@@ -53,10 +54,23 @@ def request_identity(run: DagsterRun) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+def _book_backfill(run: DagsterRun) -> bool:
+    from origo.sources.contracts import CanonicalAuditPolicy
+    from origo.sources.prepare import is_source_backfill
+    from origo.sources.registry import SOURCE_REGISTRY
+
+    return any(
+        spec.partitions.interval == 'hour'
+        and isinstance(spec.canonical, CanonicalAuditPolicy)
+        and is_source_backfill(run, spec)
+        for spec in SOURCE_REGISTRY
+    )
+
+
 def bulk_share(run: DagsterRun) -> str | None:
     """A bulk run's share of the historical lane: its native backfill, else its bulk job."""
     backfill = run.tags.get('dagster/backfill')
-    return backfill or (run.job_name if run.job_name.startswith('backfill_') else None)
+    return backfill or (run.job_name if run.job_name.startswith('backfill_') or _book_backfill(run) else None)
 
 
 def bulk_order(run: DagsterRun) -> int:
@@ -104,6 +118,7 @@ def execution_tags(run: DagsterRun, order: int = 0) -> dict[str, str]:
         IDENTITY_TAG: request_identity(run),
         **({ROUTINE_JOB_TAG: run.job_name} if not (bulk or maintenance) else {}),
         **({SHARE_TAG: share} if share else {}),
+        **({BOOK_BACKFILL_TAG: 'true'} if _book_backfill(run) else {}),
         'dagster/priority': '300' if maintenance else str(-order) if bulk else '200' if canonical else '100',
         # Preserve the daily ingestion retry envelope; unlimited jobs can leak slots.
         'dagster/max_runtime': default_runtime if requested_runtime == '0' else requested_runtime,

@@ -48,6 +48,9 @@ run_coordinator:
         value:
           applyLimitPerUniqueValue: true
         limit: 1
+      - key: origo/book_backfill
+        value: "true"
+        limit: 16
 
 run_launcher:
   module: origo.orchestration.launcher

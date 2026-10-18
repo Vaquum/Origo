@@ -85,6 +85,7 @@ def test_queue_reserves_a_maintenance_lane() -> None:
         ('origo/workload', 'backfill'): 31,
         ('origo/workload', 'routine'): 8,
         ('origo/workload', 'maintenance'): 1,
+        ('origo/book_backfill', 'true'): 16,
     }
 
 

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Protocol, cast
 
 import dagster
@@ -10,7 +11,10 @@ from dagster import (
     RetryRequested,
 )
 
-from .contracts import RevisionedSourceSpec, failure_code, failure_message, retryable_source_error
+from .contracts import (
+    CanonicalAuditPolicy, RevisionedSourceSpec, SourceError,
+    failure_code, failure_message, retryable_source_error,
+)
 
 
 class _JobFactory(Protocol):
@@ -50,7 +54,13 @@ def execute_partition_backfill(
         result = run_day(day)
     except Exception as error:
         context.log.exception('source=%s partition=%s phase=backfill_failed', spec.key, day)
-        if retryable_source_error(error):
+        historical_book_404 = (
+            isinstance(error, SourceError) and error.code == 'PROVIDER_HTTP_404'
+            and spec.partitions.interval == 'hour'
+            and isinstance(spec.canonical, CanonicalAuditPolicy)
+            and spec.canonical.partition(day).start < spec.canonical.candidate(datetime.now(UTC)).start
+        )
+        if retryable_source_error(error) and not historical_book_404:
             raise RetryRequested(
                 max_retries=spec.orchestration.retry_count,
                 seconds_to_wait=spec.orchestration.retry_delay,
@@ -105,16 +115,38 @@ def publication_ready(
             ],
         )
         builds, params = store.complete_builds()
-        completed = store.execute(
-            f"""SELECT uniqExact(r.partition_key)
+        completed, child = store.execute(
+            f"""SELECT uniqExact(r.partition_key), countIf(
+                r.partition_key=%(partition)s AND r.revision=%(revision)s
+                AND r.build_id=%(build)s AND r.generation=%(generation)s
+                AND r.dagster_run_id=%(run)s)
             FROM {store.table('source_backfill_log')} r
             INNER JOIN {store.table('source_active_partitions')} a
                 USING (source_key, partition_key, revision, build_id, generation)
             INNER JOIN {builds} c USING (source_key, partition_key, revision, build_id)
             WHERE r.source_key=%(source)s AND r.backfill_id=%(backfill)s
                 AND r.partition_key IN %(days)s AND NOT a.provisional""",
-            {**params, 'backfill': backfill_id, 'days': tuple(days)},
-        )[0][0]
+            {**params, 'backfill': backfill_id, 'days': tuple(days),
+             'partition': result['partition_key'], 'revision': result['revision'],
+             'build': result['build_id'], 'generation': result['generation'],
+             'run': context.run.run_id},
+        )[0]
+        if not child:
+            raise Failure('BACKFILL_RECEIPT_INVALID: Native child receipt lacks matching complete current coverage.',
+                          allow_retries=False)
+        record = store.record(spec.canonical.partition(str(result['partition_key'])))
+        proofs = store.execute(
+            f'SELECT component, content_hash FROM {store.table("source_component_log")} '
+            'WHERE source_key=%(source)s AND partition_key=%(partition)s '
+            'AND revision=%(revision)s AND build_id=%(build)s',
+            {**params, 'partition': result['partition_key'],
+             'revision': result['revision'], 'build': result['build_id']},
+        )
+        if record is None or store.missing_components(record) or tuple(sorted(
+            (str(key), str(digest)) for key, digest in proofs
+        )) != tuple(sorted(record.component_hashes)):
+            raise Failure('BACKFILL_RECEIPT_INVALID: Native child component proofs do not match active coverage.',
+                          allow_retries=False)
     context.log.info(
         'source=%s phase=backfill_complete partitions=%s/%s backfill=%s',
         spec.key,

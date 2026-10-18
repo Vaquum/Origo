@@ -202,7 +202,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             == D1_DELIVERY_GRACE_SECONDS
         )
     assert gates['orchestration.admission.global']['thresholds']['limit'] == 40
-    assert len([key for key in gates if key.startswith('orchestration.admission.tag:')]) == 5
+    assert len([key for key in gates if key.startswith('orchestration.admission.tag:')]) == 6
     assert build_catalog(SHA)['version'] == catalog['version']
     assert code_location(source_lock, SHA)['path'] == 'origo/sources/locking.py'
     assert code_location(source_lock, SHA)['line'] == inspect.getsourcelines(source_lock)[1]

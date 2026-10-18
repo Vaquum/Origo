@@ -1,3 +1,7 @@
+# v3.34.13
+
+- Run native book history under a shared safe admission bound; release missing historical inputs without hourly sleeps and preserve truthful selected completion.
+
 # v3.34.11
 
 - Retain successful law-reader connections under the unchanged one-query account cap.

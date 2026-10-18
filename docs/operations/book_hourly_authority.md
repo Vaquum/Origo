@@ -244,24 +244,42 @@ version-pinned controller/monitor exception retains capture/provisional/publicat
 container IDs, refuses pending component additions, and refreshes the monitor
 catalog. The next version bump returns to ordinary full rollout.
 
-Qualify exact native selections of 2/4/8/16/32 hours, then continue batches no larger
-than the highest demonstrated safe selected population, at most 31 simultaneous
-bulk. Sustain qualification for 30 minutes across an actual due current hour and
-both audits. Current authority has a canonical slot free from bulk. The active
-agent checks existing evidence at most 60 seconds apart and cancels parent and
-children on capacity/reserve/live failure, HTTP429, SQLite lock or admission-claim
-error. There is no new detached load controller.
+Launch the full selection once through native Dagit job or asset backfill controls.
+The versioned queue admits at most 16 historical book runs across both markets,
+within the existing 31 bulk / 8 routine / 1 maintenance lanes. Pending selection
+advances after terminal children and controller restart; private batches are not
+required. Ordinary current-hour refreshes and audits do not consume the book bulk
+sublimit. The 32-slot canonical pool is an upper bound, not measured safe load.
 
-Capacity checks observe free space per run, without reserving concurrent scratch.
-Require 100 GB plus measured live consumption, selected maximum scratch, projected
-retained growth and 20 GB margin; retain at least 32 GB available memory and eight
-idle CPU-equivalents at qualified load. Measure legacy prelude/replay and modern
-strata separately, accepted and attempted rates separately, including token mints,
-activation/reconciliation and retries. An unfilled modern hour uses four download
-requests, not six; active replacement adds initial discovery. The target is 12
-active-processing hours per market, with the unchanged 23-hour retry tail separate.
-Unresolved/pending keys block completion; genuine input rejections and exhausted
-provider gaps remain visibly missing.
+Historical book HTTP 404 ends that partition attempt without hourly sleeping.
+The failure identifies the missing selected/prelude/following archive. A first
+404 is unresolved, not exhausted or a permanent provider gap. Use native failed
+partition retry after input recovery. Current-authority waiting and transport,
+408/418/429/5xx, rate-circuit and revision/generation retries keep their existing
+23-hour envelope. Replay and input bounds remain strict.
+
+For these no-file-consumer sources, an accepted child must have its own native
+receipt joined to matching active revision/build/generation and all declared
+component proofs. Unrelated historical failures keep source_health and C2 red;
+they do not turn accepted selected work into a false final-child failure. A
+selected input failure or broken child proof still fails. No Arrow is declared.
+
+Retain 100 GB reserve plus live consumption, selected maximum scratch, projected
+retained growth and 20 GB margin, 32 GB available memory and eight idle CPU
+equivalents. The original 16-run stages passed; 32 active runs failed CPU
+qualification. Cancel the parent and all queued/running children on the agreed
+capacity/live-health bounds. No new detached load controller is introduced.
+Measure attempted and accepted full-range throughput separately. The 12-hour
+per-market target remains unproved at observed legacy yield; missing provider
+anchors remain incomplete coverage, never invented data.
+
+Production acceptance must record the installed SHA/config, one native parent's
+selection hash, automatic queued successor event times, controlled restart across
+the 25-partition submission checkpoint with unsubmitted work, resumed progress
+without another parent, scheduled due-authority proof, retained worker IDs and
+six-source reader/capture evidence. Unit queue protocol tests do not replace
+this actual GUI and production proof.
+
 
 
 HCD uses the same shared ledger with a third numeric provider-spacing floor;

@@ -164,6 +164,8 @@ class DiffBook:
         self.cached: tuple[tuple[Level, ...], tuple[Level, ...]] | None = None
         if event is not None:
             self.observe_levels(event.bids, event.asks)
+        elif archive_start_ms is not None:
+            self._validate_depth(None)
 
     def _validate_depth(self, event_ms: int | None) -> None:
         if self.archive_start_ms is None or (event_ms is not None and event_ms >= self.archive_start_ms):

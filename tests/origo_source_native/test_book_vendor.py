@@ -1034,6 +1034,19 @@ def test_quote_witness_rejects_unknown_or_crossed_state(
                 fault.apply(corrupted)
             assert crossed.value.code == 'BOOK_CROSSED'
             assert fault.bids[bid] == quantity
+            # The same withheld real deletion also creates a crossed replacement
+            # snapshot. Reject it in both preperiod checkpoint paths, before a
+            # later complete update could remove the visible cross.
+            from origo.workers.book_capture import BookSampler
+            payload = json.dumps({'lastUpdateId': fault.last,
+                'bids': [[str(p), str(q)] for p, q in sorted(fault.bids.items(), reverse=True)],
+                'asks': [[str(p), str(q)] for p, q in sorted(fault.asks.items())]}).encode()
+            for nominal in (False, True):
+                sampler = BookSampler(tmp_path / str(nominal), market, archive_start_ms=end_ms)
+                with pytest.raises(SourceError) as snapshot_cross:
+                    vendor._archive_checkpoint(sampler, payload, event.event_ms, end_ms, nominal=nominal)
+                assert snapshot_cross.value.code == 'BOOK_CROSSED'
+                assert sampler.book is None
             cross_checked = True
         else:
             book.apply(event)
@@ -1127,17 +1140,49 @@ def test_archive_warmup_preserves_requested_validation(
             vendor.replay_hour(paths[1], 'perp', vendor.hour_partition(keys[1]), tmp_path / 'grid', preludes=(paths[0],))
         assert stale.value.code == 'BOOK_EVENT_STALE'
         return
+    if case == 'first-grid-late':
+        _, body, _ = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(REAL_HOUR))
+        path = tmp_path / 'original.parquet'; path.write_bytes(body)
+        partition = vendor.hour_partition(REAL_HOUR)
+        start_ms, end_ms = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
+        frames = iter(vendor._frames((path,)))
+        seed = json.loads(_checkpoint_payload(next(frames)))
+        seed['bids'] = seed['bids'][:100]; seed['asks'] = seed['asks'][:100]
+        candidate = DiffBook('spot', json.dumps(seed).encode(), archive_start_ms=end_ms)
+        candidate.verified = True
+        for frame in frames:
+            if frame[0]['event_type'] != 'update':
+                continue
+            event = _recorded_event(frame, 'spot'); candidate.apply(event)
+            try:
+                candidate.top(200)
+            except SourceError as unknown:
+                assert unknown.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            else:
+                assert event.event_ms > start_ms
+                break
+        else:
+            pytest.fail('Original partial seed never became certifiable after the initial grid.')
+        original = vendor._frames
+
+        def shallow_initial(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+            for frame in original(paths, legacy=legacy):
+                if frame[0]['event_type'] == 'snapshot' and int(str(frame[0]['event_time'])) == start_ms:
+                    yield [row for side in ('bid', 'ask') for row in [r for r in frame if r['side'] == side][:100]]
+                else:
+                    yield frame
+
+        monkeypatch.setattr(vendor, '_frames', shallow_initial)
+        with pytest.raises(SourceError) as late:
+            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid')
+        assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+        assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
+        return
     paths = []
     for key, body, _ in original_reconstruction_archives['update-only']:
         path = tmp_path / f'{key}.bin'; path.write_bytes(body)
         paths.append(vendor._prepare_archive(path, tmp_path))
     partition = vendor.hour_partition('2025-07-15T20Z')
-    if case == 'first-grid-late':
-        with pytest.raises(SourceError) as late:
-            vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=(paths[1],), following=(paths[3],))
-        assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
-        assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
-        return
     original = vendor._frames
     anchor = vendor.hour_partition('2025-07-15T18Z').start if case == 'preperiod-reset' else partition.start
     gap_start = int(anchor.timestamp() * 1000) + 200

@@ -50,7 +50,10 @@ def original_historical_archives(vendor_session_root: Path) -> dict[Market, tupl
     return originals
 
 
-def _transport(archives: tuple[OriginalArchive, ...], market: Market, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], dict[str, str]]:
+def _transport(archives: tuple[OriginalArchive, ...], market: Market, monkeypatch: pytest.MonkeyPatch,
+               *, max_prelude_hours: int = 1) -> tuple[list[str], dict[str, str]]:
+    # Existing H-1/H/H+1 fixtures own one prefix; expansion owners opt into the production bound.
+    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', max_prelude_hours)
     files = {vendor._file(market, archive.partition): archive for archive in archives}
     visited: list[str] = []
     rewritten: dict[str, str] = {}
@@ -270,8 +273,6 @@ def test_rejected_book_revision_identity_and_retry(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # This cache/identity test supplies one real preceding hour; expansion has its own real-input owners.
-    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 1)
     runtime = rejection_runtime
     adapter = runtime.spec.canonical
     assert isinstance(adapter, vendor.CryptoHFTBookHourly)
@@ -438,7 +439,7 @@ def test_update_only_hour_recovers_with_bounded_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     archives = _recorded_inputs(original_reconstruction_archives['update-only'])
-    visited, rewritten = _transport(archives, 'spot', monkeypatch)
+    visited, rewritten = _transport(archives, 'spot', monkeypatch, max_prelude_hours=24)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     adapter = vendor.CryptoHFTBookHourly('spot'); partition = vendor.hour_partition('2025-07-15T20Z')
     attempts: list[tuple[int, str]] = []
@@ -486,7 +487,7 @@ def test_shallow_original_seed_recovers_without_fabricated_depth(
     with pytest.raises(SourceError) as unknown:
         warmup.top(200)
     assert unknown.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
-    visited, rewritten = _transport(archives[1:], 'spot', monkeypatch)
+    visited, rewritten = _transport(archives[1:], 'spot', monkeypatch, max_prelude_hours=24)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     adapter = vendor.CryptoHFTBookHourly('spot')
     attempts: list[tuple[int, str]] = []
@@ -522,7 +523,7 @@ def test_archive_fetch_retains_only_completed_rejection(
             book_capture.BOOK_MAX_TRACKED_PRICES) == (24, 1, 256 * 1024**2, 1024**3, 100000)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     archives = _recorded_inputs(original_reconstruction_archives['update-only'])
-    _transport(archives, 'spot', monkeypatch)
+    _transport(archives, 'spot', monkeypatch, max_prelude_hours=24)
     adapter = vendor.CryptoHFTBookHourly('spot'); partition = vendor.hour_partition('2025-07-15T20Z')
     if case == 'interrupted':
         original = vendor.get_response
@@ -575,7 +576,7 @@ def test_archive_fetch_retains_only_completed_rejection(
         for key in ('2026-10-04T09Z', '2026-10-04T10Z'):
             _, body, headers = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(key))
             originals.append(OriginalArchive(vendor.hour_partition(key), body, headers))
-        _transport(tuple(originals), 'spot', monkeypatch)
+        _transport(tuple(originals), 'spot', monkeypatch, max_prelude_hours=24)
         partition = originals[0].partition; end = int(partition.end.timestamp() * 1000)
         frames = vendor._frames; replay = vendor.replay_hour; written = []
 

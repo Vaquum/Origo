@@ -301,6 +301,21 @@ def _assert_real_canonical_discovery_and_admission(
             'depth20': 36000, 'depth200': 3600, 'depth20_1m': 60, 'depth200_1m': 60,
         }
         assert dict(record.component_hashes) == {key: digest for key, _, digest in proofs}
+        component_params = {**params, 'build': record.build_id}
+        saved = runtime.store.execute(
+            "SELECT * FROM origo.source_component_log WHERE source_key=%(source)s "
+            "AND build_id=%(build)s AND component='depth200_1m'", component_params,
+        )
+        runtime.store.execute(
+            "ALTER TABLE origo.source_component_log DELETE WHERE source_key=%(source)s "
+            "AND build_id=%(build)s AND component='depth200_1m' SETTINGS mutations_sync=1", component_params,
+        )
+        assert tick(now[0])[1] != 'This book revision already has complete active component evidence.'
+        assert _predicate(law.evaluate(runtime.store.client, 'origo', now[0]), spec.key, 'C1')['status'] == 'UNKNOWN'
+        assert runtime.store.record(partition) == record
+        runtime.store.execute('INSERT INTO origo.source_component_log VALUES', saved)
+        assert tick(now[0])[0] == []
+        assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
 
         # A delayed final tick does not hide a real discovery failure after candidate rollover.
         available[0] = False

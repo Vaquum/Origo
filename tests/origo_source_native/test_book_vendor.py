@@ -301,7 +301,7 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
         vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
     # Updates can now anchor unknown archive depth, but cannot certify this first grid.
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
-    assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
+    assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
 
 
 def test_truncated_exchange_tail_cannot_complete_an_hour(
@@ -875,7 +875,7 @@ def test_nominal_archive_preserves_native_gap(
     with pytest.raises(SourceError) as gap:
         vendor.replay_hour(current, market, partition, tmp_path, following=(following,))
     assert gap.value.code == 'BOOK_SEQUENCE_GAP'
-    assert list(tmp_path.rglob('*.seal.gz')) == []
+    assert list(tmp_path.rglob('*.rowbinary')) == []
 
 
 def test_nominal_archive_real_checkpoint_after_clockless_state(
@@ -1229,7 +1229,7 @@ def test_archive_warmup_preserves_requested_validation(
         with pytest.raises(SourceError) as late:
             vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid')
         assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
-        assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
+        assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
         return
     paths = []
     for key, body, _ in original_reconstruction_archives['update-only']:
@@ -1255,6 +1255,6 @@ def test_archive_warmup_preserves_requested_validation(
         assert gap.value.code == 'BOOK_SEQUENCE_GAP'
     else:
         revision = vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=tuple(paths[:2]), following=(paths[3],))
-        assert revision.key == 'local-book-v1:ac7263486e60a07a72ffb9e1ae0aaa15dc757d90bbe453da443fc31b1340785e'
+        assert revision.key == 'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4'
         assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
     assert omitted

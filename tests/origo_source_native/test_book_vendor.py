@@ -182,6 +182,8 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_spool: Path,
+    original_vendor_preparation: tuple[Market, vendor.Revision, Path],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     market, revision = original_vendor_revision
     assert market == original_vendor_archive[0]
@@ -224,6 +226,40 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
         20: partition.end - timedelta(milliseconds=100),
         200: partition.end - timedelta(seconds=1),
     }
+    _assert_archive_transport(revision, original_vendor_preparation, tmp_path, monkeypatch)
+
+
+def _assert_archive_transport(
+    revision: vendor.Revision, preparation: tuple[Market, vendor.Revision, Path],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+    from origo.sources import columnar
+
+    sizes: list[int] = []
+
+    class BinarySink:
+        def raw_insert(self, table: str, *, insert_block: Iterator[bytes], fmt: str) -> None:
+            assert fmt == 'RowBinary'
+            sizes.append(sum(len(block) for block in insert_block))
+
+    @contextmanager
+    def sink() -> Iterator[BinarySink]:
+        yield BinarySink()
+
+    def no_rows(self: vendor._ArchiveGrid, depth: int) -> Iterator[vendor.Row]:
+        raise AssertionError('Archive insertion decoded rows.')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(columnar, 'arrow_client', sink)
+        patch.setattr(vendor._ArchiveGrid, '_rows', no_rows)
+        assert revision.insert_bulk is not None
+        for depth in (20, 200):
+            revision.insert_bulk(f'stage.depth{depth}')
+    assert sizes == [vendor._GRID_RECORDS[20].size * 36000,
+                     vendor._GRID_RECORDS[200].size * 3600]
+    for depth in (20, 200):
+        _assert_archive_scratch_rejects_corruption(preparation, tmp_path, depth)
 
 
 def test_hourly_book_partitions_reuse_native_source_jobs() -> None:
@@ -391,8 +427,7 @@ def original_vendor_revision(
     return market, revision
 
 
-@pytest.mark.parametrize('depth', [20, 200])
-def test_archive_scratch_rejects_corruption_before_yielding(
+def _assert_archive_scratch_rejects_corruption(
     original_vendor_preparation: tuple[Market, vendor.Revision, Path],
     tmp_path: Path, depth: int,
 ) -> None:
@@ -968,6 +1003,10 @@ def test_replay_policy_invalidates_complete_revision_identity(
     assert discovered == 'cryptohftdata-v2:' + hashlib.sha256(json.dumps(
         [vendor._REPLAY_POLICY_VERSION, current, dependencies], separators=(',', ':')).encode()).hexdigest()
     assert discovered != old and not adapter.rejected_revision(partition, discovered)
+    vendor.atomic_write(path, json.dumps({'current': current, 'dependencies': dependencies,
+        'rejection': {'policy': 3, 'code': 'BOOK_EVENT_STALE', 'revision': discovered}}).encode())
+    assert adapter.discover(partition) == discovered
+    assert not adapter.rejected_revision(partition, discovered)
     vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     assert adapter.rejected_revision(partition, discovered)
     with monkeypatch.context() as changed:

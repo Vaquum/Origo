@@ -1,3 +1,7 @@
+# v3.34.18
+
+- Wait for completed query-log evidence before asserting unchanged market-state SQL and schemas.
+
 # v3.34.17
 
 - Reconstruct provable archive book depth from linked original quote witnesses and expand bounded native backfill prefixes automatically; retain strict requested grids and live capture defaults.

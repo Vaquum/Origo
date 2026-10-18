@@ -21,7 +21,9 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.assets.create_origo_database import (
+    ClickHouseClientProtocol, ClickHouseSettings, get_clickhouse_settings, make_clickhouse_client,
+)
 from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
@@ -871,16 +873,21 @@ def assert_measures(cells: list[dict[str, Any]], expected: dict[tuple[int, int],
         )
 
 
-def statement_hashes(result_id: str) -> list[str]:
+def statement_hashes(result_id: str, expected_count: int) -> list[str]:
     """SHA-256 of every statement one result ran, in order."""
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-            'ORDER BY event_time_microseconds',
-            {'result': result_id},
-        )
+        deadline = time.monotonic() + 2
+        while True:
+            client.execute('SYSTEM FLUSH LOGS')
+            rows = client.execute(
+                "SELECT query FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
+                'ORDER BY event_time_microseconds',
+                {'result': result_id},
+            )
+            if len(rows) >= expected_count or time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
     finally:
         client.disconnect()
     return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows]
@@ -1092,8 +1099,32 @@ _V3_27_2_STATEMENTS: dict[str, list[str]] = {
 }
 
 
-def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, tmp_path: Path) -> None:
+def test_default_requests_keep_their_statements_and_schema(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = detailed(cube, DAY1, minutes=MINUTES)
+    make_client = make_clickhouse_client
+    delayed: set[str] = set()
+
+    def delayed_client(settings: ClickHouseSettings) -> ClickHouseClientProtocol:
+        client = make_client(settings)
+        execute = client.execute
+
+        def observe(query: str, params: object = None,
+                    settings: Mapping[str, object] | None = None) -> list[Row]:
+            rows = execute(query, params, settings)
+            if 'SELECT query FROM system.query_log' in query and isinstance(params, dict):
+                identity = str(params['result'])
+                if identity not in delayed and len(rows) > 1:
+                    # Deliberately withhold one genuine receipt on its first observation.
+                    delayed.add(identity)
+                    return rows[:1] + rows[2:]
+            return rows
+
+        monkeypatch.setattr(client, 'execute', observe)
+        return client
+
+    monkeypatch.setattr(f'{__name__}.make_clickhouse_client', delayed_client)
     requests: dict[str, dict[str, object]] = {
         'everything': {},
         'window': {'t1': '2021-01-01T00:57:11.25Z', 't2': '2021-01-01T01:00:00Z', 'tR': 225, 'pR': 250},
@@ -1106,12 +1137,13 @@ def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, 
             # Only the coverage pin changed in #501; every data/validation statement is frozen.
             expected = ['c568497fd23856869d2687d89c5f456f0a5c67309b2006cb8dc0ab879f64d1b8',
                         *_V3_27_2_STATEMENTS[name][1:]]
-            assert statement_hashes(result.staging.name) == expected, (name, absent)
+            assert statement_hashes(result.staging.name, len(expected)) == expected, (name, absent)
             for file, schema in (('cells.arrow', CELLS_SCHEMA), ('summary.arrow', SUMMARY_SCHEMA)):
                 assert ipc.open_file(result.staging / file).schema.remove_metadata() == schema
                 meta = metadata(result.staging / file)
                 assert set(meta) == {'schema_version', 'result_id', 'request', 'grid', 'data_cutoff', 'state_token', 'pins'}
                 assert meta['schema_version'] == 1 and set(meta['request']) == {'t1', 't2', 'p1', 'p2', 'tR', 'pR'}
+    assert len(delayed) == len(requests) * 3
 
 
 def test_measures_coverage_stops_where_detail_is_missing(cube: SourceRuntime, tmp_path: Path) -> None:

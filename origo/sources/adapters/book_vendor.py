@@ -30,9 +30,11 @@ BOOK_MAX_PRELUDE_HOURS = 24
 BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
-# Bump when replay, dependency selection or BookSampler acceptance changes.
-_REJECTION_POLICY_VERSION = 1
-_REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED'})
+# Replay changes invalidate accepted identity; suppression-only changes do not.
+_REPLAY_POLICY_VERSION = 2
+_REJECTION_POLICY_VERSION = 2
+_REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
+                              'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
 # keep both sources together below the vendor's anonymous 60 requests/minute.
 CRYPTOHFT_REQUEST_WEIGHT = 40
@@ -195,6 +197,42 @@ def _has_snapshot(path: Path, start_ms: int) -> bool:
                for row in _archive_rows(path, columns=('event_type', 'event_time')))
 
 
+def _nominal_snapshots(paths: tuple[Path, ...]) -> frozenset[tuple[int, int]]:
+    from origo.workers.book_capture import parse_book_integer
+
+    markers: set[tuple[int, int]] = set()
+    for path in paths:
+        for row in _archive_rows(path, columns=('event_type', 'event_time', 'received_time', 'last_update_id')):
+            if row['event_type'] != 'snapshot':
+                break
+            event_ms = parse_book_integer(row['event_time'])
+            if event_ms % 3600000 == 0 and parse_book_integer(row['received_time']) == event_ms * 1000000:
+                markers.add((event_ms, parse_book_integer(row['last_update_id'])))
+    return frozenset(markers)
+
+
+def _archive_checkpoint(sampler: BookSampler, payload: bytes, event_ms: int, start_ms: int,
+                        *, nominal: bool) -> None:
+    from origo.workers.book_capture import DiffBook
+
+    book = sampler.book
+    if nominal:
+        replacement = DiffBook(sampler.market, payload)
+        if book is not None and book.verified and book.last == replacement.last:
+            book.refresh(replacement)
+        else:
+            replacement.top(200)
+            replacement.verified = True
+            sampler.book = replacement
+        sampler.next_grid = max(sampler.next_grid or start_ms, start_ms)
+        return
+    if book is not None and book.verified and book.event_ms is None:
+        if event_ms > start_ms:
+            raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'Checkpoint has no exchange clock at the initial grid.')
+        book.event_ms = event_ms
+    sampler.checkpoint(payload, event_ms, start_ms)
+
+
 def _dependency_path(market: Market, partition: Partition) -> Path:
     root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
     if not root.is_absolute():
@@ -255,7 +293,7 @@ def _write_dependencies(market: Market, partition: Partition, current: str,
 def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> str:
     # A policy change must revalidate retained generations as well as new builds.
     return 'cryptohftdata-v2:' + hashlib.sha256(
-        json.dumps([current, dependencies], separators=(',', ':')).encode()).hexdigest()
+        json.dumps([_REPLAY_POLICY_VERSION, current, dependencies], separators=(',', ':')).encode()).hexdigest()
 
 
 def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str, object]], start_ms: int, market: Market) -> None:
@@ -307,7 +345,9 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
     previous_received = 0
     boundary_update: list[dict[str, object]] = []
     legacy = partition.start < datetime(2026, 8, 19, tzinfo=UTC)
-    for frame in _frames((*preludes, path, *following), legacy=legacy):
+    paths = (*preludes, path, *following)
+    nominal_snapshots: frozenset[tuple[int, int]] = frozenset() if legacy else _nominal_snapshots(paths)
+    for frame in _frames(paths, legacy=legacy):
         first = frame[0]
         received = parse_book_integer(first['received_time'])
         event_ms = parse_book_integer(first['event_time'])
@@ -330,8 +370,6 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
         if first['event_type'] == 'snapshot':
             from decimal import Decimal
 
-            # A vendor snapshot carries the exchange clock of its already reconstructed
-            # state. A REST seed has no such clock and retains its existing bridge rule.
             seed = {
                 'lastUpdateId': parse_book_integer(first['last_update_id']),
                 'bids': sorted(sides['bid'], key=lambda v: Decimal(v[0]), reverse=True),
@@ -354,7 +392,12 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                 if (sampler.book is not None and sampler.book.verified
                         and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms):
                     raise SourceError('BOOK_SEQUENCE_GAP', 'Checkpoint skips native updates inside the requested hour.')
-                sampler.checkpoint(json.dumps(seed).encode(), event_ms, start_ms)
+                nominal = (event_ms, seed['lastUpdateId']) in nominal_snapshots
+                if event_ms % 3600000 == 0 and not nominal:
+                    raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'Hour marker has no witnessed nominal identity.')
+                _archive_checkpoint(sampler, json.dumps(seed).encode(), event_ms, start_ms, nominal=nominal)
+                if nominal:
+                    continue
             if legacy:
                 # A legacy REST snapshot's collector clock is not an exchange
                 # watermark and cannot terminate the requested hour.
@@ -383,11 +426,14 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             }
             if market == 'perp':
                 wire['pu'] = parse_book_integer(first['prev_final_update_id'])
+            clockless = not legacy and sampler.book.verified and sampler.book.event_ms is None
             try:
-                sampler.accept(
+                applied = sampler.accept(
                     DepthEvent.parse(json.dumps(wire).encode(), market),
                     received_at=utc_millisecond(received // 1000000),
                 )
+                if clockless and applied and event_ms > start_ms:
+                    raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'First exchange witness follows the initial grid.')
             except SourceError as error:
                 if event_ms >= start_ms or error.code != 'BOOK_KNOWN_DEPTH_EXHAUSTED':
                     raise
@@ -400,6 +446,8 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             break
     if sampler.book is None or not sampler.book.verified:
         raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no verified book.')
+    if not legacy and sampler.book.event_ms is None:
+        raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'Hourly archive has no real initial exchange witness.')
     if sampler.book.event_ms is None or sampler.book.event_ms < end_ms - 100:
         raise SourceError('BOOK_VENDOR_TAIL_MISSING', 'No exchange update witnesses the final 100-ms sample.')
     sampler.finish(end_ms)

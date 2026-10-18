@@ -75,13 +75,34 @@ new attempt. Missing verdict evidence permits classification once; corrupt
 existing dependency evidence retains its visible failure, including the existing
 active-hour retry block.
 
-`_REJECTION_POLICY_VERSION` applies only to rejected verdicts. Bump it whenever
-replay, dependency selection or BookSampler acceptance semantics change. Accepted
-`cryptohftdata-v2` identities are unchanged. Native explicit canonical retry always
-validates; retained-generation repair preserves a known rejected replacement
-failure until actual canonical recovery. Stale evidence for a different current
-ETag cannot block a new attempt; previously unrequested failed backfill hours retain that retry path
-without new automatic audit enrollment.
+`_REPLAY_POLICY_VERSION` participates in the compact `[replay_policy, current,
+dependencies]` digest under the unchanged `cryptohftdata-v2:` prefix. Bump it when
+replay, dependency selection or BookSampler acceptance changes. Both retained and
+rejected revisions then require revalidation. `_REJECTION_POLICY_VERSION` separately
+versions suppression verdicts; a suppression-only bump leaves accepted identity intact.
+Native explicit canonical retry always validates. Physically valid retained repair
+recovers only its repair failure when the official identity differs or the retained
+identity is rejected; canonical replacement failures remain until actual current-policy
+canonical build/reconciliation. Non-policy source recovery is unchanged. Stale evidence
+for a different current ETag cannot block a new attempt; previously unrequested failed
+backfill hours retain that retry path without automatic audit enrollment.
+
+Modern initial snapshot prefixes identify nominal `(event_time,last_update_id)`
+checkpoints using exact hour-aligned E and R=E*1000000. Same-identity copies do not
+acquire a clock from different receives. Unwitnessed hour markers fail
+`BOOK_VENDOR_CLOCK_UNPROVEN`. Validated nominal levels retain verified native cursor
+links but no exchange clock, and refresh without sampling. Real admitted updates must
+establish an initial clock at/before the first grid. Nominal following headers cannot
+finish replay; actual E>=end-100ms must witness the terminal grid. Clock-unproven and
+missing-tail complete revisions retain visible failures and unchanged-revision
+suppression. Original ID/freshness/depth/order rules and legacy replay remain.
+
+Policy migration revalidates retained coverage through existing bounded serial audits
+(recent2h, up to50 rotating older records and5 pending observations per market),
+independently of the current-hour canonical schedule. Keep bulk stopped during rollout;
+verify current-hour activation and live capture before resuming frozen unfinished spot
+selection. Input-poor legacy and modern update-only hours remain unresolved; this clock
+correction does not certify complete history or an overnight completion rate.
 
 ## Operator workflow and coverage
 

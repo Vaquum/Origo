@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
+import socket
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -386,81 +388,120 @@ def test_real_reader_queries_obey_cost_and_transport_bounds(law_case: LawCase,
     assert costs and any(int(str(row[0])) > 0 for row in costs)
     assert all(int(str(row[1])) <= 536870912 and int(str(row[2])) < 5000 for row in costs)
 
-    from clickhouse_driver.errors import ServerException
+    from clickhouse_driver import Client as ClickHouseClient
+    from clickhouse_driver.errors import NetworkError, ServerException
 
     from origo.workers.monitor import LawClient
 
     reader = LawClient(get_clickhouse_settings())
-    actual = law.evaluate(reader, 'origo', START + timedelta(minutes=1))
-    assert predicate(actual, 'R1')['status'] == 'PASS'
-    assert reader.execute("SELECT getSetting('readonly'), getSetting('max_memory_usage'), getSetting('max_threads')", settings=law.LAW_QUERY_SETTINGS) == [(1, 536870912, 1)]
-    with pytest.raises(ServerException, match=r'readonly|read-only|READONLY'):
-        reader.execute('CREATE TABLE origo.forbidden_law_write (x UInt8) ENGINE=Memory', settings=law.LAW_QUERY_SETTINGS)
-    for setting, value in (('max_memory_usage', 536870913), ('max_execution_time', 6), ('max_threads', 2), ('max_execution_time', 0), ('max_memory_usage', 0)):
-        with pytest.raises(ServerException):
-            reader.client.execute('SELECT 1', settings={**law.LAW_QUERY_SETTINGS, setting: value})
-    assert reader.execute("SELECT getSetting('max_memory_usage')", settings={**law.LAW_QUERY_SETTINGS, 'max_memory_usage': 268435456}) == [(268435456,)]
-    started = time.monotonic()
-    with pytest.raises(TimeoutError):
-        reader.execute('SELECT sleep(0.5)', settings={**law.LAW_QUERY_SETTINGS, 'max_execution_time': 0.1})
-    assert time.monotonic() - started < 1
-    while law_case.client.execute("SELECT count() FROM system.processes WHERE user='law_reader'") != [(0,)]:
+    try:
+        original_handler = signal.getsignal(signal.SIGALRM)
+
+        def alarm_restored() -> None:
+            assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+            assert signal.getsignal(signal.SIGALRM) == original_handler
+
+        def reader_port() -> int:
+            rows = reader.execute("SELECT port FROM system.processes WHERE user='law_reader'", settings=law.LAW_QUERY_SETTINGS)
+            alarm_restored()
+            assert len(rows) == 1
+            port = int(str(rows[0][0]))
+            assert port > 0
+            return port
+
+        initial_port = reader_port()
+        actual = law.evaluate(reader, 'origo', START + timedelta(minutes=1))
+        assert predicate(actual, 'R1')['status'] == 'PASS'
+        assert reader_port() == initial_port
+        assert reader.execute("SELECT getSetting('readonly'), getSetting('max_memory_usage'), getSetting('max_threads'), getSetting('max_concurrent_queries_for_user')", settings=law.LAW_QUERY_SETTINGS) == [(1, 536870912, 1, 1)]
+        with pytest.raises(ServerException, match=r'readonly|read-only|READONLY') as readonly_error:
+            reader.execute('CREATE TABLE origo.forbidden_law_write (x UInt8) ENGINE=Memory', settings=law.LAW_QUERY_SETTINGS)
+        assert readonly_error.value.code == 164
+        alarm_restored()
+        assert reader_port() != initial_port
+        for setting, value in (('max_memory_usage', 536870913), ('max_execution_time', 6), ('max_threads', 2), ('max_execution_time', 0), ('max_memory_usage', 0)):
+            with pytest.raises(ServerException) as constraint_error:
+                reader.client.execute('SELECT 1', settings={**law.LAW_QUERY_SETTINGS, setting: value})
+            assert constraint_error.value.code == 452
+        assert reader.execute("SELECT getSetting('max_memory_usage')", settings={**law.LAW_QUERY_SETTINGS, 'max_memory_usage': 268435456}) == [(268435456,)]
+        before_timeout = reader_port()
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            reader.execute('SELECT sleep(0.5)', settings={**law.LAW_QUERY_SETTINGS, 'max_execution_time': 0.1})
         assert time.monotonic() - started < 1
-        time.sleep(0.01)
-    assert reader.execute('SELECT 1', settings=law.LAW_QUERY_SETTINGS) == [(1,)]
-    baseline_start = time.monotonic()
-    law_case.minute(1)
-    baseline_seconds = time.monotonic() - baseline_start
-    ingestion_started = Event()
+        alarm_restored()
+        while law_case.client.execute("SELECT count() FROM system.processes WHERE user='law_reader'") != [(0,)]:
+            assert time.monotonic() - started < 1
+            time.sleep(0.01)
+        assert reader.execute('SELECT 1', settings=law.LAW_QUERY_SETTINGS) == [(1,)]
+        retained_port = reader_port()
+        assert retained_port != before_timeout
+        assert reader_port() == retained_port
+        connection = cast(ClickHouseClient, reader.client).connection
+        assert connection.socket is not None
+        connection.socket.shutdown(socket.SHUT_RDWR)
+        with pytest.raises(NetworkError, match='reconnect is disabled'):
+            reader.execute('SELECT 1', settings=law.LAW_QUERY_SETTINGS)
+        alarm_restored()
+        assert not connection.connected
+        assert reader_port() != retained_port
+        reader.disconnect()
+        assert not connection.connected
+        baseline_start = time.monotonic()
+        law_case.minute(1)
+        baseline_seconds = time.monotonic() - baseline_start
+        ingestion_started = Event()
 
-    def ingest() -> tuple[float, float]:
-        ingestion_client = make_clickhouse_client(get_clickhouse_settings())
-        runtime = SourceRuntime(
-            law_case.runtime.spec, SourceStore(ingestion_client, 'origo', law_case.runtime.spec),
-            law_case.runtime.lock_root, str(uuid4()),
-        )
-        start = time.monotonic()
-        ingestion_started.set()
-        try:
-            runtime.build((START + timedelta(minutes=2)).strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
-            return start, time.monotonic()
-        finally:
-            ingestion_client.disconnect()
+        def ingest() -> tuple[float, float]:
+            ingestion_client = make_clickhouse_client(get_clickhouse_settings())
+            runtime = SourceRuntime(
+                law_case.runtime.spec, SourceStore(ingestion_client, 'origo', law_case.runtime.spec),
+                law_case.runtime.lock_root, str(uuid4()),
+            )
+            start = time.monotonic()
+            ingestion_started.set()
+            try:
+                runtime.build((START + timedelta(minutes=2)).strftime('%Y-%m-%dT%H:%M:%SZ'), provisional=True)
+                return start, time.monotonic()
+            finally:
+                ingestion_client.disconnect()
 
-    concurrent_reader = RecordingClient(reader)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        built = pool.submit(ingest)
-        assert ingestion_started.wait(5)
-        observation_start = time.monotonic()
-        observed = law.evaluate(concurrent_reader, 'origo', START + timedelta(minutes=3, seconds=5))
-        observation_end = time.monotonic()
-        ingestion_start, ingestion_end = built.result(timeout=10)
-    assert observation_start < ingestion_end and ingestion_start < observation_end
-    assert predicate(observed, 'R1')['status'] == 'PASS'
-    assert law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [(4999,)]
-    law_case.client.execute('SYSTEM FLUSH LOGS')
-    concurrent_costs = law_case.client.execute(
-        "SELECT read_rows, memory_usage, query_duration_ms FROM system.query_log "
-        "WHERE type='QueryFinish' AND position(query, %(marker)s)>0", {'marker': concurrent_reader.marker})
-    assert concurrent_costs and all(int(str(row[1])) <= 536870912 and int(str(row[2])) < 5000 for row in concurrent_costs)
-    Path('/tmp/origo-law-cost-evidence.json').write_text(json.dumps({
-        'environment': 'local Docker ClickHouse; unchanged captured spot rows; no production calls',
-        'recorded_at': datetime.now(UTC).isoformat(),
-        'baseline': {'minute': '2025-01-01T00:01:00Z', 'raw_rows': 1273, 'ingestion_seconds': baseline_seconds},
-        'observer_on': {'minute': '2025-01-01T00:02:00Z', 'raw_rows': 1095,
-                        'ingestion_seconds': ingestion_end - ingestion_start,
-                        'evaluation_seconds': observation_end - observation_start,
-                        'overlap_seconds': min(observation_end, ingestion_end) - max(observation_start, ingestion_start)},
-        'query_fields': ['read_rows', 'memory_bytes', 'duration_ms'],
-        'initial_query_costs': costs, 'concurrent_query_costs': concurrent_costs,
-        'caveat': 'Adjacent minutes have different row counts; these timings establish bounded overlap and successful ingestion, not a throughput ratio.',
-    }, indent=2) + '\n')
-    # Deadline exhaustion forbids every subsequent database call.
-    monkeypatch.setattr(law, 'LAW_EVALUATION_TIMEOUT_SECONDS', 0)
-    client.calls.clear()
-    timed = law.evaluate(client, 'origo', START)
-    assert not client.calls and timed['status'] == 'UNKNOWN'
-    assert all(p['reason'] == 'evaluation_timeout' for f in timed['feeds'] for p in f['predicates'].values())
+        concurrent_reader = RecordingClient(reader)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            built = pool.submit(ingest)
+            assert ingestion_started.wait(5)
+            observation_start = time.monotonic()
+            observed = law.evaluate(concurrent_reader, 'origo', START + timedelta(minutes=3, seconds=5))
+            observation_end = time.monotonic()
+            ingestion_start, ingestion_end = built.result(timeout=10)
+        assert observation_start < ingestion_end and ingestion_start < observation_end
+        assert predicate(observed, 'R1')['status'] == 'PASS'
+        assert law_case.client.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [(4999,)]
+        law_case.client.execute('SYSTEM FLUSH LOGS')
+        concurrent_costs = law_case.client.execute(
+            "SELECT read_rows, memory_usage, query_duration_ms FROM system.query_log "
+            "WHERE type='QueryFinish' AND position(query, %(marker)s)>0", {'marker': concurrent_reader.marker})
+        assert concurrent_costs and all(int(str(row[1])) <= 536870912 and int(str(row[2])) < 5000 for row in concurrent_costs)
+        Path('/tmp/origo-law-cost-evidence.json').write_text(json.dumps({
+            'environment': 'local Docker ClickHouse; unchanged captured spot rows; no production calls',
+            'recorded_at': datetime.now(UTC).isoformat(),
+            'baseline': {'minute': '2025-01-01T00:01:00Z', 'raw_rows': 1273, 'ingestion_seconds': baseline_seconds},
+            'observer_on': {'minute': '2025-01-01T00:02:00Z', 'raw_rows': 1095,
+                            'ingestion_seconds': ingestion_end - ingestion_start,
+                            'evaluation_seconds': observation_end - observation_start,
+                            'overlap_seconds': min(observation_end, ingestion_end) - max(observation_start, ingestion_start)},
+            'query_fields': ['read_rows', 'memory_bytes', 'duration_ms'],
+            'initial_query_costs': costs, 'concurrent_query_costs': concurrent_costs,
+            'caveat': 'Adjacent minutes have different row counts; these timings establish bounded overlap and successful ingestion, not a throughput ratio.',
+        }, indent=2) + '\n')
+        # Deadline exhaustion forbids every subsequent database call.
+        monkeypatch.setattr(law, 'LAW_EVALUATION_TIMEOUT_SECONDS', 0)
+        client.calls.clear()
+        timed = law.evaluate(client, 'origo', START)
+        assert not client.calls and timed['status'] == 'UNKNOWN'
+        assert all(p['reason'] == 'evaluation_timeout' for f in timed['feeds'] for p in f['predicates'].values())
+    finally:
+        reader.disconnect()
 
 
 def test_missing_evidence_is_unknown_and_errors_are_sanitized(law_case: LawCase) -> None:

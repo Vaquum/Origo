@@ -1,3 +1,7 @@
+# v3.34.11
+
+- Retain successful law-reader connections under the unchanged one-query account cap.
+
 # v3.34.10
 
 Bind nominal archive book checkpoints to actual exchange clocks, revalidate replay identities and preserve failed replacements during retained repair.

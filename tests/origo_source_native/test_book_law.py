@@ -83,6 +83,8 @@ def _predicate(report: law.LawReport, source: str, key: law.LawPredicate) -> law
 def test_canary_books_have_the_same_reader_law_contract(
     authoritative_book_runtime: SourceRuntime,
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = authoritative_book_runtime
@@ -139,15 +141,20 @@ def test_canary_books_have_the_same_reader_law_contract(
     assert all(p['status'] == 'UNKNOWN' for p in projections if p['id'].endswith('_latest'))
     assert _predicate(law.evaluate(runtime.store.client, 'origo', processing), runtime.spec.key, 'C1')['status'] == 'PASS'
     _assert_book_reconciliation_uses_native_hourly_status(runtime, monkeypatch)
-    _assert_hourly_authority_uses_exact_source_component_proofs(runtime)
     with monkeypatch.context() as patch:
-        _assert_real_canonical_discovery_and_admission(runtime, original_historical_archives, patch)
+        _assert_real_canonical_discovery_and_admission(
+            runtime, original_historical_archives,
+            original_vendor_archive, original_vendor_following_archive, patch,
+        )
+    _assert_hourly_authority_uses_exact_source_component_proofs(runtime)
     _assert_declared_history_migration_preserves_existing_generation(runtime)
 
 
 def _assert_real_canonical_discovery_and_admission(
     retained: SourceRuntime,
     originals: dict[Market, tuple[OriginalArchive, ...]],
+    modern: tuple[Market, bytes, dict[str, str]],
+    following: tuple[Market, bytes, dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dagster import DagsterInstance, DagsterRunStatus, Definitions, RunRequest, build_schedule_context
@@ -233,9 +240,15 @@ def _assert_real_canonical_discovery_and_admission(
         now[0] = hour + timedelta(minutes=36)
         first = tick(now[0])[0][0]
         assert first.partition_key == partition.key and standalone in str(first.run_key)
-        revision = adapter.fetch(partition)
-        assert revision.key != standalone
-        assert adapter.discover(partition) == revision.key
+        if market == 'spot':
+            # This original spot triplet has insufficient proven depth; never make it a positive fixture.
+            with pytest.raises(SourceError) as failure:
+                adapter.fetch(partition)
+            assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+        else:
+            adapter.fetch(partition)
+        fetched_revision = adapter.discover(partition)
+        assert fetched_revision != standalone
 
         # Real fetched prelude evidence changes the key while native work is outstanding.
         for job, status, partition_tags in (
@@ -261,6 +274,48 @@ def _assert_real_canonical_discovery_and_admission(
             assert c1['evidence']['deadline'] == (first_available + timedelta(minutes=5)).isoformat()
             instance.report_run_canceled(running)
 
+        if market == 'spot':
+            with pytest.raises(SourceError) as failure:
+                runtime.build(partition.key)
+            assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            failures = runtime.store.execute(
+                'SELECT event_id,event_type FROM origo.source_failure_log '
+                'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
+            )
+            before = dict(counts)
+            now[0] = hour + timedelta(minutes=46)
+            assert tick(now[0])[0] == []
+            assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+            assert runtime.store.execute(
+                'SELECT event_id,event_type FROM origo.source_failure_log '
+                'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
+            ) == failures
+            with pytest.raises(SourceError):
+                runtime.build(partition.key)
+            assert counts['replay'] == before['replay'] + 1
+
+            # The positive spot case uses its genuinely accepted October archives through the real adapter.
+            modern_partition = hour_partition(REAL_HOUR)
+            visited, _ = _transport((
+                OriginalArchive(modern_partition, modern[1], modern[2]),
+                OriginalArchive(hour_partition('2026-10-04T10Z'), following[1], following[2]),
+            ), market, monkeypatch)
+            modern_spec = replace(retained.spec, canonical=CryptoHFTBookHourly(market))
+            modern_bundle = build_source_bundle(modern_spec)
+            modern_definitions = Definitions(assets=modern_bundle.assets, jobs=modern_bundle.jobs,
+                                             schedules=modern_bundle.schedules)
+            modern_schedule = next(s for s in modern_bundle.schedules if s.name.endswith('_canonical_schedule'))
+            now[0] = modern_partition.start + timedelta(hours=2, minutes=56)
+            accepted = retained.store.record(modern_partition)
+            assert accepted is not None and len(accepted.component_hashes) == 4
+            with build_schedule_context(instance=instance, scheduled_execution_time=now[0],
+                                        repository_def=modern_definitions.get_repository_def()) as context:
+                result = modern_schedule.evaluate_tick(context)
+            assert not result.run_requests
+            assert result.skip_message == 'This book revision already has complete active component evidence.'
+            assert retained.store.record(modern_partition) == accepted and visited
+            return
+
         # A post-fetch component failure must keep its native attempt budget across key enrichment.
         failed = instance.create_run_for_job(
             canonical, run_config=first.run_config,
@@ -285,7 +340,7 @@ def _assert_real_canonical_discovery_and_admission(
         # An actual changed provider identity remains a new event, independent of that retry delay.
         rewritten[vendor._file(market, partition)] = 'changed-original-current-after-component-failure'
         expected_revision = adapter.discover(partition)
-        assert expected_revision != revision.key
+        assert expected_revision != fetched_revision
         assert tick(now[0])[0]
 
         # Complete rejection skips preserve the failure and never download/replay again.

@@ -36,7 +36,7 @@ accepted activation. Operators use the ordinary Dagit partition/gap/failure
 selection; no manual archive preparation or alternate runner is needed.
 
 Archive grid scratch stores one minute at a time as typed RowBinary: at most600
-depth20 rows (399600 bytes) or60 depth200 rows (193680 bytes) per insertion block.
+depth20 rows (399600 bytes) or60 depth200 rows (385680 bytes) per insertion block.
 Each block is checked against its creation hash before consumption. Samples share
 the same verified state at coincident grids; finite ordered Float64 levels are
 certified before sealing. Scratch belongs to the fetched revision and is released

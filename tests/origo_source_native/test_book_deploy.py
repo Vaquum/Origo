@@ -153,6 +153,7 @@ def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:
     script = textwrap.dedent(workflow[start:end])
     import shlex
     import signal
+    import time
 
     readiness_line = next(line for line in script.splitlines() if 'exec -T dagster python -c ' in line)
     readiness = shlex.split(readiness_line.split('exec -T dagster python -c ', 1)[1].split(' </dev/null', 1)[0])[0]
@@ -168,23 +169,37 @@ Path.read_bytes = proc_bytes
 exec(sys.argv[1])
 """)
     ready_argv = tmp_path / 'ready-argv'
+    daemon_home = tmp_path / 'daemon-home'
+    daemon_home.mkdir()
+    (daemon_home / 'dagster.yaml').write_text('telemetry:\n  enabled: false\n')
+    (tmp_path / 'workspace.yaml').write_text('load_from: []\n')
+    daemon_environment = {**os.environ, 'DAGSTER_HOME': str(daemon_home),
+                          'PYTHONPATH': str(ROOT) + os.pathsep + os.environ.get('PYTHONPATH', '')}
     for arguments, ready in (
         ([sys.executable, '-m', 'origo.orchestration.daemon', 'run'], True),
         ([str(Path(sys.executable).with_name('dagster-daemon')), 'run'], False),
         (['/bin/sh', '-ec', 'sleep 30; exec python -m origo.orchestration.daemon run'], False),
     ):
-        process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   start_new_session=True)
+        process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   cwd=tmp_path, env=daemon_environment, start_new_session=True)
         try:
-            proc_args = Path(f'/proc/{process.pid}/cmdline')
-            if proc_args.exists():
-                observed_args = proc_args.read_bytes()
-            else:
-                # macOS exposes these controlled process arguments through ps.
-                command = subprocess.run(['ps', '-ww', '-p', str(process.pid), '-o', 'command='],
-                                         capture_output=True, text=True, check=True, timeout=10)
-                observed_args = b'\0'.join(arg.encode() for arg in shlex.split(command.stdout)) + b'\0'
-            assert observed_args
+            deadline = time.monotonic() + 10
+            while True:
+                if process.poll() is not None:
+                    output, _ = process.communicate(timeout=10)
+                    raise AssertionError(f'Daemon control exited before argv observation: {arguments}: {output!r}')
+                proc_args = Path(f'/proc/{process.pid}/cmdline')
+                if proc_args.exists():
+                    observed_args = proc_args.read_bytes()
+                else:
+                    # macOS exposes these controlled process arguments through ps.
+                    command = subprocess.run(['ps', '-ww', '-p', str(process.pid), '-o', 'command='],
+                                             capture_output=True, text=True, check=True, timeout=10)
+                    observed_args = b'\0'.join(arg.encode() for arg in shlex.split(command.stdout)) + b'\0'
+                if observed_args:
+                    break
+                assert time.monotonic() < deadline, 'Process argv did not become readable'
+                time.sleep(0.01)
             ready_argv.write_bytes(observed_args)
             result = subprocess.run([sys.executable, str(driver), readiness, str(ready_argv)],
                                     capture_output=True, text=True, timeout=10)
@@ -192,12 +207,13 @@ exec(sys.argv[1])
             if ready:
                 accepted_argv = ready_argv.read_bytes()
         finally:
-            os.killpg(process.pid, signal.SIGTERM)
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
             try:
-                process.wait(timeout=10)
+                process.communicate(timeout=10)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=10)
+                process.communicate(timeout=10)
     ready_argv.write_bytes(accepted_argv)
     deploy = tmp_path / 'deploy'
     deploy.mkdir()

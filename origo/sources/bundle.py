@@ -819,20 +819,29 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                             limit=1,
                         ):
                             return SkipReason('This book hour already has outstanding canonical work.')
-                current = runtime.store.record(partition)
-                if (current is not None and current.revision == revision
-                        and not runtime.store.missing_components(current)):
-                    proofs = runtime.store.execute(
-                        f'SELECT component, content_hash FROM {runtime.store.table("source_component_log")} '
-                        'WHERE source_key=%(source)s AND partition_key=%(partition)s '
-                        'AND revision=%(revision)s AND build_id=%(build)s',
-                        {'source': spec.key, 'partition': partition.key,
-                         'revision': revision, 'build': current.build_id},
+                try:
+                    current = runtime.store.record(partition)
+                    if (current is not None and current.revision == revision
+                            and not runtime.store.missing_components(current)):
+                        proofs = runtime.store.execute(
+                            f'SELECT component, content_hash FROM {runtime.store.table("source_component_log")} '
+                            'WHERE source_key=%(source)s AND partition_key=%(partition)s '
+                            'AND revision=%(revision)s AND build_id=%(build)s',
+                            {'source': spec.key, 'partition': partition.key,
+                             'revision': revision, 'build': current.build_id},
+                        )
+                        if tuple(sorted((str(key), str(digest)) for key, digest in proofs)) == tuple(
+                            sorted(current.component_hashes)
+                        ):
+                            return SkipReason('This book revision already has complete active component evidence.')
+                except SourceError as error:
+                    if error.code != 'RETAINED_CONTENT_INVALID':
+                        raise
+                    get_dagster_logger().warning(
+                        'source=%s partition=%s phase=canonical_retained_repair code=%s',
+                        spec.key, partition.key, error.code,
                     )
-                    if tuple(sorted((str(key), str(digest)) for key, digest in proofs)) == tuple(
-                        sorted(current.component_hashes)
-                    ):
-                        return SkipReason('This book revision already has complete active component evidence.')
+                    return request('canonical', partition.key, context, revision)
                 if spec.canonical.rejected_revision(partition, revision):
                     get_dagster_logger().info(
                         'source=%s partition=%s phase=canonical_rejected_unchanged',

@@ -158,10 +158,12 @@ def _assert_real_canonical_discovery_and_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dagster import DagsterInstance, DagsterRunStatus, Definitions, RunRequest, build_schedule_context
+    from dagster._core.remote_origin import RemoteJobOrigin
     from origo.sources import lifecycle
     from origo.sources.adapters import book_vendor as vendor
     from origo.sources.bundle import build_source_bundle
     from origo.sources.contracts import BuildContext
+    from .test_revisioned_source_framework_backfill import _repository_origin
 
     assert isinstance(retained.spec.canonical, CryptoHFTBookHourly)
     market = retained.spec.canonical.market
@@ -262,6 +264,7 @@ def _assert_real_canonical_discovery_and_admission(
             running = instance.create_run_for_job(
                 job, run_config=first.run_config,
                 tags={**first.tags, **partition_tags}, status=status,
+                remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
             )
             before = dict(counts)
             now[0] = hour + timedelta(minutes=41)
@@ -320,6 +323,7 @@ def _assert_real_canonical_discovery_and_admission(
         failed = instance.create_run_for_job(
             canonical, run_config=first.run_config,
             tags={**first.tags, 'dagster/partition': partition.key}, status=DagsterRunStatus.STARTED,
+            remote_job_origin=RemoteJobOrigin(_repository_origin(), canonical.name),
         )
 
         def component_failure(context: BuildContext) -> None:
@@ -406,6 +410,19 @@ def _assert_real_canonical_discovery_and_admission(
         runtime.store.execute('INSERT INTO origo.source_component_log VALUES', saved)
         assert tick(now[0])[0] == []
         assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+        import json
+
+        runtime.store.execute(
+            "ALTER TABLE origo.source_activation_log UPDATE component_hashes='[]' "
+            'WHERE source_key=%(source)s AND build_id=%(build)s SETTINGS mutations_sync=1', component_params,
+        )
+        assert tick(now[0])[0]
+        runtime.store.execute(
+            'ALTER TABLE origo.source_activation_log UPDATE component_hashes=%(hashes)s '
+            'WHERE source_key=%(source)s AND build_id=%(build)s SETTINGS mutations_sync=1',
+            {**component_params, 'hashes': json.dumps(record.component_hashes)},
+        )
+        assert tick(now[0])[0] == []
 
         # A delayed final tick does not hide a real discovery failure after candidate rollover.
         available[0] = False

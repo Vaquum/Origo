@@ -215,9 +215,9 @@ def _archive_checkpoint(sampler: BookSampler, payload: bytes, event_ms: int, sta
                         *, nominal: bool) -> None:
     from origo.workers.book_capture import DiffBook
 
-    replacement = DiffBook(sampler.market, payload)
     book = sampler.book
     if nominal:
+        replacement = DiffBook(sampler.market, payload)
         if book is not None and book.verified and book.last == replacement.last:
             book.refresh(replacement)
         else:

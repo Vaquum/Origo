@@ -22,6 +22,7 @@ from origo.workers.book_capture import BookSampler, Level, utc_millisecond
 from ..arrow_types import ArrowCompression, ArrowParquet
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
+from .book_local import fetch_sealed_partition as fetch_sealed_partition
 from .book_spool import Market, atomic_write, object_mapping
 
 CRYPTOHFT_URL = 'https://api.cryptohftdata.com/v1/download'

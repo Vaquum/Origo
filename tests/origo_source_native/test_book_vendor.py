@@ -21,7 +21,7 @@ from origo.sources.contracts import Partition, RevisionedSourceSpec, SourceError
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
-from origo.workers.book_capture import DepthEvent
+from origo.workers.book_capture import BookSampler, DepthEvent
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -65,6 +65,20 @@ _MINUTE_HASHES = {
 
 
 OriginalRecording = tuple[str, bytes, dict[str, str]]
+
+
+def _json_reference(path: Path, market: Market, partition: Partition, root: Path, *,
+                    following: tuple[Path, ...] = ()) -> vendor.Revision:
+    class ReferenceGrid(BookSampler):
+        def __init__(self, root: Path, market: Market, start_ms: int) -> None:
+            super().__init__(root, market, archive_start_ms=start_ms)
+
+        def revision(self, partition: Partition) -> vendor.Revision:
+            return vendor.fetch_sealed_partition(self.root, self.market, partition)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(vendor, '_ArchiveGrid', ReferenceGrid)
+        return vendor.replay_hour(path, market, partition, root, following=following)
 
 
 @pytest.fixture(scope='session')
@@ -167,6 +181,7 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     original_vendor_revision: tuple[Market, vendor.Revision],
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_spool: Path,
 ) -> None:
     market, revision = original_vendor_revision
     assert market == original_vendor_archive[0]
@@ -180,7 +195,8 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
         [current_hash, [], [['2026-10-04T10Z', following_hash]]], separators=(',', ':')
     ).encode()).hexdigest()
     assert json.loads(revision.evidence_json)['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
-    minutes = evidence['grid_evidence']['sealed_minutes']
+    reference = vendor.fetch_sealed_partition(original_vendor_spool, market, partition)
+    minutes = json.loads(reference.evidence_json)['sealed_minutes']
     assert len(minutes) == 60
     expected = {
         'spot': 'd5f899d30aec852c58f2612a887d4911fdf090313c456eff0001b6f8fb133461',
@@ -196,7 +212,8 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     counts = {20: 0, 200: 0}
     first: dict[int, datetime] = {}
     last: dict[int, datetime] = {}
-    for row in revision.rows():
+    for row, expected_row in zip(revision.rows(), reference.rows(), strict=True):
+        assert row == expected_row
         depth = cast(int, row[0])
         first.setdefault(depth, cast(datetime, row[1]))
         last[depth] = cast(datetime, row[1])
@@ -350,7 +367,12 @@ def original_vendor_preparation(
                 revision.key, revision.content_hash, revision.evidence_json, revision.row_count,
             ]))
         values = cast(list[object], json.loads(metadata.read_text()))
-        local = vendor.fetch_sealed_partition(grid, market, vendor.hour_partition(REAL_HOUR))
+        partition = vendor.hour_partition(REAL_HOUR)
+        binary = vendor._ArchiveGrid(grid, market, int(partition.start.timestamp() * 1000))
+        binary.minutes = json.loads(str(values[2]))['grid_evidence']['sealed_minutes']
+        for depth in (20, 200):
+            binary.digests[depth].update((grid / f'depth{depth}.rowbinary').read_bytes())
+        local = binary.revision(partition)
         revision = replace(
             local, key=str(values[0]), content_hash=str(values[1]),
             evidence_json=str(values[2]), row_count=int(str(values[3])),
@@ -369,8 +391,14 @@ def original_vendor_revision(
 @pytest.fixture(scope='session')
 def original_vendor_spool(
     original_vendor_preparation: tuple[Market, vendor.Revision, Path],
+    vendor_session_root: Path,
 ) -> Path:
-    return original_vendor_preparation[2]
+    market = original_vendor_preparation[0]
+    root = vendor_session_root / f'live-reference-{market}'
+    _json_reference(vendor_session_root / f'vendor-{market}-{REAL_HOUR}.input', market,
+                    vendor.hour_partition(REAL_HOUR), root,
+                    following=(vendor_session_root / f'vendor-{market}-2026-10-04T10Z.input',))
+    return root
 
 
 def test_hourly_and_provisional_keys_cannot_share_partition_identity() -> None:
@@ -731,26 +759,24 @@ def test_nominal_archive_snapshot_uses_real_exchange_clock(
     partition = vendor.hour_partition('2026-09-24T22Z')
     root = tmp_path / 'grids'
     revision = vendor.replay_hour(current, market, partition, root, following=(following,))
+    reference = _json_reference(current, market, partition, tmp_path / 'json', following=(following,))
     assert revision.row_count == 36000
     evidence = json.loads(revision.evidence_json)
     assert len(evidence['sealed_minutes']) == 60
-    seals = evidence['sealed_minutes']
+    seals = json.loads(reference.evidence_json)['sealed_minutes']
     digest = hashlib.sha256(json.dumps([seal['payload_sha256'] for seal in seals]).encode()).hexdigest()
     assert digest == {
         'spot': 'd84a112d98d4c36287129ce30b4cfad280765b45a7e12e1f7324e5884b354949',
         'perp': '78a1bc9c390297723b6e6d75cf6fa46813de131f8fb12e6750696415f236e626',
     }[market]
-    rows = sorted(root.rglob('*.seal.gz'))
-    assert rows
-    first = json.loads(gzip.decompress(rows[0].read_bytes()).splitlines()[0])
-    assert first['datetime_ms'] == 1790287200000
-    assert (first['source_timestamp_ms'], first['last_update_id']) == {
+    rows = revision.rows()
+    first = next(rows)
+    assert first[1] == partition.start
+    assert (first[2], first[3]) == {
         'spot': (1790287199914, 100634608796), 'perp': (1790287199988, 11650503406048),
     }[market]
-    for path in rows:
-        for raw in gzip.decompress(path.read_bytes()).splitlines():
-            row = json.loads(raw)
-            assert row['source_timestamp_ms'] <= row['datetime_ms']
+    for row, expected in zip(revision.rows(), reference.rows(), strict=True):
+        assert row == expected
     assert evidence['terminal_exchange_event_ms'] >= 1790290799900
     assert evidence['final_grid_ms'] == 1790290799900
     if market == 'spot':
@@ -927,7 +953,7 @@ def test_replay_policy_invalidates_complete_revision_identity(
     assert {'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'} <= vendor._REJECTION_CODES
 
 
-def test_archive_receive_delay_preserves_complete_exchange_history(vendor_session_root: Path, tmp_path: Path) -> None:
+def test_nominal_archive_preserves_original_freshness(vendor_session_root: Path, tmp_path: Path) -> None:
     paths = []
     for key in ('2026-09-24T00Z', '2026-09-24T01Z'):
         _original_archive(vendor_session_root, 'perp', vendor.hour_partition(key))
@@ -1132,9 +1158,8 @@ def test_archive_warmup_preserves_requested_validation(
             _original_archive(vendor_session_root, 'perp', vendor.hour_partition(key))
             paths.append(vendor_session_root / f'vendor-perp-{key}.input')
         if case == 'event-stale':
-            with pytest.raises(SourceError) as stale:
-                vendor.replay_hour(paths[0], 'perp', vendor.hour_partition(keys[0]), tmp_path / 'grid', following=(paths[1],))
-            assert stale.value.code == 'BOOK_EVENT_STALE'
+            revision = vendor.replay_hour(paths[0], 'perp', vendor.hour_partition(keys[0]), tmp_path / 'grid', following=(paths[1],))
+            assert revision.row_count == 36000
         else:
             partition = vendor.hour_partition(keys[1])
             baseline = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'baseline', following=(paths[2],))

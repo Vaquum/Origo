@@ -158,7 +158,9 @@ def test_missing_location_exhaustion_and_other_fatal_errors_stay_visible(tmp_pat
                   DagsterRunAlreadyExists('exists'), RuntimeError('transient')):
         assert daemon._retryable_backfill_error(error) == original(error)
     target = PythonFileTarget(str(tmp_path / 'missing.py'), 'defs', str(tmp_path), 'origo')
-    with instance_for_test(temp_dir=str(tmp_path / 'instance'), overrides=OVERRIDES) as instance:
+    home = tmp_path / 'instance'
+    home.mkdir()
+    with instance_for_test(temp_dir=str(home), overrides=OVERRIDES) as instance:
         with WorkspaceProcessContext(instance, EmptyWorkspaceTarget()) as workspace:
             instance.add_backfill(_parent(target, 'missing', ['0']))
             maximum = native_backfill._get_max_backfill_retries()

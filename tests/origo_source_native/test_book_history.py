@@ -270,6 +270,8 @@ def test_rejected_book_revision_identity_and_retry(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This cache/identity test supplies one real preceding hour; expansion has its own real-input owners.
+    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 1)
     runtime = rejection_runtime
     adapter = runtime.spec.canonical
     assert isinstance(adapter, vendor.CryptoHFTBookHourly)

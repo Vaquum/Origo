@@ -106,10 +106,14 @@ class DepthEvent:
     asks: tuple[Level, ...]
 
     @classmethod
-    def parse(cls, raw: bytes, market: Market) -> DepthEvent:
-        if len(raw) > FRAME_MAX_BYTES:
-            raise ValueError('Book frame exceeds its bound.')
-        value = object_mapping(json.loads(raw))
+    def parse(cls, raw: bytes | Mapping[str, object], market: Market) -> DepthEvent:
+        """Parse a native frame or an already decoded archive message."""
+        if isinstance(raw, bytes):
+            if len(raw) > FRAME_MAX_BYTES:
+                raise ValueError('Book frame exceeds its bound.')
+            value = object_mapping(json.loads(raw))
+        else:
+            value = raw
         if value.get('e') != 'depthUpdate' or value.get('s') != 'BTCUSDT':
             raise ValueError('The capture owns BTCUSDT diff-depth events only.')
         event = cls(

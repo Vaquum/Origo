@@ -412,11 +412,11 @@ def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str
         previous = sides[side].setdefault(price, quantity)
         if Decimal(previous) != Decimal(quantity):
             raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Boundary collectors disagree about an absolute quantity.')
-    event = DepthEvent.parse(json.dumps({
+    event = DepthEvent.parse({
         'e': 'depthUpdate', 's': 'BTCUSDT', 'E': first['event_time'],
         'U': first['first_update_id'], 'u': first['final_update_id'], 'pu': first['prev_final_update_id'],
         'b': list(map(list, sides['bid'].items())), 'a': list(map(list, sides['ask'].items())),
-    }).encode(), market)
+    }, market)
     snapshot = DiffBook(market, seed)
     if snapshot.last != event.last or event.event_ms != start_ms:
         raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Initial snapshot does not match the boundary exchange update.')
@@ -527,7 +527,7 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             }
             if market == 'perp':
                 wire['pu'] = parse_book_integer(first['prev_final_update_id'])
-            event = DepthEvent.parse(json.dumps(wire).encode(), market)
+            event = DepthEvent.parse(wire, market)
             if event_ms < start_ms and received // 1000000 < event_ms:
                 sampler.invalidate()
                 continue

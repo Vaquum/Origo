@@ -159,6 +159,7 @@ def _assert_real_canonical_discovery_and_admission(
 ) -> None:
     from dagster import DagsterInstance, DagsterRunStatus, Definitions, RunRequest, build_schedule_context
     from dagster._core.remote_origin import RemoteJobOrigin
+    from dagster._core.errors import ScheduleExecutionError
     from origo.sources import lifecycle
     from origo.sources.adapters import book_vendor as vendor
     from origo.sources.bundle import build_source_bundle
@@ -429,8 +430,10 @@ def _assert_real_canonical_discovery_and_admission(
         # A delayed final tick does not hide a real discovery failure after candidate rollover.
         available[0] = False
         now[0] = hour + timedelta(hours=1)
-        with pytest.raises(SourceError, match='archive unavailable'):
+        with pytest.raises(ScheduleExecutionError) as delayed_failure:
             tick(hour + timedelta(minutes=56))
+        assert isinstance(delayed_failure.value.__cause__, SourceError)
+        assert delayed_failure.value.__cause__.code == 'PROVIDER_HTTP_404'
         assert runtime.store.execute(
             "SELECT error_code FROM origo.source_failure_log WHERE source_key=%(source)s "
             "AND partition_key=%(partition)s AND operation='discovery' AND event_type='FAILED'", params,

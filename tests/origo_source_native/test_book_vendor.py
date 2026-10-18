@@ -927,14 +927,15 @@ def test_replay_policy_invalidates_complete_revision_identity(
     assert {'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'} <= vendor._REJECTION_CODES
 
 
-def test_nominal_archive_preserves_original_freshness(vendor_session_root: Path, tmp_path: Path) -> None:
+def test_archive_receive_delay_preserves_complete_exchange_history(vendor_session_root: Path, tmp_path: Path) -> None:
     paths = []
     for key in ('2026-09-24T00Z', '2026-09-24T01Z'):
         _original_archive(vendor_session_root, 'perp', vendor.hour_partition(key))
         paths.append(vendor_session_root / f'vendor-perp-{key}.input')
-    with pytest.raises(SourceError) as stale:
-        vendor.replay_hour(paths[0], 'perp', vendor.hour_partition('2026-09-24T00Z'), tmp_path, following=(paths[1],))
-    assert stale.value.code == 'BOOK_EVENT_STALE'
+    revision = vendor.replay_hour(paths[0], 'perp', vendor.hour_partition('2026-09-24T00Z'), tmp_path, following=(paths[1],))
+    assert revision.row_count == 36000
+    assert len(tuple(revision.rows())) == 39600
+    assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
 
 
 def test_real_clock_archive_preserves_original_sequence_gap(vendor_session_root: Path, tmp_path: Path) -> None:

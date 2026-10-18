@@ -79,6 +79,10 @@ make stale market data healthy. These reads make zero Binance requests and never
 scan the spool; findings use the existing Dagit checks, log and alert path. The
 provisional workers read only sealed local minutes; their own receipts and feed
 materializations remain the native ingestion evidence.
+Archive replay samples exchange time: late provider receipt alone does not invalidate a
+sequence-continuous historical book. Live receive freshness and archive sampling, depth,
+sequence, crossing and terminal exchange-clock checks remain enforced. Archive scratch
+uses bounded RowBinary batches per depth; public table schemas stay the same.
 Hourly book C1 uses existing source observation evidence to distinguish a fresh
 unpublished HCD hour from a file that arrived but was not activated. R1 still
 checks reader rows, freshness and tail gaps; C2 counts missing historical hours.

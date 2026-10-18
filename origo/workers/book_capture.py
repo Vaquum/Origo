@@ -388,22 +388,21 @@ class BookSampler:
             depths = (20, 200) if grid % 1000 == 0 else (20,)
             for depth in depths:
                 bids, asks = book.top(depth)
-                row = {
-                    'depth': depth,
-                    'datetime_ms': grid,
-                    'source_timestamp_ms': book.event_ms,
-                    'last_update_id': book.last,
-                    'bids': _strings(bids),
-                    'asks': _strings(asks),
-                }
-                self.lines.append(
-                    json.dumps(row, separators=(',', ':'), allow_nan=False).encode() + b'\n'
-                )
+                self._emit(depth, grid, bids, asks)
                 self.counts[depth] += 1
             self.next_grid += 100
         if self.minute is not None and event_ms >= self.minute + 60000:
             self._seal()
             self.minute = None
+
+    def _emit(self, depth: int, grid: int, bids: tuple[Level, ...], asks: tuple[Level, ...]) -> None:
+        book = self.book
+        assert book is not None
+        row = {
+            'depth': depth, 'datetime_ms': grid, 'source_timestamp_ms': book.event_ms,
+            'last_update_id': book.last, 'bids': _strings(bids), 'asks': _strings(asks),
+        }
+        self.lines.append(json.dumps(row, separators=(',', ':'), allow_nan=False).encode() + b'\n')
 
     def accept(self, event: DepthEvent, *, received_at: datetime) -> bool:
         book = self.book
@@ -416,11 +415,8 @@ class BookSampler:
         ):
             self.invalidate()
             raise SourceError('BOOK_SEQUENCE_GAP', 'Book continuity was lost before sampling.')
-        if (
-            not 0
-            <= (received_at - utc_millisecond(event.event_ms)).total_seconds()
-            <= BOOK_MAX_EVENT_AGE_SECONDS
-        ):
+        receive_age = (received_at - utc_millisecond(event.event_ms)).total_seconds()
+        if receive_age < 0 or (self.archive_start_ms is None and receive_age > BOOK_MAX_EVENT_AGE_SECONDS):
             self.invalidate()
             raise SourceError(
                 'BOOK_EVENT_STALE', 'Exchange event is stale or ahead of the local clock.'

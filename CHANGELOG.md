@@ -1,3 +1,7 @@
+# v3.34.18
+
+- Stream archive book grids as bounded RowBinary batches without JSON/gzip scratch or repeated depth decoding; separate archived receive delay from live freshness.
+
 # v3.34.17
 
 - Reconstruct provable archive book depth from linked original quote witnesses and expand bounded native backfill prefixes automatically; retain strict requested grids and live capture defaults.

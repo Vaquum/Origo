@@ -172,8 +172,17 @@ class DiffBook:
             self._validate_depth(None)
 
     def _validate_depth(self, event_ms: int | None) -> None:
-        if self.archive_start_ms is None or (event_ms is not None and event_ms >= self.archive_start_ms):
+        if self.archive_start_ms is None:
             self.top(200)
+        elif event_ms is not None and event_ms >= self.archive_start_ms:
+            if (len(self.bid_prices) < 200 or len(self.ask_prices) < 200
+                    or self.bid_prices[-200] < self.bid_floor
+                    or self.ask_prices[199] > self.ask_ceiling):
+                raise SourceError(
+                    'BOOK_KNOWN_DEPTH_EXHAUSTED', 'Top depth crosses the proven known price region.'
+                )
+            if self.bid_prices[-1] >= self.ask_prices[0]:
+                raise SourceError('BOOK_CROSSED', 'Reconstructed book is crossed.')
         elif self.bid_prices and self.ask_prices and self.bid_prices[-1] >= self.ask_prices[0]:
             raise SourceError('BOOK_CROSSED', 'Witnessed positive levels cross.')
 

@@ -81,7 +81,7 @@ class _ArchiveGrid(BookSampler):
         root.mkdir(parents=True, exist_ok=True)
         self.samples: list[_GridSample] = []
         self.minutes: list[dict[str, object]] = []
-        self.digests = {depth: hashlib.sha256() for depth in (20, 200)}
+        self.digests: dict[int, list[bytes]] = {20: [], 200: []}
 
     def invalidate(self) -> None:
         super().invalidate()
@@ -109,7 +109,7 @@ class _ArchiveGrid(BookSampler):
                 buffers[depth].extend(encoded)
                 minute_hash.update(encoded)
             for depth, buffer in buffers.items():
-                self.digests[depth].update(buffer)
+                self.digests[depth].append(hashlib.sha256(buffer).digest())
                 with (self.root / f'depth{depth}.rowbinary').open('ab') as output:
                     output.write(buffer)
             self.minutes.append({
@@ -123,13 +123,15 @@ class _ArchiveGrid(BookSampler):
         self.first_id = None
 
     def _chunks(self, depth: int) -> Iterator[bytes]:
-        digest = hashlib.sha256()
+        size = _GRID_RECORDS[depth].size * (600 if depth == 20 else 60)
         with (self.root / f'depth{depth}.rowbinary').open('rb') as stream:
-            while block := stream.read(_GRID_RECORDS[depth].size * 128):
-                digest.update(block)
+            for digest in self.digests[depth]:
+                block = stream.read(size)
+                if len(block) != size or hashlib.sha256(block).digest() != digest:
+                    raise SourceError('BOOK_PAYLOAD_CHANGED', 'Archive grid scratch failed its hash.')
                 yield block
-        if digest.digest() != self.digests[depth].digest():
-            raise SourceError('BOOK_PAYLOAD_CHANGED', 'Archive grid scratch failed its hash.')
+            if stream.read(1):
+                raise SourceError('BOOK_PAYLOAD_CHANGED', 'Archive grid scratch has trailing bytes.')
 
     def _rows(self, depth: int) -> Iterator[Row]:
         for block in self._chunks(depth):

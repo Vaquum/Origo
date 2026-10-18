@@ -371,7 +371,10 @@ def original_vendor_preparation(
         binary = vendor._ArchiveGrid(grid, market, int(partition.start.timestamp() * 1000))
         binary.minutes = json.loads(str(values[2]))['grid_evidence']['sealed_minutes']
         for depth in (20, 200):
-            binary.digests[depth].update((grid / f'depth{depth}.rowbinary').read_bytes())
+            size = vendor._GRID_RECORDS[depth].size * (600 if depth == 20 else 60)
+            with (grid / f'depth{depth}.rowbinary').open('rb') as stream:
+                binary.digests[depth] = [hashlib.sha256(block).digest()
+                                         for block in iter(lambda: stream.read(size), b'')]
         local = binary.revision(partition)
         revision = replace(
             local, key=str(values[0]), content_hash=str(values[1]),
@@ -386,6 +389,31 @@ def original_vendor_revision(
 ) -> tuple[Market, vendor.Revision]:
     market, revision, _ = original_vendor_preparation
     return market, revision
+
+
+@pytest.mark.parametrize('depth', [20, 200])
+def test_archive_scratch_rejects_corruption_before_yielding(
+    original_vendor_preparation: tuple[Market, vendor.Revision, Path],
+    tmp_path: Path, depth: int,
+) -> None:
+    """A deliberate length-prefix fault in genuine output must never reach insertion."""
+    market, _, original = original_vendor_preparation
+    grid = vendor._ArchiveGrid(tmp_path, market, 0)
+    path = tmp_path / f'depth{depth}.rowbinary'
+    shutil.copyfile(original / path.name, path)
+    size = vendor._GRID_RECORDS[depth].size * (600 if depth == 20 else 60)
+    with path.open('rb') as stream:
+        grid.digests[depth] = [hashlib.sha256(block).digest()
+                              for block in iter(lambda: stream.read(size), b'')]
+    with path.open('r+b') as stream:
+        stream.seek(24)
+        value = stream.read(1)
+        stream.seek(24)
+        stream.write(bytes([value[0] ^ 1]))
+    for output in (grid._chunks(depth), grid._rows(depth)):
+        with pytest.raises(SourceError, match='Archive grid scratch failed its hash') as failure:
+            next(output)
+        assert failure.value.code == 'BOOK_PAYLOAD_CHANGED'
 
 
 @pytest.fixture(scope='session')

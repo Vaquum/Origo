@@ -17,7 +17,7 @@ def _snapshots(depth: int) -> Callable[[BuildContext], None]:
     def build(context: BuildContext) -> None:
         suffix = '_latest' if context.partition.provisional else ''
         table = context.table(f'depth{depth}{suffix}')
-        if context.revision.insert_bulk is not None:
+        if context.revision.insert_bulk is not None and not context.partition.provisional:
             context.revision.insert_bulk(table)
             return
 

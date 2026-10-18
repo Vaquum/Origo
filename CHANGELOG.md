@@ -1,6 +1,10 @@
-# v3.34.18
+# v3.34.20
 
 - Read statement-start receipts for market-state SQL, settings and phase assertions; reject observed server exceptions.
+
+# v3.34.19
+
+- Stream archive book grids as bounded RowBinary batches without JSON/gzip scratch or repeated depth decoding; separate archived receive delay from live freshness.
 
 # v3.34.17
 

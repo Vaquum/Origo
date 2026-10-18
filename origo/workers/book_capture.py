@@ -106,10 +106,14 @@ class DepthEvent:
     asks: tuple[Level, ...]
 
     @classmethod
-    def parse(cls, raw: bytes, market: Market) -> DepthEvent:
-        if len(raw) > FRAME_MAX_BYTES:
-            raise ValueError('Book frame exceeds its bound.')
-        value = object_mapping(json.loads(raw))
+    def parse(cls, raw: bytes | Mapping[str, object], market: Market) -> DepthEvent:
+        """Parse a native frame or an already decoded archive message."""
+        if isinstance(raw, bytes):
+            if len(raw) > FRAME_MAX_BYTES:
+                raise ValueError('Book frame exceeds its bound.')
+            value = object_mapping(json.loads(raw))
+        else:
+            value = raw
         if value.get('e') != 'depthUpdate' or value.get('s') != 'BTCUSDT':
             raise ValueError('The capture owns BTCUSDT diff-depth events only.')
         event = cls(
@@ -168,8 +172,17 @@ class DiffBook:
             self._validate_depth(None)
 
     def _validate_depth(self, event_ms: int | None) -> None:
-        if self.archive_start_ms is None or (event_ms is not None and event_ms >= self.archive_start_ms):
+        if self.archive_start_ms is None:
             self.top(200)
+        elif event_ms is not None and event_ms >= self.archive_start_ms:
+            if (len(self.bid_prices) < 200 or len(self.ask_prices) < 200
+                    or self.bid_prices[-200] < self.bid_floor
+                    or self.ask_prices[199] > self.ask_ceiling):
+                raise SourceError(
+                    'BOOK_KNOWN_DEPTH_EXHAUSTED', 'Top depth crosses the proven known price region.'
+                )
+            if self.bid_prices[-1] >= self.ask_prices[0]:
+                raise SourceError('BOOK_CROSSED', 'Reconstructed book is crossed.')
         elif self.bid_prices and self.ask_prices and self.bid_prices[-1] >= self.ask_prices[0]:
             raise SourceError('BOOK_CROSSED', 'Witnessed positive levels cross.')
 
@@ -388,22 +401,21 @@ class BookSampler:
             depths = (20, 200) if grid % 1000 == 0 else (20,)
             for depth in depths:
                 bids, asks = book.top(depth)
-                row = {
-                    'depth': depth,
-                    'datetime_ms': grid,
-                    'source_timestamp_ms': book.event_ms,
-                    'last_update_id': book.last,
-                    'bids': _strings(bids),
-                    'asks': _strings(asks),
-                }
-                self.lines.append(
-                    json.dumps(row, separators=(',', ':'), allow_nan=False).encode() + b'\n'
-                )
+                self._emit(depth, grid, bids, asks)
                 self.counts[depth] += 1
             self.next_grid += 100
         if self.minute is not None and event_ms >= self.minute + 60000:
             self._seal()
             self.minute = None
+
+    def _emit(self, depth: int, grid: int, bids: tuple[Level, ...], asks: tuple[Level, ...]) -> None:
+        book = self.book
+        assert book is not None
+        row = {
+            'depth': depth, 'datetime_ms': grid, 'source_timestamp_ms': book.event_ms,
+            'last_update_id': book.last, 'bids': _strings(bids), 'asks': _strings(asks),
+        }
+        self.lines.append(json.dumps(row, separators=(',', ':'), allow_nan=False).encode() + b'\n')
 
     def accept(self, event: DepthEvent, *, received_at: datetime) -> bool:
         book = self.book
@@ -416,11 +428,8 @@ class BookSampler:
         ):
             self.invalidate()
             raise SourceError('BOOK_SEQUENCE_GAP', 'Book continuity was lost before sampling.')
-        if (
-            not 0
-            <= (received_at - utc_millisecond(event.event_ms)).total_seconds()
-            <= BOOK_MAX_EVENT_AGE_SECONDS
-        ):
+        receive_age = (received_at - utc_millisecond(event.event_ms)).total_seconds()
+        if receive_age < 0 or (self.archive_start_ms is None and receive_age > BOOK_MAX_EVENT_AGE_SECONDS):
             self.invalidate()
             raise SourceError(
                 'BOOK_EVENT_STALE', 'Exchange event is stale or ahead of the local clock.'

@@ -227,6 +227,7 @@ def test_recorded_diff_streams_match_independent_books_for_spot_and_perp(
             )
             continue
         event = book_capture.DepthEvent.parse(raw, market)
+        assert book_capture.DepthEvent.parse(object_mapping(json.loads(raw)), market) == event
         sampler.accept(event, received_at=received)
         book = sampler.book
         assert book is not None
@@ -649,6 +650,13 @@ def test_sampling_rejects_a_stale_recorded_book_before_sealing(
     for received, event in events:
         if sampler.accept(event, received_at=received):
             break
+    # Deliberate receipt-clock faults on the same genuine bridging event.
+    for age_ms in (-1, 5001):
+        delayed = book_capture.BookSampler(tmp_path / str(age_ms), market)
+        delayed.seed(seed_payload(market))
+        with pytest.raises(SourceError) as receipt:
+            delayed.accept(event, received_at=book_capture.utc_millisecond(event.event_ms + age_ms))
+        assert receipt.value.code == 'BOOK_EVENT_STALE' and delayed.book is None
     assert sampler.book is not None and sampler.book.event_ms is not None
     # Withhold subsequent real updates; the later recorded clock cannot certify a quiet grid.
     later_event = events[-1][1]

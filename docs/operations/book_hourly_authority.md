@@ -15,7 +15,9 @@ below their prices absent in the noncrossed venue book. Existing adjacent tick
 observations extend these known intervals. Observed positive contradictions
 reject; unknown prices outside a proved interval remain unknown. A warmup timer
 never certifies depth. Every requested grid still requires complete200-level
-proof, native continuity, actual exchange clocks, fresh receipt and terminal data.
+proof, native continuity, actual exchange clocks and terminal data. Archive receipt may lag exchange time;
+negative receipt age still rejects. A sampled state older than five seconds still
+rejects. Live capture retains its five-second receipt-age limit.
 The live capture default still requires its original complete seed and depth.
 
 Native fetch expands original preceding inputs only on insufficient seed/depth
@@ -26,12 +28,21 @@ is retained only for a completed decision. Each accepted identity binds every
 actually used ordered input and all four component proofs. Failed scratch grids
 never publish. Preperiod continuity loss discards all prior knowledge before an
 actual subsequent message anchors a new chain; requested-period loss still fails.
-Stale preperiod updates discard warmup state and cannot anchor a new chain; a later
-fresh native message or original snapshot must reestablish proof before output.
-Replay/rejection policy3 revalidates older retained and rejected identities through
-the existing native controls. Historical failures remain visible until actual
+Preperiod updates dated after their actual receipt discard warmup state; a later
+valid native message or original snapshot must reestablish proof before output.
+Accepted replay policy remains3, preserving verified generations. Rejection policy4
+reconsiders prior cached verdicts through the existing native controls. Historical failures remain visible until actual
 accepted activation. Operators use the ordinary Dagit partition/gap/failure
 selection; no manual archive preparation or alternate runner is needed.
+
+Archive grid scratch stores one minute at a time as typed RowBinary: at most600
+depth20 rows (399600 bytes) or60 depth200 rows (385680 bytes) per insertion block.
+Each block is checked against its creation hash before consumption. Samples share
+the same verified state at coincident grids; finite ordered Float64 levels are
+certified before sealing. Scratch belongs to the fetched revision and is released
+with it. Failed prefix attempts discard their grids. Live/local spool stays JSON/gzip.
+Decoded archive frames retain the100000-row frame and tracked-price bounds; the
+1 MiB wire-byte bound applies to live byte messages.
 
 ## Delivery and activation
 

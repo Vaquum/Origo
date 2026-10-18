@@ -22,7 +22,10 @@ from origo.sources.storage import SourceStore
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.law_catalog import build_catalog
 
-from .test_book_history import OriginalArchive, _transport, rejection_runtime as rejection_runtime
+from .test_book_history import (
+    OriginalArchive, _transport, rejection_runtime as rejection_runtime,
+    original_historical_archives as original_historical_archives,
+)
 from .test_book_sources import book_runtime as book_runtime, _keys
 
 from .test_book_vendor import (
@@ -79,6 +82,7 @@ def _predicate(report: law.LawReport, source: str, key: law.LawPredicate) -> law
 
 def test_canary_books_have_the_same_reader_law_contract(
     authoritative_book_runtime: SourceRuntime,
+    original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = authoritative_book_runtime
@@ -136,7 +140,177 @@ def test_canary_books_have_the_same_reader_law_contract(
     assert _predicate(law.evaluate(runtime.store.client, 'origo', processing), runtime.spec.key, 'C1')['status'] == 'PASS'
     _assert_book_reconciliation_uses_native_hourly_status(runtime, monkeypatch)
     _assert_hourly_authority_uses_exact_source_component_proofs(runtime)
+    with monkeypatch.context() as patch:
+        _assert_real_canonical_discovery_and_admission(runtime, original_historical_archives, patch)
     _assert_declared_history_migration_preserves_existing_generation(runtime)
+
+
+def _assert_real_canonical_discovery_and_admission(
+    retained: SourceRuntime,
+    originals: dict[Market, tuple[OriginalArchive, ...]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dagster import DagsterInstance, DagsterRunStatus, Definitions, RunRequest, build_schedule_context
+    from origo.sources import lifecycle
+    from origo.sources.adapters import book_vendor as vendor
+    from origo.sources.bundle import build_source_bundle
+
+    assert isinstance(retained.spec.canonical, CryptoHFTBookHourly)
+    market = retained.spec.canonical.market
+    adapter = CryptoHFTBookHourly(market)
+    spec = replace(retained.spec, canonical=adapter)
+    runtime = replace(retained, spec=spec, store=SourceStore(retained.store.client, 'origo', spec))
+    archives = originals[market]
+    partition = archives[1].partition
+    hour = partition.start + timedelta(hours=2)
+    now = [hour + timedelta(minutes=31)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return now[0]
+
+    monkeypatch.setattr(vendor, 'datetime', Clock)
+    monkeypatch.setattr(lifecycle, 'datetime', Clock)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
+    _transport(archives, market, monkeypatch)
+    transport, replay = vendor.get_response, vendor.replay_hour
+    available, rejected = [False], [False]
+    counts = {'metadata': 0, 'payload': 0, 'replay': 0}
+
+    def response(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> vendor.Response:
+        counts['metadata' if headers else 'payload'] += 1
+        assert isinstance(params, dict)
+        if not available[0] and params['file'] == vendor._file(market, partition):
+            raise SourceError('PROVIDER_HTTP_404', 'Recorded transport: archive unavailable.')
+        return transport(url, params=params, headers=headers, weight=weight)
+
+    def replayed(path: Path, market: Market, partition: Partition, root: Path, *,
+                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> Revision:
+        counts['replay'] += 1
+        if rejected[0]:
+            raise SourceError('BOOK_EVENT_STALE', 'Replay verdict fault on unchanged original vendor bytes.')
+        return replay(path, market, partition, root, preludes=preludes, following=following)
+
+    monkeypatch.setattr(vendor, 'get_response', response)
+    monkeypatch.setattr(vendor, 'replay_hour', replayed)
+    bundle = build_source_bundle(spec)
+    definitions = Definitions(assets=bundle.assets, jobs=bundle.jobs, schedules=bundle.schedules)
+    schedule = next(s for s in bundle.schedules if s.name.endswith('_canonical_schedule'))
+    canonical = next(j for j in bundle.jobs if j.name == f'refresh_{spec.key}_canonical_source_job')
+    backfill = next(j for j in bundle.jobs if j.name == f'backfill_{spec.key}_source_job')
+    home = runtime.lock_root.parent / 'cadence-dagster'
+    home.mkdir()
+    with DagsterInstance.local_temp(str(home)) as instance:
+        def tick(scheduled: datetime) -> tuple[list[RunRequest], str | None]:
+            with build_schedule_context(instance=instance, scheduled_execution_time=scheduled,
+                                        repository_def=definitions.get_repository_def()) as context:
+                result = schedule.evaluate_tick(context)
+                return list(result.run_requests), result.skip_message
+
+        params = {'source': spec.key, 'partition': partition.key}
+
+        def observations() -> list[tuple[object, ...]]:
+            return runtime.store.execute(
+                'SELECT complete,observed_at FROM origo.source_observation_log '
+                'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY observed_at', params,
+            )
+
+        # Real adapter404 is waiting only while this is the current candidate.
+        assert tick(now[0])[0] == []
+        assert observations() == [(0, now[0])]
+        assert runtime.store.execute(
+            "SELECT count() FROM origo.source_failure_log WHERE source_key=%(source)s "
+            "AND partition_key=%(partition)s AND operation='discovery'", params,
+        ) == [(0,)]
+
+        # Audit can observe first; the offset request must keep that original deadline.
+        available[0] = True
+        now[0] = hour + timedelta(minutes=35, seconds=10)
+        standalone = runtime.discover(partition)
+        first_available = now[0]
+        now[0] = hour + timedelta(minutes=36)
+        first = tick(now[0])[0][0]
+        assert first.partition_key == partition.key and standalone in str(first.run_key)
+        revision = adapter.fetch(partition)
+        assert revision.key != standalone
+        assert adapter.discover(partition) == revision.key
+
+        # Real fetched prelude evidence changes the key while native work is outstanding.
+        for job, status in ((canonical, DagsterRunStatus.QUEUED),
+                            (canonical, DagsterRunStatus.STARTING),
+                            (backfill, DagsterRunStatus.STARTED)):
+            running = instance.create_run_for_job(
+                job, run_config=first.run_config,
+                tags={**first.tags, 'dagster/partition': partition.key}, status=status,
+            )
+            before = dict(counts)
+            now[0] = hour + timedelta(minutes=41)
+            assert tick(now[0])[0] == []
+            assert counts['metadata'] > before['metadata']
+            assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+            assert observations()[-1] == (1, now[0])
+            c1 = _predicate(law.evaluate(runtime.store.client, 'origo', now[0]), spec.key, 'C1')
+            assert c1['status'] == 'FAIL'
+            assert c1['evidence']['deadline'] == (first_available + timedelta(minutes=5)).isoformat()
+            instance.report_run_canceled(running)
+
+        # Complete rejection skips preserve the failure and never download/replay again.
+        rejected[0] = True
+        with pytest.raises(SourceError, match='Replay verdict fault'):
+            runtime.build(partition.key)
+        failures = runtime.store.execute(
+            'SELECT event_id,event_type FROM origo.source_failure_log '
+            'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
+        )
+        before = dict(counts)
+        now[0] = hour + timedelta(minutes=46)
+        assert tick(now[0])[0] == []
+        assert counts['metadata'] > before['metadata']
+        assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+        assert runtime.store.execute(
+            'SELECT event_id,event_type FROM origo.source_failure_log '
+            'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
+        ) == failures
+        with pytest.raises(SourceError, match='Replay verdict fault'):
+            runtime.build(partition.key)
+        assert counts['replay'] == before['replay'] + 1
+        monkeypatch.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
+        now[0] = hour + timedelta(minutes=51)
+        assert tick(now[0])[0]
+
+        # A successful native request keeps its pre-fetch identity; active evidence deduplicates it.
+        rejected[0] = False
+        record = runtime.build(partition.key)
+        assert len(record.component_hashes) == 4 and record.revision == revision.key
+        instance.create_run_for_job(canonical, run_config=first.run_config,
+                                    tags={**first.tags, 'dagster/partition': partition.key},
+                                    status=DagsterRunStatus.SUCCESS)
+        before = dict(counts)
+        now[0] = hour + timedelta(minutes=56)
+        requests, reason = tick(now[0])
+        assert not requests and reason == 'This book revision already has complete active component evidence.'
+        assert runtime.store.record(partition) == record and observations()[-1] == (1, now[0])
+        assert counts['metadata'] > before['metadata']
+        assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+        proofs = runtime.store.execute(
+            'SELECT component,row_count,content_hash FROM origo.source_component_log '
+            'WHERE source_key=%(source)s AND build_id=%(build)s', {**params, 'build': record.build_id},
+        )
+        assert {key: count for key, count, _ in proofs} == {
+            'depth20': 36000, 'depth200': 3600, 'depth20_1m': 60, 'depth200_1m': 60,
+        }
+        assert dict(record.component_hashes) == {key: digest for key, _, digest in proofs}
+
+        # A delayed final tick does not hide a real discovery failure after candidate rollover.
+        available[0] = False
+        now[0] = hour + timedelta(hours=1)
+        with pytest.raises(SourceError, match='archive unavailable'):
+            tick(hour + timedelta(minutes=56))
+        assert runtime.store.execute(
+            "SELECT error_code FROM origo.source_failure_log WHERE source_key=%(source)s "
+            "AND partition_key=%(partition)s AND operation='discovery' AND event_type='FAILED'", params,
+        ) == [('PROVIDER_HTTP_404',)]
 
 
 def _assert_hourly_authority_uses_exact_source_component_proofs(

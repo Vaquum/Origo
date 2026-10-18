@@ -20,8 +20,14 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from clickhouse_driver.errors import ServerException
 
-from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.assets.create_origo_database import (
+    ClickHouseClientProtocol,
+    ClickHouseSettings,
+    get_clickhouse_settings,
+    make_clickhouse_client,
+)
 from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
@@ -742,12 +748,7 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
     result = run(runtime, tmp_path, tR=900, pR=250)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query, Settings FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-            'ORDER BY event_time_microseconds',
-            {'result': result.staging.name},
-        )
+        rows = statement_rows(client, result.staging.name)
         defaults = server_defaults(client)
     finally:
         client.disconnect()
@@ -871,19 +872,24 @@ def assert_measures(cells: list[dict[str, Any]], expected: dict[tuple[int, int],
         )
 
 
+def statement_rows(client: ClickHouseClientProtocol, result_id: str) -> list[Row]:
+    """Starts of sequential statements; completion logging can follow client EOS."""
+    client.execute('SYSTEM FLUSH LOGS')
+    rows = client.execute(
+        'SELECT query, Settings, type, exception_code, exception FROM system.query_log '
+        'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
+        {'result': result_id},
+    )
+    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
+    return [row[:2] for row in rows if row[2] == 'QueryStart']
+
+
 def statement_hashes(result_id: str) -> list[str]:
-    """SHA-256 of every statement one result ran, in order."""
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-            'ORDER BY event_time_microseconds',
-            {'result': result_id},
-        )
+        return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in statement_rows(client, result_id)]
     finally:
         client.disconnect()
-    return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows]
 
 
 @pytest.mark.parametrize(('n', 'm'), [(0, 0), (1, 0), (0, 1), (2, 0), (2, 3), (6, 0), (11, 2), (64, 64), (1018, 1017)])
@@ -1092,8 +1098,31 @@ _V3_27_2_STATEMENTS: dict[str, list[str]] = {
 }
 
 
-def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, tmp_path: Path) -> None:
+def test_default_requests_keep_their_statements_and_schema(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = detailed(cube, DAY1, minutes=MINUTES)
+    make_client = make_clickhouse_client
+
+    def observing_client(settings: ClickHouseSettings) -> ClickHouseClientProtocol:
+        client = make_client(settings)
+        execute = client.execute
+
+        def without_completions(query: str, params: object = None,
+                                settings: Mapping[str, object] | None = None) -> list[Row]:
+            rows = execute(query, params=params, settings=settings)
+            if 'FROM system.query_log' not in query:
+                return rows
+            # Deliberate receipt fault: withhold real cells finishes, preserving all starts/errors.
+            return [row for row in rows if not (
+                _statement(str(row[0])) == 'cells'
+                and ("type = 'QueryFinish'" in query or (len(row) > 2 and row[2] == 'QueryFinish'))
+            )]
+
+        monkeypatch.setattr(client, 'execute', without_completions)
+        return client
+
+    monkeypatch.setattr(f'{__name__}.make_clickhouse_client', observing_client)
     requests: dict[str, dict[str, object]] = {
         'everything': {},
         'window': {'t1': '2021-01-01T00:57:11.25Z', 't2': '2021-01-01T01:00:00Z', 'tR': 225, 'pR': 250},
@@ -1112,6 +1141,15 @@ def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, 
                 meta = metadata(result.staging / file)
                 assert set(meta) == {'schema_version', 'result_id', 'request', 'grid', 'data_cutoff', 'state_token', 'pins'}
                 assert meta['schema_version'] == 1 and set(meta['request']) == {'t1', 't2', 'p1', 'p2', 'tR', 'pR'}
+    # Deliberate server fault, under the real result ID: its genuine error receipt must reject.
+    client = make_client(get_clickhouse_settings())
+    try:
+        with pytest.raises(ServerException):
+            client.execute('SELECT throwIf(1)', settings={'log_comment': result.staging.name})
+    finally:
+        client.disconnect()
+    with pytest.raises(AssertionError):
+        statement_hashes(result.staging.name)
 
 
 def test_measures_coverage_stops_where_detail_is_missing(cube: SourceRuntime, tmp_path: Path) -> None:

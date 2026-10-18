@@ -744,7 +744,8 @@ class SourceRuntime:
                     upgraded = self._upgrade_components(record)
                     adapter = self.spec.canonical
                     if (isinstance(adapter, CanonicalAuditPolicy)
-                            and adapter.rejected_revision(partition, adapter.discover(partition))):
+                            and (adapter.discover(partition) != record.revision
+                                 or adapter.rejected_revision(partition, record.revision))):
                         self.failures.recover(operation='repair', partition=key)
                     else:
                         self.failures.recover_partition(partition=key)

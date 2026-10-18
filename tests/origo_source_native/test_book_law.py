@@ -612,3 +612,19 @@ def test_rejected_book_revision_is_not_replayed_by_audit(
     assert runtime.store.execute('SELECT count() FROM origo.' + runtime.spec.names.prefix + '_depth20_current') == before_coverage
     assert runtime.store.execute("SELECT error_code FROM origo.source_failure_log WHERE operation='canonical' GROUP BY failure_key,error_code HAVING argMax(event_type,event_time)='FAILED'") == [('BOOK_EVENT_STALE',)]
     assert visited
+    monkeypatch.setattr(vendor, '_REPLAY_POLICY_VERSION', vendor._REPLAY_POLICY_VERSION + 1)
+    official = runtime.spec.canonical.discover(partition)
+    assert official != canonical.revision
+    assert not runtime.spec.canonical.rejected_revision(partition, official)
+    before = dict(counts)
+    result = _execute_operation(runtime, 'repair', SourceRunConfig(partition_key=REAL_HOUR))
+    assert result['generation'] == canonical.generation
+    assert counts['payload'] == before['payload'] and counts['replay'] == before['replay']
+    assert runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id') == original_failures
+    monkeypatch.setattr(vendor, 'replay_hour', real_replay)
+    _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=REAL_HOUR))
+    rebuilt = runtime.store.record(partition)
+    assert rebuilt is not None and rebuilt.revision == official
+    assert rebuilt.generation == canonical.generation + 1 and len(rebuilt.component_hashes) == 4
+    assert counts['payload'] > before['payload']
+    assert runtime.store.execute("SELECT error_code FROM origo.source_failure_log WHERE operation='canonical' GROUP BY failure_key,error_code HAVING argMax(event_type,event_time)='FAILED'") == []

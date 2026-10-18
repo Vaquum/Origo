@@ -1550,6 +1550,22 @@
     "tests/origo_source_native/test_binance_daily_source_adapter.py::test_transfer_failure_preserves_shared_admission",
     "tests/origo_source_native/test_dagster_instance_config.py::test_book_bulk_capacity_preserves_live_lanes",
     "tests/origo_source_native/test_book_vendor.py::test_snapshot_presence_reads_only_original_required_columns",
-    "tests/origo_source_native/test_book_deploy.py::test_native_jobs_only_rollout_expires_with_version"
+    "tests/origo_source_native/test_book_deploy.py::test_native_jobs_only_rollout_expires_with_version",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_original_freshness",
+    "tests/origo_source_native/test_book_vendor.py::test_real_clock_archive_preserves_original_sequence_gap"
   ]
 }

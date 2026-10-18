@@ -1,3 +1,7 @@
+# v3.34.10
+
+Bind nominal archive book checkpoints to actual exchange clocks, revalidate replay identities and preserve failed replacements during retained repair.
+
 # v3.34.9
 
 Authenticated shared book transport overlaps native downloads; bounded native bulk capacity preserves a current-hour slot and live capture during controller/monitor rollout. Legacy snapshot searches decode only their predicate columns.

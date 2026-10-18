@@ -142,7 +142,9 @@ def publication_ready(
             {**params, 'partition': result['partition_key'],
              'revision': result['revision'], 'build': result['build_id']},
         )
-        if record is None or store.missing_components(record) or tuple(sorted(
+        if record is None or (
+            record.revision, str(record.build_id), record.generation
+        ) != (str(result['revision']), str(result['build_id']), result['generation']) or store.missing_components(record) or tuple(sorted(
             (str(key), str(digest)) for key, digest in proofs
         )) != tuple(sorted(record.component_hashes)):
             raise Failure('BACKFILL_RECEIPT_INVALID: Native child component proofs do not match active coverage.',

@@ -48,7 +48,8 @@ def _parent(instance: DagsterInstance, job_name: str) -> str:
     instance.add_backfill(PartitionBackfill(
         backfill_id=identity, status=BulkActionStatus.REQUESTED, from_failure=False,
         tags={}, backfill_timestamp=time.time(), partition_names=[REAL_HOUR],
-        partition_set_origin=RemotePartitionSetOrigin(_repository_origin(), job_name + '_partition_set'),
+        partition_set_origin=RemotePartitionSetOrigin(repository_origin=_repository_origin(),
+                                                      partition_set_name=job_name + '_partition_set'),
     ))
     return identity
 
@@ -182,6 +183,11 @@ def test_native_book_selection_completion_preserves_source_failures(
             'depth20': 36000, 'depth200': 3600, 'depth20_1m': 60, 'depth200_1m': 60,
         }
         assert dict(record.component_hashes) == {key: digest for key, _, digest in proofs}
+        saved_component = runtime.store.execute(
+            "SELECT * FROM origo.source_component_log WHERE source_key=%(source)s "
+            "AND build_id=%(build)s AND component='depth200_1m'",
+            {'source': runtime.spec.key, 'build': record.build_id},
+        )
 
         # Damage control metadata after real build and before the native child barrier.
         execute = SourceRuntime.build
@@ -200,4 +206,26 @@ def test_native_book_selection_completion_preserves_source_failures(
             invalid = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
                                              tags={'dagster/backfill': parent}, raise_on_error=False)
         assert not invalid.success and any('BACKFILL_RECEIPT_INVALID' in str(event) for event in invalid.all_events)
+        assert _failures(runtime, unrelated) == before
+        runtime.store.execute('INSERT INTO origo.source_component_log VALUES', saved_component)
+
+        # A concurrent activation can retain identical payloads but supersede this receipt.
+        query = SourceStore.execute
+
+        def activate_after_join(self: SourceStore, sql: str, params=None, settings=None):
+            rows = query(self, sql, params, settings)
+            if sql.startswith('SELECT uniqExact(r.partition_key), countIf('):
+                self.insert_activation(replace(record, generation=record.generation + 1),
+                                       'controlled-concurrent-activation')
+            return rows
+
+        with monkeypatch.context() as patch:
+            patch.setattr(SourceStore, 'execute', activate_after_join)
+            superseded = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
+                                                tags={'dagster/backfill': parent}, raise_on_error=False)
+        assert not superseded.success and any('BACKFILL_RECEIPT_INVALID' in str(event)
+                                               for event in superseded.all_events)
+        current = runtime.store.record(record.partition)
+        assert current is not None and current.generation == record.generation + 1
+        assert current.component_hashes == record.component_hashes
         assert _failures(runtime, unrelated) == before

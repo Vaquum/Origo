@@ -251,7 +251,8 @@ def _assert_book_native_queue_progress(home, monkeypatch):
                     'refresh_binance_spot_aggtrades_canonical_source_job',
                     'refresh_binance_perp_aggtrades_canonical_source_job'):
             submit(instance, job=job, day='2026-10-18T07Z')
-        origin = RemotePartitionSetOrigin(_repository_origin(), 'backfill_binance_spot_book_source_job_partition_set')
+        origin = RemotePartitionSetOrigin(repository_origin=_repository_origin(),
+                                           partition_set_name='backfill_binance_spot_book_source_job_partition_set')
         instance.add_backfill(PartitionBackfill(
             backfill_id=parent_id, status=BulkActionStatus.REQUESTED, from_failure=False,
             tags={}, backfill_timestamp=time.time(), partition_names=selected, partition_set_origin=origin,

@@ -370,6 +370,11 @@ class RecordingClient:
 
 def test_real_reader_queries_obey_cost_and_transport_bounds(law_case: LawCase,
                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    from origo.assets.create_binance_spot_depth20_1m_table_origo import _create_depth20_1m_table
+    from origo.assets.create_binance_spot_depth200_1m_table_origo import _create_depth200_1m_table
+
+    _create_depth20_1m_table(law_case.client, get_clickhouse_settings())
+    _create_depth200_1m_table(law_case.client, get_clickhouse_settings())
     law_case.minute(0)
     client = RecordingClient(law_case.client)
     started = time.monotonic()

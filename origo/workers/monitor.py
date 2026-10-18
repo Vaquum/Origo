@@ -335,8 +335,6 @@ class LawClient:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)
-            # The next admission never inherits a timed-out query/connection.
-            self.client.disconnect()
 
     def disconnect(self) -> None:
         self.client.disconnect()

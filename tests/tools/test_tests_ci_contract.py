@@ -123,6 +123,10 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[perp]',
         'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_original_freshness',
         'tests/origo_source_native/test_book_vendor.py::test_real_clock_archive_preserves_original_sequence_gap',
+        'tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[spot]',
+        'tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[perp]',
+        'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[spot]',
+        'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[perp]',
     ]
 
 

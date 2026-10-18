@@ -280,7 +280,8 @@ def _assert_book_native_queue_progress(home, monkeypatch):
         assert len(runs) == 48 and {run.tags['dagster/partition'] for run in runs} == set(selected)
         assert instance.get_backfill(parent_id).last_submitted_partition_name == selected[-1]
         waiting = {run.run_id for run in runs if run.status == DagsterRunStatus.QUEUED}
-        instance.report_run_success(instance.get_run_by_id(legacy.run_id))
+        instance.report_dagster_event(DagsterEvent('PIPELINE_SUCCESS', legacy.job_name),
+                                      run_id=legacy.run_id)
         dequeue()
         assert any(instance.get_run_by_id(identity).status == DagsterRunStatus.STARTED for identity in waiting)
         assert len(instance.get_runs(RunsFilter(statuses=ACTIVE, tags={BOOK_BACKFILL_TAG: 'true'}))) == 16

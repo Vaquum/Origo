@@ -127,6 +127,9 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[perp]',
         'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[spot]',
         'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[perp]',
+        'tests/origo_source_native/test_daemon_backfill_restart.py::test_shutdown_location_loss_preserves_native_checkpoint_and_resume',
+        'tests/origo_source_native/test_daemon_backfill_restart.py::test_missing_location_exhaustion_and_other_fatal_errors_stay_visible',
+        'tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch',
     ]
 
 

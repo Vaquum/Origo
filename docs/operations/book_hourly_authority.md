@@ -295,3 +295,16 @@ Waiting native requests rebook if a newly observed policy is stricter than their
 reserved rate. Both old controller containers stop before new three-field writers
 start; capture/provisional/publication containers keep running. Keep the extended
 reader in forward repairs; an old two-field HCD image is not a supported rollback.
+Native job backfills use the unchanged Dagster daemon through
+`python -m origo.orchestration.daemon run`. Missing code locations during graceful
+workspace teardown use Dagster's existing bounded retry budget, with the original
+traceback in daemon/instigation logs; persistent errors still become FAILED. Both
+Compose daemon services allow 300 seconds for thread joins and submission drain.
+Interrupted active children remain truthful native failures eligible for native
+failed retry; they are never reset to QUEUED. Arbitrary SIGKILL recovery and asset
+backfill restart qualification are not claimed. Before retiring an older unpatched
+daemon, all bulk parents and queued/active children must be terminal.
+Open PRD #525 owns actual full frozen GUI/restart qualification, including zero
+orphaned pre-restart NOT_STARTED children after resume and none at completion,
+17 retained live-worker IDs, due authority, live capture and sustained throughput.
+Implementation merge alone does not satisfy that acceptance.

@@ -198,7 +198,7 @@ function docker() {
       'inspect --format {{.State.Running}} '*)
         if [ "$RETIREMENT_CASE" = inspect-error ]; then return 1; fi
         if [ "$RETIREMENT_CASE" = running ]; then printf true; else printf false; fi ;;
-      'compose -p test -f docker-compose.deploy.yml exec -T dagster sh -c '*)
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster python -c '*)
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.orchestration.recovery'*)
         printf '%s\n' "$@" > "$RECOVERY_CALL" ;;
@@ -212,6 +212,7 @@ function docker() {
             ['bash', '-c', docker + recovery],
             env={**os.environ, 'RETIREMENT_CASE': case, 'RECOVERY_CALL': str(invocation)},
             capture_output=True,
+            timeout=30,
             text=True,
         )
         if case.endswith('-error'):
@@ -277,7 +278,7 @@ function docker() {
             if [ "$RETIREMENT_CASE" = spot-unknown ]; then printf unknown; return 0; fi
         fi
         if [ "$RETIREMENT_CASE" = running ]; then printf true; else printf false; fi ;;
-      'compose -p test -f docker-compose.deploy.yml exec -T dagster sh -c '*)
+      'compose -p test -f docker-compose.deploy.yml exec -T dagster python -c '*)
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml exec -T dagster python -m origo.orchestration.recovery'*)
         printf 'recovery\n' >> "$CALLS" ;;
@@ -303,6 +304,7 @@ function docker() {
             input=docker + (rollout + '\n') * attempts + '\nprintf "after-rollout\\n" >> "$CALLS"\n',
             env={**os.environ, 'RETIREMENT_CASE': case, 'CALLS': str(calls)},
             capture_output=True,
+            timeout=30,
             text=True,
         )
         observed = calls.read_text().splitlines()

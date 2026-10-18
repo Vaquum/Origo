@@ -82,12 +82,13 @@ logs through Alembic while the storage lock is held; with root python-log captur
 that log re-enters the same storage and startup deadlocks. The recovery command
 stops with a named phase after `--deadline-seconds` (900 in deployment). The
 container healthcheck passes on state persisted by the previous deployment, so the
-workflow waits for the exec into `dagster-daemon` (at most 900 seconds) before
-running recovery; a bootstrap that has not finished by then fails the deploy with
+workflow requires the actual NUL-delimited `python -m origo.orchestration.daemon run`
+PID1 argv (at most 900 seconds), rejecting the bootstrap shell, before running recovery; a bootstrap that has not finished by then fails the deploy with
 the daemon log attached. The compose start waits at most 600 seconds, the deploy
 job at most 45 minutes, and a failed start prints the last 200 daemon log lines. A
 recovery error before the recording run exists appears in that log excerpt, not as
-a Dagster run.
+a Dagster run. Both Compose daemon services allow 300 seconds for graceful shutdown
+and in-flight submission drain.
 
 Recovery and launching share a short admission/claim lock. A cancellation marker
 prevents a dequeuer that selected a duplicate just before recovery from starting

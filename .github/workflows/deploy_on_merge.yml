@@ -185,7 +185,7 @@ jobs:
 
           scp "$DEPLOY_ENV_FILE" "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/.deploy.env"
 
-          ssh "$ORIGO_USER@$ORIGO_HOST" \
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$ORIGO_USER@$ORIGO_HOST" \
             "DEPLOY_DIR='$DEPLOY_DIR' ORIGO_HOST='$ORIGO_HOST' bash -s" <<'REMOTE'
           set -euo pipefail
 

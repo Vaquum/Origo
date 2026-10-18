@@ -1,6 +1,14 @@
-# v3.34.13
+# v3.34.15
 
 - Run native book history under a shared safe admission bound; release missing historical inputs without hourly sleeps and preserve truthful selected completion.
+
+# v3.34.14
+
+- Keep the deployment SSH session alive through silent verification while preserving remote checks, input and failure status.
+
+# v3.34.13
+
+- Avoid repeated invariant time calculations during notification history replay.
 
 # v3.34.12
 

@@ -23,7 +23,9 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
 from .test_book_vendor import (
-    _original_archive, original_vendor_archive as original_vendor_archive,
+    OriginalRecording, _original_archive,
+    original_reconstruction_archives as original_reconstruction_archives,
+    original_vendor_archive as original_vendor_archive,
     vendor_session_root as vendor_session_root,
 )
 
@@ -119,6 +121,8 @@ def test_original_spot_history_rejects_unproven_depth(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This negative proves the recorded06Z prefix, not exhaustion of all24hours.
+    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 1)
     archives = original_historical_archives['spot']
     visited, _ = _transport(archives, 'spot', monkeypatch)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
@@ -380,3 +384,217 @@ def test_rejected_book_revision_identity_and_retry(
         path.write_text('{')
         with pytest.raises(ValueError):
             _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
+
+
+
+def _recorded_inputs(values: tuple[OriginalRecording, ...]) -> tuple[OriginalArchive, ...]:
+    return tuple(OriginalArchive(vendor.hour_partition(key), body, headers) for key, body, headers in values)
+
+
+def _assert_reconstructed_hour(revision: vendor.Revision, partition: Partition, expected: str) -> None:
+    evidence = json.loads(revision.evidence_json)
+    assert len(evidence['grid_evidence']['sealed_minutes']) == 60
+    assert evidence['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
+    rows = {20: 0, 200: 0}
+    first: dict[int, object] = {}
+    last: dict[int, object] = {}
+    for row in revision.rows():
+        depth = int(str(row[0])); rows[depth] += 1
+        first.setdefault(depth, row[1]); last[depth] = row[1]
+    assert rows == {20: 36000, 200: 3600}
+    assert first == {20: partition.start, 200: partition.start}
+    assert last == {20: partition.end - timedelta(milliseconds=100), 200: partition.end - timedelta(seconds=1)}
+    minutes = evidence['grid_evidence']['sealed_minutes']
+    # fetch_sealed_partition hashes all original minute identities and payloads.
+    local = 'local-book-v1:' + hashlib.sha256(json.dumps(
+        minutes, sort_keys=True, separators=(',', ':'),
+    ).encode()).hexdigest()
+    assert local == expected
+
+
+def _verify_expanded_identity(adapter: vendor.CryptoHFTBookHourly, partition: Partition,
+                              revision: vendor.Revision, archives: tuple[OriginalArchive, ...],
+                              rewritten: dict[str, str]) -> None:
+    evidence = json.loads(revision.evidence_json)
+    expected = [(a.partition.key, hashlib.sha256(a.body).hexdigest())
+                for a in archives if a.partition.key < partition.key]
+    assert evidence['prelude_input_sha256'] == [list(x) for x in expected]
+    assert evidence['following_input_sha256'] == [[archives[-1].partition.key, hashlib.sha256(archives[-1].body).hexdigest()]]
+    assert adapter.discover(partition) == revision.key
+    for archive in archives:
+        file = vendor._file('spot', archive.partition)
+        rewritten[file] = 'changed-etag-for-original-unchanged-body'
+        assert adapter.discover(partition) != revision.key
+        with pytest.raises(SourceError) as failure:
+            adapter.revalidate(partition, revision)
+        assert failure.value.code == 'OFFICIAL_REVISION_CHANGED'
+        rewritten.clear()
+
+
+def test_update_only_hour_recovers_with_bounded_prefix(
+    original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archives = _recorded_inputs(original_reconstruction_archives['update-only'])
+    visited, rewritten = _transport(archives, 'spot', monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    adapter = vendor.CryptoHFTBookHourly('spot'); partition = vendor.hour_partition('2025-07-15T20Z')
+    attempts: list[tuple[int, str]] = []
+    original = vendor.replay_hour
+
+    def observed(path: Path, market: Market, partition: Partition, root: Path, *,
+                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
+        try:
+            value = original(path, market, partition, root, preludes=preludes, following=following)
+        except SourceError as error:
+            attempts.append((len(preludes), error.code))
+            raise
+        attempts.append((len(preludes), 'accepted'))
+        return value
+
+    monkeypatch.setattr(vendor, 'replay_hour', observed)
+    revision = adapter.fetch(partition)
+    assert attempts == [(1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'accepted')]
+    _assert_reconstructed_hour(revision, partition, 'local-book-v1:ac7263486e60a07a72ffb9e1ae0aaa15dc757d90bbe453da443fc31b1340785e')
+    assert len(tuple((tmp_path / 'locks' / 'book_vendor_spot').glob('hour-*'))) == 1
+    assert set(visited) == {vendor._file('spot', a.partition) for a in archives}
+    _verify_expanded_identity(adapter, partition, revision, archives[:2] + archives[3:], rewritten)
+    # Repeated component/hash reads retain exactly the accepted scratch grid.
+    assert len(tuple(revision.rows())) == 39600
+
+
+def test_shallow_original_seed_recovers_without_fabricated_depth(
+    original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from .test_book_vendor import _checkpoint_payload
+    from origo.workers.book_capture import DiffBook
+    recordings = original_reconstruction_archives['shallow']
+    archives = _recorded_inputs(recordings)
+    seed_path = tmp_path / 'actual100.bin'; seed_path.write_bytes(archives[0].body)
+    seed_path = vendor._prepare_archive(seed_path, tmp_path)
+    frame = next(frame for frame in vendor._frames((seed_path,), legacy=True) if frame[0]['event_type'] == 'snapshot')
+    payload = _checkpoint_payload(frame)
+    assert len(json.loads(payload)['bids']) == len(json.loads(payload)['asks']) == 100
+    with pytest.raises(SourceError) as failure:
+        DiffBook('spot', payload)
+    assert failure.value.code == 'BOOK_SEED_TOO_SHALLOW'
+    partition = vendor.hour_partition('2026-07-31T17Z')
+    warmup = DiffBook('spot', payload, archive_start_ms=int(partition.start.timestamp() * 1000))
+    with pytest.raises(SourceError) as unknown:
+        warmup.top(200)
+    assert unknown.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    visited, rewritten = _transport(archives[1:], 'spot', monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    attempts: list[tuple[int, str]] = []
+    original = vendor.replay_hour
+
+    def observed(path: Path, market: Market, partition: Partition, root: Path, *,
+                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
+        try:
+            value = original(path, market, partition, root, preludes=preludes, following=following)
+        except SourceError as error:
+            attempts.append((len(preludes), error.code))
+            raise
+        attempts.append((len(preludes), 'accepted'))
+        return value
+
+    monkeypatch.setattr(vendor, 'replay_hour', observed)
+    revision = adapter.fetch(partition)
+    assert attempts == [(1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (4, 'accepted')]
+    _assert_reconstructed_hour(revision, partition, 'local-book-v1:8dd69fa189849b9de9da1403dcaeb213fd5507e3c61c2f2d291435571e32f2d0')
+    assert set(visited) == {vendor._file('spot', a.partition) for a in archives[1:]}
+    selected = tuple(a for a in archives[1:] if a.partition.key != partition.key)
+    _verify_expanded_identity(adapter, partition, revision, selected, rewritten)
+
+
+@pytest.mark.parametrize('case', ['interrupted', 'bounded-exhaustion', 'partial-grid-cleanup'])
+def test_archive_fetch_retains_only_completed_rejection(
+    case: str, original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    vendor_session_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.workers import book_capture
+    assert (vendor.BOOK_MAX_PRELUDE_HOURS, vendor.BOOK_MAX_FOLLOWING_HOURS,
+            vendor.CRYPTOHFT_MAX_FILE_BYTES, vendor.BOOK_MAX_PRELUDE_BYTES,
+            book_capture.BOOK_MAX_TRACKED_PRICES) == (24, 1, 256 * 1024**2, 1024**3, 100000)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    archives = _recorded_inputs(original_reconstruction_archives['update-only'])
+    _transport(archives, 'spot', monkeypatch)
+    adapter = vendor.CryptoHFTBookHourly('spot'); partition = vendor.hour_partition('2025-07-15T20Z')
+    if case == 'interrupted':
+        original = vendor.get_response
+
+        def interrupted(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> Response:
+            if params == {'file': vendor._file('spot', archives[0].partition)}:
+                raise SourceError('PROVIDER_HTTP_503', 'Deliberately interrupted the next original-prefix fetch.')
+            return original(url, params=params, headers=headers, weight=weight)
+
+        monkeypatch.setattr(vendor, 'get_response', interrupted)
+        with pytest.raises(SourceError) as failure:
+            adapter.fetch(partition)
+        assert failure.value.code == 'PROVIDER_HTTP_503'
+        assert not vendor._dependency_path('spot', partition).exists()
+        assert not adapter.rejected_revision(partition, adapter.discover(partition))
+        assert not tuple((tmp_path / 'locks').rglob('hour-*'))
+    elif case == 'bounded-exhaustion':
+        with monkeypatch.context() as limits:
+            limits.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 1)
+            with pytest.raises(SourceError) as failure:
+                adapter.fetch(partition)
+            assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            discovered = adapter.discover(partition)
+            assert adapter.rejected_revision(partition, discovered)
+            memo = json.loads(vendor._dependency_path('spot', partition).read_text())
+            assert memo['rejection']['policy'] == 3
+            assert [x[0] for x in memo['dependencies']] == ['2025-07-15T19Z', '2025-07-15T21Z']
+        assert not tuple((tmp_path / 'locks').rglob('hour-*'))
+        current = archives[2]
+        with monkeypatch.context() as limits:
+            limits.setattr(vendor, 'CRYPTOHFT_MAX_FILE_BYTES', len(current.body) - 1)
+            with pytest.raises(SourceError) as file_bound:
+                adapter.fetch(partition)
+            assert file_bound.value.code == 'BOOK_VENDOR_FILE_BOUND'
+        path = tmp_path / 'actual-current.bin'; path.write_bytes(current.body)
+        prepared = vendor._prepare_archive(path, tmp_path)
+        with monkeypatch.context() as limits:
+            limits.setattr(vendor, 'BOOK_MAX_PRELUDE_BYTES', prepared.stat().st_size)
+            with pytest.raises(SourceError) as combined_bound:
+                adapter.fetch(partition)
+            assert combined_bound.value.code == 'BOOK_VENDOR_PRELUDE_BOUND'
+        with monkeypatch.context() as limits:
+            limits.setattr(book_capture, 'BOOK_MAX_TRACKED_PRICES', 1)
+            with pytest.raises(SourceError) as price_bound:
+                adapter.fetch(partition)
+            assert price_bound.value.code == 'BOOK_PRICE_BOUND'
+        assert json.loads(vendor._dependency_path('spot', partition).read_text()) == memo
+    else:
+        originals = []
+        for key in ('2026-10-04T09Z', '2026-10-04T10Z'):
+            _, body, headers = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(key))
+            originals.append(OriginalArchive(vendor.hour_partition(key), body, headers))
+        _transport(tuple(originals), 'spot', monkeypatch)
+        partition = originals[0].partition; end = int(partition.end.timestamp() * 1000)
+        frames = vendor._frames; replay = vendor.replay_hour; written = []
+
+        def missing_tail(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+            for frame in frames(paths, legacy=legacy):
+                if int(str(frame[0]['event_time'])) < end - 1000:
+                    yield frame
+
+        def observed(path: Path, market: Market, partition: Partition, root: Path, *,
+                     preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
+            try:
+                return replay(path, market, partition, root, preludes=preludes, following=following)
+            except SourceError:
+                written.append(len(tuple(root.rglob('*.seal.json'))))
+                raise
+
+        monkeypatch.setattr(vendor, '_frames', missing_tail)
+        monkeypatch.setattr(vendor, 'replay_hour', observed)
+        with pytest.raises(SourceError) as tail:
+            adapter.fetch(partition)
+        assert tail.value.code == 'BOOK_VENDOR_TAIL_MISSING'
+        assert written and written[0] > 0
+        assert not tuple((tmp_path / 'locks').rglob('hour-*'))
+        assert adapter.rejected_revision(partition, adapter.discover(partition))

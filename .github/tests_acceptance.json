@@ -1573,6 +1573,23 @@
     "tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[perp]",
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_shutdown_location_loss_preserves_native_checkpoint_and_resume",
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_missing_location_exhaustion_and_other_fatal_errors_stay_visible",
-    "tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch"
+    "tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch",
+    "tests/origo_source_native/test_book_history.py::test_update_only_hour_recovers_with_bounded_prefix",
+    "tests/origo_source_native/test_book_history.py::test_shallow_original_seed_recovers_without_fabricated_depth",
+    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[perp]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[preperiod-reset]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[requested-gap]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-grid-late]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-event-stale]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[event-stale]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[price-grid]",
+    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[interrupted]",
+    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[bounded-exhaustion]",
+    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[partial-grid-cleanup]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[spot]",
+    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[perp]"
   ]
 }

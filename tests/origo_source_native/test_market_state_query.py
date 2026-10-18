@@ -1112,7 +1112,7 @@ def test_default_requests_keep_their_statements_and_schema(
 
         def observe(query: str, params: object = None,
                     settings: Mapping[str, object] | None = None) -> list[Row]:
-            rows = execute(query, params, settings)
+            rows = execute(query, params=params, settings=settings)
             if 'SELECT query FROM system.query_log' in query and isinstance(params, dict):
                 identity = str(params['result'])
                 if identity not in delayed and len(rows) > 1:

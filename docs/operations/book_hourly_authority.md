@@ -26,6 +26,8 @@ is retained only for a completed decision. Each accepted identity binds every
 actually used ordered input and all four component proofs. Failed scratch grids
 never publish. Preperiod continuity loss discards all prior knowledge before an
 actual subsequent message anchors a new chain; requested-period loss still fails.
+Stale preperiod updates discard warmup state and cannot anchor a new chain; a later
+fresh native message or original snapshot must reestablish proof before output.
 Replay/rejection policy3 revalidates older retained and rejected identities through
 the existing native controls. Historical failures remain visible until actual
 accepted activation. Operators use the ordinary Dagit partition/gap/failure

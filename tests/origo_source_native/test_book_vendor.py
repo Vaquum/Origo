@@ -1117,28 +1117,43 @@ def test_archive_warmup_preserves_requested_validation(
             pytest.fail('Original spot input has no off-perp-grid price.')
         return
     if case in ('first-event-stale', 'event-stale'):
-        keys = ('2026-09-24T00Z', '2026-09-24T01Z')
+        keys = ('2026-09-24T00Z', '2026-09-24T01Z') if case == 'event-stale' else (
+            '2026-09-24T00Z', '2026-09-24T22Z', '2026-09-24T23Z')
         paths = []
         for key in keys:
             _original_archive(vendor_session_root, 'perp', vendor.hour_partition(key))
             paths.append(vendor_session_root / f'vendor-perp-{key}.input')
-        original = vendor._frames
+        if case == 'event-stale':
+            with pytest.raises(SourceError) as stale:
+                vendor.replay_hour(paths[0], 'perp', vendor.hour_partition(keys[0]), tmp_path / 'grid', following=(paths[1],))
+            assert stale.value.code == 'BOOK_EVENT_STALE'
+        else:
+            partition = vendor.hour_partition(keys[1])
+            baseline = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'baseline', following=(paths[2],))
+            original = vendor._frames
+            stale_seen: list[int] = []
 
-        def updates_only(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-            found = case == 'event-stale'
-            for frame in original(paths, legacy=legacy):
-                if frame[0]['event_type'] != 'update':
-                    continue
-                first = frame[0]
-                age = int(str(first['received_time'])) // 1000000 - int(str(first['event_time']))
-                found |= not 0 <= age <= 5000
-                if found:
-                    yield frame
+            def stale_before_seed(inputs: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+                for path in inputs:
+                    if path != paths[0]:
+                        yield from original((path,), legacy=legacy)
+                    else:
+                        # Keep original updates through the first genuine stale
+                        # message, with no seed; the later original snapshot is valid.
+                        for frame in original((path,), legacy=legacy):
+                            if frame[0]['event_type'] != 'update':
+                                continue
+                            age = int(str(frame[0]['received_time'])) // 1000000 - int(str(frame[0]['event_time']))
+                            yield frame
+                            if not 0 <= age <= 5000:
+                                stale_seen.append(int(str(frame[0]['final_update_id'])))
+                                break
 
-        monkeypatch.setattr(vendor, '_frames', updates_only)
-        with pytest.raises(SourceError) as stale:
-            vendor.replay_hour(paths[1], 'perp', vendor.hour_partition(keys[1]), tmp_path / 'grid', preludes=(paths[0],))
-        assert stale.value.code == 'BOOK_EVENT_STALE'
+            monkeypatch.setattr(vendor, '_frames', stale_before_seed)
+            revision = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'grid',
+                                          preludes=(paths[0],), following=(paths[2],))
+            assert stale_seen and revision.key == baseline.key
+            assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
         return
     if case == 'first-grid-late':
         _, body, _ = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(REAL_HOUR))

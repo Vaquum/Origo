@@ -351,8 +351,6 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
     sampler = BookSampler(root, market, archive_start_ms=start_ms)
 
     def anchor(event: DepthEvent, received: int) -> None:
-        if not 0 <= received // 1000000 - event.event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
-            raise SourceError('BOOK_EVENT_STALE', 'Initial archive event is stale or ahead of receipt.')
         sampler.invalidate()
         sampler.book = DiffBook(market, event, archive_start_ms=start_ms)
         sampler.next_grid = start_ms
@@ -431,6 +429,9 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             if market == 'perp':
                 wire['pu'] = parse_book_integer(first['prev_final_update_id'])
             event = DepthEvent.parse(json.dumps(wire).encode(), market)
+            if event_ms < start_ms and not 0 <= received // 1000000 - event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
+                sampler.invalidate()
+                continue
             if sampler.book is None:
                 if event_ms < start_ms:
                     anchor(event, received)

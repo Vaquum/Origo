@@ -4,8 +4,10 @@ import hashlib
 import importlib
 import itertools
 import json
+import math
 import os
 import shutil
+import struct
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -13,16 +15,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import TYPE_CHECKING, cast
+from typing import Protocol, cast
+
+from origo.workers.book_capture import BookSampler, Level, utc_millisecond
 
 from ..arrow_types import ArrowCompression, ArrowParquet
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
-from .book_local import fetch_sealed_partition
+from .book_local import fetch_sealed_partition as fetch_sealed_partition
 from .book_spool import Market, atomic_write, object_mapping
-
-if TYPE_CHECKING:
-    from origo.workers.book_capture import BookSampler
 
 CRYPTOHFT_URL = 'https://api.cryptohftdata.com/v1/download'
 CRYPTOHFT_MAX_FILE_BYTES = 256 * 1024**2
@@ -31,9 +32,9 @@ BOOK_MAX_PRELUDE_HOURS = 24
 BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
-# Replay changes invalidate accepted identity; suppression-only changes do not.
+# Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 3
-_REJECTION_POLICY_VERSION = 3
+_REJECTION_POLICY_VERSION = 4
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
                               'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
@@ -61,6 +62,107 @@ _COLUMNS = (
     'price',
     'quantity',
 )
+
+_GRID_RECORDS = {depth: struct.Struct(f'<qQQ{width}{2 * depth}d{width}{2 * depth}d')
+                 for depth, width in ((20, 'B'), (200, '2s'))}
+_GRID_LENGTHS = {20: 20, 200: b'\xc8\x01'}
+_GridSample = tuple[int, int, int, int, tuple[Level, ...], tuple[Level, ...]]
+
+
+class _BinaryInsert(Protocol):
+    def raw_insert(self, table: str, *, insert_block: Iterator[bytes], fmt: str) -> object: ...
+
+
+class _ArchiveGrid(BookSampler):
+    """One minute of typed samples, then per-depth ClickHouse RowBinary scratch."""
+
+    def __init__(self, root: Path, market: Market, start_ms: int) -> None:
+        super().__init__(root, market, archive_start_ms=start_ms)
+        root.mkdir(parents=True, exist_ok=True)
+        self.samples: list[_GridSample] = []
+        self.minutes: list[dict[str, object]] = []
+        self.digests: dict[int, list[bytes]] = {20: [], 200: []}
+
+    def invalidate(self) -> None:
+        super().invalidate()
+        self.samples.clear()
+
+    def _emit(self, depth: int, grid: int, bids: tuple[Level, ...], asks: tuple[Level, ...]) -> None:
+        book = self.book
+        assert book is not None and book.event_ms is not None
+        self.samples.append((depth, grid, book.event_ms, book.last, bids, asks))
+
+    def _seal(self) -> None:
+        if self.counts == {20: 600, 200: 60}:
+            assert self.book is not None and self.minute is not None and self.first_id is not None
+            buffers = {depth: bytearray() for depth in (20, 200)}
+            minute_hash = hashlib.sha256()
+            for depth, grid, event, last, bids, asks in self.samples:
+                bid = tuple(float(value) for level in bids for value in level)
+                ask = tuple(float(value) for level in asks for value in level)
+                if (any(not math.isfinite(value) or value <= 0 for value in (*bid, *ask))
+                        or any(a <= b for a, b in zip(bid[::2], bid[2::2]))
+                        or any(a >= b for a, b in zip(ask[::2], ask[2::2])) or bid[0] >= ask[0]):
+                    raise SourceError('BOOK_FLOAT64_INVALID', 'Book levels lose validity as Float64.')
+                length = _GRID_LENGTHS[depth]
+                encoded = _GRID_RECORDS[depth].pack(grid, event, last, length, *bid, length, *ask)
+                buffers[depth].extend(encoded)
+                minute_hash.update(encoded)
+            for depth, buffer in buffers.items():
+                self.digests[depth].append(hashlib.sha256(buffer).digest())
+                with (self.root / f'depth{depth}.rowbinary').open('ab') as output:
+                    output.write(buffer)
+            self.minutes.append({
+                'market': self.market, 'minute_start': utc_millisecond(self.minute).isoformat(),
+                'samples_depth20': 600, 'samples_depth200': 60, 'first_update_id': self.first_id,
+                'last_update_id': self.book.last, 'payload_sha256': minute_hash.hexdigest(),
+            })
+            self.last_seal = utc_millisecond(self.minute + 60000)
+        self.samples.clear()
+        self.counts = {20: 0, 200: 0}
+        self.first_id = None
+
+    def _chunks(self, depth: int) -> Iterator[bytes]:
+        size = _GRID_RECORDS[depth].size * (600 if depth == 20 else 60)
+        with (self.root / f'depth{depth}.rowbinary').open('rb') as stream:
+            for digest in self.digests[depth]:
+                block = stream.read(size)
+                if len(block) != size or hashlib.sha256(block).digest() != digest:
+                    raise SourceError('BOOK_PAYLOAD_CHANGED', 'Archive grid scratch failed its hash.')
+                yield block
+            if stream.read(1):
+                raise SourceError('BOOK_PAYLOAD_CHANGED', 'Archive grid scratch has trailing bytes.')
+
+    def _rows(self, depth: int) -> Iterator[Row]:
+        for block in self._chunks(depth):
+            for raw in _GRID_RECORDS[depth].iter_unpack(block):
+                values = cast(tuple[object, ...], raw)
+                bid_end = 4 + depth * 2
+                bids = [(cast(float, values[i]), cast(float, values[i + 1])) for i in range(4, bid_end, 2)]
+                asks = [(cast(float, values[i]), cast(float, values[i + 1]))
+                        for i in range(bid_end + 1, len(values), 2)]
+                yield (depth, utc_millisecond(cast(int, values[0])), values[1], values[2], bids, asks)
+
+    def revision(self, partition: Partition) -> Revision:
+        from heapq import merge
+
+        if ([item['minute_start'] for item in self.minutes]
+                != [(partition.start + timedelta(minutes=i)).isoformat() for i in range(60)]):
+            raise SourceError('BOOK_MINUTES_MISSING', 'Archive lacks a complete sealed grid.')
+        evidence = json.dumps({'market': self.market, 'sealed_minutes': self.minutes}, separators=(',', ':'))
+        key = 'local-book-binary-v1:' + hashlib.sha256(evidence.encode()).hexdigest()
+
+        def rows() -> Iterator[Row]:
+            yield from merge(self._rows(20), self._rows(200), key=lambda row: cast(datetime, row[1]))
+
+        def insert(table: str) -> None:
+            from ..columnar import arrow_client
+
+            depth = {'depth20': 20, 'depth200': 200}[table.rsplit('.', 1)[-1]]
+            with arrow_client() as client:
+                cast(_BinaryInsert, client).raw_insert(table, insert_block=self._chunks(depth), fmt='RowBinary')
+
+        return Revision(key, key.removeprefix('local-book-binary-v1:'), evidence, 36000, rows, insert_bulk=insert)
 
 
 def hour_partition(key: str) -> Partition:
@@ -149,7 +251,7 @@ def _archive_rows(path: Path, *, columns: tuple[str, ...] = _COLUMNS) -> Iterato
         raise SourceError('BOOK_VENDOR_SCHEMA', 'Hourly archive lacks required order-book columns.')
     for batch in archive.iter_batches(batch_size=CRYPTOHFT_BATCH_ROWS, columns=list(columns)):
         for raw in batch.to_pylist():
-            yield dict(object_mapping(raw))
+            yield cast(dict[str, object], object_mapping(raw))
 
 
 def _frame_key(row: dict[str, object]) -> tuple[object, ...]:
@@ -303,7 +405,7 @@ def _revision_key(current: str, dependencies: tuple[tuple[str, str], ...]) -> st
 
 def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str, object]], start_ms: int, market: Market) -> None:
     from decimal import Decimal
-    from origo.workers.book_capture import BOOK_MAX_EVENT_AGE_SECONDS, DepthEvent, DiffBook, parse_book_integer
+    from origo.workers.book_capture import DepthEvent, DiffBook, parse_book_integer
 
     first = update[0]
     sides: dict[str, dict[str, str]] = {'bid': {}, 'ask': {}}
@@ -312,16 +414,16 @@ def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str
         previous = sides[side].setdefault(price, quantity)
         if Decimal(previous) != Decimal(quantity):
             raise SourceError('BOOK_SNAPSHOT_MISMATCH', 'Boundary collectors disagree about an absolute quantity.')
-    event = DepthEvent.parse(json.dumps({
+    event = DepthEvent.parse({
         'e': 'depthUpdate', 's': 'BTCUSDT', 'E': first['event_time'],
         'U': first['first_update_id'], 'u': first['final_update_id'], 'pu': first['prev_final_update_id'],
         'b': list(map(list, sides['bid'].items())), 'a': list(map(list, sides['ask'].items())),
-    }).encode(), market)
+    }, market)
     snapshot = DiffBook(market, seed)
     if snapshot.last != event.last or event.event_ms != start_ms:
         raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Initial snapshot does not match the boundary exchange update.')
-    if not 0 <= parse_book_integer(first['received_time']) // 1000000 - event.event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
-        raise SourceError('BOOK_EVENT_STALE', 'Boundary exchange update is stale or ahead of receipt.')
+    if parse_book_integer(first['received_time']) // 1000000 < event.event_ms:
+        raise SourceError('BOOK_EVENT_STALE', 'Boundary exchange update is ahead of receipt.')
     for levels, changes, bound, bid in (
             (snapshot.bids, event.bids, snapshot.bid_floor, True),
             (snapshot.asks, event.asks, snapshot.ask_ceiling, False)):
@@ -336,7 +438,6 @@ def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str
 def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> Revision:
     from origo.workers.book_capture import (
-        BOOK_MAX_EVENT_AGE_SECONDS,
         BookSampler,
         DepthEvent,
         DiffBook,
@@ -348,7 +449,7 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
         int(partition.start.timestamp() * 1000),
         int(partition.end.timestamp() * 1000),
     )
-    sampler = BookSampler(root, market, archive_start_ms=start_ms)
+    sampler = _ArchiveGrid(root, market, start_ms)
 
     def anchor(event: DepthEvent, received: int) -> None:
         sampler.invalidate()
@@ -404,7 +505,9 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                     sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
             else:
                 if (sampler.book is not None and sampler.book.verified
-                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms):
+                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms
+                        and not (event_ms == start_ms and sampler.book.event_ms is not None
+                                 and sampler.book.event_ms < start_ms)):
                     raise SourceError('BOOK_SEQUENCE_GAP', 'Checkpoint skips native updates inside the requested hour.')
                 nominal = (event_ms, seed['lastUpdateId']) in nominal_snapshots
                 if event_ms % 3600000 == 0 and not nominal:
@@ -428,8 +531,8 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
             }
             if market == 'perp':
                 wire['pu'] = parse_book_integer(first['prev_final_update_id'])
-            event = DepthEvent.parse(json.dumps(wire).encode(), market)
-            if event_ms < start_ms and not 0 <= received // 1000000 - event_ms <= BOOK_MAX_EVENT_AGE_SECONDS * 1000:
+            event = DepthEvent.parse(wire, market)
+            if event_ms < start_ms and received // 1000000 < event_ms:
                 sampler.invalidate()
                 continue
             if sampler.book is None:
@@ -468,7 +571,7 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
     if sampler.book.event_ms is None or sampler.book.event_ms < end_ms - 100:
         raise SourceError('BOOK_VENDOR_TAIL_MISSING', 'No exchange update witnesses the final 100-ms sample.')
     sampler.finish(end_ms)
-    result = fetch_sealed_partition(root, market, partition)
+    result = sampler.revision(partition)
     return replace(result, evidence_json=json.dumps({**json.loads(result.evidence_json),
                    'terminal_exchange_event_ms': sampler.book.event_ms,
                    'terminal_update_id': sampler.book.last, 'final_grid_ms': end_ms - 100}, separators=(',', ':')))
@@ -598,7 +701,8 @@ class CryptoHFTBookHourly:
         )
         return Revision(
             key, (hashlib.sha256(json.dumps([hashlib.sha256(response.body).hexdigest(), input_hashes, following_hashes], separators=(',', ':')).encode()).hexdigest()
-                  if input_hashes or following_hashes else hashlib.sha256(response.body).hexdigest()), evidence, local.row_count, rows
+                  if input_hashes or following_hashes else hashlib.sha256(response.body).hexdigest()),
+            evidence, local.row_count, rows, insert_bulk=local.insert_bulk,
         )
 
     def rejected_revision(self, partition: Partition, revision: str) -> bool:

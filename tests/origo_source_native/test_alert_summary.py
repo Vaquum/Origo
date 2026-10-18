@@ -409,6 +409,17 @@ def test_lifecycle_preserves_transient_and_unverified_incidents() -> None:
     assert not lifecycle_transitions(m1, now=datetime.fromisoformat(m1[-1]['sampling_slot']))
     m2 = _recorded_frames('m2-spot-20260925')
     assert m2[0]['observations'][0]['eligible'] is True
+    boundary_frames = m2[:2]
+    first_slot = datetime.fromisoformat(boundary_frames[0]['sampling_slot'])
+    for seconds in (0, 30):
+        boundary_now = first_slot + timedelta(days=1, seconds=seconds)
+        boundary = _summary(boundary_frames, boundary_now)['incidents'][0]
+        assert boundary['observations'] == boundary.get('failing_minutes') == 1
+        assert boundary['coverage']['observed_slots'] == 1
+        assert boundary['first_seen'] == boundary_frames[0]['sampling_slot']
+        boundary_transitions = lifecycle_transitions(boundary_frames, now=boundary_now)
+        assert any(event['sampling_slot'] == boundary_frames[0]['sampling_slot']
+                   and event['description'] == 'New' for event in boundary_transitions)
     transitions = lifecycle_transitions(m2, now=datetime.fromisoformat(m2[-1]['sampling_slot']))
     assert any(event['description'] == 'New' for event in transitions)
     assert any(event['description'] == 'Recovered' for event in transitions)
@@ -863,7 +874,7 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
     measured_monitor = _measure_monitor_replay(tmp_path / 'monitor-benchmark')
     assert measured_monitor['frames'] == 1440 and measured_monitor['groups_per_frame'] == 18
     assert float(str(measured_monitor['retained_index_bytes'])) <= 16 * 1024 * 1024
-    assert float(str(measured_monitor['once_each_total_seconds'])) < 1
+    assert float(str(measured_monitor['once_each_total_seconds'])) < 1, measured_monitor
     assert float(str(measured_monitor['peak_rss_mib'])) < 1024
     assert measured_monitor['genuine_r1_frames'] == 711
     assert float(str(measured_monitor['genuine_r1_summary_seconds'])) < 1

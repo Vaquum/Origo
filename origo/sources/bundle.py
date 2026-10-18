@@ -324,7 +324,7 @@ def _execute_operation(
                 )
         runtime.failures.recover(operation='backfill')
         state = observe_source(runtime)
-        if state['healthy'] is not True:
+        if state['healthy'] is not True and spec.consumers:
             raise SourceError('SOURCE_HEALTH_BLOCKED', 'Backfill has unresolved source failures.')
         return state
     if operation == 'reconcile':
@@ -406,9 +406,13 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         else None,
     )
     def execute(context: AssetExecutionContext, config: SourceRunConfig) -> Iterator[_SourceResult]:
+        from .prepare import is_source_backfill
+
         if operation == 'canonical' and (
             context.job_def.name != f'refresh_{spec.key}_canonical_source_job'
             or context.has_partition_key_range
+            or (isinstance(spec.canonical, CanonicalAuditPolicy)
+                and is_source_backfill(context.run, spec))
         ):
             from .backfill import execute_partition_backfill, publication_ready
 

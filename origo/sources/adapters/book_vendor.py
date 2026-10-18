@@ -113,6 +113,8 @@ def _archive_response(market: Market, partition: Partition, *, metadata: bool,
         latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
+        if error.code == 'PROVIDER_HTTP_404':
+            raise SourceError(error.code, f'Missing provider archive: {_file(market, partition)}') from error
         raise
 
 

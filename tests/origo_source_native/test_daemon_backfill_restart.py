@@ -4,7 +4,6 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
 from dagster import DagsterEvent
@@ -41,8 +40,8 @@ def _parent(target, identity, selected):
         from_failure=False, tags={}, backfill_timestamp=time.time(),
         partition_names=selected,
         partition_set_origin=RemotePartitionSetOrigin(
-            RemoteRepositoryOrigin(target.create_origins()[0], '__repository__'),
-            'control_partition_set',
+            repository_origin=RemoteRepositoryOrigin(target.create_origins()[0], '__repository__'),
+            partition_set_name='control_partition_set',
         ),
     )
 

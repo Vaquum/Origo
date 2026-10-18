@@ -1,3 +1,7 @@
+# v3.34.13
+
+- Keep the deployment SSH session alive through silent verification while preserving remote checks, input and failure status.
+
 # v3.34.12
 
 - Discover current book authority every five minutes and suppress duplicate or unchanged rejected scheduled work after fresh availability checks.

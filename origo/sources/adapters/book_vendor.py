@@ -505,7 +505,9 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                     sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
             else:
                 if (sampler.book is not None and sampler.book.verified
-                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms):
+                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms
+                        and not (event_ms == start_ms and sampler.book.event_ms is not None
+                                 and sampler.book.event_ms < start_ms)):
                     raise SourceError('BOOK_SEQUENCE_GAP', 'Checkpoint skips native updates inside the requested hour.')
                 nominal = (event_ms, seed['lastUpdateId']) in nominal_snapshots
                 if event_ms % 3600000 == 0 and not nominal:

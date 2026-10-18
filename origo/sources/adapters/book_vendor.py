@@ -32,8 +32,8 @@ BOOK_MAX_PRELUDE_HOURS = 24
 BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
-# Replay changes invalidate accepted identity; suppression-only changes do not.
-_REPLAY_POLICY_VERSION = 4
+# Only changes to accepted logical output invalidate retained identities.
+_REPLAY_POLICY_VERSION = 3
 _REJECTION_POLICY_VERSION = 4
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
                               'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
@@ -249,7 +249,7 @@ def _archive_rows(path: Path, *, columns: tuple[str, ...] = _COLUMNS) -> Iterato
         raise SourceError('BOOK_VENDOR_SCHEMA', 'Hourly archive lacks required order-book columns.')
     for batch in archive.iter_batches(batch_size=CRYPTOHFT_BATCH_ROWS, columns=list(columns)):
         for raw in batch.to_pylist():
-            yield dict(object_mapping(raw))
+            yield cast(dict[str, object], object_mapping(raw))
 
 
 def _frame_key(row: dict[str, object]) -> tuple[object, ...]:

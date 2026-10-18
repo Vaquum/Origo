@@ -704,7 +704,9 @@ def test_nominal_archive_snapshot_uses_real_exchange_clock(
         assert seals[0]['first_update_id'] == 100634608796
 
 
-def test_nominal_archive_frame_inventory(nominal_archives: tuple[Market, Path, Path]) -> None:
+def test_nominal_archive_frame_inventory(
+    nominal_archives: tuple[Market, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from origo.workers.book_capture import parse_book_integer
 
     market, current, following = nominal_archives
@@ -722,6 +724,11 @@ def test_nominal_archive_frame_inventory(nominal_archives: tuple[Market, Path, P
         assert parse_book_integer(first['last_update_id']) == cursor
         identities.add((event_ms, cursor))
     assert vendor._nominal_snapshots((current, following)) == identities
+    # Withhold marker evidence only; an unchanged hour-aligned payload cannot become a real clock.
+    monkeypatch.setattr(vendor, '_nominal_snapshots', lambda paths: frozenset())
+    with pytest.raises(SourceError) as unproven:
+        vendor.replay_hour(current, market, vendor.hour_partition('2026-09-24T22Z'), tmp_path)
+    assert unproven.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
 
 
 def test_nominal_archive_requires_initial_bridge(
@@ -785,7 +792,8 @@ def test_nominal_archive_preserves_native_gap(
 
 
 def test_nominal_archive_real_checkpoint_after_clockless_state(
-    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
 ) -> None:
     from origo.workers.book_capture import BookSampler, parse_book_integer
 
@@ -809,6 +817,19 @@ def test_nominal_archive_real_checkpoint_after_clockless_state(
     with pytest.raises(SourceError) as missing:
         vendor._archive_checkpoint(late, payload, event_ms, start_ms - 3600000, nominal=False)
     assert missing.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
+    following = tmp_path / 'following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
+    next_frame = next(vendor._frames((following,)))
+    next_event = parse_book_integer(next_frame[0]['event_time'])
+    future_start = start_ms + 7200000
+    prelude = BookSampler(tmp_path / 'prelude', market)
+    vendor._archive_checkpoint(prelude, payload, event_ms, future_start, nominal=True)
+    vendor._archive_checkpoint(prelude, payload, event_ms, future_start, nominal=False)
+    assert prelude.book is not None and prelude.book.event_ms == event_ms
+    vendor._archive_checkpoint(prelude, _checkpoint_payload(next_frame), next_event, future_start, nominal=True)
+    assert prelude.book is not None and prelude.book.verified and prelude.book.event_ms is None
+    assert prelude.book.last == parse_book_integer(next_frame[0]['last_update_id'])
+    assert prelude.next_grid == future_start and prelude.lines == []
 
 
 def test_replay_policy_invalidates_complete_revision_identity(

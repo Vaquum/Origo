@@ -622,7 +622,7 @@ def test_rejected_book_revision_is_not_replayed_by_audit(
     assert counts['payload'] == before['payload'] and counts['replay'] == before['replay']
     assert runtime.store.execute('SELECT event_id,event_type FROM origo.source_failure_log ORDER BY event_time,event_id') == original_failures
     monkeypatch.setattr(vendor, 'replay_hour', real_replay)
-    _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=REAL_HOUR))
+    _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=REAL_HOUR, automatic_capacity=True))
     rebuilt = runtime.store.record(partition)
     assert rebuilt is not None and rebuilt.revision == official
     assert rebuilt.generation == canonical.generation + 1 and len(rebuilt.component_hashes) == 4

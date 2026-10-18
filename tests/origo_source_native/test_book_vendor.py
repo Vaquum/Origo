@@ -282,7 +282,9 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
             writer.write_table(table.filter(pc.equal(table['event_type'], 'update')))
     with pytest.raises(SourceError) as failure:
         vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
-    assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'
+    # Updates can now anchor unknown archive depth, but cannot certify this first grid.
+    assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
 
 
 def test_truncated_exchange_tail_cannot_complete_an_hour(

@@ -126,12 +126,25 @@ class DepthEvent:
 
 
 class DiffBook:
-    def __init__(self, market: Market, seed: bytes) -> None:
+    def __init__(self, market: Market, seed: bytes | DepthEvent, *,
+                 archive_start_ms: int | None = None) -> None:
+        if archive_start_ms is not None and parse_book_integer(archive_start_ms) % 3600000:
+            raise ValueError('Archive warmup requires a UTC-hour boundary.')
         self.market = market
-        value = object_mapping(json.loads(seed))
-        self.last = parse_book_integer(value.get('lastUpdateId'))
-        bids, asks = (_levels(value.get(side), zeros=False) for side in ('bids', 'asks'))
-        if len(bids) < 200 or len(asks) < 200:
+        self.archive_start_ms = archive_start_ms
+        event = seed if isinstance(seed, DepthEvent) else None
+        bids: tuple[Level, ...]
+        asks: tuple[Level, ...]
+        if isinstance(seed, DepthEvent):
+            if archive_start_ms is None or seed.event_ms >= archive_start_ms:
+                raise SourceError('BOOK_UNSEEDED', 'Only preperiod archive messages may anchor unknown depth.')
+            self.last = seed.last
+            bids, asks = (), ()
+        else:
+            value = object_mapping(json.loads(seed))
+            self.last = parse_book_integer(value.get('lastUpdateId'))
+            bids, asks = (_levels(value.get(side), zeros=False) for side in ('bids', 'asks'))
+        if archive_start_ms is None and (len(bids) < 200 or len(asks) < 200):
             raise SourceError('BOOK_SEED_TOO_SHALLOW', 'Seed does not prove a 200-level book.')
         if bids != tuple(sorted(bids, reverse=True)) or asks != tuple(sorted(asks)):
             raise ValueError('Seed levels are not strictly ordered.')
@@ -139,15 +152,26 @@ class DiffBook:
         self.asks = dict(asks)
         self.bid_prices = [price for price, _ in reversed(bids)]
         self.ask_prices = [price for price, _ in asks]
-        self.bid_floor, self.ask_ceiling = bids[-1][0], asks[-1][0]
+        self.bid_floor = bids[-1][0] if bids else Decimal('Infinity')
+        self.ask_ceiling = asks[-1][0] if asks else Decimal('-Infinity')
         self.tick = BOOK_PRICE_TICK[market]
         if any(price % self.tick for price, _ in (*bids, *asks)):
             raise SourceError('BOOK_PRICE_GRID', 'Seed prices disagree with the BTCUSDT grid.')
         self.bid_observed: set[Decimal] = set()
         self.ask_observed: set[Decimal] = set()
-        self.event_ms: int | None = None
-        self.verified = False
+        self.event_ms: int | None = event.event_ms if event is not None else None
+        self.verified = event is not None
         self.cached: tuple[tuple[Level, ...], tuple[Level, ...]] | None = None
+        if event is not None:
+            self.observe_levels(event.bids, event.asks)
+        elif archive_start_ms is not None:
+            self._validate_depth(None)
+
+    def _validate_depth(self, event_ms: int | None) -> None:
+        if self.archive_start_ms is None or (event_ms is not None and event_ms >= self.archive_start_ms):
+            self.top(200)
+        elif self.bid_prices and self.ask_prices and self.bid_prices[-1] >= self.ask_prices[0]:
+            raise SourceError('BOOK_CROSSED', 'Witnessed positive levels cross.')
 
     def refresh(self, snapshot: DiffBook) -> None:
         if self.market != snapshot.market or self.last != snapshot.last or not self.verified:
@@ -169,7 +193,7 @@ class DiffBook:
         self.bid_observed = {p for p in self.bid_observed if p < self.bid_floor}
         self.ask_observed = {p for p in self.ask_observed if p > self.ask_ceiling}
         self.cached = None
-        self.top(200)
+        self._validate_depth(self.event_ms)
 
     def bridges(self, event: DepthEvent) -> bool:
         if self.verified:
@@ -229,6 +253,18 @@ class DiffBook:
                 elif price in side:
                     del side[price]
                     prices.pop(bisect_left(prices, price))
+        if self.archive_start_ms is not None and self.bid_prices and self.ask_prices:
+            bid, ask = self.bid_prices[-1], self.ask_prices[0]
+            if bid >= ask:
+                raise SourceError('BOOK_CROSSED', 'Witnessed positive levels cross.')
+            # A surviving positive opposite quote bounds the empty region in the
+            # noncrossed venue book. Apply the entire native message first.
+            if ask < self.bid_floor:
+                self.bid_floor = ask
+                self.bid_observed = {p for p in self.bid_observed if p < self.bid_floor}
+            if bid > self.ask_ceiling:
+                self.ask_ceiling = bid
+                self.ask_observed = {p for p in self.ask_observed if p > self.ask_ceiling}
         # Absolute updates prove each touched price, including zero quantities. Extend
         # the complete interval only when every intervening venue tick was observed.
         while self.bid_floor - self.tick in self.bid_observed:
@@ -254,7 +290,7 @@ class DiffBook:
         self.observe_levels(event.bids, event.asks)
         self.last, self.event_ms = event.last, event.event_ms
         try:
-            self.top(200)
+            self._validate_depth(event.event_ms)
         except SourceError:
             self.verified = False
             raise
@@ -267,9 +303,12 @@ def _strings(levels: tuple[Level, ...]) -> list[list[str]]:
 
 
 class BookSampler:
-    def __init__(self, root: Path, market: Market) -> None:
+    def __init__(self, root: Path, market: Market, *, archive_start_ms: int | None = None) -> None:
+        if archive_start_ms is not None and parse_book_integer(archive_start_ms) % 3600000:
+            raise ValueError('Archive warmup requires a UTC-hour boundary.')
         self.root = root
         self.market: Market = market
+        self.archive_start_ms = archive_start_ms
         self.book: DiffBook | None = None
         self.next_grid: int | None = None
         self.minute: int | None = None
@@ -289,7 +328,7 @@ class BookSampler:
 
     def seed(self, payload: bytes) -> None:
         self.invalidate()
-        self.book = DiffBook(self.market, payload)
+        self.book = DiffBook(self.market, payload, archive_start_ms=self.archive_start_ms)
 
     def checkpoint(self, payload: bytes, event_ms: int, start_ms: int) -> None:
         """Accept an archive's exchange-clock checkpoint without a REST seed."""
@@ -297,12 +336,13 @@ class BookSampler:
             if self.book.event_ms is not None and event_ms < self.book.event_ms:
                 raise SourceError('BOOK_VENDOR_ORDERING', 'Archive checkpoint clock moved backward.')
             self._sample_until(event_ms)
-        replacement = DiffBook(self.market, payload)
+        replacement = DiffBook(self.market, payload, archive_start_ms=self.archive_start_ms)
         if self.book is not None and self.book.verified and self.book.last == replacement.last:
             self.book.refresh(replacement)
         else:
             self.book = replacement
-        self.book.top(200)
+        if self.archive_start_ms is None or event_ms >= start_ms:
+            self.book.top(200)
         self.book.event_ms, self.book.verified = event_ms, True
         self.next_grid = max(self.next_grid or start_ms, start_ms, ((event_ms + 99) // 100) * 100)
 

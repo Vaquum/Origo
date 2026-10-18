@@ -1,3 +1,7 @@
+# v3.34.17
+
+- Reconstruct provable archive book depth from linked original quote witnesses and expand bounded native backfill prefixes automatically; retain strict requested grids and live capture defaults.
+
 # v3.34.16
 
 - Resume native job backfills after daemon workspace shutdown without canceling queued work; retain bounded retry exhaustion and allow graceful submission drain.

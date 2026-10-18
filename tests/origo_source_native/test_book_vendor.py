@@ -21,6 +21,7 @@ from origo.sources.contracts import Partition, RevisionedSourceSpec, SourceError
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
+from origo.workers.book_capture import DepthEvent
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -39,11 +40,47 @@ _ORIGINAL_HASHES = {
     ('perp', '2026-09-24T01Z'): '57f930164e1cf2c046375ab2b012dcb3706be3ff8ba7d52591a70cd605e5cdf2',
     ('spot', '2026-09-29T09Z'): '31628678f151487c07167854417f7bd42f6ced08fd747bd37b4b56b26fae63ad',
     ('spot', '2026-09-29T10Z'): '7e7574d5d6f788d8d893c88278e8aaeeba29597cddb8a7836164aa47712721f3',
+    ('spot', '2025-07-15T18Z'): '229093fe0ed893b621c6d5c342ba4675d9cf565d09e0ba55418b1eb6c4ac2a67',
+    ('spot', '2025-07-15T19Z'): '4a08e3432e0bd014fc6ab267123c46da8c78ade77653ad21d47cf8c344423dec',
+    ('spot', '2025-07-15T20Z'): '3c8d66d7afdae5dce221fbddcd5120e730e200e1770905575a0baac3111c6e06',
+    ('spot', '2025-07-15T21Z'): '892e01cee38c3f8dd838b15047c541759410043dd3b8d41f9a47c6f22e9dfbdc',
+    ('spot', '2026-07-30T22Z'): 'a42000a537dc3508e7ad39d27868a9b364959f303e94ed450608f02efc2bd501',
+    ('spot', '2026-07-31T13Z'): 'dad8c8387a3b23b8c6148c6cb2338567af269b5e7a9b5999b99068987355a721',
+    ('spot', '2026-07-31T14Z'): 'a31a9c556fea9344c4efaaf1b41f915224e226816cf611fb35027ad041381bde',
+    ('spot', '2026-07-31T15Z'): '9cb366aaee1c32bb4af015fb5ae113f075dbef196287269cb11fb5ee24d9e9f1',
+    ('spot', '2026-07-31T16Z'): 'e11927b8d106175e6cfe8f2d4550f6d0667e19b6e7bb86e49938f8e40b6a28e7',
+    ('spot', '2026-07-31T17Z'): '1dc5ba57cd0c68b9a699c9e10d2d80ec7e51adc38a2365f443a2ccd1328f5e47',
+    ('spot', '2026-07-31T18Z'): '26494276425eb2f929d1a3eae77f34c8683d64b180c61fdba5e189f0f2d7cecd',
+    ('spot', '2025-06-28T06Z'): '8f7525c4cbdd1d7e0c8da6b5f5704caf4ce08aeeaf65b55779d397bed2574fc4',
+    ('spot', '2025-06-28T07Z'): '3fb37a5e3084b09e56f2a459e5819bb59a562e6b558698d77b4d95f74f69d99d',
+    ('spot', '2025-06-28T08Z'): '800bd09c8d96b56123a81c07da39a64c38c55be612901d35c33e94b7c5b45df4',
+    ('perp', '2025-06-28T05Z'): '1404ec4c80d8ad7400131d6a5e3fe686226c743a6051fe90d553ac2a035bb789',
+    ('perp', '2025-06-28T06Z'): '8404548e0f8e2954a1653ed6c00401d414321a7dbbfcd0ff89439fc1d852eb05',
+    ('perp', '2025-06-28T07Z'): 'a69620ed9f26aa848984c25d1589f546ab6c34b279a9cfd298f6aa1a82e5d0ee',
 }
 _MINUTE_HASHES = {
     'spot': 'd8d884160b44755251b3208e67c91c7e37102cbcfcb73fc7633832e27bbc93ac',
     'perp': '194362e76263a438c157b8b546cc6689c7968f97148f2d725e498e883335b7ef',
 }
+
+
+OriginalRecording = tuple[str, bytes, dict[str, str]]
+
+
+@pytest.fixture(scope='session')
+def original_reconstruction_archives(vendor_session_root: Path) -> dict[str, tuple[OriginalRecording, ...]]:
+    cases = {
+        'update-only': tuple(f'2025-07-15T{hour:02}Z' for hour in range(18, 22)),
+        'shallow': ('2026-07-30T22Z', *(f'2026-07-31T{hour:02}Z' for hour in range(13, 19))),
+    }
+    result: dict[str, tuple[OriginalRecording, ...]] = {}
+    for case, keys in cases.items():
+        recordings: list[OriginalRecording] = []
+        for key in keys:
+            _, body, headers = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(key))
+            recordings.append((key, body, headers))
+        result[case] = tuple(recordings)
+    return result
 
 
 @pytest.fixture(scope='session')
@@ -145,6 +182,13 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     assert json.loads(revision.evidence_json)['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
     minutes = evidence['grid_evidence']['sealed_minutes']
     assert len(minutes) == 60
+    expected = {
+        'spot': 'd5f899d30aec852c58f2612a887d4911fdf090313c456eff0001b6f8fb133461',
+        'perp': 'a283738467478da33f96cf9a360c2bf4063c771d31d3fb900dc0ffaafe49e58c',
+    }
+    assert hashlib.sha256(json.dumps(
+        [minute['payload_sha256'] for minute in minutes], separators=(',', ':'),
+    ).encode()).hexdigest() == expected[market]
     assert hashlib.sha256(json.dumps(
         [(minute['minute_start'], minute['payload_sha256']) for minute in minutes],
         separators=(',', ':'),
@@ -238,7 +282,9 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
             writer.write_table(table.filter(pc.equal(table['event_type'], 'update')))
     with pytest.raises(SourceError) as failure:
         vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
-    assert failure.value.code == 'BOOK_VENDOR_SEED_MISSING'
+    # Updates can now anchor unknown archive depth, but cannot certify this first grid.
+    assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
 
 
 def test_truncated_exchange_tail_cannot_complete_an_hour(
@@ -787,16 +833,23 @@ def test_nominal_archive_preserves_native_gap(
 ) -> None:
     market, current, following = nominal_archives
     frames = vendor._frames
+    partition = vendor.hour_partition('2026-09-24T22Z')
+    first_second = int(partition.start.timestamp() * 1000) + 1000
 
     def missing_bridge(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        for index, frame in enumerate(frames(paths, legacy=legacy)):
-            if index != 1:
-                yield frame
+        removed = False
+        for frame in frames(paths, legacy=legacy):
+            # Withhold a real requested-hour update, after the initial clock witness.
+            if not removed and frame[0]['event_type'] == 'update' and int(str(frame[0]['event_time'])) >= first_second:
+                removed = True
+                continue
+            yield frame
 
     monkeypatch.setattr(vendor, '_frames', missing_bridge)
     with pytest.raises(SourceError) as gap:
-        vendor.replay_hour(current, market, vendor.hour_partition('2026-09-24T22Z'), tmp_path, following=(following,))
+        vendor.replay_hour(current, market, partition, tmp_path, following=(following,))
     assert gap.value.code == 'BOOK_SEQUENCE_GAP'
+    assert list(tmp_path.rglob('*.seal.gz')) == []
 
 
 def test_nominal_archive_real_checkpoint_after_clockless_state(
@@ -851,11 +904,11 @@ def test_replay_policy_invalidates_complete_revision_identity(
     current = vendor._identity(market, partition, Response(body, headers, 200))
     dependencies = [(after.key, vendor._identity(market, after, Response(
         original_vendor_following_archive[1], original_vendor_following_archive[2], 200)))]
-    old = 'cryptohftdata-v2:' + hashlib.sha256(json.dumps([current, dependencies], separators=(',', ':')).encode()).hexdigest()
+    old = 'cryptohftdata-v2:' + hashlib.sha256(json.dumps([2, current, dependencies], separators=(',', ':')).encode()).hexdigest()
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     path = vendor._dependency_path(market, partition)
     vendor.atomic_write(path, json.dumps({'current': current, 'dependencies': dependencies,
-        'rejection': {'policy': 1, 'code': 'BOOK_EVENT_STALE', 'revision': old}}).encode())
+        'rejection': {'policy': 2, 'code': 'BOOK_EVENT_STALE', 'revision': old}}).encode())
     adapter = vendor.CryptoHFTBookHourly(market)
     discovered = adapter.discover(partition)
     assert discovered == 'cryptohftdata-v2:' + hashlib.sha256(json.dumps(
@@ -892,3 +945,290 @@ def test_real_clock_archive_preserves_original_sequence_gap(vendor_session_root:
     with pytest.raises(SourceError) as gap:
         vendor.replay_hour(paths[0], 'spot', vendor.hour_partition('2026-09-29T09Z'), tmp_path, following=(paths[1],))
     assert gap.value.code == 'BOOK_SEQUENCE_GAP'
+
+
+def _recorded_event(frame: list[dict[str, object]], market: Market) -> DepthEvent:
+    from origo.workers.book_capture import DepthEvent
+    first = frame[0]
+    return DepthEvent.parse(json.dumps({
+        'e': 'depthUpdate', 's': 'BTCUSDT', 'E': first['event_time'],
+        'U': first['first_update_id'], 'u': first['final_update_id'],
+        'pu': first['prev_final_update_id'],
+        'b': [[row['price'], row['quantity']] for row in frame if row['side'] == 'bid'],
+        'a': [[row['price'], row['quantity']] for row in frame if row['side'] == 'ask'],
+    }).encode(), market)
+
+
+def test_quote_witness_matches_original_reference(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+) -> None:
+    from origo.workers.book_capture import DiffBook
+    market, body, _ = original_vendor_archive
+    path = tmp_path / 'original.parquet'; path.write_bytes(body)
+    frames = iter(vendor._frames((path,)))
+    payload = _checkpoint_payload(next(frames))
+    reference = DiffBook(market, payload); reference.verified = True
+    seed = json.loads(payload); seed['bids'] = seed['bids'][:100]; seed['asks'] = seed['asks'][:100]
+    end_ms = int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    partial = DiffBook(market, json.dumps(seed).encode(), archive_start_ms=end_ms)
+    partial.verified = True  # Original archive checkpoint, not an asynchronous REST seed.
+    candidates = [partial, None]
+    compared = [0, 0]; unknown_with_positive_depth = [False, False]; frame_count = 0
+    for frame in frames:
+        if frame[0]['event_type'] != 'update':
+            continue
+        event = _recorded_event(frame, market)
+        reference.apply(event); frame_count += 1
+        for index, candidate in enumerate(candidates):
+            if candidate is None:
+                candidate = DiffBook(market, event, archive_start_ms=end_ms)
+                candidates[index] = candidate
+            else:
+                candidate.apply(event)
+            try:
+                actual = candidate.top(200)
+            except SourceError as error:
+                assert error.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+                unknown_with_positive_depth[index] |= len(candidate.bids) >= 200 and len(candidate.asks) >= 200
+            else:
+                assert candidate.last == reference.last
+                assert actual == reference.top(200)
+                compared[index] += 1
+    expected_frames, expected_states = {'spot': (35810, 11530), 'perp': (136338, 131758)}[market]
+    assert frame_count == expected_frames
+    assert compared == [expected_states, expected_states]
+    assert unknown_with_positive_depth == [True, True]
+
+
+def test_quote_witness_rejects_unknown_or_crossed_state(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+) -> None:
+    from copy import deepcopy
+    from origo.workers.book_capture import DiffBook
+    market, body, _ = original_vendor_archive
+    path = tmp_path / 'original.parquet'; path.write_bytes(body)
+    frames = iter(vendor._frames((path,)))
+    seed = json.loads(_checkpoint_payload(next(frames)))
+    seed['bids'] = seed['bids'][:100]; seed['asks'] = seed['asks'][:100]
+    end_ms = int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    initial = DiffBook(market, json.dumps(seed).encode(), archive_start_ms=end_ms)
+    initial.verified = True
+    book = deepcopy(initial); deletion_checked = False; cross_checked = False
+    for frame in frames:
+        if frame[0]['event_type'] != 'update':
+            continue
+        event = _recorded_event(frame, market)
+        if not deletion_checked:
+            bids = tuple((p, q) for p, q in event.bids if not q and p < initial.bid_floor - initial.tick)
+            asks = tuple((p, q) for p, q in event.asks if not q and p > initial.ask_ceiling + initial.tick)
+            if bids or asks:
+                prior = (initial.bid_floor, initial.ask_ceiling, dict(initial.bids), dict(initial.asks))
+                initial.observe_levels(bids, asks)
+                assert prior == (initial.bid_floor, initial.ask_ceiling, initial.bids, initial.asks)
+                with pytest.raises(SourceError) as unknown:
+                    initial.top(200)
+                assert unknown.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+                deletion_checked = True
+        # Withhold a genuine bid deletion only when this very native message also
+        # introduces a genuine ask crossing that old positive bid. No values/IDs
+        # or clocks are invented; the complete original message must still pass.
+        bid = book.bid_prices[-1]
+        if any(p == bid and not q for p, q in event.bids) and any(q and p <= bid for p, q in event.asks):
+            corrupted = replace(event, bids=tuple((p, q) for p, q in event.bids if p != bid))
+            fault = deepcopy(book); quantity = fault.bids[bid]
+            book.apply(event)
+            with pytest.raises(SourceError) as crossed:
+                fault.apply(corrupted)
+            assert crossed.value.code == 'BOOK_CROSSED'
+            assert fault.bids[bid] == quantity
+            # The same withheld real deletion also creates a crossed replacement
+            # snapshot. Reject it in both preperiod checkpoint paths, before a
+            # later complete update could remove the visible cross.
+            from origo.workers.book_capture import BookSampler
+            payload = json.dumps({'lastUpdateId': fault.last,
+                'bids': [[str(p), str(q)] for p, q in sorted(fault.bids.items(), reverse=True)],
+                'asks': [[str(p), str(q)] for p, q in sorted(fault.asks.items())]}).encode()
+            for nominal in (False, True):
+                sampler = BookSampler(tmp_path / str(nominal), market, archive_start_ms=end_ms)
+                with pytest.raises(SourceError) as snapshot_cross:
+                    vendor._archive_checkpoint(sampler, payload, event.event_ms, end_ms, nominal=nominal)
+                assert snapshot_cross.value.code == 'BOOK_CROSSED'
+                assert sampler.book is None
+            cross_checked = True
+        else:
+            book.apply(event)
+        if deletion_checked and cross_checked:
+            break
+    assert deletion_checked and cross_checked
+
+
+def test_archive_reconstruction_keeps_live_seed_strict(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+) -> None:
+    from origo.workers.book_capture import BookSampler, DiffBook, utc_millisecond
+    market, body, _ = original_vendor_archive
+    path = tmp_path / 'original.parquet'; path.write_bytes(body)
+    frames = iter(vendor._frames((path,)))
+    checkpoint = next(frames); seed = json.loads(_checkpoint_payload(checkpoint))
+    shallow = {**seed, 'bids': seed['bids'][:100], 'asks': seed['asks'][:100]}
+    sampler = BookSampler(tmp_path / 'live', market)
+    with pytest.raises(SourceError) as shallow_error:
+        sampler.seed(json.dumps(shallow).encode())
+    assert shallow_error.value.code == 'BOOK_SEED_TOO_SHALLOW' and sampler.book is None
+    # A genuine minimum-depth REST snapshot must still invalidate when native
+    # changes leave its proven200-level region; archive inference is never used.
+    seed['bids'] = seed['bids'][:200]; seed['asks'] = seed['asks'][:200]
+    partition = vendor.hour_partition(REAL_HOUR)
+    sampler.checkpoint(json.dumps(seed).encode(), int(str(checkpoint[0]['event_time'])),
+                       int(partition.start.timestamp() * 1000))
+    assert sampler.archive_start_ms is None
+    for frame in frames:
+        if frame[0]['event_type'] != 'update':
+            continue
+        event = _recorded_event(frame, market)
+        with pytest.raises(SourceError) as unseeded:
+            DiffBook(market, event)
+        assert unseeded.value.code == 'BOOK_UNSEEDED'
+        try:
+            sampler.accept(event, received_at=utc_millisecond(int(str(frame[0]['received_time'])) // 1000000))
+        except SourceError as error:
+            assert error.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            assert sampler.book is None
+            break
+    else:
+        pytest.fail('Original native changes did not exhaust the minimum live seed.')
+
+
+@pytest.mark.parametrize('case', [
+    'preperiod-reset', 'requested-gap', 'first-grid-late',
+    'first-event-stale', 'event-stale', 'price-grid',
+])
+def test_archive_warmup_preserves_requested_validation(
+    case: str, original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    vendor_session_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.workers.book_capture import BOOK_PRICE_TICK, DiffBook
+    if case == 'price-grid':
+        _, body, _ = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(REAL_HOUR))
+        path = tmp_path / 'spot.parquet'; path.write_bytes(body)
+        end = int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+        for frame in vendor._frames((path,)):
+            if frame[0]['event_type'] == 'update':
+                event = _recorded_event(frame, 'spot')
+                if any(p % BOOK_PRICE_TICK['perp'] for p, _ in (*event.bids, *event.asks)):
+                    with pytest.raises(SourceError) as off_grid:
+                        DiffBook('perp', event, archive_start_ms=end)
+                    assert off_grid.value.code == 'BOOK_PRICE_GRID'
+                    break
+        else:
+            pytest.fail('Original spot input has no off-perp-grid price.')
+        return
+    if case in ('first-event-stale', 'event-stale'):
+        keys = ('2026-09-24T00Z', '2026-09-24T01Z') if case == 'event-stale' else (
+            '2026-09-24T00Z', '2026-09-24T22Z', '2026-09-24T23Z')
+        paths = []
+        for key in keys:
+            _original_archive(vendor_session_root, 'perp', vendor.hour_partition(key))
+            paths.append(vendor_session_root / f'vendor-perp-{key}.input')
+        if case == 'event-stale':
+            with pytest.raises(SourceError) as stale:
+                vendor.replay_hour(paths[0], 'perp', vendor.hour_partition(keys[0]), tmp_path / 'grid', following=(paths[1],))
+            assert stale.value.code == 'BOOK_EVENT_STALE'
+        else:
+            partition = vendor.hour_partition(keys[1])
+            baseline = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'baseline', following=(paths[2],))
+            original = vendor._frames
+            stale_seen: list[int] = []
+
+            def stale_before_seed(inputs: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+                for path in inputs:
+                    if path != paths[0]:
+                        yield from original((path,), legacy=legacy)
+                    else:
+                        # Keep original updates through the first genuine stale
+                        # message, with no seed; the later original snapshot is valid.
+                        for frame in original((path,), legacy=legacy):
+                            if frame[0]['event_type'] != 'update':
+                                continue
+                            age = int(str(frame[0]['received_time'])) // 1000000 - int(str(frame[0]['event_time']))
+                            yield frame
+                            if not 0 <= age <= 5000:
+                                stale_seen.append(int(str(frame[0]['final_update_id'])))
+                                break
+
+            monkeypatch.setattr(vendor, '_frames', stale_before_seed)
+            revision = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'grid',
+                                          preludes=(paths[0],), following=(paths[2],))
+            assert stale_seen and revision.key == baseline.key
+            assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
+        return
+    if case == 'first-grid-late':
+        _, body, _ = _original_archive(vendor_session_root, 'spot', vendor.hour_partition(REAL_HOUR))
+        path = tmp_path / 'original.parquet'; path.write_bytes(body)
+        partition = vendor.hour_partition(REAL_HOUR)
+        start_ms, end_ms = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
+        frames = iter(vendor._frames((path,)))
+        initial = next(frames)
+        seed = json.loads(_checkpoint_payload(initial))
+        seed['bids'] = seed['bids'][:100]; seed['asks'] = seed['asks'][:100]
+        initial_prices = {'bid': {level[0] for level in seed['bids']},
+                          'ask': {level[0] for level in seed['asks']}}
+        candidate = DiffBook('spot', json.dumps(seed).encode(), archive_start_ms=end_ms)
+        candidate.verified = True
+        for frame in frames:
+            if frame[0]['event_type'] != 'update':
+                continue
+            event = _recorded_event(frame, 'spot'); candidate.apply(event)
+            try:
+                candidate.top(200)
+            except SourceError as unknown:
+                assert unknown.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            else:
+                assert event.event_ms > start_ms
+                break
+        else:
+            pytest.fail('Original partial seed never became certifiable after the initial grid.')
+        original = vendor._frames
+
+        def shallow_initial(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+            for frame in original(paths, legacy=legacy):
+                if frame[0]['event_type'] == 'snapshot' and frame[0]['last_update_id'] == initial[0]['last_update_id']:
+                    shallow = [row for row in frame if row['price'] in initial_prices[str(row['side'])]]
+                    assert len(shallow) == 200
+                    yield shallow
+                else:
+                    yield frame
+
+        monkeypatch.setattr(vendor, '_frames', shallow_initial)
+        with pytest.raises(SourceError) as late:
+            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid')
+        assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+        assert not tuple((tmp_path / 'grid').rglob('*.seal.json'))
+        return
+    paths = []
+    for key, body, _ in original_reconstruction_archives['update-only']:
+        path = tmp_path / f'{key}.bin'; path.write_bytes(body)
+        paths.append(vendor._prepare_archive(path, tmp_path))
+    partition = vendor.hour_partition('2025-07-15T20Z')
+    original = vendor._frames
+    anchor = vendor.hour_partition('2025-07-15T18Z').start if case == 'preperiod-reset' else partition.start
+    gap_start = int(anchor.timestamp() * 1000) + 200
+    omitted = []
+
+    def missing_message(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
+        for frame in original(paths, legacy=legacy):
+            if frame[0]['event_type'] == 'update' and gap_start <= int(str(frame[0]['event_time'])) < gap_start + 1000:
+                omitted.append(frame[0]['final_update_id'])
+            else:
+                yield frame
+
+    monkeypatch.setattr(vendor, '_frames', missing_message)
+    if case == 'requested-gap':
+        with pytest.raises(SourceError) as gap:
+            vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=tuple(paths[:2]), following=(paths[3],))
+        assert gap.value.code == 'BOOK_SEQUENCE_GAP'
+    else:
+        revision = vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=tuple(paths[:2]), following=(paths[3],))
+        assert revision.key == 'local-book-v1:ac7263486e60a07a72ffb9e1ae0aaa15dc757d90bbe453da443fc31b1340785e'
+        assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
+    assert omitted

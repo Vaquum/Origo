@@ -6,6 +6,33 @@ framework. Sealed WebSocket minutes publish provisional depth20 (100 ms), depth2
 authority for the same four projections. This is the declared `hour` interval of
 the shared canonical contract; trades and aggregate trades retain `day`.
 
+## Archive reconstruction
+
+Archive replay can start from partial snapshots or unknown preperiod state. After
+an entire linked native message, surviving positive asks prove opposite bids at
+or above their prices absent; surviving positive bids prove opposite asks at or
+below their prices absent in the noncrossed venue book. Existing adjacent tick
+observations extend these known intervals. Observed positive contradictions
+reject; unknown prices outside a proved interval remain unknown. A warmup timer
+never certifies depth. Every requested grid still requires complete200-level
+proof, native continuity, actual exchange clocks, fresh receipt and terminal data.
+The live capture default still requires its original complete seed and depth.
+
+Native fetch expands original preceding inputs only on insufficient seed/depth
+proof, within the existing24-hour, following-hour, file, combined-byte and tracked
+price bounds. Requested gaps/staleness/clock/tail failures remain fatal. An
+interrupted search cannot cache an early insufficient prefix; rejected identity
+is retained only for a completed decision. Each accepted identity binds every
+actually used ordered input and all four component proofs. Failed scratch grids
+never publish. Preperiod continuity loss discards all prior knowledge before an
+actual subsequent message anchors a new chain; requested-period loss still fails.
+Stale preperiod updates discard warmup state and cannot anchor a new chain; a later
+fresh native message or original snapshot must reestablish proof before output.
+Replay/rejection policy3 revalidates older retained and rejected identities through
+the existing native controls. Historical failures remain visible until actual
+accepted activation. Operators use the ordinary Dagit partition/gap/failure
+selection; no manual archive preparation or alternate runner is needed.
+
 ## Delivery and activation
 
 The canonical schedules run at :01, :06, ... :56 UTC. To reconstruct exchange hour H, they

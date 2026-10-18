@@ -807,19 +807,18 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 f'discovery:{now.isoformat()}',
             )
             revision = runtime.discover(partition)
+            request_revision = revision
             if isinstance(spec.canonical, CanonicalAuditPolicy):
                 from origo.orchestration.policy import OUTSTANDING
 
                 for job_name in (job_names['canonical'], f'backfill_{spec.key}_source_job'):
-                    if context.instance.get_runs(
-                        RunsFilter(
-                            job_name=job_name,
-                            statuses=OUTSTANDING,
-                            tags={'dagster/partition': partition.key},
-                        ),
-                        limit=1,
-                    ):
-                        return SkipReason('This book hour already has outstanding canonical work.')
+                    for tag in ('dagster/partition', 'dagster/asset_partition_range_start'):
+                        if context.instance.get_runs(
+                            RunsFilter(job_name=job_name, statuses=OUTSTANDING,
+                                       tags={tag: partition.key}),
+                            limit=1,
+                        ):
+                            return SkipReason('This book hour already has outstanding canonical work.')
                 current = runtime.store.record(partition)
                 if (current is not None and current.revision == revision
                         and not runtime.store.missing_components(current)):
@@ -840,11 +839,29 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                         spec.key, partition.key,
                     )
                     return SkipReason('This unchanged book revision remains rejected; use native retry after correction.')
+                previous = context.instance.get_runs(
+                    RunsFilter(job_name=job_names['canonical'],
+                               tags={'origo_source_partition': partition.key}), limit=1,
+                )
+                if previous and previous[0].status in (DagsterRunStatus.FAILURE, DagsterRunStatus.CANCELED):
+                    event = previous[0].tags.get('origo_source_event', '')
+                    prefix = f'{spec.key}:canonical:{partition.key}:'
+                    if event.startswith(prefix) and runtime.store.execute(
+                        f'SELECT 1 FROM {runtime.store.table("source_failure_log")} f '
+                        f'INNER JOIN {runtime.store.table("source_build_log")} b '
+                        'USING (source_key, partition_key, build_id) '
+                        'WHERE f.source_key=%(source)s AND f.partition_key=%(partition)s '
+                        "AND f.dagster_run_id=%(run)s AND f.event_type='FAILED' "
+                        'AND b.revision=%(revision)s AND NOT b.provisional LIMIT 1',
+                        {'source': spec.key, 'partition': partition.key,
+                         'run': previous[0].run_id, 'revision': revision},
+                    ):
+                        request_revision = event.removeprefix(prefix)
         except ArchiveNotPublishedYet:
             return SkipReason(f'{spec.key} {partition.key} is not published yet.')
         finally:
             client.disconnect()
-        return request('canonical', partition.key, context, revision)
+        return request('canonical', partition.key, context, request_revision)
 
     @_schedule(
         name=f'{spec.key}_audit_schedule',

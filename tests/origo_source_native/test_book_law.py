@@ -154,6 +154,7 @@ def _assert_real_canonical_discovery_and_admission(
     from origo.sources import lifecycle
     from origo.sources.adapters import book_vendor as vendor
     from origo.sources.bundle import build_source_bundle
+    from origo.sources.contracts import BuildContext
 
     assert isinstance(retained.spec.canonical, CryptoHFTBookHourly)
     market = retained.spec.canonical.market
@@ -173,7 +174,7 @@ def _assert_real_canonical_discovery_and_admission(
     monkeypatch.setattr(vendor, 'datetime', Clock)
     monkeypatch.setattr(lifecycle, 'datetime', Clock)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(runtime.lock_root))
-    _transport(archives, market, monkeypatch)
+    _, rewritten = _transport(archives, market, monkeypatch)
     transport, replay = vendor.get_response, vendor.replay_hour
     available, rejected = [False], [False]
     counts = {'metadata': 0, 'payload': 0, 'replay': 0}
@@ -237,12 +238,17 @@ def _assert_real_canonical_discovery_and_admission(
         assert adapter.discover(partition) == revision.key
 
         # Real fetched prelude evidence changes the key while native work is outstanding.
-        for job, status in ((canonical, DagsterRunStatus.QUEUED),
-                            (canonical, DagsterRunStatus.STARTING),
-                            (backfill, DagsterRunStatus.STARTED)):
+        for job, status, partition_tags in (
+            (canonical, DagsterRunStatus.QUEUED, {'dagster/partition': partition.key}),
+            (canonical, DagsterRunStatus.STARTING, {'dagster/partition': partition.key}),
+            (backfill, DagsterRunStatus.STARTED, {
+                'dagster/asset_partition_range_start': partition.key,
+                'dagster/asset_partition_range_end': partition.key,
+            }),
+        ):
             running = instance.create_run_for_job(
                 job, run_config=first.run_config,
-                tags={**first.tags, 'dagster/partition': partition.key}, status=status,
+                tags={**first.tags, **partition_tags}, status=status,
             )
             before = dict(counts)
             now[0] = hour + timedelta(minutes=41)
@@ -254,6 +260,33 @@ def _assert_real_canonical_discovery_and_admission(
             assert c1['status'] == 'FAIL'
             assert c1['evidence']['deadline'] == (first_available + timedelta(minutes=5)).isoformat()
             instance.report_run_canceled(running)
+
+        # A post-fetch component failure must keep its native attempt budget across key enrichment.
+        failed = instance.create_run_for_job(
+            canonical, run_config=first.run_config,
+            tags={**first.tags, 'dagster/partition': partition.key}, status=DagsterRunStatus.STARTED,
+        )
+
+        def component_failure(context: BuildContext) -> None:
+            raise OSError('Controlled component failure after real prelude fetch.')
+
+        fault_spec = replace(spec, components=(
+            replace(spec.components[0], build=component_failure), *spec.components[1:],
+        ))
+        fault_runtime = replace(runtime, spec=fault_spec,
+                                store=SourceStore(runtime.store.client, 'origo', fault_spec), run_id=failed.run_id)
+        with pytest.raises(OSError, match='Controlled component failure'):
+            fault_runtime.build(partition.key)
+        instance.report_run_failed(failed)
+        before = dict(counts)
+        requests, reason = tick(now[0])
+        assert not requests and reason == 'Source retry delay has not elapsed.'
+        assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+        # An actual changed provider identity remains a new event, independent of that retry delay.
+        rewritten[vendor._file(market, partition)] = 'changed-original-current-after-component-failure'
+        expected_revision = adapter.discover(partition)
+        assert expected_revision != revision.key
+        assert tick(now[0])[0]
 
         # Complete rejection skips preserve the failure and never download/replay again.
         rejected[0] = True
@@ -281,10 +314,12 @@ def _assert_real_canonical_discovery_and_admission(
 
         # A successful native request keeps its pre-fetch identity; active evidence deduplicates it.
         rejected[0] = False
+        vendor._dependency_path(market, partition).unlink()
+        accepted_request = tick(now[0])[0][0]
         record = runtime.build(partition.key)
-        assert len(record.component_hashes) == 4 and record.revision == revision.key
-        instance.create_run_for_job(canonical, run_config=first.run_config,
-                                    tags={**first.tags, 'dagster/partition': partition.key},
+        assert len(record.component_hashes) == 4 and record.revision == expected_revision
+        instance.create_run_for_job(canonical, run_config=accepted_request.run_config,
+                                    tags={**accepted_request.tags, 'dagster/partition': partition.key},
                                     status=DagsterRunStatus.SUCCESS)
         before = dict(counts)
         now[0] = hour + timedelta(minutes=56)

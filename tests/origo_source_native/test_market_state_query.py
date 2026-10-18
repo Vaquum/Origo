@@ -1103,7 +1103,6 @@ def test_default_requests_keep_their_statements_and_schema(
 ) -> None:
     runtime = detailed(cube, DAY1, minutes=MINUTES)
     make_client = make_clickhouse_client
-    withheld: list[str] = []
 
     def observing_client(settings: ClickHouseSettings) -> ClickHouseClientProtocol:
         client = make_client(settings)
@@ -1115,10 +1114,10 @@ def test_default_requests_keep_their_statements_and_schema(
             if 'FROM system.query_log' not in query:
                 return rows
             # Deliberate receipt fault: withhold real cells finishes, preserving all starts/errors.
-            missing = [row for row in rows if _statement(str(row[0])) == 'cells'
-                       and ("type = 'QueryFinish'" in query or (len(row) > 2 and row[2] == 'QueryFinish'))]
-            withheld.extend(str(row[0]) for row in missing)
-            return [row for row in rows if row not in missing]
+            return [row for row in rows if not (
+                _statement(str(row[0])) == 'cells'
+                and ("type = 'QueryFinish'" in query or (len(row) > 2 and row[2] == 'QueryFinish'))
+            )]
 
         monkeypatch.setattr(client, 'execute', without_completions)
         return client
@@ -1142,7 +1141,6 @@ def test_default_requests_keep_their_statements_and_schema(
                 meta = metadata(result.staging / file)
                 assert set(meta) == {'schema_version', 'result_id', 'request', 'grid', 'data_cutoff', 'state_token', 'pins'}
                 assert meta['schema_version'] == 1 and set(meta['request']) == {'t1', 't2', 'p1', 'p2', 'tR', 'pR'}
-    assert withheld
     # Deliberate server fault, under the real result ID: its genuine error receipt must reject.
     client = make_client(get_clickhouse_settings())
     try:

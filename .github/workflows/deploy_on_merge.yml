@@ -303,14 +303,14 @@ jobs:
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           fi
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
-          # so wait for the exec into dagster-daemon before recovery contends for the queue lock.
+          # so require the post-bootstrap module argv before recovery contends for the queue lock.
           for attempt in $(seq 1 90); do
-            if docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster sh -c 'grep -q dagster-daemon /proc/1/cmdline' </dev/null; then
+            if docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml exec -T dagster python -c "from pathlib import Path; import sys; sys.exit(Path('/proc/1/cmdline').read_bytes().rstrip(b'\0').split(b'\0')[1:] != [b'-m', b'origo.orchestration.daemon', b'run'])" </dev/null; then
               break
             fi
             if [ "$attempt" -eq 90 ]; then
               docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster
-              echo "dagster-daemon did not start within 900 seconds" >&2
+              echo "Native daemon module did not start within 900 seconds" >&2
               exit 1
             fi
             sleep 10

@@ -117,8 +117,9 @@ def test_source_backfill_pool_and_system_logs_are_configured() -> None:
         assert compose['services']['dagster']['command'] == [
             '/bin/sh',
             '-ec',
-            'python -m origo.sources.bootstrap && exec dagster-daemon run',
+            'python -m origo.sources.bootstrap && exec python -m origo.orchestration.daemon run',
         ]
+        assert compose['services']['dagster']['stop_grace_period'] == '300s'
         assert compose['services']['dagster']['healthcheck']['test'] == [
             'CMD',
             'python',

@@ -24,6 +24,6 @@ BINANCE_SPOT_BOOK_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     provisional=LocalBookProvisional('spot'),
     components=book_components(),
     consumers=(),
-    orchestration=OrchestrationSpec('15 * * * *', '* * * * *', '5,20,35,50 * * * *', canonical_concurrency=32),
+    orchestration=OrchestrationSpec('1-59/5 * * * *', '* * * * *', '5,20,35,50 * * * *', canonical_concurrency=32),
     read_policy=SourceReadPolicy.AVAILABLE,
 )

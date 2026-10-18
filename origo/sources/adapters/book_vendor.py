@@ -42,7 +42,7 @@ CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT = 2
 CRYPTOHFT_TOKEN_URL = 'https://api.cryptohftdata.com/v1/jwt-token'
 _TOKEN_LOCK = Lock()
 _token: tuple[str, str, float] | None = None
-# The :15 schedule has five minutes for admission, replay and activation.
+# Before availability is observed, the hourly delivery fallback expires at :20.
 BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 20 * 60
 BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS = 5 * 60
 BOOK_AVAILABILITY_MAX_AGE_SECONDS = 20 * 60

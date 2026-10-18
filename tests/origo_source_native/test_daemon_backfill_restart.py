@@ -154,7 +154,7 @@ def test_missing_location_exhaustion_and_other_fatal_errors_stay_visible(tmp_pat
     ):
         assert not original(error) and daemon._retryable_backfill_error(error)
     for error in (DagsterBackfillFailedError('partition set missing'), check.CheckError('invalid'),
-                  DagsterCodeLocationLoadError('load'), DagsterUserCodeUnreachableError('offline'),
+                  DagsterCodeLocationLoadError('load', load_error_infos=[]), DagsterUserCodeUnreachableError('offline'),
                   DagsterRunAlreadyExists('exists'), RuntimeError('transient')):
         assert daemon._retryable_backfill_error(error) == original(error)
     target = PythonFileTarget(str(tmp_path / 'missing.py'), 'defs', str(tmp_path), 'origo')

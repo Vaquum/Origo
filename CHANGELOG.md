@@ -1,3 +1,7 @@
+# v3.34.14
+
+- Keep the deployment SSH session alive through silent verification while preserving remote checks, input and failure status.
+
 # v3.34.13
 
 - Avoid repeated invariant time calculations during notification history replay.

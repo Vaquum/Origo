@@ -20,8 +20,14 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from clickhouse_driver.errors import ServerException
 
-from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.assets.create_origo_database import (
+    ClickHouseClientProtocol,
+    ClickHouseSettings,
+    get_clickhouse_settings,
+    make_clickhouse_client,
+)
 from origo.query import market_state
 from origo.query.market_state import (
     CELLS_SCHEMA,
@@ -1095,8 +1101,32 @@ _V3_27_2_STATEMENTS: dict[str, list[str]] = {
 }
 
 
-def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, tmp_path: Path) -> None:
+def test_default_requests_keep_their_statements_and_schema(
+    cube: SourceRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = detailed(cube, DAY1, minutes=MINUTES)
+    make_client = make_clickhouse_client
+    withheld: list[str] = []
+
+    def observing_client(settings: ClickHouseSettings) -> ClickHouseClientProtocol:
+        client = make_client(settings)
+        execute = client.execute
+
+        def without_completions(query: str, params: object = None,
+                                settings: Mapping[str, object] | None = None) -> list[Row]:
+            rows = execute(query, params=params, settings=settings)
+            if 'FROM system.query_log' not in query:
+                return rows
+            # Deliberate receipt fault: withhold real cells finishes, preserving all starts/errors.
+            missing = [row for row in rows if _statement(str(row[0])) == 'cells'
+                       and ("type = 'QueryFinish'" in query or (len(row) > 1 and row[1] == 'QueryFinish'))]
+            withheld.extend(str(row[0]) for row in missing)
+            return [row for row in rows if row not in missing]
+
+        monkeypatch.setattr(client, 'execute', without_completions)
+        return client
+
+    monkeypatch.setattr(f'{__name__}.make_clickhouse_client', observing_client)
     requests: dict[str, dict[str, object]] = {
         'everything': {},
         'window': {'t1': '2021-01-01T00:57:11.25Z', 't2': '2021-01-01T01:00:00Z', 'tR': 225, 'pR': 250},
@@ -1115,6 +1145,16 @@ def test_default_requests_keep_their_statements_and_schema(cube: SourceRuntime, 
                 meta = metadata(result.staging / file)
                 assert set(meta) == {'schema_version', 'result_id', 'request', 'grid', 'data_cutoff', 'state_token', 'pins'}
                 assert meta['schema_version'] == 1 and set(meta['request']) == {'t1', 't2', 'p1', 'p2', 'tR', 'pR'}
+    assert withheld
+    # Deliberate server fault, under the real result ID: its genuine error receipt must reject.
+    client = make_client(get_clickhouse_settings())
+    try:
+        with pytest.raises(ServerException):
+            client.execute('SELECT throwIf(1)', settings={'log_comment': result.staging.name})
+    finally:
+        client.disconnect()
+    with pytest.raises(AssertionError):
+        statement_hashes(result.staging.name)
 
 
 def test_measures_coverage_stops_where_detail_is_missing(cube: SourceRuntime, tmp_path: Path) -> None:

@@ -154,8 +154,6 @@ def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:
     import shlex
     import signal
 
-    import psutil
-
     readiness_line = next(line for line in script.splitlines() if 'exec -T dagster python -c ' in line)
     readiness = shlex.split(readiness_line.split('exec -T dagster python -c ', 1)[1].split(' </dev/null', 1)[0])[0]
     driver = tmp_path / 'readiness.py'
@@ -178,12 +176,19 @@ exec(sys.argv[1])
         process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    start_new_session=True)
         try:
-            argv = psutil.Process(process.pid).cmdline()
-            assert argv
-            ready_argv.write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
+            proc_args = Path(f'/proc/{process.pid}/cmdline')
+            if proc_args.exists():
+                observed_args = proc_args.read_bytes()
+            else:
+                # macOS exposes these controlled process arguments through ps.
+                command = subprocess.run(['ps', '-ww', '-p', str(process.pid), '-o', 'command='],
+                                         capture_output=True, text=True, check=True, timeout=10)
+                observed_args = b'\0'.join(arg.encode() for arg in shlex.split(command.stdout)) + b'\0'
+            assert observed_args
+            ready_argv.write_bytes(observed_args)
             result = subprocess.run([sys.executable, str(driver), readiness, str(ready_argv)],
                                     capture_output=True, text=True, timeout=10)
-            assert (result.returncode == 0) == ready, (argv, result.stderr)
+            assert (result.returncode == 0) == ready, (observed_args, result.stderr)
             if ready:
                 accepted_argv = ready_argv.read_bytes()
         finally:

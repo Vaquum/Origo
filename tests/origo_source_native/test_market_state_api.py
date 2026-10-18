@@ -31,6 +31,7 @@ from origo.workers.report import Reporter
 from origo.workers.runtime import heartbeat_path, touch_heartbeat
 
 from .test_market_state_query import DAY1, _statement, built, cube, effective, server_defaults  # noqa: F401
+from .test_market_state_query import statement_rows
 from .test_monitor import _monitor, recorder  # noqa: F401
 
 
@@ -359,17 +360,10 @@ def test_published_queries_log_their_phases(service: Service, caplog: pytest.Log
     # settings and the result ID; that check lives in the source lifecycle, outside this service.
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query, Settings, type, exception_code, exception FROM system.query_log "
-            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
-            {'result': result.result_id},
-        )
+        rows = statement_rows(client, result.result_id)
         defaults = server_defaults(client)
     finally:
         client.disconnect()
-    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
-    rows = [row[:2] for row in rows if row[2] == 'QueryStart']
     kinds = [_statement(query_) for query_, _ in rows]
     assert kinds == ['pin', 'extent', 'cells', 'validate']
     assert [

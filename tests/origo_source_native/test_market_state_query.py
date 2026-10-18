@@ -748,17 +748,10 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
     result = run(runtime, tmp_path, tR=900, pR=250)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query, Settings, type, exception_code, exception FROM system.query_log "
-            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
-            {'result': result.staging.name},
-        )
+        rows = statement_rows(client, result.staging.name)
         defaults = server_defaults(client)
     finally:
         client.disconnect()
-    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
-    rows = [row[:2] for row in rows if row[2] == 'QueryStart']
     # Every statement of the request, the pin included, carries the declared bounds and its result ID.
     assert [_statement(query) for query, _ in rows] == ['pin', 'extent', 'cells', 'validate']
     for _, settings in rows:
@@ -879,20 +872,24 @@ def assert_measures(cells: list[dict[str, Any]], expected: dict[tuple[int, int],
         )
 
 
+def statement_rows(client: ClickHouseClientProtocol, result_id: str) -> list[Row]:
+    """Starts of sequential statements; completion logging can follow client EOS."""
+    client.execute('SYSTEM FLUSH LOGS')
+    rows = client.execute(
+        'SELECT query, Settings, type, exception_code, exception FROM system.query_log '
+        'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
+        {'result': result_id},
+    )
+    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
+    return [row[:2] for row in rows if row[2] == 'QueryStart']
+
+
 def statement_hashes(result_id: str) -> list[str]:
-    """Hash starts of sequential requests; stream completion logging can follow client EOS."""
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
-        client.execute('SYSTEM FLUSH LOGS')
-        rows = client.execute(
-            "SELECT query, type, exception_code, exception FROM system.query_log "
-            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
-            {'result': result_id},
-        )
+        return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in statement_rows(client, result_id)]
     finally:
         client.disconnect()
-    assert all(row[1] in ('QueryStart', 'QueryFinish') for row in rows), rows
-    return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows if row[1] == 'QueryStart']
 
 
 @pytest.mark.parametrize(('n', 'm'), [(0, 0), (1, 0), (0, 1), (2, 0), (2, 3), (6, 0), (11, 2), (64, 64), (1018, 1017)])
@@ -1119,7 +1116,7 @@ def test_default_requests_keep_their_statements_and_schema(
                 return rows
             # Deliberate receipt fault: withhold real cells finishes, preserving all starts/errors.
             missing = [row for row in rows if _statement(str(row[0])) == 'cells'
-                       and ("type = 'QueryFinish'" in query or (len(row) > 1 and row[1] == 'QueryFinish'))]
+                       and ("type = 'QueryFinish'" in query or (len(row) > 2 and row[2] == 'QueryFinish'))]
             withheld.extend(str(row[0]) for row in missing)
             return [row for row in rows if row not in missing]
 

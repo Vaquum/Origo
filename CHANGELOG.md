@@ -1,6 +1,6 @@
 # v3.34.18
 
-- Wait for completed query-log evidence before asserting unchanged market-state SQL and schemas.
+- Read statement-start receipts when asserting unchanged market-state SQL and schemas.
 
 # v3.34.17
 

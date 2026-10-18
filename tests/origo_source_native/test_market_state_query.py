@@ -882,7 +882,7 @@ def statement_hashes(result_id: str, expected_count: int) -> list[str]:
             client.execute('SYSTEM FLUSH LOGS')
             rows = client.execute(
                 "SELECT query FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-                'ORDER BY event_time_microseconds',
+                'ORDER BY query_start_time_microseconds',
                 {'result': result_id},
             )
             if len(rows) >= expected_count or time.monotonic() >= deadline:

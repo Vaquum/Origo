@@ -189,29 +189,31 @@ def test_native_book_selection_completion_preserves_source_failures(
             {'source': runtime.spec.key, 'build': record.build_id},
         )
 
-        # Damage control metadata after real build and before the native child barrier.
-        execute = SourceRuntime.build
+        # Damage proof after native receipt insertion, beyond build/reconcile validation.
+        query = SourceStore.execute
+        fault_reached = [False]
 
-        def damaged(self: SourceRuntime, key: str, *, provisional: bool = False):
-            built = execute(self, key, provisional=provisional)
-            self.store.execute(
-                "ALTER TABLE origo.source_component_log DELETE WHERE source_key=%(source)s "
-                "AND build_id=%(build)s AND component='depth200_1m' SETTINGS mutations_sync=1",
-                {'source': self.spec.key, 'build': built.build_id},
-            )
-            return built
+        def damaged(self: SourceStore, sql: str, params=None, settings=None):
+            rows = query(self, sql, params, settings)
+            if sql.startswith('INSERT INTO origo.source_backfill_log'):
+                fault_reached[0] = True
+                query(self,
+                    "ALTER TABLE origo.source_component_log DELETE WHERE source_key=%(source)s "
+                    "AND build_id=%(build)s AND component='depth200_1m' SETTINGS mutations_sync=1",
+                    {'source': self.spec.key, 'build': record.build_id},
+                )
+            return rows
 
         with monkeypatch.context() as patch:
-            patch.setattr(SourceRuntime, 'build', damaged)
+            patch.setattr(SourceStore, 'execute', damaged)
             invalid = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
                                              tags={'dagster/backfill': parent}, raise_on_error=False)
-        assert not invalid.success and any('BACKFILL_RECEIPT_INVALID' in str(event) for event in invalid.all_events)
+        assert fault_reached[0] and not invalid.success
+        assert any('BACKFILL_RECEIPT_INVALID' in str(event) for event in invalid.all_events)
         assert _failures(runtime, unrelated) == before
         runtime.store.execute('INSERT INTO origo.source_component_log VALUES', saved_component)
 
         # A concurrent activation can retain identical payloads but supersede this receipt.
-        query = SourceStore.execute
-
         def activate_after_join(self: SourceStore, sql: str, params=None, settings=None):
             rows = query(self, sql, params, settings)
             if sql.startswith('SELECT uniqExact(r.partition_key), countIf('):

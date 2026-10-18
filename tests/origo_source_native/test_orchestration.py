@@ -164,6 +164,8 @@ def _assert_book_native_queue_progress(home, monkeypatch):
     from dagster._core.remote_origin import RemotePartitionSetOrigin
 
     from origo.orchestration.policy import ACTIVE, BOOK_BACKFILL_TAG
+    from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+    from origo.sources.prepare import is_source_backfill
     from .test_revisioned_source_framework_backfill import _repository_origin
 
     config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
@@ -232,6 +234,11 @@ def _assert_book_native_queue_progress(home, monkeypatch):
                 run = create_run_for_test(instance, job_name=job, tags={'dagster/partition': selected[0]},
                                            status=DagsterRunStatus.CANCELED)
                 assert BOOK_BACKFILL_TAG not in execution_tags(run)
+        daily = create_run_for_test(instance, job_name='refresh_binance_spot_trades_canonical_source_job',
+                                    tags={'dagster/backfill': 'daily-control', 'dagster/partition': '2026-10-17'},
+                                    status=DagsterRunStatus.CANCELED)
+        assert not is_source_backfill(daily, BINANCE_SPOT_TRADES_SPEC)
+        assert BOOK_BACKFILL_TAG not in execution_tags(daily)
         legacy = create_run_for_test(instance, job_name='backfill_binance_spot_book_source_job',
                                       tags={'dagster/partition': '2026-08-31T23Z'},
                                       status=DagsterRunStatus.STARTED)

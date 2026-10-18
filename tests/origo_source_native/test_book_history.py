@@ -548,7 +548,7 @@ def test_archive_fetch_retains_only_completed_rejection(
             discovered = adapter.discover(partition)
             assert adapter.rejected_revision(partition, discovered)
             memo = json.loads(vendor._dependency_path('spot', partition).read_text())
-            assert memo['rejection']['policy'] == 3
+            assert memo['rejection']['policy'] == 4
             assert [x[0] for x in memo['dependencies']] == ['2025-07-15T19Z', '2025-07-15T21Z']
         assert not tuple((tmp_path / 'locks').rglob('hour-*'))
         current = archives[2]

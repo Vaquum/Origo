@@ -1,3 +1,7 @@
+# v3.34.13
+
+- Avoid repeated invariant time calculations during notification history replay.
+
 # v3.34.12
 
 - Discover current book authority every five minutes and suppress duplicate or unchanged rejected scheduled work after fresh availability checks.

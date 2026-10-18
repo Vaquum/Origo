@@ -342,6 +342,14 @@ def _assert_real_canonical_discovery_and_admission(
         requests, reason = tick(now[0])
         assert not requests and reason == 'Source retry delay has not elapsed.'
         assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+        with monkeypatch.context() as patch:
+            def invalid_inventory(self: SourceStore, selected: Partition):
+                raise SourceError('RETAINED_CONTENT_INVALID', 'Controlled invalid retained inventory.')
+
+            patch.setattr(SourceStore, 'record', invalid_inventory)
+            requests, reason = tick(now[0])
+            assert not requests and reason == 'Source retry delay has not elapsed.'
+            assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
         # An actual changed provider identity remains a new event, independent of that retry delay.
         rewritten[vendor._file(market, partition)] = 'changed-original-current-after-component-failure'
         expected_revision = adapter.discover(partition)

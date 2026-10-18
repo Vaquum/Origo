@@ -819,6 +819,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                             limit=1,
                         ):
                             return SkipReason('This book hour already has outstanding canonical work.')
+                retained_invalid = False
                 try:
                     current = runtime.store.record(partition)
                     if (current is not None and current.revision == revision
@@ -841,8 +842,8 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                         'source=%s partition=%s phase=canonical_retained_repair code=%s',
                         spec.key, partition.key, error.code,
                     )
-                    return request('canonical', partition.key, context, revision)
-                if spec.canonical.rejected_revision(partition, revision):
+                    retained_invalid = True
+                if not retained_invalid and spec.canonical.rejected_revision(partition, revision):
                     get_dagster_logger().info(
                         'source=%s partition=%s phase=canonical_rejected_unchanged',
                         spec.key, partition.key,

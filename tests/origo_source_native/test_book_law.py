@@ -376,7 +376,9 @@ def _assert_real_canonical_discovery_and_admission(
         vendor._dependency_path(market, partition).unlink()
         accepted_request = tick(now[0])[0][0]
         record = runtime.build(partition.key)
-        assert len(record.component_hashes) == 4 and record.revision == expected_revision
+        assert len(record.component_hashes) == 4
+        assert record.revision == adapter.discover(partition)
+        assert record.revision != expected_revision
         instance.create_run_for_job(canonical, run_config=accepted_request.run_config,
                                     tags={**accepted_request.tags, 'dagster/partition': partition.key},
                                     status=DagsterRunStatus.SUCCESS)

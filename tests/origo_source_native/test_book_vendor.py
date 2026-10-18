@@ -1161,8 +1161,11 @@ def test_archive_warmup_preserves_requested_validation(
         partition = vendor.hour_partition(REAL_HOUR)
         start_ms, end_ms = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
         frames = iter(vendor._frames((path,)))
-        seed = json.loads(_checkpoint_payload(next(frames)))
+        initial = next(frames)
+        seed = json.loads(_checkpoint_payload(initial))
         seed['bids'] = seed['bids'][:100]; seed['asks'] = seed['asks'][:100]
+        initial_prices = {'bid': {level[0] for level in seed['bids']},
+                          'ask': {level[0] for level in seed['asks']}}
         candidate = DiffBook('spot', json.dumps(seed).encode(), archive_start_ms=end_ms)
         candidate.verified = True
         for frame in frames:
@@ -1182,8 +1185,10 @@ def test_archive_warmup_preserves_requested_validation(
 
         def shallow_initial(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
             for frame in original(paths, legacy=legacy):
-                if frame[0]['event_type'] == 'snapshot' and int(str(frame[0]['event_time'])) == start_ms:
-                    yield [row for side in ('bid', 'ask') for row in [r for r in frame if r['side'] == side][:100]]
+                if frame[0]['event_type'] == 'snapshot' and frame[0]['last_update_id'] == initial[0]['last_update_id']:
+                    shallow = [row for row in frame if row['price'] in initial_prices[str(row['side'])]]
+                    assert len(shallow) == 200
+                    yield shallow
                 else:
                     yield frame
 

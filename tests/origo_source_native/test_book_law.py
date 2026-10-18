@@ -94,7 +94,8 @@ def test_canary_books_have_the_same_reader_law_contract(
     assert c1['evidence']['deadline'] == '2026-10-04T11:20:00+00:00'
     assert c1['evidence']['following_hour'] == '2026-10-04T10Z'
     assert _predicate(overdue, runtime.spec.key, 'C2')['status'] == 'FAIL'
-    launch = partition.end + timedelta(hours=1, minutes=int(runtime.spec.orchestration.canonical_cron.split()[0]))
+    # Reference the unchanged :20 delivery fallback, independently of schedule ticks.
+    launch = partition.end + timedelta(hours=1, minutes=15)
     assert runtime.spec.canonical.candidate(launch) == partition
     pending = _predicate(law.evaluate(runtime.store.client, 'origo', launch), runtime.spec.key, 'C1')
     assert pending['status'] == 'NOT_DUE'

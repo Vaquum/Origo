@@ -52,6 +52,7 @@ from .cleanup import preserve_primary_failure
 from .component_upgrade import ComponentUpgradeError
 from .contracts import (
     ArchiveNotPublishedYet,
+    CanonicalAuditPolicy,
     RevisionedSourceSpec,
     RolloutStage,
     SourceBundle,
@@ -806,6 +807,39 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 f'discovery:{now.isoformat()}',
             )
             revision = runtime.discover(partition)
+            if isinstance(spec.canonical, CanonicalAuditPolicy):
+                from origo.orchestration.policy import OUTSTANDING
+
+                for job_name in (job_names['canonical'], f'backfill_{spec.key}_source_job'):
+                    if context.instance.get_runs(
+                        RunsFilter(
+                            job_name=job_name,
+                            statuses=OUTSTANDING,
+                            tags={'dagster/partition': partition.key},
+                        ),
+                        limit=1,
+                    ):
+                        return SkipReason('This book hour already has outstanding canonical work.')
+                current = runtime.store.record(partition)
+                if (current is not None and current.revision == revision
+                        and not runtime.store.missing_components(current)):
+                    proofs = runtime.store.execute(
+                        f'SELECT component, content_hash FROM {runtime.store.table("source_component_log")} '
+                        'WHERE source_key=%(source)s AND partition_key=%(partition)s '
+                        'AND revision=%(revision)s AND build_id=%(build)s',
+                        {'source': spec.key, 'partition': partition.key,
+                         'revision': revision, 'build': current.build_id},
+                    )
+                    if tuple(sorted((str(key), str(digest)) for key, digest in proofs)) == tuple(
+                        sorted(current.component_hashes)
+                    ):
+                        return SkipReason('This book revision already has complete active component evidence.')
+                if spec.canonical.rejected_revision(partition, revision):
+                    get_dagster_logger().info(
+                        'source=%s partition=%s phase=canonical_rejected_unchanged',
+                        spec.key, partition.key,
+                    )
+                    return SkipReason('This unchanged book revision remains rejected; use native retry after correction.')
         except ArchiveNotPublishedYet:
             return SkipReason(f'{spec.key} {partition.key} is not published yet.')
         finally:

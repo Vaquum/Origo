@@ -8,14 +8,21 @@ the shared canonical contract; trades and aggregate trades retain `day`.
 
 ## Delivery and activation
 
-The canonical schedules run at minute 15. To reconstruct exchange hour H, they
+The canonical schedules run at :01, :06, ... :56 UTC. To reconstruct exchange hour H, they
 need H's receive-time file and H+1's file: closing exchange updates can arrive in
-the latter. At 12:15 UTC the candidate is therefore 10:00–11:00, using the 10Z and
+the latter. At 12:36 UTC the candidate is therefore 10:00–11:00, using the 10Z and
 11Z files. Native calendars exclude the still-ineligible final hour. This adds
 about one hour to authoritative delivery compared with single-file acceptance;
 WebSocket minutes remain provisional and readable during that delay.
-The existing audit runs at :05, :20, :35 and :50, keeping its 15-minute cadence
-without launching simultaneously with the :15 canonical refresh. It retries up to five requested inactive
+The current candidate gets twelve discovery opportunities; selection advances at
+the next UTC hour. An older hour published after its final :56 opportunity remains
+dependent on audit, without a five-minute discovery guarantee. Each tick records
+fresh availability before checking native outstanding work, complete matching
+active component evidence, or unchanged complete rejection evidence. A skip never
+recovers a rejected input failure; explicit native manual retry remains available.
+The existing audit runs at :05, :20, :35 and :50, keeping its 15-minute cadence.
+Offset ticks avoid exact schedule coincidence; audit and canonical work can still
+race for a partition lock, and the resulting failure remains visible. Audit retries up to five requested inactive
 hours, prioritizing the latest and recent delayed hours before least-recently
 checked historical requests; persistent failures cannot permanently occupy all five slots;
 revision checks cover two recent hours and rotate through 50 older active hours.

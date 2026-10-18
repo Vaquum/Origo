@@ -166,13 +166,18 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
 
 
 def test_hourly_book_partitions_reuse_native_source_jobs() -> None:
+    from itertools import islice
     from dagster import Definitions, HourlyPartitionsDefinition
+    from dagster._utils.schedules import schedule_execution_time_iterator
     from origo.sources.bundle import build_source_bundle
     from origo.sources.registry import SOURCE_REGISTRY
 
     for spec in SOURCE_REGISTRY:
         assert spec.partitions.interval == ('hour' if spec.key.endswith('_book') else 'day')
         if not spec.key.endswith('_book'):
+            assert spec.orchestration.canonical_cron == (
+                '0 4 * * *' if 'spot' in spec.key else '5 8 * * *'
+            )
             continue
         bundle = build_source_bundle(spec)
         defs = Definitions(
@@ -186,16 +191,19 @@ def test_hourly_book_partitions_reuse_native_source_jobs() -> None:
         assert REAL_HOUR in job.partitions_def.get_partition_keys(
             datetime(2026, 10, 4, 11, tzinfo=UTC)
         )
-        assert (
-            len(
-                vendor.CryptoHFTBookHourly('spot')
-                .candidate(datetime(2026, 10, 4, 10, 15, tzinfo=UTC))
-                .key
-            )
-            == 14
+        canonical = next(s for s in bundle.schedules if s.name.endswith('_canonical_schedule'))
+        assert canonical.cron_schedule == '1-59/5 * * * *'
+        assert canonical.execution_timezone == 'UTC'
+        ticks = list(islice(schedule_execution_time_iterator(
+            datetime(2026, 10, 4, 11, tzinfo=UTC).timestamp(),
+            canonical.cron_schedule, canonical.execution_timezone,
+        ), 13))
+        assert [tick.minute for tick in ticks] == [*range(1, 60, 5), 1]
+        assert [spec.canonical.candidate(tick).key for tick in ticks] == (
+            [REAL_HOUR] * 12 + ['2026-10-04T10Z']
         )
-        assert spec.orchestration.canonical_cron == '15 * * * *'
         assert spec.orchestration.audit_cron == '5,20,35,50 * * * *'
+        assert spec.orchestration.provisional_cron == '* * * * *'
 
 
 @pytest.mark.parametrize(

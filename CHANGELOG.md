@@ -1,3 +1,7 @@
+# v3.34.12
+
+- Discover current book authority every five minutes and suppress duplicate or unchanged rejected scheduled work after fresh availability checks.
+
 # v3.34.11
 
 - Retain successful law-reader connections under the unchanged one-query account cap.

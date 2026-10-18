@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NotRequired, TypeAlias, TypedDict, cast
 
+_ZERO_DURATION = timedelta(0)
+
 Json: TypeAlias = None | bool | int | float | str | list['Json'] | dict[str, 'Json']
 Document: TypeAlias = dict[str, Json]
 SummaryStatus = Literal['PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT']
@@ -196,7 +198,7 @@ def _instant(value: Json) -> datetime:
     if not isinstance(value, str) or len(value) > 40:
         raise ValueError('invalid_utc_time')
     stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    if stamp.tzinfo is None or stamp.utcoffset() != timedelta(0):
+    if stamp.tzinfo is None or stamp.utcoffset() != _ZERO_DURATION:
         raise ValueError('invalid_utc_time')
     return stamp
 
@@ -591,7 +593,9 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
 def _reduce(history: Sequence[ObservationFrame], now: datetime) -> tuple[list[ObservationFrame], dict[str, _Episode]]:
     frames = _frames(history, now)
     episodes: dict[str, _Episode] = {}
+    cutoff = now.replace(second=0, microsecond=0) - timedelta(minutes=1439)
     for frame in frames:
+        expired = _instant(frame['sampling_slot']) < cutoff
         observations = {item['group_id']: item for item in frame['observations']}
         for key in observations:
             if key not in episodes:
@@ -602,7 +606,7 @@ def _reduce(history: Sequence[ObservationFrame], now: datetime) -> tuple[list[Ob
                 _event(episode, observation, frame)
             else:
                 _condition(episode, observation, frame)
-            if _instant(frame['sampling_slot']) < now.replace(second=0, microsecond=0) - timedelta(minutes=1439):
+            if expired:
                 episode.observations = episode.failing_minutes = episode.observed_slots = 0
     captured_slots = {frame['sampling_slot'] for frame in frames if 'notification_transitions' in frame}
     for key, episode in episodes.items():

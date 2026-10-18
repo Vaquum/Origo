@@ -833,16 +833,23 @@ def test_nominal_archive_preserves_native_gap(
 ) -> None:
     market, current, following = nominal_archives
     frames = vendor._frames
+    partition = vendor.hour_partition('2026-09-24T22Z')
+    first_second = int(partition.start.timestamp() * 1000) + 1000
 
     def missing_bridge(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        for index, frame in enumerate(frames(paths, legacy=legacy)):
-            if index != 1:
-                yield frame
+        removed = False
+        for frame in frames(paths, legacy=legacy):
+            # Withhold a real requested-hour update, after the initial clock witness.
+            if not removed and frame[0]['event_type'] == 'update' and int(str(frame[0]['event_time'])) >= first_second:
+                removed = True
+                continue
+            yield frame
 
     monkeypatch.setattr(vendor, '_frames', missing_bridge)
     with pytest.raises(SourceError) as gap:
-        vendor.replay_hour(current, market, vendor.hour_partition('2026-09-24T22Z'), tmp_path, following=(following,))
+        vendor.replay_hour(current, market, partition, tmp_path, following=(following,))
     assert gap.value.code == 'BOOK_SEQUENCE_GAP'
+    assert list(tmp_path.rglob('*.seal.gz')) == []
 
 
 def test_nominal_archive_real_checkpoint_after_clockless_state(

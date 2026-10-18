@@ -361,13 +361,15 @@ def test_published_queries_log_their_phases(service: Service, caplog: pytest.Log
     try:
         client.execute('SYSTEM FLUSH LOGS')
         rows = client.execute(
-            "SELECT query, Settings FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-            'ORDER BY event_time_microseconds',
+            "SELECT query, Settings, type, exception_code, exception FROM system.query_log "
+            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
             {'result': result.result_id},
         )
         defaults = server_defaults(client)
     finally:
         client.disconnect()
+    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
+    rows = [row[:2] for row in rows if row[2] == 'QueryStart']
     kinds = [_statement(query_) for query_, _ in rows]
     assert kinds == ['pin', 'extent', 'cells', 'validate']
     assert [

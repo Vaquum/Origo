@@ -744,13 +744,15 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
     try:
         client.execute('SYSTEM FLUSH LOGS')
         rows = client.execute(
-            "SELECT query, Settings FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = %(result)s "
-            'ORDER BY event_time_microseconds',
+            "SELECT query, Settings, type, exception_code, exception FROM system.query_log "
+            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
             {'result': result.staging.name},
         )
         defaults = server_defaults(client)
     finally:
         client.disconnect()
+    assert all(row[2] in ('QueryStart', 'QueryFinish') for row in rows), rows
+    rows = [row[:2] for row in rows if row[2] == 'QueryStart']
     # Every statement of the request, the pin included, carries the declared bounds and its result ID.
     assert [_statement(query) for query, _ in rows] == ['pin', 'extent', 'cells', 'validate']
     for _, settings in rows:
@@ -872,18 +874,19 @@ def assert_measures(cells: list[dict[str, Any]], expected: dict[tuple[int, int],
 
 
 def statement_hashes(result_id: str) -> list[str]:
-    """SHA-256 of every statement one result ran, in order."""
+    """Hash starts of sequential requests; stream completion logging can follow client EOS."""
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         client.execute('SYSTEM FLUSH LOGS')
         rows = client.execute(
-            "SELECT query FROM system.query_log WHERE type = 'QueryStart' AND log_comment = %(result)s "
-            'ORDER BY query_start_time_microseconds',
+            "SELECT query, type, exception_code, exception FROM system.query_log "
+            'WHERE log_comment = %(result)s ORDER BY query_start_time_microseconds',
             {'result': result_id},
         )
     finally:
         client.disconnect()
-    return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows]
+    assert all(row[1] in ('QueryStart', 'QueryFinish') for row in rows), rows
+    return [hashlib.sha256(str(row[0]).encode()).hexdigest() for row in rows if row[1] == 'QueryStart']
 
 
 @pytest.mark.parametrize(('n', 'm'), [(0, 0), (1, 0), (0, 1), (2, 0), (2, 3), (6, 0), (11, 2), (64, 64), (1018, 1017)])

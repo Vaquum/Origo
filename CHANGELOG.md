@@ -1,6 +1,6 @@
 # v3.34.18
 
-- Read statement-start receipts when asserting unchanged market-state SQL and schemas.
+- Read statement-start receipts for market-state SQL, settings and phase assertions; reject observed server exceptions.
 
 # v3.34.17
 

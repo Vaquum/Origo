@@ -45,8 +45,8 @@ class ArchiveReplay:
 
 
 class _Inputs:
-    def __init__(self, market: Market, end_ms: int) -> None:
-        self.market, self.end_ms = market, end_ms
+    def __init__(self, market: Market) -> None:
+        self.market = market
         self.files: dict[Path, tuple[pl.DataFrame, pl.DataFrame]] = {}
         self.offset = 0
         self.prices: list[Decimal] = []
@@ -55,35 +55,13 @@ class _Inputs:
         self.quantity_codes = {Decimal(0): 0}
         self.literals: dict[str, dict[str, int]] = {'price': {}, 'quantity': {}}
 
-    def add(
-        self, path: Path, *, following: bool, native_order: bool
-    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+    def add(self, path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
         if path in self.files:
             return self.files[path]
         scan = pl.scan_parquet(path)
         if not set(_COLUMNS) <= set(scan.collect_schema().names()):
             raise SourceError('BOOK_VENDOR_SCHEMA', 'Archive lacks required order-book columns.')
         scan = scan.select(_COLUMNS)
-        if following:
-            boundary = pl.col('final_update_id' if native_order else 'received_time')
-            terminal = (
-                scan.filter(
-                    (pl.col('event_type') == 'update') & (pl.col('event_time') >= self.end_ms)
-                )
-                .select(boundary.min())
-                .collect()
-                .item()
-            )
-            if terminal is not None:
-                order = (
-                    pl.when(pl.col('event_type') == 'update')
-                    .then(pl.col('final_update_id'))
-                    .otherwise(pl.col('last_update_id'))
-                    if native_order else pl.col('received_time')
-                )
-                scan = scan.filter(
-                    (order <= terminal) | (pl.col('event_time') < self.end_ms)
-                )
         frame = scan.collect()
         if frame.schema['price'] != pl.String or frame.schema['quantity'] != pl.String:
             raise SourceError('BOOK_VENDOR_ROW', 'Archive values require decimal strings.')
@@ -180,9 +158,7 @@ class _Inputs:
         messages: list[pl.DataFrame] = []
         pieces: list[pl.DataFrame] = []
         for index, path in enumerate(paths):
-            events, levels = self.add(
-                path, following=index == len(paths) - 1, native_order=native_order
-            )
+            events, levels = self.add(path)
             messages.append(events.with_columns(pl.lit(index, dtype=pl.UInt8).alias('file')))
             pieces.append(levels)
         events = pl.concat(messages).with_columns(
@@ -219,8 +195,8 @@ _inputs: ContextVar[_Inputs | None] = ContextVar('book_archive_inputs', default=
 
 
 @contextmanager
-def replay_session(market: Market, end_ms: int) -> Iterator[None]:
-    token = _inputs.set(_Inputs(market, end_ms))
+def replay_session(market: Market) -> Iterator[None]:
+    token = _inputs.set(_Inputs(market))
     try:
         yield
     finally:
@@ -377,7 +353,7 @@ def _plan(
 
 def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> ArchiveReplay:
     start, end = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
-    inputs = _inputs.get() or _Inputs(market, end)
+    inputs = _inputs.get() or _Inputs(market)
     native_order = partition.key < '2026-08-19T00Z'
     events, levels, prices = inputs.ordered(paths, native_order=native_order)
     events = _plan(events, market, start, end, native_order)

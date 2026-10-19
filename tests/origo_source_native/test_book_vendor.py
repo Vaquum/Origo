@@ -973,7 +973,7 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert all(r._content_consumed for r in responses)
 
 
-def test_following_pruning_preserves_preboundary_sequence_fault(
+def test_following_file_keeps_all_boundary_sequence_evidence(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
     tmp_path: Path,
@@ -1049,15 +1049,15 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
     )
     late_file = tmp_path / 'late-preboundary.parquet'
     pl.concat([closing.collect(), late.collect()]).write_parquet(late_file)
-    retained, _ = _Inputs(market, end).add(late_file, following=True, native_order=True)
+    retained, _ = _Inputs(market).add(late_file)
     assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
     closing_late = message(low).with_columns(
         pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
     )
     closing_file = tmp_path / 'late-closing.parquet'
     pl.concat([closing.collect(), closing_late.collect()]).write_parquet(closing_file)
-    retained, _ = _Inputs(market, end).add(closing_file, following=True, native_order=True)
-    assert set(retained['final_update_id']) == {low['final_update_id']}
+    retained, _ = _Inputs(market).add(closing_file)
+    assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
 
 
 def test_snapshot_presence_reads_only_original_required_columns(

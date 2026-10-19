@@ -534,7 +534,7 @@ class CryptoHFTBookHourly:
 
             from .book_columnar import replay_session
 
-            with replay_session(self.market, int(partition.end.timestamp() * 1000)):
+            with replay_session(self.market):
                 for offset in range(BOOK_MAX_PRELUDE_HOURS + 1):
                     if offset:
                         before = hour_partition(

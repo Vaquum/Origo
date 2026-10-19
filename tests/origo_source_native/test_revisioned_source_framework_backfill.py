@@ -191,7 +191,7 @@ def test_backfill_builds_real_archive_and_records_evidence(
         result = _run(backfill_env, day='2020-01-01', probe=True)
     assert len(archives) == 1
     assert dict(retained_reads) == {
-        key: 2 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+        key: 1 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
     }
     assert result.success
     evidence = runtime.store.execute(

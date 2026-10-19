@@ -308,7 +308,7 @@ def _plan(
                     if event >= start:
                         raise SourceError(
                             'BOOK_VENDOR_SEED_MISSING'
-                            if clock is not None and clock < start
+                            if clock is None or clock < start
                             else 'BOOK_SEQUENCE_GAP',
                             'Native update chain does not bridge.',
                         )

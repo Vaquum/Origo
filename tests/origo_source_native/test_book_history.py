@@ -464,9 +464,10 @@ def test_update_only_hour_recovers_with_bounded_prefix(
     assert len(tuple(revision.rows())) == 39600
 
 
+@pytest.mark.parametrize('anchor_kind', ['update', 'snapshot'])
 def test_zero_prelude_opening_gap_fetches_the_real_bridge(
     original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, anchor_kind: str,
 ) -> None:
     import polars as pl
 
@@ -474,16 +475,19 @@ def test_zero_prelude_opening_gap_fetches_the_real_bridge(
     partition = vendor.hour_partition('2025-07-15T20Z')
     start = int(partition.start.timestamp() * 1000)
     frames = []
-    for index in (1, 2):
+    for index in (0, 1, 2):
         root = tmp_path / str(index)
         root.mkdir()
         path = root / 'input'
         path.write_bytes(archives[index].body)
         frames.append(pl.read_parquet(vendor._prepare_archive(path, root)))
-    prior, current = frames
+    prefix, prior, current = frames
     updates = prior.filter(pl.col('event_type') == 'update')
     anchor_id = updates['final_update_id'].unique().sort()[-2]
     anchor = updates.filter(pl.col('final_update_id') == anchor_id)
+    if anchor_kind == 'snapshot':
+        snapshots = prefix.filter(pl.col('event_type') == 'snapshot')
+        anchor = snapshots.filter(pl.col('last_update_id') == snapshots['last_update_id'].max())
     bridge = current.filter(pl.col('event_time') < start)
     assert anchor.height and bridge.height
     # Move complete genuine messages across the file boundary; values/clocks/IDs stay exact.

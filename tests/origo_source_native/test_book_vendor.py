@@ -1680,3 +1680,94 @@ def test_archive_warmup_preserves_requested_validation(
         assert revision.key == 'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4'
         assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
     assert omitted
+
+
+@pytest.mark.parametrize('operation', ('fetch', 'discover'))
+def test_independent_archive_requests_overlap_with_original_bytes(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from threading import Barrier, Lock
+
+    market, body, headers = original_vendor_archive
+    partition = vendor.hour_partition(REAL_HOUR)
+    following = vendor.hour_partition('2026-10-04T10Z')
+    recordings = {partition.key: (body, headers),
+                  following.key: original_vendor_following_archive[1:]}
+    rendezvous = Barrier(2, timeout=5)
+    lock = Lock()
+    active = 0
+    peak = 0
+    calls: list[tuple[str, bool]] = []
+
+    def observed(request_market: Market, selected: Partition, *, metadata: bool) -> Response:
+        nonlocal active, peak
+        assert request_market == market
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            calls.append((selected.key, metadata))
+        try:
+            rendezvous.wait()
+            captured, original_headers = recordings[selected.key]
+            return Response(b'' if metadata else captured, original_headers, 206 if metadata else 200)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(vendor, '_response', observed)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly(market)
+    if operation == 'fetch':
+        revision = adapter.fetch(partition)
+        evidence = json.loads(revision.evidence_json)
+        assert revision.row_count == 36000
+        assert evidence['input_sha256'] == hashlib.sha256(body).hexdigest()
+        assert evidence['following_input_sha256'] == [
+            [following.key, hashlib.sha256(original_vendor_following_archive[1]).hexdigest()]
+        ]
+    else:
+        expected = vendor._revision_key(
+            vendor._identity(market, partition, Response(body, headers, 200)),
+            ((following.key, vendor._identity(market, following, Response(
+                *original_vendor_following_archive[1:], 200))),),
+        )
+        assert adapter.discover(partition) == expected
+    assert sorted(calls) == [(partition.key, operation == 'discover'),
+                             (following.key, operation == 'discover')]
+    assert peak == 2 and active == 0
+
+
+@pytest.mark.parametrize('operation', ('fetch', 'discover'))
+@pytest.mark.parametrize('current_fails', (False, True))
+def test_independent_archive_requests_preserve_discovery_identity(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, current_fails: bool,
+) -> None:
+    from threading import Barrier
+
+    market, body, headers = original_vendor_archive
+    partition = vendor.hour_partition(REAL_HOUR)
+    rendezvous = Barrier(2, timeout=5)
+
+    def failed(request_market: Market, selected: Partition, *, metadata: bool) -> Response:
+        assert request_market == market
+        rendezvous.wait()
+        # Deliberate provider faults prove error priority without inventing market rows.
+        if selected.key == partition.key:
+            if current_fails:
+                raise SourceError('PROVIDER_HTTP_401', 'Current input was rejected.')
+            return Response(body, headers, 200)
+        raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Following input transport failed.')
+
+    monkeypatch.setattr(vendor, '_response', failed)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly(market)
+    with pytest.raises(SourceError) as failure:
+        if operation == 'fetch':
+            adapter.fetch(partition)
+        else:
+            adapter.discover(partition)
+    assert failure.value.code == ('PROVIDER_HTTP_401' if current_fails else 'PROVIDER_TRANSPORT_FAILED')
+    assert not tuple(tmp_path.glob('book_vendor_*/hour-*'))

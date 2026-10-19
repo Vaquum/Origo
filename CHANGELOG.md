@@ -1,3 +1,7 @@
+# v3.34.24
+
+- Overlap the two required hourly book archive transfers and their final identity checks through the existing shared provider pacing.
+
 # v3.34.22
 
 - Replay provider book archives through exact columnar dictionaries and bounded native state; reuse decoded lookback files and retain all four grid proofs.

@@ -10,6 +10,7 @@ import shutil
 import struct
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -242,6 +243,15 @@ def _identity(market: Market, partition: Partition, response: Response) -> str:
         raise SourceError('BOOK_VENDOR_IDENTITY_MISSING', 'Hourly archive has no object ETag.')
     payload = json.dumps([_file(market, partition), etag], separators=(',', ':')).encode()
     return 'cryptohftdata-v1:' + hashlib.sha256(payload).hexdigest()
+
+
+def _paired_responses(
+    market: Market, partition: Partition, following: Partition, *, metadata: bool
+) -> tuple[Response, Response]:
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        current = pool.submit(_response, market, partition, metadata=metadata)
+        closing = pool.submit(_response, market, following, metadata=metadata)
+        return current.result(), closing.result()
 
 
 def _archive_rows(path: Path, *, columns: tuple[str, ...] = _COLUMNS) -> Iterator[dict[str, object]]:
@@ -488,19 +498,22 @@ class CryptoHFTBookHourly:
         return hour_partition(key)
 
     def discover(self, partition: Partition) -> str:
-        current = _identity(self.market, partition, _response(self.market, partition, metadata=True))
-        dependencies = _dependencies(self.market, partition, current)
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
+        opening, closing = _paired_responses(self.market, partition, after, metadata=True)
+        current = _identity(self.market, partition, opening)
+        dependencies = _dependencies(self.market, partition, current)
         keys = tuple(key for key, _ in dependencies)
         if after.key not in keys:
             keys += (after.key,)
         checked = tuple((key, _identity(self.market, hour_partition(key),
+                        closing if key == after.key else
                         _response(self.market, hour_partition(key), metadata=True)))
                         for key in keys)
         return _revision_key(current, checked)
 
     def fetch(self, partition: Partition) -> Revision:
-        response = _response(self.market, partition, metadata=False)
+        after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
+        response, original = _paired_responses(self.market, partition, after, metadata=False)
         current = _identity(self.market, partition, response)
         if len(response.body) > CRYPTOHFT_MAX_FILE_BYTES:
             raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Hourly archive exceeds its byte bound.')
@@ -518,8 +531,6 @@ class CryptoHFTBookHourly:
             archive = _prepare_archive(archive, root)
             used = archive.stat().st_size
             boundary = int(partition.start.timestamp() * 1000)
-            after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
-            original = _response(self.market, after, metadata=False)
             if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
                 raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Following vendor archive exceeds its byte bound.')
             tail = root / 'following.parquet'

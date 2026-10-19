@@ -114,6 +114,7 @@ class _Inputs:
             .sort('block')
         )
         event_for_row = block_events['event'].to_numpy()[frame['block'].to_numpy()]
+        frame = frame.select('side', 'price', 'quantity')
         numeric: list[pl.Series] = []
         for name, mapping, values in (
             ('price', self.price_codes, self.prices),
@@ -141,11 +142,13 @@ class _Inputs:
             numeric.append(
                 pl.Series(name, np.asarray(codes, dtype=np.uint32)[dictionary.indices.to_numpy()])
             )
+            del dictionary
         levels = frame.select(
             pl.Series('event', event_for_row),
             (pl.col('side') == 'ask').cast(pl.UInt8).alias('side'),
             *numeric,
         )
+        del frame
         duplicate = levels.group_by('event', 'side', 'price').len().filter(pl.col('len') > 1)
         if duplicate.height:
             repeated = levels.join(

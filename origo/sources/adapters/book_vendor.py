@@ -35,6 +35,7 @@ BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
 # Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 4
 _REJECTION_POLICY_VERSION = 5
+_MISSING_DEPENDENCY = 'provider-http-404'
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
                               'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
@@ -67,6 +68,10 @@ _GRID_RECORDS = {depth: struct.Struct(f'<qQQ{width}{2 * depth}d{width}{2 * depth
                  for depth, width in ((20, 'B'), (200, '2s'))}
 _GRID_LENGTHS = {20: 20, 200: b'\xc8\x01'}
 _GridSample = tuple[int, int, int, int, tuple[Level, ...], tuple[Level, ...]]
+
+
+class _MissingArchive(SourceError):
+    """An archive lookup returned404; authentication failures are separate."""
 
 
 class _BinaryInsert(Protocol):
@@ -217,7 +222,7 @@ def _archive_response(market: Market, partition: Partition, *, metadata: bool,
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
         if error.code == 'PROVIDER_HTTP_404':
-            raise SourceError(error.code, f'Missing provider archive: {_file(market, partition)}') from error
+            raise _MissingArchive(error.code, f'Missing provider archive: {_file(market, partition)}') from error
         raise
 
 
@@ -494,10 +499,19 @@ class CryptoHFTBookHourly:
         keys = tuple(key for key, _ in dependencies)
         if after.key not in keys:
             keys += (after.key,)
-        checked = tuple((key, _identity(self.market, hour_partition(key),
-                        _response(self.market, hour_partition(key), metadata=True)))
-                        for key in keys)
-        return _revision_key(current, checked)
+        previous = dict(dependencies)
+        checked: list[tuple[str, str]] = []
+        for key in keys:
+            dependency = hour_partition(key)
+            try:
+                response = _response(self.market, dependency, metadata=True)
+            except _MissingArchive:
+                if key >= partition.key or previous.get(key) != _MISSING_DEPENDENCY:
+                    raise
+                checked.append((key, _MISSING_DEPENDENCY))
+            else:
+                checked.append((key, _identity(self.market, dependency, response)))
+        return _revision_key(current, tuple(checked))
 
     def fetch(self, partition: Partition) -> Revision:
         response = _response(self.market, partition, metadata=False)
@@ -534,44 +548,49 @@ class CryptoHFTBookHourly:
 
             from .book_columnar import replay_session
 
+            last_rejection: tuple[str, str] | None = None
+            last_prefix = -1
             with replay_session(self.market):
                 for offset in range(BOOK_MAX_PRELUDE_HOURS + 1):
+                    unavailable: Partition | None = None
                     if offset:
                         before = hour_partition(
                             (partition.start - timedelta(hours=offset)).strftime(HOUR_KEY_FORMAT)
                         )
-                        original = _response(self.market, before, metadata=False)
-                        if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
+                        try:
+                            original = _response(self.market, before, metadata=False)
+                        except _MissingArchive:
+                            unavailable = before
+                        if unavailable is None and len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
                             raise SourceError(
                                 'BOOK_VENDOR_FILE_BOUND',
                                 'Preceding vendor archive exceeds its byte bound.',
                             )
-                        prior = root / f'prelude-{offset:02}.parquet'
-                        prior.write_bytes(original.body)
-                        prior = _prepare_archive(prior, root)
-                        used += prior.stat().st_size
-                        if used > BOOK_MAX_PRELUDE_BYTES:
-                            raise SourceError(
-                                'BOOK_VENDOR_PRELUDE_BOUND',
-                                'Preceding archives exceed the replay byte bound.',
+                        if unavailable is None:
+                            prior = root / f'prelude-{offset:02}.parquet'
+                            prior.write_bytes(original.body)
+                            prior = _prepare_archive(prior, root)
+                            used += prior.stat().st_size
+                            if used > BOOK_MAX_PRELUDE_BYTES:
+                                raise SourceError(
+                                    'BOOK_VENDOR_PRELUDE_BOUND',
+                                    'Preceding archives exceed the replay byte bound.',
+                                )
+                            dependencies.insert(
+                                0, (before.key, _identity(self.market, before, original))
                             )
-                        dependencies.insert(
-                            0, (before.key, _identity(self.market, before, original))
-                        )
-                        input_hashes.insert(
-                            0, (before.key, hashlib.sha256(original.body).hexdigest())
-                        )
-                        preludes.insert(0, prior)
-                        if offset not in (
-                            1,
-                            2,
-                            4,
-                            8,
-                            16,
-                            BOOK_MAX_PRELUDE_HOURS,
-                        ) and not _has_snapshot(prior, boundary):
-                            continue
+                            input_hashes.insert(
+                                0, (before.key, hashlib.sha256(original.body).hexdigest())
+                            )
+                            preludes.insert(0, prior)
+                            if offset not in (
+                                1, 2, 4, 8, 16, BOOK_MAX_PRELUDE_HOURS,
+                            ) and not _has_snapshot(prior, boundary):
+                                continue
                     try:
+                        if (unavailable is not None and last_rejection is not None
+                                and last_prefix == len(preludes)):
+                            raise SourceError(*last_rejection)
                         local = replay_hour(
                             archive,
                             self.market,
@@ -581,8 +600,21 @@ class CryptoHFTBookHourly:
                             following=(tail,),
                         )
                     except SourceError as error:
+                        last_rejection = (error.code, str(error))
+                        last_prefix = len(preludes)
                         if grid.exists():
                             shutil.rmtree(grid)
+                        if unavailable is not None:
+                            if error.code in _REJECTION_CODES:
+                                dependencies.insert(0, (unavailable.key, _MISSING_DEPENDENCY))
+                                _write_dependencies(
+                                    self.market, partition, current, dependencies, rejected=error.code
+                                )
+                            raise SourceError(
+                                error.code,
+                                f'{error} Preceding archive is unavailable: '
+                                f'{_file(self.market, unavailable)} (HTTP 404).',
+                            ) from error
                         if offset < BOOK_MAX_PRELUDE_HOURS and error.code in {
                             'BOOK_VENDOR_SEED_MISSING',
                             'BOOK_SEED_TOO_SHALLOW',

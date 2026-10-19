@@ -10,6 +10,8 @@ import shutil
 import struct
 import time
 from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -247,6 +249,16 @@ def _identity(market: Market, partition: Partition, response: Response) -> str:
         raise SourceError('BOOK_VENDOR_IDENTITY_MISSING', 'Hourly archive has no object ETag.')
     payload = json.dumps([_file(market, partition), etag], separators=(',', ':')).encode()
     return 'cryptohftdata-v1:' + hashlib.sha256(payload).hexdigest()
+
+
+@contextmanager
+def _paired_responses(
+    market: Market, partition: Partition, following: Partition, *, metadata: bool
+) -> Iterator[tuple[Response, Future[Response]]]:
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        current = pool.submit(_response, market, partition, metadata=metadata)
+        closing = pool.submit(_response, market, following, metadata=metadata)
+        yield current.result(), closing
 
 
 def _archive_rows(path: Path, *, columns: tuple[str, ...] = _COLUMNS) -> Iterator[dict[str, object]]:
@@ -493,47 +505,53 @@ class CryptoHFTBookHourly:
         return hour_partition(key)
 
     def discover(self, partition: Partition) -> str:
-        current = _identity(self.market, partition, _response(self.market, partition, metadata=True))
-        dependencies = _dependencies(self.market, partition, current)
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
-        keys = tuple(key for key, _ in dependencies)
-        if after.key not in keys:
-            keys += (after.key,)
-        previous = dict(dependencies)
-        checked: list[tuple[str, str]] = []
-        for key in keys:
-            dependency = hour_partition(key)
-            try:
-                response = _response(self.market, dependency, metadata=True)
-            except _MissingArchive:
-                if key >= partition.key or previous.get(key) != _MISSING_DEPENDENCY:
-                    raise
-                checked.append((key, _MISSING_DEPENDENCY))
-            else:
-                checked.append((key, _identity(self.market, dependency, response)))
-        return _revision_key(current, tuple(checked))
+        with _paired_responses(self.market, partition, after, metadata=True) as (opening, closing):
+            current = _identity(self.market, partition, opening)
+            dependencies = _dependencies(self.market, partition, current)
+            keys = tuple(key for key, _ in dependencies)
+            if after.key not in keys:
+                keys += (after.key,)
+            previous = dict(dependencies)
+            checked: list[tuple[str, str]] = []
+            for key in keys:
+                dependency = hour_partition(key)
+                try:
+                    response = (closing.result() if key == after.key else
+                                _response(self.market, dependency, metadata=True))
+                except _MissingArchive:
+                    if key >= partition.key or previous.get(key) != _MISSING_DEPENDENCY:
+                        raise
+                    checked.append((key, _MISSING_DEPENDENCY))
+                else:
+                    checked.append((key, _identity(self.market, dependency, response)))
+            return _revision_key(current, tuple(checked))
 
     def fetch(self, partition: Partition) -> Revision:
-        response = _response(self.market, partition, metadata=False)
-        current = _identity(self.market, partition, response)
-        if len(response.body) > CRYPTOHFT_MAX_FILE_BYTES:
-            raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Hourly archive exceeds its byte bound.')
-        scratch = _dependency_path(self.market, partition).parent
-        scratch.mkdir(parents=True, exist_ok=True)
-        temporary = TemporaryDirectory(prefix='hour-', dir=scratch)
-        root = Path(temporary.name)
-        archive = root / 'input.parquet'
-        archive.write_bytes(response.body)
+        after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
+        with _paired_responses(self.market, partition, after, metadata=False) as (response, closing):
+            current = _identity(self.market, partition, response)
+            if len(response.body) > CRYPTOHFT_MAX_FILE_BYTES:
+                raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Hourly archive exceeds its byte bound.')
+            scratch = _dependency_path(self.market, partition).parent
+            scratch.mkdir(parents=True, exist_ok=True)
+            temporary = TemporaryDirectory(prefix='hour-', dir=scratch)
+            root = Path(temporary.name)
+            archive = root / 'input.parquet'
+            try:
+                archive.write_bytes(response.body)
+                archive = _prepare_archive(archive, root)
+                original = closing.result()
+            except BaseException:
+                temporary.cleanup()
+                raise
         dependencies: list[tuple[str, str]] = []
         input_hashes: list[tuple[str, str]] = []
         following_hashes: list[tuple[str, str]] = []
         preludes: list[Path] = []
         try:
-            archive = _prepare_archive(archive, root)
             used = archive.stat().st_size
             boundary = int(partition.start.timestamp() * 1000)
-            after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
-            original = _response(self.market, after, metadata=False)
             if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
                 raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Following vendor archive exceeds its byte bound.')
             tail = root / 'following.parquet'

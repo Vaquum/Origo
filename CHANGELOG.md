@@ -1,3 +1,7 @@
+# v3.34.24
+
+- Overlap the two required hourly book archive transfers and their final identity checks through the existing shared provider pacing.
+
 # v3.34.23
 
 - Preserve the actual book replay rejection when an older lookback archive is absent; recheck that absence when reusing rejected input evidence.

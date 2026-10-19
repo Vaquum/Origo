@@ -72,7 +72,9 @@ class _Inputs:
                 .item()
             )
             if terminal is not None:
-                scan = scan.filter(pl.col('received_time') <= terminal)
+                scan = scan.filter(
+                    (pl.col('received_time') <= terminal) | (pl.col('event_time') < self.end_ms)
+                )
         frame = scan.collect()
         if frame.schema['price'] != pl.String or frame.schema['quantity'] != pl.String:
             raise SourceError('BOOK_VENDOR_ROW', 'Archive values require decimal strings.')

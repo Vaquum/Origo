@@ -530,7 +530,8 @@ def test_hourly_adapter_rejects_nonhour_keys(key: str) -> None:
 
 
 def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
-    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path
 ) -> None:
     import pyarrow as pa
     import pyarrow.compute as pc
@@ -544,8 +545,11 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
         for batch in archive.iter_batches(batch_size=vendor.CRYPTOHFT_BATCH_ROWS):
             table = pa.Table.from_batches([batch])
             writer.write_table(table.filter(pc.equal(table['event_type'], 'update')))
+    following = tmp_path / 'untouched-following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
     with pytest.raises(SourceError) as failure:
-        vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
+        vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid',
+                           following=(following,))
     # Updates can now anchor unknown archive depth, but cannot certify this first grid.
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))

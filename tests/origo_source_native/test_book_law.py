@@ -296,7 +296,7 @@ def _assert_real_canonical_discovery_and_admission(
             ) == failures
             with pytest.raises(SourceError):
                 runtime.build(partition.key)
-            assert counts['replay'] == before['replay'] + 1
+            assert counts['replay'] > before['replay']  # Explicit retry may extend its prelude.
 
             # The positive spot case uses its genuinely accepted October archives through the real adapter.
             modern_partition = hour_partition(REAL_HOUR)

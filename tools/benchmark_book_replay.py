@@ -157,10 +157,10 @@ def main() -> None:
         'time_utc': datetime.now(UTC).isoformat(),
         'market': market,
         'partition': args.partition,
-        'scope': 'Original local bytes through setup, canonical fetch/replay, all four writes/proofs and activation; OS input cache warm; provider transfer/authentication/pacing and Dagster launch excluded. Peak RSS is cumulative Python process only; raw-source-row throughput not measured.',
+        'scope': 'Original local bytes through setup, canonical fetch/replay, all four writes/proofs and activation; OS input cache warm; provider transfer/authentication/pacing and Dagster launch excluded. Peak RSS is cumulative Python process only; raw-source-row throughput not measured. Main totals exclude imports; process startup must be measured by the launcher.',
         'python': platform.python_version(),
-        'process_elapsed_s': time.perf_counter() - process_start,
-        'process_cpu_s': time.process_time() - cpu_start,
+        'main_elapsed_s': time.perf_counter() - process_start,
+        'main_cpu_s': time.process_time() - cpu_start,
         'input_pins': {k: v.sha256 for k, v in originals.items()},
         'results': results,
     }

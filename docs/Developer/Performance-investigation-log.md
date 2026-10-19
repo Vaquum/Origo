@@ -104,3 +104,13 @@ the result:
 - I found — good: that exact terminal cursor can be selected from the already validated event headers, without another level scan or replay. Extend the existing original-hour assertion to compare both minute cursors against the independent reference.
 - Measurements: not measured; this is a correctness repair, not a timing result.
 - Progress/Next: push the corrected cursor selection before local validation. Complete numeric and evidence checks together.
+
+## Entry 008 — 2026-10-19
+
+- Task/evidence: [#554](https://github.com/Vaquum/Origo/pull/554), local validation `3554d837-485e-43c2-8410-196e0b5710e2` and [current-head runtime failure](https://github.com/Vaquum/Origo/actions/runs/39239577254).
+- Context: original recorded inputs; local ordinary phase on Python 3.11.11 with two workers, isolated source state and unchanged assertions/limits. One Linux-only multiple-loopback test is skipped on macOS and remains required in Linux CI.
+- I tried: the complete ordinary contract matrix after publishing the implementation and compiler prerequisite.
+- I found — good: 243 local cases passed before interruption, including both complete original-hour numeric and minute-cursor comparisons. The native extension installed in Linux CI after the compiler fix.
+- I found — bad: history fault injection still targeted the retired row reader; rejection-identity setup implicitly required an old preliminary prelude; one opening-seed test also removed its closing witness; a manual-retry assertion fixed the internal replay-attempt count. Preserve the same observable faults at the columnar boundary, deliberately exercise all identity dependencies, provide the untouched tail for the opening fault, and assert a genuine retry while retaining exact automatic-suppression checks. The old tracked-price restriction now needs an accepted archive assertion; live limits remain unchanged. An interrupted native replay produces no partial RowBinary files, strengthening the previous cleanup boundary.
+- Measurements: local ordinary phase failed after 247.92 s, with 243 passed, two failed and one platform skip. Linux CI exposed the additional opening-fault and retry-count assumptions. No speed qualification or completed suite is claimed. The measurement command's main timers exclude imports; an external launcher must measure complete cold-process cost.
+- Progress/Next: push these contract-preserving repairs before another check. Repeat the required matrix, then measure complete source builds with matched inputs and separately measured startup.

@@ -23,7 +23,7 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
 from .test_book_vendor import (
-    OriginalRecording, _original_archive,
+    OriginalRecording, _original_archive, _fault_columnar,
     original_reconstruction_archives as original_reconstruction_archives,
     original_vendor_archive as original_vendor_archive,
     vendor_session_root as vendor_session_root,
@@ -162,8 +162,6 @@ def test_legacy_collector_clock_cannot_close_exchange_hour(
     original_historical_archives: dict[Market, tuple[OriginalArchive, ...]], tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from collections.abc import Iterator
-
     archives = original_historical_archives['perp']
     paths: list[Path] = []
     for archive in archives:
@@ -171,21 +169,19 @@ def test_legacy_collector_clock_cannot_close_exchange_hour(
         path.write_bytes(archive.body)
         paths.append(vendor._prepare_archive(path, tmp_path))
     partition = archives[1].partition
-    original_frames = vendor._frames
     replaced = [False]
 
-    def delayed_collector(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        for frame in original_frames(paths, legacy=legacy):
-            first = frame[0]
-            # Alter only one REST snapshot's collector metadata; original native
-            # update IDs, exchange clocks and every price/quantity remain intact.
-            if (not replaced[0] and first['event_type'] == 'snapshot'
-                    and int(str(first['event_time'])) >= int(partition.start.timestamp() * 1000)):
-                frame = [dict(row, event_time=int(partition.end.timestamp() * 1000)) for row in frame]
-                replaced[0] = True
-            yield frame
+    def delayed_collector(events, levels, prices):
+        import polars as pl
+        selected = events.filter((pl.col('event_type') == 'snapshot')
+            & (pl.col('event_time') >= int(partition.start.timestamp()*1000)))['order'][0]
+        replaced[0] = True
+        # Deliberate collector-clock fault; native IDs and all levels remain original.
+        return events.with_columns(pl.when(pl.col('order') == selected)
+            .then(pl.lit(int(partition.end.timestamp()*1000)))
+            .otherwise(pl.col('event_time')).alias('event_time')), levels, prices
 
-    monkeypatch.setattr(vendor, '_frames', delayed_collector)
+    _fault_columnar(monkeypatch, delayed_collector)
     revision = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'grid',
                                   preludes=(paths[0],), following=(paths[2],))
     assert replaced[0]
@@ -285,6 +281,9 @@ def test_rejected_book_revision_identity_and_retry(
     fault = ['BOOK_SEQUENCE_GAP']
 
     def rejected(*args: object, **kwargs: object) -> vendor.Revision:
+        # This identity scenario deliberately exercises all three original dependencies.
+        if not kwargs.get('preludes'):
+            raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Controlled prefix requirement.')
         attempts.append(fault[0])
         raise SourceError(fault[0], 'Deliberate replay verdict fault; original vendor bytes unchanged.')
 
@@ -362,16 +361,16 @@ def test_rejected_book_revision_identity_and_retry(
     with pytest.raises(OSError):
         _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
     assert not path.exists()
-    frames = vendor._frames
+    prepare = vendor._prepare_archive
 
-    def early_failure(*args: object, **kwargs: object) -> Iterator[list[dict[str, object]]]:
+    def early_failure(*args: object, **kwargs: object) -> Path:
         raise SourceError('BOOK_SEQUENCE_GAP', 'Deliberate early failure before dependency payloads are fetched.')
 
-    monkeypatch.setattr(vendor, '_frames', early_failure)
+    monkeypatch.setattr(vendor, '_prepare_archive', early_failure)
     with pytest.raises(SourceError):
         _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
     assert not path.exists()
-    monkeypatch.setattr(vendor, '_frames', frames)
+    monkeypatch.setattr(vendor, '_prepare_archive', prepare)
     assert visited
     # A real successful replay clears rejected evidence; ordinary activation recovers.
     monkeypatch.setattr(vendor, 'replay_hour', replay)
@@ -548,7 +547,7 @@ def test_archive_fetch_retains_only_completed_rejection(
             discovered = adapter.discover(partition)
             assert adapter.rejected_revision(partition, discovered)
             memo = json.loads(vendor._dependency_path('spot', partition).read_text())
-            assert memo['rejection']['policy'] == 4
+            assert memo['rejection']['policy'] == vendor._REJECTION_POLICY_VERSION
             assert [x[0] for x in memo['dependencies']] == ['2025-07-15T19Z', '2025-07-15T21Z']
         assert not tuple((tmp_path / 'locks').rglob('hour-*'))
         current = archives[2]
@@ -566,10 +565,11 @@ def test_archive_fetch_retains_only_completed_rejection(
             assert combined_bound.value.code == 'BOOK_VENDOR_PRELUDE_BOUND'
         with monkeypatch.context() as limits:
             limits.setattr(book_capture, 'BOOK_MAX_TRACKED_PRICES', 1)
-            with pytest.raises(SourceError) as price_bound:
-                adapter.fetch(partition)
-            assert price_bound.value.code == 'BOOK_PRICE_BOUND'
-        assert json.loads(vendor._dependency_path('spot', partition).read_text()) == memo
+            # The live collector's price cap no longer constrains bounded archive arrays.
+            accepted = adapter.fetch(partition)
+            assert accepted.row_count == 36000
+            assert len(json.loads(accepted.evidence_json)['grid_evidence']['sealed_minutes']) == 60
+        assert 'rejection' not in json.loads(vendor._dependency_path('spot', partition).read_text())
     else:
         originals = []
         for key in ('2026-10-04T09Z', '2026-10-04T10Z'):
@@ -577,12 +577,11 @@ def test_archive_fetch_retains_only_completed_rejection(
             originals.append(OriginalArchive(vendor.hour_partition(key), body, headers))
         _transport(tuple(originals), 'spot', monkeypatch, max_prelude_hours=24)
         partition = originals[0].partition; end = int(partition.end.timestamp() * 1000)
-        frames = vendor._frames; replay = vendor.replay_hour; written = []
+        replay = vendor.replay_hour; written = []
 
-        def missing_tail(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-            for frame in frames(paths, legacy=legacy):
-                if int(str(frame[0]['event_time'])) < end - 1000:
-                    yield frame
+        def missing_tail(events, levels, prices):
+            import polars as pl
+            return events.filter(pl.col('event_time') < end-1000), levels, prices
 
         def observed(path: Path, market: Market, partition: Partition, root: Path, *,
                      preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
@@ -592,11 +591,11 @@ def test_archive_fetch_retains_only_completed_rejection(
                 written.append(len(tuple(root.rglob('*.rowbinary'))))
                 raise
 
-        monkeypatch.setattr(vendor, '_frames', missing_tail)
+        _fault_columnar(monkeypatch, missing_tail)
         monkeypatch.setattr(vendor, 'replay_hour', observed)
         with pytest.raises(SourceError) as tail:
             adapter.fetch(partition)
         assert tail.value.code == 'BOOK_VENDOR_TAIL_MISSING'
-        assert written and written[0] > 0
+        assert written and all(count == 0 for count in written)
         assert not tuple((tmp_path / 'locks').rglob('hour-*'))
         assert adapter.rejected_revision(partition, adapter.discover(partition))

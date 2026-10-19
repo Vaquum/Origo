@@ -96,8 +96,6 @@ def publication_ready(
     days = backfill.partition_names
     if not days or result['partition_key'] not in days:
         raise RuntimeError('Source partition is outside the native backfill selection.')
-    if not spec.consumers:
-        return True
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     with preserve_primary_failure('disconnect', client.disconnect):
@@ -116,27 +114,29 @@ def publication_ready(
                 )
             ],
         )
-        builds, params = store.complete_builds()
-        completed, child = store.execute(
-            f"""SELECT uniqExact(r.partition_key), countIf(
-                r.partition_key=%(partition)s AND r.revision=%(revision)s
-                AND r.build_id=%(build)s AND r.generation=%(generation)s
-                AND r.dagster_run_id=%(run)s)
-            FROM {store.table('source_backfill_log')} r
-            INNER JOIN {store.table('source_active_partitions')} a
-                USING (source_key, partition_key, revision, build_id, generation)
-            INNER JOIN {builds} c USING (source_key, partition_key, revision, build_id)
-            WHERE r.source_key=%(source)s AND r.backfill_id=%(backfill)s
-                AND r.partition_key IN %(days)s AND NOT a.provisional""",
-            {**params, 'backfill': backfill_id, 'days': tuple(days),
-             'partition': result['partition_key'], 'revision': result['revision'],
-             'build': result['build_id'], 'generation': result['generation'],
-             'run': context.run.run_id},
-        )[0]
-        if not child:
-            raise Failure('BACKFILL_RECEIPT_INVALID: Native child receipt lacks matching complete current coverage.',
-                          allow_retries=False)
-        record = store.record(spec.canonical.partition(str(result['partition_key'])))
+        params: dict[str, object] = {'source': spec.key}
+        completed = 0
+        if spec.consumers:
+            builds, params = store.complete_builds()
+            completed, child = store.execute(
+                f"""SELECT uniqExact(r.partition_key), countIf(
+                    r.partition_key=%(partition)s AND r.revision=%(revision)s
+                    AND r.build_id=%(build)s AND r.generation=%(generation)s
+                    AND r.dagster_run_id=%(run)s)
+                FROM {store.table('source_backfill_log')} r
+                INNER JOIN {store.table('source_active_partitions')} a
+                    USING (source_key, partition_key, revision, build_id, generation)
+                INNER JOIN {builds} c USING (source_key, partition_key, revision, build_id)
+                WHERE r.source_key=%(source)s AND r.backfill_id=%(backfill)s
+                    AND r.partition_key IN %(days)s AND NOT a.provisional""",
+                {**params, 'backfill': backfill_id, 'days': tuple(days),
+                 'partition': result['partition_key'], 'revision': result['revision'],
+                 'build': result['build_id'], 'generation': result['generation'],
+                 'run': context.run.run_id},
+            )[0]
+            if not child:
+                raise Failure('BACKFILL_RECEIPT_INVALID: Native child receipt lacks matching complete current coverage.',
+                              allow_retries=False)
         proofs = store.execute(
             f'SELECT component, content_hash FROM {store.table("source_component_log")} '
             'WHERE source_key=%(source)s AND partition_key=%(partition)s '
@@ -144,6 +144,7 @@ def publication_ready(
             {**params, 'partition': result['partition_key'],
              'revision': result['revision'], 'build': result['build_id']},
         )
+        record = store.record(spec.canonical.partition(str(result['partition_key'])))
         if record is None or (
             record.revision, str(record.build_id), record.generation
         ) != (str(result['revision']), str(result['build_id']), result['generation']) or store.missing_components(record) or tuple(sorted(
@@ -151,6 +152,8 @@ def publication_ready(
         )) != tuple(sorted(record.component_hashes)):
             raise Failure('BACKFILL_RECEIPT_INVALID: Native child component proofs do not match active coverage.',
                           allow_retries=False)
+    if not spec.consumers:
+        return True
     context.log.info(
         'source=%s phase=backfill_complete partitions=%s/%s backfill=%s',
         spec.key,

@@ -512,7 +512,7 @@ def test_hourly_audit_preserves_obsolete_requests_and_retries_hours(
     assert runtime.store.records(canonical_only=True) == ()
 
 
-def test_native_hourly_backfill_avoids_global_health_scan() -> None:
+def test_native_hourly_backfill_orders_completion_after_canonical_build() -> None:
     from dagster import AssetKey, Definitions
     from origo.sources.bundle import build_source_bundle
 

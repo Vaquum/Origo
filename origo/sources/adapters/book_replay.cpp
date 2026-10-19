@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
-#include <stdexcept>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
@@ -73,11 +73,11 @@ struct Side {
 };
 
 struct Chunk {
- const int64_t *offsets;
- const uint8_t *sides;
- const uint32_t *prices;
- const int32_t *quantities;
- size_t nevent,nlevel;
+  const int64_t *offsets;
+  const uint8_t *sides;
+  const uint32_t *prices;
+  const int32_t *quantities;
+  size_t nevent, nlevel;
 };
 struct Replay {
   const int64_t *offsets, *events;
@@ -101,18 +101,28 @@ struct Replay {
   size_t nrank;
   const int64_t *chunk_offsets = nullptr;
   size_t local = 0;
-  int64_t begin(size_t e) const { return chunks ? chunk_offsets[local] : offsets[e]; }
-  int64_t finish(size_t e) const { return chunks ? chunk_offsets[local+1] : offsets[e+1]; }
-  uint32_t price(size_t i) const { return chunks ? ranks[prices[i]] : prices[i]; }
+  int64_t begin(size_t e) const {
+    return chunks ? chunk_offsets[local] : offsets[e];
+  }
+  int64_t finish(size_t e) const {
+    return chunks ? chunk_offsets[local + 1] : offsets[e + 1];
+  }
+  uint32_t price(size_t i) const {
+    return chunks ? ranks[prices[i]] : prices[i];
+  }
   void select(size_t e) {
-   if (chunks) {
-    uint64_t location=uint64_t(offsets[e]);
-    const auto &c=(*chunks)[location >> 32]; local=uint32_t(location);
-    chunk_offsets=c.offsets;sides=c.sides;prices=c.prices;quantities=c.quantities;
-   }
+    if (chunks) {
+      uint64_t location = uint64_t(offsets[e]);
+      const auto &c = (*chunks)[location >> 32];
+      local = uint32_t(location);
+      chunk_offsets = c.offsets;
+      sides = c.sides;
+      prices = c.prices;
+      quantities = c.quantities;
+    }
   }
   Replay(const Buffers &b, int64_t start, int64_t finish, char *out20,
-         char *out200, const std::vector<Chunk> *parts=nullptr)
+         char *out200, const std::vector<Chunk> *parts = nullptr)
       : offsets(b.data<int64_t>(0)), events(b.data<int64_t>(2)),
         adjacent(b.data<uint8_t>(9)), observed(2 * b.count(7), 0),
         floor(int64_t(b.count(7))), ceiling(-1), native(b.data<uint64_t>(3)),
@@ -122,27 +132,40 @@ struct Replay {
         nevent(b.count(1)), nlevel(b.count(4)), nprice(b.count(7)),
         nquantity(b.count(8)), bid(nprice), ask(nprice), replacement(nprice, 0),
         small(out20), large(out200), next(start), end(finish), chunks(parts),
-        ranks(parts ? b.data<uint32_t>(10) : nullptr), nrank(parts ? b.count(10) : 0) {}
+        ranks(parts ? b.data<uint32_t>(10) : nullptr),
+        nrank(parts ? b.count(10) : 0) {}
   void validate() const {
-    if (!nevent || !nprice || !nquantity || (!chunks && (offsets[0] != 0 ||
-        offsets[nevent] != int64_t(nlevel))))
+    if (!nevent || !nprice || !nquantity ||
+        (!chunks && (offsets[0] != 0 || offsets[nevent] != int64_t(nlevel))))
       throw std::invalid_argument("Invalid replay dimensions.");
     for (size_t e = 0; e < nevent; ++e) {
-      if (kinds[e] > 1) throw std::invalid_argument("Invalid event kind.");
+      if (kinds[e] > 1)
+        throw std::invalid_argument("Invalid event kind.");
       if (chunks) {
-        uint64_t location=uint64_t(offsets[e]); size_t chunk=location >> 32;
-        if (chunk >= chunks->size() || uint32_t(location) >= (*chunks)[chunk].nevent)
+        uint64_t location = uint64_t(offsets[e]);
+        size_t chunk = location >> 32;
+        if (chunk >= chunks->size() ||
+            uint32_t(location) >= (*chunks)[chunk].nevent)
           throw std::invalid_argument("Invalid chunk event.");
-      } else if (offsets[e] < 0 || offsets[e] > offsets[e+1]) throw std::invalid_argument("Invalid event offsets.");
+      } else if (offsets[e] < 0 || offsets[e] > offsets[e + 1])
+        throw std::invalid_argument("Invalid event offsets.");
       if (e && events[e] < events[e - 1])
         throw std::invalid_argument("Exchange clock regressed.");
     }
     if (chunks) {
-      for(size_t p=0;p<nrank;++p) if(ranks[p]>=nprice) throw std::invalid_argument("Invalid price rank.");
-      for(const auto &c:*chunks) {
-        if(c.offsets[0]!=0 || c.offsets[c.nevent]!=int64_t(c.nlevel)) throw std::invalid_argument("Invalid chunk offsets.");
-        for(size_t e=0;e<c.nevent;++e) if(c.offsets[e]<0 || c.offsets[e]>c.offsets[e+1]) throw std::invalid_argument("Invalid chunk order.");
-        for(size_t i=0;i<c.nlevel;++i) if(c.sides[i]>1 || c.prices[i]>=nrank || c.quantities[i]<0 || size_t(c.quantities[i])>=nquantity) throw std::invalid_argument("Invalid chunk level.");
+      for (size_t p = 0; p < nrank; ++p)
+        if (ranks[p] >= nprice)
+          throw std::invalid_argument("Invalid price rank.");
+      for (const auto &c : *chunks) {
+        if (c.offsets[0] != 0 || c.offsets[c.nevent] != int64_t(c.nlevel))
+          throw std::invalid_argument("Invalid chunk offsets.");
+        for (size_t e = 0; e < c.nevent; ++e)
+          if (c.offsets[e] < 0 || c.offsets[e] > c.offsets[e + 1])
+            throw std::invalid_argument("Invalid chunk order.");
+        for (size_t i = 0; i < c.nlevel; ++i)
+          if (c.sides[i] > 1 || c.prices[i] >= nrank || c.quantities[i] < 0 ||
+              size_t(c.quantities[i]) >= nquantity)
+            throw std::invalid_argument("Invalid chunk level.");
       }
     }
     for (size_t i = 0; i < nlevel; ++i) {
@@ -291,12 +314,12 @@ struct Replay {
 };
 
 static PyObject *replay(PyObject *, PyObject *args) {
-  PyObject *inputs, *parts=Py_None;
+  PyObject *inputs, *parts = Py_None;
   long long start, end;
   if (!PyArg_ParseTuple(args, "OLL|O", &inputs, &start, &end, &parts))
     return nullptr;
-  bool chunked=parts!=Py_None;
-  int width=chunked ? 11 : 10;
+  bool chunked = parts != Py_None;
+  int width = chunked ? 11 : 10;
   if (!PyTuple_Check(inputs) || PyTuple_Size(inputs) != width || start < 0 ||
       start % 3600000 || start > INT64_MAX - 3600000 ||
       end != start + 3600000) {
@@ -327,24 +350,46 @@ static PyObject *replay(PyObject *, PyObject *args) {
   }
   std::vector<std::unique_ptr<Buffers>> owners;
   std::vector<Chunk> chunks;
-  if(chunked) {
-    if(!PyTuple_Check(parts)) {PyErr_SetString(PyExc_ValueError,"Chunks require a tuple.");return nullptr;}
-    const int sizes[4]={8,1,4,4};
-    for(Py_ssize_t j=0;j<PyTuple_Size(parts);++j) {
-      PyObject *part=PyTuple_GetItem(parts,j);
-      if(!PyTuple_Check(part) || PyTuple_Size(part)!=4) {PyErr_SetString(PyExc_ValueError,"Invalid chunk tuple.");return nullptr;}
-      auto owner=std::make_unique<Buffers>();
-      for(int k=0;k<4;++k) {
-        if(PyObject_GetBuffer(PyTuple_GetItem(part,k),&owner->views[k],PyBUF_CONTIG_RO)<0)return nullptr;
-        ++owner->acquired;
-        if(owner->views[k].itemsize!=sizes[k] || owner->views[k].len%sizes[k]) {PyErr_SetString(PyExc_ValueError,"Invalid chunk width.");return nullptr;}
+  if (chunked) {
+    if (!PyTuple_Check(parts)) {
+      PyErr_SetString(PyExc_ValueError, "Chunks require a tuple.");
+      return nullptr;
+    }
+    const int sizes[4] = {8, 1, 4, 4};
+    for (Py_ssize_t j = 0; j < PyTuple_Size(parts); ++j) {
+      PyObject *part = PyTuple_GetItem(parts, j);
+      if (!PyTuple_Check(part) || PyTuple_Size(part) != 4) {
+        PyErr_SetString(PyExc_ValueError, "Invalid chunk tuple.");
+        return nullptr;
       }
-      size_t rows=owner->count(1);
-      if(!owner->count(0) || owner->count(2)!=rows || owner->count(3)!=rows) {PyErr_SetString(PyExc_ValueError,"Invalid chunk lengths.");return nullptr;}
+      auto owner = std::make_unique<Buffers>();
+      for (int k = 0; k < 4; ++k) {
+        if (PyObject_GetBuffer(PyTuple_GetItem(part, k), &owner->views[k],
+                               PyBUF_CONTIG_RO) < 0)
+          return nullptr;
+        ++owner->acquired;
+        if (owner->views[k].itemsize != sizes[k] ||
+            owner->views[k].len % sizes[k]) {
+          PyErr_SetString(PyExc_ValueError, "Invalid chunk width.");
+          return nullptr;
+        }
+      }
+      size_t rows = owner->count(1);
+      if (!owner->count(0) || owner->count(2) != rows ||
+          owner->count(3) != rows) {
+        PyErr_SetString(PyExc_ValueError, "Invalid chunk lengths.");
+        return nullptr;
+      }
       size_t total = rows;
-      for (const auto &existing : chunks) total += existing.nlevel;
-      if (total > UINT32_MAX) {PyErr_SetString(PyExc_ValueError,"Invalid replay level count.");return nullptr;}
-      chunks.push_back({owner->data<int64_t>(0),owner->data<uint8_t>(1),owner->data<uint32_t>(2),owner->data<int32_t>(3),owner->count(0)-1,rows});
+      for (const auto &existing : chunks)
+        total += existing.nlevel;
+      if (total > UINT32_MAX) {
+        PyErr_SetString(PyExc_ValueError, "Invalid replay level count.");
+        return nullptr;
+      }
+      chunks.push_back({owner->data<int64_t>(0), owner->data<uint8_t>(1),
+                        owner->data<uint32_t>(2), owner->data<int32_t>(3),
+                        owner->count(0) - 1, rows});
       owners.push_back(std::move(owner));
     }
   }

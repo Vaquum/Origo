@@ -1,3 +1,7 @@
+# v3.34.23
+
+- Preserve the actual book replay rejection when an older lookback archive is absent; recheck that absence when reusing rejected input evidence.
+
 # v3.34.22
 
 - Replay provider book archives through exact columnar dictionaries and bounded native state; reuse decoded lookback files and retain all four grid proofs.

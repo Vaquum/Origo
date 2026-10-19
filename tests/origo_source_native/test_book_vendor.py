@@ -973,6 +973,61 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert all(r._content_consumed for r in responses)
 
 
+def test_following_pruning_preserves_preboundary_sequence_fault(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+    from origo.sources.adapters.book_columnar import _KEYS
+
+    market, body, _ = original_vendor_archive
+    current = tmp_path / 'current.parquet'
+    current.write_bytes(body)
+    following = tmp_path / 'following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
+    current_scan = pl.scan_parquet(current).filter(pl.col('event_type') == 'update')
+    cursor, clock = current_scan.select(
+        pl.col('final_update_id').max(), pl.col('event_time').max()
+    ).collect().row(0)
+    scan = pl.scan_parquet(following).filter(pl.col('event_type') == 'update')
+    low, high = (
+        scan.select(_KEYS).unique(maintain_order=True)
+        .filter(pl.col('final_update_id') > cursor)
+        .unique(subset='final_update_id', maintain_order=True).head(2).collect().to_dicts()
+    )
+    assert clock < int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    assert low['event_time'] >= int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    assert low['first_update_id'] <= cursor + 1 <= low['final_update_id']
+    assert high['final_update_id'] > low['final_update_id']
+    assert high['first_update_id'] > cursor + 1
+    if market == 'perp':
+        assert low['prev_final_update_id'] == cursor
+    schema = scan.collect_schema()
+
+    def message(header):
+        return scan.filter(
+            (pl.col('received_time') == header['received_time'])
+            & (pl.col('final_update_id') == header['final_update_id'])
+        )
+
+    # Reassociate only genuine clocks/IDs to inject the gap; all original levels remain.
+    before = message(high).with_columns(
+        pl.lit(low['received_time']).cast(schema['received_time']).alias('received_time'),
+        pl.lit(clock).cast(schema['event_time']).alias('event_time'),
+    )
+    witness = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    damaged = tmp_path / 'gap-following.parquet'
+    pl.concat([before.collect(), witness.collect()]).write_parquet(damaged)
+    with pytest.raises(SourceError) as error:
+        vendor.replay_hour(current, market, vendor.hour_partition(REAL_HOUR),
+                           tmp_path / 'grid', following=(damaged,))
+    assert error.value.code == 'BOOK_SEQUENCE_GAP'
+    assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
+
+
 def test_snapshot_presence_reads_only_original_required_columns(
     vendor_session_root, tmp_path, monkeypatch,
 ):

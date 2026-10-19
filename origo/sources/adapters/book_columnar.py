@@ -67,17 +67,12 @@ class _Inputs:
                 scan.filter(
                     (pl.col('event_type') == 'update') & (pl.col('event_time') >= self.end_ms)
                 )
-                .select(pl.col('final_update_id').min())
+                .select(pl.col('received_time').min())
                 .collect()
                 .item()
             )
             if terminal is not None:
-                cursor = (
-                    pl.when(pl.col('event_type') == 'update')
-                    .then(pl.col('final_update_id'))
-                    .otherwise(pl.col('last_update_id'))
-                )
-                scan = scan.filter(cursor <= terminal)
+                scan = scan.filter(pl.col('received_time') <= terminal)
         frame = scan.collect()
         if frame.schema['price'] != pl.String or frame.schema['quantity'] != pl.String:
             raise SourceError('BOOK_VENDOR_ROW', 'Archive values require decimal strings.')

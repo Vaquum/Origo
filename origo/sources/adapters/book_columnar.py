@@ -55,7 +55,9 @@ class _Inputs:
         self.quantity_codes = {Decimal(0): 0}
         self.literals: dict[str, dict[str, int]] = {'price': {}, 'quantity': {}}
 
-    def add(self, path: Path, *, following: bool) -> tuple[pl.DataFrame, pl.DataFrame]:
+    def add(
+        self, path: Path, *, following: bool, native_order: bool
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
         if path in self.files:
             return self.files[path]
         scan = pl.scan_parquet(path)
@@ -63,17 +65,24 @@ class _Inputs:
             raise SourceError('BOOK_VENDOR_SCHEMA', 'Archive lacks required order-book columns.')
         scan = scan.select(_COLUMNS)
         if following:
+            boundary = pl.col('final_update_id' if native_order else 'received_time')
             terminal = (
                 scan.filter(
                     (pl.col('event_type') == 'update') & (pl.col('event_time') >= self.end_ms)
                 )
-                .select(pl.col('received_time').min())
+                .select(boundary.min())
                 .collect()
                 .item()
             )
             if terminal is not None:
+                order = (
+                    pl.when(pl.col('event_type') == 'update')
+                    .then(pl.col('final_update_id'))
+                    .otherwise(pl.col('last_update_id'))
+                    if native_order else pl.col('received_time')
+                )
                 scan = scan.filter(
-                    (pl.col('received_time') <= terminal) | (pl.col('event_time') < self.end_ms)
+                    (order <= terminal) | (pl.col('event_time') < self.end_ms)
                 )
         frame = scan.collect()
         if frame.schema['price'] != pl.String or frame.schema['quantity'] != pl.String:
@@ -171,7 +180,9 @@ class _Inputs:
         messages: list[pl.DataFrame] = []
         pieces: list[pl.DataFrame] = []
         for index, path in enumerate(paths):
-            events, levels = self.add(path, following=index == len(paths) - 1)
+            events, levels = self.add(
+                path, following=index == len(paths) - 1, native_order=native_order
+            )
             messages.append(events.with_columns(pl.lit(index, dtype=pl.UInt8).alias('file')))
             pieces.append(levels)
         events = pl.concat(messages).with_columns(

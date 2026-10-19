@@ -1049,8 +1049,15 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
     )
     late_file = tmp_path / 'late-preboundary.parquet'
     pl.concat([closing.collect(), late.collect()]).write_parquet(late_file)
-    retained, _ = _Inputs(market, end).add(late_file, following=True)
+    retained, _ = _Inputs(market, end).add(late_file, following=True, native_order=True)
     assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
+    closing_late = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    closing_file = tmp_path / 'late-closing.parquet'
+    pl.concat([closing.collect(), closing_late.collect()]).write_parquet(closing_file)
+    retained, _ = _Inputs(market, end).add(closing_file, following=True, native_order=True)
+    assert set(retained['final_update_id']) == {low['final_update_id']}
 
 
 def test_snapshot_presence_reads_only_original_required_columns(

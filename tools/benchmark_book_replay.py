@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import resource
@@ -69,12 +70,12 @@ def partition_metrics(selected: list[str], attempts: list[PartitionAttempt]) -> 
     if not selected or len(set(selected)) != len(selected):
         raise ValueError('Select a nonempty set of distinct partitions.')
     selected_set = set(selected)
-    if any(attempt.partition not in selected_set or attempt.seconds < 0 for attempt in attempts):
+    if any(attempt.partition not in selected_set or not math.isfinite(attempt.seconds) or attempt.seconds < 0 for attempt in attempts):
         raise ValueError('Attempt does not belong to the selected cohort.')
     if any(attempt.complete == bool(attempt.error_code) for attempt in attempts):
         raise ValueError('A complete attempt cannot carry an error; a failure requires its code.')
     latest = {attempt.partition: attempt for attempt in attempts}
-    full = sum(attempt.complete for attempt in latest.values())
+    full = len({attempt.partition for attempt in attempts if attempt.complete})
     failed = sum(not attempt.complete for attempt in attempts)
     completed = [attempt.seconds for attempt in attempts if attempt.complete]
     return {

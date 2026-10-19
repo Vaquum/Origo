@@ -1,3 +1,7 @@
+# v3.34.21
+
+- Record twenty ingestion performance rules and an append-only investigation log; require reading both before ingestion or performance work and recording positive and negative performance findings.
+
 # v3.34.20
 
 - Read statement-start receipts for market-state SQL, settings and phase assertions; reject observed server exceptions.

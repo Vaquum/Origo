@@ -43,11 +43,11 @@ def _job(runtime: SourceRuntime):
     return repository.get_job(f'backfill_{runtime.spec.key}_source_job')
 
 
-def _parent(instance: DagsterInstance, job_name: str) -> str:
+def _parent(instance: DagsterInstance, job_name: str, keys: tuple[str, ...] = (REAL_HOUR,)) -> str:
     identity = str(uuid4())
     instance.add_backfill(PartitionBackfill(
         backfill_id=identity, status=BulkActionStatus.REQUESTED, from_failure=False,
-        tags={}, backfill_timestamp=time.time(), partition_names=[REAL_HOUR],
+        tags={}, backfill_timestamp=time.time(), partition_names=list(keys),
         partition_set_origin=RemotePartitionSetOrigin(repository_origin=_repository_origin(),
                                                       partition_set_name=job_name + '_partition_set'),
     ))
@@ -164,10 +164,10 @@ def test_native_book_selection_completion_preserves_source_failures(
         from dagster import validate_run_config
 
         config = job.get_run_config_for_partition_key(REAL_HOUR)
-        assert validate_run_config(job, config)['execution'][job.executor_def.name].keys() == {'in_process'}
+        assert validate_run_config(job, config)['execution'][job.executor_def.name].keys() == {'multiprocess'}
         assert validate_run_config(job, {
-            'execution': {'config': {'multiprocess': {}}},
-        })['execution'][job.executor_def.name].keys() == {'multiprocess'}
+            'execution': {'config': {'in_process': {}}},
+        })['execution'][job.executor_def.name].keys() == {'in_process'}
         assert job.asset_layer.executable_asset_keys == {
             AssetKey(f'build_{runtime.spec.key}_canonical_revision_origo')
         }
@@ -206,6 +206,28 @@ def test_native_book_selection_completion_preserves_source_failures(
             'depth20': 36000, 'depth200': 3600, 'depth20_1m': 60, 'depth200_1m': 60,
         }
         assert dict(record.component_hashes) == {key: digest for key, _, digest in proofs}
+
+        # A deliberate post-canonical persistence fault is terminal, outside source retries.
+        receipt_parent = _parent(instance, job.name)
+        persisted = SourceStore.execute
+        receipt_attempts: list[str] = []
+
+        def unavailable_receipt(self, sql, params=None, settings=None):
+            if sql.startswith('INSERT INTO origo.source_backfill_log'):
+                receipt_attempts.append(sql)
+                raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Controlled receipt persistence fault.')
+            return persisted(self, sql, params, settings)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(SourceStore, 'execute', unavailable_receipt)
+            failed_receipt = job.execute_in_process(
+                instance=instance, partition_key=REAL_HOUR,
+                tags={'dagster/backfill': receipt_parent}, raise_on_error=False,
+            )
+        assert not failed_receipt.success and len(receipt_attempts) == 1
+        assert not any(event.event_type_value == 'STEP_UP_FOR_RETRY'
+                       for event in failed_receipt.all_events)
+        assert runtime.store.record(record.partition) == record
         saved_component = runtime.store.execute(
             "SELECT * FROM origo.source_component_log WHERE source_key=%(source)s "
             "AND build_id=%(build)s AND component='depth200_1m'",
@@ -254,3 +276,39 @@ def test_native_book_selection_completion_preserves_source_failures(
         assert current is not None and current.generation == record.generation + 1
         assert current.component_hashes == record.component_hashes
         assert _failures(runtime, unrelated) == before
+
+        # A deliberate input rejection in the first hour must not hide the genuine next hour.
+        missing = '2026-10-04T08Z'
+        keys = (missing, REAL_HOUR)
+        ranged_parent = _parent(instance, job.name, keys)
+        original_fetch = type(runtime.spec.canonical).fetch
+
+        def rejected_first(self, partition):
+            if partition.key == missing:
+                raise SourceError('BOOK_SEQUENCE_GAP', 'Controlled input fault; no market rows.')
+            return original_fetch(self, partition)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(type(runtime.spec.canonical), 'fetch', rejected_first)
+            mixed = job.execute_in_process(
+                instance=instance,
+                tags={'dagster/backfill': ranged_parent,
+                      'dagster/asset_partition_range_start': missing,
+                      'dagster/asset_partition_range_end': REAL_HOUR},
+                run_config=config,
+                raise_on_error=False,
+            )
+        assert job.backfill_policy.max_partitions_per_run == vendor.BOOK_BACKFILL_BATCH_SIZE
+        assert not mixed.success
+        materialized = mixed.asset_materializations_for_node(
+            f'build_{runtime.spec.key}_canonical_revision_origo'
+        )
+        assert [event.partition for event in materialized] == [REAL_HOUR]
+        assert _failures(runtime, missing) and _failures(runtime, unrelated) == before
+        assert runtime.store.record(vendor.hour_partition(missing)) is None
+        assert runtime.store.execute(
+            'SELECT partition_key,dagster_run_id FROM origo.source_backfill_log '
+            'WHERE source_key=%(source)s AND backfill_id=%(parent)s',
+            {'source': runtime.spec.key, 'parent': ranged_parent},
+        ) == [(REAL_HOUR, mixed.run_id)]
+        assert not any(event.event_type_value == 'STEP_UP_FOR_RETRY' for event in mixed.all_events)

@@ -4,6 +4,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -139,6 +140,16 @@ class CanonicalAdapter(Protocol):
 @runtime_checkable
 class CanonicalAuditPolicy(Protocol):
     def rejected_revision(self, partition: Partition, revision: str) -> bool: ...
+
+
+@runtime_checkable
+class CanonicalBackfillBatch(Protocol):
+    @property
+    def backfill_batch_size(self) -> int: ...
+
+    def backfill_batch(self) -> AbstractContextManager[None]: ...
+
+    def backfill_rejection(self, error: BaseException | None) -> bool: ...
 
 
 class ProvisionalAdapter(Protocol):

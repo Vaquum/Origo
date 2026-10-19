@@ -276,7 +276,10 @@ def _fault_columnar(monkeypatch, change):
     original = book_columnar._Inputs.ordered
 
     def ordered(self, paths, *, native_order):
-        return change(*original(self, paths, native_order=native_order))
+        from origo.sources.adapters.book_columnar import _Chunks
+
+        events, levels, prices = original(self, paths, native_order=native_order)
+        return change(events, levels.frame() if isinstance(levels, _Chunks) else levels, prices)
 
     monkeypatch.setattr(book_columnar._Inputs, 'ordered', ordered)
 

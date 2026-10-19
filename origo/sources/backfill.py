@@ -12,7 +12,7 @@ from dagster import (
 )
 
 from .contracts import (
-    CanonicalAuditPolicy, RevisionedSourceSpec, SourceError,
+    CanonicalAuditPolicy, CanonicalBackfillBatch, RevisionedSourceSpec, SourceError,
     failure_code, failure_message, retryable_source_error,
 )
 
@@ -30,15 +30,24 @@ def execute_partition_backfill(
     spec: RevisionedSourceSpec,
     context: AssetExecutionContext,
     run_day: Callable[[str], dict[str, object]],
+    *,
+    partition_key: str | None = None,
 ) -> dict[str, object]:
     from .prepare import prepare_source
 
     spec.require_enabled('backfill')
     days = tuple(context.partition_keys)
-    if len(days) != 1:
+    if partition_key is not None:
+        if (spec.consumers or not isinstance(spec.canonical, CanonicalBackfillBatch)
+                or partition_key not in days or len(days) > spec.canonical.backfill_batch_size):
+            raise ValueError('Partition is outside the native source batch.')
+        day = partition_key
+    elif len(days) != 1:
         raise ValueError('Source backfills require one canonical partition per native Dagster run.')
-    day = days[0]
-    prepare_source(spec, context.instance)
+    else:
+        day = days[0]
+    if partition_key is None or day == days[0]:
+        prepare_source(spec, context.instance)
     context.instance.add_run_tags(
         context.run.run_id,
         {
@@ -90,10 +99,10 @@ def publication_ready(
     backfill = context.instance.get_backfill(backfill_id)
     if backfill is None:
         raise RuntimeError('Native backfill selection is missing.')
-    if backfill.is_asset_backfill:
+    if backfill.is_asset_backfill and spec.consumers:
         # Asset backfills natively wait for all upstream partitions before unpartitioned files.
         return True
-    days = backfill.partition_names
+    days = tuple(context.partition_keys) if backfill.is_asset_backfill else backfill.partition_names
     if not days or result['partition_key'] not in days:
         raise RuntimeError('Source partition is outside the native backfill selection.')
     settings = get_clickhouse_settings()

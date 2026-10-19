@@ -1,6 +1,12 @@
+# v3.34.27
+
+- Reuse bounded book archive inputs across native partition ranges and feed per-file buffers directly to replay, preserving each hour's proofs and failures.
+- Restore native multiprocess backfill defaults so cancellation can interrupt hourly retry waits; batching amortizes process startup and explicit parent-run overrides remain available.
+
 # v3.34.26
 
 - Default single-asset native backfills to execution within their isolated run worker, avoiding a redundant step process while preserving explicit executor overrides.
+- Replace implicit canonical retries with explicit source-error classification. Receipt/publication errors outside that boundary fail visibly without an automatic step retry.
 
 # v3.34.25
 

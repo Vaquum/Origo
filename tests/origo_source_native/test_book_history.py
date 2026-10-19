@@ -113,6 +113,43 @@ def test_original_historical_hour_replays_preceding_vendor_snapshot(
     with pytest.raises(SourceError) as failure:
         adapter.revalidate(partition, revision)
     assert failure.value.code == 'OFFICIAL_REVISION_CHANGED'
+
+    # The same originals own scoped reuse, eviction and fresh revalidation boundaries.
+    from origo.sources.adapters.book_columnar import _inputs
+
+    rewritten.clear()
+    for evict in (False, True):
+        with monkeypatch.context() as patch:
+            if evict:
+                patch.setattr(vendor, 'BOOK_BATCH_BODY_BYTES', 0)
+                patch.setattr(vendor, 'BOOK_BATCH_PREPARED_BYTES', 0)
+            with adapter.backfill_batch():
+                batch = vendor._batch.get()
+                assert batch is not None
+                cache_root = batch.root
+                first_revision = adapter.fetch(partition)
+                fetched = len(visited)
+                cached = adapter.fetch(partition)
+                assert (len(visited) > fetched) is evict
+                assert cached.key == first_revision.key == revision.key
+                assert cached.content_hash == first_revision.content_hash == revision.content_hash
+                assert cached.evidence_json == first_revision.evidence_json == revision.evidence_json
+                decoder = _inputs.get()
+                assert decoder is not None
+                assert len(batch.responses) == len(batch.prepared) == len(decoder.files) == (
+                    0 if evict else 3
+                )
+                before_check = len(visited)
+                adapter.revalidate(partition, cached)
+                assert len(visited) > before_check
+                rewritten[vendor._file(market, archives[0].partition)] = 'changed-during-batch'
+                with pytest.raises(SourceError) as changed:
+                    adapter.revalidate(partition, cached)
+                assert changed.value.code == 'OFFICIAL_REVISION_CHANGED'
+                rewritten.clear()
+            assert not cache_root.exists() and vendor._batch.get() is None and _inputs.get() is None
+            assert next(iter(cached.rows()))[1] == partition.start
+
     rewritten.clear()
     rewritten[vendor._file(market, archives[2].partition)] = 'revised-closing-object'
     with pytest.raises(SourceError) as failure:

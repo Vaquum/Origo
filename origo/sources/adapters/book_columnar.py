@@ -14,6 +14,7 @@ from typing import Protocol, cast
 
 import numpy as np
 import polars as pl
+from numpy.typing import NDArray
 
 from origo.workers.book_capture import BOOK_PRICE_TICK, parse_book_integer
 
@@ -30,10 +31,12 @@ _KEYS = (
     'last_update_id',
 )
 _COLUMNS = (*_KEYS, 'symbol', 'side', 'price', 'quantity')
+_INPUT_CACHE_BYTES = 2 * 1024**3
 
 
 class _NativeReplay(Protocol):
-    def replay(self, buffers: tuple[object, ...], start: int, end: int) -> tuple[bytes, bytes]: ...
+    def replay(self, buffers: tuple[object, ...], start: int, end: int,
+               chunks: tuple[tuple[object, ...], ...] | None = None) -> tuple[bytes, bytes]: ...
 
 
 @dataclass(frozen=True)
@@ -44,11 +47,59 @@ class ArchiveReplay:
     terminal_id: int
 
 
+@dataclass(frozen=True)
+class _Chunk:
+    offsets: pl.Series
+    side: pl.Series
+    price: pl.Series
+    quantity: pl.Series
+    first_event: int
+
+    def buffers(self) -> tuple[object, ...]:
+        return (self.offsets.to_numpy(), self.side.to_numpy(), self.price.to_numpy(),
+                self.quantity.to_numpy().view(np.int32))
+
+
+@dataclass(frozen=True)
+class _Chunks:
+    events: pl.DataFrame
+    parts: tuple[_Chunk, ...]
+    ranks: pl.Series
+
+    def locations(self, plan: pl.DataFrame) -> NDArray[np.int64]:
+        order = plan['order'].to_numpy()
+        file = self.events['file'].to_numpy()[order]
+        first = np.array([part.first_event for part in self.parts],dtype=np.uint32)
+        local = self.events['event'].to_numpy()[order] - first[file]
+        locations = np.empty(len(order)+1,dtype=np.int64)
+        locations[:-1] = (file.astype(np.int64) << 32) | local
+        locations[-1] = 0
+        return locations
+
+    def frame(self) -> pl.DataFrame:
+        ordering = np.empty(int(self.events['event'].max())+1,dtype=np.uint32)
+        ordering[self.events['event'].to_numpy()] = self.events['order'].to_numpy()
+        frames: list[pl.DataFrame] = []
+        ranks = self.ranks.to_numpy()
+        for part in self.parts:
+            events=np.repeat(np.arange(len(part.offsets)-1,dtype=np.uint32)+part.first_event,np.diff(part.offsets.to_numpy()))
+            frames.append(pl.DataFrame({'order':ordering[events],'side':part.side,'price':ranks[part.price.to_numpy()],'quantity':part.quantity}))
+        return pl.concat(frames).sort('order')
+
+
 class _Inputs:
     def __init__(self, market: Market) -> None:
         self.market = market
         self.files: dict[Path, tuple[pl.DataFrame, pl.DataFrame]] = {}
+        self.chunks: dict[Path, _Chunk] = {}
         self.offset = 0
+        self.layout_count = -1
+        self.layout: tuple[tuple[Decimal, ...], NDArray[np.uint32], NDArray[np.float64], NDArray[np.uint8]] | None = None
+        self.quantity_count = 1
+        self.quantity_values: NDArray[np.float64] = np.zeros(1, dtype=np.float64)
+        self.active_paths: set[Path] = set()
+        self.file_bytes: dict[Path, int] = {}
+        self.cache_bytes = 0
         self.prices: list[Decimal] = []
         self.quantities = [Decimal(0)]
         self.price_codes: dict[Decimal, int] = {}
@@ -148,19 +199,53 @@ class _Inputs:
                     'BOOK_VENDOR_ROW', 'One native message gives conflicting absolute quantities.'
                 )
             levels = levels.unique(maintain_order=True)
+        levels = levels.sort('event')
+        counts = np.bincount(levels['event'].to_numpy()-self.offset,minlength=events.height)
+        offsets = np.empty(events.height+1,dtype=np.int64);offsets[0]=0;np.cumsum(counts,out=offsets[1:])
+        levels = levels.select('side','price','quantity')
+        self.chunks[path] = _Chunk(pl.Series(offsets),levels['side'],levels['price'],levels['quantity'],self.offset)
         self.offset += events.height
         self.files[path] = events, levels
+        self.file_bytes[path] = events.estimated_size() + levels.estimated_size()
+        self.cache_bytes += self.file_bytes[path]
+        self.trim()
         return events, levels
+
+    def trim(self) -> None:
+        for previous in tuple(self.files):
+            if self.cache_bytes <= _INPUT_CACHE_BYTES:
+                break
+            if previous not in self.active_paths:
+                self.forget(previous)
+
+    def forget(self, path: Path) -> None:
+        self.files.pop(path, None)
+        self.chunks.pop(path, None)
+        self.cache_bytes -= self.file_bytes.pop(path, 0)
+
+    def clear(self) -> None:
+        self.files.clear()
+        self.chunks.clear()
+        self.file_bytes.clear()
+        self.active_paths.clear()
+        self.prices.clear()
+        self.quantities.clear()
+        self.price_codes.clear()
+        self.quantity_codes.clear()
+        for literals in self.literals.values():
+            literals.clear()
+        self.layout = None
+        self.quantity_values = np.empty(0, dtype=np.float64)
+        self.cache_bytes = 0
 
     def ordered(
         self, paths: tuple[Path, ...], *, native_order: bool
-    ) -> tuple[pl.DataFrame, pl.DataFrame, tuple[Decimal, ...]]:
+    ) -> tuple[pl.DataFrame, _Chunks | pl.DataFrame, tuple[Decimal, ...]]:
+        self.active_paths = set(paths)
         messages: list[pl.DataFrame] = []
-        pieces: list[pl.DataFrame] = []
         for index, path in enumerate(paths):
-            events, levels = self.add(path)
+            events, _ = self.add(path)
             messages.append(events.with_columns(pl.lit(index, dtype=pl.UInt8).alias('file')))
-            pieces.append(levels)
         events = pl.concat(messages).with_columns(
             pl.when(pl.col('event_type') == 'update')
             .then(pl.col('final_update_id'))
@@ -174,21 +259,16 @@ class _Inputs:
                 .drop('snapshot')
             )
         events = events.with_row_index('order')
-        order_for_event = np.empty(self.offset, dtype=np.uint32)
-        order_for_event[events['event'].to_numpy()] = np.arange(events.height, dtype=np.uint32)
-        raw = pl.concat(pieces)
-        prices = tuple(sorted(self.prices))
-        ranks = {price: index for index, price in enumerate(prices)}
-        rank_for_price = np.array([ranks[p] for p in self.prices], dtype=np.uint32)
-        levels = pl.DataFrame(
-            {
-                'order': order_for_event[raw['event'].to_numpy()],
-                'side': raw['side'],
-                'price': rank_for_price[raw['price'].to_numpy()],
-                'quantity': raw['quantity'],
-            }
-        ).sort('order')
-        return events, levels, prices
+        if self.layout_count != len(self.prices):
+            prices = tuple(sorted(self.prices))
+            ranks = {price: index for index, price in enumerate(prices)}
+            rank_for_price = np.array([ranks[p] for p in self.prices], dtype=np.uint32)
+            adjacent = np.array([b - a == BOOK_PRICE_TICK[self.market] for a,b in zip(prices,prices[1:])],dtype=np.uint8)
+            self.layout = prices, rank_for_price, np.fromiter(map(float,prices),dtype=np.float64), adjacent
+            self.layout_count = len(self.prices)
+        assert self.layout is not None
+        prices, rank_for_price, _, _ = self.layout
+        return events, _Chunks(events,tuple(self.chunks[path] for path in paths),pl.Series(rank_for_price)), prices
 
 
 _inputs: ContextVar[_Inputs | None] = ContextVar('book_archive_inputs', default=None)
@@ -196,11 +276,17 @@ _inputs: ContextVar[_Inputs | None] = ContextVar('book_archive_inputs', default=
 
 @contextmanager
 def replay_session(market: Market) -> Iterator[None]:
-    token = _inputs.set(_Inputs(market))
+    retained = _inputs.get()
+    if retained is not None and retained.market == market:
+        yield
+        return
+    owned = _Inputs(market)
+    token = _inputs.set(owned)
     try:
         yield
     finally:
         _inputs.reset(token)
+        owned.clear()
 
 
 def _plan(
@@ -360,16 +446,22 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
     native_order = partition.key < '2026-08-19T00Z'
     events, levels, prices = inputs.ordered(paths, native_order=native_order)
     events = _plan(events, market, start, end, native_order)
-    positions = np.full(int(levels['order'].max()) + 1, -1, dtype=np.int32)
-    positions[events['order'].to_numpy()] = np.arange(events.height, dtype=np.int32)
-    order = positions[levels['order'].to_numpy()]
-    kept = order >= 0
-    side, price = levels['side'].to_numpy()[kept], levels['price'].to_numpy()[kept]
-    quantity = levels['quantity'].to_numpy()[kept].astype(np.int32)
-    order = order[kept]
+    native_chunks: tuple[tuple[object, ...], ...] | None
+    if isinstance(levels, _Chunks):
+        offsets = levels.locations(events)
+        side=np.empty(0,dtype=np.uint8);price=np.empty(0,dtype=np.uint32);quantity=np.empty(0,dtype=np.int32)
+        native_chunks = tuple(part.buffers() for part in levels.parts)
+    else:
+        positions = np.full(int(levels['order'].max())+1,-1,dtype=np.int32)
+        positions[events['order'].to_numpy()] = np.arange(events.height,dtype=np.int32)
+        order=positions[levels['order'].to_numpy()];kept=order>=0
+        side=levels['side'].to_numpy()[kept];price=levels['price'].to_numpy()[kept]
+        quantity=levels['quantity'].to_numpy()[kept].astype(np.int32);order=order[kept]
+        offsets=np.searchsorted(order,np.arange(events.height+1)).astype(np.int64)
+        native_chunks=None
     boundary = events.filter(pl.col('event_type') == 'boundary')['order'].to_list()
     if boundary:
-        repeated = levels.filter(pl.col('order').is_in(boundary))
+        repeated = (levels.frame() if isinstance(levels, _Chunks) else levels).filter(pl.col('order').is_in(boundary))
         if (
             repeated.group_by('side', 'price')
             .agg(pl.col('quantity').n_unique())
@@ -379,19 +471,18 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
             raise SourceError(
                 'BOOK_SNAPSHOT_MISMATCH', 'Boundary collectors disagree about an absolute quantity.'
             )
-    offsets = np.searchsorted(order, np.arange(events.height + 1)).astype(np.int64)
     effective = events['effective'].to_numpy().astype(np.int64)
     native = events['native'].to_numpy().astype(np.uint64)
     update = (events['event_type'] != 'snapshot').to_numpy().astype(np.uint8)
-    adjacent = np.array(
-        [b - a == BOOK_PRICE_TICK[market] for a, b in zip(prices, prices[1:])], dtype=np.uint8
-    )
-    price_values = np.fromiter(map(float, prices), dtype=np.float64)
-    quantity_values = np.fromiter(map(float, inputs.quantities), dtype=np.float64)
+    assert inputs.layout is not None
+    _, _, price_values, adjacent = inputs.layout
+    if inputs.quantity_count != len(inputs.quantities):
+        inputs.quantity_values = np.fromiter(map(float,inputs.quantities),dtype=np.float64)
+        inputs.quantity_count = len(inputs.quantities)
+    quantity_values = inputs.quantity_values
     engine = cast(_NativeReplay, importlib.import_module('_origo_book_replay'))
     try:
-        payloads = engine.replay(
-            (
+        buffers: tuple[object, ...] = (
                 offsets,
                 update,
                 effective,
@@ -402,10 +493,10 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
                 price_values,
                 quantity_values,
                 adjacent,
-            ),
-            start,
-            end,
-        )
+            )
+        if isinstance(levels, _Chunks):
+            buffers += (levels.ranks.to_numpy(),)
+        payloads = engine.replay(buffers,start,end,native_chunks)
     except ValueError as error:
         code, separator, message = str(error).partition('|')
         if separator and code.startswith('BOOK_'):

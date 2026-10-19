@@ -53,6 +53,7 @@ from .component_upgrade import ComponentUpgradeError
 from .contracts import (
     ArchiveNotPublishedYet,
     CanonicalAuditPolicy,
+    CanonicalBackfillBatch,
     RevisionedSourceSpec,
     RolloutStage,
     SourceBundle,
@@ -75,7 +76,6 @@ else:
 class _JobFactory(Protocol):
     def __call__(
         self, name: str, *, selection: list[str], tags: dict[str, str],
-        config: dict[str, object] | None = None,
     ) -> UnresolvedAssetJobDefinition: ...
 
 
@@ -366,6 +366,22 @@ def _execute_operation(
     raise ValueError(f'Unknown source operation: {operation}')
 
 
+def _partition_materialization(name: str, result: dict[str, object]) -> AssetMaterialization:
+    from dagster._core.definitions.data_version import DATA_VERSION_TAG
+
+    return AssetMaterialization(
+        asset_key=name,
+        partition=str(result['partition_key']),
+        metadata={
+            'source_state': MetadataValue.json(result),
+            'source_result': MetadataValue.json(result),
+        },
+        tags={DATA_VERSION_TAG: hashlib.sha256(
+            str((result['revision'], result['build_id'], result['generation'])).encode()
+        ).hexdigest()},
+    )
+
+
 def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> AssetsDefinition:
     @asset(
         name=name,
@@ -384,7 +400,10 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation in ('canonical', 'repair', 'certify')
         else None,
         output_required=operation != 'canonical',
-        backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=1)
+        backfill_policy=BackfillPolicy.multi_run(max_partitions_per_run=(
+            spec.canonical.backfill_batch_size
+            if isinstance(spec.canonical, CanonicalBackfillBatch) and not spec.consumers else 1
+        ))
         if operation == 'canonical'
         else None,
         deps=(
@@ -422,27 +441,36 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                     run_id=context.run.run_id,
                 )
 
+            if len(context.partition_keys) > 1:
+                adapter = spec.canonical
+                if not isinstance(adapter, CanonicalBackfillBatch) or spec.consumers:
+                    raise ValueError('This source requires one canonical partition per run.')
+                failed: list[str] = []
+                with adapter.backfill_batch(), archive_session():
+                    for key in context.partition_keys:
+                        try:
+                            result = execute_partition_backfill(
+                                spec, context, run_day, partition_key=key
+                            )
+                        except Failure as error:
+                            if not adapter.backfill_rejection(error.__cause__):
+                                raise
+                            failed.append(key)
+                            context.log.warning('source=%s partition=%s rejected=%s',
+                                                spec.key, key, error.description)
+                        else:
+                            publication_ready(spec, context, result)
+                            context.log_event(_partition_materialization(name, result))
+                if failed:
+                    raise Failure(
+                        description='BOOK_PARTITIONS_FAILED: ' + ', '.join(failed),
+                        allow_retries=False,
+                    )
+                return
+
             result = execute_partition_backfill(spec, context, run_day)
             if not publication_ready(spec, context, result):
-                from dagster._core.definitions.data_version import DATA_VERSION_TAG
-
-                context.log_event(
-                    AssetMaterialization(
-                        asset_key=name,
-                        partition=str(result['partition_key']),
-                        metadata={
-                            'source_state': MetadataValue.json(result),
-                            'source_result': MetadataValue.json(result),
-                        },
-                        tags={
-                            DATA_VERSION_TAG: hashlib.sha256(
-                                str(
-                                    (result['revision'], result['build_id'], result['generation'])
-                                ).encode()
-                            ).hexdigest()
-                        },
-                    )
-                )
+                context.log_event(_partition_materialization(name, result))
                 return
             yield MaterializeResult(
                 value=None,
@@ -632,7 +660,6 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 'origo_source_operation': 'backfill',
                 'dagster/max_runtime': '93600',
             },
-            config={'execution': {'config': {'in_process': {}}}} if not spec.consumers else None,
         ),
     )
     definitions = Definitions(assets=assets, jobs=unresolved)

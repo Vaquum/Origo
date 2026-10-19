@@ -9,10 +9,11 @@ import os
 import shutil
 import struct
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from origo.workers.book_capture import BookSampler, Level, utc_millisecond
 
 from ..arrow_types import ArrowCompression, ArrowParquet
-from ..archive import archive_references
+from ..archive import archive_references, archive_session
+from ..cleanup import preserve_primary_failure
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
 from .book_local import fetch_sealed_partition as fetch_sealed_partition
@@ -37,6 +39,10 @@ BOOK_MAX_PRELUDE_HOURS = 24
 BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
+BOOK_BACKFILL_BATCH_SIZE = 24
+BOOK_BATCH_FILE_COUNT = BOOK_BACKFILL_BATCH_SIZE + BOOK_MAX_PRELUDE_HOURS + 1
+BOOK_BATCH_BODY_BYTES = 512 * 1024**2
+BOOK_BATCH_PREPARED_BYTES = 2 * BOOK_MAX_PRELUDE_BYTES
 # Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 4
 _REJECTION_POLICY_VERSION = 5
@@ -78,6 +84,81 @@ _GridSample = tuple[int, int, int, int, tuple[Level, ...], tuple[Level, ...]]
 
 class _MissingArchive(SourceError):
     """An archive lookup returned404; authentication failures are separate."""
+
+
+class _BookBatch:
+    def __init__(self, market: Market, root: Path) -> None:
+        self.market, self.root = market, root
+        self.responses: OrderedDict[tuple[str, str], Response] = OrderedDict()
+        self.body_bytes = 0
+        self.prepared: OrderedDict[str, tuple[Path, int]] = OrderedDict()
+        self.prepared_bytes = 0
+        self.active: set[Path] = set()
+        self.lock = Lock()
+
+    def response(self, key: tuple[str, str]) -> Response | None:
+        with self.lock:
+            response = self.responses.get(key)
+            if response is not None:
+                self.responses.move_to_end(key)
+            return response
+
+    def remember(self, key: tuple[str, str], response: Response) -> None:
+        etag = response.headers.get('ETag') or response.headers.get('etag') or ''
+        if (len(response.body) > CRYPTOHFT_MAX_FILE_BYTES
+                or not etag.startswith('"') or not etag.endswith('"')):
+            return
+        with self.lock:
+            previous = self.responses.pop(key, None)
+            if previous is not None:
+                self.body_bytes -= len(previous.body)
+            self.responses[key] = Response(
+                response.body, dict(response.headers), response.status,
+                resource_url=response.resource_url,
+            )
+            self.body_bytes += len(response.body)
+            while (len(self.responses) > BOOK_BATCH_FILE_COUNT
+                   or self.body_bytes > BOOK_BATCH_BODY_BYTES):
+                _, removed = self.responses.popitem(last=False)
+                self.body_bytes -= len(removed.body)
+
+    def prepare(self, body: bytes) -> Path:
+        digest = hashlib.sha256(body).hexdigest()
+        retained = self.prepared.get(digest)
+        if retained is not None:
+            self.prepared.move_to_end(digest)
+            self.active.add(retained[0])
+            return retained[0]
+        raw = self.root / (digest + '.input')
+        raw.write_bytes(body)
+        prepared = _prepare_archive_uncached(raw, self.root)
+        if prepared != raw:
+            raw.unlink()
+        size = prepared.stat().st_size
+        self.prepared[digest] = prepared, size
+        self.prepared_bytes += size
+        self.active.add(prepared)
+        self.trim()
+        return prepared
+
+    def trim(self) -> None:
+        from .book_columnar import _inputs
+
+        for previous in tuple(self.prepared):
+            if (self.prepared_bytes <= BOOK_BATCH_PREPARED_BYTES
+                    and len(self.prepared) <= BOOK_BATCH_FILE_COUNT):
+                break
+            candidate, count = self.prepared[previous]
+            if candidate not in self.active:
+                candidate.unlink()
+                del self.prepared[previous]
+                self.prepared_bytes -= count
+                decoder = _inputs.get()
+                if decoder is not None:
+                    decoder.forget(candidate)
+
+
+_batch: ContextVar[_BookBatch | None] = ContextVar('book_backfill_batch', default=None)
 
 
 class _BinaryInsert(Protocol):
@@ -293,7 +374,7 @@ def _archive_response(market: Market, partition: Partition, *, metadata: bool,
         raise
 
 
-def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+def _provider_response(market: Market, partition: Partition, *, metadata: bool) -> Response:
     key = os.environ.get('CRYPTOHFTDATA_API_KEY', '')
     if not key:
         return _archive_response(market, partition, metadata=metadata, token=None)
@@ -306,6 +387,24 @@ def _response(market: Market, partition: Partition, *, metadata: bool) -> Respon
                 raise
         token = _token_for(key, rejected=token)
     raise RuntimeError('Provider authentication attempts exhausted.')
+
+
+def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
+    batch = _batch.get()
+    cache_key = (partition.key, hashlib.sha256(
+        os.environ.get('CRYPTOHFTDATA_API_KEY', '').encode()
+    ).hexdigest())
+    reusable = batch is not None and batch.market == market and not metadata
+    if reusable:
+        assert batch is not None
+        retained = batch.response(cache_key)
+        if retained is not None:
+            return retained
+    response = _provider_response(market, partition, metadata=metadata)
+    if reusable:
+        assert batch is not None
+        batch.remember(cache_key, response)
+    return response
 
 
 def _identity(market: Market, partition: Partition, response: Response) -> str:
@@ -341,6 +440,19 @@ def _frame_key(row: dict[str, object]) -> tuple[object, ...]:
 
 
 def _prepare_archive(path: Path, root: Path) -> Path:
+    batch = _batch.get()
+    return batch.prepare(path.read_bytes()) if batch is not None else _prepare_archive_uncached(path, root)
+
+
+def _store_archive(path: Path, root: Path, body: bytes) -> Path:
+    batch = _batch.get()
+    if batch is not None:
+        return batch.prepare(body)
+    path.write_bytes(body)
+    return _prepare_archive(path, root)
+
+
+def _prepare_archive_uncached(path: Path, root: Path) -> Path:
     with path.open('rb') as stream:
         magic = stream.read(4)
     if magic != b'\x28\xb5\x2f\xfd':
@@ -562,6 +674,38 @@ def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
 class CryptoHFTBookHourly:
     market: Market
 
+    @property
+    def backfill_batch_size(self) -> int:
+        return BOOK_BACKFILL_BATCH_SIZE
+
+    @contextmanager
+    def backfill_batch(self) -> Iterator[None]:
+        from .book_columnar import replay_session
+
+        root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
+        if not root.is_absolute():
+            raise ValueError('Book input reuse requires the shared absolute lock mount.')
+        root = root / f'book_vendor_{self.market}'
+        root.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix='backfill-', dir=root) as directory:
+            batch = _BookBatch(self.market, Path(directory))
+            token = _batch.set(batch)
+            try:
+                with archive_session(), replay_session(self.market):
+                    yield
+            finally:
+                _batch.reset(token)
+                batch.responses.clear()
+                batch.prepared.clear()
+                batch.active.clear()
+
+    def backfill_rejection(self, error: BaseException | None) -> bool:
+        return isinstance(error, _MissingArchive) or (
+            isinstance(error, SourceError) and error.code in (
+                _REJECTION_CODES | {'BOOK_VENDOR_SEED_MISSING', 'BOOK_SEED_TOO_SHALLOW'}
+            )
+        )
+
     def candidate(self, now: datetime) -> Partition:
         start = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         return self.partition(start.strftime(HOUR_KEY_FORMAT))
@@ -593,6 +737,22 @@ class CryptoHFTBookHourly:
             return _revision_key(current, tuple(checked))
 
     def fetch(self, partition: Partition) -> Revision:
+        def finish_inputs() -> None:
+            batch = _batch.get()
+            if batch is not None:
+                batch.active.clear()
+                batch.trim()
+                from .book_columnar import _inputs
+
+                decoder = _inputs.get()
+                if decoder is not None:
+                    decoder.active_paths.clear()
+                    decoder.trim()
+
+        with preserve_primary_failure('book input cache cleanup', finish_inputs):
+            return self._fetch(partition)
+
+    def _fetch(self, partition: Partition) -> Revision:
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
         with _paired_responses(self.market, partition, after, metadata=False) as (response, closing):
             current = _identity(self.market, partition, response)
@@ -604,8 +764,7 @@ class CryptoHFTBookHourly:
             root = Path(temporary.name)
             archive = root / 'input.parquet'
             try:
-                archive.write_bytes(response.body)
-                archive = _prepare_archive(archive, root)
+                archive = _store_archive(archive, root, response.body)
                 original = closing.result()
             except BaseException:
                 temporary.cleanup()
@@ -620,8 +779,7 @@ class CryptoHFTBookHourly:
             if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
                 raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Following vendor archive exceeds its byte bound.')
             tail = root / 'following.parquet'
-            tail.write_bytes(original.body)
-            tail = _prepare_archive(tail, root)
+            tail = _store_archive(tail, root, original.body)
             used += tail.stat().st_size
             if used > BOOK_MAX_PRELUDE_BYTES:
                 raise SourceError('BOOK_VENDOR_PRELUDE_BOUND', 'Adjacent archives exceed the replay byte bound.')
@@ -651,8 +809,7 @@ class CryptoHFTBookHourly:
                             )
                         if unavailable is None:
                             prior = root / f'prelude-{offset:02}.parquet'
-                            prior.write_bytes(original.body)
-                            prior = _prepare_archive(prior, root)
+                            prior = _store_archive(prior, root, original.body)
                             used += prior.stat().st_size
                             if used > BOOK_MAX_PRELUDE_BYTES:
                                 raise SourceError(

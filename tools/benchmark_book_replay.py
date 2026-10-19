@@ -10,9 +10,9 @@ import os
 import platform
 import resource
 import statistics
-from collections import Counter
 import tempfile
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path

@@ -979,7 +979,7 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
     tmp_path: Path,
 ) -> None:
     import polars as pl
-    from origo.sources.adapters.book_columnar import _KEYS
+    from origo.sources.adapters.book_columnar import _Inputs, _KEYS
 
     market, body, _ = original_vendor_archive
     current = tmp_path / 'current.parquet'
@@ -1038,6 +1038,19 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
                            tmp_path / 'grid', following=(damaged,))
     assert error.value.code == 'BOOK_SEQUENCE_GAP'
     assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
+
+    # Older archives sort by native ID: a valid earlier event can arrive later.
+    late = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time'),
+        pl.lit(clock).cast(schema['event_time']).alias('event_time'),
+    )
+    closing = message(high).with_columns(
+        pl.lit(low['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    late_file = tmp_path / 'late-preboundary.parquet'
+    pl.concat([closing.collect(), late.collect()]).write_parquet(late_file)
+    retained, _ = _Inputs(market, end).add(late_file, following=True)
+    assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
 
 
 def test_snapshot_presence_reads_only_original_required_columns(

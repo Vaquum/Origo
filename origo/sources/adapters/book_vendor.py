@@ -214,25 +214,34 @@ def _token_for(key: str, *, rejected: str | None = None) -> str:
 
 def _remember_reference(file: str, response: Response) -> None:
     references = archive_references()
-    if references is None or response.resource_url is None:
+    if references is None:
         return
-    target = urlsplit(response.resource_url)
-    query = parse_qs(target.query)
-    if (target.scheme != 'https' or target.hostname is None
-            or not target.hostname.endswith('.r2.cloudflarestorage.com')
-            or target.username is not None or target.port not in (None, 443)
-            or not unquote(target.path).endswith(('/' + file, '/' + file + '.zst'))
-            or any(key.lower() == 'versionid' for key in query)
-            or query.get('X-Amz-SignedHeaders') != ['host']
-            or len(query.get('X-Amz-Signature', [])) != 1
-            or len(query.get('X-Amz-Date', [])) != 1
-            or len(query.get('X-Amz-Expires', [])) != 1):
-        return
-    issued = datetime.strptime(query['X-Amz-Date'][0], '%Y%m%dT%H%M%SZ').replace(tzinfo=UTC)
-    deadline = issued.timestamp() + int(query['X-Amz-Expires'][0])
+    key = (CRYPTOHFT_URL, file)
     with _REFERENCE_LOCK:
-        key = (CRYPTOHFT_URL, file)
-        if key not in references and len(references) >= BOOK_MAX_PRELUDE_HOURS + 2:
+        references.pop(key, None)
+    if response.resource_url is None:
+        return
+    try:
+        target = urlsplit(response.resource_url)
+        query = parse_qs(target.query)
+        if (target.scheme != 'https' or target.hostname is None
+                or not target.hostname.endswith('.r2.cloudflarestorage.com')
+                or target.username is not None or target.port not in (None, 443)
+                or not unquote(target.path).endswith(('/' + file, '/' + file + '.zst'))
+                or any(name.lower() == 'versionid' for name in query)
+                or query.get('X-Amz-SignedHeaders') != ['host']
+                or len(query.get('X-Amz-Signature', [])) != 1
+                or len(query.get('X-Amz-Date', [])) != 1
+                or len(query.get('X-Amz-Expires', [])) != 1):
+            return
+        issued = datetime.strptime(query['X-Amz-Date'][0], '%Y%m%dT%H%M%SZ').replace(tzinfo=UTC)
+        deadline = issued.timestamp() + int(query['X-Amz-Expires'][0])
+    except (ValueError, OverflowError):
+        deadline = 0.0
+    if not math.isfinite(deadline) or deadline <= time.time() + 35:
+        return
+    with _REFERENCE_LOCK:
+        if len(references) >= BOOK_MAX_PRELUDE_HOURS + 2:
             references.pop(next(iter(references)))
         references[key] = (response.resource_url, deadline)
 

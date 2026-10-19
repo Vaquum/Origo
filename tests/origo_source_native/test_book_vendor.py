@@ -981,7 +981,8 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert all(r._content_consumed for r in responses)
 
 
-@pytest.mark.parametrize('case', ('reuse', 'expired', 'changed', 'moved', 'missing', 'transport', 'unsupported'))
+@pytest.mark.parametrize('case', ('reuse', 'expired', 'changed', 'moved', 'missing', 'transport', 'unsupported',
+                                  'malformed-date', 'malformed-expiry', 'oversized-expiry'))
 def test_vendor_issued_object_reference_scope(
     original_vendor_archive, original_vendor_following_archive, tmp_path, monkeypatch, caplog, case,
 ):
@@ -1039,6 +1040,11 @@ def test_vendor_issued_object_reference_scope(
                   '&X-Amz-Signature=control-signature')
         if case == 'unsupported':
             issued += '&versionId=deliberate-version'
+        elif case == 'malformed-date':
+            issued = issued.replace('X-Amz-Date=' + date, 'X-Amz-Date=invalid')
+        elif case in ('malformed-expiry', 'oversized-expiry'):
+            issued = issued.replace('X-Amz-Expires=300', 'X-Amz-Expires=' + (
+                'not-a-number' if case == 'malformed-expiry' else '9' * 400))
         return response(content[:1] if metadata else content, original_headers, issued,
                         206 if metadata else 200)
 
@@ -1050,6 +1056,7 @@ def test_vendor_issued_object_reference_scope(
     monkeypatch.setattr(daily.time, 'time', lambda: clock[0])
     monkeypatch.setattr(daily.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     adapter = vendor.CryptoHFTBookHourly(market)
+    unsupported = case in ('unsupported', 'malformed-date', 'malformed-expiry', 'oversized-expiry')
     with archive.archive_session():
         with vendor._paired_responses(market, partition, after, metadata=False) as (opening, closing):
             tail = closing.result()
@@ -1057,7 +1064,7 @@ def test_vendor_issued_object_reference_scope(
         expected = vendor._revision_key(vendor._identity(market, partition, opening),
             ((after.key, vendor._identity(market, after, tail)),))
         assert 'control-signature' not in repr(opening)
-        assert len(archive.archive_references()) == (0 if case == 'unsupported' else 2)
+        assert len(archive.archive_references()) == (0 if unsupported else 2)
         before = len(calls)
         if case == 'expired':
             clock[0] += 300
@@ -1071,7 +1078,7 @@ def test_vendor_issued_object_reference_scope(
             assert sum(file == current_file and not direct for file, _, direct, _ in calls[before:]) == (case == 'missing')
         else:
             assert (adapter.discover(partition) != expected) == (case in ('changed', 'moved'))
-            assert any(direct for _, _, direct, _ in calls[before:]) == (case not in ('expired', 'unsupported'))
+            assert any(direct for _, _, direct, _ in calls[before:]) == (case != 'expired' and not unsupported)
         assert len(list(tmp_path.glob('*.state'))) == 1
     assert archive.archive_references() is None
     assert 'control-signature' not in caplog.text and 'control-key' not in caplog.text
@@ -1101,6 +1108,9 @@ def test_vendor_reference_cache_is_bounded_and_scoped():
             vendor._remember_reference(file, Response(b'', {}, 206, resource_url=url))
             assert len(archive.archive_references()) <= vendor.BOOK_MAX_PRELUDE_HOURS + 2
         assert len(archive.archive_references()) == vendor.BOOK_MAX_PRELUDE_HOURS + 2
+        vendor._remember_reference(file, Response(b'', {}, 206, resource_url=url.replace(
+            'X-Amz-Date=' + now, 'X-Amz-Date=invalid')))
+        assert (vendor.CRYPTOHFT_URL, file) not in archive.archive_references()
     assert archive.archive_references() is None
 
 

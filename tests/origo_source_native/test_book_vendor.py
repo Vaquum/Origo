@@ -1771,3 +1771,55 @@ def test_independent_archive_requests_preserve_discovery_identity(
             adapter.discover(partition)
     assert failure.value.code == ('PROVIDER_HTTP_401' if current_fails else 'PROVIDER_TRANSPORT_FAILED')
     assert not tuple(tmp_path.glob('book_vendor_*/hour-*'))
+
+
+@pytest.mark.parametrize('case', ('fetch_identity', 'fetch_bound', 'fetch_prepare',
+                                 'discover_identity', 'discover_dependencies', 'discover_prelude'))
+def test_independent_archive_requests_keep_validation_error_priority(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    from threading import Barrier
+
+    market, body, headers = original_vendor_archive
+    operation, fault = case.split('_')
+    partition = vendor.hour_partition(REAL_HOUR)
+    before = vendor.hour_partition('2026-10-04T08Z')
+    rendezvous = Barrier(2, timeout=5)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    if fault in ('dependencies', 'prelude'):
+        path = vendor._dependency_path(market, partition)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        current = vendor._identity(market, partition, Response(body, headers, 200))
+        path.write_text(json.dumps({'current': current, 'dependencies':
+            'deliberately-invalid-metadata' if fault == 'dependencies' else
+            [(before.key, 'deliberately-unidentified-prelude')]}))
+    if fault == 'bound':
+        monkeypatch.setattr(vendor, 'CRYPTOHFT_MAX_FILE_BYTES', len(body) - 1)
+    if fault == 'prepare':
+        def invalid_preparation(path: Path, root: Path) -> Path:
+            raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Deliberate current preparation failure.')
+        monkeypatch.setattr(vendor, '_prepare_archive', invalid_preparation)
+
+    def observed(request_market: Market, selected: Partition, *, metadata: bool) -> Response:
+        assert request_market == market
+        if selected.key == before.key:
+            return Response(b'', {}, 206)  # Deliberate earlier dependency identity failure.
+        rendezvous.wait()
+        if selected.key != partition.key:
+            raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Deliberate following transport failure.')
+        original_headers = {} if fault == 'identity' else headers
+        return Response(b'' if metadata else body, original_headers, 206 if metadata else 200)
+
+    monkeypatch.setattr(vendor, '_response', observed)
+    adapter = vendor.CryptoHFTBookHourly(market)
+    with pytest.raises(SourceError) as failure:
+        if operation == 'fetch':
+            adapter.fetch(partition)
+        else:
+            adapter.discover(partition)
+    expected = ('BOOK_VENDOR_FILE_BOUND' if fault in ('bound', 'prepare') else
+                'BOOK_VENDOR_DEPENDENCIES' if fault == 'dependencies' else
+                'BOOK_VENDOR_IDENTITY_MISSING')
+    assert failure.value.code == expected
+    assert not tuple(tmp_path.glob('book_vendor_*/hour-*'))

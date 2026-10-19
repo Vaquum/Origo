@@ -46,6 +46,18 @@ When reviewing comments left on an issue you are working on, always address the 
 
 The opinion is the deliverable. Confirming before posting adds a round-trip and slows collaboration.
 
+## Ingestion and performance
+
+Before any work related to ingestion—including planning, review, debugging,
+adapters, capture, backfills, reconciliation, projections or publication—read and
+apply the [ingestion performance rules](docs/Developer/Ingestion-performance.md)
+and read the [performance investigation log](docs/Developer/Performance-investigation-log.md).
+Before any performance work elsewhere in the system, read both documents too.
+Every performance task must append its evidence and positive and negative
+learnings to the log before completion, including failed experiments and unchanged
+results. State unmeasured or unknown outcomes explicitly. Preserve existing
+entries; append corrections identifying the entries they supersede.
+
 ## Operator UX
 
 Before drafting or implementing any PRD or slice that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD and Slice templates require it.

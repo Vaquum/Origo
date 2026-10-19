@@ -127,7 +127,8 @@ def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> No
     from dagster import validate_run_config
 
     backfill = next(job for job in source.jobs if job.name == 'backfill_binance_spot_trades_source_job')
-    assert validate_run_config(backfill)['execution'][backfill.executor_def.name].keys() == {'multiprocess'}
+    config = backfill.get_run_config_for_partition_key(DAY)
+    assert validate_run_config(backfill, config)['execution'][backfill.executor_def.name].keys() == {'multiprocess'}
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
     assert isinstance(asset.partitions_def, DailyPartitionsDefinition)
     assert asset.partitions_def.get_first_partition_key() == DAY

@@ -163,7 +163,8 @@ def test_native_book_selection_completion_preserves_source_failures(
         job = _job(runtime)
         from dagster import validate_run_config
 
-        assert validate_run_config(job)['execution'][job.executor_def.name].keys() == {'in_process'}
+        config = job.get_run_config_for_partition_key(REAL_HOUR)
+        assert validate_run_config(job, config)['execution'][job.executor_def.name].keys() == {'in_process'}
         assert validate_run_config(job, {
             'execution': {'config': {'multiprocess': {}}},
         })['execution'][job.executor_def.name].keys() == {'multiprocess'}

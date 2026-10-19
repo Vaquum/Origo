@@ -10,7 +10,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from dagster import AssetExecutionContext, DagsterInstance, Definitions, Failure, RetryRequested
+from dagster import AssetExecutionContext, AssetKey, DagsterInstance, Definitions, Failure, RetryRequested
 from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
 from dagster._core.remote_origin import RemotePartitionSetOrigin
 
@@ -155,18 +155,33 @@ def test_native_book_selection_completion_preserves_source_failures(
                             scope='PARTITION', partition=unrelated,
                             message='Controlled unrelated source failure; no provider-coverage claim.')
     before = _failures(runtime, unrelated)
+    runtime.failures.record(operation='backfill', error_code='RUN_FAILED', scope='NONE')
     home = tmp_path / 'native-completion'
     home.mkdir()
     with DagsterInstance.local_temp(str(home)) as instance:
         job = _job(runtime)
+        assert job.asset_layer.executable_asset_keys == {
+            AssetKey(f'build_{runtime.spec.key}_canonical_revision_origo')
+        }
         parent = _parent(instance, job.name)
         result = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
                                         tags={'dagster/backfill': parent}, raise_on_error=False)
         assert result.success
         assert _failures(runtime, unrelated) == before
+        assert runtime.store.execute(
+            "SELECT failure_key FROM origo.source_failure_log WHERE source_key=%(source)s "
+            "AND operation='backfill' GROUP BY failure_key "
+            "HAVING argMax(event_type,event_time)='FAILED'",
+            {'source': runtime.spec.key},
+        ) == []
+        health_job = next(
+            item for item in build_source_bundle(runtime.spec).jobs
+            if item.name == f'reconcile_{runtime.spec.key}_source_origo_job'
+        )
+        health = health_job.execute_in_process(instance=instance)
         assert any(event.event_type_value == 'ASSET_CHECK_EVALUATION'
                    and event.event_specific_data.check_name == 'source_health'
-                   and event.event_specific_data.passed is False for event in result.all_events)
+                   and event.event_specific_data.passed is False for event in health.all_events)
         record = runtime.store.record(vendor.hour_partition(REAL_HOUR))
         assert record is not None and len(record.component_hashes) == 4
         assert runtime.store.execute(
@@ -216,7 +231,7 @@ def test_native_book_selection_completion_preserves_source_failures(
         # A concurrent activation can retain identical payloads but supersede this receipt.
         def activate_after_join(self: SourceStore, sql: str, params=None, settings=None):
             rows = query(self, sql, params, settings)
-            if sql.startswith('SELECT uniqExact(r.partition_key), countIf('):
+            if sql.startswith('SELECT component, content_hash FROM origo.source_component_log'):
                 self.insert_activation(replace(record, generation=record.generation + 1),
                                        'controlled-concurrent-activation')
             return rows

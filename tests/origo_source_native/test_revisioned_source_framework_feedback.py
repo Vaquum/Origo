@@ -66,16 +66,17 @@ def test_native_completion_does_not_enqueue_another_reconciliation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime, instance, source = backfill_env
-    original = SourceRuntime.reconcile
+    original = SourceRuntime.build
     cursors = []
 
     def during_run(self: SourceRuntime, key: str) -> StateRecord:
+        record = original(self, key)
         requests, cursor = _requests(backfill_env)
         assert all(r.partition_key is None for r in requests)
         cursors.append(cursor)
-        return original(self, key)
+        return record
 
-    monkeypatch.setattr(SourceRuntime, 'reconcile', during_run)
+    monkeypatch.setattr(SourceRuntime, 'build', during_run)
     asset = next(a for a in source.assets if a.key == AssetKey(ASSET))
     job = Definitions(assets=[asset]).get_implicit_global_asset_job_def()
     result = job.execute_in_process(
@@ -279,7 +280,8 @@ def test_cleanup_failures_preserve_primary_verdict(
         raise OSError('Injected capacity persistence failure')
 
     with monkeypatch.context() as patch:
-        patch.setattr(SourceRuntime, 'reconcile', invalid)
+        patch.setattr(SourceRuntime, 'build', invalid)
+        patch.setattr(SourceRuntime, 'repair', invalid)
         patch.setattr(capacity.CapacityMonitor, 'finish', failed_sampling)
         result = backfill._run(backfill_env)
     assert not result.success

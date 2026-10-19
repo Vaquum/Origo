@@ -191,7 +191,7 @@ def test_backfill_builds_real_archive_and_records_evidence(
         result = _run(backfill_env, day='2020-01-01', probe=True)
     assert len(archives) == 1
     assert dict(retained_reads) == {
-        key: 2 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+        key: 1 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
     }
     assert result.success
     evidence = runtime.store.execute(
@@ -236,7 +236,7 @@ def test_backfill_builds_real_archive_and_records_evidence(
     assert instance.get_materialized_partitions(asset.key) == {DAY, '2020-01-01'}
 
     messages = '\n'.join(entry.user_message for entry in instance.all_logs(result.run_id))
-    assert 'phase=reconciled' in messages
+    assert 'operation=canonical phase=completed' in messages
 
     # Duplicate an actual archive row exactly at the seek-page boundary.
     record = next(

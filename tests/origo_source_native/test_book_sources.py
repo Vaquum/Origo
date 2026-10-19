@@ -221,11 +221,11 @@ def test_wide_book_components_hash_in_bounded_chunks_and_trade_hashes_are_unchan
     monkeypatch.setattr(runtime.store.client, 'execute', observed)
     record = runtime.build(_keys(runtime)[-1], provisional=True)
     assert len(record.component_hashes) == 4
-    assert any('LIMIT 64' in query for query in queries)
+    assert any('intDiv(ordinal-1, 64)' in query for query in queries)
     assert not any('LIMIT 1048576' in query and 'bids' in query for query in queries)
     runtime.store.execute('SYSTEM FLUSH LOGS')
     peaks = runtime.store.execute(
-        "SELECT max(memory_usage) FROM system.query_log WHERE type='QueryFinish' AND query LIKE '%LIMIT 64%' AND event_time > now() - INTERVAL 10 MINUTE"
+        "SELECT max(memory_usage) FROM system.query_log WHERE type='QueryFinish' AND startsWith(query, 'SELECT chunk,') AND query LIKE '%intDiv(ordinal-1, 64)%' AND event_time > now() - INTERVAL 10 MINUTE"
     )
     assert 0 < int(str(peaks[0][0])) < 256 * 1024**2
 
@@ -315,9 +315,10 @@ def test_real_depth200_hash_page_stays_within_memory_budget(
         peaks = client.execute(
             f'SELECT max(memory_usage), count() FROM system.query_log '
             f"WHERE type='QueryFinish' AND position(query,'FROM {table}')>0 "
-            f"AND position(query,'LIMIT {BOOK_HASH_CHUNK_ROWS}')>0"
+            f"AND startsWith(query, 'SELECT chunk,') "
+            f"AND position(query,'intDiv(ordinal-1, {BOOK_HASH_CHUNK_ROWS})')>0"
         )
-        assert int(str(peaks[0][1])) >= 2
+        assert int(str(peaks[0][1])) == 1
         assert 0 < int(str(peaks[0][0])) < 256 * 1024**2
     finally:
         client.disconnect()

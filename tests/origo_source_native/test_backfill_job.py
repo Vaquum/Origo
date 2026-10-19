@@ -600,9 +600,18 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
     assert pinned['pinned_token'] == store.snapshot().token
 
 
-@pytest.mark.parametrize('ready_job', CASES, indirect=True, ids=lambda case: case.source.spec_key)
+@pytest.mark.parametrize(
+    'ready_job,path',
+    [
+        pytest.param(case, path, id=case.source.spec_key if path == 'fresh'
+                     else f'{path}-{case.source.spec_key}')
+        for path in ('fresh', 'retained-after-fetch', 'repair') for case in CASES
+    ],
+    indirect=['ready_job'],
+)
 def test_canonical_day_retires_failed_provisional_intervals_inside_it(
-    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, path: str,
 ) -> None:
     from uuid import uuid4
 
@@ -613,6 +622,19 @@ def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     case = _case(store)
     runtime = SourceRuntime(store.spec, store, tmp_path / 'locks', 'test-setup')
     runtime.setup()
+    if path != 'fresh':
+        runtime.build(case.day)
+    if path == 'retained-after-fetch':
+        adapter_type = type(store.spec.canonical)
+        discover = adapter_type.discover
+        calls = 0
+
+        def changed_once(self, partition):
+            nonlocal calls
+            calls += 1
+            return 'changed' if calls == 1 else discover(self, partition)
+
+        monkeypatch.setattr(adapter_type, 'discover', changed_once)
     injected = FailureLog(store, tmp_path / 'locks', str(uuid4()))
     inside = f'{case.day}T10:15:00Z'
     injected.record(
@@ -629,7 +651,10 @@ def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     injected.record(
         operation='provisional', scope='PARTITION', partition=outside, error_code='RUN_FAILED'
     )
-    runtime.build(case.day)
+    if path == 'repair':
+        runtime.repair(case.day)
+    else:
+        runtime.build(case.day)
     assert store.execute(
         'SELECT partition_key, argMax(event_type, event_time), argMax(details_json, event_time) '
         'FROM origo.source_failure_log GROUP BY failure_key, partition_key ORDER BY partition_key',

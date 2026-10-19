@@ -67,6 +67,212 @@ _MINUTE_HASHES = {
 OriginalRecording = tuple[str, bytes, dict[str, str]]
 
 
+def _reference_replay_hour(
+    path: Path,
+    market: Market,
+    partition: Partition,
+    root: Path,
+    *,
+    preludes: tuple[Path, ...] = (),
+    following: tuple[Path, ...] = (),
+) -> vendor.Revision:
+    from origo.workers.book_capture import (
+        BookSampler,
+        DepthEvent,
+        DiffBook,
+        parse_book_integer,
+        utc_millisecond,
+    )
+
+    start_ms, end_ms = (
+        int(partition.start.timestamp() * 1000),
+        int(partition.end.timestamp() * 1000),
+    )
+    sampler = vendor._ArchiveGrid(root, market, start_ms)
+
+    def anchor(event: DepthEvent, received: int) -> None:
+        sampler.invalidate()
+        sampler.book = DiffBook(market, event, archive_start_ms=start_ms)
+        sampler.next_grid = start_ms
+        sampler.last_received = utc_millisecond(received // 1000000)
+
+    previous_received = 0
+    boundary_update: list[dict[str, object]] = []
+    legacy = partition.start < datetime(2026, 8, 19, tzinfo=UTC)
+    paths = (*preludes, path, *following)
+    nominal_snapshots: frozenset[tuple[int, int]] = (
+        frozenset() if legacy else vendor._nominal_snapshots(paths)
+    )
+    for frame in vendor._frames(paths, legacy=legacy):
+        first = frame[0]
+        received = parse_book_integer(first['received_time'])
+        event_ms = parse_book_integer(first['event_time'])
+        if (received < previous_received and not legacy) or any(
+            row['symbol'] != 'BTCUSDT' for row in frame
+        ):
+            raise SourceError(
+                'BOOK_VENDOR_ORDERING', 'Hourly archive has invalid receive ordering or symbol.'
+            )
+        # Legacy files merge redundant collectors by native update ID. Their
+        # receive clocks can interleave; accepted exchange clocks and ID links
+        # still have to pass the sampler's continuity and freshness checks.
+        if not legacy:
+            previous_received = received
+        sides: dict[str, list[list[str]]] = {'bid': [], 'ask': []}
+        for row in frame:
+            side = str(row['side'])
+            price, quantity = row['price'], row['quantity']
+            if side not in sides or not isinstance(price, str) or not isinstance(quantity, str):
+                raise SourceError('BOOK_VENDOR_ROW', 'Hourly archive has invalid level fields.')
+            sides[side].append([price, quantity])
+        if first['event_type'] == 'snapshot':
+            from decimal import Decimal
+
+            seed = {
+                'lastUpdateId': parse_book_integer(first['last_update_id']),
+                'bids': sorted(sides['bid'], key=lambda v: Decimal(v[0]), reverse=True),
+                'asks': sorted(sides['ask'], key=lambda v: Decimal(v[0])),
+            }
+            if legacy:
+                if sampler.book is None:
+                    if boundary_update:
+                        vendor._bind_boundary_seed(
+                            sampler, json.dumps(seed).encode(), boundary_update, start_ms, market
+                        )
+                        boundary_update.clear()
+                    else:
+                        sampler.seed(json.dumps(seed).encode())
+                        sampler.next_grid = start_ms
+                elif sampler.book.verified and sampler.book.last == seed['lastUpdateId']:
+                    # The matching update supplies the real exchange clock for this
+                    # REST snapshot. Its legacy event_time is a collector clock.
+                    assert sampler.book.event_ms is not None
+                    sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
+            else:
+                if (
+                    sampler.book is not None
+                    and sampler.book.verified
+                    and sampler.book.last != seed['lastUpdateId']
+                    and event_ms >= start_ms
+                    and not (
+                        event_ms == start_ms
+                        and sampler.book.event_ms is not None
+                        and sampler.book.event_ms < start_ms
+                    )
+                ):
+                    raise SourceError(
+                        'BOOK_SEQUENCE_GAP',
+                        'Checkpoint skips native updates inside the requested hour.',
+                    )
+                nominal = (event_ms, seed['lastUpdateId']) in nominal_snapshots
+                if event_ms % 3600000 == 0 and not nominal:
+                    raise SourceError(
+                        'BOOK_VENDOR_CLOCK_UNPROVEN',
+                        'Hour marker has no witnessed nominal identity.',
+                    )
+                vendor._archive_checkpoint(
+                    sampler, json.dumps(seed).encode(), event_ms, start_ms, nominal=nominal
+                )
+                if nominal:
+                    continue
+            if legacy:
+                # A legacy REST snapshot's collector clock is not an exchange
+                # watermark and cannot terminate the requested hour.
+                continue
+        elif first['event_type'] == 'update':
+            wire = {
+                'e': 'depthUpdate',
+                's': 'BTCUSDT',
+                'E': event_ms,
+                'U': parse_book_integer(first['first_update_id']),
+                'u': parse_book_integer(first['final_update_id']),
+                'b': sides['bid'],
+                'a': sides['ask'],
+            }
+            if market == 'perp':
+                wire['pu'] = parse_book_integer(first['prev_final_update_id'])
+            event = DepthEvent.parse(wire, market)
+            if event_ms < start_ms and received // 1000000 < event_ms:
+                sampler.invalidate()
+                continue
+            if sampler.book is None:
+                if event_ms < start_ms:
+                    anchor(event, received)
+                    continue
+                if (
+                    legacy
+                    and event_ms == start_ms
+                    and (
+                        not boundary_update
+                        or first['final_update_id'] == boundary_update[0]['final_update_id']
+                    )
+                ):
+                    if len(boundary_update) + len(frame) > 100000:
+                        raise SourceError(
+                            'BOOK_VENDOR_FRAME_BOUND',
+                            'Boundary seed messages exceed their frame bound.',
+                        )
+                    boundary_update.extend(frame)
+                    continue
+                raise SourceError(
+                    'BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no initial snapshot.'
+                )
+            clockless = not legacy and sampler.book.verified and sampler.book.event_ms is None
+            try:
+                applied = sampler.accept(
+                    event,
+                    received_at=utc_millisecond(received // 1000000),
+                )
+                if clockless and applied and event_ms > start_ms:
+                    raise SourceError(
+                        'BOOK_VENDOR_CLOCK_UNPROVEN',
+                        'First exchange witness follows the initial grid.',
+                    )
+            except SourceError as error:
+                if event_ms >= start_ms or error.code != 'BOOK_SEQUENCE_GAP':
+                    raise
+                anchor(event, received)
+        else:
+            raise SourceError('BOOK_VENDOR_EVENT', 'Hourly archive has an unknown event type.')
+        if event_ms >= end_ms:
+            break
+    if sampler.book is None or not sampler.book.verified:
+        raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no verified book.')
+    if not legacy and sampler.book.event_ms is None:
+        raise SourceError(
+            'BOOK_VENDOR_CLOCK_UNPROVEN', 'Hourly archive has no real initial exchange witness.'
+        )
+    if sampler.book.event_ms is None or sampler.book.event_ms < end_ms - 100:
+        raise SourceError(
+            'BOOK_VENDOR_TAIL_MISSING', 'No exchange update witnesses the final 100-ms sample.'
+        )
+    sampler.finish(end_ms)
+    result = sampler.revision(partition)
+    return replace(
+        result,
+        evidence_json=json.dumps(
+            {
+                **json.loads(result.evidence_json),
+                'terminal_exchange_event_ms': sampler.book.event_ms,
+                'terminal_update_id': sampler.book.last,
+                'final_grid_ms': end_ms - 100,
+            },
+            separators=(',', ':'),
+        ),
+    )
+
+
+def _fault_columnar(monkeypatch, change):
+    from origo.sources.adapters import book_columnar
+
+    original = book_columnar._Inputs.ordered
+
+    def ordered(self, paths, *, native_order):
+        return change(*original(self, paths, native_order=native_order))
+
+    monkeypatch.setattr(book_columnar._Inputs, 'ordered', ordered)
+
+
 def _json_reference(path: Path, market: Market, partition: Partition, root: Path, *,
                     following: tuple[Path, ...] = ()) -> vendor.Revision:
     class ReferenceGrid(BookSampler):
@@ -78,7 +284,8 @@ def _json_reference(path: Path, market: Market, partition: Partition, root: Path
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(vendor, '_ArchiveGrid', ReferenceGrid)
-        return vendor.replay_hour(path, market, partition, root, following=following)
+
+        return _reference_replay_hour(path, market, partition, root, following=following)
 
 
 @pytest.fixture(scope='session')
@@ -199,6 +406,10 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     assert json.loads(revision.evidence_json)['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
     reference = vendor.fetch_sealed_partition(original_vendor_spool, market, partition)
     minutes = json.loads(reference.evidence_json)['sealed_minutes']
+    actual_minutes = evidence['grid_evidence']['sealed_minutes']
+    assert [(item['first_update_id'], item['last_update_id']) for item in actual_minutes] == [
+        (item['first_update_id'], item['last_update_id']) for item in minutes
+    ]
     assert len(minutes) == 60
     expected = {
         'spot': 'd5f899d30aec852c58f2612a887d4911fdf090313c456eff0001b6f8fb133461',
@@ -319,7 +530,8 @@ def test_hourly_adapter_rejects_nonhour_keys(key: str) -> None:
 
 
 def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
-    original_vendor_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]], tmp_path: Path
 ) -> None:
     import pyarrow as pa
     import pyarrow.compute as pc
@@ -333,8 +545,11 @@ def test_missing_vendor_checkpoint_cannot_activate_a_partial_hour(
         for batch in archive.iter_batches(batch_size=vendor.CRYPTOHFT_BATCH_ROWS):
             table = pa.Table.from_batches([batch])
             writer.write_table(table.filter(pc.equal(table['event_type'], 'update')))
+    following = tmp_path / 'untouched-following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
     with pytest.raises(SourceError) as failure:
-        vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid')
+        vendor.replay_hour(path, market, vendor.hour_partition(REAL_HOUR), tmp_path / 'grid',
+                           following=(following,))
     # Updates can now anchor unknown archive depth, but cannot certify this first grid.
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
@@ -758,6 +973,93 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert all(r._content_consumed for r in responses)
 
 
+def test_following_file_keeps_all_boundary_sequence_evidence(
+    original_vendor_archive: tuple[Market, bytes, dict[str, str]],
+    original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+    from origo.sources.adapters.book_columnar import _Inputs, _KEYS
+
+    market, body, _ = original_vendor_archive
+    current = tmp_path / 'current.parquet'
+    current.write_bytes(body)
+    following = tmp_path / 'following.parquet'
+    following.write_bytes(original_vendor_following_archive[1])
+    current_scan = pl.scan_parquet(current).filter(pl.col('event_type') == 'update')
+    cursor, clock = current_scan.select(
+        pl.col('final_update_id').max(), pl.col('event_time').max()
+    ).collect().row(0)
+    scan = pl.scan_parquet(following).filter(pl.col('event_type') == 'update')
+    headers = (
+        scan.select(_KEYS).unique(maintain_order=True)
+        .filter(pl.col('final_update_id') > cursor)
+        .unique(subset='final_update_id', maintain_order=True).collect()
+    )
+    end = int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    low = headers.filter(pl.col('event_time') >= end).row(0, named=True)
+    high = headers.filter(pl.col('final_update_id') > low['final_update_id']).row(0, named=True)
+    prefix = headers.filter(pl.col('received_time') < low['received_time'])
+    if prefix.height:
+        cursor = max(cursor, prefix['final_update_id'].max())
+        clock = max(clock, prefix['event_time'].max())
+    assert clock < int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    assert low['event_time'] >= int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    assert high['final_update_id'] > low['final_update_id']
+    if market == 'perp':
+        assert low['prev_final_update_id'] == cursor
+        assert high['prev_final_update_id'] != cursor
+    else:
+        assert low['first_update_id'] <= cursor + 1 <= low['final_update_id']
+        assert high['first_update_id'] > cursor + 1
+    schema = scan.collect_schema()
+
+    def message(header):
+        return scan.filter(
+            (pl.col('received_time') == header['received_time'])
+            & (pl.col('final_update_id') == header['final_update_id'])
+        )
+
+    # Reassociate only genuine clocks/IDs to inject the gap; all original levels remain.
+    before = message(high).with_columns(
+        pl.lit(low['received_time']).cast(schema['received_time']).alias('received_time'),
+        pl.lit(clock).cast(schema['event_time']).alias('event_time'),
+    )
+    witness = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    damaged = tmp_path / 'gap-following.parquet'
+    pl.concat([
+        scan.filter(pl.col('received_time') < low['received_time']).collect(),
+        before.collect(), witness.collect(),
+    ]).write_parquet(damaged)
+    with pytest.raises(SourceError) as error:
+        vendor.replay_hour(current, market, vendor.hour_partition(REAL_HOUR),
+                           tmp_path / 'grid', following=(damaged,))
+    assert error.value.code == 'BOOK_SEQUENCE_GAP'
+    assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
+
+    # Older archives sort by native ID: a valid earlier event can arrive later.
+    late = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time'),
+        pl.lit(clock).cast(schema['event_time']).alias('event_time'),
+    )
+    closing = message(high).with_columns(
+        pl.lit(low['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    late_file = tmp_path / 'late-preboundary.parquet'
+    pl.concat([closing.collect(), late.collect()]).write_parquet(late_file)
+    retained, _ = _Inputs(market).add(late_file)
+    assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
+    closing_late = message(low).with_columns(
+        pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
+    )
+    closing_file = tmp_path / 'late-closing.parquet'
+    pl.concat([closing.collect(), closing_late.collect()]).write_parquet(closing_file)
+    retained, _ = _Inputs(market).add(closing_file)
+    assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
+
+
 def test_snapshot_presence_reads_only_original_required_columns(
     vendor_session_root, tmp_path, monkeypatch,
 ):
@@ -768,33 +1070,44 @@ def test_snapshot_presence_reads_only_original_required_columns(
     raw = tmp_path / 'original.parquet'
     raw.write_bytes(body)
     path = vendor._prepare_archive(raw, tmp_path / 'unwrapped')
-    original = vendor._archive_rows
-    observed = []
 
-    def rows(path, *, columns=vendor._COLUMNS):
-        observed.append(columns)
-        yield from original(path, columns=columns)
+    import polars as pl
 
-    monkeypatch.setattr(vendor, '_archive_rows', rows)
-    for start in (0, int(partition.end.timestamp() * 1000)):
-        expected = any(row['event_type'] == 'snapshot' and int(str(row['event_time'])) <= start
-                       for row in original(path))
-        assert vendor._has_snapshot(path, start) == expected
-    assert observed == [('event_type', 'event_time')] * 2
     table = pq.read_table(path)
+    observed: list[str] = []
+    collect = pl.LazyFrame.collect
+
+    def projected(frame: pl.LazyFrame, *args, **kwargs):
+        observed.append(frame.explain(optimized=True))
+        return collect(frame, *args, **kwargs)
+
+    for start in (0, int(partition.end.timestamp() * 1000)):
+
+        snapshots = pl.from_arrow(table).filter(pl.col('event_type') == 'snapshot')
+
+        expected = bool((snapshots['event_time'] <= start).any())
+        with monkeypatch.context() as patch:
+            patch.setattr(pl.LazyFrame, 'collect', projected)
+            assert vendor._has_snapshot(path, start) == expected
+    assert len(observed) == 2
+    assert all(f'PROJECT 2/{table.num_columns} COLUMNS' in plan for plan in observed)
     damaged = tmp_path / 'missing-column.parquet'
     pq.write_table(table.drop(['quantity']), damaged)
     with pytest.raises(SourceError) as failure:
         vendor._has_snapshot(damaged, 0)
     assert failure.value.code == 'BOOK_VENDOR_SCHEMA'
-    for value, expected in [('123', True), (123, True)]:
-        monkeypatch.setattr(vendor, '_archive_rows', lambda *a, **k: iter([
-            {'event_type': 'snapshot', 'event_time': value}]))
-        assert vendor._has_snapshot(path, 123) == expected
-    monkeypatch.setattr(vendor, '_archive_rows', lambda *a, **k: iter([
-        {'event_type': 'snapshot', 'event_time': None}]))
+
+    missing_clock = tmp_path / 'missing-clock.parquet'
+    pl.from_arrow(table).with_columns(
+        pl.when(pl.col('event_type') == 'snapshot')
+        .then(None)
+        .otherwise(pl.col('event_time'))
+        .alias('event_time')
+    ).write_parquet(missing_clock)
+
     with pytest.raises(ValueError):
-        vendor._has_snapshot(path, 123)
+
+        vendor._has_snapshot(missing_clock, 123)
 
 
 @pytest.fixture(scope='session', params=['spot', 'perp'])
@@ -867,8 +1180,25 @@ def test_nominal_archive_frame_inventory(
         assert parse_book_integer(first['last_update_id']) == cursor
         identities.add((event_ms, cursor))
     assert vendor._nominal_snapshots((current, following)) == identities
-    # Withhold marker evidence only; an unchanged hour-aligned payload cannot become a real clock.
-    monkeypatch.setattr(vendor, '_nominal_snapshots', lambda paths: frozenset())
+    # Deliberate protocol fault: replace the nominal marker's clock with a real update's receipt.
+
+    def marker_clock(events, levels, prices):
+        import polars as pl
+
+        real = events.filter(pl.col('event_type') == 'update')['received_time'][0]
+        return (
+            events.with_columns(
+                pl.when(pl.col('event_type') == 'snapshot')
+                .then(pl.lit(real))
+                .otherwise(pl.col('received_time'))
+                .alias('received_time')
+            ),
+            levels,
+            prices,
+        )
+
+    _fault_columnar(monkeypatch, marker_clock)
+
     with pytest.raises(SourceError) as unproven:
         vendor.replay_hour(current, market, vendor.hour_partition('2026-09-24T22Z'), tmp_path)
     assert unproven.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
@@ -883,12 +1213,14 @@ def test_nominal_archive_requires_initial_bridge(
     with pytest.raises(SourceError, match='initial grid') as late:
         vendor.replay_hour(following, market, partition, tmp_path / 'late')
     assert late.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
-    frames = vendor._frames
 
-    def prefix(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        yield from itertools.takewhile(lambda frame: frame[0]['event_type'] == 'snapshot', frames(paths, legacy=legacy))
+    def prefix(events, levels, prices):
+        import polars as pl
 
-    monkeypatch.setattr(vendor, '_frames', prefix)
+        return events.filter(pl.col('event_type') == 'snapshot'), levels, prices
+
+    _fault_columnar(monkeypatch, prefix)
+
     with pytest.raises(SourceError) as absent:
         vendor.replay_hour(current, market, partition, tmp_path / 'absent')
     assert absent.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
@@ -898,14 +1230,20 @@ def test_nominal_archive_requires_real_tail(
     nominal_archives: tuple[Market, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     market, current, following = nominal_archives
-    frames = vendor._frames
     limit = [0]
 
-    def subset(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        for path in paths:
-            yield from frames((path,), legacy=legacy) if path == current else itertools.islice(frames((path,), legacy=legacy), 1 + limit[0])
+    def subset(events, levels, prices):
+        import polars as pl
 
-    monkeypatch.setattr(vendor, '_frames', subset)
+        future = events.filter(pl.col('file') == 1).head(1 + limit[0])['order']
+        return (
+            events.filter((pl.col('file') == 0) | pl.col('order').is_in(future.implode())),
+            levels,
+            prices,
+        )
+
+    _fault_columnar(monkeypatch, subset)
+
     partition = vendor.hour_partition('2026-09-24T22Z')
     with pytest.raises(SourceError) as missing:
         vendor.replay_hour(current, market, partition, tmp_path / 'missing', following=(following,))
@@ -921,20 +1259,19 @@ def test_nominal_archive_preserves_native_gap(
     nominal_archives: tuple[Market, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     market, current, following = nominal_archives
-    frames = vendor._frames
     partition = vendor.hour_partition('2026-09-24T22Z')
     first_second = int(partition.start.timestamp() * 1000) + 1000
 
-    def missing_bridge(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        removed = False
-        for frame in frames(paths, legacy=legacy):
-            # Withhold a real requested-hour update, after the initial clock witness.
-            if not removed and frame[0]['event_type'] == 'update' and int(str(frame[0]['event_time'])) >= first_second:
-                removed = True
-                continue
-            yield frame
+    def missing_bridge(events, levels, prices):
+        import polars as pl
 
-    monkeypatch.setattr(vendor, '_frames', missing_bridge)
+        removed = events.filter(
+            (pl.col('event_type') == 'update') & (pl.col('event_time') >= first_second)
+        )['order'][0]
+        return events.filter(pl.col('order') != removed), levels, prices
+
+    _fault_columnar(monkeypatch, missing_bridge)
+
     with pytest.raises(SourceError) as gap:
         vendor.replay_hour(current, market, partition, tmp_path, following=(following,))
     assert gap.value.code == 'BOOK_SEQUENCE_GAP'
@@ -1230,26 +1567,27 @@ def test_archive_warmup_preserves_requested_validation(
         else:
             partition = vendor.hour_partition(keys[1])
             baseline = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'baseline', following=(paths[2],))
-            original = vendor._frames
             stale_seen: list[int] = []
 
-            def stale_before_seed(inputs: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-                for path in inputs:
-                    if path != paths[0]:
-                        yield from original((path,), legacy=legacy)
-                    else:
-                        # Keep original updates through the first genuine stale
-                        # message, with no seed; the later original snapshot is valid.
-                        for frame in original((path,), legacy=legacy):
-                            if frame[0]['event_type'] != 'update':
-                                continue
-                            age = int(str(frame[0]['received_time'])) // 1000000 - int(str(frame[0]['event_time']))
-                            yield frame
-                            if not 0 <= age <= 5000:
-                                stale_seen.append(int(str(frame[0]['final_update_id'])))
-                                break
+            def stale_before_seed(events, levels, prices):
+                import polars as pl
 
-            monkeypatch.setattr(vendor, '_frames', stale_before_seed)
+                updates = events.filter((pl.col('file') == 0) & (pl.col('event_type') == 'update'))
+                age = pl.col('received_time') // 1000000 - pl.col('event_time')
+                stale = updates.filter((age < 0) | (age > 5000)).head(1)
+                stale_seen.extend(stale['final_update_id'].to_list())
+                last = stale['order'][0]
+                return (
+                    events.filter(
+                        (pl.col('file') != 0)
+                        | ((pl.col('event_type') == 'update') & (pl.col('order') <= last))
+                    ),
+                    levels,
+                    prices,
+                )
+
+            _fault_columnar(monkeypatch, stale_before_seed)
+
             revision = vendor.replay_hour(paths[1], 'perp', partition, tmp_path / 'grid',
                                           preludes=(paths[0],), following=(paths[2],))
             assert stale_seen and revision.key == baseline.key
@@ -1281,20 +1619,35 @@ def test_archive_warmup_preserves_requested_validation(
                 break
         else:
             pytest.fail('Original partial seed never became certifiable after the initial grid.')
-        original = vendor._frames
 
-        def shallow_initial(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-            for frame in original(paths, legacy=legacy):
-                if frame[0]['event_type'] == 'snapshot' and frame[0]['last_update_id'] == initial[0]['last_update_id']:
-                    shallow = [row for row in frame if row['price'] in initial_prices[str(row['side'])]]
-                    assert len(shallow) == 200
-                    yield shallow
-                else:
-                    yield frame
+        def shallow_initial(events, levels, prices):
+            import polars as pl
+            from decimal import Decimal
 
-        monkeypatch.setattr(vendor, '_frames', shallow_initial)
+            ranks = {price: index for index, price in enumerate(prices)}
+            allowed = {
+                side: [ranks[Decimal(p)] for p in values] for side, values in initial_prices.items()
+            }
+            initial_orders = events.filter(
+                (pl.col('event_type') == 'snapshot')
+                & (pl.col('native') == initial[0]['last_update_id'])
+            )['order']
+            filtered = levels.filter(
+                ~pl.col('order').is_in(initial_orders.implode())
+                | ((pl.col('side') == 0) & pl.col('price').is_in(allowed['bid']))
+                | ((pl.col('side') == 1) & pl.col('price').is_in(allowed['ask']))
+            )
+            return events, filtered, prices
+
+        _fault_columnar(monkeypatch, shallow_initial)
+
+        _, following_body, _ = _original_archive(
+            vendor_session_root, 'spot', vendor.hour_partition('2026-10-04T10Z')
+        )
+        following = tmp_path / 'following.parquet'
+        following.write_bytes(following_body)
         with pytest.raises(SourceError) as late:
-            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid')
+            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid', following=(following,))
         assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
         assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
         return
@@ -1303,19 +1656,21 @@ def test_archive_warmup_preserves_requested_validation(
         path = tmp_path / f'{key}.bin'; path.write_bytes(body)
         paths.append(vendor._prepare_archive(path, tmp_path))
     partition = vendor.hour_partition('2025-07-15T20Z')
-    original = vendor._frames
     anchor = vendor.hour_partition('2025-07-15T18Z').start if case == 'preperiod-reset' else partition.start
     gap_start = int(anchor.timestamp() * 1000) + 200
     omitted = []
 
-    def missing_message(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[dict[str, object]]]:
-        for frame in original(paths, legacy=legacy):
-            if frame[0]['event_type'] == 'update' and gap_start <= int(str(frame[0]['event_time'])) < gap_start + 1000:
-                omitted.append(frame[0]['final_update_id'])
-            else:
-                yield frame
+    def missing_message(events, levels, prices):
+        import polars as pl
 
-    monkeypatch.setattr(vendor, '_frames', missing_message)
+        missing = (pl.col('event_type') == 'update') & pl.col('event_time').is_between(
+            gap_start, gap_start + 1000, closed='left'
+        )
+        omitted.extend(events.filter(missing)['final_update_id'].to_list())
+        return events.filter(~missing), levels, prices
+
+    _fault_columnar(monkeypatch, missing_message)
+
     if case == 'requested-gap':
         with pytest.raises(SourceError) as gap:
             vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=tuple(paths[:2]), following=(paths[3],))

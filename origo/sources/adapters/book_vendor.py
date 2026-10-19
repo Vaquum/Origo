@@ -33,8 +33,8 @@ BOOK_MAX_FOLLOWING_HOURS = 1
 BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
 # Only changes to accepted logical output invalidate retained identities.
-_REPLAY_POLICY_VERSION = 3
-_REJECTION_POLICY_VERSION = 4
+_REPLAY_POLICY_VERSION = 4
+_REJECTION_POLICY_VERSION = 5
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
                               'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
 # The existing unknown-host transport allows 20 units/second. Charge 40 to
@@ -298,8 +298,18 @@ def _frames(paths: tuple[Path, ...], *, legacy: bool = False) -> Iterator[list[d
 
 
 def _has_snapshot(path: Path, start_ms: int) -> bool:
-    return any(row['event_type'] == 'snapshot' and int(str(row['event_time'])) <= start_ms
-               for row in _archive_rows(path, columns=('event_type', 'event_time')))
+
+    import polars as pl
+
+    scan = pl.scan_parquet(path)
+    if not set(_COLUMNS) <= set(scan.collect_schema().names()):
+        raise SourceError('BOOK_VENDOR_SCHEMA', 'Archive lacks required order-book columns.')
+    clocks = (
+        scan.filter(pl.col('event_type') == 'snapshot').select('event_time').collect()['event_time']
+    )
+    if clocks.null_count():
+        raise ValueError('Snapshot clock is missing.')
+    return bool((clocks <= start_ms).any())
 
 
 def _nominal_snapshots(paths: tuple[Path, ...]) -> frozenset[tuple[int, int]]:
@@ -437,144 +447,33 @@ def _bind_boundary_seed(sampler: BookSampler, seed: bytes, update: list[dict[str
 
 def replay_hour(path: Path, market: Market, partition: Partition, root: Path, *,
                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> Revision:
-    from origo.workers.book_capture import (
-        BookSampler,
-        DepthEvent,
-        DiffBook,
-        parse_book_integer,
-        utc_millisecond,
+
+    from .book_columnar import replay
+
+    result = replay((*preludes, path, *following), market, partition)
+
+    grid = _ArchiveGrid(root, market, int(partition.start.timestamp() * 1000))
+    for depth, payload in zip((20, 200), result.payloads, strict=True):
+        (root / f'depth{depth}.rowbinary').write_bytes(payload)
+        size = _GRID_RECORDS[depth].size * (600 if depth == 20 else 60)
+        grid.digests[depth] = [
+            hashlib.sha256(memoryview(payload)[start : start + size]).digest()
+            for start in range(0, len(payload), size)
+        ]
+    grid.minutes = result.minutes
+    revision = grid.revision(partition)
+    return replace(
+        revision,
+        evidence_json=json.dumps(
+            {
+                **json.loads(revision.evidence_json),
+                'terminal_exchange_event_ms': result.terminal_ms,
+                'terminal_update_id': result.terminal_id,
+                'final_grid_ms': int(partition.end.timestamp() * 1000) - 100,
+            },
+            separators=(',', ':'),
+        ),
     )
-
-    start_ms, end_ms = (
-        int(partition.start.timestamp() * 1000),
-        int(partition.end.timestamp() * 1000),
-    )
-    sampler = _ArchiveGrid(root, market, start_ms)
-
-    def anchor(event: DepthEvent, received: int) -> None:
-        sampler.invalidate()
-        sampler.book = DiffBook(market, event, archive_start_ms=start_ms)
-        sampler.next_grid = start_ms
-        sampler.last_received = utc_millisecond(received // 1000000)
-
-    previous_received = 0
-    boundary_update: list[dict[str, object]] = []
-    legacy = partition.start < datetime(2026, 8, 19, tzinfo=UTC)
-    paths = (*preludes, path, *following)
-    nominal_snapshots: frozenset[tuple[int, int]] = frozenset() if legacy else _nominal_snapshots(paths)
-    for frame in _frames(paths, legacy=legacy):
-        first = frame[0]
-        received = parse_book_integer(first['received_time'])
-        event_ms = parse_book_integer(first['event_time'])
-        if (received < previous_received and not legacy) or any(row['symbol'] != 'BTCUSDT' for row in frame):
-            raise SourceError(
-                'BOOK_VENDOR_ORDERING', 'Hourly archive has invalid receive ordering or symbol.'
-            )
-        # Legacy files merge redundant collectors by native update ID. Their
-        # receive clocks can interleave; accepted exchange clocks and ID links
-        # still have to pass the sampler's continuity and freshness checks.
-        if not legacy:
-            previous_received = received
-        sides: dict[str, list[list[str]]] = {'bid': [], 'ask': []}
-        for row in frame:
-            side = str(row['side'])
-            price, quantity = row['price'], row['quantity']
-            if side not in sides or not isinstance(price, str) or not isinstance(quantity, str):
-                raise SourceError('BOOK_VENDOR_ROW', 'Hourly archive has invalid level fields.')
-            sides[side].append([price, quantity])
-        if first['event_type'] == 'snapshot':
-            from decimal import Decimal
-
-            seed = {
-                'lastUpdateId': parse_book_integer(first['last_update_id']),
-                'bids': sorted(sides['bid'], key=lambda v: Decimal(v[0]), reverse=True),
-                'asks': sorted(sides['ask'], key=lambda v: Decimal(v[0])),
-            }
-            if legacy:
-                if sampler.book is None:
-                    if boundary_update:
-                        _bind_boundary_seed(sampler, json.dumps(seed).encode(), boundary_update, start_ms, market)
-                        boundary_update.clear()
-                    else:
-                        sampler.seed(json.dumps(seed).encode())
-                        sampler.next_grid = start_ms
-                elif sampler.book.verified and sampler.book.last == seed['lastUpdateId']:
-                    # The matching update supplies the real exchange clock for this
-                    # REST snapshot. Its legacy event_time is a collector clock.
-                    assert sampler.book.event_ms is not None
-                    sampler.checkpoint(json.dumps(seed).encode(), sampler.book.event_ms, start_ms)
-            else:
-                if (sampler.book is not None and sampler.book.verified
-                        and sampler.book.last != seed['lastUpdateId'] and event_ms >= start_ms
-                        and not (event_ms == start_ms and sampler.book.event_ms is not None
-                                 and sampler.book.event_ms < start_ms)):
-                    raise SourceError('BOOK_SEQUENCE_GAP', 'Checkpoint skips native updates inside the requested hour.')
-                nominal = (event_ms, seed['lastUpdateId']) in nominal_snapshots
-                if event_ms % 3600000 == 0 and not nominal:
-                    raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'Hour marker has no witnessed nominal identity.')
-                _archive_checkpoint(sampler, json.dumps(seed).encode(), event_ms, start_ms, nominal=nominal)
-                if nominal:
-                    continue
-            if legacy:
-                # A legacy REST snapshot's collector clock is not an exchange
-                # watermark and cannot terminate the requested hour.
-                continue
-        elif first['event_type'] == 'update':
-            wire = {
-                'e': 'depthUpdate',
-                's': 'BTCUSDT',
-                'E': event_ms,
-                'U': parse_book_integer(first['first_update_id']),
-                'u': parse_book_integer(first['final_update_id']),
-                'b': sides['bid'],
-                'a': sides['ask'],
-            }
-            if market == 'perp':
-                wire['pu'] = parse_book_integer(first['prev_final_update_id'])
-            event = DepthEvent.parse(wire, market)
-            if event_ms < start_ms and received // 1000000 < event_ms:
-                sampler.invalidate()
-                continue
-            if sampler.book is None:
-                if event_ms < start_ms:
-                    anchor(event, received)
-                    continue
-                if legacy and event_ms == start_ms and (
-                        not boundary_update or first['final_update_id'] == boundary_update[0]['final_update_id']):
-                    if len(boundary_update) + len(frame) > 100000:
-                        raise SourceError('BOOK_VENDOR_FRAME_BOUND', 'Boundary seed messages exceed their frame bound.')
-                    boundary_update.extend(frame)
-                    continue
-                raise SourceError(
-                    'BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no initial snapshot.'
-                )
-            clockless = not legacy and sampler.book.verified and sampler.book.event_ms is None
-            try:
-                applied = sampler.accept(
-                    event,
-                    received_at=utc_millisecond(received // 1000000),
-                )
-                if clockless and applied and event_ms > start_ms:
-                    raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'First exchange witness follows the initial grid.')
-            except SourceError as error:
-                if event_ms >= start_ms or error.code != 'BOOK_SEQUENCE_GAP':
-                    raise
-                anchor(event, received)
-        else:
-            raise SourceError('BOOK_VENDOR_EVENT', 'Hourly archive has an unknown event type.')
-        if event_ms >= end_ms:
-            break
-    if sampler.book is None or not sampler.book.verified:
-        raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Hourly archive has no verified book.')
-    if not legacy and sampler.book.event_ms is None:
-        raise SourceError('BOOK_VENDOR_CLOCK_UNPROVEN', 'Hourly archive has no real initial exchange witness.')
-    if sampler.book.event_ms is None or sampler.book.event_ms < end_ms - 100:
-        raise SourceError('BOOK_VENDOR_TAIL_MISSING', 'No exchange update witnesses the final 100-ms sample.')
-    sampler.finish(end_ms)
-    result = sampler.revision(partition)
-    return replace(result, evidence_json=json.dumps({**json.loads(result.evidence_json),
-                   'terminal_exchange_event_ms': sampler.book.event_ms,
-                   'terminal_update_id': sampler.book.last, 'final_grid_ms': end_ms - 100}, separators=(',', ':')))
 
 
 @dataclass(frozen=True)
@@ -618,9 +517,7 @@ class CryptoHFTBookHourly:
         try:
             archive = _prepare_archive(archive, root)
             used = archive.stat().st_size
-            first = next(_frames((archive,)))
             boundary = int(partition.start.timestamp() * 1000)
-            needs_prelude = first[0]['event_type'] != 'snapshot' or int(str(first[0]['event_time'])) > boundary
             after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
             original = _response(self.market, after, metadata=False)
             if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
@@ -634,42 +531,78 @@ class CryptoHFTBookHourly:
             dependencies.append((after.key, _identity(self.market, after, original)))
             following_hashes.append((after.key, hashlib.sha256(original.body).hexdigest()))
             grid = root / 'grid'
-            for offset in range(BOOK_MAX_PRELUDE_HOURS + 1):
-                if offset:
-                    before = hour_partition((partition.start - timedelta(hours=offset)).strftime(HOUR_KEY_FORMAT))
-                    original = _response(self.market, before, metadata=False)
-                    if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
-                        raise SourceError('BOOK_VENDOR_FILE_BOUND', 'Preceding vendor archive exceeds its byte bound.')
-                    prior = root / f'prelude-{offset:02}.parquet'
-                    prior.write_bytes(original.body)
-                    prior = _prepare_archive(prior, root)
-                    used += prior.stat().st_size
-                    if used > BOOK_MAX_PRELUDE_BYTES:
-                        raise SourceError('BOOK_VENDOR_PRELUDE_BOUND', 'Preceding archives exceed the replay byte bound.')
-                    dependencies.insert(0, (before.key, _identity(self.market, before, original)))
-                    input_hashes.insert(0, (before.key, hashlib.sha256(original.body).hexdigest()))
-                    preludes.insert(0, prior)
-                    if (offset not in (1, 2, 4, 8, 16, BOOK_MAX_PRELUDE_HOURS)
-                            and not _has_snapshot(prior, boundary)):
-                        continue
-                elif needs_prelude:
-                    continue
-                try:
-                    local = replay_hour(archive, self.market, partition, grid,
-                                        preludes=tuple(preludes), following=(tail,))
-                except SourceError as error:
-                    if grid.exists():
-                        shutil.rmtree(grid)
-                    if (offset < BOOK_MAX_PRELUDE_HOURS and error.code in {
-                            'BOOK_VENDOR_SEED_MISSING', 'BOOK_SEED_TOO_SHALLOW', 'BOOK_KNOWN_DEPTH_EXHAUSTED'}):
-                        continue
-                    if error.code in _REJECTION_CODES:
-                        _write_dependencies(self.market, partition, current, dependencies, rejected=error.code)
-                    raise
+
+            from .book_columnar import replay_session
+
+            with replay_session(self.market):
+                for offset in range(BOOK_MAX_PRELUDE_HOURS + 1):
+                    if offset:
+                        before = hour_partition(
+                            (partition.start - timedelta(hours=offset)).strftime(HOUR_KEY_FORMAT)
+                        )
+                        original = _response(self.market, before, metadata=False)
+                        if len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
+                            raise SourceError(
+                                'BOOK_VENDOR_FILE_BOUND',
+                                'Preceding vendor archive exceeds its byte bound.',
+                            )
+                        prior = root / f'prelude-{offset:02}.parquet'
+                        prior.write_bytes(original.body)
+                        prior = _prepare_archive(prior, root)
+                        used += prior.stat().st_size
+                        if used > BOOK_MAX_PRELUDE_BYTES:
+                            raise SourceError(
+                                'BOOK_VENDOR_PRELUDE_BOUND',
+                                'Preceding archives exceed the replay byte bound.',
+                            )
+                        dependencies.insert(
+                            0, (before.key, _identity(self.market, before, original))
+                        )
+                        input_hashes.insert(
+                            0, (before.key, hashlib.sha256(original.body).hexdigest())
+                        )
+                        preludes.insert(0, prior)
+                        if offset not in (
+                            1,
+                            2,
+                            4,
+                            8,
+                            16,
+                            BOOK_MAX_PRELUDE_HOURS,
+                        ) and not _has_snapshot(prior, boundary):
+                            continue
+                    try:
+                        local = replay_hour(
+                            archive,
+                            self.market,
+                            partition,
+                            grid,
+                            preludes=tuple(preludes),
+                            following=(tail,),
+                        )
+                    except SourceError as error:
+                        if grid.exists():
+                            shutil.rmtree(grid)
+                        if offset < BOOK_MAX_PRELUDE_HOURS and error.code in {
+                            'BOOK_VENDOR_SEED_MISSING',
+                            'BOOK_SEED_TOO_SHALLOW',
+                            'BOOK_KNOWN_DEPTH_EXHAUSTED',
+                            'BOOK_VENDOR_CLOCK_UNPROVEN',
+                        }:
+                            continue
+                        if error.code in _REJECTION_CODES:
+                            _write_dependencies(
+                                self.market, partition, current, dependencies, rejected=error.code
+                            )
+                        raise
+                    else:
+                        break
                 else:
-                    break
-            else:
-                raise SourceError('BOOK_VENDOR_SEED_MISSING', 'No complete hour within the bounded replay search.')
+                    raise SourceError(
+                        'BOOK_VENDOR_SEED_MISSING',
+                        'No complete hour within the bounded replay search.',
+                    )
+
             key = _revision_key(current, tuple(dependencies))
             _write_dependencies(self.market, partition, current, dependencies)
         except BaseException:

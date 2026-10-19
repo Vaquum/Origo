@@ -622,7 +622,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
             selection=[
                 names['canonical'],
                 *(names['consumer_' + c.key] for c in spec.consumers),
-                names['reconcile'],
+                *([names['reconcile']] if spec.consumers else []),
             ],
             tags={
                 'origo_source_key': spec.key,

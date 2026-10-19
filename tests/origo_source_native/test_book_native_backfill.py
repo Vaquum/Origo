@@ -10,7 +10,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from dagster import AssetExecutionContext, DagsterInstance, Definitions, Failure, RetryRequested
+from dagster import AssetExecutionContext, AssetKey, DagsterInstance, Definitions, Failure, RetryRequested
 from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
 from dagster._core.remote_origin import RemotePartitionSetOrigin
 
@@ -159,14 +159,22 @@ def test_native_book_selection_completion_preserves_source_failures(
     home.mkdir()
     with DagsterInstance.local_temp(str(home)) as instance:
         job = _job(runtime)
+        assert job.asset_layer.executable_asset_keys == {
+            AssetKey(f'build_{runtime.spec.key}_canonical_revision_origo')
+        }
         parent = _parent(instance, job.name)
         result = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
                                         tags={'dagster/backfill': parent}, raise_on_error=False)
         assert result.success
         assert _failures(runtime, unrelated) == before
+        health_job = next(
+            item for item in build_source_bundle(runtime.spec).jobs
+            if item.name == f'reconcile_{runtime.spec.key}_source_origo_job'
+        )
+        health = health_job.execute_in_process(instance=instance)
         assert any(event.event_type_value == 'ASSET_CHECK_EVALUATION'
                    and event.event_specific_data.check_name == 'source_health'
-                   and event.event_specific_data.passed is False for event in result.all_events)
+                   and event.event_specific_data.passed is False for event in health.all_events)
         record = runtime.store.record(vendor.hour_partition(REAL_HOUR))
         assert record is not None and len(record.component_hashes) == 4
 

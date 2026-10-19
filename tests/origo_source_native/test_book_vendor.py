@@ -406,6 +406,10 @@ def test_original_vendor_hour_builds_all_book_grids_without_binance(
     assert json.loads(revision.evidence_json)['grid_evidence']['terminal_exchange_event_ms'] >= int(partition.end.timestamp() * 1000) - 100
     reference = vendor.fetch_sealed_partition(original_vendor_spool, market, partition)
     minutes = json.loads(reference.evidence_json)['sealed_minutes']
+    actual_minutes = evidence['grid_evidence']['sealed_minutes']
+    assert [(item['first_update_id'], item['last_update_id']) for item in actual_minutes] == [
+        (item['first_update_id'], item['last_update_id']) for item in minutes
+    ]
     assert len(minutes) == 60
     expected = {
         'spot': 'd5f899d30aec852c58f2612a887d4911fdf090313c456eff0001b6f8fb133461',

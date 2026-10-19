@@ -95,3 +95,12 @@ the result:
 - I found — bad: installation failed because `g++` was absent. This is a missing declared build prerequisite, not a test waiver or a reason to retry unchanged inputs.
 - Measurements: no runtime or speed qualification from this failed job. At 10:23:45 UTC the production backfill remained CANCELED; one routine run was queued and two refreshes, metadata maintenance and one audit were active. A subsequent read found only the routine audit active; no canceled-backfill work resumed.
 - Progress/Next: install the compiler in the existing CI dependency phase, push that fix, then run the required local checks and complete current-head CI. No production deployment or restart.
+
+## Entry 007 — 2026-10-19
+
+- Task/evidence: [#554](https://github.com/Vaquum/Origo/pull/554), self-review of its complete published diff against the original sampler.
+- I tried: checked the minute evidence separately from the four numeric component hashes.
+- I found — bad: the prototype used the last emitted 100-ms grid's update ID as the minute's terminal update ID. The original seal records the last accepted exchange event strictly before the minute boundary; genuine updates can occur after that final grid. Numeric component hashes alone do not establish the evidence metadata's identity.
+- I found — good: that exact terminal cursor can be selected from the already validated event headers, without another level scan or replay. Extend the existing original-hour assertion to compare both minute cursors against the independent reference.
+- Measurements: not measured; this is a correctness repair, not a timing result.
+- Progress/Next: push the corrected cursor selection before local validation. Complete numeric and evidence checks together.

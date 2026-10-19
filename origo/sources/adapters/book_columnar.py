@@ -424,6 +424,7 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
     dtype20 = np.dtype([('time', '<i8'), ('event', '<u8'), ('last', '<u8'), ('payload', 'V642')])
     small = np.frombuffer(payloads[0], dtype=dtype20)
     fused_type = np.dtype([('first', 'V666'), ('large', 'V6428'), ('rest', 'V666', (9,))])
+    minute_last = np.searchsorted(effective, np.arange(start+60000, end+1, 60000), side='left')-1
     minutes: list[dict[str, object]] = []
     for minute in range(60):
         tiny = np.frombuffer(
@@ -439,7 +440,7 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
                 'samples_depth20': 600,
                 'samples_depth200': 60,
                 'first_update_id': int(small['last'][minute * 600]),
-                'last_update_id': int(small['last'][(minute + 1) * 600 - 1]),
+                'last_update_id': int(native[minute_last[minute]]),
                 'payload_sha256': hashlib.sha256(fused.tobytes()).hexdigest(),
             }
         )

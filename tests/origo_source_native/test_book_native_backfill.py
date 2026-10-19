@@ -341,6 +341,60 @@ def test_native_book_selection_completion_preserves_source_failures(
         ) == [(missing, 'BOOK_SEQUENCE_GAP'), (REAL_HOUR, 'RUN_FAILED')]
         assert runtime.store.record(vendor.hour_partition(REAL_HOUR)) == current
 
+        # Separate hours each receive their retry allowance; resumed work retains rejections.
+        from origo.sources import bundle as source_bundle
+
+        retry_spec = replace(runtime.spec, orchestration=replace(
+            runtime.spec.orchestration, retry_count=1, retry_delay=0,
+        ))
+        retry_job = _job(replace(runtime, spec=retry_spec))
+        execute = source_bundle.execute_source
+        attempted: dict[str, int] = {}
+
+        def transient_hours(spec, operation, config, *, run_id):
+            key = config.partition_key
+            attempted[key] = attempted.get(key, 0) + 1
+            if attempted[key] == 1:
+                raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Controlled transient fault; no market rows.')
+            if key == missing:
+                raise SourceError('BOOK_SEQUENCE_GAP', 'Controlled rejected hour; no market rows.')
+            return execute(spec, operation, config, run_id=run_id)
+
+        tags = {'dagster/backfill': _parent(instance, job.name, keys),
+                'dagster/asset_partition_range_start': missing,
+                'dagster/asset_partition_range_end': REAL_HOUR}
+        with monkeypatch.context() as patch:
+            patch.setattr(source_bundle, 'execute_source', transient_hours)
+            resumed = retry_job.execute_in_process(
+                instance=instance, tags=tags, run_config=config, raise_on_error=False,
+            )
+        assert not resumed.success and attempted == {missing: 2, REAL_HOUR: 2}
+        assert sum(event.event_type_value == 'STEP_UP_FOR_RETRY'
+                   for event in resumed.all_events) == 2
+        assert [event.partition for event in resumed.asset_materializations_for_node(
+            f'build_{runtime.spec.key}_canonical_revision_origo'
+        )] == [REAL_HOUR]
+        assert any(event.event_specific_data.user_failure_data.description
+                   == 'BOOK_PARTITIONS_FAILED: ' + missing
+                   for event in resumed.all_events if event.event_type_value == 'STEP_FAILURE')
+
+        # Exhausting one hour's own allowance terminates without attempting the next hour.
+        attempted.clear()
+
+        def unavailable_hour(spec, operation, config, *, run_id):
+            key = config.partition_key
+            attempted[key] = attempted.get(key, 0) + 1
+            raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Controlled persistent fault; no market rows.')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(source_bundle, 'execute_source', unavailable_hour)
+            exhausted = retry_job.execute_in_process(
+                instance=instance, tags=tags, run_config=config, raise_on_error=False,
+            )
+        assert not exhausted.success and attempted == {missing: 2}
+        assert sum(event.event_type_value == 'STEP_UP_FOR_RETRY'
+                   for event in exhausted.all_events) == 1
+
 
 def test_book_benchmark_counts_partition_coverage_separately_from_attempts() -> None:
     from tools.benchmark_book_replay import PartitionAttempt, partition_metrics

@@ -1590,6 +1590,7 @@
     "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[bounded-exhaustion]",
     "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[partial-grid-cleanup]",
     "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[perp]"
+    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[perp]",
+    "tests/origo_source_native/test_book_native_backfill.py::test_book_benchmark_counts_partition_coverage_separately_from_attempts"
   ]
 }

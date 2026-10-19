@@ -1,3 +1,7 @@
+# v3.34.30
+
+- Resume native book range retries at the failed hour, preserving each hour's retry allowance and earlier rejected hours.
+
 # v3.34.29
 
 - Count selected full book partitions separately from attempts, preserving ingestion timings and every error occurrence during local backfill qualification.

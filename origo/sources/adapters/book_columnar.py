@@ -307,7 +307,10 @@ def _plan(
                 if not bridges or (clock is not None and event < clock):
                     if event >= start:
                         raise SourceError(
-                            'BOOK_SEQUENCE_GAP', 'Native update chain does not bridge.'
+                            'BOOK_VENDOR_SEED_MISSING'
+                            if clock is not None and clock < start
+                            else 'BOOK_SEQUENCE_GAP',
+                            'Native update chain does not bridge.',
                         )
                     reset = True
                 elif clock is None and event > start:

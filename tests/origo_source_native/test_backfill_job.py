@@ -600,8 +600,15 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
     assert pinned['pinned_token'] == store.snapshot().token
 
 
-@pytest.mark.parametrize('ready_job', CASES, indirect=True, ids=lambda case: case.source.spec_key)
-@pytest.mark.parametrize('path', ['fresh', 'retained-after-fetch', 'repair'])
+@pytest.mark.parametrize(
+    'ready_job,path',
+    [
+        pytest.param(case, path, id=case.source.spec_key if path == 'fresh'
+                     else f'{path}-{case.source.spec_key}')
+        for path in ('fresh', 'retained-after-fetch', 'repair') for case in CASES
+    ],
+    indirect=['ready_job'],
+)
 def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch, path: str,

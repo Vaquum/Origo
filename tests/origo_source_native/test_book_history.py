@@ -464,6 +464,61 @@ def test_update_only_hour_recovers_with_bounded_prefix(
     assert len(tuple(revision.rows())) == 39600
 
 
+def test_zero_prelude_opening_gap_fetches_the_real_bridge(
+    original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import polars as pl
+
+    archives = list(_recorded_inputs(original_reconstruction_archives['update-only']))
+    partition = vendor.hour_partition('2025-07-15T20Z')
+    start = int(partition.start.timestamp() * 1000)
+    frames = []
+    for index in (1, 2):
+        root = tmp_path / str(index)
+        root.mkdir()
+        path = root / 'input'
+        path.write_bytes(archives[index].body)
+        frames.append(pl.read_parquet(vendor._prepare_archive(path, root)))
+    prior, current = frames
+    updates = prior.filter(pl.col('event_type') == 'update')
+    anchor_id = updates['final_update_id'].unique().sort()[-2]
+    anchor = updates.filter(pl.col('final_update_id') == anchor_id)
+    bridge = current.filter(pl.col('event_time') < start)
+    assert anchor.height and bridge.height
+    # Move complete genuine messages across the file boundary; values/clocks/IDs stay exact.
+    for index, frame in (
+        (1, pl.concat([prior, bridge])),
+        (2, pl.concat([anchor, current.filter(pl.col('event_time') >= start)])),
+    ):
+        path = tmp_path / f'reassociated-{index}.parquet'
+        frame.write_parquet(path)
+        archives[index] = replace(archives[index], body=path.read_bytes())
+    _transport(tuple(archives), 'spot', monkeypatch, max_prelude_hours=24)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
+    attempts: list[tuple[int, str]] = []
+    replay = vendor.replay_hour
+
+    def observed(path: Path, market: Market, partition: Partition, root: Path, *,
+                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
+        try:
+            revision = replay(path, market, partition, root, preludes=preludes, following=following)
+        except SourceError as error:
+            attempts.append((len(preludes), error.code))
+            raise
+        attempts.append((len(preludes), 'accepted'))
+        return revision
+
+    monkeypatch.setattr(vendor, 'replay_hour', observed)
+    revision = vendor.CryptoHFTBookHourly('spot').fetch(partition)
+    assert attempts == [(0, 'BOOK_VENDOR_SEED_MISSING'), (1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'),
+                        (2, 'accepted')]
+    _assert_reconstructed_hour(
+        revision, partition,
+        'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4',
+    )
+
+
 def test_shallow_original_seed_recovers_without_fabricated_depth(
     original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

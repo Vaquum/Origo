@@ -422,7 +422,9 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation.startswith('consumer_')
         else None,
     )
-    def execute(context: AssetExecutionContext, config: SourceRunConfig) -> Iterator[_SourceResult]:
+    def execute(
+        context: AssetExecutionContext, config: SourceRunConfig
+    ) -> Iterator[_SourceResult | AssetMaterialization]:
         from .prepare import is_source_backfill
 
         if operation == 'canonical' and (
@@ -460,7 +462,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                                                 spec.key, key, error.description)
                         else:
                             publication_ready(spec, context, result)
-                            context.log_event(_partition_materialization(name, result))
+                            yield _partition_materialization(name, result)
                 if failed:
                     raise Failure(
                         description='BOOK_PARTITIONS_FAILED: ' + ', '.join(failed),
@@ -470,7 +472,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
 
             result = execute_partition_backfill(spec, context, run_day)
             if not publication_ready(spec, context, result):
-                context.log_event(_partition_materialization(name, result))
+                yield _partition_materialization(name, result)
                 return
             yield MaterializeResult(
                 value=None,

@@ -418,3 +418,8 @@ the result:
 ## Entry 050 — 2026-10-19
 
 - Integration correction in #563: two logical archives can share one identical immutable prepared body. The native chunk path already locates events by file and local index; the flat diagnostic/boundary conversion instead used global event ID alone and could attach duplicate-body levels to the last logical file. Map each file independently. Extend the existing following-boundary owner with the same two genuine messages used twice, requiring level rows for every logical event. No market values, source ordering guarantee or production input are invented; no new throughput result is claimed.
+
+## Entry 051 — 2026-10-19
+
+- Current-head focused check:151 passed,2 failed in450.79s; CI stopped at303 passed,1 failed. Both local failures are the same mixed-range regression, for spot and perpetual. Successful canonical data and its receipt survive, but Dagster does not persist the queued materialization when the generator subsequently raises the aggregate input failure. This is a genuine operator-visibility defect, not permission to waive the assertion.
+- Dagster1.13.21 consumes context.log_event events only when the compute generator yields or finishes normally. Yield each hour's explicit AssetMaterialization immediately instead of queueing it; a later rejected hour can then fail the range without losing already successful partition visibility. Existing mixed-range tests require the real later hour's materialization and receipt, failed-hour nonactivation and retained unrelated failure. Recheck both markets and the full native launch path after publishing the fix; no end-to-end performance acceptance is claimed yet.

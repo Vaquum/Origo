@@ -315,9 +315,10 @@ def test_real_depth200_hash_page_stays_within_memory_budget(
         peaks = client.execute(
             f'SELECT max(memory_usage), count() FROM system.query_log '
             f"WHERE type='QueryFinish' AND position(query,'FROM {table}')>0 "
-            f"AND position(query,'LIMIT {BOOK_HASH_CHUNK_ROWS}')>0"
+            f"AND startsWith(query, 'SELECT chunk,') "
+            f"AND position(query,'intDiv(ordinal-1, {BOOK_HASH_CHUNK_ROWS})')>0"
         )
-        assert int(str(peaks[0][1])) >= 2
+        assert int(str(peaks[0][1])) == 1
         assert 0 < int(str(peaks[0][0])) < 256 * 1024**2
     finally:
         client.disconnect()

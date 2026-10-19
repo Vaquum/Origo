@@ -1,3 +1,7 @@
+# v3.34.26
+
+- Default single-asset native backfills to execution within their isolated run worker, avoiding a redundant step process while preserving explicit executor overrides.
+
 # v3.34.25
 
 - Reuse issued archive object references for fresh metadata checks within one source execution, retaining logical provider pacing, expiry and authoritative error checks.

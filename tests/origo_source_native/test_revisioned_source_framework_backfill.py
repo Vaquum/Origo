@@ -22,9 +22,11 @@ from dagster._core.remote_origin import RemoteRepositoryOrigin
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources import capacity
 from origo.sources.adapters import binance_daily
+from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
+from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
-from origo.sources.contracts import RolloutStage, SourceBundle
+from origo.sources.contracts import RevisionedSourceSpec, RolloutStage, SourceBundle
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
@@ -122,6 +124,10 @@ def _run(
 def test_native_dagit_backfill_uses_daily_partitions_and_one_run_per_day() -> None:
     assert BINANCE_SPOT_TRADES_SPEC.rollout_stage == RolloutStage.LIVE
     source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
+    from dagster import validate_run_config
+
+    backfill = next(job for job in source.jobs if job.name == 'backfill_binance_spot_trades_source_job')
+    assert validate_run_config(backfill)['execution'][backfill.executor_def.name].keys() == {'multiprocess'}
     asset = next(asset for asset in source.assets if asset.key == AssetKey(ASSET))
     assert isinstance(asset.partitions_def, DailyPartitionsDefinition)
     assert asset.partitions_def.get_first_partition_key() == DAY
@@ -572,15 +578,23 @@ def test_backfill_resume_skips_verified_generations_and_retries_failed_days(
     assert _status(backfill_env) == 'MATERIALIZED'
 
 
-def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) -> None:
+@pytest.mark.parametrize('spec', (
+    BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC,
+), ids=('daily', 'spot-book', 'perp-book'))
+def test_native_backfill_queue_bounds_parallel_canonical_runs(
+    tmp_path: Path, spec: RevisionedSourceSpec,
+) -> None:
     from dagster import DagsterRunStatus, RunsFilter
     from dagster._core.instance.config import PoolGranularity
     from dagster._core.op_concurrency_limits_counter import GlobalOpConcurrencyLimitsCounter
     from dagster._core.remote_origin import RemoteJobOrigin
 
-    source = build_source_bundle(BINANCE_SPOT_TRADES_SPEC)
+    source = build_source_bundle(spec)
     job = next(
-        job for job in source.jobs if job.name.startswith('refresh_') and 'canonical' in job.name
+        job for job in source.jobs if job.name == (
+            f'refresh_{spec.key}_canonical_source_job' if spec.consumers
+            else f'backfill_{spec.key}_source_job'
+        )
     )
     root = tmp_path / 'queue'
     root.mkdir()
@@ -588,15 +602,16 @@ def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) ->
         str(root), overrides={'concurrency': {'pools': {'default_limit': 1, 'granularity': 'run'}}}
     ) as instance:
         first = instance.create_run_for_job(
-            job, status=DagsterRunStatus.STARTED, tags={'dagster/partition': DAY}
+            job, status=DagsterRunStatus.STARTED,
+            tags={'dagster/partition': DAY if spec.consumers else '2026-10-04T09Z'},
         )
         second = instance.create_run_for_job(
             job,
             status=DagsterRunStatus.QUEUED,
-            tags={'dagster/partition': '2020-01-01'},
+            tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-04T10Z'},
             remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
         )
-        pool = 'binance_spot_trades_canonical'
+        pool = f'{spec.key}_canonical'
         assert first.run_op_concurrency.all_pools == {pool}
         instance.event_log_storage.set_concurrency_slots(pool, 2)
         records = instance.get_run_records(RunsFilter(run_ids=[first.run_id]))

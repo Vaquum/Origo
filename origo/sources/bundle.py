@@ -74,7 +74,8 @@ else:
 
 class _JobFactory(Protocol):
     def __call__(
-        self, name: str, *, selection: list[str], tags: dict[str, str]
+        self, name: str, *, selection: list[str], tags: dict[str, str],
+        config: dict[str, object] | None = None,
     ) -> UnresolvedAssetJobDefinition: ...
 
 
@@ -631,6 +632,7 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 'origo_source_operation': 'backfill',
                 'dagster/max_runtime': '93600',
             },
+            config={'execution': {'config': {'in_process': {}}}} if not spec.consumers else None,
         ),
     )
     definitions = Definitions(assets=assets, jobs=unresolved)

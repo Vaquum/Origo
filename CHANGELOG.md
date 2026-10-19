@@ -1,3 +1,7 @@
+# v3.34.29
+
+- Count selected full book partitions separately from attempts, preserving ingestion timings and every error occurrence during local backfill qualification.
+
 # v3.34.28
 
 - Record the failed full native book-range acceptance and retain the production bulk stop while its SIGBUS cause is investigated locally.

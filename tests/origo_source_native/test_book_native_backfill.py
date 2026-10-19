@@ -340,3 +340,27 @@ def test_native_book_selection_completion_preserves_source_failures(
             'WHERE dagster_run_id=%(run)s ORDER BY partition_key', {'run': mixed_receipt.run_id},
         ) == [(missing, 'BOOK_SEQUENCE_GAP'), (REAL_HOUR, 'RUN_FAILED')]
         assert runtime.store.record(vendor.hour_partition(REAL_HOUR)) == current
+
+
+def test_book_benchmark_counts_partition_coverage_separately_from_attempts() -> None:
+    from tools.benchmark_book_replay import PartitionAttempt, partition_metrics
+
+    selected = ['2025-07-15T00Z', '2025-07-15T01Z', '2025-07-15T05Z']
+    observed = [PartitionAttempt(selected[0], 58.163, True),
+                PartitionAttempt(selected[1], 0.0, False, 'BOOK_KNOWN_DEPTH_EXHAUSTED')]
+    report = partition_metrics(selected, observed + observed)
+    assert report['full_partitions'] == 1
+    assert report['full_partitions_percent'] == 100 / 3
+    assert report['pending_partitions'] == 1
+    assert report['attempts'] == 4
+    assert report['failure_rate_percent'] == 50
+    assert report['errors'] == {'BOOK_KNOWN_DEPTH_EXHAUSTED': 2}
+    assert report['mean_seconds_per_successful_partition'] == 58.163
+    assert partition_metrics(selected, [])['failure_rate_percent'] is None
+    uneven = partition_metrics(selected, observed + observed + [PartitionAttempt(selected[2], 6.970, True)])
+    assert uneven['full_partitions'] == 2
+    assert uneven['mean_seconds_per_successful_partition'] == (58.163 + 6.970) / 2
+    assert uneven['median_seconds_per_successful_partition'] == (58.163 + 6.970) / 2
+    assert uneven['failure_rate_percent'] == 40
+    with pytest.raises(ValueError, match='failure requires its code'):
+        partition_metrics(selected, [PartitionAttempt(selected[0], 0.0, False)])

@@ -4,11 +4,12 @@ Continuous, append-only record of performance investigations, benchmarks and
 optimizations throughout Origo. Read it before performance work and before any
 ingestion work, together with the [ingestion performance rules](Ingestion-performance.md).
 
-Append an entry for every attempt while doing the work, and complete its findings
-before declaring the task complete. Record successes, failures, regressions,
+Append each completed attempt and its findings as the work proceeds, before
+declaring the task complete. Record pending attempts explicitly and append their
+results in new entries referencing the original. Record successes, failures, regressions,
 unchanged results and disproved hypotheses. Use `not measured`, `unknown` or
 `none established` when appropriate; never invent a measurement or learning.
-Preserve previous entries. Append corrections referencing the entry they
+Do not edit or remove recorded entries. Append corrections referencing the entry they
 supersede so the evolution remains visible.
 
 ## Entry format

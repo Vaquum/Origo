@@ -1003,7 +1003,7 @@ def test_snapshot_presence_reads_only_original_required_columns(
             patch.setattr(pl.LazyFrame, 'collect', projected)
             assert vendor._has_snapshot(path, start) == expected
     assert len(observed) == 2
-    assert all('PROJECT 2/11 COLUMNS' in plan for plan in observed)
+    assert all(f'PROJECT 2/{table.num_columns} COLUMNS' in plan for plan in observed)
     damaged = tmp_path / 'missing-column.parquet'
     pq.write_table(table.drop(['quantity']), damaged)
     with pytest.raises(SourceError) as failure:

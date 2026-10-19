@@ -112,10 +112,7 @@ class _BookBatch:
             previous = self.responses.pop(key, None)
             if previous is not None:
                 self.body_bytes -= len(previous.body)
-            self.responses[key] = Response(
-                response.body, dict(response.headers), response.status,
-                resource_url=response.resource_url,
-            )
+            self.responses[key] = replace(response, headers=dict(response.headers))
             self.body_bytes += len(response.body)
             while (len(self.responses) > BOOK_BATCH_FILE_COUNT
                    or self.body_bytes > BOOK_BATCH_BODY_BYTES):
@@ -391,19 +388,16 @@ def _provider_response(market: Market, partition: Partition, *, metadata: bool) 
 
 def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
     batch = _batch.get()
+    if batch is None or batch.market != market or metadata:
+        return _provider_response(market, partition, metadata=metadata)
     cache_key = (partition.key, hashlib.sha256(
         os.environ.get('CRYPTOHFTDATA_API_KEY', '').encode()
     ).hexdigest())
-    reusable = batch is not None and batch.market == market and not metadata
-    if reusable:
-        assert batch is not None
-        retained = batch.response(cache_key)
-        if retained is not None:
-            return retained
+    retained = batch.response(cache_key)
+    if retained is not None:
+        return retained
     response = _provider_response(market, partition, metadata=metadata)
-    if reusable:
-        assert batch is not None
-        batch.remember(cache_key, response)
+    batch.remember(cache_key, response)
     return response
 
 

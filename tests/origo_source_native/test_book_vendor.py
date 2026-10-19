@@ -991,11 +991,18 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
         pl.col('final_update_id').max(), pl.col('event_time').max()
     ).collect().row(0)
     scan = pl.scan_parquet(following).filter(pl.col('event_type') == 'update')
-    low, high = (
+    headers = (
         scan.select(_KEYS).unique(maintain_order=True)
         .filter(pl.col('final_update_id') > cursor)
-        .unique(subset='final_update_id', maintain_order=True).head(2).collect().to_dicts()
+        .unique(subset='final_update_id', maintain_order=True).collect()
     )
+    end = int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
+    low = headers.filter(pl.col('event_time') >= end).row(0, named=True)
+    high = headers.filter(pl.col('final_update_id') > low['final_update_id']).row(0, named=True)
+    prefix = headers.filter(pl.col('received_time') < low['received_time'])
+    if prefix.height:
+        cursor = max(cursor, prefix['final_update_id'].max())
+        clock = max(clock, prefix['event_time'].max())
     assert clock < int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
     assert low['event_time'] >= int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
     assert low['first_update_id'] <= cursor + 1 <= low['final_update_id']
@@ -1020,7 +1027,10 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
         pl.lit(high['received_time']).cast(schema['received_time']).alias('received_time')
     )
     damaged = tmp_path / 'gap-following.parquet'
-    pl.concat([before.collect(), witness.collect()]).write_parquet(damaged)
+    pl.concat([
+        scan.filter(pl.col('received_time') < low['received_time']).collect(),
+        before.collect(), witness.collect(),
+    ]).write_parquet(damaged)
     with pytest.raises(SourceError) as error:
         vendor.replay_hour(current, market, vendor.hour_partition(REAL_HOUR),
                            tmp_path / 'grid', following=(damaged,))

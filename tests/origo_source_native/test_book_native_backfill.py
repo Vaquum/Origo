@@ -139,7 +139,8 @@ def test_historical_book_404_is_terminal_without_changing_transient_retries(
                                             tags={'dagster/backfill': parent}, raise_on_error=False)
             assert not result.success and len(calls) > before
             assert not any(event.event_type_value == 'STEP_UP_FOR_RETRY' for event in result.all_events)
-            assert any('Missing provider archive:' in str(event) and calls[-1] in str(event)
+            selected = vendor._file(market, vendor.hour_partition(REAL_HOUR))
+            assert any('Missing provider archive:' in str(event) and selected in str(event)
                        for event in result.all_events)
         assert _failures(actual, REAL_HOUR)
         assert actual.store.record(vendor.hour_partition(REAL_HOUR)) is None

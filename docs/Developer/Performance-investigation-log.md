@@ -283,3 +283,9 @@ the result:
 - Task/evidence: [#557](https://github.com/Vaquum/Origo/issues/557), reviews [4315605320](https://github.com/Vaquum/Origo/pull/558#discussion_r4315605320) and [4315605336](https://github.com/Vaquum/Origo/pull/558#discussion_r4315605336).
 - I found — bad: eagerly retrieving the closing future could surface its transport error before current identity/size/preparation validation or an earlier dependency identity. The initial twelve original-input concurrency/error tests did not cover validation priority.
 - Progress/Next: retain the two-request resource scope but consume the closing future only at its original validation point. Add six distinct validation boundaries using genuine bodies and explicitly faulted metadata/preparation. Include the missing Entries024–026 verbatim so the failed experiment referenced by Entry027 is present in this PR's log. No new performance result is claimed by the review correction.
+
+## Entry 031 — 2026-10-19
+
+- Task/evidence: [#557](https://github.com/Vaquum/Origo/issues/557), failed native-source CI run39276669427, historical404 test.
+- I found — bad: the test asserted that the error names the last callback's file. Independent current/following requests now finish in either order; callback completion order is not the selected-partition failure contract.
+- Progress/Next: assert the selected current archive explicitly, retaining terminal failure, no-retry, open-failure and no-canonical-proof assertions. This is a fixture correction for actual failed CI, not a retry waiver. No performance result is claimed.

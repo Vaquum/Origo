@@ -8,6 +8,8 @@ import json
 import os
 import platform
 import resource
+import statistics
+from collections import Counter
 import tempfile
 import time
 from dataclasses import dataclass
@@ -51,6 +53,46 @@ def recordings(path: Path) -> dict[str, Recording]:
             raise ValueError(f'Original response ETag missing: {header_path}')
         result[key] = Recording(source, str(item['sha256']), headers)
     return result
+
+
+
+@dataclass(frozen=True)
+class PartitionAttempt:
+    partition: str
+    seconds: float
+    complete: bool
+    error_code: str | None = None
+
+
+def partition_metrics(selected: list[str], attempts: list[PartitionAttempt]) -> dict[str, object]:
+    """Count original partition outcomes without treating attempts as coverage."""
+    if not selected or len(set(selected)) != len(selected):
+        raise ValueError('Select a nonempty set of distinct partitions.')
+    selected_set = set(selected)
+    if any(attempt.partition not in selected_set or attempt.seconds < 0 for attempt in attempts):
+        raise ValueError('Attempt does not belong to the selected cohort.')
+    if any(attempt.complete == bool(attempt.error_code) for attempt in attempts):
+        raise ValueError('A complete attempt cannot carry an error; a failure requires its code.')
+    latest = {attempt.partition: attempt for attempt in attempts}
+    full = sum(attempt.complete for attempt in latest.values())
+    failed = sum(not attempt.complete for attempt in attempts)
+    completed = [attempt.seconds for attempt in attempts if attempt.complete]
+    return {
+        'selected_partitions': len(selected),
+        'full_partitions': full,
+        'full_partitions_percent': full * 100 / len(selected),
+        'attempted_partitions': len(latest),
+        'pending_partitions': len(selected_set - latest.keys()),
+        'attempts': len(attempts),
+        'failed_attempts': failed,
+        'failure_rate_percent': failed * 100 / len(attempts) if attempts else None,
+        'mean_seconds_per_successful_partition': statistics.mean(completed) if completed else None,
+        'median_seconds_per_successful_partition': statistics.median(completed) if completed else None,
+        'mean_seconds_per_attempt': statistics.mean(attempt.seconds for attempt in attempts) if attempts else None,
+        'errors': dict(Counter(
+            attempt.error_code for attempt in attempts if not attempt.complete
+        )),
+    }
 
 
 def main() -> None:

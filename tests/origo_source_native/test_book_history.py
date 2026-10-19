@@ -372,6 +372,24 @@ def test_rejected_book_revision_identity_and_retry(
     assert not path.exists()
     monkeypatch.setattr(vendor, '_prepare_archive', prepare)
     assert visited
+    if adapter.market == 'spot':
+        # A fresh missing dependency uses the same lifecycle suppression and retry contract.
+        path.unlink(missing_ok=True)
+        monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 24)
+        calls = _missing_prelude_transport(archives, monkeypatch)
+        fault[0] = 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+        monkeypatch.setattr(vendor, 'replay_hour', rejected)
+        retry()
+        runtime.discover(partition)
+        before_attempts, before_calls = len(attempts), len(calls)
+        assert _execute_operation(runtime, 'audit', SourceRunConfig()) == {'corrected_partitions': []}
+        assert len(attempts) == before_attempts
+        assert all(metadata for _, metadata in calls[before_calls:])
+        assert runtime.store.record(partition) is None
+        assert runtime.store.execute("SELECT count() FROM (SELECT failure_key FROM origo.source_failure_log WHERE blocking_scope='PARTITION' GROUP BY failure_key HAVING argMax(event_type,event_time)='FAILED')")[0][0] > 0
+        retry()
+        assert len(attempts) > before_attempts
+        _transport(archives, adapter.market, monkeypatch)
     # A real successful replay clears rejected evidence; ordinary activation recovers.
     monkeypatch.setattr(vendor, 'replay_hour', replay)
     if adapter.market == 'spot':
@@ -668,3 +686,270 @@ def test_archive_fetch_retains_only_completed_rejection(
         assert written and all(count == 0 for count in written)
         assert not tuple((tmp_path / 'locks').rglob('hour-*'))
         assert adapter.rejected_revision(partition, adapter.discover(partition))
+
+
+@pytest.fixture(scope='session')
+def original_missing_prelude_archives(vendor_session_root: Path) -> tuple[OriginalArchive, ...]:
+    result: list[OriginalArchive] = []
+    for hour in range(6, 17):
+        partition = vendor.hour_partition(f'2025-06-28T{hour:02}Z')
+        _, body, headers = _original_archive(vendor_session_root, 'spot', partition)
+        result.append(OriginalArchive(partition, body, headers))
+    return tuple(result)
+
+
+def _missing_prelude_transport(
+    archives: tuple[OriginalArchive, ...], monkeypatch: pytest.MonkeyPatch,
+    *, error_code: str = 'PROVIDER_HTTP_404', failed_hour: int = 5,
+) -> list[tuple[str, bool]]:
+    originals = {vendor._file('spot', item.partition): item for item in archives}
+    missing = vendor._file('spot', vendor.hour_partition(f'2025-06-28T{failed_hour:02}Z'))
+    calls: list[tuple[str, bool]] = []
+    monkeypatch.delenv('CRYPTOHFTDATA_API_KEY', raising=False)
+
+    def recorded(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> Response:
+        assert url == vendor.CRYPTOHFT_URL and weight == vendor.CRYPTOHFT_REQUEST_WEIGHT
+        assert isinstance(params, dict)
+        file = str(cast(dict[str, object], params)['file'])
+        calls.append((file, bool(headers)))
+        if file == missing:
+            raise SourceError(error_code, f'Observed unavailable archive: {file}')
+        original = originals[file]
+        return Response(original.body[:1] if headers else original.body,
+                        original.headers, 206 if headers else 200)
+
+    monkeypatch.setattr(vendor, 'get_response', recorded)
+    return calls
+
+
+@pytest.mark.parametrize('hour', (7, 8, 13, 15))
+def test_missing_prelude_retains_original_replay_rejection(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, hour: int,
+) -> None:
+    calls = _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    partition = adapter.partition(f'2025-06-28T{hour:02}Z')
+    with pytest.raises(SourceError) as failure:
+        adapter.fetch(partition)
+    assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    assert 'binance_spot/2025-06-28/05/BTCUSDT_orderbook.parquet (HTTP 404)' in str(failure.value)
+    count = len(calls)
+    revision = adapter.discover(partition)
+    assert adapter.rejected_revision(partition, revision)
+    assert calls[count:] and all(metadata for _, metadata in calls[count:])
+    assert not tuple(tmp_path.glob('book_vendor_spot/hour-*'))
+
+
+def test_missing_prelude_rejection_rechecks_absence(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    partition = adapter.partition('2025-06-28T07Z')
+    with pytest.raises(SourceError, match='Top depth exceeds the proven region'):
+        adapter.fetch(partition)
+    rejected = adapter.discover(partition)
+    assert adapter.rejected_revision(partition, rejected)
+    recorded = vendor.get_response
+
+    for hour in (6, 7, 8):
+        def changed_metadata(url: str, *, params: object = None, headers: object = None,
+                             weight: int = 0) -> Response:
+            response = recorded(url, params=params, headers=headers, weight=weight)
+            assert isinstance(params, dict)
+            if f'/{hour:02}/' in str(cast(dict[str, object], params)['file']):
+                return Response(response.body, {**response.headers, 'ETag': 'deliberate-metadata-change'}, response.status)
+            return response
+
+        with monkeypatch.context() as changed:
+            changed.setattr(vendor, 'get_response', changed_metadata)
+            assert not adapter.rejected_revision(partition, adapter.discover(partition))
+
+    def newly_missing(url: str, *, params: object = None, headers: object = None,
+                      weight: int = 0) -> Response:
+        assert isinstance(params, dict)
+        if '/06/' in str(cast(dict[str, object], params)['file']):
+            raise SourceError('PROVIDER_HTTP_404', 'Deliberately removed a previously present object.')
+        return recorded(url, params=params, headers=headers, weight=weight)
+
+    with monkeypatch.context() as changed:
+        changed.setattr(vendor, 'get_response', newly_missing)
+        with pytest.raises(SourceError) as failure:
+            adapter.discover(partition)
+        assert failure.value.code == 'PROVIDER_HTTP_404' and '/06/' in str(failure.value)
+
+    def available_metadata(url: str, *, params: object = None, headers: object = None,
+                           weight: int = 0) -> Response:
+        assert isinstance(params, dict)
+        if '/05/' in str(cast(dict[str, object], params)['file']):
+            assert headers == {'Range': 'bytes=0-0'}
+            # Availability/ETag is the controlled transport change; no market rows are invented.
+            return Response(b'', original_missing_prelude_archives[0].headers, 206)
+        return recorded(url, params=cast(dict[str, str], params),
+                        headers=cast(dict[str, str] | None, headers), weight=weight)
+
+    monkeypatch.setattr(vendor, 'get_response', available_metadata)
+    changed = adapter.discover(partition)
+    assert changed != rejected
+    assert not adapter.rejected_revision(partition, changed)
+
+
+@pytest.mark.parametrize('code', ('PROVIDER_HTTP_401', 'PROVIDER_HTTP_429', 'PROVIDER_TRANSPORT_FAILED'))
+def test_missing_prelude_preserves_other_provider_errors(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, code: str,
+) -> None:
+    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch, error_code=code)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    with pytest.raises(SourceError) as failure:
+        vendor.CryptoHFTBookHourly('spot').fetch(vendor.hour_partition('2025-06-28T07Z'))
+    assert failure.value.code == code
+    assert not vendor._dependency_path('spot', vendor.hour_partition('2025-06-28T07Z')).exists()
+    assert not tuple(tmp_path.glob('book_vendor_spot/hour-*'))
+
+
+@pytest.mark.parametrize('hour', (7, 8))
+def test_missing_prelude_does_not_relabel_current_or_following_404(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, hour: int,
+) -> None:
+    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch, failed_hour=hour)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    with pytest.raises(SourceError) as failure:
+        vendor.CryptoHFTBookHourly('spot').fetch(vendor.hour_partition('2025-06-28T07Z'))
+    assert failure.value.code == 'PROVIDER_HTTP_404'
+    assert not vendor._dependency_path('spot', vendor.hour_partition('2025-06-28T07Z')).exists()
+    assert not tuple(tmp_path.glob('book_vendor_spot/hour-*'))
+
+
+@pytest.mark.parametrize('case', ('rejected', 'recovered', 'uncacheable'))
+def test_missing_prelude_attempts_the_last_available_untried_prefix(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    original_reconstruction_archives: dict[str, tuple[OriginalRecording, ...]],
+    monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    if case == 'rejected':
+        _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+        # Deliberately defer intermediate checkpoints; original market rows stay unchanged.
+        monkeypatch.setattr(vendor, '_has_snapshot', lambda path, start: False)
+        partition = vendor.hour_partition('2025-06-28T15Z')
+        complete_prefix = 9
+    else:
+        import polars as pl
+
+        archives = list(_recorded_inputs(original_reconstruction_archives['update-only']))
+        path = tmp_path / 'original-18.bin'
+        path.write_bytes(archives[0].body)
+        frame = pl.read_parquet(vendor._prepare_archive(path, tmp_path))
+        boundary = int((archives[1].partition.start - timedelta(minutes=1)).timestamp() * 1000)
+        # Protocol faults only: move complete genuine messages across an object boundary,
+        # then make the older object unavailable. Values, clocks and IDs stay exact.
+        parts = []
+        for key, selected in (
+            ('2025-07-15T17Z', frame.filter(pl.col('event_time') < boundary)),
+            ('2025-07-15T18Z', frame.filter(pl.col('event_time') >= boundary)),
+        ):
+            assert selected.height
+            path = tmp_path / f'{key}.parquet'
+            selected.write_parquet(path)
+            parts.append(OriginalArchive(vendor.hour_partition(key), path.read_bytes(), archives[0].headers))
+        _transport(tuple(parts) + tuple(archives[1:]), 'spot', monkeypatch, max_prelude_hours=24)
+        recorded = vendor.get_response
+
+        def missing(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> Response:
+            assert isinstance(params, dict)
+            if '/16/' in str(cast(dict[str, object], params)['file']):
+                raise SourceError('PROVIDER_HTTP_404', 'Deliberate unavailable older object.')
+            return recorded(url, params=params, headers=headers, weight=weight)
+
+        monkeypatch.setattr(vendor, 'get_response', missing)
+        partition = vendor.hour_partition('2025-07-15T20Z')
+        complete_prefix = 3
+    replay = vendor.replay_hour
+    prefixes: list[int] = []
+
+    def observed(path: Path, market: Market, partition: Partition, root: Path, *,
+                 preludes: tuple[Path, ...] = (), following: tuple[Path, ...] = ()) -> vendor.Revision:
+        prefixes.append(len(preludes))
+        if case == 'uncacheable' and len(preludes) == complete_prefix:
+            raise SourceError('BOOK_VENDOR_SEED_MISSING', 'Deliberate noncacheable final verdict.')
+        return replay(path, market, partition, root, preludes=preludes, following=following)
+
+    monkeypatch.setattr(vendor, 'replay_hour', observed)
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    if case == 'recovered':
+        revision = adapter.fetch(partition)
+        _assert_reconstructed_hour(revision, partition, 'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4')
+        memo = json.loads(vendor._dependency_path('spot', partition).read_text())
+        assert 'rejection' not in memo
+        assert all(key != '2025-07-15T16Z' for key, _ in memo['dependencies'])
+    else:
+        with pytest.raises(SourceError) as failure:
+            adapter.fetch(partition)
+        assert failure.value.code == ('BOOK_KNOWN_DEPTH_EXHAUSTED' if case == 'rejected' else 'BOOK_VENDOR_SEED_MISSING')
+        if case == 'uncacheable':
+            assert not vendor._dependency_path('spot', partition).exists()
+    assert prefixes[-1] == complete_prefix and prefixes.count(complete_prefix) == 1
+
+
+@pytest.mark.parametrize('operation', ('fetch', 'discover'))
+def test_missing_prelude_token_404_stays_an_authentication_failure(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    partition = adapter.partition('2025-06-28T07Z')
+    if operation == 'discover':
+        with pytest.raises(SourceError) as original_failure:
+            adapter.fetch(partition)
+        assert original_failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    evidence = vendor._dependency_path('spot', partition)
+    before = evidence.read_bytes() if evidence.exists() else None
+    originals = {vendor._file('spot', item.partition): item for item in original_missing_prelude_archives}
+    from contextvars import ContextVar
+    active = ContextVar('archive_partition', default='')
+    response = vendor._response
+    monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'deliberate-test-credential')
+
+    def selected(market: Market, partition: Partition, *, metadata: bool) -> Response:
+        marker = active.set(partition.key)
+        try:
+            return response(market, partition, metadata=metadata)
+        finally:
+            active.reset(marker)
+
+    def token(key: str, *, rejected: str | None = None) -> str:
+        assert key == 'deliberate-test-credential' and rejected is None
+        if active.get() == '2025-06-28T05Z':
+            raise SourceError('PROVIDER_HTTP_404', 'Token endpoint returned HTTP404.')
+        return 'deliberate-test-token'
+
+    def archive(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> Response:
+        assert url == vendor.CRYPTOHFT_URL
+        assert weight == vendor.CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT
+        assert isinstance(params, dict) and isinstance(headers, dict)
+        assert headers.get('Authorization') == 'Bearer deliberate-test-token'
+        file = str(cast(dict[str, object], params)['file'])
+        assert '/05/' not in file  # Token failure occurs before this archive is checked.
+        original = originals[file]
+        metadata = headers.get('Range') == 'bytes=0-0'
+        return Response(b'' if metadata else original.body, original.headers, 206 if metadata else 200)
+
+    monkeypatch.setattr(vendor, '_token_for', token)
+    monkeypatch.setattr(vendor, '_response', selected)
+    monkeypatch.setattr(vendor, 'get_response', archive)
+    with pytest.raises(SourceError) as failure:
+        if operation == 'fetch':
+            adapter.fetch(partition)
+        else:
+            adapter.discover(partition)
+    assert failure.value.code == 'PROVIDER_HTTP_404'
+    assert str(failure.value) == 'Token endpoint returned HTTP404.'
+    assert (evidence.read_bytes() if evidence.exists() else None) == before

@@ -800,3 +800,54 @@ def test_missing_prelude_attempts_the_last_available_untried_prefix(
         vendor.CryptoHFTBookHourly('spot').fetch(vendor.hour_partition('2025-06-28T15Z'))
     assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     assert prefixes == [0, 1, 2, 4, 8, 9]
+
+
+@pytest.mark.parametrize('operation', ('fetch', 'discover'))
+def test_missing_prelude_token_404_stays_an_authentication_failure(
+    original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    adapter = vendor.CryptoHFTBookHourly('spot')
+    partition = adapter.partition('2025-06-28T07Z')
+    if operation == 'discover':
+        with pytest.raises(SourceError) as original_failure:
+            adapter.fetch(partition)
+        assert original_failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    evidence = vendor._dependency_path('spot', partition)
+    before = evidence.read_bytes() if evidence.exists() else None
+    originals = {vendor._file('spot', item.partition): item for item in original_missing_prelude_archives}
+    token_calls = 0
+    fault_at = 4 if operation == 'fetch' else 2
+    monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'deliberate-test-credential')
+
+    def token(key: str, *, rejected: str | None = None) -> str:
+        nonlocal token_calls
+        assert key == 'deliberate-test-credential' and rejected is None
+        token_calls += 1
+        if token_calls == fault_at:
+            raise SourceError('PROVIDER_HTTP_404', 'Token endpoint returned HTTP404.')
+        return 'deliberate-test-token'
+
+    def archive(url: str, *, params: object = None, headers: object = None, weight: int = 0) -> Response:
+        assert url == vendor.CRYPTOHFT_URL
+        assert weight == vendor.CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT
+        assert isinstance(params, dict) and isinstance(headers, dict)
+        assert headers.get('Authorization') == 'Bearer deliberate-test-token'
+        file = str(cast(dict[str, object], params)['file'])
+        assert '/05/' not in file  # Token failure occurs before this archive is checked.
+        original = originals[file]
+        metadata = headers.get('Range') == 'bytes=0-0'
+        return Response(b'' if metadata else original.body, original.headers, 206 if metadata else 200)
+
+    monkeypatch.setattr(vendor, '_token_for', token)
+    monkeypatch.setattr(vendor, 'get_response', archive)
+    with pytest.raises(SourceError) as failure:
+        if operation == 'fetch':
+            adapter.fetch(partition)
+        else:
+            adapter.discover(partition)
+    assert failure.value.code == 'PROVIDER_HTTP_404'
+    assert str(failure.value) == 'Token endpoint returned HTTP404.'
+    assert (evidence.read_bytes() if evidence.exists() else None) == before

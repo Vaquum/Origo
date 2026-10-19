@@ -70,6 +70,10 @@ _GRID_LENGTHS = {20: 20, 200: b'\xc8\x01'}
 _GridSample = tuple[int, int, int, int, tuple[Level, ...], tuple[Level, ...]]
 
 
+class _MissingArchive(SourceError):
+    """An archive lookup returned404; authentication failures are separate."""
+
+
 class _BinaryInsert(Protocol):
     def raw_insert(self, table: str, *, insert_block: Iterator[bytes], fmt: str) -> object: ...
 
@@ -218,7 +222,7 @@ def _archive_response(market: Market, partition: Partition, *, metadata: bool,
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
             raise ArchiveNotPublishedYet(_file(market, partition)) from error
         if error.code == 'PROVIDER_HTTP_404':
-            raise SourceError(error.code, f'Missing provider archive: {_file(market, partition)}') from error
+            raise _MissingArchive(error.code, f'Missing provider archive: {_file(market, partition)}') from error
         raise
 
 
@@ -501,9 +505,8 @@ class CryptoHFTBookHourly:
             dependency = hour_partition(key)
             try:
                 response = _response(self.market, dependency, metadata=True)
-            except SourceError as error:
-                if (error.code != 'PROVIDER_HTTP_404' or key >= partition.key
-                        or previous.get(key) != _MISSING_DEPENDENCY):
+            except _MissingArchive:
+                if key >= partition.key or previous.get(key) != _MISSING_DEPENDENCY:
                     raise
                 checked.append((key, _MISSING_DEPENDENCY))
             else:
@@ -556,9 +559,7 @@ class CryptoHFTBookHourly:
                         )
                         try:
                             original = _response(self.market, before, metadata=False)
-                        except SourceError as error:
-                            if error.code != 'PROVIDER_HTTP_404':
-                                raise
+                        except _MissingArchive:
                             unavailable = before
                         if unavailable is None and len(original.body) > CRYPTOHFT_MAX_FILE_BYTES:
                             raise SourceError(

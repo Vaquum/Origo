@@ -268,3 +268,10 @@ the result:
 - I found — bad: the second two-transfer batch hit the unchanged30s ReadTimeout and did not finish. The provider/network contribution is variable; the failed batch is retained, not replaced with the earlier success. No product transport change is justified from one successful parallel batch.
 - Measurements: only the four real HTTP calls and process-local token when cold; no replay, database, Dagster or memory measurement. Maximum successful baseline individual metadata call5.402s. No sustained throughput or completion-time projection.
 - Progress/Next: finish the narrow rejection correction separately. Further local transport qualification must record each request failure and repeat matched variants before selecting an implementation; retain the current timeout, error and quota behavior.
+
+## Entry 028 — 2026-10-19
+
+- Task/evidence: [#555](https://github.com/Vaquum/Origo/issues/555), review [4315534894](https://github.com/Vaquum/Origo/pull/556#discussion_r4315534894).
+- I tried: distinguish the concrete missing archive from the request wrapper's generic HTTP404 before retaining a lookback rejection.
+- I found — bad: `_response` can mint/refresh a token before asking for the archive; that endpoint's404 has the same generic error code. Catching only the code could hide an authentication-service failure during either fetch or rejected-input discovery. The initial eleven targeted regressions passed but did not cover this boundary.
+- Progress/Next: use an archive-specific SourceError subtype without changing its public404 code; add both original-input token-refresh transitions. Stop superseded local verification, publish the correction, then repeat required checks. No performance gain or production success is claimed by this repair.

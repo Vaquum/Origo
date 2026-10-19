@@ -357,5 +357,10 @@ def test_book_benchmark_counts_partition_coverage_separately_from_attempts() -> 
     assert report['errors'] == {'BOOK_KNOWN_DEPTH_EXHAUSTED': 2}
     assert report['mean_seconds_per_successful_partition'] == 58.163
     assert partition_metrics(selected, [])['failure_rate_percent'] is None
+    uneven = partition_metrics(selected, observed + observed + [PartitionAttempt(selected[2], 6.970, True)])
+    assert uneven['full_partitions'] == 2
+    assert uneven['mean_seconds_per_successful_partition'] == (58.163 + 6.970) / 2
+    assert uneven['median_seconds_per_successful_partition'] == (58.163 + 6.970) / 2
+    assert uneven['failure_rate_percent'] == 40
     with pytest.raises(ValueError, match='failure requires its code'):
         partition_metrics(selected, [PartitionAttempt(selected[0], 0.0, False)])

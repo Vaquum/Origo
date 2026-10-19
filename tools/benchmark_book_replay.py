@@ -75,9 +75,13 @@ def partition_metrics(selected: list[str], attempts: list[PartitionAttempt]) -> 
     if any(attempt.complete == bool(attempt.error_code) for attempt in attempts):
         raise ValueError('A complete attempt cannot carry an error; a failure requires its code.')
     latest = {attempt.partition: attempt for attempt in attempts}
-    full = len({attempt.partition for attempt in attempts if attempt.complete})
+    completed_by_partition: dict[str, float] = {}
+    for attempt in attempts:
+        if attempt.complete:
+            completed_by_partition.setdefault(attempt.partition, attempt.seconds)
+    full = len(completed_by_partition)
     failed = sum(not attempt.complete for attempt in attempts)
-    completed = [attempt.seconds for attempt in attempts if attempt.complete]
+    completed = list(completed_by_partition.values())
     return {
         'selected_partitions': len(selected),
         'full_partitions': full,
@@ -87,6 +91,7 @@ def partition_metrics(selected: list[str], attempts: list[PartitionAttempt]) -> 
         'attempts': len(attempts),
         'failed_attempts': failed,
         'failure_rate_percent': failed * 100 / len(attempts) if attempts else None,
+        'successful_partition_timing': 'first verified successful attempt per selected partition',
         'mean_seconds_per_successful_partition': statistics.mean(completed) if completed else None,
         'median_seconds_per_successful_partition': statistics.median(completed) if completed else None,
         'mean_seconds_per_attempt': statistics.mean(attempt.seconds for attempt in attempts) if attempts else None,

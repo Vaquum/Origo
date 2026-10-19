@@ -471,11 +471,14 @@ def test_zero_prelude_opening_gap_fetches_the_real_bridge(
 ) -> None:
     import polars as pl
 
-    archives = list(_recorded_inputs(original_reconstruction_archives['update-only']))
-    partition = vendor.hour_partition('2025-07-15T20Z')
+    case = 'update-only' if anchor_kind == 'update' else 'shallow'
+    archives = list(_recorded_inputs(original_reconstruction_archives[case]))
+    current_index = 2 if anchor_kind == 'update' else 5
+    prior_index = current_index - 1
+    partition = archives[current_index].partition
     start = int(partition.start.timestamp() * 1000)
     frames = []
-    for index in (0, 1, 2):
+    for index in (0, prior_index, current_index):
         root = tmp_path / str(index)
         root.mkdir()
         path = root / 'input'
@@ -487,13 +490,13 @@ def test_zero_prelude_opening_gap_fetches_the_real_bridge(
     anchor = updates.filter(pl.col('final_update_id') == anchor_id)
     if anchor_kind == 'snapshot':
         snapshots = prefix.filter(pl.col('event_type') == 'snapshot')
-        anchor = snapshots.filter(pl.col('last_update_id') == snapshots['last_update_id'].max())
+        anchor = snapshots.filter(pl.col('received_time') == snapshots['received_time'].max())
     bridge = current.filter(pl.col('event_time') < start)
     assert anchor.height and bridge.height
     # Move complete genuine messages across the file boundary; values/clocks/IDs stay exact.
     for index, frame in (
-        (1, pl.concat([prior, bridge])),
-        (2, pl.concat([anchor, current.filter(pl.col('event_time') >= start)])),
+        (prior_index, pl.concat([prior, bridge])),
+        (current_index, pl.concat([anchor, current.filter(pl.col('event_time') >= start)])),
     ):
         path = tmp_path / f'reassociated-{index}.parquet'
         frame.write_parquet(path)
@@ -515,11 +518,18 @@ def test_zero_prelude_opening_gap_fetches_the_real_bridge(
 
     monkeypatch.setattr(vendor, 'replay_hour', observed)
     revision = vendor.CryptoHFTBookHourly('spot').fetch(partition)
-    assert attempts == [(0, 'BOOK_VENDOR_SEED_MISSING'), (1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'),
-                        (2, 'accepted')]
+    expected = [(0, 'BOOK_VENDOR_SEED_MISSING'), (1, 'BOOK_KNOWN_DEPTH_EXHAUSTED')]
+    if anchor_kind == 'snapshot':
+        expected.append((2, 'BOOK_KNOWN_DEPTH_EXHAUSTED'))
+    expected.append((2 if anchor_kind == 'update' else 4, 'accepted'))
+    assert attempts == expected
     _assert_reconstructed_hour(
         revision, partition,
-        'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4',
+        'local-book-binary-v1:' + (
+            'feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4'
+            if anchor_kind == 'update' else
+            '58dcc9d61aec399f5dde8036cf74e0091e45af455e17c191b18da4c87a210b9a'
+        ),
     )
 
 

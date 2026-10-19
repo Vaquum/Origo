@@ -424,7 +424,10 @@ def replay(paths: tuple[Path, ...], market: Market, partition: Partition) -> Arc
     dtype20 = np.dtype([('time', '<i8'), ('event', '<u8'), ('last', '<u8'), ('payload', 'V642')])
     small = np.frombuffer(payloads[0], dtype=dtype20)
     fused_type = np.dtype([('first', 'V666'), ('large', 'V6428'), ('rest', 'V666', (9,))])
-    minute_last = np.searchsorted(effective, np.arange(start+60000, end+1, 60000), side='left')-1
+    # Seals include accepted events after the minute's final emitted grid.
+    minute_last = np.searchsorted(
+        effective, np.arange(start + 60000, end + 1, 60000), side='left'
+    ) - 1
     minutes: list[dict[str, object]] = []
     for minute in range(60):
         tiny = np.frombuffer(

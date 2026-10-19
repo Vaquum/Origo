@@ -84,9 +84,6 @@ def publication_ready(
     from .cleanup import preserve_primary_failure
     from .storage import SourceStore
 
-    if not spec.consumers:
-        return True
-
     backfill_id = context.run.tags.get(BACKFILL_ID_TAG)
     if backfill_id is None:
         return True
@@ -99,6 +96,8 @@ def publication_ready(
     days = backfill.partition_names
     if not days or result['partition_key'] not in days:
         raise RuntimeError('Source partition is outside the native backfill selection.')
+    if not spec.consumers:
+        return True
     settings = get_clickhouse_settings()
     client = make_clickhouse_client(settings)
     with preserve_primary_failure('disconnect', client.disconnect):

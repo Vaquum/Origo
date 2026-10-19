@@ -1005,11 +1005,13 @@ def test_following_pruning_preserves_preboundary_sequence_fault(
         clock = max(clock, prefix['event_time'].max())
     assert clock < int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
     assert low['event_time'] >= int(vendor.hour_partition(REAL_HOUR).end.timestamp() * 1000)
-    assert low['first_update_id'] <= cursor + 1 <= low['final_update_id']
     assert high['final_update_id'] > low['final_update_id']
-    assert high['first_update_id'] > cursor + 1
     if market == 'perp':
         assert low['prev_final_update_id'] == cursor
+        assert high['prev_final_update_id'] != cursor
+    else:
+        assert low['first_update_id'] <= cursor + 1 <= low['final_update_id']
+        assert high['first_update_id'] > cursor + 1
     schema = scan.collect_schema()
 
     def message(header):

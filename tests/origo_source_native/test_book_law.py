@@ -528,7 +528,7 @@ def test_native_hourly_backfill_avoids_global_health_scan() -> None:
         assert job.asset_layer.executable_asset_keys == {
             AssetKey(f'build_{spec.key}_canonical_revision_origo'),
         }
-        health = defs.get_job_def(f'reconcile_{spec.key}_source_job')
+        health = defs.get_job_def(f'reconcile_{spec.key}_source_origo_job')
         assert health.asset_layer.executable_asset_keys == {
             AssetKey(f'reconcile_{spec.key}_source_origo'),
         }

@@ -1,3 +1,7 @@
+# v3.34.25
+
+- Reuse issued archive object references for fresh metadata checks within one source execution, retaining logical provider pacing, expiry and authoritative error checks.
+
 # v3.34.24
 
 - Overlap the two required hourly book archive transfers and their final identity checks through the existing shared provider pacing.

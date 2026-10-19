@@ -981,6 +981,128 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert all(r._content_consumed for r in responses)
 
 
+@pytest.mark.parametrize('case', ('reuse', 'expired', 'changed', 'moved', 'missing', 'transport', 'unsupported'))
+def test_vendor_issued_object_reference_scope(
+    original_vendor_archive, original_vendor_following_archive, tmp_path, monkeypatch, caplog, case,
+):
+    from datetime import UTC, datetime
+    from urllib.parse import unquote, urlsplit
+
+    import requests
+    from origo.sources import archive
+    from origo.sources.adapters import binance_daily as daily
+
+    market, body, headers = original_vendor_archive
+    _, following_body, following_headers = original_vendor_following_archive
+    partition = vendor.hour_partition(REAL_HOUR)
+    after = vendor.hour_partition('2026-10-04T10Z')
+    current_file = vendor._file(market, partition)
+    originals = {current_file: (body, headers), vendor._file(market, after): (following_body, following_headers)}
+    clock = [1000.0]
+    calls = []
+
+    def response(content, headers, url, status=200):
+        value = requests.Response()
+        value.status_code = status
+        value.headers.update(headers)
+        value._content, value._content_consumed, value.url = content, True, url
+        return value
+
+    def post(url, **kwargs):
+        assert url == vendor.CRYPTOHFT_TOKEN_URL and kwargs['allow_redirects'] is False
+        return response(b'{"jwt_token":"control-token","expires_in":14400}', {}, url)
+
+    def get(url, *, params, headers, timeout):
+        assert timeout == (5, 30)
+        metadata = headers.get('Range') == 'bytes=0-0'
+        direct = url != vendor.CRYPTOHFT_URL
+        if direct:
+            assert params is None and 'Authorization' not in headers and 'X-API-Key' not in headers
+            file = unquote(urlsplit(url).path).removeprefix('/bucket/').removesuffix('.zst')
+        else:
+            assert headers['Authorization'] == 'Bearer control-token'
+            file = params['file']
+        calls.append((file, metadata, direct, clock[0]))
+        if metadata and file == current_file:
+            if case == 'transport' and direct:
+                raise requests.ReadTimeout('Deliberate failure containing control-signature.')
+            if (case == 'missing') or (case == 'moved' and direct):
+                return response(b'', {}, url, 404)
+        content, original_headers = originals[file]
+        if metadata and file == current_file and case in ('changed', 'moved'):
+            original_headers = {**original_headers, 'ETag': 'deliberate-metadata-change'}
+        date = datetime.fromtimestamp(clock[0], UTC).strftime('%Y%m%dT%H%M%SZ')
+        # Deliberate transport clock/signature/redirect faults; every market row stays original.
+        issued = (f'https://test.r2.cloudflarestorage.com/bucket/{file}.zst'
+                  f'?X-Amz-Date={date}&X-Amz-Expires=300&X-Amz-SignedHeaders=host'
+                  '&X-Amz-Signature=control-signature')
+        if case == 'unsupported':
+            issued += '&versionId=deliberate-version'
+        return response(content[:1] if metadata else content, original_headers, issued,
+                        206 if metadata else 200)
+
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'control-key')
+    monkeypatch.setattr(vendor, '_token', None)
+    monkeypatch.setattr(daily.requests, 'post', post)
+    monkeypatch.setattr(daily.requests, 'get', get)
+    monkeypatch.setattr(daily.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(daily.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    adapter = vendor.CryptoHFTBookHourly(market)
+    with archive.archive_session():
+        with vendor._paired_responses(market, partition, after, metadata=False) as (opening, closing):
+            tail = closing.result()
+        assert opening.body == body and tail.body == following_body
+        expected = vendor._revision_key(vendor._identity(market, partition, opening),
+            ((after.key, vendor._identity(market, after, tail)),))
+        assert 'control-signature' not in repr(opening)
+        assert len(archive.archive_references()) == (0 if case == 'unsupported' else 2)
+        before = len(calls)
+        if case == 'expired':
+            clock[0] += 300
+        if case in ('missing', 'transport'):
+            with pytest.raises(SourceError) as error:
+                adapter.discover(partition)
+            assert error.value.code == ('PROVIDER_HTTP_404' if case == 'missing' else 'PROVIDER_TRANSPORT_FAILED')
+            assert 'control-signature' not in str(error.value)
+            if case == 'missing':
+                assert current_file in str(error.value)
+            assert sum(file == current_file and not direct for file, _, direct, _ in calls[before:]) == (case == 'missing')
+        else:
+            assert (adapter.discover(partition) != expected) == (case in ('changed', 'moved'))
+            assert any(direct for _, _, direct, _ in calls[before:]) == (case not in ('expired', 'unsupported'))
+        assert len(list(tmp_path.glob('*.state'))) == 1
+    assert archive.archive_references() is None
+    assert 'control-signature' not in caplog.text and 'control-key' not in caplog.text
+    # A separate source execution resolves the official route again.
+    before = len(calls)
+    with archive.archive_session():
+        if case == 'missing':
+            with pytest.raises(SourceError):
+                adapter.discover(partition)
+        else:
+            adapter.discover(partition)
+    assert all(not direct for _, _, direct, _ in calls[before:])
+
+
+def test_vendor_reference_cache_is_bounded_and_scoped():
+    from datetime import UTC, datetime
+    from origo.sources import archive
+
+    now = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
+    with archive.archive_session():
+        for market, key in _ORIGINAL_HASHES:
+            file = vendor._file(market, vendor.hour_partition(key))
+            # Only the reference protocol is controlled; these are pinned genuine source keys.
+            url = (f'https://test.r2.cloudflarestorage.com/bucket/{file}.zst'
+                   f'?X-Amz-Date={now}&X-Amz-Expires=300&X-Amz-SignedHeaders=host'
+                   '&X-Amz-Signature=control-signature')
+            vendor._remember_reference(file, Response(b'', {}, 206, resource_url=url))
+            assert len(archive.archive_references()) <= vendor.BOOK_MAX_PRELUDE_HOURS + 2
+        assert len(archive.archive_references()) == vendor.BOOK_MAX_PRELUDE_HOURS + 2
+    assert archive.archive_references() is None
+
+
 def test_following_file_keeps_all_boundary_sequence_evidence(
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],

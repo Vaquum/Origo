@@ -8,16 +8,25 @@ from .contracts import SourceError
 _archive: ContextVar[dict[tuple[str, str], bytes] | None] = ContextVar(
     'source_archive', default=None
 )
+_references: ContextVar[dict[tuple[str, str], tuple[str, float]] | None] = ContextVar(
+    'source_archive_references', default=None
+)
 
 
 @contextmanager
 def archive_session() -> Iterator[None]:
     """Share checksum-verified bytes only within one source execution."""
     token = _archive.set({})
+    references = _references.set({})
     try:
         yield
     finally:
         _archive.reset(token)
+        _references.reset(references)
+
+
+def archive_references() -> dict[tuple[str, str], tuple[str, float]] | None:
+    return _references.get()
 
 
 def verified_archive(url: str, revision: str, fetch: Callable[[str], bytes], *, code: str) -> bytes:

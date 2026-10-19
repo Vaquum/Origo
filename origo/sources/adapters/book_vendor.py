@@ -12,16 +12,19 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from contextvars import copy_context
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Protocol, cast
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from origo.workers.book_capture import BookSampler, Level, utc_millisecond
 
 from ..arrow_types import ArrowCompression, ArrowParquet
+from ..archive import archive_references
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
 from .binance_daily import Response, get_response
 from .book_local import fetch_sealed_partition as fetch_sealed_partition
@@ -46,6 +49,7 @@ CRYPTOHFT_REQUEST_WEIGHT = 40
 CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT = 2
 CRYPTOHFT_TOKEN_URL = 'https://api.cryptohftdata.com/v1/jwt-token'
 _TOKEN_LOCK = Lock()
+_REFERENCE_LOCK = Lock()
 _token: tuple[str, str, float] | None = None
 # Before availability is observed, the hourly delivery fallback expires at :20.
 BOOK_HOURLY_DELIVERY_GRACE_SECONDS = 20 * 60
@@ -208,17 +212,69 @@ def _token_for(key: str, *, rejected: str | None = None) -> str:
         return token
 
 
+def _remember_reference(file: str, response: Response) -> None:
+    references = archive_references()
+    if references is None or response.resource_url is None:
+        return
+    target = urlsplit(response.resource_url)
+    query = parse_qs(target.query)
+    if (target.scheme != 'https' or target.hostname is None
+            or not target.hostname.endswith('.r2.cloudflarestorage.com')
+            or target.username is not None or target.port not in (None, 443)
+            or not unquote(target.path).endswith('/' + file + '.zst')
+            or any(key.lower() == 'versionid' for key in query)
+            or query.get('X-Amz-SignedHeaders') != ['host']
+            or len(query.get('X-Amz-Signature', [])) != 1
+            or len(query.get('X-Amz-Date', [])) != 1
+            or len(query.get('X-Amz-Expires', [])) != 1):
+        return
+    issued = datetime.strptime(query['X-Amz-Date'][0], '%Y%m%dT%H%M%SZ').replace(tzinfo=UTC)
+    deadline = issued.timestamp() + int(query['X-Amz-Expires'][0])
+    with _REFERENCE_LOCK:
+        key = (CRYPTOHFT_URL, file)
+        if key not in references and len(references) >= BOOK_MAX_PRELUDE_HOURS + 2:
+            references.pop(next(iter(references)))
+        references[key] = (response.resource_url, deadline)
+
+
 def _archive_response(market: Market, partition: Partition, *, metadata: bool,
                       token: str | None) -> Response:
     headers = {'Authorization': f'Bearer {token}'} if token is not None else {}
     if metadata:
         headers['Range'] = 'bytes=0-0'
+    file = _file(market, partition)
+    references = archive_references()
+    resource_url = None
+    if metadata and references is not None:
+        with _REFERENCE_LOCK:
+            reference = references.get((CRYPTOHFT_URL, file))
+            # Leave the configured 5+30-second request budget before signature expiry.
+            if reference is not None and reference[1] > time.time() + 35:
+                resource_url = reference[0]
+
+    def request(target: str | None) -> Response:
+        weight = CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT if token is not None else CRYPTOHFT_REQUEST_WEIGHT
+        if target is None:
+            return get_response(CRYPTOHFT_URL, params={'file': file}, headers=headers or None,
+                                weight=weight)
+        return get_response(CRYPTOHFT_URL, params={'file': file}, headers=headers or None,
+                            weight=weight, resource_url=target)
+
     try:
-        return get_response(
-            CRYPTOHFT_URL, params={'file': _file(market, partition)},
-            headers=headers or None,
-            weight=CRYPTOHFT_AUTHENTICATED_REQUEST_WEIGHT if token is not None else CRYPTOHFT_REQUEST_WEIGHT,
-        )
+        try:
+            response = request(resource_url)
+        except SourceError as error:
+            if resource_url is None or error.code not in {
+                'PROVIDER_HTTP_401', 'PROVIDER_HTTP_403', 'PROVIDER_HTTP_404',
+            }:
+                raise
+            assert references is not None
+            with _REFERENCE_LOCK:
+                references.pop((CRYPTOHFT_URL, file), None)
+            # A stale storage reference cannot establish official archive absence.
+            response = request(None)
+        _remember_reference(file, response)
+        return response
     except SourceError as error:
         latest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1 + BOOK_MAX_FOLLOWING_HOURS)
         if error.code == 'PROVIDER_HTTP_404' and partition.start >= latest:
@@ -256,8 +312,8 @@ def _paired_responses(
     market: Market, partition: Partition, following: Partition, *, metadata: bool
 ) -> Iterator[tuple[Response, Future[Response]]]:
     with ThreadPoolExecutor(max_workers=2) as pool:
-        current = pool.submit(_response, market, partition, metadata=metadata)
-        closing = pool.submit(_response, market, following, metadata=metadata)
+        current = pool.submit(copy_context().run, _response, market, partition, metadata=metadata)
+        closing = pool.submit(copy_context().run, _response, market, following, metadata=metadata)
         yield current.result(), closing
 
 

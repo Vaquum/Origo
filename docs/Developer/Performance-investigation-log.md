@@ -167,3 +167,10 @@ the result:
 - Published-reader measurement (perp-snapshot): complete partition 4.066, 4.084, 3.779 s; Python CPU 3.105, 2.803, 2.670 s; cold process to first completion 4.681 s; peak Python RSS 1665.38 MiB. All four persisted reference hashes match in each repetition.
 - Published-reader measurement (spot-update-only): complete partition 4.903, 5.314, 4.597 s; Python CPU 3.614, 3.323, 3.220 s; cold process to first completion 5.532 s; peak Python RSS 1202.34 MiB. All four persisted reference hashes match in each repetition.
 - Limits/Next: same original bytes/headers, fresh setup, actual storage admission, four writes/proofs and activation as Entry 010. Provider transfer/pacing, production concurrency/headroom, complete historical coverage and backfill ETA remain unqualified. Finish the final current-input contract matrix and review evidence; production remains stopped.
+
+## Entry 014 — 2026-10-19
+
+- Task/evidence: [#554](https://github.com/Vaquum/Origo/pull/554), [runtime CI on 14ddb93](https://github.com/Vaquum/Origo/actions/runs/39250814012).
+- I found — good: 1,016 Linux cases passed before interruption. Local lint, benchmark CLI, captured boundary regressions and focused book regressions passed on this source.
+- I found — bad: after repairing the retained-read count, the same full real-archive contract also asserted the removed `phase=reconciled` message. Require the actual `operation=canonical phase=completed` event instead; keep every row-count, evidence, partition selection and duplicate-detection assertion. Include the complete failing scenario in the focused check before the final full matrix.
+- Measurements: no new performance experiment or product change; Entry 013's published-reader measurements still apply. Current-input full contracts and CI remain required.

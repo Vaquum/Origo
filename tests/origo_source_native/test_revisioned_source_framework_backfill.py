@@ -236,7 +236,7 @@ def test_backfill_builds_real_archive_and_records_evidence(
     assert instance.get_materialized_partitions(asset.key) == {DAY, '2020-01-01'}
 
     messages = '\n'.join(entry.user_message for entry in instance.all_logs(result.run_id))
-    assert 'phase=reconciled' in messages
+    assert 'operation=canonical phase=completed' in messages
 
     # Duplicate an actual archive row exactly at the seek-page boundary.
     record = next(

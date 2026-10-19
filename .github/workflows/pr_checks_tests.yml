@@ -44,8 +44,10 @@ jobs:
 
       - name: Install package and test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes g++
+          if ! command -v g++ >/dev/null; then
+            sudo apt-get update
+            sudo apt-get -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes g++
+          fi
           python -m pip install --upgrade pip '.[dev]'
 
       - name: Install browser for dashboard acceptance

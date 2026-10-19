@@ -276,7 +276,10 @@ def _fault_columnar(monkeypatch, change):
     original = book_columnar._Inputs.ordered
 
     def ordered(self, paths, *, native_order):
-        return change(*original(self, paths, native_order=native_order))
+        from origo.sources.adapters.book_columnar import _Chunks
+
+        events, levels, prices = original(self, paths, native_order=native_order)
+        return change(events, levels.frame() if isinstance(levels, _Chunks) else levels, prices)
 
     monkeypatch.setattr(book_columnar._Inputs, 'ordered', ordered)
 
@@ -1199,6 +1202,12 @@ def test_following_file_keeps_all_boundary_sequence_evidence(
     pl.concat([closing.collect(), closing_late.collect()]).write_parquet(closing_file)
     retained, _ = _Inputs(market).add(closing_file)
     assert set(retained['final_update_id']) == {low['final_update_id'], high['final_update_id']}
+    # Identical immutable bodies can serve two logical files; keep each event's own levels.
+    from origo.sources.adapters.book_columnar import _Chunks
+
+    aliased, levels, _ = _Inputs(market).ordered((closing_file, closing_file), native_order=True)
+    assert isinstance(levels, _Chunks)
+    assert levels.frame()['order'].n_unique() == aliased.height
 
 
 def test_snapshot_presence_reads_only_original_required_columns(

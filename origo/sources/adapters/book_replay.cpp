@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -13,7 +14,7 @@
 #endif
 
 struct Buffers {
-  Py_buffer views[10]{};
+  Py_buffer views[11]{};
   int acquired = 0;
   ~Buffers() {
     for (int i = 0; i < acquired; ++i)
@@ -71,6 +72,13 @@ struct Side {
   }
 };
 
+struct Chunk {
+  const int64_t *offsets;
+  const uint8_t *sides;
+  const uint32_t *prices;
+  const int32_t *quantities;
+  size_t nevent, nlevel;
+};
 struct Replay {
   const int64_t *offsets, *events;
   const uint8_t *adjacent;
@@ -88,8 +96,33 @@ struct Replay {
   size_t small_rows = 0, large_rows = 0;
   int64_t next, end;
   int current = -1;
+  const std::vector<Chunk> *chunks;
+  const uint32_t *ranks;
+  size_t nrank;
+  const int64_t *chunk_offsets = nullptr;
+  size_t local = 0;
+  int64_t begin(size_t e) const {
+    return chunks ? chunk_offsets[local] : offsets[e];
+  }
+  int64_t finish(size_t e) const {
+    return chunks ? chunk_offsets[local + 1] : offsets[e + 1];
+  }
+  uint32_t price(size_t i) const {
+    return chunks ? ranks[prices[i]] : prices[i];
+  }
+  void select(size_t e) {
+    if (chunks) {
+      uint64_t location = uint64_t(offsets[e]);
+      const auto &c = (*chunks)[location >> 32];
+      local = uint32_t(location);
+      chunk_offsets = c.offsets;
+      sides = c.sides;
+      prices = c.prices;
+      quantities = c.quantities;
+    }
+  }
   Replay(const Buffers &b, int64_t start, int64_t finish, char *out20,
-         char *out200)
+         char *out200, const std::vector<Chunk> *parts = nullptr)
       : offsets(b.data<int64_t>(0)), events(b.data<int64_t>(2)),
         adjacent(b.data<uint8_t>(9)), observed(2 * b.count(7), 0),
         floor(int64_t(b.count(7))), ceiling(-1), native(b.data<uint64_t>(3)),
@@ -98,16 +131,42 @@ struct Replay {
         price_values(b.data<double>(7)), quantity_values(b.data<double>(8)),
         nevent(b.count(1)), nlevel(b.count(4)), nprice(b.count(7)),
         nquantity(b.count(8)), bid(nprice), ask(nprice), replacement(nprice, 0),
-        small(out20), large(out200), next(start), end(finish) {}
+        small(out20), large(out200), next(start), end(finish), chunks(parts),
+        ranks(parts ? b.data<uint32_t>(10) : nullptr),
+        nrank(parts ? b.count(10) : 0) {}
   void validate() const {
-    if (!nevent || !nprice || !nquantity || offsets[0] != 0 ||
-        offsets[nevent] != int64_t(nlevel))
+    if (!nevent || !nprice || !nquantity ||
+        (!chunks && (offsets[0] != 0 || offsets[nevent] != int64_t(nlevel))))
       throw std::invalid_argument("Invalid replay dimensions.");
     for (size_t e = 0; e < nevent; ++e) {
-      if (offsets[e] < 0 || offsets[e] > offsets[e + 1] || kinds[e] > 1)
-        throw std::invalid_argument("Invalid event offsets or kind.");
+      if (kinds[e] > 1)
+        throw std::invalid_argument("Invalid event kind.");
+      if (chunks) {
+        uint64_t location = uint64_t(offsets[e]);
+        size_t chunk = location >> 32;
+        if (chunk >= chunks->size() ||
+            uint32_t(location) >= (*chunks)[chunk].nevent)
+          throw std::invalid_argument("Invalid chunk event.");
+      } else if (offsets[e] < 0 || offsets[e] > offsets[e + 1])
+        throw std::invalid_argument("Invalid event offsets.");
       if (e && events[e] < events[e - 1])
         throw std::invalid_argument("Exchange clock regressed.");
+    }
+    if (chunks) {
+      for (size_t p = 0; p < nrank; ++p)
+        if (ranks[p] >= nprice)
+          throw std::invalid_argument("Invalid price rank.");
+      for (const auto &c : *chunks) {
+        if (c.offsets[0] != 0 || c.offsets[c.nevent] != int64_t(c.nlevel))
+          throw std::invalid_argument("Invalid chunk offsets.");
+        for (size_t e = 0; e < c.nevent; ++e)
+          if (c.offsets[e] < 0 || c.offsets[e] > c.offsets[e + 1])
+            throw std::invalid_argument("Invalid chunk order.");
+        for (size_t i = 0; i < c.nlevel; ++i)
+          if (c.sides[i] > 1 || c.prices[i] >= nrank || c.quantities[i] < 0 ||
+              size_t(c.quantities[i]) >= nquantity)
+            throw std::invalid_argument("Invalid chunk level.");
+      }
     }
     for (size_t i = 0; i < nlevel; ++i) {
       if (sides[i] > 1 || prices[i] >= nprice || quantities[i] < 0 ||
@@ -125,21 +184,21 @@ struct Replay {
     for (int side = 0; side < 2; ++side) {
       size_t bound = side ? 0 : nprice;
       bool seen = false;
-      for (int64_t i = offsets[e]; i < offsets[e + 1]; ++i)
+      for (int64_t i = begin(e); i < finish(e); ++i)
         if (sides[i] == side) {
           if (!quantities[i])
             throw std::invalid_argument("Snapshot contains zero quantity.");
-          bound = side ? std::max(bound, size_t(prices[i]))
-                       : std::min(bound, size_t(prices[i]));
+          bound = side ? std::max(bound, size_t(price(i)))
+                       : std::min(bound, size_t(price(i)));
           seen = true;
         }
       if (!seen)
         continue;
       size_t lo = side ? 0 : bound, hi = side ? bound + 1 : nprice;
       std::fill(replacement.begin() + lo, replacement.begin() + hi, 0);
-      for (int64_t i = offsets[e]; i < offsets[e + 1]; ++i)
+      for (int64_t i = begin(e); i < finish(e); ++i)
         if (sides[i] == side)
-          replacement[prices[i]] = quantities[i];
+          replacement[price(i)] = quantities[i];
       Side &book = side ? ask : bid;
       for (size_t p = lo; p < hi; ++p) {
         if ((observed[side * nprice + p] ||
@@ -222,11 +281,12 @@ struct Replay {
   void run() {
     validate();
     for (size_t e = 0; e < nevent; ++e) {
+      select(e);
       until(events[e]);
       if (kinds[e]) {
-        for (int64_t i = offsets[e]; i < offsets[e + 1]; ++i) {
-          (sides[i] ? ask : bid).set(prices[i], quantities[i]);
-          observed[size_t(sides[i]) * nprice + prices[i]] = 1;
+        for (int64_t i = begin(e); i < finish(e); ++i) {
+          (sides[i] ? ask : bid).set(price(i), quantities[i]);
+          observed[size_t(sides[i]) * nprice + price(i)] = 1;
         }
         int best_bid = bid.best(true), best_ask = ask.best(false);
         if (best_bid >= 0 && best_ask >= 0 && best_bid >= best_ask)
@@ -254,19 +314,21 @@ struct Replay {
 };
 
 static PyObject *replay(PyObject *, PyObject *args) {
-  PyObject *inputs;
+  PyObject *inputs, *parts = Py_None;
   long long start, end;
-  if (!PyArg_ParseTuple(args, "OLL", &inputs, &start, &end))
+  if (!PyArg_ParseTuple(args, "OLL|O", &inputs, &start, &end, &parts))
     return nullptr;
-  if (!PyTuple_Check(inputs) || PyTuple_Size(inputs) != 10 || start < 0 ||
+  bool chunked = parts != Py_None;
+  int width = chunked ? 11 : 10;
+  if (!PyTuple_Check(inputs) || PyTuple_Size(inputs) != width || start < 0 ||
       start % 3600000 || start > INT64_MAX - 3600000 ||
       end != start + 3600000) {
     PyErr_SetString(PyExc_ValueError, "Invalid replay arguments.");
     return nullptr;
   }
   Buffers buffers;
-  const int sizes[10] = {8, 1, 8, 8, 1, 4, 4, 8, 8, 1};
-  for (int i = 0; i < 10; ++i) {
+  const int sizes[11] = {8, 1, 8, 8, 1, 4, 4, 8, 8, 1, 4};
+  for (int i = 0; i < width; ++i) {
     if (PyObject_GetBuffer(PyTuple_GetItem(inputs, i), &buffers.views[i],
                            PyBUF_CONTIG_RO) < 0)
       return nullptr;
@@ -286,6 +348,51 @@ static PyObject *replay(PyObject *, PyObject *args) {
     PyErr_SetString(PyExc_ValueError, "Invalid replay buffer length.");
     return nullptr;
   }
+  std::vector<std::unique_ptr<Buffers>> owners;
+  std::vector<Chunk> chunks;
+  if (chunked) {
+    if (!PyTuple_Check(parts)) {
+      PyErr_SetString(PyExc_ValueError, "Chunks require a tuple.");
+      return nullptr;
+    }
+    const int sizes[4] = {8, 1, 4, 4};
+    for (Py_ssize_t j = 0; j < PyTuple_Size(parts); ++j) {
+      PyObject *part = PyTuple_GetItem(parts, j);
+      if (!PyTuple_Check(part) || PyTuple_Size(part) != 4) {
+        PyErr_SetString(PyExc_ValueError, "Invalid chunk tuple.");
+        return nullptr;
+      }
+      auto owner = std::make_unique<Buffers>();
+      for (int k = 0; k < 4; ++k) {
+        if (PyObject_GetBuffer(PyTuple_GetItem(part, k), &owner->views[k],
+                               PyBUF_CONTIG_RO) < 0)
+          return nullptr;
+        ++owner->acquired;
+        if (owner->views[k].itemsize != sizes[k] ||
+            owner->views[k].len % sizes[k]) {
+          PyErr_SetString(PyExc_ValueError, "Invalid chunk width.");
+          return nullptr;
+        }
+      }
+      size_t rows = owner->count(1);
+      if (!owner->count(0) || owner->count(2) != rows ||
+          owner->count(3) != rows) {
+        PyErr_SetString(PyExc_ValueError, "Invalid chunk lengths.");
+        return nullptr;
+      }
+      size_t total = rows;
+      for (const auto &existing : chunks)
+        total += existing.nlevel;
+      if (total > UINT32_MAX) {
+        PyErr_SetString(PyExc_ValueError, "Invalid replay level count.");
+        return nullptr;
+      }
+      chunks.push_back({owner->data<int64_t>(0), owner->data<uint8_t>(1),
+                        owner->data<uint32_t>(2), owner->data<int32_t>(3),
+                        owner->count(0) - 1, rows});
+      owners.push_back(std::move(owner));
+    }
+  }
   PyObject *small = PyBytes_FromStringAndSize(nullptr, 36000 * 666);
   if (!small)
     return nullptr;
@@ -297,7 +404,7 @@ static PyObject *replay(PyObject *, PyObject *args) {
   std::exception_ptr error;
   Py_BEGIN_ALLOW_THREADS try {
     Replay worker(buffers, start, end, PyBytes_AS_STRING(small),
-                  PyBytes_AS_STRING(large));
+                  PyBytes_AS_STRING(large), chunked ? &chunks : nullptr);
     worker.run();
   } catch (...) {
     error = std::current_exception();

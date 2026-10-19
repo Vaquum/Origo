@@ -261,6 +261,17 @@ def _assert_real_canonical_discovery_and_admission(
                 'dagster/asset_partition_range_start': partition.key,
                 'dagster/asset_partition_range_end': partition.key,
             }),
+            (backfill, DagsterRunStatus.QUEUED, {
+                'dagster/asset_partition_range_start':
+                    (partition.start - timedelta(hours=1)).strftime('%Y-%m-%dT%HZ'),
+                'dagster/asset_partition_range_end': partition.key,
+            }),
+            (backfill, DagsterRunStatus.CANCELING, {
+                'dagster/asset_partition_range_start':
+                    (partition.start - timedelta(hours=1)).strftime('%Y-%m-%dT%HZ'),
+                'dagster/asset_partition_range_end':
+                    (partition.end).strftime('%Y-%m-%dT%HZ'),
+            }),
         ):
             running = instance.create_run_for_job(
                 job, run_config=first.run_config,
@@ -270,7 +281,9 @@ def _assert_real_canonical_discovery_and_admission(
             )
             before = dict(counts)
             now[0] = hour + timedelta(minutes=41)
-            assert tick(now[0])[0] == []
+            requests, reason = tick(now[0])
+            assert requests == []
+            assert reason == 'This book hour already has outstanding canonical work.'
             assert counts['metadata'] > before['metadata']
             assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
             assert observations()[-1] == (1, now[0])

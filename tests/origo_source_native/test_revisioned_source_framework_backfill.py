@@ -586,60 +586,65 @@ def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) ->
     from dagster._core.remote_origin import RemoteJobOrigin
 
     for spec in (BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
-        source = build_source_bundle(spec)
-        job = next(
-            job for job in source.jobs if job.name == (
-                f'refresh_{spec.key}_canonical_source_job' if spec.consumers
-                else f'backfill_{spec.key}_source_job'
+        for granularity in (PoolGranularity.RUN, PoolGranularity.OP):
+            source = build_source_bundle(spec)
+            job = next(
+                job for job in source.jobs if job.name == (
+                    f'refresh_{spec.key}_canonical_source_job' if spec.consumers
+                    else f'backfill_{spec.key}_source_job'
+                )
             )
-        )
-        root = tmp_path / spec.key
-        root.mkdir()
-        with DagsterInstance.local_temp(
-            str(root), overrides={'concurrency': {'pools': {'default_limit': 1, 'granularity': 'run'}}}
-        ) as instance:
-            first = instance.create_run_for_job(
-                job, status=DagsterRunStatus.STARTED,
-                tags={'dagster/partition': DAY if spec.consumers else '2026-10-04T09Z'},
-            )
-            second = instance.create_run_for_job(
-                job,
-                status=DagsterRunStatus.QUEUED,
-                tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-04T10Z'},
-                remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
-            )
-            pool = f'{spec.key}_canonical'
-            assert first.run_op_concurrency.all_pools == {pool}
-            instance.event_log_storage.set_concurrency_slots(pool, 2)
-            records = instance.get_run_records(RunsFilter(run_ids=[first.run_id]))
-            counter = GlobalOpConcurrencyLimitsCounter(
-                instance,
-                [second],
-                records,
-                {pool},
-                instance.event_log_storage.get_pool_limits(),
-                pool_granularity=PoolGranularity.RUN,
-            )
-            assert not counter.is_blocked(second)
-            instance.event_log_storage.set_concurrency_slots(pool, 1)
-            limited = GlobalOpConcurrencyLimitsCounter(
-                instance,
-                [second],
-                records,
-                {pool},
-                instance.event_log_storage.get_pool_limits(),
-                pool_granularity=PoolGranularity.RUN,
-            )
-            assert limited.is_blocked(second)
-            released = GlobalOpConcurrencyLimitsCounter(
-                instance,
-                [second],
-                [],
-                {pool},
-                instance.event_log_storage.get_pool_limits(),
-                pool_granularity=PoolGranularity.RUN,
-            )
-            assert not released.is_blocked(second)
+            root = tmp_path / (spec.key + '_' + granularity.value)
+            root.mkdir()
+            with DagsterInstance.local_temp(
+                str(root), overrides={'concurrency': {'pools': {'default_limit': 1, 'granularity': granularity.value}}}
+            ) as instance:
+                first = instance.create_run_for_job(
+                    job, status=DagsterRunStatus.STARTED,
+                    tags={'dagster/partition': DAY if spec.consumers else '2026-10-04T09Z'},
+                )
+                second = instance.create_run_for_job(
+                    job,
+                    status=DagsterRunStatus.QUEUED,
+                    tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-04T10Z'},
+                    remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
+                )
+                pool = f'{spec.key}_canonical'
+                assert first.run_op_concurrency.all_pools == {pool}
+                instance.event_log_storage.set_concurrency_slots(pool, 2)
+                if granularity == PoolGranularity.OP:
+                    claimed = instance.event_log_storage.claim_concurrency_slot(pool, first.run_id, 'canonical')
+                    assert claimed.is_claimed
+                records = instance.get_run_records(RunsFilter(run_ids=[first.run_id]))
+                counter = GlobalOpConcurrencyLimitsCounter(
+                    instance,
+                    [second],
+                    records,
+                    {pool},
+                    instance.event_log_storage.get_pool_limits(),
+                    pool_granularity=granularity,
+                )
+                assert not counter.is_blocked(second)
+                instance.event_log_storage.set_concurrency_slots(pool, 1)
+                limited = GlobalOpConcurrencyLimitsCounter(
+                    instance,
+                    [second],
+                    records,
+                    {pool},
+                    instance.event_log_storage.get_pool_limits(),
+                    pool_granularity=granularity,
+                )
+                assert limited.is_blocked(second)
+                instance.event_log_storage.free_concurrency_slots_for_run(first.run_id)
+                released = GlobalOpConcurrencyLimitsCounter(
+                    instance,
+                    [second],
+                    [],
+                    {pool},
+                    instance.event_log_storage.get_pool_limits(),
+                    pool_granularity=granularity,
+                )
+                assert not released.is_blocked(second)
 
 def test_canonical_job_fails_before_provider_io_when_preparation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

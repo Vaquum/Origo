@@ -16,6 +16,9 @@ _references: ContextVar[dict[tuple[str, str], tuple[str, float]] | None] = Conte
 @contextmanager
 def archive_session() -> Iterator[None]:
     """Share checksum-verified bytes only within one source execution."""
+    if _archive.get() is not None:
+        yield
+        return
     token = _archive.set({})
     references = _references.set({})
     try:

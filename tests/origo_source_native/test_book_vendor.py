@@ -1554,8 +1554,13 @@ def test_archive_warmup_preserves_requested_validation(
 
         _fault_columnar(monkeypatch, shallow_initial)
 
+        _, following_body, _ = _original_archive(
+            vendor_session_root, 'spot', vendor.hour_partition('2026-10-04T10Z')
+        )
+        following = tmp_path / 'following.parquet'
+        following.write_bytes(following_body)
         with pytest.raises(SourceError) as late:
-            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid')
+            vendor.replay_hour(path, 'spot', partition, tmp_path / 'grid', following=(following,))
         assert late.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
         assert not tuple((tmp_path / 'grid').rglob('*.rowbinary'))
         return

@@ -378,6 +378,7 @@ def test_rejected_book_revision_identity_and_retry(
         monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 24)
         calls = _missing_prelude_transport(archives, monkeypatch)
         fault[0] = 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+        monkeypatch.setattr(vendor, 'replay_hour', rejected)
         retry()
         runtime.discover(partition)
         before_attempts, before_calls = len(attempts), len(calls)

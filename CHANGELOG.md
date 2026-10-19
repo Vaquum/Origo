@@ -1,3 +1,7 @@
+# v3.34.28
+
+- Record the failed full native book-range acceptance and retain the production bulk stop while its SIGBUS cause is investigated locally.
+
 # v3.34.27
 
 - Reuse bounded book archive inputs across native partition ranges and feed per-file buffers directly to replay, preserving each hour's proofs and failures.

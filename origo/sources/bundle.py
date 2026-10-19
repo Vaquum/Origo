@@ -29,7 +29,7 @@ from dagster import (
     JobDefinition,
     MaterializeResult,
     MetadataValue,
-    RetryPolicy,
+    RetryRequested,
     RunRequest,
     RunsFilter,
     RunStatusSensorContext,
@@ -402,11 +402,6 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         else f'{spec.key}_{operation}'
         if operation.startswith('consumer_')
         else None,
-        retry_policy=RetryPolicy(
-            max_retries=spec.orchestration.retry_count, delay=spec.orchestration.retry_delay
-        )
-        if operation == 'canonical'
-        else None,
     )
     def execute(context: AssetExecutionContext, config: SourceRunConfig) -> Iterator[_SourceResult]:
         from .prepare import is_source_backfill
@@ -522,6 +517,11 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 raise Failure(
                     description=f'{failure_code(error)}: {failure_message(error)}',
                     allow_retries=False,
+                ) from error
+            if operation == 'canonical':
+                raise RetryRequested(
+                    max_retries=spec.orchestration.retry_count,
+                    seconds_to_wait=spec.orchestration.retry_delay,
                 ) from error
             raise
         if operation == 'canonical':

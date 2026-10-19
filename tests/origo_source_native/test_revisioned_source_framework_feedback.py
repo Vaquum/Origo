@@ -13,6 +13,7 @@ from dagster import (
     build_run_status_sensor_context,
     build_sensor_context,
 )
+from dagster._core.errors import DagsterExecutionInterruptedError
 
 from origo.sources import bundle, capacity, dagit
 from origo.sources.bundle import SourceRunConfig, build_source_bundle
@@ -188,12 +189,13 @@ def test_transient_verification_and_cancellation_retry_without_poisoning_ingesti
         (SourceError('PROVIDER_HTTP_503', 'Provider unavailable'), 3),
         (SourceError('OFFICIAL_REVISION_CHANGED', 'Republished while building'), 3),
         (SourceError('GENERATION_CHANGED', 'Activation advanced during reconciliation'), 3),
+        (DagsterExecutionInterruptedError(), 1),
     ],
 )
 def test_actual_retry_policy_only_retries_explicit_transient_errors(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
-    error: Exception,
+    error: BaseException,
     attempts: int,
 ) -> None:
     runtime, instance, _ = backfill_env
@@ -208,11 +210,18 @@ def test_actual_retry_policy_only_retries_explicit_transient_errors(
         spec: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str
     ) -> dict[str, object]:
         calls.append(run_id)
+        if isinstance(error, DagsterExecutionInterruptedError):
+            active = instance.get_run_by_id(run_id)
+            assert active is not None
+            instance.report_run_canceling(active)
         raise error
 
     monkeypatch.setattr(bundle, 'execute_source', fail)
     result = backfill._run((runtime, instance, source))
     assert not result.success and len(calls) == attempts
+    if isinstance(error, DagsterExecutionInterruptedError):
+        canceled = instance.get_run_by_id(result.run_id)
+        assert canceled is not None and canceled.status == DagsterRunStatus.CANCELED
     if isinstance(error, SourceError) and error.code in (
         'SOURCE_LOCK_BUSY',
         'CAPACITY_SAMPLER_STUCK',

@@ -221,7 +221,7 @@ def _remember_reference(file: str, response: Response) -> None:
     if (target.scheme != 'https' or target.hostname is None
             or not target.hostname.endswith('.r2.cloudflarestorage.com')
             or target.username is not None or target.port not in (None, 443)
-            or not unquote(target.path).endswith('/' + file + '.zst')
+            or not unquote(target.path).endswith(('/' + file, '/' + file + '.zst'))
             or any(key.lower() == 'versionid' for key in query)
             or query.get('X-Amz-SignedHeaders') != ['host']
             or len(query.get('X-Amz-Signature', [])) != 1

@@ -1033,7 +1033,8 @@ def test_vendor_issued_object_reference_scope(
             original_headers = {**original_headers, 'ETag': 'deliberate-metadata-change'}
         date = datetime.fromtimestamp(clock[0], UTC).strftime('%Y%m%dT%H%M%SZ')
         # Deliberate transport clock/signature/redirect faults; every market row stays original.
-        issued = (f'https://test.r2.cloudflarestorage.com/bucket/{file}.zst'
+        suffix = '.zst' if content[:4] == b'\x28\xb5\x2f\xfd' else ''
+        issued = (f'https://test.r2.cloudflarestorage.com/bucket/{file}{suffix}'
                   f'?X-Amz-Date={date}&X-Amz-Expires=300&X-Amz-SignedHeaders=host'
                   '&X-Amz-Signature=control-signature')
         if case == 'unsupported':

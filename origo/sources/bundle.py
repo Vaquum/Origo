@@ -155,6 +155,8 @@ def execute_source(
                 runtime.failures.recover(
                     operation=failure_operation, partition=partition, consumer=consumer
                 )
+                if operation == 'canonical' and not spec.consumers:
+                    runtime.failures.recover(operation='backfill')
             logger.info(
                 'source=%s partition=%s operation=%s phase=completed run=%s',
                 spec.key,

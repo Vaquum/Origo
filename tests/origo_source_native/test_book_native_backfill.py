@@ -155,6 +155,7 @@ def test_native_book_selection_completion_preserves_source_failures(
                             scope='PARTITION', partition=unrelated,
                             message='Controlled unrelated source failure; no provider-coverage claim.')
     before = _failures(runtime, unrelated)
+    runtime.failures.record(operation='backfill', error_code='RUN_FAILED', scope='NONE')
     home = tmp_path / 'native-completion'
     home.mkdir()
     with DagsterInstance.local_temp(str(home)) as instance:
@@ -167,6 +168,12 @@ def test_native_book_selection_completion_preserves_source_failures(
                                         tags={'dagster/backfill': parent}, raise_on_error=False)
         assert result.success
         assert _failures(runtime, unrelated) == before
+        assert runtime.store.execute(
+            "SELECT failure_key FROM origo.source_failure_log WHERE source_key=%(source)s "
+            "AND operation='backfill' GROUP BY failure_key "
+            "HAVING argMax(event_type,event_time)='FAILED'",
+            {'source': runtime.spec.key},
+        ) == []
         health_job = next(
             item for item in build_source_bundle(runtime.spec).jobs
             if item.name == f'reconcile_{runtime.spec.key}_source_origo_job'

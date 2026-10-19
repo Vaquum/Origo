@@ -16,7 +16,7 @@ from dagster._core.remote_origin import RemotePartitionSetOrigin
 
 from origo.sources import capacity
 from origo.sources.adapters import book_vendor as vendor
-from origo.sources.backfill import execute_partition_backfill
+from origo.sources.backfill import execute_partition_backfill, publication_ready
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import SourceError
@@ -169,11 +169,16 @@ def test_native_book_selection_completion_preserves_source_failures(
                    and event.event_specific_data.passed is False for event in result.all_events)
         record = runtime.store.record(vendor.hour_partition(REAL_HOUR))
         assert record is not None and len(record.component_hashes) == 4
-        assert runtime.store.execute(
-            'SELECT partition_key,revision,build_id,generation,dagster_run_id '
-            'FROM origo.source_backfill_log WHERE source_key=%(source)s AND backfill_id=%(parent)s',
-            {'source': runtime.spec.key, 'parent': parent},
-        ) == [(REAL_HOUR, record.revision, record.build_id, record.generation, result.run_id)]
+
+        assert (
+            runtime.store.execute(
+                'SELECT partition_key,revision,build_id,generation,dagster_run_id '
+                'FROM origo.source_backfill_log WHERE source_key=%(source)s AND backfill_id=%(parent)s',
+                {'source': runtime.spec.key, 'parent': parent},
+            )
+            == []
+        )  # No file consumers: native run/activation evidence needs no publication receipt.
+
         proofs = runtime.store.execute(
             'SELECT component,row_count,content_hash FROM origo.source_component_log '
             'WHERE source_key=%(source)s AND build_id=%(build)s',
@@ -190,6 +195,24 @@ def test_native_book_selection_completion_preserves_source_failures(
         )
 
         # Damage proof after native receipt insertion, beyond build/reconcile validation.
+
+        publication_spec = replace(runtime.spec, consumers=BINANCE_SPOT_TRADES_SPEC.consumers)
+        context = cast(
+            AssetExecutionContext,
+            SimpleNamespace(
+                instance=instance,
+                run=instance.get_run_by_id(result.run_id),
+                log=logging.getLogger('book-publication-contract'),
+            ),
+        )
+        source_result = {
+            'partition_key': REAL_HOUR,
+            'revision': record.revision,
+            'build_id': str(record.build_id),
+            'generation': record.generation,
+        }
+        assert publication_ready(publication_spec, context, source_result)
+
         query = SourceStore.execute
         fault_reached = [False]
 
@@ -206,10 +229,12 @@ def test_native_book_selection_completion_preserves_source_failures(
 
         with monkeypatch.context() as patch:
             patch.setattr(SourceStore, 'execute', damaged)
-            invalid = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
-                                             tags={'dagster/backfill': parent}, raise_on_error=False)
-        assert fault_reached[0] and not invalid.success
-        assert any('BACKFILL_RECEIPT_INVALID' in str(event) for event in invalid.all_events)
+
+            with pytest.raises(Failure, match='BACKFILL_RECEIPT_INVALID'):
+                publication_ready(publication_spec, context, source_result)
+
+        assert fault_reached[0]
+
         assert _failures(runtime, unrelated) == before
         runtime.store.execute('INSERT INTO origo.source_component_log VALUES', saved_component)
 
@@ -223,10 +248,10 @@ def test_native_book_selection_completion_preserves_source_failures(
 
         with monkeypatch.context() as patch:
             patch.setattr(SourceStore, 'execute', activate_after_join)
-            superseded = job.execute_in_process(instance=instance, partition_key=REAL_HOUR,
-                                                tags={'dagster/backfill': parent}, raise_on_error=False)
-        assert not superseded.success and any('BACKFILL_RECEIPT_INVALID' in str(event)
-                                               for event in superseded.all_events)
+
+            with pytest.raises(Failure, match='BACKFILL_RECEIPT_INVALID'):
+                publication_ready(publication_spec, context, source_result)
+
         current = runtime.store.record(record.partition)
         assert current is not None and current.generation == record.generation + 1
         assert current.component_hashes == record.component_hashes

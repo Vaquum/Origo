@@ -139,6 +139,29 @@ def binary_hash(
     digest.update(schema_version.to_bytes(8, 'big'))
     digest.update(chunk_rows.to_bytes(8, 'big'))
     bindings = dict(params or {})
+
+    if component.hash_chunk_rows is not None:
+        # Explicit chunks currently belong to bounded book grids. Read their ordered
+        # rows once; retain the exact existing fixed-chunk digests and root encoding.
+        chunks = client.execute(
+            f"""SELECT chunk, count(), hex(SHA256(arrayStringConcat(arrayMap(item -> item.2,
+                arraySort(item -> item.1, groupArray((ordinal, encoded)))))))
+            FROM (
+                SELECT intDiv(ordinal-1, {chunk_rows}) AS chunk, ordinal, encoded FROM (
+                    SELECT row_number() OVER (ORDER BY {ordering}) AS ordinal,
+                           formatRow('RowBinary', {columns}) AS encoded
+                    FROM {table} WHERE {predicate}
+                )
+            ) GROUP BY chunk ORDER BY chunk""",
+            bindings,
+            settings={'read_in_order_use_buffering': 0},
+        )
+        for chunk_number, count, chunk_hash in chunks:
+            digest.update(int(str(chunk_number)).to_bytes(8, 'big'))
+            digest.update(int(str(count)).to_bytes(8, 'big'))
+            digest.update(bytes.fromhex(str(chunk_hash)))
+        return 'v2:' + digest.hexdigest()
+
     seek = '1'
     chunk = 0
     while True:

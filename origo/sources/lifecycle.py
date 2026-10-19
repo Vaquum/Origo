@@ -199,9 +199,10 @@ class SourceRuntime:
         lock = _partition_lock(partition)
         try:
             with partition_work(self.lock_root, self.spec.key, lock):
-                expected = self.store.generation(partition)
+                current = self.store.record(partition)
+                expected = current.generation if current is not None else 0
                 if provisional:
-                    retained = self.store.record(partition)
+                    retained = current
                     if retained is not None and self.store.missing_components(retained):
                         self._validate_retained(retained)
                         return self._upgrade_components(retained)
@@ -233,14 +234,6 @@ class SourceRuntime:
                             'Provisional interval is awaiting independent completeness evidence.'
                         )
                 else:
-                    current = next(
-                        (
-                            item
-                            for item in self.store.records(canonical_only=True)
-                            if item.partition.key == key
-                        ),
-                        None,
-                    )
                     if (
                         current is not None
                         and self.spec.canonical.discover(partition) == current.revision
@@ -254,20 +247,19 @@ class SourceRuntime:
                         self._recover_superseded(key)
                         return current
                     revision = adapter.fetch(partition)
-                current = [
-                    record
-                    for record in self.store.records(canonical_only=not provisional)
-                    if record.partition.key == key
-                ]
-                if current and current[0].revision == revision.key:
-                    self._validate_retained(current[0])
-                    retained = self._upgrade_components(current[0])
+
+                if current is not None and current.revision == revision.key:
+                    self._validate_retained(current)
+                    if not provisional:
+                        self.spec.canonical.revalidate(partition, revision)
+                    retained = self._upgrade_components(current)
                     if provisional:
                         self.failures.recover(operation=operation, partition=key)
                         self.failures.recover(operation='component', partition=key)
                     else:
                         self.failures.recover_partition(partition=key)
                     return retained
+
                 record = self._build_components(partition, revision, build_id, expected)
                 if provisional:
                     self._activate(record, expected)
@@ -708,17 +700,12 @@ class SourceRuntime:
     def repair(self, key: str) -> StateRecord:
         self.spec.require_enabled('repair')
         self.require_shared_mount()
-        record = next(
-            (
-                record
-                for record in self.store.records(canonical_only=True)
-                if record.partition.key == key
-            ),
-            None,
-        )
+
+        partition = self.spec.canonical.partition(key)
+
+        record = self.store.record(partition)
         if record is None:
             return self.build(key)
-        partition = self.spec.canonical.partition(key)
         build_id = uuid4()
         try:
             with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
@@ -925,14 +912,7 @@ class SourceRuntime:
         partition = self.spec.canonical.partition(key)
         try:
             with partition_work(self.lock_root, self.spec.key, _partition_lock(partition)):
-                record = next(
-                    (
-                        item
-                        for item in self.store.records(canonical_only=True)
-                        if item.partition.key == key
-                    ),
-                    None,
-                )
+                record = self.store.record(partition)
                 if record is None:
                     raise SourceError(
                         'ACTIVE_PARTITION_MISSING', 'No canonical generation is active.'

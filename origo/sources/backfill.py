@@ -84,6 +84,9 @@ def publication_ready(
     from .cleanup import preserve_primary_failure
     from .storage import SourceStore
 
+    if not spec.consumers:
+        return True
+
     backfill_id = context.run.tags.get(BACKFILL_ID_TAG)
     if backfill_id is None:
         return True

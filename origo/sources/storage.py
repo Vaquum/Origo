@@ -396,8 +396,10 @@ class SourceStore:
     def generation(self, partition: Partition) -> int:
         rows = self.execute(
             f"""SELECT max(generation) FROM {self.table('source_activation_log')}
-            WHERE source_key=%(source)s AND partition_key=%(partition)s AND provisional=%(provisional)s""",
+            WHERE source_key=%(source)s AND partition_start=%(start)s
+              AND partition_key=%(partition)s AND provisional=%(provisional)s""",
             {
+                'start': partition.start,
                 'source': self.spec.key,
                 'partition': partition.key,
                 'provisional': int(partition.provisional),
@@ -567,13 +569,20 @@ class SourceStore:
 
     def record(self, partition: Partition) -> StateRecord | None:
         rows = self.execute(
-            f"""SELECT partition_key, provisional, partition_start, partition_end,
-            generation, revision, build_id, component_hashes
-            FROM {self.table('source_active_partitions')}
-            WHERE source_key=%(source)s AND partition_key=%(partition)s
-              AND provisional=%(provisional)s""",
-            {'source': self.spec.key, 'partition': partition.key,
-             'provisional': int(partition.provisional)},
+            f"""SELECT partition_key, provisional,
+            argMax(a.partition_start, a.generation), argMax(a.partition_end, a.generation),
+            max(a.generation), argMax(a.revision, a.generation), argMax(a.build_id, a.generation),
+            argMax(a.component_hashes, a.generation)
+            FROM {self.table('source_activation_log')} a
+            WHERE source_key=%(source)s AND partition_start=%(start)s
+              AND partition_key=%(partition)s AND provisional=%(provisional)s
+            GROUP BY partition_key, provisional""",
+            {
+                'source': self.spec.key,
+                'start': partition.start,
+                'partition': partition.key,
+                'provisional': int(partition.provisional),
+            },
         )
         if len(rows) > 1:
             raise SourceError('RETAINED_CONTENT_INVALID', 'Partition has ambiguous active state.')

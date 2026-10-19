@@ -246,12 +246,13 @@ def _execute_canonical(
         else:
             if not config.reconcile_only:
                 try:
-                    runtime.build(config.partition_key)
+                    record = runtime.build(config.partition_key)
                 except SourceError as error:
                     if error.code != 'RETAINED_CONTENT_INVALID':
                         raise
-                    runtime.repair(config.partition_key)
-            record = runtime.reconcile(config.partition_key)
+                    record = runtime.repair(config.partition_key)
+            else:
+                record = runtime.reconcile(config.partition_key)
         successful = True
     result: dict[str, object] = {
         'partition_key': record.partition.key,
@@ -262,7 +263,6 @@ def _execute_canonical(
     if not repair:
         result['reconciled_at'] = datetime.now(UTC).isoformat()
     return result
-
 
 
 def _execute_operation(

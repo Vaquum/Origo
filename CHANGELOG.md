@@ -1,3 +1,8 @@
+# v3.34.22
+
+- Replay provider book archives through exact columnar dictionaries and bounded native state; reuse decoded lookback files and retain all four grid proofs.
+- Bound individual activation reads and remove repeated audits and publication coordination for sources without file consumers.
+
 # v3.34.21
 
 - Record twenty ingestion performance rules and an append-only investigation log; require reading both before ingestion or performance work and recording positive and negative performance findings.

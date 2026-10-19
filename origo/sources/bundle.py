@@ -849,12 +849,14 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 from origo.orchestration.policy import OUTSTANDING
 
                 for job_name in (job_names['canonical'], f'backfill_{spec.key}_source_job'):
-                    for tag in ('dagster/partition', 'dagster/asset_partition_range_start'):
-                        if context.instance.get_runs(
-                            RunsFilter(job_name=job_name, statuses=OUTSTANDING,
-                                       tags={tag: partition.key}),
-                            limit=1,
-                        ):
+                    for run in context.instance.get_runs(
+                        RunsFilter(job_name=job_name, statuses=OUTSTANDING)
+                    ):
+                        start = run.tags.get('dagster/partition') or run.tags.get(
+                            'dagster/asset_partition_range_start'
+                        )
+                        end = run.tags.get('dagster/asset_partition_range_end', start)
+                        if start is not None and end is not None and start <= partition.key <= end:
                             return SkipReason('This book hour already has outstanding canonical work.')
                 retained_invalid = False
                 try:

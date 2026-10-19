@@ -264,7 +264,8 @@ def _assert_real_canonical_discovery_and_admission(
         ):
             running = instance.create_run_for_job(
                 job, run_config=first.run_config,
-                tags={**first.tags, **partition_tags}, status=status,
+                tags={**{k: v for k, v in first.tags.items() if k != 'dagster/partition'},
+                      **partition_tags}, status=status,
                 remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
             )
             before = dict(counts)
@@ -511,7 +512,7 @@ def test_hourly_audit_preserves_obsolete_requests_and_retries_hours(
     assert runtime.store.records(canonical_only=True) == ()
 
 
-def test_native_hourly_backfill_orders_completion_after_canonical_build() -> None:
+def test_native_hourly_backfill_avoids_global_health_scan() -> None:
     from dagster import AssetKey, Definitions
     from origo.sources.bundle import build_source_bundle
 
@@ -524,8 +525,13 @@ def test_native_hourly_backfill_orders_completion_after_canonical_build() -> Non
             sensors=bundle.sensors,
         )
         job = defs.get_job_def(f'backfill_{spec.key}_source_job')
-        reconcile = job.asset_layer.asset_graph.get(AssetKey(f'reconcile_{spec.key}_source_origo'))
-        assert AssetKey(f'build_{spec.key}_canonical_revision_origo') in reconcile.parent_keys
+        assert job.asset_layer.executable_asset_keys == {
+            AssetKey(f'build_{spec.key}_canonical_revision_origo'),
+        }
+        health = defs.get_job_def(f'reconcile_{spec.key}_source_job')
+        assert health.asset_layer.executable_asset_keys == {
+            AssetKey(f'reconcile_{spec.key}_source_origo'),
+        }
 
 
 def test_fresh_book_minute_does_not_hide_a_provisional_gap(book_runtime: SourceRuntime) -> None:

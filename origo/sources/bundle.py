@@ -448,12 +448,38 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                 if not isinstance(adapter, CanonicalBackfillBatch) or spec.consumers:
                     raise ValueError('This source requires one canonical partition per run.')
                 failed: list[str] = []
+                keys = context.partition_keys
+                start, retries = 0, 0
+                if context.retry_number:
+                    current_run = context.instance.get_run_by_id(context.run.run_id)
+                    if current_run is None:
+                        raise RuntimeError('Native backfill retry run is missing.')
+                    start = keys.index(current_run.tags['origo_book_retry_partition'])
+                    retries = int(current_run.tags['origo_book_retry_count'])
+                    rejected = current_run.tags['origo_book_retry_rejected']
+                    failed = rejected.split(',') if rejected else []
                 with adapter.backfill_batch(), archive_session():
-                    for key in context.partition_keys:
+                    for key in keys[start:]:
                         try:
                             result = execute_partition_backfill(
                                 spec, context, run_day, partition_key=key
                             )
+                        except RetryRequested as error:
+                            cause = cast(Exception, error.__cause__)
+                            if retries >= spec.orchestration.retry_count:
+                                raise Failure(
+                                    description=f'{failure_code(cause)}: {failure_message(cause)}',
+                                    allow_retries=False,
+                                ) from cause
+                            context.instance.add_run_tags(context.run.run_id, {
+                                'origo_book_retry_partition': key,
+                                'origo_book_retry_count': str(retries + 1),
+                                'origo_book_retry_rejected': ','.join(failed),
+                            })
+                            raise RetryRequested(
+                                max_retries=context.retry_number + 1,
+                                seconds_to_wait=error.seconds_to_wait,
+                            ) from cause
                         except Failure as error:
                             if not adapter.backfill_rejection(error.__cause__):
                                 raise
@@ -463,6 +489,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
                         else:
                             publication_ready(spec, context, result)
                             yield _partition_materialization(name, result)
+                        retries = 0
                 if failed:
                     raise Failure(
                         description='BOOK_PARTITIONS_FAILED: ' + ', '.join(failed),

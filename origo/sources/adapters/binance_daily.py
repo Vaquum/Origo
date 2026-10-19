@@ -5,7 +5,7 @@ import os
 import re
 import time
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from ipaddress import IPv4Address
@@ -31,6 +31,7 @@ class Response:
     headers: Mapping[str, str]
     status: int
     egress_ip: str | None = None
+    resource_url: str | None = field(default=None, repr=False, compare=False)
 
 
 # Static pacing per Binance host family at 60% of the documented IP allowance,
@@ -49,7 +50,13 @@ def _request(
     headers: Mapping[str, str] | None,
     egress_ip: str | None = None,
     method: Literal['GET', 'POST'] = 'GET',
+    *, resource_url: str | None = None,
 ) -> requests.Response:
+    target = resource_url or url
+    if resource_url is not None:
+        params = None
+        headers = {k: v for k, v in (headers or {}).items()
+                   if k.lower() not in ('authorization', 'x-api-key')}
     try:
         if egress_ip is not None:
             with requests.Session() as session:
@@ -59,13 +66,13 @@ def _request(
                 session.mount('https://', adapter)
                 session.mount('http://', adapter)
                 if method == 'POST':
-                    return session.post(url, params=params, headers=headers, timeout=(5, 30),
+                    return session.post(target, params=params, headers=headers, timeout=(5, 30),
                                         allow_redirects=False)
-                return session.get(url, params=params, headers=headers, timeout=(5, 30))
+                return session.get(target, params=params, headers=headers, timeout=(5, 30))
         if method == 'POST':
-            return requests.post(url, params=params, headers=headers, timeout=(5, 30),
+            return requests.post(target, params=params, headers=headers, timeout=(5, 30),
                                  allow_redirects=False)
-        return requests.get(url, params=params, headers=headers, timeout=(5, 30))
+        return requests.get(target, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
         if _budget_host(url) == 'api.cryptohftdata.com':
             raise SourceError(
@@ -100,12 +107,16 @@ def _weighted_request(
     weight: int,
     egress_ip: str | None = None,
     method: Literal['GET', 'POST'] = 'GET',
+    *, resource_url: str | None = None,
 ) -> requests.Response:
     root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
     if _budget_host(url) == 'api.cryptohftdata.com':
+        if resource_url is not None:
+            return _vendor_request(root, url, params, headers, weight, egress_ip, method,
+                                   resource_url=resource_url)
         return _vendor_request(root, url, params, headers, weight, egress_ip, method)
     # Processes share each host/address allowance; unbound callers keep the legacy file.
     rate, backstop = REST_HOST_BUDGETS.get(_budget_host(url), REST_DEFAULT_BUDGET)
@@ -200,6 +211,7 @@ def _vendor_request(
     root: Path, url: str, params: Mapping[str, str | int] | None,
     headers: Mapping[str, str] | None, weight: int, egress_ip: str | None,
     method: Literal['GET', 'POST'],
+    *, resource_url: str | None = None,
 ) -> requests.Response:
     spacing = weight / REST_DEFAULT_BUDGET[0]
     with _budget_state_file(root, url, egress_ip).open('a+') as state:
@@ -222,6 +234,8 @@ def _vendor_request(
             _save_budget(state, due + reserved_spacing, pause, provider_spacing)
             fcntl.flock(state.fileno(), fcntl.LOCK_UN)
         response = (
+            _request(url, params, headers, egress_ip, method, resource_url=resource_url)
+            if resource_url is not None else
             _request(url, params, headers, egress_ip, method)
             if method != 'GET' else _request(url, params, headers, egress_ip)
             if egress_ip is not None else _request(url, params, headers)
@@ -248,13 +262,21 @@ def get_response(
     weight: int = 0,
     egress_ip: str | None = None,
     method: Literal['GET', 'POST'] = 'GET',
+    resource_url: str | None = None,
 ) -> Response:
     if weight < 0:
         raise ValueError('Binance request weight cannot be negative.')
+    if resource_url is not None and (
+        method != 'GET' or weight <= 0 or _budget_host(url) != 'api.cryptohftdata.com'
+    ):
+        raise ValueError('An issued provider object requires its weighted logical GET.')
     if egress_ip is not None:
         egress_ip = str(IPv4Address(egress_ip))
     try:
         response = (
+            _weighted_request(url, params, headers, weight, egress_ip, method,
+                              resource_url=resource_url)
+            if resource_url is not None else
             _weighted_request(url, params, headers, weight, egress_ip, method)
             if method != 'GET' and weight
             else _request(url, params, headers, egress_ip, method)
@@ -271,7 +293,12 @@ def get_response(
                     f'PROVIDER_HTTP_{response.status_code}',
                     f'Provider returned HTTP {response.status_code}.',
                 )
-            return Response(response.content, dict(response.headers), response.status_code, egress_ip)
+            issued = response.url if (
+                _budget_host(url) == 'api.cryptohftdata.com' and method == 'GET'
+                and params is not None and 'file' in params
+            ) else None
+            return Response(response.content, dict(response.headers), response.status_code,
+                            egress_ip, issued)
         finally:
             if _budget_host(url) == 'api.cryptohftdata.com':
                 response.close()

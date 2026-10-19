@@ -352,3 +352,14 @@ the result:
 - Task/evidence: #561/#562, native default qualification on fbe95b2, managed log31c26c2e-fd47-4bd0-ba8e-dbdd0159f02c. Actual default executed in-process, matched all four original hashes/counts and the native receipt,7.017s native/9.148s cold. The explicit multiprocess override also completed its native step successfully, but the qualifier rejected it before final proof comparison. Neither partial run is complete qualification.
 - I found — bad: the harness searched only ENGINE_EVENT messages for subprocess launch. Dagster emits that fact as STEP_WORKER_STARTING, which the filter had discarded. The exact log confirms the override launched pid21 and finished successfully; product executor behavior was correct.
 - Repair/Next: assert the actual STEP_WORKER_STARTING event rather than matching its message inside an unrelated event category. Retain the failed attempt, logs and its scratch capacity directory; repeat with this changed harness input. No throughput gain or production restart is claimed.
+
+## Entry 039 — 2026-10-19
+
+- Task/evidence: #561/#562, review4316975364. The runtime acceptance manifest pins the original exact queue-test node; parametrizing its function removed that node even though all three variants passed locally. This would fail the required CI inventory check.
+- Repair/Next: retain the original unparameterized node and exercise the same contract matrix inside it, with a separate instance directory per source. Keep daily and both native-book pool-capacity/release checks without weakening or editing the baseline manifest. Publish the repair, then repeat current-input validation.
+
+## Entry 040 — 2026-10-19
+
+- Task/evidence: #561/#562, native default qualifier878adc6, managed log34dc85d9-00d5-478e-895f-55073e702f2f. Nine default runs and the explicit override completed with all original proofs/physical counts/receipts; the final cancellation probe failed before sending its signal because no op slot was claimed. Retain the complete partial attempt; do not claim cancellation passed.
+- Diagnosis: the private scratch Dagster instance configured only telemetry, omitting production's op-granularity default pool limit. The executor sees no configured limit before the step; preparation inside the step creates it too late for that admission. Dagster's InstanceConcurrencyContext intentionally permits an unconfigured pool. This is a qualifier setup mismatch, not evidence that the existing production pool is bypassed.
+- Repair/Next: apply the existing versioned op-granularity/default-limit1 instance settings in the qualifier. Mark the run CANCELING before SIGINT, matching native cancellation rather than an unexpected process interruption. Test cancellation first, before spending another data cohort; require its claimed slot to release with no provider calls or activation, then repeat real native qualification. No production settings, limits or data rules change.

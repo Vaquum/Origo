@@ -34,7 +34,7 @@ BOOK_MAX_PRELUDE_BYTES = 1024**3
 BOOK_DEPENDENCY_MAX_BYTES = 16 * 1024
 # Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 4
-_REJECTION_POLICY_VERSION = 6
+_REJECTION_POLICY_VERSION = 5
 _MISSING_DEPENDENCY = 'provider-http-404'
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
                               'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'})
@@ -605,10 +605,11 @@ class CryptoHFTBookHourly:
                         if grid.exists():
                             shutil.rmtree(grid)
                         if unavailable is not None:
-                            dependencies.insert(0, (unavailable.key, _MISSING_DEPENDENCY))
-                            _write_dependencies(
-                                self.market, partition, current, dependencies, rejected=error.code
-                            )
+                            if error.code in _REJECTION_CODES:
+                                dependencies.insert(0, (unavailable.key, _MISSING_DEPENDENCY))
+                                _write_dependencies(
+                                    self.market, partition, current, dependencies, rejected=error.code
+                                )
                             raise SourceError(
                                 error.code,
                                 f'{error} Preceding archive is unavailable: '

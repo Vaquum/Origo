@@ -275,3 +275,9 @@ the result:
 - I tried: distinguish the concrete missing archive from the request wrapper's generic HTTP404 before retaining a lookback rejection.
 - I found — bad: `_response` can mint/refresh a token before asking for the archive; that endpoint's404 has the same generic error code. Catching only the code could hide an authentication-service failure during either fetch or rejected-input discovery. The initial eleven targeted regressions passed but did not cover this boundary.
 - Progress/Next: use an archive-specific SourceError subtype without changing its public404 code; add both original-input token-refresh transitions. Stop superseded local verification, publish the correction, then repeat required checks. No performance gain or production success is claimed by this repair.
+
+## Entry 030 — 2026-10-19
+
+- Task/evidence: [#555](https://github.com/Vaquum/Origo/issues/555), scheduled document review and code inspection of final-prefix termination.
+- I found — bad: advancing rejection policy5 to6 would invalidate unchanged existing rejections despite an additive dependency representation. The missing-object branch also wrote non-whitelisted errors as rejection evidence, although the reader could not reuse them.
+- Progress/Next: retain policy5; write negative evidence only for the existing rejection codes. Extend existing owners for automatic suppression/explicit retry, metadata changes, newly missing present inputs, partition-targeted token404, and final-prefix acceptance. Reassociate complete original July15 messages across one object boundary as an explicitly controlled protocol fault; preserve every market value, clock, ID and expected output hash. No new throughput result is claimed; published current-input checks follow this correction.

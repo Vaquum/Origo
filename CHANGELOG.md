@@ -1,6 +1,7 @@
 # v3.34.23
 
 - Preserve the actual book replay rejection when an older lookback archive is absent; recheck that absence when reusing rejected input evidence.
+- Preserve existing rejection-cache policy and retryable errors; attempt the final available deferred prefix before recording a rejection.
 
 # v3.34.22
 

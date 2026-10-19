@@ -618,7 +618,16 @@ def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     if path != 'fresh':
         runtime.build(case.day)
     if path == 'retained-after-fetch':
-        monkeypatch.setattr(type(store.spec.canonical), 'discover', lambda self, partition: 'changed')
+        adapter_type = type(store.spec.canonical)
+        discover = adapter_type.discover
+        calls = 0
+
+        def changed_once(self, partition):
+            nonlocal calls
+            calls += 1
+            return 'changed' if calls == 1 else discover(self, partition)
+
+        monkeypatch.setattr(adapter_type, 'discover', changed_once)
     injected = FailureLog(store, tmp_path / 'locks', str(uuid4()))
     inside = f'{case.day}T10:15:00Z'
     injected.record(

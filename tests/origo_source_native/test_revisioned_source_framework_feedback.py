@@ -280,7 +280,8 @@ def test_cleanup_failures_preserve_primary_verdict(
         raise OSError('Injected capacity persistence failure')
 
     with monkeypatch.context() as patch:
-        patch.setattr(SourceRuntime, 'reconcile', invalid)
+        patch.setattr(SourceRuntime, 'build', invalid)
+        patch.setattr(SourceRuntime, 'repair', invalid)
         patch.setattr(capacity.CapacityMonitor, 'finish', failed_sampling)
         result = backfill._run(backfill_env)
     assert not result.success

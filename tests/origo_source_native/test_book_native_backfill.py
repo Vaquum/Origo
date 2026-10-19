@@ -161,6 +161,13 @@ def test_native_book_selection_completion_preserves_source_failures(
     home.mkdir()
     with DagsterInstance.local_temp(str(home)) as instance:
         job = _job(runtime)
+        from dagster import validate_run_config
+
+        config = job.get_run_config_for_partition_key(REAL_HOUR)
+        assert validate_run_config(job, config)['execution'][job.executor_def.name].keys() == {'in_process'}
+        assert validate_run_config(job, {
+            'execution': {'config': {'multiprocess': {}}},
+        })['execution'][job.executor_def.name].keys() == {'multiprocess'}
         assert job.asset_layer.executable_asset_keys == {
             AssetKey(f'build_{runtime.spec.key}_canonical_revision_origo')
         }

@@ -235,16 +235,16 @@ struct Replay {
           floor = std::min(floor, int64_t(best_ask));
           ceiling = std::max(ceiling, int64_t(best_bid));
         }
-        while (floor > 0 && floor < int64_t(nprice) && adjacent[floor - 1] &&
-               observed[floor - 1])
-          --floor;
-        while (ceiling >= 0 && ceiling + 1 < int64_t(nprice) &&
-               adjacent[ceiling] && observed[nprice + ceiling + 1])
-          ++ceiling;
       } else {
         snapshot(e);
         uncrossed();
       }
+      while (floor > 0 && floor < int64_t(nprice) && adjacent[floor - 1] &&
+             observed[floor - 1])
+        --floor;
+      while (ceiling >= 0 && ceiling + 1 < int64_t(nprice) &&
+             adjacent[ceiling] && observed[nprice + ceiling + 1])
+        ++ceiling;
       current = int(e);
     }
     until(end);

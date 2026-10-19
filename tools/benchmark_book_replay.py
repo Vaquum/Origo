@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.adapters import book_vendor as vendor
@@ -22,6 +22,7 @@ from origo.sources.adapters.binance_daily import Response
 from origo.sources.adapters.book_spool import Market, object_mapping
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
+from origo.sources.bundle import SourceRunConfig, _execute_operation
 from origo.sources.columnar import BoundedClient
 from origo.sources.contracts import Partition
 from origo.sources.lifecycle import SourceRuntime
@@ -111,13 +112,16 @@ def main() -> None:
                     runtime.setup()
                     stages['setup_s'] = time.perf_counter() - before
                     before = time.perf_counter()
-                    record = runtime.build(args.partition)
+                    result = _execute_operation(
+                        runtime, 'canonical',
+                        SourceRunConfig(partition_key=args.partition, automatic_capacity=True),
+                    )
                     stages['canonical_build_s'] = time.perf_counter() - before
                     before = time.perf_counter()
                     rows = runtime.store.execute(
                         f'SELECT component,row_count,content_hash FROM {database}.source_component_log '
                         'WHERE source_key=%(source)s AND build_id=%(build)s ORDER BY component',
-                        {'source': spec.key, 'build': record.build_id},
+                        {'source': spec.key, 'build': UUID(str(result['build_id']))},
                     )
                     proofs = [(str(k), int(str(n)), str(h)) for k, n, h in rows]
                     stages['output_proof_read_s'] = time.perf_counter() - before
@@ -131,7 +135,7 @@ def main() -> None:
                     if baseline is not None and proofs != baseline:
                         raise ValueError('Repeated identical input changed output hashes.')
                     baseline = proofs
-                    result: dict[str, object] = {
+                    result = {
                         'iteration': iteration,
                         'process_cold': iteration == 0,
                         'completed_partitions': 1,

@@ -455,7 +455,7 @@ def test_update_only_hour_recovers_with_bounded_prefix(
 
     monkeypatch.setattr(vendor, 'replay_hour', observed)
     revision = adapter.fetch(partition)
-    assert attempts == [(1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'accepted')]
+    assert attempts == [(0, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'accepted')]
     _assert_reconstructed_hour(revision, partition, 'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4')
     assert len(tuple((tmp_path / 'locks' / 'book_vendor_spot').glob('hour-*'))) == 1
     assert set(visited) == {vendor._file('spot', a.partition) for a in archives}
@@ -503,7 +503,7 @@ def test_shallow_original_seed_recovers_without_fabricated_depth(
 
     monkeypatch.setattr(vendor, 'replay_hour', observed)
     revision = adapter.fetch(partition)
-    assert attempts == [(1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (4, 'accepted')]
+    assert attempts == [(0, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (1, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (2, 'BOOK_KNOWN_DEPTH_EXHAUSTED'), (4, 'accepted')]
     _assert_reconstructed_hour(revision, partition, 'local-book-binary-v1:58dcc9d61aec399f5dde8036cf74e0091e45af455e17c191b18da4c87a210b9a')
     assert set(visited) == {vendor._file('spot', a.partition) for a in archives[1:]}
     selected = tuple(a for a in archives[1:] if a.partition.key != partition.key)

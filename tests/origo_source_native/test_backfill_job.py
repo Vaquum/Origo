@@ -601,8 +601,10 @@ def test_publication_follows_canonical_state_across_provisional_refreshes(
 
 
 @pytest.mark.parametrize('ready_job', CASES, indirect=True, ids=lambda case: case.source.spec_key)
+@pytest.mark.parametrize('path', ['fresh', 'retained-after-fetch', 'repair'])
 def test_canonical_day_retires_failed_provisional_intervals_inside_it(
-    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path
+    ready_job: tuple[SourceStore, DagsterInstance, SourceBundle], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, path: str,
 ) -> None:
     from uuid import uuid4
 
@@ -613,6 +615,10 @@ def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     case = _case(store)
     runtime = SourceRuntime(store.spec, store, tmp_path / 'locks', 'test-setup')
     runtime.setup()
+    if path != 'fresh':
+        runtime.build(case.day)
+    if path == 'retained-after-fetch':
+        monkeypatch.setattr(type(store.spec.canonical), 'discover', lambda self, partition: 'changed')
     injected = FailureLog(store, tmp_path / 'locks', str(uuid4()))
     inside = f'{case.day}T10:15:00Z'
     injected.record(
@@ -629,7 +635,10 @@ def test_canonical_day_retires_failed_provisional_intervals_inside_it(
     injected.record(
         operation='provisional', scope='PARTITION', partition=outside, error_code='RUN_FAILED'
     )
-    runtime.build(case.day)
+    if path == 'repair':
+        runtime.repair(case.day)
+    else:
+        runtime.build(case.day)
     assert store.execute(
         'SELECT partition_key, argMax(event_type, event_time), argMax(details_json, event_time) '
         'FROM origo.source_failure_log GROUP BY failure_key, partition_key ORDER BY partition_key',

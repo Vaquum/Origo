@@ -987,13 +987,23 @@ def test_snapshot_presence_reads_only_original_required_columns(
     import polars as pl
 
     table = pq.read_table(path)
+    observed: list[str] = []
+    collect = pl.LazyFrame.collect
+
+    def projected(frame: pl.LazyFrame, *args, **kwargs):
+        observed.append(frame.explain(optimized=True))
+        return collect(frame, *args, **kwargs)
 
     for start in (0, int(partition.end.timestamp() * 1000)):
 
         snapshots = pl.from_arrow(table).filter(pl.col('event_type') == 'snapshot')
 
         expected = bool((snapshots['event_time'] <= start).any())
-        assert vendor._has_snapshot(path, start) == expected
+        with monkeypatch.context() as patch:
+            patch.setattr(pl.LazyFrame, 'collect', projected)
+            assert vendor._has_snapshot(path, start) == expected
+    assert len(observed) == 2
+    assert all('PROJECT 2/11 COLUMNS' in plan for plan in observed)
     damaged = tmp_path / 'missing-column.parquet'
     pq.write_table(table.drop(['quantity']), damaged)
     with pytest.raises(SourceError) as failure:

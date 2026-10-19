@@ -258,6 +258,7 @@ class SourceRuntime:
                         self.failures.recover(operation='component', partition=key)
                     else:
                         self.failures.recover_partition(partition=key)
+                        self._recover_superseded(key)
                     return retained
 
                 record = self._build_components(partition, revision, build_id, expected)
@@ -736,6 +737,7 @@ class SourceRuntime:
                         self.failures.recover(operation='repair', partition=key)
                     else:
                         self.failures.recover_partition(partition=key)
+                    self._recover_superseded(key)
                     return upgraded
                 expected = self.store.generation(partition)
                 revision = self.spec.canonical.fetch(partition)
@@ -743,6 +745,7 @@ class SourceRuntime:
                 self.spec.canonical.revalidate(partition, revision)
                 self._activate(rebuilt, expected)
                 self.failures.recover_partition(partition=key)
+                self._recover_superseded(key)
                 return rebuilt
         except ComponentUpgradeError:
             raise

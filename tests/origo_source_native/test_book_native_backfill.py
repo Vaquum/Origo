@@ -34,6 +34,7 @@ from .test_book_vendor import (
     vendor_session_root as vendor_session_root,
 )
 from .test_revisioned_source_framework_backfill import _repository_origin
+from .test_revisioned_source_framework_feedback import _observe_failure
 
 
 def _job(runtime: SourceRuntime):
@@ -312,3 +313,30 @@ def test_native_book_selection_completion_preserves_source_failures(
             {'source': runtime.spec.key, 'parent': ranged_parent},
         ) == [(REAL_HOUR, mixed.run_id)]
         assert not any(event.event_type_value == 'STEP_UP_FOR_RETRY' for event in mixed.all_events)
+        source = build_source_bundle(runtime.spec)
+        _observe_failure((runtime, instance, source), mixed)
+        assert runtime.store.execute(
+            'SELECT partition_key,error_code FROM origo.source_failure_log '
+            'WHERE dagster_run_id=%(run)s ORDER BY partition_key', {'run': mixed.run_id},
+        ) == [(missing, 'BOOK_SEQUENCE_GAP')]
+
+        # An earlier rejected hour must not suppress a later receipt failure in this run.
+        receipt_parent = _parent(instance, job.name, keys)
+        with monkeypatch.context() as patch:
+            patch.setattr(type(runtime.spec.canonical), 'fetch', rejected_first)
+            patch.setattr(SourceStore, 'execute', unavailable_receipt)
+            mixed_receipt = job.execute_in_process(
+                instance=instance,
+                tags={'dagster/backfill': receipt_parent,
+                      'dagster/asset_partition_range_start': missing,
+                      'dagster/asset_partition_range_end': REAL_HOUR},
+                run_config=config, raise_on_error=False,
+            )
+        assert not mixed_receipt.success
+        _observe_failure((runtime, instance, source), mixed_receipt)
+        _observe_failure((runtime, instance, source), mixed_receipt)
+        assert runtime.store.execute(
+            'SELECT partition_key,error_code FROM origo.source_failure_log '
+            'WHERE dagster_run_id=%(run)s ORDER BY partition_key', {'run': mixed_receipt.run_id},
+        ) == [(missing, 'BOOK_SEQUENCE_GAP'), (REAL_HOUR, 'RUN_FAILED')]
+        assert runtime.store.record(vendor.hour_partition(REAL_HOUR)) == current

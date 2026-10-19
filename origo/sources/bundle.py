@@ -1013,13 +1013,19 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
         is_backfill = is_source_backfill(context.dagster_run, spec)
         selected = context.dagster_run.asset_selection or set()
         if is_backfill:
+            failure_events = context.for_run_failure().get_step_failure_events()
             failed_steps = {
-                event.step_key for event in context.for_run_failure().get_step_failure_events()
+                event.step_key for event in failure_events
             }
             operation = next(
                 (op for op, name in names.items() if name in failed_steps),
                 'canonical',
             )
+            if operation == 'canonical' and isinstance(spec.canonical, CanonicalBackfillBatch):
+                for event in failure_events:
+                    data = event.step_failure_data.user_failure_data
+                    if data and data.description and data.description.startswith('BOOK_PARTITIONS_FAILED:'):
+                        return
         if operation is None:
             selected = context.dagster_run.asset_selection or set()
             operation = next(
@@ -1037,20 +1043,27 @@ def build_source_bundle(spec: RevisionedSourceSpec) -> SourceBundle:
                 Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks')),
                 context.dagster_run.run_id,
             )
+            tags = context.dagster_run.tags
+            canonical_partition = (
+                tags.get('origo_source_partition')
+                if is_backfill and operation == 'canonical'
+                and tags.get('origo_source_phase') == 'canonical' else None
+            )
+            partition_filter = (
+                ' AND partition_key=%(partition)s'
+                if canonical_partition and isinstance(spec.canonical, CanonicalBackfillBatch) else ''
+            )
             recorded = runtime.store.execute(
                 f'SELECT count() FROM {runtime.store.table("source_failure_log")} '
-                "WHERE source_key=%(source)s AND dagster_run_id=%(run)s AND event_type='FAILED'",
-                {'source': spec.key, 'run': context.dagster_run.run_id},
+                "WHERE source_key=%(source)s AND dagster_run_id=%(run)s AND event_type='FAILED'"
+                + partition_filter,
+                {'source': spec.key, 'run': context.dagster_run.run_id,
+                 'partition': canonical_partition},
             )
             if recorded[0][0]:
                 return
             if is_backfill and operation == 'canonical':
-                tags = context.dagster_run.tags
-                key = (
-                    tags.get('origo_source_partition')
-                    if tags.get('origo_source_phase') == 'canonical'
-                    else None
-                )
+                key = canonical_partition
                 runtime.failures.record(
                     operation='canonical' if key else 'backfill',
                     error_code='RUN_FAILED',

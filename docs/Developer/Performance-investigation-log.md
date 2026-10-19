@@ -85,3 +85,13 @@ the result:
 
 - Task/evidence: correction to Entry 004's memory unit. The earlier dense-input report records 1,263.97 MiB (approximately 1.234 GiB), rather than 1.26 GiB. No new experiment or performance claim.
 - Progress/Next: retain exact units in subsequent qualification reports.
+
+## Entry 006 — 2026-10-19
+
+- Task/evidence: [#554](https://github.com/Vaquum/Origo/pull/554), head `2dcff512`; failed [runtime CI installation](https://github.com/Vaquum/Origo/actions/runs/39237455944/job/118009873849).
+- Context: isolated Ubuntu test guest, Python 3.11.17; no runtime tests executed. The package build invokes the new C++17 extension's compiler.
+- I tried: published the source and ran the existing required CI gates before local checks.
+- I found — good: lint, typing, fail-loud, slice, version, ruleset, Conventional Commits and CodeQL gates passed on this head.
+- I found — bad: installation failed because `g++` was absent. This is a missing declared build prerequisite, not a test waiver or a reason to retry unchanged inputs.
+- Measurements: no runtime or speed qualification from this failed job. At 10:23:45 UTC the production backfill remained CANCELED; one routine run was queued and two refreshes, metadata maintenance and one audit were active. A subsequent read found only the routine audit active; no canceled-backfill work resumed.
+- Progress/Next: install the compiler in the existing CI dependency phase, push that fix, then run the required local checks and complete current-head CI. No production deployment or restart.

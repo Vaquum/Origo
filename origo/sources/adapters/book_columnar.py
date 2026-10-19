@@ -81,13 +81,14 @@ class _Chunks:
         return locations
 
     def frame(self) -> pl.DataFrame:
-        ordering = np.empty(int(self.events['event'].max()) + 1, dtype=np.uint32)
-        ordering[self.events['event'].to_numpy()] = self.events['order'].to_numpy()
         frames: list[pl.DataFrame] = []
         ranks = self.ranks.to_numpy()
-        for part in self.parts:
+        for index, part in enumerate(self.parts):
+            headers = self.events.filter(pl.col('file') == index)
+            ordering = np.empty(len(part.offsets) - 1, dtype=np.uint32)
+            ordering[headers['event'].to_numpy() - part.first_event] = headers['order'].to_numpy()
             events = np.repeat(
-                np.arange(len(part.offsets) - 1, dtype=np.uint32) + part.first_event,
+                np.arange(len(part.offsets) - 1, dtype=np.uint32),
                 np.diff(part.offsets.to_numpy()),
             )
             frames.append(pl.DataFrame({

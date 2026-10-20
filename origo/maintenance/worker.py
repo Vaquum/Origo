@@ -266,6 +266,7 @@ def maintain(instance: DagsterInstance, config: OperationalMetadataMaintenanceCo
                 if journal.scan_cursor == 0:
                     break
         except MaintenanceDeadlineReached as error:
+            work_deadline = time.monotonic()
             journal = Journal.model_validate_json(journal_path.read_bytes())
             journal.first_apply_completed = (
                 journal.first_apply_completed or report.deleted + report.archived > 0

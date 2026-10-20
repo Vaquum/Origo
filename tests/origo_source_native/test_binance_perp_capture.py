@@ -428,7 +428,7 @@ def test_capture_continues_during_slow_repair_and_publication(
         statements: list[str] = []
         connection.set_trace_callback(statements.append)
         with source_lock((tmp_path / 'spool').resolve(), 'binance_perp_trades', 'capture_write'):
-            spool._reclaim(connection, tmp_path / 'spool')
+            spool._reclaim(connection)
         assert not any(sql.startswith(('BEGIN', 'PRAGMA incremental_vacuum',
                                        'PRAGMA wal_checkpoint')) for sql in statements)
 

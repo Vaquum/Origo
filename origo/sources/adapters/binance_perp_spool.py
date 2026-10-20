@@ -817,11 +817,13 @@ def _covered_until(repair: sqlite3.Connection, start_ms: int) -> int:
     return start_ms if row is None or row[0] is None else int(row[0])
 
 
-def _reclaim(connection: sqlite3.Connection, capture_root: Path | None = None) -> None:
+def _reclaim(connection: sqlite3.Connection) -> None:
     connection.commit()
     free = int(connection.execute('PRAGMA freelist_count').fetchone()[0])
     if not free:
         return
+    path = Path(connection.execute('PRAGMA database_list').fetchone()[2])
+    capture_root = path.parent if path.name == 'capture.sqlite3' else None
     for _ in range(min(free, 256)):
         with (source_lock(capture_root.resolve(), _SOURCE, 'capture_write')
               if capture_root is not None else nullcontext()):
@@ -897,7 +899,7 @@ def cleanup_spool(root: Path) -> None:
                                 raise SourceError('CAPTURE_STORAGE', 'Cleanup removed a required overlap witness.')
                             capture.execute('UPDATE segments SET first_id=?,first_ms=? WHERE identity=?', (first[0], first[1], identity))
                             capture.commit()
-                        _reclaim(capture, root)
+                        _reclaim(capture)
                         remaining -= size
                         remaining_pages -= 1
                 # Attempts have their own lifecycle: failed requests own no payload page.
@@ -925,10 +927,10 @@ def cleanup_spool(root: Path) -> None:
                         with source_lock(root.resolve(), _SOURCE, 'capture_write'):
                             capture.executemany('DELETE FROM polls WHERE seq=?', ((row[0],) for row in polls))
                             capture.commit()
-                        _reclaim(capture, root)
+                        _reclaim(capture)
                         remaining -= size
                         remaining_pages -= len(polls)
-                _reclaim(capture, root)
+                _reclaim(capture)
                 _reclaim(repair)
         except SourceError as error:
             cause = error.__cause__

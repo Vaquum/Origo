@@ -284,7 +284,7 @@ def registration() -> ModuleType:
     return module
 
 
-@pytest.mark.parametrize('scenario', ['status-changes', 'listener-exit', 'offline', 'deadline'])
+@pytest.mark.parametrize('scenario', ['status-changes', 'listener-exit', 'offline', 'absent', 'deadline'])
 def test_controller_keeps_a_live_listener_through_status_changes(
     tmp_path: Path, scenario: str,
 ) -> None:
@@ -295,6 +295,7 @@ def test_controller_keeps_a_live_listener_through_status_changes(
         'status-changes': ['busy', 'online', 'offline', 'absent', 'busy'],
         'listener-exit': ['busy'],
         'offline': ['busy'] + ['offline'] * 30,
+        'absent': ['absent'] * 30,
         'deadline': ['busy'] + ['online'] * 420,
     }[scenario]
     (tmp_path / 'statuses').write_text('\n'.join(statuses) + '\n')
@@ -319,11 +320,12 @@ trap 'printf "cleanup\\n" >> "$CONTROLLER_TRACE/cleanup"' EXIT
     }, capture_output=True, text=True, timeout=10)
     assert not (tmp_path / 'statuses').read_text(), result.stderr
     assert (tmp_path / 'cleanup').read_text() == 'cleanup\n'
-    assert result.returncode == (1 if scenario in {'offline', 'deadline'} else 0), result.stderr
+    assert result.returncode == (1 if scenario in {'offline', 'absent', 'deadline'} else 0), result.stderr
     assert result.stdout == ''
     assert result.stderr == {
         'status-changes': '', 'listener-exit': '',
-        'offline': 'Runner remained offline for five minutes\n',
+        'offline': 'Runner remained offline or absent for five minutes\n',
+        'absent': 'Runner remained offline or absent for five minutes\n',
         'deadline': 'Outside-guest active-job deadline reached\n',
     }[scenario]
 

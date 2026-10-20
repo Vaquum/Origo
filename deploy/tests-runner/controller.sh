@@ -47,8 +47,8 @@ while kill -0 "$listener_pid" 2>/dev/null; do
         echo 'Outside-guest active-job deadline reached' >&2
         exit 1
     fi
-    # Listener lifetime determines completion; API status alone cannot end a live job.
-    if [[ $status == offline ]]; then offline=$((offline+1)); else offline=0; fi
-    if [[ $offline -ge 30 ]]; then echo 'Runner remained offline for five minutes' >&2; exit 1; fi
+    # One non-busy API observation does not prove the listener finished.
+    if [[ $status == offline || $status == absent ]]; then offline=$((offline+1)); else offline=0; fi
+    if [[ $offline -ge 30 ]]; then echo 'Runner remained offline or absent for five minutes' >&2; exit 1; fi
     sleep 10
 done

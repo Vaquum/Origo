@@ -108,7 +108,8 @@ def test_historical_book_404_is_terminal_without_changing_transient_retries(
                 else:
                     with pytest.raises(RetryRequested) as retry:
                         execute_partition_backfill(runtime.spec, context, failed)
-                    assert (retry.value.max_retries, retry.value.seconds_to_wait) == (23, 3600)
+                    delay = 1 if code == 'PROVIDER_TRANSPORT_FAILED' or code.startswith('PROVIDER_HTTP_5') else 3600
+                    assert (retry.value.max_retries, retry.value.seconds_to_wait) == (23, delay)
                     assert retry.value.__cause__ is error
             error = SourceError('PROVIDER_HTTP_404', 'Unpublished current authority.')
             context.partition_keys[:] = [runtime.spec.canonical.candidate(datetime.now(UTC)).key]
@@ -119,6 +120,10 @@ def test_historical_book_404_is_terminal_without_changing_transient_retries(
             with pytest.raises(RetryRequested) as daily:
                 execute_partition_backfill(BINANCE_SPOT_TRADES_SPEC, context, failed)
             assert (daily.value.max_retries, daily.value.seconds_to_wait) == (23, 3600)
+            error = SourceError('PROVIDER_HTTP_502', 'Controlled daily provider failure; no market rows.')
+            with pytest.raises(RetryRequested) as daily_transient:
+                execute_partition_backfill(BINANCE_SPOT_TRADES_SPEC, context, failed)
+            assert (daily_transient.value.max_retries, daily_transient.value.seconds_to_wait) == (23, 3600)
 
         market = runtime.spec.canonical.market
         calls: list[str] = []
@@ -410,6 +415,8 @@ def test_native_book_selection_completion_preserves_source_failures(
         assert not resumed.success and attempted == {missing: 2, REAL_HOUR: 2}
         assert sum(event.event_type_value == 'STEP_UP_FOR_RETRY'
                    for event in resumed.all_events) == 2
+        assert all(event.event_specific_data.seconds_to_wait == 1
+                   for event in resumed.all_events if event.event_type_value == 'STEP_UP_FOR_RETRY')
         assert [event.partition for event in resumed.asset_materializations_for_node(
             f'build_{runtime.spec.key}_canonical_revision_origo'
         )] == [REAL_HOUR]
@@ -433,6 +440,8 @@ def test_native_book_selection_completion_preserves_source_failures(
         assert not exhausted.success and attempted == {missing: 2}
         assert sum(event.event_type_value == 'STEP_UP_FOR_RETRY'
                    for event in exhausted.all_events) == 1
+        assert all(event.event_specific_data.seconds_to_wait == 1
+                   for event in exhausted.all_events if event.event_type_value == 'STEP_UP_FOR_RETRY')
 
 
 def test_book_benchmark_counts_partition_coverage_separately_from_attempts() -> None:

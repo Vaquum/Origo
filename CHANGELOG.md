@@ -2,6 +2,12 @@
 
 - Read publication state one consumer source at a time through the read-only monitor profile, avoiding irrelevant book state and preserving resource limits.
 
+# v3.34.48
+
+- Retry hourly book backfill transport/HTTP5xx failures after one second; preserve retry counts, provider pacing and other source/error policies.
+
+- Recheck provider identity before reusing a retained book rejection, avoiding unchanged archive downloads and reconstruction while preserving failed outcomes.
+
 # v3.34.47
 
 - Scan retained metadata read-only and take a writer only for eligible deletion; preserve the page checkpoint when the writer is busy.

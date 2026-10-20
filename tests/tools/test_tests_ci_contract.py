@@ -284,6 +284,52 @@ def registration() -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize('scenario', ['status-changes', 'listener-exit', 'offline', 'absent', 'deadline'])
+def test_controller_keeps_a_live_listener_through_status_changes(
+    tmp_path: Path, scenario: str,
+) -> None:
+    loop = 'started=0\n' + (REPO_ROOT / 'deploy/tests-runner/controller.sh').read_text().split(
+        'started=0\n', 1,
+    )[1]
+    statuses = {
+        'status-changes': ['busy', 'online', 'offline', 'absent', 'busy'],
+        'listener-exit': ['busy'],
+        'offline': ['busy'] + ['offline'] * 30,
+        'absent': ['absent'] * 30,
+        'deadline': ['busy'] + ['online'] * 420,
+    }[scenario]
+    (tmp_path / 'statuses').write_text('\n'.join(statuses) + '\n')
+    script = '''
+set -euo pipefail
+SECONDS=1
+listener_pid=$$
+python3() {
+    head -n 1 "$CONTROLLER_TRACE/statuses"
+    tail -n +2 "$CONTROLLER_TRACE/statuses" > "$CONTROLLER_TRACE/next"
+    mv "$CONTROLLER_TRACE/next" "$CONTROLLER_TRACE/statuses"
+}
+kill() {
+    [[ $1 == -0 && $2 == "$listener_pid" ]]
+    [[ -s $CONTROLLER_TRACE/statuses ]]
+}
+sleep() { SECONDS=$((SECONDS+$1)); }
+trap 'printf "cleanup\\n" >> "$CONTROLLER_TRACE/cleanup"' EXIT
+'''
+    result = subprocess.run(['bash', '-c', script + loop], env={
+        **os.environ, 'CONTROLLER_TRACE': str(tmp_path),
+    }, capture_output=True, text=True, timeout=10)
+    assert not (tmp_path / 'statuses').read_text(), result.stderr
+    assert (tmp_path / 'cleanup').read_text() == 'cleanup\n'
+    assert result.returncode == (1 if scenario in {'offline', 'absent', 'deadline'} else 0), result.stderr
+    assert result.stdout == ''
+    assert result.stderr == {
+        'status-changes': '', 'listener-exit': '',
+        'offline': 'Runner remained offline or absent for five minutes\n',
+        'absent': 'Runner remained offline or absent for five minutes\n',
+        'deadline': 'Outside-guest active-job deadline reached\n',
+    }[scenario]
+
+
 @pytest.mark.parametrize('fault', ['none', 'timeout', 'network', 'server', 'unauthorized', 'exhausted'])
 def test_github_requests_recover_from_transient_errors(
     registration: ModuleType, monkeypatch: pytest.MonkeyPatch,

@@ -716,7 +716,8 @@ def test_publication_observation_checks_real_token_and_artifacts(
                     deadline=time.monotonic() + 5,
                 )
             }
-        assert set(requested) == expected and len(requested) == len(expected)
+        assert set(requested) == expected
+        assert all(1 <= requested.count(source) <= 2 for source in expected)
         return result
 
     node = f'{live_spec.key}:consumer:mount'

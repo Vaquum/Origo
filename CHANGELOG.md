@@ -1,3 +1,7 @@
+# v3.34.51
+
+- Coordinate perp capture transactions with bounded spool cleanup; skip empty reclamation writers and retain visible storage failures.
+
 # v3.34.50
 
 - Defer perp spool cleanup when a capture writer holds SQLite; retain data, report the deferral and preserve other storage failures.

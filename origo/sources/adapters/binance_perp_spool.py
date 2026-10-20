@@ -8,7 +8,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -18,6 +18,7 @@ from typing import Literal, TypedDict, cast
 
 from ..contracts import Partition, Revision, Row, SourceError, failure_code
 from ..hashing import content_hash
+from ..locking import source_lock
 from .binance_daily import get_response
 from .binance_perp_daily import parse_decimal, timestamp_datetime
 from .binance_provisional import _bool, _int, _text
@@ -269,7 +270,7 @@ def begin_capture_attempt(root: Path, evidence: Mapping[str, object]) -> int:
     if len(serialized.encode()) > 16384:
         raise SourceError('CAPTURE_EVIDENCE_CAPACITY', 'Poll intent exceeds 16 KiB.')
     _capacity(root, len(serialized.encode()) * 4 + 65536)
-    with _database(root, 'capture', create=True) as connection:
+    with source_lock(root.resolve(), _SOURCE, 'capture_write', wait=True), _database(root, 'capture', create=True) as connection:
         attempt = connection.execute('INSERT INTO polls(received_at,evidence) VALUES (?,?)',
             (now_utc().isoformat(), serialized)).lastrowid
         connection.commit()
@@ -289,8 +290,9 @@ def finish_capture_attempt(root: Path, attempt_id: int, evidence: Mapping[str, o
         if len(serialized.encode()) > 16384:
             raise SourceError('CAPTURE_EVIDENCE_CAPACITY', 'Poll outcome exceeds 16 KiB.')
         _capacity(root, len(serialized.encode()) * 4 + 65536)
-        connection.execute('UPDATE polls SET evidence=? WHERE seq=?', (serialized, attempt_id))
-        connection.commit()
+        with source_lock(root.resolve(), _SOURCE, 'capture_write', wait=True):
+            connection.execute('UPDATE polls SET evidence=? WHERE seq=?', (serialized, attempt_id))
+            connection.commit()
 
 
 def append_capture(root: Path, rows: Sequence[Mapping[str, object]], *,
@@ -309,57 +311,60 @@ def append_capture(root: Path, rows: Sequence[Mapping[str, object]], *,
     if len(serialized_evidence.encode()) > 16384:
         raise SourceError('CAPTURE_EVIDENCE_CAPACITY', 'Capture response evidence exceeds 16 KiB.')
     conflicts: set[str] = set()
+    advanced = False
     result: CaptureCommit | None = None
     with _database(root, 'capture', create=True) as connection:
-        connection.execute('BEGIN IMMEDIATE')
-        if attempt_id is None:
-            connection.execute('INSERT INTO polls(received_at,first_id,last_id,evidence) VALUES (?,?,?,?)',
-                               (received_at.isoformat(), records[0][0], records[-1][0], serialized_evidence))
-        else:
-            changed = connection.execute('UPDATE polls SET received_at=?,first_id=?,last_id=?,evidence=? WHERE seq=?',
-                               (received_at.isoformat(), records[0][0], records[-1][0], serialized_evidence, attempt_id)).rowcount
-            if changed != 1:
-                raise SourceError('CAPTURE_ATTEMPT_MISSING', 'The durable poll intent is absent.')
-        current = _segments(connection)
-        previous = current[0] if current else None
-        if previous is not None and previous.quarantined:
-            raise SourceError('CAPTURE_QUARANTINED', 'Capture is quarantined pending explicit historical repair.')
-        for trade_id, _, payload in records:
-            saved = connection.execute('SELECT payload,segment FROM trades WHERE id=?', (trade_id,)).fetchone()
-            if saved is not None and str(saved[0]) != payload:
-                conflicts.add(str(saved[1]))
-        overlap = previous is not None and any(row[0] == previous.last_id for row in records)
-        if previous is not None and records[0][0] <= previous.last_id < records[-1][0] and not overlap:
-            conflicts.add(previous.identity)
-        if previous is not None and not overlap and records[-1][0] > previous.last_id and records[0][1] < previous.last_ms:
-            conflicts.add(previous.identity)
-        if conflicts:
-            connection.executemany('UPDATE segments SET quarantined=1 WHERE identity=?', ((identity,) for identity in conflicts))
-            connection.commit()
-        else:
-            advanced = previous is None or records[-1][0] > previous.last_id
-            if advanced:
-                unseen = records if previous is None or not overlap else tuple(row for row in records if row[0] > previous.last_id)
-                if overlap and previous is not None:
-                    identity = previous.identity
-                    connection.execute('UPDATE segments SET last_id=?,last_ms=? WHERE identity=?',
-                                       (records[-1][0], records[-1][1], identity))
-                else:
-                    identity = hashlib.sha256(records[0][2].encode()).hexdigest()
-                    connection.execute('INSERT INTO segments(identity,first_id,last_id,first_ms,last_ms) VALUES (?,?,?,?,?)',
-                                       (identity, records[0][0], records[-1][0], records[0][1], records[-1][1]))
-                connection.executemany('INSERT INTO trades(id,time,segment,payload) VALUES (?,?,?,?)',
-                                       ((row[0], row[1], identity, row[2]) for row in unseen))
-                page_identity = hashlib.sha256(''.join(row[2] for row in unseen).encode()).hexdigest()
-                connection.execute('INSERT INTO pages VALUES (?,?,?,?,?,?,?,?)',
-                    (page_identity, identity, unseen[0][0], unseen[-1][0], unseen[0][1], unseen[-1][1],
-                     previous.last_id if overlap and previous is not None else None,
-                     serialized_evidence))
-                connection.execute('INSERT OR REPLACE INTO state VALUES (1,?,?,?,?)',
-                                   (identity, received_at.isoformat(), received_at.isoformat(), int(overlap or previous is None)))
+        with source_lock(root.resolve(), _SOURCE, 'capture_write', wait=True):
+            connection.execute('BEGIN IMMEDIATE')
+            if attempt_id is None:
+                connection.execute('INSERT INTO polls(received_at,first_id,last_id,evidence) VALUES (?,?,?,?)',
+                                   (received_at.isoformat(), records[0][0], records[-1][0], serialized_evidence))
             else:
-                connection.execute('UPDATE state SET response_at=? WHERE singleton=1', (received_at.isoformat(),))
-            connection.commit()
+                changed = connection.execute('UPDATE polls SET received_at=?,first_id=?,last_id=?,evidence=? WHERE seq=?',
+                                   (received_at.isoformat(), records[0][0], records[-1][0], serialized_evidence, attempt_id)).rowcount
+                if changed != 1:
+                    raise SourceError('CAPTURE_ATTEMPT_MISSING', 'The durable poll intent is absent.')
+            current = _segments(connection)
+            previous = current[0] if current else None
+            if previous is not None and previous.quarantined:
+                raise SourceError('CAPTURE_QUARANTINED', 'Capture is quarantined pending explicit historical repair.')
+            for trade_id, _, payload in records:
+                saved = connection.execute('SELECT payload,segment FROM trades WHERE id=?', (trade_id,)).fetchone()
+                if saved is not None and str(saved[0]) != payload:
+                    conflicts.add(str(saved[1]))
+            overlap = previous is not None and any(row[0] == previous.last_id for row in records)
+            if previous is not None and records[0][0] <= previous.last_id < records[-1][0] and not overlap:
+                conflicts.add(previous.identity)
+            if previous is not None and not overlap and records[-1][0] > previous.last_id and records[0][1] < previous.last_ms:
+                conflicts.add(previous.identity)
+            if conflicts:
+                connection.executemany('UPDATE segments SET quarantined=1 WHERE identity=?', ((identity,) for identity in conflicts))
+                connection.commit()
+            else:
+                advanced = previous is None or records[-1][0] > previous.last_id
+                if advanced:
+                    unseen = records if previous is None or not overlap else tuple(row for row in records if row[0] > previous.last_id)
+                    if overlap and previous is not None:
+                        identity = previous.identity
+                        connection.execute('UPDATE segments SET last_id=?,last_ms=? WHERE identity=?',
+                                           (records[-1][0], records[-1][1], identity))
+                    else:
+                        identity = hashlib.sha256(records[0][2].encode()).hexdigest()
+                        connection.execute('INSERT INTO segments(identity,first_id,last_id,first_ms,last_ms) VALUES (?,?,?,?,?)',
+                                           (identity, records[0][0], records[-1][0], records[0][1], records[-1][1]))
+                    connection.executemany('INSERT INTO trades(id,time,segment,payload) VALUES (?,?,?,?)',
+                                           ((row[0], row[1], identity, row[2]) for row in unseen))
+                    page_identity = hashlib.sha256(''.join(row[2] for row in unseen).encode()).hexdigest()
+                    connection.execute('INSERT INTO pages VALUES (?,?,?,?,?,?,?,?)',
+                        (page_identity, identity, unseen[0][0], unseen[-1][0], unseen[0][1], unseen[-1][1],
+                         previous.last_id if overlap and previous is not None else None,
+                         serialized_evidence))
+                    connection.execute('INSERT OR REPLACE INTO state VALUES (1,?,?,?,?)',
+                                       (identity, received_at.isoformat(), received_at.isoformat(), int(overlap or previous is None)))
+                else:
+                    connection.execute('UPDATE state SET response_at=? WHERE singleton=1', (received_at.isoformat(),))
+                connection.commit()
+        if not conflicts:
             result = _commit(root, connection, advanced=advanced)
             if result is None:
                 raise SourceError('CAPTURE_STORAGE', 'A committed capture lacks its checkpoint.')
@@ -812,14 +817,20 @@ def _covered_until(repair: sqlite3.Connection, start_ms: int) -> int:
     return start_ms if row is None or row[0] is None else int(row[0])
 
 
-def _reclaim(connection: sqlite3.Connection) -> None:
+def _reclaim(connection: sqlite3.Connection, capture_root: Path | None = None) -> None:
     connection.commit()
     free = int(connection.execute('PRAGMA freelist_count').fetchone()[0])
-    connection.execute('BEGIN IMMEDIATE')
+    if not free:
+        return
     for _ in range(min(free, 256)):
-        connection.execute('PRAGMA incremental_vacuum(1)')
-    connection.commit()
-    connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
+        with (source_lock(capture_root.resolve(), _SOURCE, 'capture_write')
+              if capture_root is not None else nullcontext()):
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute('PRAGMA incremental_vacuum(1)')
+            connection.commit()
+    with (source_lock(capture_root.resolve(), _SOURCE, 'capture_write')
+          if capture_root is not None else nullcontext()):
+        connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
 
 
 def cleanup_spool(root: Path) -> None:
@@ -878,13 +889,15 @@ def cleanup_spool(root: Path) -> None:
                         size = int(capture.execute('SELECT coalesce(sum(length(payload)),0) FROM trades WHERE segment=? AND id BETWEEN ? AND ?', (identity, first_page_id, last_page_id)).fetchone()[0])
                         if size > remaining or remaining_pages == 0:
                             return
-                        capture.execute('DELETE FROM trades WHERE segment=? AND id BETWEEN ? AND ?', (identity, first_page_id, last_page_id))
-                        capture.execute('DELETE FROM pages WHERE segment=? AND first_id=?', (identity, first_page_id))
-                        first = capture.execute('SELECT id,time FROM trades WHERE segment=? ORDER BY id LIMIT 1', (identity,)).fetchone()
-                        if first is None:
-                            raise SourceError('CAPTURE_STORAGE', 'Cleanup removed a required overlap witness.')
-                        capture.execute('UPDATE segments SET first_id=?,first_ms=? WHERE identity=?', (first[0], first[1], identity))
-                        _reclaim(capture)
+                        with source_lock(root.resolve(), _SOURCE, 'capture_write'):
+                            capture.execute('DELETE FROM trades WHERE segment=? AND id BETWEEN ? AND ?', (identity, first_page_id, last_page_id))
+                            capture.execute('DELETE FROM pages WHERE segment=? AND first_id=?', (identity, first_page_id))
+                            first = capture.execute('SELECT id,time FROM trades WHERE segment=? ORDER BY id LIMIT 1', (identity,)).fetchone()
+                            if first is None:
+                                raise SourceError('CAPTURE_STORAGE', 'Cleanup removed a required overlap witness.')
+                            capture.execute('UPDATE segments SET first_id=?,first_ms=? WHERE identity=?', (first[0], first[1], identity))
+                            capture.commit()
+                        _reclaim(capture, root)
                         remaining -= size
                         remaining_pages -= 1
                 # Attempts have their own lifecycle: failed requests own no payload page.
@@ -909,19 +922,24 @@ def cleanup_spool(root: Path) -> None:
                         size = sum(int(row[1]) for row in polls)
                         if size > remaining:
                             return
-                        capture.executemany('DELETE FROM polls WHERE seq=?', ((row[0],) for row in polls))
-                        _reclaim(capture)
+                        with source_lock(root.resolve(), _SOURCE, 'capture_write'):
+                            capture.executemany('DELETE FROM polls WHERE seq=?', ((row[0],) for row in polls))
+                            capture.commit()
+                        _reclaim(capture, root)
                         remaining -= size
                         remaining_pages -= len(polls)
-                _reclaim(capture)
+                _reclaim(capture, root)
                 _reclaim(repair)
         except SourceError as error:
             cause = error.__cause__
-            if (error.code != 'CAPTURE_STORAGE'
+            if error.code == 'SOURCE_LOCK_BUSY':
+                _LOG.warning('Perp spool cleanup deferred: %s', error.safe_message)
+            elif (error.code != 'CAPTURE_STORAGE'
                     or not isinstance(cause, sqlite3.OperationalError)
                     or cause.sqlite_errorcode != sqlite3.SQLITE_BUSY):
                 raise
-            _LOG.warning('Perp spool cleanup deferred: %s', cause.sqlite_errorname)
+            else:
+                _LOG.warning('Perp spool cleanup deferred: %s', cause.sqlite_errorname)
         finally:
             fcntl.flock(readers, fcntl.LOCK_UN)
             fcntl.flock(lock, fcntl.LOCK_UN)

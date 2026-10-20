@@ -8,14 +8,19 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
+from threading import Event, Timer, get_ident
 
 import pytest
 import requests
@@ -24,6 +29,7 @@ from origo.sources.adapters import binance_daily as transport
 from origo.sources.adapters import binance_perp_spool as spool
 from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
 from origo.sources.contracts import SourceError
+from origo.sources.locking import source_lock
 from origo.workers import perp_capture as capture
 from origo.workers.runtime import heartbeat_is_fresh, heartbeat_path, touch_heartbeat
 
@@ -269,8 +275,105 @@ def test_capture_obeys_ip_budget_and_provider_backoff(
     assert attempts[1][1]['headers'] == {'Retry-After': '1'}
 
 
+def _durable_capture_rows(root: Path) -> tuple[tuple[int, int, str], ...]:
+    with sqlite3.connect(root / 'capture.sqlite3') as connection:
+        return tuple(connection.execute('SELECT id,time,payload FROM trades ORDER BY id'))
+
+
+def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase: str,
+                                monkeypatch: pytest.MonkeyPatch) -> None:
+    held, released, between, finished = Event(), Event(), Event(), Event()
+    database, admission = spool._database, source_lock
+    cleanup_thread: list[int] = []
+    transaction_held: list[bool] = []
+    waits_completed: list[bool] = []
+    before = _durable_capture_rows(root)
+    expected = dict((row[0], row) for row in before)
+    expected.update((row[0], row) for row in spool._rows(capture.parse_recent(_body(record))))
+    cleanup_future: Future[None] | None = None
+
+    @contextmanager
+    def observed_database(path: Path, owner: str, *, create: bool = False
+                          ) -> Iterator[sqlite3.Connection]:
+        assert owner in ('capture', 'repair')
+        with database(path, owner, create=create) as connection:
+            if owner == 'capture' and cleanup_thread == [get_ident()]:
+                def trace(sql: str) -> None:
+                    target = ('PRAGMA incremental_vacuum' if phase == 'vacuum'
+                              else 'DELETE FROM polls')
+                    if sql.startswith(target) and not held.is_set():
+                        transaction_held.append(connection.in_transaction)
+                        held.set()
+                        Timer(2.5, released.set).start()  # Explicit storage-stall fault.
+                        waits_completed.append(released.wait(10))
+                connection.set_trace_callback(trace)
+            yield connection
+
+    @contextmanager
+    def observed_admission(path: Path, source: str, name: str, *,
+                           shared: bool = False, wait: bool = False) -> Iterator[None]:
+        with admission(path, source, name, shared=shared, wait=wait):
+            yield
+        if cleanup_thread == [get_ident()] and held.is_set() and not between.is_set():
+            between.set()
+            # This pause is outside admission: capture must finish before cleanup resumes.
+            waits_completed.append(finished.wait(10))
+
+    def cleanup() -> None:
+        cleanup_thread.append(get_ident())
+        spool.cleanup_spool(root)
+
+    with monkeypatch.context() as patch, ThreadPoolExecutor(max_workers=2) as pool:
+        patch.setattr(spool, '_database', observed_database)
+        patch.setattr(spool, 'source_lock', observed_admission, raising=False)
+        def response(*args: object, **kwargs: object) -> transport.Response:
+            nonlocal cleanup_future
+            if phase != 'intent':
+                cleanup_future = pool.submit(cleanup)
+                assert held.wait(10), 'Actual cleanup transaction was not reached.'
+            if phase == 'failed_outcome':
+                raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Deliberate provider transport fault.')
+            return transport.Response(_body(record), {}, 200, capture.CAPTURE_EGRESS_IP)
+        patch.setattr(capture, 'get_response', response)
+        with source_lock(root.resolve(), 'binance_perp_trades', 'capture'):
+            worker = capture.PerpCapture(root, capture.status_path(root),
+                                         clock=lambda: _instant(record['completed_at']))
+            if phase == 'intent':
+                cleanup_future = pool.submit(cleanup)
+                assert held.wait(10), 'Actual cleanup transaction was not reached.'
+            producer = pool.submit(worker.step)
+            try:
+                if phase == 'failed_outcome':
+                    with pytest.raises(SourceError, match='Deliberate provider transport fault'):
+                        producer.result(timeout=10)
+                else:
+                    commit = producer.result(timeout=10)
+                    assert commit.advanced and commit.overlap and commit.pending_gaps == 0
+                assert between.wait(1), 'Cleanup did not release admission between chunks.'
+                assert cleanup_future is not None and not cleanup_future.done()
+            finally:
+                finished.set()
+                released.set()
+                if cleanup_future is not None:
+                    cleanup_future.result(timeout=10)
+    assert transaction_held == [True] and all(waits_completed)
+    after = _durable_capture_rows(root)
+    assert after == (before if phase == 'failed_outcome'
+                     else tuple(expected[key] for key in sorted(expected)))
+    with sqlite3.connect(root / 'capture.sqlite3') as connection:
+        evidence = json.loads(connection.execute(
+            'SELECT evidence FROM polls ORDER BY seq DESC LIMIT 1').fetchone()[0])
+    assert evidence['completed_at'] == record['completed_at']
+    assert evidence['outcome'] == ('failed' if phase == 'failed_outcome' else 'succeeded')
+    assert evidence['error_code'] == ('PROVIDER_TRANSPORT_FAILED' if phase == 'failed_outcome' else None)
+    revision = spool.read_spooled_revision(root, BinancePerpProvisional().partition(
+        '2026-09-21T15:11:00Z'))
+    assert revision is not None and revision.complete and revision.row_count == 9948
+    assert revision.content_hash == '12c2d088cef34fe2a322461a6ad5b75ab61a7c28f1cf44358e0af399e00532c3'
+
+
 def test_capture_continues_during_slow_repair_and_publication(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     records = _records()
     _append(tmp_path / 'spool', records[:1])
@@ -287,6 +390,47 @@ def test_capture_continues_during_slow_repair_and_publication(
         commit = capture.PerpCapture(tmp_path / 'spool', capture.status_path(tmp_path)).step()
         assert commit.advanced and time.monotonic() - began < 2
         repair.rollback()
+
+    seed = tmp_path / 'seed'
+    _append(seed, records[:-1])
+    partition = BinancePerpProvisional().partition('2026-09-21T15:11:00Z')
+    revision = spool.read_spooled_revision(seed, partition)
+    assert revision is not None and revision.complete
+    # Acknowledge a genuinely complete interval, queueing its cleanup for each control.
+    with monkeypatch.context() as patch:
+        patch.setattr(spool, 'cleanup_spool', lambda root: None)
+        spool.acknowledge_spooled_revision(seed, replace(partition, provisional=False))
+    for phase in ('intent', 'append', 'failed_outcome', 'vacuum'):
+        root = tmp_path / phase
+        shutil.copytree(seed, root)
+        _capture_cleanup_contention(root, records[-1], phase, monkeypatch)
+
+    root = tmp_path / 'producer_first'
+    shutil.copytree(seed, root)
+    before = _durable_capture_rows(root)
+    with sqlite3.connect(root / 'capture.sqlite3') as connection:
+        polls_before = connection.execute('SELECT count(*) FROM polls').fetchone()[0]
+    caplog.clear()
+    with source_lock(root.resolve(), 'binance_perp_trades', 'capture_write', wait=True):
+        spool.cleanup_spool(root)
+    assert 'Perp spool cleanup deferred: Source lock is already held:' in caplog.text
+    assert _durable_capture_rows(root) == before
+    with sqlite3.connect(root / 'capture.sqlite3') as connection:
+        assert connection.execute('SELECT count(*) FROM polls').fetchone()[0] == polls_before
+    spool.cleanup_spool(root)
+    assert _durable_capture_rows(root) == before
+    with sqlite3.connect(root / 'capture.sqlite3') as connection:
+        assert connection.execute('SELECT count(*) FROM polls').fetchone()[0] < polls_before
+
+    # No free page means no vacuum transaction AND no explicit checkpoint writer.
+    with spool._database(tmp_path / 'spool', 'capture') as connection:
+        assert connection.execute('PRAGMA freelist_count').fetchone()[0] == 0
+        statements: list[str] = []
+        connection.set_trace_callback(statements.append)
+        with source_lock((tmp_path / 'spool').resolve(), 'binance_perp_trades', 'capture_write'):
+            spool._reclaim(connection, tmp_path / 'spool')
+        assert not any(sql.startswith(('BEGIN', 'PRAGMA incremental_vacuum',
+                                       'PRAGMA wal_checkpoint')) for sql in statements)
 
 
 def _replay_historical_busy_minute(root: Path) -> dict[str, int | float]:

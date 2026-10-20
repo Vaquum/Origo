@@ -1645,10 +1645,10 @@ def observe_publications(
     deadline: float,
 ) -> list[ProjectionObservation]:
     """Compare manifests to the real reader-selected state; inspect file metadata only."""
-    from origo.sources.contracts import Partition, StateRecord, identifier
+    from origo.sources.contracts import identifier
     from origo.sources.hashing import state_token
     from origo.sources.registry import SOURCE_REGISTRY
-    from origo.sources.storage import SourceStore, _current_partition_indices, _utc
+    from origo.sources.storage import SourceStore
 
     if time.monotonic() >= deadline:
         raise TimeoutError('Publication observation budget exhausted.')
@@ -1659,7 +1659,11 @@ def observe_publications(
             raise TimeoutError('Publication observation budget exhausted.')
         rows = client.execute(
             query,
-            {'source': source},
+            {
+                'source': source,
+                'activation_table': f'{identifier(database)}.source_activation_log',
+                'source_filter': f"source_key='{identifier(source)}'",
+            },
             settings={
                 'max_memory_usage': 536870912,
                 'max_execution_time': min(5, remaining),
@@ -1679,25 +1683,11 @@ def observe_publications(
         rows = read(
             f'SELECT partition_key, provisional, partition_start, partition_end, '
             f'generation, revision, build_id, component_hashes '
-            f'FROM {identifier(database)}.source_active_partitions WHERE source_key=%(source)s '
-            f'ORDER BY partition_start, provisional',
+            f'FROM {identifier(database)}.source_current_partitions WHERE source_key=%(source)s '
+            'SETTINGS additional_table_filters={%(activation_table)s: %(source_filter)s}',
             spec.key,
         )
-        records: tuple[StateRecord, ...] = ()
-        if rows:
-            partitions = [
-                Partition(str(row[0]), _utc(row[2]), _utc(row[3]), bool(row[1])) for row in rows
-            ]
-            anchors = read(
-                f'SELECT anchor FROM {identifier(database)}.source_anchor_log '
-                f'WHERE source_key=%(source)s',
-                spec.key,
-            )
-            if len(anchors) != 1:
-                raise RuntimeError('A source must have exactly one immutable coverage anchor.')
-            selected = _current_partition_indices(partitions, _utc(anchors[0][0]), spec.read_policy)
-            records = tuple(SourceStore._state_record(rows[index]) for index in selected)
-            del partitions, selected, anchors
+        records = tuple(SourceStore._state_record(row) for row in rows)
         del rows
         canonical = tuple(record for record in records if not record.partition.provisional)
         canonical_token = state_token(spec.key, canonical)

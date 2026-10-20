@@ -717,7 +717,7 @@ def test_publication_observation_checks_real_token_and_artifacts(
                 )
             }
         assert set(requested) == expected
-        assert all(1 <= requested.count(source) <= 2 for source in expected)
+        assert len(requested) == len(expected)
         return result
 
     node = f'{live_spec.key}:consumer:mount'

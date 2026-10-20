@@ -671,6 +671,8 @@ def test_publication_observation_checks_real_token_and_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from uuid import uuid4
+
     from origo.sources.storage import SourceStore
 
     runtime, keys, _, _ = real_minutes
@@ -692,6 +694,7 @@ def test_publication_observation_checks_real_token_and_artifacts(
         expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
         requested: list[str] = []
         execute = runtime.store.client.execute
+        prefix = f'publication-read-{uuid4().hex}-'
 
         def scoped(
             query: str, params: object | None = None,
@@ -701,7 +704,7 @@ def test_publication_observation_checks_real_token_and_artifacts(
             source = params.get('source')
             assert isinstance(source, str) and source in expected
             requested.append(source)
-            return execute(query, params, settings)
+            return execute(query, params, {**(settings or {}), 'log_comment': prefix + source})
 
         with monkeypatch.context() as patch:
             patch.setattr(runtime.store.client, 'execute', scoped)
@@ -718,6 +721,28 @@ def test_publication_observation_checks_real_token_and_artifacts(
             }
         assert set(requested) == expected
         assert len(requested) == len(expected)
+        if requested:
+            execute('SYSTEM FLUSH LOGS')
+            measured = execute(
+                'SELECT log_comment, read_rows FROM system.query_log '
+                "WHERE log_comment LIKE %(prefix)s AND type='QueryFinish'",
+                {'prefix': prefix + '%'},
+            )
+            counts = {
+                str(row[0]): int(str(row[1])) for row in execute(
+                    f'SELECT source_key, count() FROM {runtime.store.database}.source_activation_log '
+                    'GROUP BY source_key',
+                )
+            }
+            anchors = int(str(execute(
+                f'SELECT count() FROM {runtime.store.database}.source_anchor_log',
+            )[0][0]))
+            assert len(measured) == len(requested)
+            # The real fixture also proves empty sources never scan its populated neighbour.
+            assert all(
+                int(str(row[1])) <= 2 * counts.get(str(row[0])[len(prefix):], 0) + anchors
+                for row in measured
+            )
         return result
 
     node = f'{live_spec.key}:consumer:mount'

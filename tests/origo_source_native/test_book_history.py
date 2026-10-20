@@ -327,9 +327,14 @@ def test_rejected_book_revision_identity_and_retry(
     monkeypatch.setattr(vendor, 'replay_hour', rejected)
 
     def retry() -> None:
+        query = ("SELECT count() FROM origo.source_failure_log WHERE source_key=%(source)s "
+                 "AND partition_key=%(partition)s AND event_type='FAILED'")
+        params = {'source': runtime.spec.key, 'partition': partition.key}
+        failed = runtime.store.execute(query, params)[0][0]
         with pytest.raises(SourceError) as failure:
             _execute_operation(runtime, 'canonical', SourceRunConfig(partition_key=partition.key, automatic_capacity=True))
         assert failure.value.code == fault[0]
+        assert runtime.store.execute(query, params)[0][0] == failed + 1
 
     # Discovery and fetch can observe different provider ETags.
     discovered = adapter.discover(partition)
@@ -348,9 +353,10 @@ def test_rejected_book_revision_identity_and_retry(
     assert not tuple(path.parent.glob('hour-*'))
     runtime.discover(partition)
     assert adapter.rejected_revision(partition, adapter.discover(partition))
-    # Explicit native retry bypasses automatic suppression for unchanged inputs.
+    # Explicit retry checks the provider again and records failure without replaying unchanged inputs.
+    before_visited = len(visited)
     retry()
-    assert len(attempts) == 2
+    assert len(attempts) == 1 and len(visited) > before_visited
     for archive, code in zip(archives, ('BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED', 'BOOK_SEQUENCE_GAP'), strict=True):
         rewritten[vendor._file(adapter.market, archive.partition)] = 'controlled-provider-etag-' + archive.partition.key
         fault[0] = code
@@ -424,10 +430,13 @@ def test_rejected_book_revision_identity_and_retry(
         assert all(metadata for _, metadata in calls[before_calls:])
         assert runtime.store.record(partition) is None
         assert runtime.store.execute("SELECT count() FROM (SELECT failure_key FROM origo.source_failure_log WHERE blocking_scope='PARTITION' GROUP BY failure_key HAVING argMax(event_type,event_time)='FAILED')")[0][0] > 0
+        before_calls = len(calls)
         retry()
-        assert len(attempts) > before_attempts
+        assert len(attempts) == before_attempts
+        assert calls[before_calls:] and all(metadata for _, metadata in calls[before_calls:])
         _transport(archives, adapter.market, monkeypatch)
-    # A real successful replay clears rejected evidence; ordinary activation recovers.
+    # Removing the deliberate replay fault changes its policy; ordinary activation can recover.
+    monkeypatch.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
     monkeypatch.setattr(vendor, 'replay_hour', replay)
     if adapter.market == 'spot':
         with pytest.raises(SourceError, match='depth'):

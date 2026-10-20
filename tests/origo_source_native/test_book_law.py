@@ -308,9 +308,19 @@ def _assert_real_canonical_discovery_and_admission(
                 'SELECT event_id,event_type FROM origo.source_failure_log '
                 'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
             ) == failures
-            with pytest.raises(SourceError):
+            with pytest.raises(SourceError) as failure:
                 runtime.build(partition.key)
-            assert counts['replay'] > before['replay']  # Explicit retry may extend its prelude.
+            assert failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+            assert counts['metadata'] > before['metadata']
+            assert (counts['payload'], counts['replay']) == (before['payload'], before['replay'])
+            retried_failures = runtime.store.execute(
+                'SELECT event_id,event_type FROM origo.source_failure_log '
+                'WHERE source_key=%(source)s AND partition_key=%(partition)s ORDER BY event_time,event_id', params,
+            )
+            assert len(retried_failures) == len(failures) + 1
+            assert set(failures) < set(retried_failures)
+            assert retried_failures[-1][1] == 'FAILED'
+            assert _predicate(law.evaluate(runtime.store.client, 'origo', now[0]), spec.key, 'C1')['status'] == 'FAIL'
 
             # The positive spot case uses its genuinely accepted October archives through the real adapter.
             modern_partition = hour_partition(REAL_HOUR)

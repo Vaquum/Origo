@@ -1,3 +1,7 @@
+# v3.34.46
+
+- Validate matching retained canonical content before one fresh provider revision check, preserving invalid-copy rejection and changed-revision rebuilding.
+
 # v3.34.45
 
 - Let the book connection test controller release borrowers after a lost loan; require both existing market cases in the acceptance inventory.

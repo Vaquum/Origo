@@ -524,6 +524,24 @@ QC found that Dagster counts retries per step, so a range shared one per-hour al
 - Progress/Next: publish before checks; require the unchanged owner to pass and the exception-only loan-loss control to fail both market cases. Complete current-head full suites, lint, CI and reviews. Operator acceptance still requires the stopped remote backfill to pass its separate coverage, latency, failure and routine-capacity criteria.
 
 
+## Entry 063 — 2026-10-20
+
+- Task/evidence: actual ordinary validation e512387b-bee6-46dc-a806-7343f4eafc77 failed the default query statement assertion after1,143 other passes and one Linux-only skip. The known cells and validation SQL digests arrived in reversed query_start_time order. The test incorrectly treated independently clocked observations as the statement contract. AGENTS requires a wrong gate to be repaired separately.
+- I tried: compare the unchanged SQL digest multiset in the existing owner, and always reverse its genuine query-log rows. Preserve exact digest values and multiplicity, Arrow schemas/metadata and real server-error rejection. No product SQL, numeric output, transport, source rule or inventory change.
+- I found — bad: separate local CI-contract execution copied ignored ClickHouse scratch trees containing stale server symlinks, then its shell deadline case exceeded its10second harness bound. Neither is an ingestion outcome. The same current-head ruleset CI passed. Qualification needs a clean tracked-source copy and isolated host execution; no timeout or assertion relaxation.
+- Measurements: published before local checks. No book latency, reliability or coverage gain claimed. Production bulk stays stopped after361completedattempts/235accepted,208reused and27newfull;125inputrejections and1transportfailure. Maintenance lock and redundant reuse requests are separate unresolved source work.
+- Progress/Next: require this existing owner to pass with reordered actual receipts and fail when its ordered assertion is restored. Complete required current-head source suites, lint, CI and reviews.
+
+
+## Entry 065 — 2026-10-20
+
+- Task/evidence: required runtime CI39384557564/job118501176930 passed1,159ordinary cases, then failed monitor replay at1.0159117369998967seconds against the original one-second limit. This is a distinct CI performance failure, not a book ingestion error. No unchanged rerun or threshold waiver.
+- I tried: profile exactly the existing observation decode, summary and lifecycle stages using the same genuine captured all-law frame and its original1440protocol envelopes, plus the separate711frame actual R1 history. The profile records130,971 _instant calls,0.145seconds cumulative of0.946profiled total; decoding0.672seconds dominates. Profiling adds overhead; cumulative values overlap and cannot be summed as independent costs.
+- I found — bad: each of18incident reductions repeatedly parses the same frame/current/previous timestamps, and decoder fields repeat times too. The original helper validates and allocates a datetime on every call. Cache only successful immutable UTC results, bounded at4096entries; preserve the JSON type/length guard before cache lookup so malformed unhashable input has identical rejection.
+- Measurements: source published before candidate checks. Profiled baseline replay stages0.675decode/0.139summary/0.130lifecycle seconds are local diagnostic measurements, not unprofiled candidate gains or production capacity. Profiling RSS261.86MiB includes profiler overhead and does not qualify the unchanged256MiB resource limit.
+- Progress/Next: AB/BA/AB exact-workload cache ablation must preserve full frame/summary/transition hashes and malformed-input behavior. Record cold/steady replay, preparation, full process time and peak memory separately. The original one-second,256MiB, record/index limits and evaluator are unchanged; complete actual current-head CI and all source checks. Book bulk stays stopped; metadata/reuse/input completeness remain separate work.
+
+
 ## Entry 062 — 2026-10-20
 
 - Task/evidence: #581 reviews [6284468918](https://github.com/Vaquum/Origo/issues/581#issuecomment-6284468918) and [6284492512](https://github.com/Vaquum/Origo/issues/581#issuecomment-6284492512) reproduce a test deadlock. This corrects Entry 061's incomplete negative proof. Callback and controller race equal three-second waits; a success-only loan-return mutant can lose the surviving loan on the callback assertion and hang teardown. The earlier private RequestException-only mutation avoided that assertion path and did not establish this stronger control.

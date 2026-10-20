@@ -1,3 +1,7 @@
+# v3.34.40
+
+- Compare the unchanged frozen query statements independently of cross-query clock ordering; exercise reversed genuine log receipts.
+
 # v3.34.38
 
 - Require both book HTTP connection loans to remain usable after a transport failure.

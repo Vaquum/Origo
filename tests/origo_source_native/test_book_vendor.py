@@ -1573,6 +1573,7 @@ def test_replay_policy_invalidates_complete_revision_identity(
     current = vendor._identity(market, partition, Response(body, headers, 200))
     dependencies = [(after.key, vendor._identity(market, after, Response(
         original_vendor_following_archive[1], original_vendor_following_archive[2], 200)))]
+    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 0)
     old = 'cryptohftdata-v2:' + hashlib.sha256(json.dumps([2, current, dependencies], separators=(',', ':')).encode()).hexdigest()
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     path = vendor._dependency_path(market, partition)

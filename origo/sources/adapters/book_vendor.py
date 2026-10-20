@@ -47,7 +47,7 @@ BOOK_BATCH_BODY_BYTES = 512 * 1024**2
 BOOK_BATCH_PREPARED_BYTES = 2 * BOOK_MAX_PRELUDE_BYTES
 # Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 4
-# Versions rejection verdicts across Python/native replay logic and replay bounds.
+# Versions changes to rejection verdict semantics across Python/native replay.
 _REJECTION_POLICY_VERSION = 5
 _MISSING_DEPENDENCY = 'provider-http-404'
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
@@ -956,6 +956,11 @@ class CryptoHFTBookHourly:
         dependencies = _dependency_entries(partition, current, value)
         if not dependencies or dependencies[-1][0] != partition.end.strftime(HOUR_KEY_FORMAT):
             return False
+        if verdict['code'] in {'BOOK_KNOWN_DEPTH_EXHAUSTED', 'BOOK_VENDOR_CLOCK_UNPROVEN'}:
+            preceding = [(key, identity) for key, identity in dependencies if key < partition.key]
+            if len(preceding) != BOOK_MAX_PRELUDE_HOURS and not (
+                    preceding and preceding[0][1] == _MISSING_DEPENDENCY):
+                return False
         return revision == _revision_key(current, dependencies)
 
     def revalidate(self, partition: Partition, revision: Revision) -> None:

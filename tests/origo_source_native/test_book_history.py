@@ -711,6 +711,7 @@ def test_archive_fetch_retains_only_completed_rejection(
             memo = json.loads(vendor._dependency_path('spot', partition).read_text())
             assert memo['rejection']['policy'] == vendor._REJECTION_POLICY_VERSION
             assert [x[0] for x in memo['dependencies']] == ['2025-07-15T19Z', '2025-07-15T21Z']
+        assert not adapter.rejected_revision(partition, adapter.discover(partition))
         assert not tuple((tmp_path / 'locks').rglob('hour-*'))
         current = archives[2]
         with monkeypatch.context() as limits:

@@ -260,12 +260,30 @@ def test_superseded_metadata_compaction(metadata_instance: DagsterInstance) -> N
     instance = metadata_instance
     first = execute_archive(instance)
     key = AssetKey('metadata_proof_archive')
+    layout = Layout.from_instance(instance)
+    storage = instance.event_log_storage
+    assert isinstance(storage, OrigoSqliteEventLogStorage)
+    with connection(layout.events, time.monotonic() + 15, 1, write=True) as writer:
+        writer.execute('BEGIN IMMEDIATE')
+        _, scanned, compacted = storage.compact_retired_state(
+            layout.runs, 0, 500, time.monotonic() + 15, 0.05
+        )
+        assert scanned > 0 and compacted == 0
+        writer.rollback()
     instance.delete_run(first)
     second = execute_archive(instance)
     current = instance.fetch_materializations(key, limit=1).records[0]
-    assert isinstance(instance.event_log_storage, OrigoSqliteEventLogStorage)
-    _, scanned, compacted = instance.event_log_storage.compact_retired_state(
-        Layout.from_instance(instance).runs, 0, 500, time.monotonic() + 15, 1
+    before = instance.fetch_materializations(key, limit=10).records
+    from origo.maintenance.sqlite import MaintenanceDeadlineReached
+
+    with connection(layout.events, time.monotonic() + 15, 1, write=True) as writer:
+        writer.execute('BEGIN IMMEDIATE')
+        with pytest.raises(MaintenanceDeadlineReached, match='yielded to the active SQLite writer'):
+            storage.compact_retired_state(layout.runs, 0, 500, time.monotonic() + 15, 0.05)
+        writer.rollback()
+    assert instance.fetch_materializations(key, limit=10).records == before
+    _, scanned, compacted = storage.compact_retired_state(
+        layout.runs, 0, 500, time.monotonic() + 15, 1
     )
     assert scanned > 0 and compacted > 0
     assert instance.fetch_materializations(key, limit=10).records == [current]

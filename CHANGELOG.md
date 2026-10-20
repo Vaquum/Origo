@@ -1,3 +1,7 @@
+# v3.34.41
+
+- Scan retained metadata read-only and take a writer only for eligible deletion; preserve the page checkpoint when the writer is busy.
+
 # v3.34.38
 
 - Require both book HTTP connection loans to remain usable after a transport failure.

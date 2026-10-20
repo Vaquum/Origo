@@ -324,27 +324,42 @@ class OrigoSqliteEventLogStorage(SqliteEventLogStorage):
     ) -> tuple[int, int, int]:
         """Scan a bounded index page; remove only superseded facts of absent runs."""
         path = Path(self.path_for_shard('index'))
-        with (
-            connection(runs_path, deadline, lock_wait) as runs,
-            connection(path, deadline, lock_wait, write=True) as database,
-        ):
-            database.execute('BEGIN IMMEDIATE')
-            rows = database.execute(
-                """SELECT id,run_id,asset_key,dagster_event_type,partition
-                   FROM event_logs WHERE id>? ORDER BY id LIMIT ?""",
-                (after_id, limit),
-            ).fetchall()
-            retired: list[int] = []
-            for row in rows:
+        with connection(runs_path, deadline, lock_wait) as runs:
+            def superseded(database: sqlite3.Connection, row: sqlite3.Row) -> bool:
                 run_id = str(row['run_id'])
                 # Runless events belong to Dagster's runless shard and are not retired history.
-                if (
+                return (
                     len(run_id) == 36
                     and runs.execute('SELECT 1 FROM runs WHERE run_id=?', (run_id,)).fetchone()
                     is None
                     and not _current(database, row)
-                ):
-                    retired.append(int(row['id']))
-            _delete_index_events(database, retired)
-            database.commit()
+                )
+
+            with connection(path, deadline, lock_wait) as database:
+                rows = database.execute(
+                    """SELECT id,run_id,asset_key,dagster_event_type,partition
+                       FROM event_logs WHERE id>? ORDER BY id LIMIT ?""",
+                    (after_id, limit),
+                ).fetchall()
+                candidates = [int(row['id']) for row in rows if superseded(database, row)]
+            retired: list[int] = []
+            if candidates:
+                try:
+                    with connection(path, deadline, lock_wait, write=True) as database:
+                        database.execute('BEGIN IMMEDIATE')
+                        placeholders = ','.join('?' for _ in candidates)
+                        eligible = database.execute(
+                            f"""SELECT id,run_id,asset_key,dagster_event_type,partition
+                                FROM event_logs WHERE id IN ({placeholders})""",
+                            candidates,
+                        ).fetchall()
+                        retired = [int(row['id']) for row in eligible if superseded(database, row)]
+                        _delete_index_events(database, retired)
+                        database.commit()
+                except sqlite3.OperationalError as error:
+                    if error.sqlite_errorcode == sqlite3.SQLITE_BUSY:
+                        raise MaintenanceDeadlineReached(
+                            'Retained-state compaction yielded to the active SQLite writer.'
+                        ) from error
+                    raise
         return (int(rows[-1]['id']) if rows else 0, len(rows), len(retired))

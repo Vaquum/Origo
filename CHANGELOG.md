@@ -1,6 +1,10 @@
-# v3.34.43
+# v3.34.47
 
 - Scan retained metadata read-only and take a writer only for eligible deletion; preserve the page checkpoint when the writer is busy.
+
+# v3.34.45
+
+- Let the book connection test controller release borrowers after a lost loan; require both existing market cases in the acceptance inventory.
 
 # v3.34.42
 

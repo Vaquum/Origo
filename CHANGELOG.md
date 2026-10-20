@@ -1,3 +1,7 @@
+# v3.34.34
+
+- Guard the entire eligible book planner against Python row iteration and reject extra native receipts when no active generation is expected.
+
 # v3.34.33
 
 - Reject wrong or missing native receipt identities and guard columnar planner work and validation priority with genuine-input controls.

@@ -118,4 +118,4 @@ ignore = [
 known-first-party = ["origo"]
 
 [tool.origo.release]
-native_jobs_only_version = "3.34.49"
+native_jobs_only_version = "3.34.48"

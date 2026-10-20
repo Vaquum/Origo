@@ -1,3 +1,7 @@
+# v3.34.41
+
+- Validate matching retained canonical content before one fresh provider revision check, preserving invalid-copy rejection and changed-revision rebuilding.
+
 # v3.34.40
 
 - Compare the unchanged frozen query statements independently of cross-query clock ordering; exercise reversed genuine log receipts.

@@ -234,18 +234,21 @@ class SourceRuntime:
                             'Provisional interval is awaiting independent completeness evidence.'
                         )
                 else:
-                    if (
-                        current is not None
-                        and self.spec.canonical.discover(partition) == current.revision
-                    ):
-                        self._validate_retained(current)
-                        self.spec.canonical.revalidate(
-                            partition, Revision(current.revision, '', '{}', 0, lambda: iter(()))
-                        )
-                        current = self._upgrade_components(current)
-                        self.failures.recover_partition(partition=key)
-                        self._recover_superseded(key)
-                        return current
+                    if current is not None:
+                        invalid: SourceError | None = None
+                        try:
+                            self._validate_retained(current)
+                        except SourceError as error:
+                            if error.code != 'RETAINED_CONTENT_INVALID':
+                                raise
+                            invalid = error
+                        if self.spec.canonical.discover(partition) == current.revision:
+                            if invalid is not None:
+                                raise invalid
+                            current = self._upgrade_components(current)
+                            self.failures.recover_partition(partition=key)
+                            self._recover_superseded(key)
+                            return current
                     revision = adapter.fetch(partition)
 
                 if current is not None and current.revision == revision.key:

@@ -747,6 +747,13 @@ class CryptoHFTBookHourly:
             return self._fetch(partition)
 
     def _fetch(self, partition: Partition) -> Revision:
+        rejection = _dependency_evidence(self.market, partition).get('rejection')
+        if isinstance(rejection, dict):
+            verdict = object_mapping(rejection)
+            revision = verdict.get('revision')
+            if (isinstance(revision, str) and self.rejected_revision(partition, revision)
+                    and self.discover(partition) == revision):
+                raise SourceError(str(verdict['code']), 'Unchanged provider revision retains its rejection.')
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
         with _paired_responses(self.market, partition, after, metadata=False) as (response, closing):
             current = _identity(self.market, partition, response)

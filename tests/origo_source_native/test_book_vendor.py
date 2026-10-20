@@ -6,7 +6,7 @@ import hashlib
 import itertools
 import json
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1589,14 +1589,53 @@ def test_replay_policy_invalidates_complete_revision_identity(
     assert not adapter.rejected_revision(partition, discovered)
     vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     assert adapter.rejected_revision(partition, discovered)
+    calls: list[bool] = []
+    original_response = vendor.get_response
+
+    def observed(
+        url: str, *, params: Mapping[str, str | int] | None = None,
+        headers: Mapping[str, str] | None = None, weight: int = 0,
+    ) -> Response:
+        calls.append(bool(headers))
+        return original_response(url, params=params, headers=headers, weight=weight)
+
+    monkeypatch.setattr(vendor, 'get_response', observed)
+    proof = path.read_bytes()
+    # Deliberate retained rejection over genuine bytes; it is never a complete hour.
+    with pytest.raises(SourceError) as retained:
+        adapter.fetch(partition)
+    assert retained.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
+    assert calls == [True, True] and path.read_bytes() == proof
+    assert not tuple(tmp_path.glob('book_vendor_*/hour-*'))
     with monkeypatch.context() as changed:
         changed.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
         assert adapter.discover(partition) == discovered
         assert not adapter.rejected_revision(partition, discovered)
+        calls.clear()
+        rebuilt = adapter.fetch(partition)
+        assert calls == [False, False] and rebuilt.row_count == 36000
+        assert json.loads(rebuilt.evidence_json)['input_sha256'] == hashlib.sha256(body).hexdigest()
+    vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     with monkeypatch.context() as changed:
         changed.setattr(vendor, '_REPLAY_POLICY_VERSION', vendor._REPLAY_POLICY_VERSION + 1)
         assert adapter.discover(partition) != discovered
         assert not adapter.rejected_revision(partition, adapter.discover(partition))
+    with monkeypatch.context() as changed:
+        def revised(
+            url: str, *, params: Mapping[str, str | int] | None = None,
+            headers: Mapping[str, str] | None = None, weight: int = 0,
+        ) -> Response:
+            response = observed(url, params=params, headers=headers, weight=weight)
+            if params == {'file': vendor._file(market, partition)}:
+                return replace(response, headers={**response.headers, 'ETag': '"controlled-revision-change"'})
+            return response
+
+        # Only the provider identity changes; every market byte stays genuine.
+        changed.setattr(vendor, 'get_response', revised)
+        calls.clear()
+        replacement = adapter.fetch(partition)
+        assert calls.count(True) == 2 and calls.count(False) == 2
+        assert replacement.key != discovered and replacement.content_hash == rebuilt.content_hash
     assert {'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'} <= vendor._REJECTION_CODES
 
 

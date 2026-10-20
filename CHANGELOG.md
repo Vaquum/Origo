@@ -1,3 +1,7 @@
+# v3.34.48
+
+- Recheck provider identity before reusing a retained book rejection, avoiding unchanged archive downloads and reconstruction while preserving failed outcomes.
+
 # v3.34.47
 
 - Scan retained metadata read-only and take a writer only for eligible deletion; preserve the page checkpoint when the writer is busy.

@@ -524,6 +524,15 @@ QC found that Dagster counts retries per step, so a range shared one per-hour al
 - Progress/Next: publish before checks; require the unchanged owner to pass and the exception-only loan-loss control to fail both market cases. Complete current-head full suites, lint, CI and reviews. Operator acceptance still requires the stopped remote backfill to pass its separate coverage, latency, failure and routine-capacity criteria.
 
 
+## Entry 063 — 2026-10-20
+
+- Task/evidence: actual ordinary validation e512387b-bee6-46dc-a806-7343f4eafc77 failed the default query statement assertion after1,143 other passes and one Linux-only skip. The known cells and validation SQL digests arrived in reversed query_start_time order. The test incorrectly treated independently clocked observations as the statement contract. AGENTS requires a wrong gate to be repaired separately.
+- I tried: compare the unchanged SQL digest multiset in the existing owner, and always reverse its genuine query-log rows. Preserve exact digest values and multiplicity, Arrow schemas/metadata and real server-error rejection. No product SQL, numeric output, transport, source rule or inventory change.
+- I found — bad: separate local CI-contract execution copied ignored ClickHouse scratch trees containing stale server symlinks, then its shell deadline case exceeded its10second harness bound. Neither is an ingestion outcome. The same current-head ruleset CI passed. Qualification needs a clean tracked-source copy and isolated host execution; no timeout or assertion relaxation.
+- Measurements: published before local checks. No book latency, reliability or coverage gain claimed. Production bulk stays stopped after361completedattempts/235accepted,208reused and27newfull;125inputrejections and1transportfailure. Maintenance lock and redundant reuse requests are separate unresolved source work.
+- Progress/Next: require this existing owner to pass with reordered actual receipts and fail when its ordered assertion is restored. Complete required current-head source suites, lint, CI and reviews.
+
+
 ## Entry 065 — 2026-10-20
 
 - Task/evidence: required runtime CI39384557564/job118501176930 passed1,159ordinary cases, then failed monitor replay at1.0159117369998967seconds against the original one-second limit. This is a distinct CI performance failure, not a book ingestion error. No unchanged rerun or threshold waiver.

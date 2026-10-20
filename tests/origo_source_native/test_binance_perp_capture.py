@@ -298,10 +298,15 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
         assert owner in ('capture', 'repair')
         with database(path, owner, create=create) as connection:
             if owner == 'capture' and cleanup_thread == [get_ident()]:
+                matched = 0
                 def trace(sql: str) -> None:
+                    nonlocal matched
                     target = ('PRAGMA incremental_vacuum' if phase == 'vacuum'
                               else 'DELETE FROM polls')
-                    if sql.startswith(target) and not held.is_set():
+                    if sql.startswith(target):
+                        matched += 1
+                    # The second DELETE follows a real write; BEGIN DEFERRED alone owns no writer.
+                    if sql.startswith(target) and not held.is_set() and (phase == 'vacuum' or matched == 2):
                         transaction_held.append(connection.in_transaction)
                         held.set()
                         Timer(2.5, released.set).start()  # Explicit storage-stall fault.
@@ -323,6 +328,12 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
         cleanup_thread.append(get_ident())
         spool.cleanup_spool(root)
 
+    def require_held_writer() -> None:
+        assert held.wait(10), 'Actual cleanup transaction was not reached.'
+        with sqlite3.connect(root / 'capture.sqlite3', timeout=0) as probe:
+            with pytest.raises(sqlite3.OperationalError, match='locked'):
+                probe.execute('BEGIN IMMEDIATE')
+
     with monkeypatch.context() as patch, ThreadPoolExecutor(max_workers=2) as pool:
         patch.setattr(spool, '_database', observed_database)
         patch.setattr(spool, 'source_lock', observed_admission, raising=False)
@@ -330,7 +341,7 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
             nonlocal cleanup_future
             if phase != 'intent':
                 cleanup_future = pool.submit(cleanup)
-                assert held.wait(10), 'Actual cleanup transaction was not reached.'
+                require_held_writer()
             if phase == 'failed_outcome':
                 raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Deliberate provider transport fault.')
             return transport.Response(_body(record), {}, 200, capture.CAPTURE_EGRESS_IP)
@@ -340,7 +351,7 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
                                          clock=lambda: _instant(record['completed_at']))
             if phase == 'intent':
                 cleanup_future = pool.submit(cleanup)
-                assert held.wait(10), 'Actual cleanup transaction was not reached.'
+                require_held_writer()
             producer = pool.submit(worker.step)
             try:
                 if phase == 'failed_outcome':

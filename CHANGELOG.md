@@ -1,3 +1,7 @@
+# v3.34.35
+
+- Keep an active ephemeral CI runner alive through non-busy GitHub API status observations; preserve listener exit, deadline and offline cleanup.
+
 # v3.34.33
 
 - Reject wrong or missing native receipt identities and guard columnar planner work and validation priority with genuine-input controls.
@@ -767,3 +771,4 @@ Completed metadata scans no longer report a growing cleanup backlog solely becau
 - Add `.github/typing_budget.json` as the committed baseline oracle (zero escape hatches, 1213 pyright-strict errors on 35 files at introduction).
 - Bump `project.requires-python` to `>=3.11` to align with `tomllib` usage, `pyright.pythonVersion`, `ruff.target-version`, and CI.
 - Bump `pr_checks_codeql.yml` Python from `3.10` to `3.11` to match the above.
+

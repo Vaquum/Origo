@@ -1,3 +1,7 @@
+# v3.34.32
+
+- Plan historical spot update messages columnarly, preserving native sequence, clock and replay boundaries.
+
 # v3.34.31
 
 - Verify native backfill receipts against the full active revision, build and generation, separately for each run.

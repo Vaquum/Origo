@@ -1846,7 +1846,7 @@ def test_archive_warmup_preserves_requested_validation(
                 assert actual_error.value.code == reference_error.code
             if reraise:
                 raise
-            return
+            return actual_error.value
         actual = plan(events, market, start, end, native_order)
         assert_frame_equal(actual, expected)
         return actual
@@ -1856,25 +1856,32 @@ def test_archive_warmup_preserves_requested_validation(
         # Protocol faults alter recorded headers only; market levels remain original.
         events, _, _ = columnar._Inputs('spot').ordered(tuple(paths), native_order=True)
         start, end = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
-        def compare_fault(frame):
-            compared_plan(frame, 'spot', start, end, True, reraise=False)
+        def compare_fault(frame, expected_error=None):
+            observed = compared_plan(frame, 'spot', start, end, True, reraise=False)
+            if expected_error is None:
+                assert isinstance(observed, pl.DataFrame)
+            else:
+                assert (type(observed), observed.code if isinstance(observed, SourceError)
+                        else None, str(observed)) == expected_error
         def reversed_ids(frame):
             return frame.with_columns(
                 pl.col('final_update_id').alias('first_update_id'),
                 pl.col('first_update_id').alias('final_update_id'),
                 pl.col('first_update_id').alias('native'),
             )
-        compare_fault(pl.concat([reversed_ids(events.head(1)), events.slice(1)]))
+        reversed_error = (ValueError, None, 'Native update IDs are reversed.')
+        compare_fault(pl.concat([reversed_ids(events.head(1)), events.slice(1)]), reversed_error)
         chosen = int((events['event_time'] >= start + 2000).arg_true()[0])
         original = events.slice(chosen, 1)
         stale = original.with_columns(pl.lit(events['received_time'][0]).alias('received_time'))
         compare_fault(pl.concat([events.head(chosen + 1), stale, events.slice(chosen + 1)]))
-        compare_fault(pl.concat([events.head(chosen + 1), reversed_ids(stale), events.slice(chosen + 1)]))
+        compare_fault(pl.concat([events.head(chosen + 1), reversed_ids(stale), events.slice(chosen + 1)]), reversed_error)
         closing = int((events['event_time'] >= end).arg_true()[0])
         compare_fault(pl.concat([events.head(closing + 1), reversed_ids(events.slice(closing + 1, 1)), events.slice(closing + 2)]))
         gap = events.filter(~pl.col('event_time').is_between(start + 200, start + 1200, closed='left'))
         later = int((gap['event_time'] >= start + 2000).arg_true()[0])
-        compare_fault(pl.concat([gap.head(later), reversed_ids(gap.slice(later, 1)), gap.slice(later + 1)]))
+        compare_fault(pl.concat([gap.head(later), reversed_ids(gap.slice(later, 1)), gap.slice(later + 1)]),
+                      (SourceError, 'BOOK_SEQUENCE_GAP', 'Native update chain does not bridge.'))
     monkeypatch.setattr(columnar, '_plan', compared_plan)
     _fault_columnar(monkeypatch, missing_message)
 

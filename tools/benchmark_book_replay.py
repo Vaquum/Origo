@@ -27,7 +27,7 @@ from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.bundle import SourceRunConfig, _execute_operation
 from origo.sources.columnar import BoundedClient
-from origo.sources.contracts import Partition
+from origo.sources.contracts import Partition, Row, StateRecord
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.storage import SourceStore
 
@@ -99,6 +99,28 @@ def partition_metrics(selected: list[str], attempts: list[PartitionAttempt]) -> 
             attempt.error_code for attempt in attempts if not attempt.complete
         )),
     }
+
+
+def verify_backfill_receipts(
+    store: SourceStore, backfill_id: str, run_id: str, active_records: list[StateRecord],
+) -> list[Row]:
+    """Match this run's receipts to active records already read for output verification."""
+    expected = sorted(
+        (record.partition.key, record.revision, str(record.build_id), record.generation, run_id)
+        for record in active_records
+    )
+    if len({record.partition.key for record in active_records}) != len(active_records):
+        raise ValueError('BACKFILL_RECEIPT_INVALID: duplicate expected partition.')
+    receipts = store.execute(
+        'SELECT partition_key,revision,toString(build_id),generation,dagster_run_id '
+        f'FROM {store.table("source_backfill_log")} '
+        'WHERE source_key=%(source)s AND backfill_id=%(parent)s '
+        'AND dagster_run_id=%(run)s ORDER BY partition_key',
+        {'source': store.spec.key, 'parent': backfill_id, 'run': run_id},
+    )
+    if receipts != expected:
+        raise ValueError('BACKFILL_RECEIPT_INVALID: receipts differ from verified active records.')
+    return receipts
 
 
 def main() -> None:

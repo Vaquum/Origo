@@ -28,7 +28,7 @@ from ..arrow_types import ArrowCompression, ArrowParquet
 from ..archive import archive_references, archive_session
 from ..cleanup import preserve_primary_failure
 from ..contracts import ArchiveNotPublishedYet, Partition, Revision, Row, SourceError
-from .binance_daily import Response, get_response
+from .binance_daily import Response, get_response, provider_connections
 from .book_local import fetch_sealed_partition as fetch_sealed_partition
 from .book_spool import Market, atomic_write, object_mapping
 
@@ -685,7 +685,7 @@ class CryptoHFTBookHourly:
             batch = _BookBatch(self.market, Path(directory))
             token = _batch.set(batch)
             try:
-                with archive_session(), replay_session(self.market):
+                with archive_session(), provider_connections(), replay_session(self.market):
                     yield
             finally:
                 _batch.reset(token)

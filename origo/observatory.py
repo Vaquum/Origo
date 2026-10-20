@@ -10,6 +10,7 @@ import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Literal, NotRequired, TypeAlias, TypedDict, cast
 
 _ZERO_DURATION = timedelta(0)
@@ -197,6 +198,11 @@ def _number(value: Json) -> float | None:
 def _instant(value: Json) -> datetime:
     if not isinstance(value, str) or len(value) > 40:
         raise ValueError('invalid_utc_time')
+    return _parsed_instant(value)
+
+
+@lru_cache(maxsize=4096)
+def _parsed_instant(value: str) -> datetime:
     stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
     if stamp.tzinfo is None or stamp.utcoffset() != _ZERO_DURATION:
         raise ValueError('invalid_utc_time')

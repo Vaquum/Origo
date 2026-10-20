@@ -1064,6 +1064,30 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert daily._read_budget((tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state').open())[1] >= clock[0] + 2
     assert vendor._identity('spot', partition, first) == vendor._identity(
         'spot', partition, Response(b'', {'ETag': 'recorded-object'}, 206))
+    # Deliberate HTTP faults: no source rows; retry scheduling must respect the shared pause.
+    for retry_after in ('60', None, 'invalid'):
+        attempted = []
+
+        def unavailable(url, params, headers, egress_ip=None, method='GET'):
+            attempted.append(clock[0])
+            value = response(
+                status=503 if len(attempted) == 1 else 200,
+                headers={'Retry-After': retry_after} if retry_after is not None else {},
+            )
+            responses.append(value)
+            return value
+
+        monkeypatch.setattr(daily, '_request', unavailable)
+        with pytest.raises(SourceError) as transient:
+            vendor._response('spot', partition, metadata=True)
+        assert transient.value.code == (
+            'PROVIDER_RATE_HEADER_INVALID' if retry_after == 'invalid' else 'PROVIDER_HTTP_503'
+        )
+        if retry_after != 'invalid':
+            daily.time.sleep(1)  # The native book retry resumes after one second.
+            vendor._response('perp', partition, metadata=True)
+            assert len(attempted) == 2
+            assert attempted[1] == pytest.approx(attempted[0] + (60 if retry_after else 1))
     # Exercise requests' real cross-host redirect preparation without a network socket.
     prepared = requests.Request('GET', vendor.CRYPTOHFT_URL,
                                 headers={'Authorization': 'Bearer control-token', 'Range': 'bytes=0-0'}).prepare()

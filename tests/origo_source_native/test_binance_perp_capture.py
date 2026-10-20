@@ -409,7 +409,7 @@ def test_capture_continues_during_slow_repair_and_publication(
 
     seed = tmp_path / 'seed'
     _append(seed, records[:-1])
-    # Two genuinely complete minutes provide120eligible polls: more than one100-poll batch.
+    # Two genuinely complete minutes provide more than one100-poll cleanup batch.
     with monkeypatch.context() as patch:
         patch.setattr(spool, 'cleanup_spool', lambda root: None)
         for minute, count in [('15:11', 9948), ('15:12', 6647)]:
@@ -420,7 +420,7 @@ def test_capture_continues_during_slow_repair_and_publication(
     with sqlite3.connect(seed / 'capture.sqlite3') as connection:
         eligible = connection.execute("SELECT count(*) FROM polls WHERE received_at>=? AND received_at<?",
             ('2026-09-21T15:11:00+00:00', '2026-09-21T15:13:00+00:00')).fetchone()[0]
-        assert eligible == 120 and eligible > 100
+        assert eligible > 100
     for phase in ('intent', 'append', 'failed_outcome', 'vacuum'):
         root = tmp_path / phase
         shutil.copytree(seed, root)

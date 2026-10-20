@@ -5,12 +5,15 @@ import os
 import re
 import time
 from collections.abc import Iterator, Mapping
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from ipaddress import IPv4Address
 from math import ceil, isfinite
 from pathlib import Path
+from queue import LifoQueue
 from typing import ClassVar, Literal, TextIO
 from urllib.parse import urlsplit
 
@@ -43,6 +46,26 @@ REST_HOST_BUDGETS = {
 }
 REST_DEFAULT_BUDGET = (20, 1200)
 
+_provider_connections: ContextVar[LifoQueue[requests.Session] | None] = ContextVar(
+    'book_provider_connections', default=None
+)
+
+
+@contextmanager
+def provider_connections() -> Iterator[None]:
+    if _provider_connections.get() is not None:
+        yield
+        return
+    with ExitStack() as stack:
+        sessions: LifoQueue[requests.Session] = LifoQueue(2)
+        for _ in range(2):
+            sessions.put(stack.enter_context(requests.Session()))
+        token = _provider_connections.set(sessions)
+        try:
+            yield
+        finally:
+            _provider_connections.reset(token)
+
 
 def _request(
     url: str,
@@ -72,6 +95,13 @@ def _request(
         if method == 'POST':
             return requests.post(target, params=params, headers=headers, timeout=(5, 30),
                                  allow_redirects=False)
+        sessions = _provider_connections.get()
+        if sessions is not None and _budget_host(url) == 'api.cryptohftdata.com':
+            session = sessions.get()
+            try:
+                return session.get(target, params=params, headers=headers, timeout=(5, 30))
+            finally:
+                sessions.put(session)
         return requests.get(target, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
         if _budget_host(url) == 'api.cryptohftdata.com':

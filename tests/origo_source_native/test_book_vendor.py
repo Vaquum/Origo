@@ -929,6 +929,95 @@ def test_vendor_jwt_authentication_rotates_without_url_credentials(monkeypatch, 
     assert calls == [(vendor.CRYPTOHFT_URL, {'file': vendor._file('spot', partition)}, {}, 40, 'GET')]
 
 
+def test_vendor_backfill_http_connections_are_bounded_and_scoped(
+    original_vendor_archive, tmp_path, monkeypatch,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+    from threading import Event, Lock
+
+    import requests
+    from origo.sources.adapters import binance_daily as daily
+
+    market, body, headers = original_vendor_archive
+    opened, closed, ordinary, busy = [], [], [], set()
+    entered, release, fail = Event(), Event(), Event()
+    guard = Lock()
+
+    def response():
+        value = requests.Response()
+        value.status_code = 206
+        value.headers.update(headers)
+        value._content, value._content_consumed = body[:1], True
+        return value
+
+    class Connection(requests.Session):
+        def __init__(self):
+            super().__init__()
+            opened.append(self)
+
+        def get(self, url, *, params, headers, timeout):
+            assert url == 'https://storage.example/recorded-object'
+            assert params is None and headers == {'Range': 'bytes=0-0'}
+            assert timeout == (5, 30)
+            if fail.is_set():
+                fail.clear()
+                raise requests.ConnectionError('Deliberate transport fault; original bytes unchanged.')
+            with guard:
+                assert self not in busy
+                busy.add(self)
+                if len(busy) == 2:
+                    entered.set()
+            try:
+                assert release.wait(3), 'Two independent requests did not reach the transport.'
+                return response()
+            finally:
+                with guard:
+                    busy.remove(self)
+
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    def unpooled(url, **kwargs):
+        ordinary.append(url)
+        return response()
+
+    def request():
+        return daily._request(vendor.CRYPTOHFT_URL, None,
+            {'Authorization': 'Bearer control-token', 'X-API-Key': 'control-key', 'Range': 'bytes=0-0'},
+            resource_url='https://storage.example/recorded-object')
+
+    monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
+    monkeypatch.setattr(daily.requests, 'Session', Connection)
+    monkeypatch.setattr(daily.requests, 'get', unpooled)
+    with pytest.raises(RuntimeError, match='Deliberate batch exit'):
+        with vendor.CryptoHFTBookHourly(market).backfill_batch():
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                futures = [pool.submit(copy_context().run, request) for _ in range(3)]
+                try:
+                    assert entered.wait(3)
+                    assert len(opened) == 2 and not ordinary
+                finally:
+                    release.set()
+                for future in futures:
+                    with future.result(timeout=5) as value:
+                        assert value.content == body[:1] and dict(value.headers) == headers
+            fail.set()
+            with pytest.raises(SourceError) as error:
+                request()
+            assert error.value.code == 'PROVIDER_TRANSPORT_FAILED'
+            assert 'control-token' not in str(error.value) and 'control-key' not in str(error.value)
+            with request() as value:
+                assert value.content == body[:1]
+            with daily._request('https://api.binance.com/api/v3/time', None, None):
+                assert len(ordinary) == 1
+            raise RuntimeError('Deliberate batch exit')
+    assert len(opened) == 2 and set(closed) == set(opened) and len(closed) == 2 and not busy
+    with daily._request(vendor.CRYPTOHFT_URL, None, None):
+        assert len(ordinary) == 2
+
+
 def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypatch):
     import requests
     from origo.sources.adapters import binance_daily as daily

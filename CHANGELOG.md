@@ -1,3 +1,7 @@
+# v3.34.37
+
+- Reuse two scoped HTTP connections during native book backfills while preserving provider budgets and input revalidation.
+
 # v3.34.36
 
 - Guard the entire eligible book planner against Python row iteration and reject extra native receipts when no active generation is expected.

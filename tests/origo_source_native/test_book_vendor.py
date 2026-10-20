@@ -1613,7 +1613,7 @@ def test_replay_policy_invalidates_complete_revision_identity(
         assert not adapter.rejected_revision(partition, discovered)
         calls.clear()
         rebuilt = adapter.fetch(partition)
-        assert calls == [False, False] and rebuilt.row_count == 36000
+        assert calls == [True, True, False, False] and rebuilt.row_count == 36000
         assert json.loads(rebuilt.evidence_json)['input_sha256'] == hashlib.sha256(body).hexdigest()
     vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     with monkeypatch.context() as changed:

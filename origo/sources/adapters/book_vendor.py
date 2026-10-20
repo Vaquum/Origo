@@ -751,8 +751,8 @@ class CryptoHFTBookHourly:
         if isinstance(rejection, dict):
             verdict = object_mapping(rejection)
             revision = verdict.get('revision')
-            if (isinstance(revision, str) and self.rejected_revision(partition, revision)
-                    and self.discover(partition) == revision):
+            if (isinstance(revision, str) and self.discover(partition) == revision
+                    and self.rejected_revision(partition, revision)):
                 raise SourceError(str(verdict['code']), 'Unchanged provider revision retains its rejection.')
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
         with _paired_responses(self.market, partition, after, metadata=False) as (response, closing):

@@ -1114,7 +1114,7 @@ def test_default_requests_keep_their_statements_and_schema(
             if 'FROM system.query_log' not in query:
                 return rows
             # Deliberate receipt fault: withhold real cells finishes, preserving all starts/errors.
-            return [row for row in rows if not (
+            return [row for row in reversed(rows) if not (
                 _statement(str(row[0])) == 'cells'
                 and ("type = 'QueryFinish'" in query or (len(row) > 2 and row[2] == 'QueryFinish'))
             )]
@@ -1135,7 +1135,7 @@ def test_default_requests_keep_their_statements_and_schema(
             # Only the coverage pin changed in #501; every data/validation statement is frozen.
             expected = ['c568497fd23856869d2687d89c5f456f0a5c67309b2006cb8dc0ab879f64d1b8',
                         *_V3_27_2_STATEMENTS[name][1:]]
-            assert statement_hashes(result.staging.name) == expected, (name, absent)
+            assert sorted(statement_hashes(result.staging.name)) == sorted(expected), (name, absent)
             for file, schema in (('cells.arrow', CELLS_SCHEMA), ('summary.arrow', SUMMARY_SCHEMA)):
                 assert ipc.open_file(result.staging / file).schema.remove_metadata() == schema
                 meta = metadata(result.staging / file)

@@ -6,7 +6,7 @@ import hashlib
 import itertools
 import json
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1064,6 +1064,30 @@ def test_vendor_authenticated_requests_keep_one_shared_budget(tmp_path, monkeypa
     assert daily._read_budget((tmp_path / 'binance_rest_budget.api_cryptohftdata_com.state').open())[1] >= clock[0] + 2
     assert vendor._identity('spot', partition, first) == vendor._identity(
         'spot', partition, Response(b'', {'ETag': 'recorded-object'}, 206))
+    # Deliberate HTTP faults: no source rows; retry scheduling must respect the shared pause.
+    for retry_after in ('60', None, 'invalid'):
+        attempted = []
+
+        def unavailable(url, params, headers, egress_ip=None, method='GET'):
+            attempted.append(clock[0])
+            value = response(
+                status=503 if len(attempted) == 1 else 200,
+                headers={'Retry-After': retry_after} if retry_after is not None else {},
+            )
+            responses.append(value)
+            return value
+
+        monkeypatch.setattr(daily, '_request', unavailable)
+        with pytest.raises(SourceError) as transient:
+            vendor._response('spot', partition, metadata=True)
+        assert transient.value.code == (
+            'PROVIDER_RATE_HEADER_INVALID' if retry_after == 'invalid' else 'PROVIDER_HTTP_503'
+        )
+        if retry_after != 'invalid':
+            daily.time.sleep(1)  # The native book retry resumes after one second.
+            vendor._response('perp', partition, metadata=True)
+            assert len(attempted) == 2
+            assert attempted[1] == pytest.approx(attempted[0] + (60 if retry_after else 1))
     # Exercise requests' real cross-host redirect preparation without a network socket.
     prepared = requests.Request('GET', vendor.CRYPTOHFT_URL,
                                 headers={'Authorization': 'Bearer control-token', 'Range': 'bytes=0-0'}).prepare()
@@ -1573,6 +1597,7 @@ def test_replay_policy_invalidates_complete_revision_identity(
     current = vendor._identity(market, partition, Response(body, headers, 200))
     dependencies = [(after.key, vendor._identity(market, after, Response(
         original_vendor_following_archive[1], original_vendor_following_archive[2], 200)))]
+    monkeypatch.setattr(vendor, 'BOOK_MAX_PRELUDE_HOURS', 0)
     old = 'cryptohftdata-v2:' + hashlib.sha256(json.dumps([2, current, dependencies], separators=(',', ':')).encode()).hexdigest()
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     path = vendor._dependency_path(market, partition)
@@ -1589,14 +1614,103 @@ def test_replay_policy_invalidates_complete_revision_identity(
     assert not adapter.rejected_revision(partition, discovered)
     vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     assert adapter.rejected_revision(partition, discovered)
+    calls: list[bool] = []
+    original_response = vendor.get_response
+
+    def observed(
+        url: str, *, params: Mapping[str, str | int] | None = None,
+        headers: Mapping[str, str] | None = None, weight: int = 0,
+    ) -> Response:
+        # This recorded transport is anonymous; only metadata GETs carry headers.
+        calls.append(bool(headers))
+        return original_response(url, params=params, headers=headers, weight=weight)
+
+    monkeypatch.setattr(vendor, 'get_response', observed)
+    proof = path.read_bytes()
+    # Deliberate retained rejection over genuine bytes; it is never a complete hour.
+    with pytest.raises(SourceError) as retained:
+        adapter.fetch(partition)
+    assert retained.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
+    assert calls == [True, True] and path.read_bytes() == proof
+    assert not tuple(tmp_path.glob('book_vendor_*/hour-*'))
     with monkeypatch.context() as changed:
         changed.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
         assert adapter.discover(partition) == discovered
         assert not adapter.rejected_revision(partition, discovered)
+        calls.clear()
+        rebuilt = adapter.fetch(partition)
+        assert calls == [True, True, False, False] and rebuilt.row_count == 36000
+        assert json.loads(rebuilt.evidence_json)['input_sha256'] == hashlib.sha256(body).hexdigest()
+    vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     with monkeypatch.context() as changed:
         changed.setattr(vendor, '_REPLAY_POLICY_VERSION', vendor._REPLAY_POLICY_VERSION + 1)
         assert adapter.discover(partition) != discovered
         assert not adapter.rejected_revision(partition, adapter.discover(partition))
+        calls.clear()
+        replayed = adapter.fetch(partition)
+        assert calls == [True, True, False, False]
+        assert replayed.key != discovered and replayed.content_hash == rebuilt.content_hash
+    vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
+    with monkeypatch.context() as changed:
+        def revised(
+            url: str, *, params: Mapping[str, str | int] | None = None,
+            headers: Mapping[str, str] | None = None, weight: int = 0,
+        ) -> Response:
+            response = observed(url, params=params, headers=headers, weight=weight)
+            if params == {'file': vendor._file(market, partition)}:
+                return replace(response, headers={**response.headers, 'ETag': '"controlled-revision-change"'})
+            return response
+
+        # Only the provider identity changes; every market byte stays genuine.
+        changed.setattr(vendor, 'get_response', revised)
+        calls.clear()
+        replacement = adapter.fetch(partition)
+        assert calls.count(True) == 2 and calls.count(False) == 2
+        assert replacement.key != discovered and replacement.content_hash == rebuilt.content_hash
+    # Corrupt local proof is a labelled fault; explicit fetch still replaces it from genuine bytes.
+    invalid_entries = {**json.loads(proof), 'dependencies': [['invalid-hour', current]]}
+    for invalid in (b'{', b'[]', json.dumps(invalid_entries).encode(), b' ' * (vendor.BOOK_DEPENDENCY_MAX_BYTES + 1)):
+        path.write_bytes(invalid)
+        calls.clear()
+        recovered = adapter.fetch(partition)
+        assert calls.count(False) == 2 and recovered.content_hash == rebuilt.content_hash
+        assert 'rejection' not in json.loads(path.read_bytes())
+        assert adapter.discover(partition) == recovered.key
+    for code in ('PROVIDER_HTTP_404', 'PROVIDER_HTTP_503', 'BOOK_VENDOR_IDENTITY_MISSING'):
+        path.write_bytes(proof)
+        calls.clear()
+        with monkeypatch.context() as changed:
+            def unavailable(
+                url: str, *, params: Mapping[str, str | int] | None = None,
+                headers: Mapping[str, str] | None = None, weight: int = 0,
+            ) -> Response:
+                calls.append(bool(headers))
+                raise SourceError(code, 'Deliberate provider failure over unchanged recorded input.')
+
+            changed.setattr(vendor, 'get_response', unavailable)
+            with pytest.raises(SourceError) as unavailable_error:
+                adapter.fetch(partition)
+            assert unavailable_error.value.code == code
+            assert calls and all(calls) and path.read_bytes() == proof
+    path.write_bytes(proof)
+    replaced = [False]
+    with monkeypatch.context() as changed:
+        def replace_proof(
+            url: str, *, params: Mapping[str, str | int] | None = None,
+            headers: Mapping[str, str] | None = None, weight: int = 0,
+        ) -> Response:
+            if not replaced[0]:
+                replaced[0] = True
+                changed_proof = json.loads(proof)
+                changed_proof['rejection']['code'] = 'unvalidated-concurrent-code'
+                vendor.atomic_write(path, json.dumps(changed_proof).encode())
+            return observed(url, params=params, headers=headers, weight=weight)
+
+        changed.setattr(vendor, 'get_response', replace_proof)
+        with pytest.raises(SourceError) as pinned:
+            adapter.fetch(partition)
+        assert pinned.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
+        assert json.loads(path.read_bytes())['rejection']['code'] == 'unvalidated-concurrent-code'
     assert {'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'} <= vendor._REJECTION_CODES
 
 

@@ -216,7 +216,7 @@ def _vendor_pause(response: requests.Response, spacing: float) -> tuple[float, f
     provider_spacing = 0.0
     for hop in (*response.history, response):
         retry = hop.headers.get('Retry-After')
-        if hop.status_code in (418, 429):
+        if hop.status_code in (418, 429) or (500 <= hop.status_code < 600 and retry is not None):
             if retry is None or not retry.isdigit():
                 raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Provider Retry-After is invalid.')
             pause = max(pause, time.time() + int(retry))

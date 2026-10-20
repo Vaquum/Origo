@@ -70,9 +70,16 @@ def execute_partition_backfill(
             and spec.canonical.partition(day).start < spec.canonical.candidate(datetime.now(UTC)).start
         )
         if retryable_source_error(error) and not historical_book_404:
+            retry_delay = spec.orchestration.retry_delay
+            if (spec.partitions.interval == 'hour'
+                    and isinstance(spec.canonical, CanonicalBackfillBatch)
+                    and isinstance(error, SourceError)
+                    and (error.code == 'PROVIDER_TRANSPORT_FAILED'
+                         or error.code.startswith('PROVIDER_HTTP_5'))):
+                retry_delay = 1
             raise RetryRequested(
                 max_retries=spec.orchestration.retry_count,
-                seconds_to_wait=spec.orchestration.retry_delay,
+                seconds_to_wait=retry_delay,
             ) from error
         raise Failure(
             description=f'{failure_code(error)}: {failure_message(error)}', allow_retries=False

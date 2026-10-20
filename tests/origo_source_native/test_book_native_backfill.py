@@ -210,14 +210,26 @@ def test_native_book_selection_completion_preserves_source_failures(
 
         from tools.benchmark_book_replay import verify_backfill_receipts
 
-        assert len(verify_backfill_receipts(runtime.store, parent, result.run_id, [record])) == 1
+        expected_receipt = [(REAL_HOUR, record.revision, str(record.build_id),
+                             record.generation, result.run_id)]
+        assert verify_backfill_receipts(runtime.store, parent, result.run_id, [record]) == expected_receipt
         assert verify_backfill_receipts(runtime.store, parent, str(uuid4()), []) == []
-        wrong_parent = _parent(instance, job.name)
-        receipt = (runtime.spec.key, wrong_parent, REAL_HOUR, record.revision,
-                   record.build_id, record.generation + 1, result.run_id)
-        runtime.store.execute('INSERT INTO origo.source_backfill_log VALUES', [receipt])
+        # Deliberate receipt faults leave the genuine active generation unchanged.
+        for revision, build, generation in (
+            ('controlled-wrong-revision', record.build_id, record.generation),
+            (record.revision, uuid4(), record.generation),
+            (record.revision, record.build_id, record.generation + 1),
+        ):
+            wrong_parent = _parent(instance, job.name)
+            receipt = (runtime.spec.key, wrong_parent, REAL_HOUR, revision,
+                       build, generation, result.run_id)
+            runtime.store.execute('INSERT INTO origo.source_backfill_log VALUES', [receipt])
+            with pytest.raises(ValueError, match='BACKFILL_RECEIPT_INVALID'):
+                verify_backfill_receipts(runtime.store, wrong_parent, result.run_id, [record])
+        missing_parent = _parent(instance, job.name)
         with pytest.raises(ValueError, match='BACKFILL_RECEIPT_INVALID'):
-            verify_backfill_receipts(runtime.store, wrong_parent, result.run_id, [record])
+            verify_backfill_receipts(runtime.store, missing_parent, result.run_id, [record])
+        assert verify_backfill_receipts(runtime.store, parent, result.run_id, [record]) == expected_receipt
 
         duplicate_parent = _parent(instance, job.name)
         correct = (runtime.spec.key, duplicate_parent, REAL_HOUR, record.revision,

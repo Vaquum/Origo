@@ -1821,29 +1821,60 @@ def test_archive_warmup_preserves_requested_validation(
 
     from origo.sources.adapters import book_columnar as columnar
     from polars.testing import assert_frame_equal
+    import polars as pl
 
     plan, general, fast = columnar._plan, columnar._general_plan, columnar._spot_update_plan
     columnar_calls: list[int] = []
 
     def measured_fast(events, start, end):
         columnar_calls.append(events.height)
-        return fast(events, start, end)
+        def row_loop(*args, **kwargs):
+            pytest.fail('Eligible spot planning must not iterate message rows in Python.')
+        with monkeypatch.context() as patch:
+            patch.setattr(pl.DataFrame, 'iter_rows', row_loop)
+            return fast(events, start, end)
 
-    def compared_plan(events, market, start, end, native_order):
+    def compared_plan(events, market, start, end, native_order, *, reraise=True):
         try:
             expected = general(events, market, start, end, native_order)
-        except SourceError as reference_error:
-            with pytest.raises(SourceError) as actual_error:
+        except (SourceError, ValueError) as reference_error:
+            with pytest.raises(type(reference_error)) as actual_error:
                 plan(events, market, start, end, native_order)
-            assert (actual_error.value.code, str(actual_error.value)) == (
-                reference_error.code, str(reference_error),
-            )
-            raise
+            assert type(actual_error.value) is type(reference_error)
+            assert str(actual_error.value) == str(reference_error)
+            if isinstance(reference_error, SourceError):
+                assert actual_error.value.code == reference_error.code
+            if reraise:
+                raise
+            return
         actual = plan(events, market, start, end, native_order)
         assert_frame_equal(actual, expected)
         return actual
 
     monkeypatch.setattr(columnar, '_spot_update_plan', measured_fast)
+    if case == 'preperiod-reset':
+        # Protocol faults alter recorded headers only; market levels remain original.
+        events, _, _ = columnar._Inputs('spot').ordered(tuple(paths), native_order=True)
+        start, end = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
+        def compare_fault(frame):
+            compared_plan(frame, 'spot', start, end, True, reraise=False)
+        def reversed_ids(frame):
+            return frame.with_columns(
+                pl.col('final_update_id').alias('first_update_id'),
+                pl.col('first_update_id').alias('final_update_id'),
+                pl.col('first_update_id').alias('native'),
+            )
+        compare_fault(pl.concat([reversed_ids(events.head(1)), events.slice(1)]))
+        chosen = int((events['event_time'] >= start + 2000).arg_true()[0])
+        original = events.slice(chosen, 1)
+        stale = original.with_columns(pl.lit(events['received_time'][0]).alias('received_time'))
+        compare_fault(pl.concat([events.head(chosen + 1), stale, events.slice(chosen + 1)]))
+        compare_fault(pl.concat([events.head(chosen + 1), reversed_ids(stale), events.slice(chosen + 1)]))
+        closing = int((events['event_time'] >= end).arg_true()[0])
+        compare_fault(pl.concat([events.head(closing + 1), reversed_ids(events.slice(closing + 1, 1)), events.slice(closing + 2)]))
+        gap = events.filter(~pl.col('event_time').is_between(start + 200, start + 1200, closed='left'))
+        later = int((gap['event_time'] >= start + 2000).arg_true()[0])
+        compare_fault(pl.concat([gap.head(later), reversed_ids(gap.slice(later, 1)), gap.slice(later + 1)]))
     monkeypatch.setattr(columnar, '_plan', compared_plan)
     _fault_columnar(monkeypatch, missing_message)
 

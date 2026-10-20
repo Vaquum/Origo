@@ -1828,18 +1828,22 @@ def test_archive_warmup_preserves_requested_validation(
 
     def measured_fast(events, start, end):
         columnar_calls.append(events.height)
+        return fast(events, start, end)
+
+    def actual_plan(events, market, start, end, native_order, *, eligible):
         def row_loop(*args, **kwargs):
             pytest.fail('Eligible spot planning must not iterate message rows in Python.')
         with monkeypatch.context() as patch:
-            patch.setattr(pl.DataFrame, 'iter_rows', row_loop)
-            return fast(events, start, end)
+            if eligible:
+                patch.setattr(pl.DataFrame, 'iter_rows', row_loop)
+            return plan(events, market, start, end, native_order)
 
-    def compared_plan(events, market, start, end, native_order, *, reraise=True):
+    def compared_plan(events, market, start, end, native_order, *, reraise=True, eligible=True):
         try:
             expected = general(events, market, start, end, native_order)
         except (SourceError, ValueError) as reference_error:
             with pytest.raises(type(reference_error)) as actual_error:
-                plan(events, market, start, end, native_order)
+                actual_plan(events, market, start, end, native_order, eligible=eligible)
             assert type(actual_error.value) is type(reference_error)
             assert str(actual_error.value) == str(reference_error)
             if isinstance(reference_error, SourceError):
@@ -1847,7 +1851,7 @@ def test_archive_warmup_preserves_requested_validation(
             if reraise:
                 raise
             return actual_error.value
-        actual = plan(events, market, start, end, native_order)
+        actual = actual_plan(events, market, start, end, native_order, eligible=eligible)
         assert_frame_equal(actual, expected)
         return actual
 
@@ -1857,7 +1861,7 @@ def test_archive_warmup_preserves_requested_validation(
         events, _, _ = columnar._Inputs('spot').ordered(tuple(paths), native_order=True)
         start, end = int(partition.start.timestamp() * 1000), int(partition.end.timestamp() * 1000)
         def compare_fault(frame, expected_error=None):
-            observed = compared_plan(frame, 'spot', start, end, True, reraise=False)
+            observed = compared_plan(frame, 'spot', start, end, True, reraise=False, eligible=False)
             if expected_error is None:
                 assert isinstance(observed, pl.DataFrame)
             else:

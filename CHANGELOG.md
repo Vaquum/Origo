@@ -1,3 +1,7 @@
+# v3.34.36
+
+- Guard the entire eligible book planner against Python row iteration and reject extra native receipts when no active generation is expected.
+
 # v3.34.35
 
 - Keep an active ephemeral CI runner alive through non-busy GitHub API status observations; preserve listener exit, deadline and offline cleanup.

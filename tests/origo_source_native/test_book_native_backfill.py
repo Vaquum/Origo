@@ -213,6 +213,8 @@ def test_native_book_selection_completion_preserves_source_failures(
         expected_receipt = [(REAL_HOUR, record.revision, str(record.build_id),
                              record.generation, result.run_id)]
         assert verify_backfill_receipts(runtime.store, parent, result.run_id, [record]) == expected_receipt
+        with pytest.raises(ValueError, match='BACKFILL_RECEIPT_INVALID'):
+            verify_backfill_receipts(runtime.store, parent, result.run_id, [])
         assert verify_backfill_receipts(runtime.store, parent, str(uuid4()), []) == []
         # Deliberate receipt faults leave the genuine active generation unchanged.
         for revision, build, generation in (

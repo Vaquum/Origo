@@ -1,3 +1,8 @@
+# v3.34.49
+
+- Read publication state one consumer source at a time through the read-only monitor profile, avoiding irrelevant book state and preserving resource limits.
+- Activate the required ClickHouse reader profile through the existing full deployment for this release.
+
 # v3.34.48
 
 - Retry hourly book backfill transport/HTTP5xx failures after one second; preserve retry counts, provider pacing and other source/error policies.

@@ -1645,61 +1645,50 @@ def observe_publications(
     deadline: float,
 ) -> list[ProjectionObservation]:
     """Compare manifests to the real reader-selected state; inspect file metadata only."""
-    from uuid import UUID
-
-    from origo.sources.contracts import Partition, StateRecord, identifier
+    from origo.sources.contracts import identifier
     from origo.sources.hashing import state_token
     from origo.sources.registry import SOURCE_REGISTRY
+    from origo.sources.storage import SourceStore
 
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    if time.monotonic() >= deadline:
         raise TimeoutError('Publication observation budget exhausted.')
-    rows = client.execute(
-        f'SELECT source_key, partition_key, provisional, partition_start, partition_end, '
-        f'generation, revision, build_id, component_hashes FROM {identifier(database)}.source_current_partitions',
-        settings={
-            'max_memory_usage': 536870912,
-            'max_execution_time': min(5, remaining),
-            'max_threads': 1,
-            'read_overflow_mode': 'throw',
-            'timeout_overflow_mode': 'throw',
-        },
-    )
-    selected: dict[str, list[StateRecord]] = {}
-    for row in rows:
+
+    def read(query: str, source: str) -> list[tuple[object, ...]]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Publication observation budget exhausted.')
+        rows = client.execute(
+            query,
+            {
+                'source': source,
+                'activation_table': f'{identifier(database)}.source_activation_log',
+                'source_filter': f"source_key='{identifier(source)}'",
+            },
+            settings={
+                'max_memory_usage': 536870912,
+                'max_execution_time': min(5, remaining),
+                'max_threads': 1,
+                'read_overflow_mode': 'throw',
+                'timeout_overflow_mode': 'throw',
+            },
+        )
         if time.monotonic() >= deadline:
             raise TimeoutError('Publication observation budget exhausted.')
-        source, key, provisional, start, end, generation, revision, build, encoded = row
-        if not isinstance(start, datetime) or not isinstance(end, datetime):
-            raise TypeError('Publication coverage requires timestamped active records.')
-        pairs: object = json.loads(str(encoded))
-        if not isinstance(pairs, list):
-            raise TypeError('Active component hashes must be pairs.')
-        hashes: list[tuple[str, str]] = []
-        for pair in cast(list[object], pairs):
-            if not isinstance(pair, list):
-                raise TypeError('Active component hash must be a pair.')
-            values = cast(list[object], pair)
-            if len(values) != 2 or not all(isinstance(value, str) for value in values):
-                raise TypeError('Active component hash must contain two strings.')
-            hashes.append((str(values[0]), str(values[1])))
-        selected.setdefault(str(source), []).append(
-            StateRecord(
-                Partition(
-                    str(key),
-                    start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC),
-                    end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC),
-                    bool(provisional),
-                ),
-                int(str(generation)),
-                str(revision),
-                UUID(str(build)),
-                tuple(hashes),
-            )
-        )
+        return rows
+
     result: list[ProjectionObservation] = []
     for spec in SOURCE_REGISTRY:
-        records = tuple(selected.get(spec.key, ()))
+        if not spec.consumers:
+            continue
+        rows = read(
+            f'SELECT partition_key, provisional, partition_start, partition_end, '
+            f'generation, revision, build_id, component_hashes '
+            f'FROM {identifier(database)}.source_current_partitions WHERE source_key=%(source)s '
+            'SETTINGS additional_table_filters={%(activation_table)s: %(source_filter)s}',
+            spec.key,
+        )
+        records = tuple(SourceStore._state_record(row) for row in rows)
+        del rows
         canonical = tuple(record for record in records if not record.partition.provisional)
         canonical_token = state_token(spec.key, canonical)
         pinned_token = state_token(spec.key, records)
@@ -1776,6 +1765,7 @@ def observe_publications(
                 )
                 observation.update(status='UNKNOWN', reason='publication_evidence_invalid')
             result.append(observation)
+        del records, canonical
     if time.monotonic() > deadline:
         raise TimeoutError('Publication observation budget exhausted.')
     return result

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -670,7 +671,11 @@ def test_publication_observation_checks_real_token_and_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from uuid import uuid4
+
+    from origo.assets.create_origo_database import get_clickhouse_settings
     from origo.sources.storage import SourceStore
+    from origo.workers.monitor import LawClient
 
     runtime, keys, _, _ = real_minutes
     live_spec = replace(runtime.spec, rollout_stage=RolloutStage.LIVE)
@@ -688,20 +693,79 @@ def test_publication_observation_checks_real_token_and_artifacts(
     published = json.loads(manifest.read_text())
 
     def observe() -> dict[str, ProjectionObservation]:
-        return {
-            item['id']: item
-            for item in observe_publications(
-                runtime.store.client,
-                runtime.store.database,
-                catalog,
-                datetime.now(UTC),
-                root,
-                deadline=time.monotonic() + 5,
+        expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
+        requested: list[str] = []
+        admin = runtime.store.client.execute
+        reader = LawClient(get_clickhouse_settings())
+        execute = reader.execute
+        prefix = f'publication-read-{uuid4().hex}-'
+
+        def scoped(
+            query: str, params: object | None = None,
+            settings: Mapping[str, object] | None = None,
+        ) -> list[Row]:
+            assert isinstance(params, dict)
+            source = params.get('source')
+            assert isinstance(source, str) and source in expected
+            requested.append(source)
+            return execute(query + f' /* {prefix}{source} */', params, settings=settings)
+
+        try:
+            if expected:
+                assert execute(
+                    "SELECT currentUser(), getSetting('readonly'), "
+                    "getSetting('max_memory_usage'), getSetting('max_threads'), "
+                    "getSetting('max_concurrent_queries_for_user')",
+                ) == [('law_reader', 1, 536870912, 1, 1)]
+            with monkeypatch.context() as patch:
+                patch.setattr(reader, 'execute', scoped)
+                result = {
+                    item['id']: item
+                    for item in observe_publications(
+                        reader,
+                        runtime.store.database,
+                        catalog,
+                        datetime.now(UTC),
+                        root,
+                        deadline=time.monotonic() + 5,
+                    )
+                }
+        finally:
+            reader.disconnect()
+        assert set(requested) == expected
+        assert len(requested) == len(expected)
+        if requested:
+            admin('SYSTEM FLUSH LOGS')
+            measured = admin(
+                'SELECT query, read_rows FROM system.query_log '
+                "WHERE user='law_reader' AND position(query, %(prefix)s)>0 "
+                "AND type='QueryFinish'",
+                {'prefix': prefix},
             )
-        }
+            counts = {
+                str(row[0]): int(str(row[1])) for row in admin(
+                    f'SELECT source_key, count() FROM {runtime.store.database}.source_activation_log '
+                    'GROUP BY source_key',
+                )
+            }
+            anchors = int(str(admin(
+                f'SELECT count() FROM {runtime.store.database}.source_anchor_log',
+            )[0][0]))
+            assert len(measured) == len(requested)
+            # The real fixture also proves empty sources never scan its populated neighbour.
+            assert all(
+                int(str(row[1])) <= 2 * counts.get(str(row[0]).rsplit(prefix, 1)[1].removesuffix(' */'), 0) + anchors
+                for row in measured
+            )
+        return result
 
     node = f'{live_spec.key}:consumer:mount'
     actual = observe()[node]
+    with monkeypatch.context() as patch:
+        patch.setattr(registry, 'SOURCE_REGISTRY', tuple(
+            spec for spec in registry.SOURCE_REGISTRY if not spec.consumers
+        ))
+        assert observe() == {}
     if not published['files']:
         # The genuine 2017 day precedes this consumer's 2020 export floor.
         assert actual['status'] == 'UNKNOWN'

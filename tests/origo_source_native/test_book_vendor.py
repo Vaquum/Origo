@@ -1819,6 +1819,32 @@ def test_archive_warmup_preserves_requested_validation(
         omitted.extend(events.filter(missing)['final_update_id'].to_list())
         return events.filter(~missing), levels, prices
 
+    from origo.sources.adapters import book_columnar as columnar
+    from polars.testing import assert_frame_equal
+
+    plan, general, fast = columnar._plan, columnar._general_plan, columnar._spot_update_plan
+    columnar_calls: list[int] = []
+
+    def measured_fast(events, start, end):
+        columnar_calls.append(events.height)
+        return fast(events, start, end)
+
+    def compared_plan(events, market, start, end, native_order):
+        try:
+            expected = general(events, market, start, end, native_order)
+        except SourceError as reference_error:
+            with pytest.raises(SourceError) as actual_error:
+                plan(events, market, start, end, native_order)
+            assert (actual_error.value.code, str(actual_error.value)) == (
+                reference_error.code, str(reference_error),
+            )
+            raise
+        actual = plan(events, market, start, end, native_order)
+        assert_frame_equal(actual, expected)
+        return actual
+
+    monkeypatch.setattr(columnar, '_spot_update_plan', measured_fast)
+    monkeypatch.setattr(columnar, '_plan', compared_plan)
     _fault_columnar(monkeypatch, missing_message)
 
     if case == 'requested-gap':
@@ -1829,7 +1855,7 @@ def test_archive_warmup_preserves_requested_validation(
         revision = vendor.replay_hour(paths[2], 'spot', partition, tmp_path / 'grid', preludes=tuple(paths[:2]), following=(paths[3],))
         assert revision.key == 'local-book-binary-v1:feb1c48b8a290bc7797075469d77c51bd1715e1710a57196afd9fef69f73d1c4'
         assert len(json.loads(revision.evidence_json)['sealed_minutes']) == 60
-    assert omitted
+    assert omitted and columnar_calls
 
 
 @pytest.mark.parametrize('operation', ('fetch', 'discover'))

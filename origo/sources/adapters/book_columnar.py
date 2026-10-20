@@ -315,6 +315,61 @@ def replay_session(market: Market) -> Iterator[None]:
 def _plan(
     events: pl.DataFrame, market: Market, start: int, end: int, native_order: bool
 ) -> pl.DataFrame:
+    integers = ('received_time', 'event_time', 'first_update_id', 'final_update_id', 'native')
+    if (
+        native_order and market == 'spot' and events.height
+        and events.schema['order'] == pl.UInt32 and events.schema['file'] == pl.UInt8
+        and all(events.schema[name] == pl.Int64 for name in integers)
+        and not any(events[name].null_count() for name in (*integers, 'order', 'file', 'event_type'))
+        and (events['event_type'] == 'update').all()
+        and events['event_time'][0] < start
+        and events.select((
+            (pl.col('first_update_id') >= 0)
+            & (pl.col('first_update_id') <= pl.col('final_update_id'))
+            & (pl.col('native') >= 0) & (pl.col('event_time') >= 0)
+            & (pl.col('received_time') // 1000000 >= pl.col('event_time'))
+        ).all()).item()
+    ):
+        return _spot_update_plan(events, start, end)
+    return _general_plan(events, market, start, end, native_order)
+
+
+def _spot_update_plan(events: pl.DataFrame, start: int, end: int) -> pl.DataFrame:
+    frame = events.filter(
+        pl.col('final_update_id')
+        > pl.col('final_update_id').cum_max().shift(1).fill_null(-1)
+    )
+    terminal = (frame['event_time'] >= end).arg_true()
+    if len(terminal):
+        frame = frame.head(int(terminal[0]) + 1)
+    frame = frame.with_columns(
+        pl.col('event_time').shift(1).alias('_previous_clock'),
+        (
+            (pl.col('first_update_id') > pl.col('final_update_id').shift(1) + 1)
+            | (pl.col('event_time') < pl.col('event_time').shift(1))
+        ).fill_null(False).alias('_break'),
+    )
+    failed = frame.filter(pl.col('_break') & (pl.col('event_time') >= start)).head(1)
+    if failed.height:
+        raise SourceError(
+            'BOOK_VENDOR_SEED_MISSING'
+            if int(failed['_previous_clock'][0]) < start else 'BOOK_SEQUENCE_GAP',
+            'Native update chain does not bridge.',
+        )
+    resets = frame['_break'].arg_true()
+    if len(resets):
+        frame = frame.slice(int(resets[-1]))
+    if int(frame['event_time'][-1]) < end - 100:
+        raise SourceError('BOOK_VENDOR_TAIL_MISSING', 'No exchange witness for the final grid.')
+    return frame.select(
+        'order', pl.col('event_time').alias('effective'),
+        pl.col('final_update_id').cast(pl.UInt64).alias('native'), 'event_type',
+    )
+
+
+def _general_plan(
+    events: pl.DataFrame, market: Market, start: int, end: int, native_order: bool
+) -> pl.DataFrame:
     rows: list[tuple[int, int, int, str]] = []
     pending: list[tuple[int, int, int, str]] = []
     cursor: int | None = None

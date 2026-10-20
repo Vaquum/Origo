@@ -391,11 +391,18 @@ def _provider_response(market: Market, partition: Partition, *, metadata: bool) 
 
 def _response(market: Market, partition: Partition, *, metadata: bool) -> Response:
     batch = _batch.get()
-    if batch is None or batch.market != market or metadata:
+    if batch is None or batch.market != market:
         return _provider_response(market, partition, metadata=metadata)
     cache_key = (partition.key, hashlib.sha256(
         os.environ.get('CRYPTOHFTDATA_API_KEY', '').encode()
     ).hexdigest())
+    if metadata:
+        response = _provider_response(market, partition, metadata=True)
+        with batch.lock:
+            retained = batch.responses.get(cache_key)
+            if retained is not None and _identity(market, partition, retained) != _identity(market, partition, response):
+                batch.body_bytes -= len(batch.responses.pop(cache_key).body)
+        return response
     retained = batch.response(cache_key)
     if retained is not None:
         return retained

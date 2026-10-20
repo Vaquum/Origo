@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
@@ -338,7 +338,7 @@ def test_rejected_book_revision_identity_and_retry(
 
     # Discovery and fetch can observe different provider ETags.
     discovered = adapter.discover(partition)
-    rewritten[vendor._file(adapter.market, partition)] = 'controlled-fetch-time-etag'
+    rewritten[vendor._file(adapter.market, partition)] = '"controlled-fetch-time-etag"'
     # Backfill does not enroll previously unrequested failed hours in audit.
     retry()
     assert runtime.store.execute('SELECT count() FROM origo.source_discovery_log') == [(0,)]
@@ -346,7 +346,7 @@ def test_rejected_book_revision_identity_and_retry(
     assert len(attempts) == 1
     value = json.loads(path.read_text())
     assert value['current'] == vendor._identity(adapter.market, partition, Response(archives[1].body,
-        {**archives[1].headers, 'ETag': 'controlled-fetch-time-etag'}, 200))
+        {**archives[1].headers, 'ETag': '"controlled-fetch-time-etag"'}, 200))
     assert not adapter.rejected_revision(partition, discovered)
     assert value['dependencies'] == [[a.partition.key, vendor._identity(adapter.market, a.partition, Response(a.body, a.headers, 200))]
                                      for a in (archives[0], archives[2])]
@@ -357,13 +357,42 @@ def test_rejected_book_revision_identity_and_retry(
     before_visited = len(visited)
     retry()
     assert len(attempts) == 1 and len(visited) > before_visited
+    proof = path.read_bytes()
+    transport = vendor.get_response
+    for archive in archives:
+        for code in ('PROVIDER_HTTP_404', 'PROVIDER_HTTP_503'):
+            requests: list[bool] = []
+
+            def unavailable(
+                url: str, *, params: Mapping[str, str | int] | None = None,
+                headers: Mapping[str, str] | None = None, weight: int = 0,
+            ) -> Response:
+                requests.append(bool(headers))
+                if params == {'file': vendor._file(adapter.market, archive.partition)}:
+                    raise SourceError(code, 'Deliberate metadata failure on a retained dependency.')
+                return transport(url, params=params, headers=headers, weight=weight)
+
+            with monkeypatch.context() as changed:
+                changed.setattr(vendor, 'get_response', unavailable)
+                with pytest.raises(SourceError) as failed_check:
+                    adapter.fetch(partition)
+                assert failed_check.value.code == code
+                assert path.read_bytes() == proof and len(attempts) == 1
+                assert requests and all(requests)
     for archive, code in zip(archives, ('BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED', 'BOOK_SEQUENCE_GAP'), strict=True):
-        rewritten[vendor._file(adapter.market, archive.partition)] = 'controlled-provider-etag-' + archive.partition.key
-        fault[0] = code
-        assert not adapter.rejected_revision(partition, adapter.discover(partition))
-        with pytest.raises(ExceptionGroup):
-            _execute_operation(runtime, 'audit', SourceRunConfig())
-        assert adapter.rejected_revision(partition, adapter.discover(partition))
+        with adapter.backfill_batch():
+            for original in archives:
+                vendor._response(adapter.market, original.partition, metadata=False)
+            batch = vendor._batch.get()
+            assert batch is not None and len(batch.responses) == 3
+            rewritten[vendor._file(adapter.market, archive.partition)] = '"controlled-provider-etag-' + archive.partition.key + '"'
+            fault[0] = code
+            assert not adapter.rejected_revision(partition, adapter.discover(partition))
+            assert len(batch.responses) == 2
+            with pytest.raises(ExceptionGroup):
+                _execute_operation(runtime, 'audit', SourceRunConfig())
+            assert len(batch.responses) == 3
+            assert adapter.rejected_revision(partition, adapter.discover(partition))
     before = len(attempts)
     monkeypatch.setattr(vendor, '_REJECTION_POLICY_VERSION', vendor._REJECTION_POLICY_VERSION + 1)
     runtime = replace(runtime, run_id=str(uuid4()), spec=replace(runtime.spec, canonical=vendor.CryptoHFTBookHourly(adapter.market)))
@@ -792,7 +821,7 @@ def test_missing_prelude_rejection_rechecks_absence(
     original_missing_prelude_archives: tuple[OriginalArchive, ...], tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
+    calls = _missing_prelude_transport(original_missing_prelude_archives, monkeypatch)
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     adapter = vendor.CryptoHFTBookHourly('spot')
     partition = adapter.partition('2025-06-28T07Z')
@@ -800,6 +829,12 @@ def test_missing_prelude_rejection_rechecks_absence(
         adapter.fetch(partition)
     rejected = adapter.discover(partition)
     assert adapter.rejected_revision(partition, rejected)
+    proof = vendor._dependency_path('spot', partition).read_bytes()
+    before = len(calls)
+    with pytest.raises(SourceError) as unchanged:
+        adapter.fetch(partition)
+    assert unchanged.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    assert calls[before:] and all(metadata for _, metadata in calls[before:])
     recorded = vendor.get_response
 
     for hour in (6, 7, 8):
@@ -824,14 +859,20 @@ def test_missing_prelude_rejection_rechecks_absence(
 
     with monkeypatch.context() as changed:
         changed.setattr(vendor, 'get_response', newly_missing)
-        with pytest.raises(SourceError) as failure:
-            adapter.discover(partition)
-        assert failure.value.code == 'PROVIDER_HTTP_404' and '/06/' in str(failure.value)
+        for operation in (adapter.discover, adapter.fetch):
+            with pytest.raises(SourceError) as failure:
+                operation(partition)
+            assert failure.value.code == 'PROVIDER_HTTP_404' and '/06/' in str(failure.value)
+            assert vendor._dependency_path('spot', partition).read_bytes() == proof
 
+    new_body_requests: list[str] = []
     def available_metadata(url: str, *, params: object = None, headers: object = None,
                            weight: int = 0) -> Response:
         assert isinstance(params, dict)
         if '/05/' in str(cast(dict[str, object], params)['file']):
+            if not headers:
+                new_body_requests.append(str(cast(dict[str, object], params)['file']))
+                raise SourceError('PROVIDER_TRANSPORT_FAILED', 'Deliberate newly available body failure; no archive invented.')
             assert headers == {'Range': 'bytes=0-0'}
             # Availability/ETag is the controlled transport change; no market rows are invented.
             return Response(b'', original_missing_prelude_archives[0].headers, 206)
@@ -842,6 +883,11 @@ def test_missing_prelude_rejection_rechecks_absence(
     changed = adapter.discover(partition)
     assert changed != rejected
     assert not adapter.rejected_revision(partition, changed)
+    with pytest.raises(SourceError) as changed_fetch:
+        adapter.fetch(partition)
+    assert changed_fetch.value.code == 'PROVIDER_TRANSPORT_FAILED'
+    assert len(new_body_requests) == 1
+    assert vendor._dependency_path('spot', partition).read_bytes() == proof
 
 
 @pytest.mark.parametrize('code', ('PROVIDER_HTTP_401', 'PROVIDER_HTTP_429', 'PROVIDER_TRANSPORT_FAILED'))
@@ -952,10 +998,9 @@ def test_missing_prelude_token_404_stays_an_authentication_failure(
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     adapter = vendor.CryptoHFTBookHourly('spot')
     partition = adapter.partition('2025-06-28T07Z')
-    if operation == 'discover':
-        with pytest.raises(SourceError) as original_failure:
-            adapter.fetch(partition)
-        assert original_failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
+    with pytest.raises(SourceError) as original_failure:
+        adapter.fetch(partition)
+    assert original_failure.value.code == 'BOOK_KNOWN_DEPTH_EXHAUSTED'
     evidence = vendor._dependency_path('spot', partition)
     before = evidence.read_bytes() if evidence.exists() else None
     originals = {vendor._file('spot', item.partition): item for item in original_missing_prelude_archives}
@@ -963,6 +1008,7 @@ def test_missing_prelude_token_404_stays_an_authentication_failure(
     active = ContextVar('archive_partition', default='')
     response = vendor._response
     monkeypatch.setenv('CRYPTOHFTDATA_API_KEY', 'deliberate-test-credential')
+    metadata_requests: list[bool] = []
 
     def selected(market: Market, partition: Partition, *, metadata: bool) -> Response:
         marker = active.set(partition.key)
@@ -986,6 +1032,7 @@ def test_missing_prelude_token_404_stays_an_authentication_failure(
         assert '/05/' not in file  # Token failure occurs before this archive is checked.
         original = originals[file]
         metadata = headers.get('Range') == 'bytes=0-0'
+        metadata_requests.append(metadata)
         return Response(b'' if metadata else original.body, original.headers, 206 if metadata else 200)
 
     monkeypatch.setattr(vendor, '_token_for', token)
@@ -998,4 +1045,7 @@ def test_missing_prelude_token_404_stays_an_authentication_failure(
             adapter.discover(partition)
     assert failure.value.code == 'PROVIDER_HTTP_404'
     assert str(failure.value) == 'Token endpoint returned HTTP404.'
+    assert not isinstance(failure.value, vendor._MissingArchive)
+    assert not adapter.backfill_rejection(failure.value)
+    assert metadata_requests and all(metadata_requests)
     assert (evidence.read_bytes() if evidence.exists() else None) == before

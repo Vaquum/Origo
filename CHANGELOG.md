@@ -1,3 +1,7 @@
+# v3.34.45
+
+- Let the book connection test controller release borrowers after a lost loan; require both existing market cases in the acceptance inventory.
+
 # v3.34.42
 
 - Reuse up to4096 validated UTC timestamp parses during monitor replay without changing validation or resource limits.

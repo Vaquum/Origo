@@ -301,7 +301,7 @@ def test_controller_keeps_a_live_listener_through_status_changes(
     script = '''
 set -euo pipefail
 SECONDS=1
-listener_pid=$BASHPID
+listener_pid=$$
 python3() {
     head -n 1 "$CONTROLLER_TRACE/statuses"
     tail -n +2 "$CONTROLLER_TRACE/statuses" > "$CONTROLLER_TRACE/next"

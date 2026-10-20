@@ -15,7 +15,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator, Mapping, Sequence
+import zlib
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -807,6 +808,47 @@ def _assert_monitor_failure_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 
+def _assert_monitor_record_identities() -> None:
+    frame = cast(Document, _recorded_frames('r1-perp-20260928')[0])
+
+    def encoded(value: Document) -> bytes:
+        compressed = zlib.compress(json.dumps(value, separators=(',', ':'), allow_nan=False).encode())
+        return json.dumps({'frame': base64.b64encode(compressed).decode(), 'brief': None}).encode()
+
+    def target(value: Document, kind: str) -> Document:
+        observation = page._objects(value['observations'])[0]
+        return observation if kind == 'observation' else page._objects(observation['measurements'])[0]
+
+    assert observatory.decode_observation_record(encoded(frame)) == (frame, None)
+    for kind, fields, code in (
+        ('observation', ('group_id', 'check', 'scope', 'definition_version'), 'invalid_notification_identity'),
+        ('measurement', ('name', 'unit', 'observed_at', 'definition_version'), 'invalid_notification_measurement_identity'),
+    ):
+        for field in fields:
+            # These are explicit protocol faults on one genuine captured frame.
+            for fault, value in (('missing', None), ('null', None), ('bool', True), ('int', 7), ('list', []), ('object', {})):
+                altered = copy.deepcopy(frame)
+                row = target(altered, kind)
+                if fault == 'missing':
+                    del row[field]
+                else:
+                    row[field] = value
+                with pytest.raises(ValueError, match=f'^{code}$'):
+                    observatory.decode_observation_record(encoded(altered))
+            altered = copy.deepcopy(frame)
+            target(altered, kind)[field] = ''
+            assert observatory.decode_observation_record(encoded(altered)) == (altered, None)
+        altered = copy.deepcopy(frame)
+        row = target(altered, kind)
+        row[fields[0]] = None
+        row.update({'kind': None} if kind == 'observation' else {'value': 'invalid', 'window_start': 'invalid'})
+        with pytest.raises(ValueError, match=f'^{code}$'):
+            observatory.decode_observation_record(encoded(altered))
+    altered = copy.deepcopy(frame)
+    target(altered, 'measurement')['observed_at'] = 'not-a-timestamp'
+    assert observatory.decode_observation_record(encoded(altered)) == (altered, None)
+
+
 def _measure_monitor_replay(root: Path) -> Document:
     script = r'''
 import base64
@@ -834,7 +876,6 @@ with pytest.MonkeyPatch.context() as patch:
     now = _now()
     monitor.tick(now)
     frame = monitor.notification_history.observations()[-1]
-    original_measurements = [row['measurements'] for row in frame['observations']]
     replay = _NotificationHistory(Path(directory) / 'load-protocol-only')
     for minute in range(1440):
         slot = (now.replace(second=0, microsecond=0) - timedelta(minutes=1439-minute)).isoformat()
@@ -845,7 +886,7 @@ with pytest.MonkeyPatch.context() as patch:
     started = time.monotonic()
     frames = replay.observations()
     decoded_seconds = time.monotonic()-started
-    assert [row['measurements'] for row in frames[0]['observations']] == original_measurements
+    decoded_frame_preserved = frames[0] == {**frame, 'sampling_slot': next(iter(replay.frames))}
     current, catalog = (_document(CAPTURES/name) for name in ('current.json', 'catalog.json'))
     started = time.monotonic()
     summary = build_summary(current, catalog, frames, now=now)
@@ -859,6 +900,7 @@ with pytest.MonkeyPatch.context() as patch:
     actual_seconds = time.monotonic()-started
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 if sys.platform.startswith('linux') else 1024*1024)
     result={'load_kind':'1440 protocol envelopes reuse one actual captured all-law/operational frame; source measurement values/times unchanged','groups_per_frame':len(frame['observations']),'measurements_per_frame':sum(len(row['measurements']) for row in frame['observations']),'encoded_frame_bytes':max(map(len,replay.frames.values())),'frames':len(frames),'retained_index_bytes':index_bytes,'observations_seconds':decoded_seconds,'build_summary_seconds':summary_seconds,'lifecycle_reducer_seconds':reducer_seconds,'once_each_total_seconds':decoded_seconds+summary_seconds+reducer_seconds,'genuine_r1_frames':len(actual),'genuine_r1_summary_seconds':actual_seconds,'peak_rss_mib':rss}
+    result['decoded_frame_preserved'] = decoded_frame_preserved
     print(json.dumps(result,indent=2))
 '''
     measured = subprocess.run([sys.executable, '-c', script, str(Path(__file__)), str(root)],
@@ -868,10 +910,14 @@ with pytest.MonkeyPatch.context() as patch:
     return result
 
 @pytest.mark.resource
-def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                            record_property: Callable[[str, object], None]) -> None:
     evaluator_before = (ROOT / 'origo/law.py').read_bytes()
+    _assert_monitor_record_identities()
     _assert_monitor_failure_paths(tmp_path / 'failure-paths', monkeypatch)
     measured_monitor = _measure_monitor_replay(tmp_path / 'monitor-benchmark')
+    record_property('monitor_replay_metrics', json.dumps(measured_monitor, sort_keys=True))
+    assert measured_monitor['decoded_frame_preserved'] is True, measured_monitor
     assert measured_monitor['frames'] == 1440 and measured_monitor['groups_per_frame'] == 18
     assert float(str(measured_monitor['retained_index_bytes'])) <= 16 * 1024 * 1024
     assert float(str(measured_monitor['once_each_total_seconds'])) < 1, measured_monitor

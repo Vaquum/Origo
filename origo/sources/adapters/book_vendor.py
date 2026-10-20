@@ -22,6 +22,8 @@ from threading import Lock
 from typing import Protocol, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from dagster import get_dagster_logger
+
 from origo.workers.book_capture import BookSampler, Level, utc_millisecond
 
 from ..arrow_types import ArrowCompression, ArrowParquet
@@ -45,6 +47,7 @@ BOOK_BATCH_BODY_BYTES = 512 * 1024**2
 BOOK_BATCH_PREPARED_BYTES = 2 * BOOK_MAX_PRELUDE_BYTES
 # Only changes to accepted logical output invalidate retained identities.
 _REPLAY_POLICY_VERSION = 4
+# Versions rejection verdicts across Python/native replay logic and replay bounds.
 _REJECTION_POLICY_VERSION = 5
 _MISSING_DEPENDENCY = 'provider-http-404'
 _REJECTION_CODES = frozenset({'BOOK_SEQUENCE_GAP', 'BOOK_EVENT_STALE', 'BOOK_KNOWN_DEPTH_EXHAUSTED',
@@ -747,13 +750,30 @@ class CryptoHFTBookHourly:
             return self._fetch(partition)
 
     def _fetch(self, partition: Partition) -> Revision:
-        rejection = _dependency_evidence(self.market, partition).get('rejection')
-        if isinstance(rejection, dict):
-            verdict = object_mapping(rejection)
-            revision = verdict.get('revision')
-            if (isinstance(revision, str) and self.discover(partition) == revision
-                    and self.rejected_revision(partition, revision)):
-                raise SourceError(str(verdict['code']), 'Unchanged provider revision retains its rejection.')
+        try:
+            value = _dependency_evidence(self.market, partition)
+            rejection = value.get('rejection')
+            if isinstance(rejection, dict):
+                verdict = object_mapping(rejection)
+                if self._rejected_revision(partition, self.discover(partition), value):
+                    code = str(verdict['code'])
+                    get_dagster_logger('origo.sources').info(
+                        'market=%s partition=%s phase=fetch_rejected_reused code=%s revision=%s',
+                        self.market, partition.key, code, verdict['revision'],
+                    )
+                    raise SourceError(code, 'Unchanged provider revision retains its rejection.')
+        except SourceError as error:
+            if error.code not in {'BOOK_VENDOR_DEPENDENCIES', 'BOOK_VENDOR_DEPENDENCY_BOUND'}:
+                raise
+            get_dagster_logger('origo.sources').warning(
+                'market=%s partition=%s phase=fetch_dependency_rebuild code=%s',
+                self.market, partition.key, error.code,
+            )
+        except (ValueError, TypeError) as error:
+            get_dagster_logger('origo.sources').warning(
+                'market=%s partition=%s phase=fetch_dependency_rebuild code=%s',
+                self.market, partition.key, type(error).__name__,
+            )
         after = hour_partition(partition.end.strftime(HOUR_KEY_FORMAT))
         with _paired_responses(self.market, partition, after, metadata=False) as (response, closing):
             current = _identity(self.market, partition, response)
@@ -912,7 +932,9 @@ class CryptoHFTBookHourly:
         )
 
     def rejected_revision(self, partition: Partition, revision: str) -> bool:
-        value = _dependency_evidence(self.market, partition)
+        return self._rejected_revision(partition, revision, _dependency_evidence(self.market, partition))
+
+    def _rejected_revision(self, partition: Partition, revision: str, value: dict[str, object]) -> bool:
         rejection = value.get('rejection')
         if not isinstance(rejection, dict):
             return False

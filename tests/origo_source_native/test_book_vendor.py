@@ -1596,6 +1596,7 @@ def test_replay_policy_invalidates_complete_revision_identity(
         url: str, *, params: Mapping[str, str | int] | None = None,
         headers: Mapping[str, str] | None = None, weight: int = 0,
     ) -> Response:
+        # This recorded transport is anonymous; only metadata GETs carry headers.
         calls.append(bool(headers))
         return original_response(url, params=params, headers=headers, weight=weight)
 
@@ -1620,6 +1621,11 @@ def test_replay_policy_invalidates_complete_revision_identity(
         changed.setattr(vendor, '_REPLAY_POLICY_VERSION', vendor._REPLAY_POLICY_VERSION + 1)
         assert adapter.discover(partition) != discovered
         assert not adapter.rejected_revision(partition, adapter.discover(partition))
+        calls.clear()
+        replayed = adapter.fetch(partition)
+        assert calls == [True, True, False, False]
+        assert replayed.key != discovered and replayed.content_hash == rebuilt.content_hash
+    vendor._write_dependencies(market, partition, current, dependencies, rejected='BOOK_VENDOR_CLOCK_UNPROVEN')
     with monkeypatch.context() as changed:
         def revised(
             url: str, *, params: Mapping[str, str | int] | None = None,
@@ -1636,6 +1642,50 @@ def test_replay_policy_invalidates_complete_revision_identity(
         replacement = adapter.fetch(partition)
         assert calls.count(True) == 2 and calls.count(False) == 2
         assert replacement.key != discovered and replacement.content_hash == rebuilt.content_hash
+    # Corrupt local proof is a labelled fault; explicit fetch still replaces it from genuine bytes.
+    invalid_entries = {**json.loads(proof), 'dependencies': [['invalid-hour', current]]}
+    for invalid in (b'{', b'[]', json.dumps(invalid_entries).encode(), b' ' * (vendor.BOOK_DEPENDENCY_MAX_BYTES + 1)):
+        path.write_bytes(invalid)
+        calls.clear()
+        recovered = adapter.fetch(partition)
+        assert calls.count(False) == 2 and recovered.content_hash == rebuilt.content_hash
+        assert 'rejection' not in json.loads(path.read_bytes())
+        assert adapter.discover(partition) == recovered.key
+    for code in ('PROVIDER_HTTP_404', 'PROVIDER_HTTP_503', 'BOOK_VENDOR_IDENTITY_MISSING'):
+        path.write_bytes(proof)
+        calls.clear()
+        with monkeypatch.context() as changed:
+            def unavailable(
+                url: str, *, params: Mapping[str, str | int] | None = None,
+                headers: Mapping[str, str] | None = None, weight: int = 0,
+            ) -> Response:
+                calls.append(bool(headers))
+                raise SourceError(code, 'Deliberate provider failure over unchanged recorded input.')
+
+            changed.setattr(vendor, 'get_response', unavailable)
+            with pytest.raises(SourceError) as unavailable_error:
+                adapter.fetch(partition)
+            assert unavailable_error.value.code == code
+            assert calls and all(calls) and path.read_bytes() == proof
+    path.write_bytes(proof)
+    replaced = [False]
+    with monkeypatch.context() as changed:
+        def replace_proof(
+            url: str, *, params: Mapping[str, str | int] | None = None,
+            headers: Mapping[str, str] | None = None, weight: int = 0,
+        ) -> Response:
+            if not replaced[0]:
+                replaced[0] = True
+                changed_proof = json.loads(proof)
+                changed_proof['rejection']['code'] = 'unvalidated-concurrent-code'
+                vendor.atomic_write(path, json.dumps(changed_proof).encode())
+            return observed(url, params=params, headers=headers, weight=weight)
+
+        changed.setattr(vendor, 'get_response', replace_proof)
+        with pytest.raises(SourceError) as pinned:
+            adapter.fetch(partition)
+        assert pinned.value.code == 'BOOK_VENDOR_CLOCK_UNPROVEN'
+        assert json.loads(path.read_bytes())['rejection']['code'] == 'unvalidated-concurrent-code'
     assert {'BOOK_VENDOR_CLOCK_UNPROVEN', 'BOOK_VENDOR_TAIL_MISSING'} <= vendor._REJECTION_CODES
 
 

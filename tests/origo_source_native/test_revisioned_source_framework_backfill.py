@@ -162,12 +162,15 @@ def test_backfill_builds_real_archive_and_records_evidence(
 
     runtime, instance, _source = backfill_env
     archives = []
+    stages: list[str] = []
     retained_reads = Counter()
     validate = SourceStore.validate_component
 
     def counted_archive(url: str) -> binance_daily.Response:
         if url.endswith('.zip'):
             archives.append(url)
+        if url.endswith('CHECKSUM'):
+            stages.append('provider')
         return archive_response(url)
 
     def counted_validation(
@@ -182,6 +185,7 @@ def test_backfill_builds_real_archive_and_records_evidence(
     ) -> tuple[int, str]:
         if table.endswith('_revisions'):
             retained_reads[component.key] += 1
+            stages.append(component.key)
         return validate(
             self,
             component,
@@ -216,6 +220,18 @@ def test_backfill_builds_real_archive_and_records_evidence(
         'aligned',
     }
     assert dict(evidence)['raw'] == 194010
+    retained = runtime.store.record(runtime.spec.canonical.partition('2020-01-01'))
+    stages.clear()
+    retained_reads.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(binance_daily, 'get_response', counted_archive)
+        patch.setattr(SourceStore, 'validate_component', counted_validation)
+        assert runtime.build('2020-01-01') == retained
+    assert stages[-1] == 'provider' and stages.count('provider') == 1
+    assert dict(retained_reads) == {
+        key: 1 for key in ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
+    }
+    assert len(archives) == 1
     assert instance.get_materialized_partitions(AssetKey(ASSET)) == {'2020-01-01'}
     from dagster._core.definitions.automation_tick_evaluation_context import (
         build_run_requests_with_backfill_policies,
@@ -350,6 +366,8 @@ def test_reconciliation_marks_corrupt_missing_and_changed_generations(
     backfill_env: BackfillEnv,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from origo.sources.contracts import SourceError, StateRecord
+
     runtime, instance, _source = backfill_env
     assert _run(backfill_env, probe=True).success
     first = runtime.store.records(canonical_only=True)[0]
@@ -359,6 +377,9 @@ def test_reconciliation_marks_corrupt_missing_and_changed_generations(
     )
     failed = _run(backfill_env, reconcile=True)
     assert not failed.success and _status(backfill_env) == 'FAILED'
+    with pytest.raises(SourceError) as invalid:
+        runtime.build(DAY)
+    assert invalid.value.code == 'RETAINED_CONTENT_INVALID'
     repaired = runtime.repair(DAY)
     assert repaired.generation > first.generation
     assert _run(backfill_env, reconcile=True).success
@@ -400,7 +421,16 @@ def test_reconciliation_marks_corrupt_missing_and_changed_generations(
         return binance_daily.Response(payload, {}, 200)
 
     monkeypatch.setattr(binance_daily, 'get_response', correction)
-    corrected = runtime.build(DAY)
+    validate_retained = SourceRuntime._validate_retained
+
+    def invalid_previous(self: SourceRuntime, record: StateRecord) -> None:
+        if record.build_id == restored.build_id:
+            raise SourceError('RETAINED_CONTENT_INVALID', 'Deliberate invalid old-copy control.')
+        validate_retained(self, record)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(SourceRuntime, '_validate_retained', invalid_previous)
+        corrected = runtime.build(DAY)
     assert corrected.revision != restored.revision
     assert _run(backfill_env, reconcile=True).success
     latest = instance.get_latest_materialization_event(AssetKey(ASSET))

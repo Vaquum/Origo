@@ -1542,7 +1542,9 @@ def test_first_apply_resumes_after_live_revalidation(
     ) -> tuple[int, int, int]:
         nonlocal elapsed
         if interrupt_at == 'compaction':
-            elapsed += 45
+            raise maintenance_sqlite.MaintenanceDeadlineReached(
+                'Deliberate compaction yield before the work deadline.'
+            )
         return compact(runs_path, after_id, limit, deadline, lock_wait)
 
     page_compaction = worker.incremental_compaction
@@ -1566,6 +1568,8 @@ def test_first_apply_resumes_after_live_revalidation(
         metadata_instance.event_log_storage, 'compact_retired_state', timed_compaction
     )
     outcome = worker.maintain(metadata_instance, config)
+    if interrupt_at == 'compaction':
+        assert page_calls == 0, 'A yielded work phase must not retry SQLite writes.'
     if interrupt_at == 'pages':
         assert page_calls == 1, (
             'Later databases must not start reclamation in the reporting reserve.'

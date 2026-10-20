@@ -1,3 +1,7 @@
+# v3.34.38
+
+- Require both book HTTP connection loans to remain usable after a transport failure.
+
 # v3.34.37
 
 - Reuse two scoped HTTP connections during native book backfills while preserving provider budgets and input revalidation.

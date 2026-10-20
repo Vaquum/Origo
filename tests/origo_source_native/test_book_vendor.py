@@ -988,28 +988,32 @@ def test_vendor_backfill_http_connections_are_bounded_and_scoped(
             {'Authorization': 'Bearer control-token', 'X-API-Key': 'control-key', 'Range': 'bytes=0-0'},
             resource_url='https://storage.example/recorded-object')
 
+    def concurrent_requests(count):
+        entered.clear()
+        release.clear()
+        with ThreadPoolExecutor(max_workers=count) as pool:
+            futures = [pool.submit(copy_context().run, request) for _ in range(count)]
+            try:
+                assert entered.wait(3), 'Both connection loans must remain usable'
+                assert len(opened) == 2 and not ordinary
+            finally:
+                release.set()
+            for future in futures:
+                with future.result(timeout=5) as value:
+                    assert value.content == body[:1] and dict(value.headers) == headers
+
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path))
     monkeypatch.setattr(daily.requests, 'Session', Connection)
     monkeypatch.setattr(daily.requests, 'get', unpooled)
     with pytest.raises(RuntimeError, match='Deliberate batch exit'):
         with vendor.CryptoHFTBookHourly(market).backfill_batch():
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                futures = [pool.submit(copy_context().run, request) for _ in range(3)]
-                try:
-                    assert entered.wait(3)
-                    assert len(opened) == 2 and not ordinary
-                finally:
-                    release.set()
-                for future in futures:
-                    with future.result(timeout=5) as value:
-                        assert value.content == body[:1] and dict(value.headers) == headers
+            concurrent_requests(3)
             fail.set()
             with pytest.raises(SourceError) as error:
                 request()
             assert error.value.code == 'PROVIDER_TRANSPORT_FAILED'
             assert 'control-token' not in str(error.value) and 'control-key' not in str(error.value)
-            with request() as value:
-                assert value.content == body[:1]
+            concurrent_requests(2)
             with daily._request('https://api.binance.com/api/v3/time', None, None):
                 assert len(ordinary) == 1
             raise RuntimeError('Deliberate batch exit')

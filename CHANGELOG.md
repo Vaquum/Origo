@@ -1,3 +1,7 @@
+# v3.34.33
+
+- Reject wrong or missing native receipt identities and guard columnar planner work and validation priority with genuine-input controls.
+
 # v3.34.32
 
 - Plan historical spot update messages columnarly, preserving native sequence, clock and replay boundaries.

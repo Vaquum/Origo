@@ -286,6 +286,7 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
     database, admission = spool._database, source_lock
     cleanup_thread: list[int] = []
     transaction_held: list[bool] = []
+    cleanup_writes_after_capture: list[str] = []
     waits_completed: list[bool] = []
     before = _durable_capture_rows(root)
     expected = dict((row[0], row) for row in before)
@@ -301,6 +302,9 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
                 matched = 0
                 def trace(sql: str) -> None:
                     nonlocal matched
+                    if finished.is_set() and sql.startswith(('DELETE ', 'PRAGMA incremental_vacuum',
+                                                             'PRAGMA wal_checkpoint')):
+                        cleanup_writes_after_capture.append(sql)
                     target = ('PRAGMA incremental_vacuum' if phase == 'vacuum'
                               else 'DELETE FROM polls')
                     if sql.startswith(target):
@@ -368,6 +372,7 @@ def _capture_cleanup_contention(root: Path, record: Mapping[str, object], phase:
                 if cleanup_future is not None:
                     cleanup_future.result(timeout=10)
     assert transaction_held == [True] and all(waits_completed)
+    assert cleanup_writes_after_capture, 'Capture did not precede remaining cleanup writes.'
     after = _durable_capture_rows(root)
     assert after == (before if phase == 'failed_outcome'
                      else tuple(expected[key] for key in sorted(expected)))

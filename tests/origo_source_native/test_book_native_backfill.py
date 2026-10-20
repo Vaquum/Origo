@@ -208,6 +208,31 @@ def test_native_book_selection_completion_preserves_source_failures(
         }
         assert dict(record.component_hashes) == {key: digest for key, _, digest in proofs}
 
+        from tools.benchmark_book_replay import verify_backfill_receipts
+
+        assert len(verify_backfill_receipts(runtime.store, parent, result.run_id, [record])) == 1
+        assert verify_backfill_receipts(runtime.store, parent, str(uuid4()), []) == []
+        wrong_parent = _parent(instance, job.name)
+        receipt = (runtime.spec.key, wrong_parent, REAL_HOUR, record.revision,
+                   record.build_id, record.generation + 1, result.run_id)
+        runtime.store.execute('INSERT INTO origo.source_backfill_log VALUES', [receipt])
+        with pytest.raises(ValueError, match='BACKFILL_RECEIPT_INVALID'):
+            verify_backfill_receipts(runtime.store, wrong_parent, result.run_id, [record])
+
+        duplicate_parent = _parent(instance, job.name)
+        correct = (runtime.spec.key, duplicate_parent, REAL_HOUR, record.revision,
+                   record.build_id, record.generation, result.run_id)
+        other_run = str(uuid4())
+        runtime.store.execute('INSERT INTO origo.source_backfill_log VALUES',
+                              [correct, (*correct[:-1], other_run)])
+        assert len(verify_backfill_receipts(runtime.store, duplicate_parent,
+                                          result.run_id, [record])) == 1
+        assert len(verify_backfill_receipts(runtime.store, duplicate_parent,
+                                          other_run, [record])) == 1
+        runtime.store.execute('INSERT INTO origo.source_backfill_log VALUES', [correct])
+        with pytest.raises(ValueError, match='BACKFILL_RECEIPT_INVALID'):
+            verify_backfill_receipts(runtime.store, duplicate_parent, result.run_id, [record])
+
         # A deliberate post-canonical persistence fault is terminal, outside source retries.
         receipt_parent = _parent(instance, job.name)
         persisted = SourceStore.execute

@@ -1,3 +1,7 @@
+# v3.34.31
+
+- Verify native backfill receipts against the full active revision, build and generation, separately for each run.
+
 # v3.34.30
 
 - Resume native book range retries at the failed hour, preserving each hour's retry allowance and earlier rejected hours.

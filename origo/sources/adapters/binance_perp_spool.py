@@ -915,6 +915,13 @@ def cleanup_spool(root: Path) -> None:
                         remaining_pages -= len(polls)
                 _reclaim(capture)
                 _reclaim(repair)
+        except SourceError as error:
+            cause = error.__cause__
+            if (error.code != 'CAPTURE_STORAGE'
+                    or not isinstance(cause, sqlite3.OperationalError)
+                    or cause.sqlite_errorcode != sqlite3.SQLITE_BUSY):
+                raise
+            _LOG.warning('Perp spool cleanup deferred: %s', cause.sqlite_errorname)
         finally:
             fcntl.flock(readers, fcntl.LOCK_UN)
             fcntl.flock(lock, fcntl.LOCK_UN)

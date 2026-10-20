@@ -120,7 +120,7 @@ def test_restart_recovers_only_durable_capture(tmp_path: Path, responses: tuple[
     assert recovered.segment_id == checkpoint.segment_id
 
 
-def test_bounds_and_cleanup_preserve_unacknowledged_data(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bounds_and_cleanup_preserve_unacknowledged_data(tmp_path: Path, responses: tuple[tuple[datetime, list[dict[str, object]]], ...], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     _append(tmp_path, responses)
     revision = spool.read_spooled_revision(tmp_path, _partition())
     assert revision is not None
@@ -137,6 +137,45 @@ def test_bounds_and_cleanup_preserve_unacknowledged_data(tmp_path: Path, respons
     assert 0 < after < before
     durable = spool.capture_state(tmp_path)
     assert durable is not None and durable.segment_id
+    # The genuine repeated response adds a poll but no trade payloads.
+    spool.append_capture(tmp_path, responses[-1][1], received_at=responses[-1][0])
+    with spool._database(tmp_path, 'capture') as connection:
+        retained = connection.execute('SELECT * FROM trades ORDER BY id').fetchall()
+        polls = connection.execute('SELECT * FROM polls ORDER BY seq').fetchall()
+    assert polls
+    writer = sqlite3.connect(tmp_path / 'capture.sqlite3')
+    writer.execute('BEGIN IMMEDIATE')
+    try:
+        spool.cleanup_spool(tmp_path)
+        with spool._database(tmp_path, 'capture') as connection:
+            assert connection.execute('SELECT * FROM trades ORDER BY id').fetchall() == retained
+            assert connection.execute('SELECT * FROM polls ORDER BY seq').fetchall() == polls
+        assert any(record.name == spool.__name__ and record.levelname == 'WARNING'
+                   and 'SQLITE_BUSY' in record.getMessage() for record in caplog.records)
+        with pytest.raises(SourceError) as capture_error:
+            spool.append_capture(tmp_path, responses[-1][1], received_at=responses[-1][0])
+        assert capture_error.value.code == 'CAPTURE_STORAGE'
+        cause = capture_error.value.__cause__
+        assert isinstance(cause, sqlite3.OperationalError) and cause.sqlite_errorcode == sqlite3.SQLITE_BUSY
+    finally:
+        writer.rollback()
+        writer.close()
+    spool.cleanup_spool(tmp_path)
+    with spool._database(tmp_path, 'capture') as connection:
+        assert connection.execute('SELECT * FROM trades ORDER BY id').fetchall() == retained
+        assert connection.execute('SELECT count(*) FROM polls').fetchone()[0] < len(polls)
+
+    def invalid_reclaim(connection: sqlite3.Connection) -> None:
+        # Deliberate SQL protocol fault: a nonbusy storage error must still fail.
+        connection.execute('SELECT missing_column FROM identity')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(spool, '_reclaim', invalid_reclaim)
+        with pytest.raises(SourceError) as storage_error:
+            spool.cleanup_spool(tmp_path)
+        assert storage_error.value.code == 'CAPTURE_STORAGE'
+        cause = storage_error.value.__cause__
+        assert isinstance(cause, sqlite3.OperationalError) and cause.sqlite_errorcode == sqlite3.SQLITE_ERROR
     (tmp_path / 'partial.bin').write_bytes(b'partial transaction delivery fault')
     monkeypatch.setattr(spool, 'SPOOL_LIMIT_BYTES', spool.spool_bytes(tmp_path))
     with pytest.raises(SourceError, match='capacity'):

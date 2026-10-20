@@ -1,3 +1,7 @@
+# v3.34.50
+
+- Defer perp spool cleanup when a capture writer holds SQLite; retain data, report the deferral and preserve other storage failures.
+
 # v3.34.49
 
 - Read publication state one consumer source at a time through the read-only monitor profile, avoiding irrelevant book state and preserving resource limits.

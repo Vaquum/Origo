@@ -1662,7 +1662,7 @@ def observe_publications(
         if remaining <= 0:
             raise TimeoutError('Publication observation budget exhausted.')
         rows = client.execute(
-            f'SELECT source_key, partition_key, provisional, partition_start, partition_end, '
+            f'SELECT partition_key, provisional, partition_start, partition_end, '
             f'generation, revision, build_id, component_hashes FROM {identifier(database)}.source_current_partitions '
             f'WHERE source_key=%(source)s',
             {'source': spec.key},
@@ -1678,7 +1678,7 @@ def observe_publications(
         for row in rows:
             if time.monotonic() >= deadline:
                 raise TimeoutError('Publication observation budget exhausted.')
-            _, key, provisional, start, end, generation, revision, build, encoded = row
+            key, provisional, start, end, generation, revision, build, encoded = row
             if not isinstance(start, datetime) or not isinstance(end, datetime):
                 raise TypeError('Publication coverage requires timestamped active records.')
             pairs: object = json.loads(str(encoded))

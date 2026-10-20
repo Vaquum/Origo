@@ -1,3 +1,7 @@
+# v3.34.39
+
+- Let the book connection test controller release borrowers after a lost loan; require both existing market cases in the acceptance inventory.
+
 # v3.34.38
 
 - Require both book HTTP connection loans to remain usable after a transport failure.

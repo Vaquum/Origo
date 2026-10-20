@@ -1,6 +1,6 @@
 # v3.34.49
 
-- Read publication state one consumer source at a time, avoiding irrelevant book state and preserving monitor resource limits.
+- Read publication state one consumer source at a time through the read-only monitor profile, avoiding irrelevant book state and preserving resource limits.
 
 # v3.34.47
 

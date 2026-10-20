@@ -10,6 +10,7 @@
       <max_threads>1</max_threads>
       <max_concurrent_queries_for_user>1</max_concurrent_queries_for_user>
       <constraints>
+        <additional_table_filters><changeable_in_readonly/></additional_table_filters>
         <max_execution_time><min>0.001</min><max>5</max><changeable_in_readonly/></max_execution_time>
         <max_memory_usage><min>1</min><max>536870912</max><changeable_in_readonly/></max_memory_usage>
         <max_threads><min>1</min><max>1</max><changeable_in_readonly/></max_threads>

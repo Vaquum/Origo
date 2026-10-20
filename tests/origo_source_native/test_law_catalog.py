@@ -673,7 +673,9 @@ def test_publication_observation_checks_real_token_and_artifacts(
 ) -> None:
     from uuid import uuid4
 
+    from origo.assets.create_origo_database import get_clickhouse_settings
     from origo.sources.storage import SourceStore
+    from origo.workers.monitor import LawClient
 
     runtime, keys, _, _ = real_minutes
     live_spec = replace(runtime.spec, rollout_stage=RolloutStage.LIVE)
@@ -693,7 +695,9 @@ def test_publication_observation_checks_real_token_and_artifacts(
     def observe() -> dict[str, ProjectionObservation]:
         expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
         requested: list[str] = []
-        execute = runtime.store.client.execute
+        admin = runtime.store.client.execute
+        reader = LawClient(get_clickhouse_settings())
+        execute = reader.execute
         prefix = f'publication-read-{uuid4().hex}-'
 
         def scoped(
@@ -704,43 +708,53 @@ def test_publication_observation_checks_real_token_and_artifacts(
             source = params.get('source')
             assert isinstance(source, str) and source in expected
             requested.append(source)
-            return execute(query, params, {**(settings or {}), 'log_comment': prefix + source})
+            return execute(query + f' /* {prefix}{source} */', params, settings=settings)
 
-        with monkeypatch.context() as patch:
-            patch.setattr(runtime.store.client, 'execute', scoped)
-            result = {
-                item['id']: item
-                for item in observe_publications(
-                    runtime.store.client,
-                    runtime.store.database,
-                    catalog,
-                    datetime.now(UTC),
-                    root,
-                    deadline=time.monotonic() + 5,
-                )
-            }
+        try:
+            if expected:
+                assert execute(
+                    "SELECT currentUser(), getSetting('readonly'), "
+                    "getSetting('max_memory_usage'), getSetting('max_threads'), "
+                    "getSetting('max_concurrent_queries_for_user')",
+                ) == [('law_reader', 1, 536870912, 1, 1)]
+            with monkeypatch.context() as patch:
+                patch.setattr(reader, 'execute', scoped)
+                result = {
+                    item['id']: item
+                    for item in observe_publications(
+                        reader,
+                        runtime.store.database,
+                        catalog,
+                        datetime.now(UTC),
+                        root,
+                        deadline=time.monotonic() + 5,
+                    )
+                }
+        finally:
+            reader.disconnect()
         assert set(requested) == expected
         assert len(requested) == len(expected)
         if requested:
-            execute('SYSTEM FLUSH LOGS')
-            measured = execute(
-                'SELECT log_comment, read_rows FROM system.query_log '
-                "WHERE log_comment LIKE %(prefix)s AND type='QueryFinish'",
-                {'prefix': prefix + '%'},
+            admin('SYSTEM FLUSH LOGS')
+            measured = admin(
+                'SELECT query, read_rows FROM system.query_log '
+                "WHERE user='law_reader' AND position(query, %(prefix)s)>0 "
+                "AND type='QueryFinish'",
+                {'prefix': prefix},
             )
             counts = {
-                str(row[0]): int(str(row[1])) for row in execute(
+                str(row[0]): int(str(row[1])) for row in admin(
                     f'SELECT source_key, count() FROM {runtime.store.database}.source_activation_log '
                     'GROUP BY source_key',
                 )
             }
-            anchors = int(str(execute(
+            anchors = int(str(admin(
                 f'SELECT count() FROM {runtime.store.database}.source_anchor_log',
             )[0][0]))
             assert len(measured) == len(requested)
             # The real fixture also proves empty sources never scan its populated neighbour.
             assert all(
-                int(str(row[1])) <= 2 * counts.get(str(row[0])[len(prefix):], 0) + anchors
+                int(str(row[1])) <= 2 * counts.get(str(row[0]).rsplit(prefix, 1)[1].removesuffix(' */'), 0) + anchors
                 for row in measured
             )
         return result

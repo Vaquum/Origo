@@ -8,7 +8,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -823,15 +823,19 @@ def _reclaim(connection: sqlite3.Connection) -> None:
     if not free:
         return
     path = Path(connection.execute('PRAGMA database_list').fetchone()[2])
-    capture_root = path.parent if path.name == 'capture.sqlite3' else None
-    for _ in range(min(free, 256)):
-        with (source_lock(capture_root.resolve(), _SOURCE, 'capture_write')
-              if capture_root is not None else nullcontext()):
-            connection.execute('BEGIN IMMEDIATE')
+    if path.name == 'capture.sqlite3':
+        for _ in range(min(free, 256)):
+            with source_lock(path.parent.resolve(), _SOURCE, 'capture_write'):
+                connection.execute('BEGIN IMMEDIATE')
+                connection.execute('PRAGMA incremental_vacuum(1)')
+                connection.commit()
+        with source_lock(path.parent.resolve(), _SOURCE, 'capture_write'):
+            connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
+    else:
+        connection.execute('BEGIN IMMEDIATE')
+        for _ in range(min(free, 256)):
             connection.execute('PRAGMA incremental_vacuum(1)')
-            connection.commit()
-    with (source_lock(capture_root.resolve(), _SOURCE, 'capture_write')
-          if capture_root is not None else nullcontext()):
+        connection.commit()
         connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
 
 

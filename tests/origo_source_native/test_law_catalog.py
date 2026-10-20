@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -688,20 +689,43 @@ def test_publication_observation_checks_real_token_and_artifacts(
     published = json.loads(manifest.read_text())
 
     def observe() -> dict[str, ProjectionObservation]:
-        return {
-            item['id']: item
-            for item in observe_publications(
-                runtime.store.client,
-                runtime.store.database,
-                catalog,
-                datetime.now(UTC),
-                root,
-                deadline=time.monotonic() + 5,
-            )
-        }
+        expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
+        requested: list[str] = []
+        execute = runtime.store.client.execute
+
+        def scoped(
+            query: str, params: object | None = None,
+            settings: Mapping[str, object] | None = None,
+        ) -> list[Row]:
+            assert isinstance(params, dict)
+            source = params.get('source')
+            assert isinstance(source, str) and source in expected
+            requested.append(source)
+            return execute(query, params, settings)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime.store.client, 'execute', scoped)
+            result = {
+                item['id']: item
+                for item in observe_publications(
+                    runtime.store.client,
+                    runtime.store.database,
+                    catalog,
+                    datetime.now(UTC),
+                    root,
+                    deadline=time.monotonic() + 5,
+                )
+            }
+        assert set(requested) == expected and len(requested) == len(expected)
+        return result
 
     node = f'{live_spec.key}:consumer:mount'
     actual = observe()[node]
+    with monkeypatch.context() as patch:
+        patch.setattr(registry, 'SOURCE_REGISTRY', tuple(
+            spec for spec in registry.SOURCE_REGISTRY if not spec.consumers
+        ))
+        assert observe() == {}
     if not published['files']:
         # The genuine 2017 day precedes this consumer's 2020 export floor.
         assert actual['status'] == 'UNKNOWN'

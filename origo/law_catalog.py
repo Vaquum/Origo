@@ -1654,52 +1654,59 @@ def observe_publications(
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError('Publication observation budget exhausted.')
-    rows = client.execute(
-        f'SELECT source_key, partition_key, provisional, partition_start, partition_end, '
-        f'generation, revision, build_id, component_hashes FROM {identifier(database)}.source_current_partitions',
-        settings={
-            'max_memory_usage': 536870912,
-            'max_execution_time': min(5, remaining),
-            'max_threads': 1,
-            'read_overflow_mode': 'throw',
-            'timeout_overflow_mode': 'throw',
-        },
-    )
-    selected: dict[str, list[StateRecord]] = {}
-    for row in rows:
-        if time.monotonic() >= deadline:
-            raise TimeoutError('Publication observation budget exhausted.')
-        source, key, provisional, start, end, generation, revision, build, encoded = row
-        if not isinstance(start, datetime) or not isinstance(end, datetime):
-            raise TypeError('Publication coverage requires timestamped active records.')
-        pairs: object = json.loads(str(encoded))
-        if not isinstance(pairs, list):
-            raise TypeError('Active component hashes must be pairs.')
-        hashes: list[tuple[str, str]] = []
-        for pair in cast(list[object], pairs):
-            if not isinstance(pair, list):
-                raise TypeError('Active component hash must be a pair.')
-            values = cast(list[object], pair)
-            if len(values) != 2 or not all(isinstance(value, str) for value in values):
-                raise TypeError('Active component hash must contain two strings.')
-            hashes.append((str(values[0]), str(values[1])))
-        selected.setdefault(str(source), []).append(
-            StateRecord(
-                Partition(
-                    str(key),
-                    start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC),
-                    end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC),
-                    bool(provisional),
-                ),
-                int(str(generation)),
-                str(revision),
-                UUID(str(build)),
-                tuple(hashes),
-            )
-        )
     result: list[ProjectionObservation] = []
     for spec in SOURCE_REGISTRY:
-        records = tuple(selected.get(spec.key, ()))
+        if not spec.consumers:
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Publication observation budget exhausted.')
+        rows = client.execute(
+            f'SELECT source_key, partition_key, provisional, partition_start, partition_end, '
+            f'generation, revision, build_id, component_hashes FROM {identifier(database)}.source_current_partitions '
+            f'WHERE source_key=%(source)s',
+            {'source': spec.key},
+            settings={
+                'max_memory_usage': 536870912,
+                'max_execution_time': min(5, remaining),
+                'max_threads': 1,
+                'read_overflow_mode': 'throw',
+                'timeout_overflow_mode': 'throw',
+            },
+        )
+        selected: list[StateRecord] = []
+        for row in rows:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Publication observation budget exhausted.')
+            _, key, provisional, start, end, generation, revision, build, encoded = row
+            if not isinstance(start, datetime) or not isinstance(end, datetime):
+                raise TypeError('Publication coverage requires timestamped active records.')
+            pairs: object = json.loads(str(encoded))
+            if not isinstance(pairs, list):
+                raise TypeError('Active component hashes must be pairs.')
+            hashes: list[tuple[str, str]] = []
+            for pair in cast(list[object], pairs):
+                if not isinstance(pair, list):
+                    raise TypeError('Active component hash must be a pair.')
+                values = cast(list[object], pair)
+                if len(values) != 2 or not all(isinstance(value, str) for value in values):
+                    raise TypeError('Active component hash must contain two strings.')
+                hashes.append((str(values[0]), str(values[1])))
+            selected.append(
+                StateRecord(
+                    Partition(
+                        str(key),
+                        start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC),
+                        end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC),
+                        bool(provisional),
+                    ),
+                    int(str(generation)),
+                    str(revision),
+                    UUID(str(build)),
+                    tuple(hashes),
+                )
+            )
+        records = tuple(selected)
         canonical = tuple(record for record in records if not record.partition.provisional)
         canonical_token = state_token(spec.key, canonical)
         pinned_token = state_token(spec.key, records)
@@ -1776,6 +1783,7 @@ def observe_publications(
                 )
                 observation.update(status='UNKNOWN', reason='publication_evidence_invalid')
             result.append(observation)
+        del rows, selected, records, canonical
     if time.monotonic() > deadline:
         raise TimeoutError('Publication observation budget exhausted.')
     return result

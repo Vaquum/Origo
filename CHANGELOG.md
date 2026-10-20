@@ -1,3 +1,7 @@
+# v3.34.49
+
+- Read publication state one consumer source at a time, avoiding irrelevant book state and preserving monitor resource limits.
+
 # v3.34.47
 
 - Scan retained metadata read-only and take a writer only for eligible deletion; preserve the page checkpoint when the writer is busy.

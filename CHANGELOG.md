@@ -1,6 +1,10 @@
-# v3.34.41
+# v3.34.44
 
 - Validate matching retained canonical content before one fresh provider revision check, preserving invalid-copy rejection and changed-revision rebuilding.
+
+# v3.34.42
+
+- Reuse up to4096 validated UTC timestamp parses during monitor replay without changing validation or resource limits.
 
 # v3.34.40
 

@@ -854,7 +854,8 @@ def decode_observation_record(raw: bytes) -> tuple[ObservationFrame, Document | 
     for observation in observations:
         if not isinstance(observation, dict):
             raise ValueError('invalid_notification_observation')
-        if any(not isinstance(observation.get(key), str) for key in ('group_id', 'check', 'scope', 'definition_version')):
+        if (not isinstance(observation.get('group_id'), str) or not isinstance(observation.get('check'), str)
+                or not isinstance(observation.get('scope'), str) or not isinstance(observation.get('definition_version'), str)):
             raise ValueError('invalid_notification_identity')
         if observation.get('kind') not in ('condition', 'event_stream') or observation.get('status') not in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT', 'NO_NEW_EVENTS'):
             raise ValueError('invalid_notification_state')
@@ -872,7 +873,8 @@ def decode_observation_record(raw: bytes) -> tuple[ObservationFrame, Document | 
         for measurement in measurements:
             if not isinstance(measurement, dict):
                 raise ValueError('invalid_notification_measurement')
-            if any(not isinstance(measurement.get(key), str) for key in ('name', 'unit', 'observed_at', 'definition_version')):
+            if (not isinstance(measurement.get('name'), str) or not isinstance(measurement.get('unit'), str)
+                    or not isinstance(measurement.get('observed_at'), str) or not isinstance(measurement.get('definition_version'), str)):
                 raise ValueError('invalid_notification_measurement_identity')
             for key in ('value', 'threshold'):
                 if measurement.get(key) is not None and _number(measurement[key]) is None:

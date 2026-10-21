@@ -1,3 +1,8 @@
+# v3.34.51
+
+- Validate monitor record identity fields without per-row generators; retain exact rejection semantics and replay stage metrics in failed test artifacts.
+- Retain collectors during this monitor prerequisite rollout through the existing one-version release pin; the following capture-fix version returns to full rollout.
+
 # v3.34.50
 
 - Defer perp spool cleanup when a capture writer holds SQLite; retain data, report the deferral and preserve other storage failures.

@@ -43,13 +43,6 @@
       }
     },
     {
-      "type": "copilot_code_review",
-      "parameters": {
-        "review_on_push": true,
-        "review_draft_pull_requests": false
-      }
-    },
-    {
       "type": "required_status_checks",
       "parameters": {
         "strict_required_status_checks_policy": true,
@@ -92,6 +85,13 @@
             "integration_id": 15368
           }
         ]
+      }
+    },
+    {
+      "type": "copilot_code_review",
+      "parameters": {
+        "review_on_push": false,
+        "review_draft_pull_requests": false
       }
     }
   ],

@@ -1,3 +1,7 @@
+# v3.34.54
+
+- Stop automatic Copilot code review on every push; reviews remain available on request.
+
 # v3.34.53
 
 - Bound each current reader to its source before metadata aggregation; preserve public values and generation visibility under existing query limits.

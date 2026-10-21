@@ -1,3 +1,7 @@
+# v3.34.52
+
+- Coordinate perp capture transactions with bounded spool cleanup; skip empty reclamation writers and retain visible storage failures.
+
 # v3.34.51
 
 - Validate monitor record identity fields without per-row generators; retain exact rejection semantics and replay stage metrics in failed test artifacts.

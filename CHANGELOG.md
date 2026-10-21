@@ -1,3 +1,7 @@
+# v3.34.53
+
+- Bound each current reader to its source before metadata aggregation; preserve public values and generation visibility under existing query limits.
+
 # v3.34.52
 
 - Coordinate perp capture transactions with bounded spool cleanup; skip empty reclamation writers and retain visible storage failures.

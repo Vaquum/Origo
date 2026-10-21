@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,7 @@ from origo.assets.create_origo_database import get_clickhouse_settings, make_cli
 from origo.sources.adapters import binance_daily as daily
 from origo.sources.adapters.binance_spot_rest import BinanceSpotProvisional
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.columnar import binary_hash
 from origo.sources.contracts import Partition, Revision, RolloutStage, Row, SourceReadPolicy
 from origo.sources.hashing import content_hash
 from origo.sources.lifecycle import SourceRuntime
@@ -53,6 +55,8 @@ def real_minutes(
         for i in range(3)
     }
 
+    del by_minute
+
     def captured(
         self: BinanceSpotProvisional,
         partition: Partition,
@@ -82,20 +86,93 @@ def _current(store: SourceStore) -> list[Row]:
     )
 
 
+def _plan_nodes(value: object) -> Iterator[dict[str, object]]:
+    if isinstance(value, dict):
+        node = cast(dict[str, object], value)
+        yield node
+        for child in node.values():
+            yield from _plan_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _plan_nodes(child)
+
+
+def _assert_public_readers(
+    runtime: SourceRuntime, request: pytest.FixtureRequest, phase: str,
+) -> None:
+    store, spec = runtime.store, runtime.spec
+    snapshot = store.snapshot()
+    readers = [(spec.names.prefix + '_' + c.key + '_current', c, True) for c in spec.components]
+    readers.extend((name, next(c for c in spec.components if c.key == key), False)
+                   for name, key in spec.aliases)
+    receipts: list[dict[str, object]] = []
+    report = {'phase': phase, 'state': snapshot.token, 'readers': receipts}
+    try:
+        for name, component, combined in readers:
+            view = store.table(name)
+            receipt: dict[str, object] = {'view': view}
+            receipts.append(receipt)
+            declared = [(c.name, c.sql_type.replace(' ', '')) for c in component.columns]
+            columns = [(str(r[0]), str(r[1]).replace(' ', ''))
+                       for r in store.execute(f'DESCRIBE TABLE {view}')]
+            receipt['columns'] = columns
+            assert columns == declared, (view, 'public schema', columns, declared)
+            members = [component]
+            if combined:
+                members.extend(c for c in spec.components if c.current_target == component.key)
+            selects: list[str] = []
+            params: dict[str, object] = {}
+            for index, member in enumerate(members):
+                states = tuple((r.partition.key, r.revision, r.build_id) for r in snapshot.records
+                               if r.partition.provisional == member.provisional
+                               and (member.activation_group is None
+                                    or member.key in dict(r.component_hashes)))
+                key = f'states_{index}'
+                params[key] = states
+                predicate = f'tuple(partition_key, revision, build_id) IN %({key})s' if states else '0'
+                names = ', '.join(c.name for c in component.columns)
+                selects.append(f'SELECT {names} FROM {store.component_table(member.key)} WHERE {predicate}')
+            reference = '(' + ' UNION ALL '.join(selects) + ')'
+            expected = binary_hash(store.client, component, reference, params=params,
+                                   schema_version=spec.schema_version)
+            actual = binary_hash(store.client, component, view, schema_version=spec.schema_version)
+            receipt.update(expected_hash=expected, public_hash=actual)
+            assert actual == expected, (view, 'public values differ from pinned physical generations')
+            plan = json.loads(str(store.execute(f'EXPLAIN json=1, indexes=1 SELECT count() FROM {view}')[0][0]))
+            scans = [n for n in _plan_nodes(plan) if n.get('Node Type') == 'ReadFromMergeTree'
+                     and n.get('Description') == store.table('source_activation_log')]
+            conditions: list[str] = []
+            receipt['activation_conditions'] = conditions
+            assert scans, (view, 'missing activation scans')
+            for scan in scans:
+                indexes = cast(list[dict[str, object]], scan['Indexes'])
+                primary = [i for i in indexes if i['Type'] == 'PrimaryKey']
+                assert len(primary) == 1 and 'source_key' in cast(list[str], primary[0].get('Keys', [])), (view, scan)
+                condition = str(primary[0]['Condition'])
+                conditions.append(condition)
+                assert set(re.findall(r"'([^']*)'", condition)) == {spec.key}, (view, 'unscoped activation scan', condition)
+    finally:
+        request.node.user_properties.append(('public_readers_' + phase, json.dumps(report)))
+
+
 def test_real_minutes_clip_at_gap_then_canonical_day_supersedes_them(
+    request: pytest.FixtureRequest,
     real_minutes: tuple[SourceRuntime, tuple[str, ...], dict[str, tuple[Row, ...]], int],
 ) -> None:
     runtime, keys, rows, archive_count = real_minutes
     store = runtime.store
     runtime.build(keys[2], provisional=True)
     assert _current(store) == []
+    _assert_public_readers(runtime, request, 'hidden_gap')
     runtime.build(keys[0], provisional=True)
     assert _current(store) == [(keys[0], 1)]
+    _assert_public_readers(runtime, request, 'first_minute')
     assert store.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [
         (len(rows[keys[0]]),)
     ]
     runtime.build(keys[1], provisional=True)
     assert _current(store) == [(key, 1) for key in keys]
+    _assert_public_readers(runtime, request, 'filled_gap')
     assert store.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [
         (sum(map(len, rows.values())),)
     ]
@@ -103,6 +180,7 @@ def test_real_minutes_clip_at_gap_then_canonical_day_supersedes_them(
     day = keys[0][:10]
     runtime.build(day)
     assert _current(store) == [(day, 0)]
+    _assert_public_readers(runtime, request, 'canonical')
     assert store.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [
         (archive_count,)
     ]
@@ -114,11 +192,13 @@ def test_real_minutes_clip_at_gap_then_canonical_day_supersedes_them(
 
 
 def test_preparation_replaces_existing_view_without_changing_dependent_views(
+    request: pytest.FixtureRequest,
     real_minutes: tuple[SourceRuntime, tuple[str, ...], dict[str, tuple[Row, ...]], int],
 ) -> None:
     runtime, keys, _, _ = real_minutes
     store = runtime.store
     runtime.build(keys[0], provisional=True)
+    _assert_public_readers(runtime, request, 'before_recovery')
     names = [f'{store.spec.names.prefix}_{component.key}_current' for component in store.spec.components]
     names.extend(name for name, _ in store.spec.aliases)
     counts = {name: store.execute(f'SELECT count() FROM origo.{name}') for name in names}
@@ -127,13 +207,14 @@ def test_preparation_replaces_existing_view_without_changing_dependent_views(
         'CREATE OR REPLACE VIEW origo.source_current_partitions AS '
         'SELECT * FROM origo.source_active_partitions WHERE 0'
     )
-    assert store.execute('SELECT count() FROM origo.binance_spot_trades_raw_current') == [(0,)]
-    for _ in range(2):
+    assert _current(store) == []
+    for repeat in range(2):
         runtime.setup(anchor=store.anchor())
         assert store.execute('DESCRIBE TABLE origo.source_current_partitions') == columns
         assert _current(store) == [(keys[0], 1)]
         assert {name: store.execute(f'SELECT count() FROM origo.{name}') for name in names} == counts
         assert store.execute('SELECT count() FROM origo.source_activation_log') == [(1,)]
+        _assert_public_readers(runtime, request, f'recovered_{repeat}')
 
 
 @pytest.mark.resource

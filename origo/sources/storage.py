@@ -291,36 +291,11 @@ class SourceStore:
                 argMax(a.component_hashes, a.generation) AS component_hashes
             FROM {self.table('source_activation_log')} a
             GROUP BY source_key, partition_key, provisional""")
-        from .registry import SOURCE_REGISTRY
-
-        policies = {source.key: source.read_policy for source in SOURCE_REGISTRY}
-        policies[self.spec.key] = self.spec.read_policy
-        available = ', '.join(
-            f"'{identifier(key)}'" for key, policy in sorted(policies.items())
-            if policy == SourceReadPolicy.AVAILABLE
-        ) or "''"
-        self.execute(f"""CREATE OR REPLACE VIEW {self.table('source_current_partitions')} AS
-            WITH covered AS (
-                SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
-                    PARTITION BY source_key ORDER BY partition_start, provisional
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS canonical_end
-                FROM {self.table('source_active_partitions')} a
-            ), eligible AS (
-                SELECT * EXCEPT canonical_end FROM covered
-                WHERE NOT provisional OR partition_start>=canonical_end
-            ), ranked AS (
-                SELECT e.*, anchor,
-                    max(partition_end) OVER (PARTITION BY e.source_key ORDER BY partition_start, partition_end
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_end
-                FROM eligible e INNER JOIN {self.table('source_anchor_log')} n ON e.source_key=n.source_key
-            ), frontiers AS (
-                SELECT source_key,
-                    if(countIf(partition_start>greatest(prior_end, anchor))=0,
-                       max(partition_end), minIf(partition_start, partition_start>greatest(prior_end, anchor))) AS frontier
-                FROM ranked GROUP BY source_key
-            )
-            SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
-            WHERE NOT e.provisional OR e.source_key IN ({available}) OR e.partition_end<=f.frontier""")
+        self.execute(
+            f"CREATE OR REPLACE VIEW {self.table('source_current_partitions')} AS "
+            + self._current_partitions_select()
+        )
+        current = self._current_partitions_select(self.spec.key)
         self.execute(f"""CREATE TABLE IF NOT EXISTS {self.table('source_capacity_log')} (
             source_key String, volume_id String, working_set_bytes UInt64,
             dagster_run_id String, successful UInt8, measured_at DateTime64(6, 'UTC')
@@ -333,9 +308,9 @@ class SourceStore:
             ) ENGINE = MergeTree PARTITION BY toYYYYMM(source_date)
             ORDER BY (source_date, revision, build_id, {key})""")
         for component in self.spec.components:
-            selections = [self._current_select(component, component)]
+            selections = [self._current_select(component, component, current)]
             selections.extend(
-                self._current_select(component, provisional)
+                self._current_select(component, provisional, current)
                 for provisional in self.spec.components
                 if provisional.current_target == component.key
             )
@@ -353,7 +328,7 @@ class SourceStore:
             component = next(item for item in self.spec.components if item.key == key)
             self.execute(
                 f'CREATE OR REPLACE VIEW {self.table(alias)} AS '
-                + self._current_select(component, component)
+                + self._current_select(component, component, current)
             )
 
     def _engine(self, name: str) -> str | None:
@@ -381,7 +356,39 @@ class SourceStore:
             settings={'max_table_size_to_drop': 0},
         )
 
-    def _current_select(self, target: ComponentSpec, source: ComponentSpec) -> str:
+    def _current_partitions_select(self, source_key: str | None = None) -> str:
+        from .registry import SOURCE_REGISTRY
+
+        policies = {source.key: source.read_policy for source in SOURCE_REGISTRY}
+        policies[self.spec.key] = self.spec.read_policy
+        available = ', '.join(
+            f"'{identifier(key)}'" for key, policy in sorted(policies.items())
+            if policy == SourceReadPolicy.AVAILABLE
+        ) or "''"
+        predicate = f" WHERE a.source_key='{identifier(source_key)}'" if source_key is not None else ''
+        return f"""WITH covered AS (
+                SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
+                    PARTITION BY source_key ORDER BY partition_start, provisional
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS canonical_end
+                FROM {self.table('source_active_partitions')} a{predicate}
+            ), eligible AS (
+                SELECT * EXCEPT canonical_end FROM covered
+                WHERE NOT provisional OR partition_start>=canonical_end
+            ), ranked AS (
+                SELECT e.*, anchor,
+                    max(partition_end) OVER (PARTITION BY e.source_key ORDER BY partition_start, partition_end
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_end
+                FROM eligible e INNER JOIN {self.table('source_anchor_log')} n ON e.source_key=n.source_key
+            ), frontiers AS (
+                SELECT source_key,
+                    if(countIf(partition_start>greatest(prior_end, anchor))=0,
+                       max(partition_end), minIf(partition_start, partition_start>greatest(prior_end, anchor))) AS frontier
+                FROM ranked GROUP BY source_key
+            )
+            SELECT e.* FROM eligible e INNER JOIN frontiers f ON e.source_key=f.source_key
+            WHERE NOT e.provisional OR e.source_key IN ({available}) OR e.partition_end<=f.frontier"""
+
+    def _current_select(self, target: ComponentSpec, source: ComponentSpec, current: str) -> str:
         selected = ', '.join(f'd.{column.name}' for column in target.columns)
         active = (
             f" AND arrayExists(pair -> pair[1] = '{source.key}', "
@@ -389,7 +396,7 @@ class SourceStore:
             if source.activation_group is not None else ''
         )
         return f"""SELECT {selected} FROM {self.component_table(source.key)} d
-            INNER JOIN {self.table('source_current_partitions')} a
+            INNER JOIN ({current}) a
             ON d.partition_key=a.partition_key AND d.revision=a.revision AND d.build_id=a.build_id
             WHERE a.source_key='{self.spec.key}' AND a.provisional={int(source.provisional)}{active}"""
 

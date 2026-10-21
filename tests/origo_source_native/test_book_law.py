@@ -27,6 +27,7 @@ from .test_book_history import (
     original_historical_archives as original_historical_archives,
 )
 from .test_book_sources import book_runtime as book_runtime, _keys
+from .test_current_partition_recovery import _assert_public_readers
 
 from .test_book_vendor import (
     REAL_HOUR,
@@ -597,6 +598,7 @@ def test_book_tail_proofs_include_distinct_minute_builds(book_runtime: SourceRun
 
 
 def test_hourly_authority_replaces_overlapping_provisional_book_rows(
+    request: pytest.FixtureRequest,
     authoritative_book_runtime: SourceRuntime,
     original_vendor_archive: tuple[Market, bytes, dict[str, str]],
     original_vendor_following_archive: tuple[Market, bytes, dict[str, str]],
@@ -619,7 +621,9 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
     prefix = 'origo.' + runtime.spec.names.prefix
     assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_current') == [(600,)]
     assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_latest_current') == [(600,)]
+    _assert_public_readers(runtime, request, 'provisional')
     canonical = runtime.build(REAL_HOUR)
+    _assert_public_readers(runtime, request, 'canonical')
     assert runtime.store.records() == (canonical,)
     assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_current') == [(36000,)]
     assert runtime.store.execute(f'SELECT count() FROM {prefix}_depth20_latest_current') == [(0,)]
@@ -652,6 +656,7 @@ def test_hourly_authority_replaces_overlapping_provisional_book_rows(
         runtime.build(REAL_HOUR)
     assert failure.value.code == 'BOOK_SEQUENCE_GAP'
     assert runtime.store.records() == (canonical,)
+    _assert_public_readers(runtime, request, 'failed_replacement')
     assert runtime.store.execute(
         f'SELECT count() FROM {prefix}_depth20_latest_revisions WHERE build_id=%(build)s',
         {'build': minute.build_id},

@@ -781,3 +781,9 @@ Owner02:57monitor current bookreaders each116/116minutes0missing, both00Zcanonic
 - First managed native-retirement check on c649ea3 failed after7passes/37.47s because the new preservation test omitted its SourceStore import; current-head runtimeCI also failed. This is a test setup defect, not a deletion or preservation pass. Add the actual import and publish before repeating. The local result is additionally unknown for final-input binding because the operations document was added during execution; preserve both facts.
 - Static review rejected hashing the latest canonical trade day on every cleanup batch. Protection now pins at most one actual provisional minute per source, retaining exact count/SHA256 comparisons without repeated full-day scans. No production deletion or measured gain.
 - A second review exposed aged native payloads on permanently incomplete days: whole-day cleanup cannot reclaim them once hourly authority is gone. Scope extension is awaiting the operator's answer; do not declare retirement complete or indefinite live capture safety from the current free space.
+
+
+### Retirement collection correction and approved retention — 2026-10-22
+
+- Correction: runtimeCI39852968520 stopped during collection, before the local missing-import boundary. Its installed Linux layout resolved an unrelated tools namespace, so importing the retirement command by package name failed. Load the exact repository tool file with the existing importlib pattern. Preserve both distinct failures; neither qualifies production cleanup.
+- Operator approved the narrow additional cleanup: “Yes, include the cleanup fix.” Limit it to aged temporary native payloads whose exact stored minute and four physical component proofs verify; keep immutable seals, actual gaps and complete days awaiting daily canonical retry. Existing collectors and captured database data remain protected.

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -21,9 +23,15 @@ from origo.sources.failures import FailureLog
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
-from tools import retire_cryptohftdata as retirement
-
 from .test_book_sources import _keys, book_runtime as book_runtime
+
+_module_spec = importlib.util.spec_from_file_location(
+    'retire_cryptohftdata', Path(__file__).resolve().parents[2] / 'tools/retire_cryptohftdata.py',
+)
+assert _module_spec is not None and _module_spec.loader is not None
+retirement = importlib.util.module_from_spec(_module_spec)
+sys.modules[_module_spec.name] = retirement
+_module_spec.loader.exec_module(retirement)
 
 
 def _stopped() -> list[SimpleNamespace]:

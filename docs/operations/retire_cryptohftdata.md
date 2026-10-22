@@ -42,13 +42,18 @@ The owning agent completes these operations; no operator configuration is needed
    it accepts only zero remaining rows or the original unchanged count. Partial
    outcomes and changed protected data stay blocked, with no waiver/new baseline.
    A partial Dagster wipe requires investigation before its complete outcome can
-   be proved. Keep the same private evidence file throughout the retirement.
+   be proved. Keep the same private evidence ledger for unresolved work. A verified
+   handoff may freeze a completed ledger intact, prove zero pending operations and
+   the original pins under the retirement lock, and fsync an exact SHA/path/inode/size
+   attestation linking the retained ledger to a new one. This is operational chain
+   evidence; the CLI validates only its selected ledger. It never clears failed or
+   interrupted work. Pin every later invocation to the new ledger.
 5. Remove only the provider's isolated `book_vendor_spot` and `book_vendor_perp`
    cache directories and `binance_rest_budget.api_cryptohftdata_com.state`. Keep
    source domain markers, other quota ledgers, all native spool files and all other
    volumes. Remove the retired credential from deployment secrets and local
-   deployment configuration after the release no longer references it. Delete
-   no shared Dagster run history: vendor completion runs can also contain native
+   deployment configuration after the release no longer references it. Retain
+   shared Dagster run history: vendor completion runs can also contain native
    receipts. After the database phase has no candidate, run the same command with
    `--dagster` to inventory the two canonical assets. `--dagster --apply` uses the
    supported exact-asset wipe only after every materialization is proven to have

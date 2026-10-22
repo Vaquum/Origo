@@ -155,6 +155,7 @@ def _assert_native_selection_and_completion(
     # Every copied market value is unchanged; only its canonical provenance differs.
     record = replace(
         native, partition=replace(native.partition, provisional=False), build_id=uuid4(),
+        generation=native.generation + 1,
         component_hashes=tuple((key.removesuffix('_latest'), digest)
                                for key, digest in native.component_hashes),
     )

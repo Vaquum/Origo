@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 from dagster import (
-    AssetExecutionContext, AssetKey, DailyPartitionsDefinition, DagsterInstance, Definitions,
-    Failure, build_sensor_context,
+    AssetExecutionContext, AssetKey, AssetsDefinition, DailyPartitionsDefinition,
+    DagsterInstance, Definitions, Failure, build_sensor_context,
 )
 from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
 from dagster._core.remote_origin import RemotePartitionSetOrigin
@@ -20,12 +20,13 @@ from dagster._core.test_utils import create_run_for_test
 
 from origo import law
 from origo.law_catalog import build_catalog
+from origo.sources import bundle as source_bundle
 from origo.sources.adapters.book_local import LocalBookCanonical
 from origo.sources.backfill import publication_ready
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.bundle import SourceRunConfig, build_source_bundle, execute_source
-from origo.sources.contracts import Partition, Row
+from origo.sources.contracts import Partition, RevisionedSourceSpec, Row, SourceError
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.storage import SourceStore
@@ -141,12 +142,12 @@ def test_native_daily_backfill_orders_completion_after_canonical_build(
     assert health.asset_layer.executable_asset_keys == {
         AssetKey(f'reconcile_{spec.key}_source_origo'),
     }
-    _assert_native_selection_and_completion(runtime, monkeypatch, request, job.name)
+    _assert_native_selection_and_completion(runtime, monkeypatch, request, job.name, canonical)
 
 
 def _assert_native_selection_and_completion(
     runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest, job_name: str,
+    request: pytest.FixtureRequest, job_name: str, canonical: AssetsDefinition,
 ) -> None:
     store = runtime.store
     native = runtime.build(_keys(runtime)[-1], provisional=True)
@@ -268,6 +269,53 @@ def _assert_native_selection_and_completion(
                 publication_ready(runtime.spec, context, result)
         assert len(attempts) == 1
         assert publication_ready(runtime.spec, context, result) is True
+
+        # Dagster's single child uses the canonical job and normal partition tags,
+        # without range tags. Keep this calendar protocol bound to the real minute.
+        execute = cast(
+            Callable[[AssetExecutionContext, SourceRunConfig], Iterator[object]],
+            getattr(canonical.op.compute_fn, 'decorated_fn'),
+        )
+        canonical_job = f'refresh_{runtime.spec.key}_canonical_source_job'
+        for fail in (False, True):
+            child = create_run_for_test(instance, job_name=canonical_job, tags={
+                'dagster/backfill': parent, 'dagster/partition': record.partition.key,
+            })
+            child_context = cast(AssetExecutionContext, SimpleNamespace(
+                instance=instance, run=child, job_def=SimpleNamespace(name=canonical_job),
+                has_partition_key_range=False, partition_keys=[record.partition.key],
+                log=logging.getLogger(__name__),
+            ))
+
+            def captured_child(
+                spec: RevisionedSourceSpec, operation: str, config: SourceRunConfig,
+                *, run_id: str,
+            ) -> dict[str, object]:
+                assert spec == runtime.spec and operation == 'canonical'
+                assert config.partition_key == record.partition.key and config.automatic_capacity
+                assert run_id == child.run_id
+                if fail:
+                    raise SourceError('DELIBERATE_CHILD_FAILURE', 'Captured child protocol fault.')
+                return result
+
+            with monkeypatch.context() as control:
+                control.setattr(source_bundle, 'execute_source', captured_child)
+                if fail:
+                    with pytest.raises(Failure, match='DELIBERATE_CHILD_FAILURE'):
+                        list(execute(child_context, SourceRunConfig()))
+                else:
+                    assert len(list(execute(child_context, SourceRunConfig()))) == 1
+            stored_child = instance.get_run_by_id(child.run_id)
+            assert stored_child is not None
+            assert stored_child.tags.items() >= {
+                'origo_source_key': runtime.spec.key, 'origo_source_operation': 'backfill',
+                'origo_source_partition': record.partition.key, 'origo_source_phase': 'canonical',
+            }.items()
+            assert not any(key.startswith('dagster/asset_partition_range_') for key in stored_child.tags)
+            assert store.execute(
+                'SELECT count() FROM origo.source_backfill_log WHERE dagster_run_id=%(run)s',
+                {'run': child.run_id},
+            ) == [(0 if fail else 1,)]
 
     unrelated = _keys(runtime)[0]
     assert unrelated != record.partition.key

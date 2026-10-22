@@ -29,10 +29,20 @@ The owning agent completes these operations; no operator configuration is needed
    observer runs can also contain native events and are not exclusively vendor-owned.
 4. Invoke the same command with `--apply` one batch at a time. Each invocation
    appends private, durable evidence, removes at most one table/month and rechecks
-   exact count/SHA256 proofs of immutable native provisional minutes. Stop on any
+   exact count/SHA256 proofs of immutable native provisional minutes. The owning
+   agent admits no manual book work during this window. Stopped instigators and
+   source-wide run/backfill checks are rechecked before every mutation; the tool's
+   own lock serializes retirement commands, not deployed source writers. It never
+   holds the shared heavy fence that live minute ingestion needs. Stop on any
    error, unverified mutation or change in protected live operation. Do not retry
    an unfinished database mutation blindly. A dry-run with `statement: null` marks
-   completion of this database phase.
+   completion of this database phase. An unmatched or failed apply blocks later
+   operations against the same evidence ledger. Use `--reconcile --evidence FILE`
+   for a read-only recheck of that original operation's pins and exact row outcome;
+   it accepts only zero remaining rows or the original unchanged count. Partial
+   outcomes and changed protected data stay blocked, with no waiver/new baseline.
+   A partial Dagster wipe requires investigation before its complete outcome can
+   be proved. Keep the same private evidence file throughout the retirement.
 5. Remove only the provider's isolated `book_vendor_spot` and `book_vendor_perp`
    cache directories and `binance_rest_budget.api_cryptohftdata_com.state`. Keep
    source domain markers, other quota ledgers, all native spool files and all other
@@ -49,7 +59,9 @@ The owning agent completes these operations; no operator configuration is needed
 6. Merge and deploy the validated release only after the obsolete hourly metadata
    has been removed. Bootstrap re-enables managed book automation, so deploying
    daily code first would allow daily audit/reconciliation to encounter retired
-   hourly keys. The release's native-only pin preserves live collector/worker
+   hourly keys. The release also executes `tools/book_deploy_preflight.py` before
+   compatibility/bootstrap/container replacement; it refuses retired metadata and
+   hourly canonical Dagster facts using bounded read-only checks. The release's native-only pin preserves live collector/worker
    identities while updating orchestration and monitoring.
 7. Verify zero vendor database generations/cache objects and no provider requests;
    verify the original native/depth minute proofs and advancing live minutes,

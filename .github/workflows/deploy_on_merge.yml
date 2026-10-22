@@ -204,6 +204,8 @@ jobs:
 
           cd "$DEPLOY_DIR"
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
+          # Retired hourly authority must disappear before daily bootstrap changes any source state.
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster /opt/app/tools/book_deploy_preflight.py </dev/null
           # Before any container is replaced, the new image must read every activated component.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility </dev/null
           retained_workers=()

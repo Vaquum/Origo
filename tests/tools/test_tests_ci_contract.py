@@ -88,7 +88,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest() == 'e179f839c88a6e1ab771539cab20fc698467497e2e842da141c8ab5f829fa6d4'
+    ).encode()).hexdigest() == 'f4904447c9c236340149fab136ed9bb1c263c50af1b180e3bbeb4ae2e6542a6c'
     assert contract['required_nodes'] == [
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
@@ -102,7 +102,27 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch',
         'tests/origo_source_native/test_book_deploy.py::test_retired_hourly_vendor_credential_is_absent',
         'tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws',
-        'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build',
+        'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[spot]',
+        'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[perp]',
+        'tests/origo_source_native/test_book_sources.py::test_native_audit_reclaims_only_saved_payloads_from_incomplete_days[spot]',
+        'tests/origo_source_native/test_book_sources.py::test_native_audit_reclaims_only_saved_payloads_from_incomplete_days[perp]',
+        'tests/origo_source_native/test_book_sources.py::test_native_reclamation_keeps_payloads_when_seal_or_persisted_proof_fails[spot]',
+        'tests/origo_source_native/test_book_sources.py::test_native_reclamation_keeps_payloads_when_seal_or_persisted_proof_fails[perp]',
+        'tests/origo_source_native/test_book_capture.py::test_provisional_admission_waits_for_actual_seals[spot]',
+        'tests/origo_source_native/test_book_capture.py::test_provisional_admission_waits_for_actual_seals[perp]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[adapter]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[automation]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[run]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[not_started]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[backfill]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_dry_run_and_single_mutation_keep_protection_evidence[False]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_dry_run_and_single_mutation_keep_protection_evidence[True]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables',
+        'tests/origo_source_native/test_book_retirement.py::test_vendor_scratch_lookup_stays_below_query_limit_with_many_build_identities',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_preserves_native_and_unrelated_data[spot]',
+        'tests/origo_source_native/test_book_retirement.py::test_retirement_preserves_native_and_unrelated_data[perp]',
+        'tests/origo_source_native/test_book_deploy.py::test_daily_book_deployment_refuses_retired_metadata_before_bootstrap[spot]',
+        'tests/origo_source_native/test_book_deploy.py::test_daily_book_deployment_refuses_retired_metadata_before_bootstrap[perp]',
     ]
 
 

@@ -1,25 +1,38 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
+from uuid import uuid4
 
 import pytest
 from dagster import (
-    AssetKey, DailyPartitionsDefinition, DagsterInstance, Definitions, build_sensor_context,
+    AssetExecutionContext, AssetKey, DailyPartitionsDefinition, DagsterInstance, Definitions,
+    Failure, build_sensor_context,
 )
+from dagster._core.execution.backfill import BulkActionStatus, PartitionBackfill
+from dagster._core.remote_origin import RemotePartitionSetOrigin
+from dagster._core.test_utils import create_run_for_test
 
 from origo import law
 from origo.law_catalog import build_catalog
+from origo.sources.adapters.book_local import LocalBookCanonical
+from origo.sources.backfill import publication_ready
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
-from origo.sources.bundle import build_source_bundle
+from origo.sources.bundle import SourceRunConfig, build_source_bundle, execute_source
+from origo.sources.contracts import Partition, Row
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.storage import SourceStore
 
 from .test_book_sources import book_runtime as book_runtime, _keys
 from .test_current_partition_recovery import _assert_public_readers
+from .test_revisioned_source_framework_backfill import _repository_origin
 
 
 def _predicate(report: law.LawReport, source: str, key: law.LawPredicate) -> law.PredicateReport:
@@ -107,25 +120,173 @@ def test_book_sources_are_required_daily_reader_laws() -> None:
         assert f'book.capture.hourly_grid:{source}' not in gates
 
 
-def test_native_daily_backfill_orders_completion_after_canonical_build() -> None:
-    for spec in (BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
-        bundle = build_source_bundle(spec)
-        definitions = Definitions(
-            assets=bundle.assets, jobs=bundle.jobs,
-            schedules=bundle.schedules, sensors=bundle.sensors,
+def test_native_daily_backfill_orders_completion_after_canonical_build(
+    book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> None:
+    runtime, spec = book_runtime, book_runtime.spec
+    bundle = build_source_bundle(spec)
+    definitions = Definitions(
+        assets=bundle.assets, jobs=bundle.jobs,
+        schedules=bundle.schedules, sensors=bundle.sensors,
+    )
+    job = definitions.get_job_def(f'backfill_{spec.key}_source_job')
+    assert job.asset_layer.executable_asset_keys == {
+        AssetKey(f'build_{spec.key}_canonical_revision_origo'),
+    }
+    canonical = next(asset for asset in bundle.assets
+                     if AssetKey(f'build_{spec.key}_canonical_revision_origo') in asset.keys)
+    assert isinstance(canonical.partitions_def, DailyPartitionsDefinition)
+    assert canonical.partitions_def.start == spec.partitions.start
+    health = definitions.get_job_def(f'reconcile_{spec.key}_source_origo_job')
+    assert health.asset_layer.executable_asset_keys == {
+        AssetKey(f'reconcile_{spec.key}_source_origo'),
+    }
+    _assert_native_selection_and_completion(runtime, monkeypatch, request, job.name)
+
+
+def _assert_native_selection_and_completion(
+    runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest, job_name: str,
+) -> None:
+    store = runtime.store
+    native = runtime.build(_keys(runtime)[-1], provisional=True)
+    _assert_public_readers(runtime, request, 'before_canonical_control')
+    # This is a one-minute activation/proof protocol control, never a complete day.
+    # Every copied market value is unchanged; only its canonical provenance differs.
+    record = replace(
+        native, partition=replace(native.partition, provisional=False), build_id=uuid4(),
+        component_hashes=tuple((key.removesuffix('_latest'), digest)
+                               for key, digest in native.component_hashes),
+    )
+    bindings = {'native': native.build_id, 'canonical': record.build_id}
+    for component in runtime.spec.components:
+        if not component.provisional:
+            columns = ','.join(column.name for column in component.columns)
+            store.execute(
+                f'INSERT INTO {store.component_table(component.key)} '
+                f'SELECT source_date,partition_key,revision,%(canonical)s,{columns} '
+                f'FROM {store.component_table(component.key + "_latest")} '
+                'WHERE build_id=%(native)s', bindings,
+            )
+    store.execute(
+        'INSERT INTO origo.source_component_log SELECT source_key,partition_key,0,revision,'
+        "%(canonical)s,replaceOne(component,'_latest',''),row_count,content_hash,"
+        'source_content_hash,evidence_json,artifact_ref,dagster_run_id,completed_at '
+        'FROM origo.source_component_log WHERE build_id=%(native)s', bindings,
+    )
+    store.insert_activation(record, runtime.run_id)
+    assert store.snapshot().records == (record,)
+    for phase in ('canonical_precedes_overlapping_provisional', 'provisional_physically_absent'):
+        if phase == 'provisional_physically_absent':
+            # Deliberate physical-absence control rejects a reader using only the
+            # identical provisional copy instead of the accepted canonical arm.
+            for component in runtime.spec.components:
+                if component.provisional:
+                    store.execute(
+                        f'ALTER TABLE {store.component_table(component.key)} DELETE '
+                        'WHERE build_id=%(native)s', bindings, settings={'mutations_sync': 2},
+                    )
+        for component, count in zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1), strict=True):
+            assert store.execute(
+                f'SELECT count() FROM {store.table(runtime.spec.key + "_" + component + "_current")}'
+            ) == [(count,)]
+        _assert_public_readers(runtime, request, phase)
+    proofs = store.execute(
+        'SELECT component,row_count,content_hash FROM origo.source_component_log '
+        'WHERE source_key=%(source)s AND build_id=%(build)s',
+        {'source': runtime.spec.key, 'build': record.build_id},
+    )
+    assert {key: count for key, count, _digest in proofs} == dict(
+        zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1), strict=True)
+    )
+    assert dict(record.component_hashes) == {key: digest for key, _count, digest in proofs}
+
+    # Narrow only the partition-calendar protocol to this actual captured minute.
+    # The real completion validator and all its storage queries remain unchanged.
+    def recorded_minute(self: LocalBookCanonical, key: str) -> Partition:
+        assert key == record.partition.key
+        return record.partition
+
+    monkeypatch.setattr(LocalBookCanonical, 'partition', recorded_minute)
+    with DagsterInstance.ephemeral() as instance:
+        parent = str(uuid4())
+        instance.add_backfill(PartitionBackfill(
+            backfill_id=parent, status=BulkActionStatus.REQUESTED, from_failure=False, tags={},
+            backfill_timestamp=datetime.now(UTC).timestamp(), partition_names=[record.partition.key],
+            partition_set_origin=RemotePartitionSetOrigin(
+                repository_origin=_repository_origin(), partition_set_name=job_name + '_partition_set',
+            ),
+        ))
+        run = create_run_for_test(instance, job_name=job_name, tags={'dagster/backfill': parent})
+        context = cast(AssetExecutionContext, SimpleNamespace(
+            instance=instance, run=run, partition_keys=[record.partition.key],
+            log=logging.getLogger(__name__),
+        ))
+        result: dict[str, object] = {
+            'partition_key': record.partition.key, 'revision': record.revision,
+            'build_id': str(record.build_id), 'generation': record.generation,
+        }
+        assert publication_ready(runtime.spec, context, result) is True
+        assert store.execute(
+            'SELECT partition_key,revision,build_id,generation,dagster_run_id '
+            'FROM origo.source_backfill_log WHERE source_key=%(source)s AND backfill_id=%(parent)s',
+            {'source': runtime.spec.key, 'parent': parent},
+        ) == [(record.partition.key, record.revision, record.build_id, record.generation, run.run_id)]
+        for field, fault in (('revision', 'deliberate-revision-fault'),
+                             ('build_id', str(uuid4())), ('generation', record.generation + 1)):
+            with pytest.raises(Failure, match='BACKFILL_RECEIPT_INVALID'):
+                publication_ready(runtime.spec, context, {**result, field: fault})
+            assert store.record(record.partition) == record
+
+        saved = store.execute(
+            "SELECT * FROM origo.source_component_log WHERE build_id=%(build)s AND component='depth200_1m'",
+            {'build': record.build_id},
         )
-        job = definitions.get_job_def(f'backfill_{spec.key}_source_job')
-        assert job.asset_layer.executable_asset_keys == {
-            AssetKey(f'build_{spec.key}_canonical_revision_origo'),
-        }
-        canonical = next(asset for asset in bundle.assets
-                         if AssetKey(f'build_{spec.key}_canonical_revision_origo') in asset.keys)
-        assert isinstance(canonical.partitions_def, DailyPartitionsDefinition)
-        assert canonical.partitions_def.start == spec.partitions.start
-        health = definitions.get_job_def(f'reconcile_{spec.key}_source_origo_job')
-        assert health.asset_layer.executable_asset_keys == {
-            AssetKey(f'reconcile_{spec.key}_source_origo'),
-        }
+        store.execute(
+            "ALTER TABLE origo.source_component_log DELETE WHERE build_id=%(build)s AND component='depth200_1m'",
+            {'build': record.build_id}, settings={'mutations_sync': 2},
+        )
+        with pytest.raises(Failure, match='BACKFILL_RECEIPT_INVALID'):
+            publication_ready(runtime.spec, context, result)
+        store.execute('INSERT INTO origo.source_component_log VALUES', saved)
+        persisted = SourceStore.execute
+        attempts: list[str] = []
+
+        def unavailable_receipt(
+            self: SourceStore, sql: str, params: object | None = None,
+            settings: Mapping[str, object] | None = None,
+        ) -> list[Row]:
+            if sql.startswith('INSERT INTO origo.source_backfill_log'):
+                attempts.append(sql)
+                raise OSError('Deliberate receipt persistence protocol fault.')
+            return persisted(self, sql, params, settings)
+
+        with monkeypatch.context() as control:
+            control.setattr(SourceStore, 'execute', unavailable_receipt)
+            with pytest.raises(OSError, match='receipt persistence'):
+                publication_ready(runtime.spec, context, result)
+        assert len(attempts) == 1
+        assert publication_ready(runtime.spec, context, result) is True
+
+    unrelated = _keys(runtime)[0]
+    assert unrelated != record.partition.key
+    runtime.failures.record(operation='canonical', partition=unrelated, scope='PARTITION',
+                            error_code='DELIBERATE_UNRELATED_COMPLETION_CONTROL')
+    runtime.failures.record(operation='backfill', scope='NONE', error_code='RUN_FAILED')
+    before = store.execute(
+        "SELECT * FROM origo.source_failure_log WHERE operation='canonical' AND partition_key=%(key)s",
+        {'key': unrelated},
+    )
+    completed = execute_source(runtime.spec, 'complete', SourceRunConfig(), run_id=runtime.run_id)
+    assert completed['healthy'] is False and completed['unresolved_failures'] == 1
+    assert store.execute(
+        "SELECT * FROM origo.source_failure_log WHERE operation='canonical' AND partition_key=%(key)s",
+        {'key': unrelated},
+    ) == before
+    assert store.execute(
+        "SELECT argMax(event_type,event_time) FROM origo.source_failure_log WHERE operation='backfill'"
+    ) == [('RECOVERED',)]
+    assert store.record(record.partition) == record
 
 
 def test_fresh_book_minute_does_not_hide_a_provisional_gap(book_runtime: SourceRuntime) -> None:

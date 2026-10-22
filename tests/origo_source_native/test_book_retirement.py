@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -125,7 +125,7 @@ def test_retirement_dry_run_and_single_mutation_keep_protection_evidence(
     stages: list[str] = []
     monkeypatch.setattr(retirement, 'require_quiescent', lambda *_args: stages.append('quiescent'))
     monkeypatch.setattr(retirement, 'require_no_mutations', lambda *_args: stages.append('idle'))
-    deletion = retirement.Deletion('origo.source_activation_log', retirement.VENDOR, {}, 1)
+    deletion = retirement.Deletion('origo.source_activation_log', retirement.VENDOR, {}, 3)
     monkeypatch.setattr(retirement, 'next_deletion', lambda _stores: deletion)
     monkeypatch.setattr(retirement, 'vendor_manifest', lambda _stores:
                         retirement.VendorManifest((), (), (), ()))
@@ -150,6 +150,69 @@ def test_retirement_dry_run_and_single_mutation_keep_protection_evidence(
     assert len([call for call in client.execute.call_args_list
                 if call.args[0].startswith('ALTER TABLE')]) == int(apply)
     instance.wipe_assets.assert_not_called()
+    if not apply:
+        monkeypatch.setattr('sys.argv', ['retirement', '--apply', '--evidence', str(evidence)])
+        retirement.main()
+        assert sum(call.args[0].startswith('ALTER TABLE')
+                   for call in client.execute.call_args_list) == 1
+    if apply:
+        for interrupted in (False, True):
+            # Explicit protocol faults model a completed mutation followed by a
+            # failed proof or process interruption, without claiming market damage.
+            pins = ({'source': 'deliberate-original-protection-control'},)
+            sampler = MagicMock(return_value=pins)
+            monkeypatch.setattr(retirement, 'protected_fingerprints', sampler)
+            failure = (KeyboardInterrupt('deliberate interruption') if interrupted
+                       else RuntimeError('deliberate failed preservation'))
+            verifier = MagicMock(side_effect=failure)
+            monkeypatch.setattr(retirement, 'verify_protected', verifier)
+            monkeypatch.setattr('sys.argv', ['retirement', '--apply', '--evidence', str(evidence)])
+            with pytest.raises(type(failure)):
+                retirement.main()
+            original = retirement.unresolved_evidence(evidence)[0]
+            assert original['protected'] == list(pins)
+            before_retry = sum(call.args[0].startswith('ALTER TABLE')
+                               for call in client.execute.call_args_list)
+            sampler.return_value = ({'source': 'deliberate-new-baseline-control'},)
+            with pytest.raises(RuntimeError, match='Unverified retirement'):
+                retirement.main()
+            assert sampler.call_count == 1
+            assert sum(call.args[0].startswith('ALTER TABLE')
+                       for call in client.execute.call_args_list) == before_retry
+            monkeypatch.setattr('sys.argv', ['retirement', '--reconcile', '--evidence', str(evidence)])
+            with pytest.raises(type(failure)):
+                retirement.main()
+            assert verifier.call_args.args[1] == pins
+            assert sampler.call_count == 1
+            verifier.side_effect = None
+            client.execute.return_value = [(1,)]  # Neither zero nor the original three.
+            with pytest.raises(RuntimeError, match='Partial mutation outcome'):
+                retirement.main()
+            assert retirement.unresolved_evidence(evidence)
+            client.execute.return_value = [(0,)]
+            retirement.main()
+            assert sampler.call_count == 1
+            assert verifier.call_args.args[1] == pins
+            assert retirement.unresolved_evidence(evidence) == ()
+            frames = [json.loads(line) for line in evidence.read_text().splitlines()]
+            assert frames[-1]['phase'] == 'reconciled' and frames[-1]['outcome'] == 'applied'
+            assert next(frame for frame in frames if frame['id'] == original['id']) == original
+            # Original count unchanged is a separately proved, unsent outcome.
+            not_sent = {**original, 'id': str(uuid4())}
+            retirement.record(evidence, not_sent)
+            client.execute.return_value = [(3,)]
+            retirement.main()
+            assert json.loads(evidence.read_text().splitlines()[-1])['outcome'] == 'not_applied'
+            assert sampler.call_count == 1
+            client.execute.return_value = [(0,)]
+            monkeypatch.setattr('sys.argv', ['retirement', '--apply', '--evidence', str(evidence)])
+            retirement.main()
+            assert sampler.call_count == 2
+            assert sum(call.args[0].startswith('ALTER TABLE')
+                       for call in client.execute.call_args_list) == before_retry + 1
+        retirement.record(evidence, {'id': str(uuid4()), 'phase': 'unknown-apply-result'})
+        with pytest.raises(RuntimeError, match='Unknown or invalid'):
+            retirement.main()
 
 
 def test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables(
@@ -197,7 +260,7 @@ def test_vendor_scratch_lookup_stays_below_query_limit_with_many_build_identitie
 
 
 def test_retirement_preserves_native_and_unrelated_data(
-    book_runtime: SourceRuntime, metadata_instance: DagsterInstance,
+    book_runtime: SourceRuntime, metadata_instance: DagsterInstance, tmp_path: Path,
 ) -> None:
     """Real captured values survive; only deliberately vendor-labelled provenance is removed."""
     runtime = book_runtime
@@ -319,15 +382,31 @@ def test_retirement_preserves_native_and_unrelated_data(
         for name in scratch_names:
             store.execute(f'DROP DATABASE {name} SYNC')
     pins = retirement.protected_fingerprints((store,))
+    evidence = tmp_path / 'preservation-retirement.jsonl'
     deletion = retirement.next_deletion((store,))
     assert deletion is not None and deletion.table.endswith('.source_activation_log')
     mutations: list[str] = []
     for _ in range(30):
         if deletion is None:
             break
+        if not mutations:
+            retirement.record(evidence, {
+                'id': str(uuid4()), 'phase': 'before', 'apply': True, 'operation': 'rows',
+                'statement': deletion.statement, 'params': deletion.params,
+                'selected_rows': deletion.rows, 'protected': pins,
+                'vendor_ownership': asdict(ownership),
+            })
         mutations.append(deletion.table)
         store.execute(deletion.statement, deletion.params, settings={'mutations_sync': 2})
         retirement.verify_protected((store,), pins)
+        if len(mutations) == 1:
+            # Deliberately omit the result receipt after a real completed mutation.
+            original = retirement.unresolved_evidence(evidence)[0]
+            proof = retirement.reconcile_evidence(instance, (store,), (store,), original)
+            assert proof['outcome'] == 'applied'
+            assert proof['protected'] == tuple(original['protected'])
+            retirement.record(evidence, proof)
+            assert retirement.unresolved_evidence(evidence) == ()
         assert store.execute(
             'SELECT * FROM origo.source_run_log WHERE source_key=%(source)s '
             'AND event_id=%(event)s',
@@ -357,7 +436,25 @@ def test_retirement_preserves_native_and_unrelated_data(
     assert all(item.partitions == (key,) and item.counts == {
         'ASSET_MATERIALIZATION': 1, 'ASSET_MATERIALIZATION_PLANNED': 1,
     } for item in ownership)
-    retired = retirement.wipe_vendor_assets(instance, ownership)
+    retirement.record(evidence, {
+        'id': str(uuid4()), 'phase': 'before', 'apply': True, 'operation': 'dagster',
+        'statement': None, 'params': {}, 'selected_rows': 0, 'protected': pins,
+        'vendor_ownership': {'builds': [], 'runs': [], 'events': [], 'scratch_databases': []},
+        'canonical_assets': tuple(asdict(item) for item in ownership),
+    })
+    interrupted = retirement.unresolved_evidence(evidence)[0]
+    instance.wipe_assets([canonical_assets[0]])
+    with pytest.raises(RuntimeError, match='Partial or changed Dagster transition'):
+        retirement.reconcile_evidence(instance, (store,), (store,), interrupted)
+    assert retirement.unresolved_evidence(evidence)
+    # Complete only the remaining fully proved vendor asset through the same
+    # supported wipe. The unresolved receipt must still use its original pins.
+    retirement.wipe_vendor_assets(instance, retirement.dagster_inventory(instance))
+    retired = retirement.dagster_inventory(instance)
+    proof = retirement.reconcile_evidence(instance, (store,), (store,), interrupted)
+    assert proof['outcome'] == 'applied'
+    retirement.record(evidence, proof)
+    assert retirement.unresolved_evidence(evidence) == ()
     retirement.verify_protected((store,), pins)
     for asset in canonical_assets:
         assert instance.get_materialized_partitions(asset) == set()

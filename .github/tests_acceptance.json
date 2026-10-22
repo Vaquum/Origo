@@ -1647,27 +1647,22 @@
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_replaces_overlapping_provisional_book_rows[perp]": {
       "retained": [
-        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[perp]"
       ],
-      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
-      "retired_capability": "CryptoHFTData hourly book authority",
-      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+      "contract": "PRESERVED: native canonical book component readers suppress overlapping provisional rows. Unchanged genuine captured minute values, an explicitly minute-sized canonical metadata control, actual per-component public counts and pinned physical/public hashes reject duplicate canonical/provisional selection. A deliberate physical-absence control then removes only the provisional copy and repeats those assertions, rejecting a reader that selects only the wrong arm. This does not claim a complete native day."
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_replaces_overlapping_provisional_book_rows[spot]": {
       "retained": [
-        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[spot]"
       ],
-      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
-      "retired_capability": "CryptoHFTData hourly book authority",
-      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+      "contract": "PRESERVED: native canonical book component readers suppress overlapping provisional rows. Unchanged genuine captured minute values, an explicitly minute-sized canonical metadata control, actual per-component public counts and pinned physical/public hashes reject duplicate canonical/provisional selection. A deliberate physical-absence control then removes only the provisional copy and repeats those assertions, rejecting a reader that selects only the wrong arm. This does not claim a complete native day."
     },
     "tests/origo_source_native/test_book_law.py::test_native_hourly_backfill_orders_completion_after_canonical_build": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build"
+        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[spot]",
+        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[perp]"
       ],
-      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
-      "retired_capability": "CryptoHFTData hourly book authority",
-      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+      "contract": "PRESERVED: native daily job structure orders child completion after canonical build. The actual no-consumer completion policy, narrowed only to one genuine captured minute by an explicit partition-calendar protocol control, persists the exact active revision/build/generation, rejects identity and missing component-proof faults, propagates receipt persistence failure once, and retains unrelated source failures. Complete-day native acceptance remains unverified."
     },
     "tests/origo_source_native/test_book_law.py::test_pending_historical_failures_do_not_starve_later_valid_hour[perp]": {
       "retained": [
@@ -1878,6 +1873,26 @@
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch",
     "tests/origo_source_native/test_book_deploy.py::test_retired_hourly_vendor_credential_is_absent",
     "tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws",
-    "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build"
+    "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[spot]",
+    "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[perp]",
+    "tests/origo_source_native/test_book_sources.py::test_native_audit_reclaims_only_saved_payloads_from_incomplete_days[spot]",
+    "tests/origo_source_native/test_book_sources.py::test_native_audit_reclaims_only_saved_payloads_from_incomplete_days[perp]",
+    "tests/origo_source_native/test_book_sources.py::test_native_reclamation_keeps_payloads_when_seal_or_persisted_proof_fails[spot]",
+    "tests/origo_source_native/test_book_sources.py::test_native_reclamation_keeps_payloads_when_seal_or_persisted_proof_fails[perp]",
+    "tests/origo_source_native/test_book_capture.py::test_provisional_admission_waits_for_actual_seals[spot]",
+    "tests/origo_source_native/test_book_capture.py::test_provisional_admission_waits_for_actual_seals[perp]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[adapter]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[automation]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[run]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[not_started]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_refuses_nonlocal_or_nonquiescent_books[backfill]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_dry_run_and_single_mutation_keep_protection_evidence[False]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_dry_run_and_single_mutation_keep_protection_evidence[True]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables",
+    "tests/origo_source_native/test_book_retirement.py::test_vendor_scratch_lookup_stays_below_query_limit_with_many_build_identities",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_preserves_native_and_unrelated_data[spot]",
+    "tests/origo_source_native/test_book_retirement.py::test_retirement_preserves_native_and_unrelated_data[perp]",
+    "tests/origo_source_native/test_book_deploy.py::test_daily_book_deployment_refuses_retired_metadata_before_bootstrap[spot]",
+    "tests/origo_source_native/test_book_deploy.py::test_daily_book_deployment_refuses_retired_metadata_before_bootstrap[perp]"
   ]
 }

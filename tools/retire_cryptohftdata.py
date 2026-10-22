@@ -10,6 +10,13 @@ After the database phase returns no candidate, --dagster audits the two canonica
 assets. --dagster --apply wipes their history only when every source fact is a
 vendor hourly fact. Native daily facts, observations or unknown facts refuse it.
 Separate provisional/feed assets and raw tables are preserved.
+
+An unmatched or failed apply blocks every new operation against that evidence
+file. --reconcile --evidence FILE performs reads only and rechecks the original
+pins and outcome before appending a reconciliation receipt. It cannot be combined
+with --apply or --dagster. Partial outcomes or changed protected data stay blocked;
+there is no waiver or replacement baseline. Partial Dagster wipes require manual
+investigation before their complete outcome can be proved.
 """
 
 from __future__ import annotations
@@ -408,12 +415,170 @@ def record(path: Path, value: dict[str, object]) -> None:
         os.fsync(stream.fileno())
 
 
+def evidence_object(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise RuntimeError('Retirement evidence must contain JSON objects with text keys.')
+    return dict(value)
+
+
+def recorded_canonical(value: object) -> tuple[CanonicalHistory, ...]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise RuntimeError('Retirement evidence has no complete canonical inventory.')
+    histories: list[CanonicalHistory] = []
+    for raw in value:
+        item = evidence_object(raw)
+        counts = evidence_object(item.get('counts'))
+        partitions, digest = item.get('partitions'), item.get('sha256')
+        if (set(counts) - {'ASSET_MATERIALIZATION', 'ASSET_MATERIALIZATION_PLANNED',
+                          'FRESHNESS_STATE_CHANGE', 'ASSET_WIPED'}
+                or any(type(count) is not int or count < 0 for count in counts.values())
+                or not isinstance(partitions, list)
+                or any(not isinstance(key, str)
+                       or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}Z', key)
+                       for key in partitions)
+                or not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest)):
+            raise RuntimeError('Retirement canonical inventory is malformed.')
+        histories.append(CanonicalHistory(str(item.get('asset')),
+                                          {key: int(str(count)) for key, count in counts.items()},
+                                          tuple(str(key) for key in partitions), digest))
+    if tuple(item.asset for item in histories) != tuple(
+        f'build_{source}_canonical_revision_origo' for source in SOURCES
+    ):
+        raise RuntimeError('Retirement inventory does not name the exact canonical assets.')
+    return tuple(histories)
+
+
+def unresolved_evidence(path: Path) -> tuple[dict[str, object], ...]:
+    """Read the append-only ledger without discarding failed or interrupted applies."""
+    pending: dict[str, dict[str, object]] = {}
+    seen: set[str] = set()
+    failed: set[str] = set()
+    if not path.exists():
+        return ()
+    with path.open() as stream:
+        if os.fstat(stream.fileno()).st_mode & 0o077:
+            raise RuntimeError('Retirement evidence must have private permissions.')
+        for line in stream:
+            frame = evidence_object(json.loads(line))
+            identity, phase = frame.get('id'), frame.get('phase')
+            if (not isinstance(identity, str) or not identity
+                    or phase not in ('before', 'after', 'failed', 'reconciled')):
+                raise RuntimeError('Unknown or invalid retirement ledger entry; investigate it manually.')
+            if phase == 'before':
+                if identity in seen or type(frame.get('apply')) is not bool:
+                    raise RuntimeError('Duplicate or invalid retirement admission record.')
+                seen.add(identity)
+                if frame['apply']:
+                    if (not isinstance(frame.get('protected'), list)
+                            or not isinstance(frame.get('vendor_ownership'), dict)
+                            or not isinstance(frame.get('params'), dict)
+                            or 'statement' not in frame
+                            or (frame['statement'] is not None and not isinstance(frame['statement'], str))
+                            or type(frame.get('selected_rows')) is not int
+                            or frame.get('operation', 'rows') not in ('rows', 'dagster')):
+                        raise RuntimeError('Original retirement evidence is incomplete.')
+                    if int(str(frame['selected_rows'])) < 0:
+                        raise RuntimeError('Original retirement count is invalid.')
+                    if frame.get('operation', 'rows') == 'dagster':
+                        recorded_canonical(frame.get('canonical_assets'))
+                    pending[identity] = frame
+            else:
+                if identity not in pending:
+                    raise RuntimeError('Retirement result has no unresolved apply record.')
+                before = pending[identity]
+                if phase == 'failed':
+                    failed.add(identity)
+                else:
+                    if phase == 'after' and identity in failed:
+                        raise RuntimeError('A failed apply requires an explicit reconciliation receipt.')
+                    if (frame.get('protected_unchanged') is not True
+                            or frame.get('protected') != before['protected']):
+                        raise RuntimeError('Retirement result does not retain its original protected proof.')
+                    if phase == 'reconciled':
+                        if frame.get('outcome') not in ('applied', 'not_applied'):
+                            raise RuntimeError('Reconciliation has no proved outcome.')
+                        if before.get('operation', 'rows') == 'rows':
+                            expected = 0 if frame['outcome'] == 'applied' else before['selected_rows']
+                            if (type(frame.get('selected_rows_remaining')) is not int
+                                    or frame['selected_rows_remaining'] != expected):
+                                raise RuntimeError('Reconciliation row outcome is inconsistent.')
+                    elif (before.get('operation', 'rows') == 'rows'
+                          and (type(frame.get('selected_rows_remaining')) is not int
+                               or frame['selected_rows_remaining'] != 0)):
+                        raise RuntimeError('Retirement result has no zero-row postcondition.')
+                    if before.get('operation', 'rows') == 'dagster':
+                        canonical = recorded_canonical(frame.get('canonical_assets'))
+                        if phase == 'reconciled' and frame['outcome'] == 'not_applied':
+                            valid = canonical == recorded_canonical(before.get('canonical_assets'))
+                        else:
+                            valid = all(not {'ASSET_MATERIALIZATION', 'ASSET_MATERIALIZATION_PLANNED'}.intersection(item.counts)
+                                        for item in canonical)
+                        if not valid:
+                            raise RuntimeError('Dagster result does not prove the recorded outcome.')
+                    del pending[identity]
+    return tuple(pending.values())
+
+
+def reconcile_evidence(
+    instance: DagsterInstance, stores: tuple[SourceStore, ...],
+    protected: tuple[SourceStore, ...], before: dict[str, object],
+) -> dict[str, object]:
+    """Prove the saved operation's outcome without sampling new protection pins."""
+    loaded = before.get('protected')
+    if not isinstance(loaded, list) or not loaded:
+        raise RuntimeError('Original protection pins are absent; manual investigation is required.')
+    pins = tuple(evidence_object(pin) for pin in loaded)
+    require_no_mutations(stores[0])
+    result: dict[str, object] = {'id': before['id'], 'phase': 'reconciled',
+                               'at': datetime.now(UTC).isoformat(), 'protected': pins}
+    if before.get('operation', 'rows') == 'dagster':
+        if next_deletion(stores) is not None:
+            raise RuntimeError('Vendor database rows remain during Dagster reconciliation.')
+        original = recorded_canonical(before.get('canonical_assets'))
+        current = dagster_inventory(instance)
+        serialized = tuple(asdict(item) for item in current)
+        if current == original:
+            outcome = 'not_applied'
+        elif all(not {'ASSET_MATERIALIZATION', 'ASSET_MATERIALIZATION_PLANNED'}.intersection(item.counts)
+                 for item in current):
+            outcome = 'applied'
+        else:
+            raise RuntimeError('Partial or changed Dagster transition; manual investigation is required.')
+        result['canonical_assets'] = serialized
+    else:
+        statement, params, expected = before.get('statement'), before.get('params'), before.get('selected_rows')
+        if not isinstance(params, dict) or type(expected) is not int or expected < 0:
+            raise RuntimeError('Original mutation bindings or count are invalid.')
+        if statement is None and expected == 0:
+            remaining = 0
+        else:
+            match = re.fullmatch(r'ALTER TABLE ([A-Za-z0-9_.]+) DELETE WHERE (.+)', str(statement))
+            allowed = {store.component_table(component.key) for store in stores
+                       for component in store.spec.components if not component.provisional}
+            allowed.update(store.table(name) for store in stores for name, _predicate, _column in predicates(store))
+            if match is None or match[1] not in allowed:
+                raise RuntimeError('Original mutation is outside the declared retirement tables.')
+            remaining = int(str(stores[0].execute(
+                f'SELECT count() FROM {match[1]} WHERE {match[2]}', params,
+            )[0][0]))
+        if remaining not in (0, expected):
+            raise RuntimeError('Partial mutation outcome; manual investigation is required.')
+        outcome = 'applied' if statement is not None and remaining == 0 else 'not_applied'
+        result['selected_rows_remaining'] = remaining
+    require_no_mutations(stores[0])
+    verify_protected(protected, pins)
+    return {**result, 'outcome': outcome, 'protected_unchanged': True}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--dagster', action='store_true')
+    parser.add_argument('--reconcile', action='store_true')
     parser.add_argument('--evidence', type=Path, required=True)
     args = parser.parse_args()
+    if args.reconcile and (args.apply or args.dagster):
+        parser.error('--reconcile performs reads only; omit --apply and --dagster.')
     specs = tuple(next(spec for spec in SOURCE_REGISTRY if spec.key == key) for key in SOURCES)
     settings = get_clickhouse_settings()
     client = RetirementClient(make_clickhouse_client(settings))
@@ -422,11 +587,21 @@ def main() -> None:
         raise ValueError('Retirement requires the absolute shared lock mount and database identifier.')
     try:
         with DagsterInstance.get() as instance, source_lock(root, 'cryptohftdata_retirement', 'mutation'):
+            pending = unresolved_evidence(args.evidence)
+            if pending and not args.reconcile:
+                raise RuntimeError(f'Unverified retirement {pending[0]["id"]}; run --reconcile first.')
             require_quiescent(instance, specs)
             book_stores = tuple(SourceStore(client, settings.database, spec) for spec in specs)
             protected = tuple(SourceStore(client, settings.database, spec) for spec in SOURCE_REGISTRY
                               if spec.rollout_stage != RolloutStage.DORMANT)
             require_no_mutations(book_stores[0])
+            if args.reconcile:
+                if not pending:
+                    raise RuntimeError('No unresolved apply exists to reconcile.')
+                proof = reconcile_evidence(instance, book_stores, protected, pending[0])
+                record(args.evidence, proof)
+                print(json.dumps(proof, default=str, sort_keys=True))
+                return
             deletion = next_deletion(book_stores)
             if args.dagster and deletion is not None:
                 raise RuntimeError('Complete vendor database retirement before --dagster.')
@@ -468,17 +643,18 @@ def main() -> None:
                                       'canonical_assets': tuple(asdict(item) for item in after),
                                       'protected_unchanged': True}, default=str))
                 return
-            if args.apply and deletion is not None:
+            if args.apply:
                 try:
                     require_quiescent(instance, specs)
                     require_no_mutations(book_stores[0])
-                    book_stores[0].execute(deletion.statement, deletion.params,
-                                           settings={'mutations_sync': 2})
+                    if deletion is not None:
+                        book_stores[0].execute(deletion.statement, deletion.params,
+                                               settings={'mutations_sync': 2})
                     require_no_mutations(book_stores[0])
                     verify_protected(protected, pins)
                     remaining = book_stores[0].execute(
                         f'SELECT count() FROM {deletion.table} WHERE {deletion.predicate}', deletion.params,
-                    )[0][0]
+                    )[0][0] if deletion is not None else 0
                     if remaining:
                         raise RuntimeError('The selected vendor rows remain after mutation.')
                 except Exception as error:
@@ -488,7 +664,7 @@ def main() -> None:
                     raise
                 record(args.evidence, {'id': identity, 'phase': 'after', 'protected_unchanged': True,
                                        'selected_rows_remaining': 0, 'protected': pins})
-                print(json.dumps({'id': identity, 'deleted_rows': deletion.rows,
+                print(json.dumps({'id': identity, 'deleted_rows': deletion.rows if deletion else 0,
                                   'protected_unchanged': True, 'next_invocation_required': True}))
     finally:
         client.disconnect()

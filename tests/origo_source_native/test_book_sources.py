@@ -88,6 +88,12 @@ def test_book_sources_register_as_canary_beside_the_four_trade_sources() -> None
     for spec in SPECS:
         assert spec in SOURCE_REGISTRY and spec.rollout_stage == RolloutStage.CANARY
         assert spec.read_policy == SourceReadPolicy.AVAILABLE
+        assert isinstance(spec.canonical, LocalBookCanonical)
+        assert spec.partitions.start == datetime(2026, 10, 4, tzinfo=UTC)
+        assert spec.partitions.interval == 'day'
+        assert spec.orchestration.canonical_cron == '5 0 * * *'
+        assert spec.orchestration.audit_cron == '30 * * * *'
+        assert spec.orchestration.canonical_concurrency == 8
         assert {component.key for component in spec.components} == {
             *BOOK_COMPONENT_KEYS,
             *(key + '_latest' for key in BOOK_COMPONENT_KEYS),

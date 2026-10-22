@@ -112,24 +112,10 @@ def test_provider_pause_does_not_block_capture_process_health(
     assert book_capture.check_capture(directory, market, now + timedelta(seconds=181)) == 1
 
 
-def test_vendor_credential_reaches_native_jobs() -> None:
-    for filename in ('docker-compose.yml', 'docker-compose.deploy.yml'):
-        services = yaml.safe_load((ROOT / filename).read_text())['services']
-        for name, service in services.items():
-            environment = service.get('environment', [])
-            values = list(environment) if isinstance(environment, dict) else environment
-            entries = [entry for entry in values if entry.startswith('CRYPTOHFTDATA_API_KEY')]
-            if name in ('dagster', 'dagit'):
-                expected = ('CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:-}'
-                            if filename == 'docker-compose.yml' else
-                            'CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:?CRYPTOHFTDATA_API_KEY must be set}')
-                assert entries == [expected]
-            else:
-                assert not entries
-    workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert workflow.count('CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}') == 2
-    assert '"CRYPTOHFTDATA_API_KEY": os.environ["CRYPTOHFTDATA_API_KEY"]' in workflow
-    assert 'umask 077' in workflow
+def test_retired_hourly_vendor_credential_is_absent() -> None:
+    for filename in ('docker-compose.yml', 'docker-compose.deploy.yml',
+                     '.github/workflows/deploy_on_merge.yml'):
+        assert 'CRYPTOHFTDATA_API_KEY' not in (ROOT / filename).read_text()
 
 
 def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:

@@ -1124,78 +1124,86 @@
       ]
     },
     {
-      "name": "Pin and execute book recovery acceptance",
-      "expected": 10,
+      "name": "Pin and execute native book recovery acceptance",
+      "expected": 4,
       "nodes": [
-        "tests/origo_source_native/test_book_vendor.py::test_real_hour_survives_original_seed_region_without_reseeding",
         "tests/origo_source_native/test_book_capture.py::test_exhausted_seed_capacity_prevents_connection",
-        "tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence",
-        "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation",
-        "tests/origo_source_native/test_book_history.py::test_original_historical_hour_replays_preceding_vendor_snapshot",
-        "tests/origo_source_native/test_book_history.py::test_original_spot_history_rejects_unproven_depth"
+        "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation"
       ]
     }
   ],
   "consolidations": {
     "tests/origo_source_native/test_book_law.py::test_book_reconciliation_uses_native_hourly_status[perp]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Book reconciliation uses native hourly partitions and requests the verified hour."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_book_reconciliation_uses_native_hourly_status[spot]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Book reconciliation uses native hourly partitions and requests the verified hour."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation[perp]": {
       "retained": [
         "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
       ],
-      "contract": "Declared anchor upgrade preserves an existing generation; undeclared anchor changes fail."
+      "contract": "Native source anchor migration and exact component proof integrity remain covered with genuine captured local minutes; the hourly provider path is retired."
     },
     "tests/origo_source_native/test_book_law.py::test_declared_history_migration_preserves_existing_generation[spot]": {
       "retained": [
         "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
       ],
-      "contract": "Declared anchor upgrade preserves an existing generation; undeclared anchor changes fail."
+      "contract": "Native source anchor migration and exact component proof integrity remain covered with genuine captured local minutes; the hourly provider path is retired."
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_deadline_and_history_are_independent_of_reader_liveness[perp]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Missing canonical hour remains FAIL independently of reader liveness; exact deadline and following hour survive."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_deadline_and_history_are_independent_of_reader_liveness[spot]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Missing canonical hour remains FAIL independently of reader liveness; exact deadline and following hour survive."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_uses_exact_source_component_proofs[perp]": {
       "retained": [
         "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
       ],
-      "contract": "Removing the real depth200_1m proof changes both verified reader and canonical law from PASS to UNKNOWN."
+      "contract": "Native source anchor migration and exact component proof integrity remain covered with genuine captured local minutes; the hourly provider path is retired."
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_authority_uses_exact_source_component_proofs[spot]": {
       "retained": [
         "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
       ],
-      "contract": "Removing the real depth200_1m proof changes both verified reader and canonical law from PASS to UNKNOWN."
+      "contract": "Native source anchor migration and exact component proof integrity remain covered with genuine captured local minutes; the hourly provider path is retired."
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_schedule_has_an_activation_window_before_c1_deadline[perp]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Hourly candidate and five-minute activation window retain NOT_DUE before deadline, FAIL at deadline and PASS after build."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_hourly_schedule_has_an_activation_window_before_c1_deadline[spot]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Hourly candidate and five-minute activation window retain NOT_DUE before deadline, FAIL at deadline and PASS after build."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_law_page.py::test_thirty_day_replay_cache_fits_page_memory_budget": {
       "retained": [
@@ -1511,15 +1519,339 @@
     },
     "tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence[spot]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[spot]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Provider unavailability stays non-failed, ages to UNKNOWN, and activation has its native five-minute window; the same full-hour build satisfies readiness and law checks."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     },
     "tests/origo_source_native/test_book_law.py::test_provider_delay_and_activation_use_native_evidence[perp]": {
       "retained": [
-        "tests/origo_source_native/test_book_law.py::test_canary_books_have_the_same_reader_law_contract[perp]"
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
       ],
-      "contract": "Provider unavailability stays non-failed, ages to UNKNOWN, and activation has its native five-minute window; the same full-hour build satisfies readiness and law checks."
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_history.py::test_initial_legacy_snapshot_uses_matching_original_exchange_clock": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_history.py::test_legacy_collector_clock_cannot_close_exchange_hour": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_history.py::test_legacy_snapshot_received_first_follows_its_native_update": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_history.py::test_original_historical_hour_replays_preceding_vendor_snapshot": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_history.py::test_original_spot_history_rejects_unproven_depth": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_book_sources_are_required_hourly_reader_laws": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_admits_latest_hour_before_old_pending_requests[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_admits_latest_hour_before_old_pending_requests[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[perp-2026-10-03]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[perp-2026-10-04]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[perp-2026-10-05]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[spot-2026-10-03]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[spot-2026-10-04]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_audit_preserves_obsolete_requests_and_retries_hours[spot-2026-10-05]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_replaces_overlapping_provisional_book_rows[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_hourly_authority_replaces_overlapping_provisional_book_rows[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_native_hourly_backfill_orders_completion_after_canonical_build": {
+      "retained": [
+        "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_pending_historical_failures_do_not_starve_later_valid_hour[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_pending_historical_failures_do_not_starve_later_valid_hour[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_prior_book_authority_is_unverified_until_closing_input_rebuild[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_law.py::test_prior_book_authority_is_unverified_until_closing_input_rebuild[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_adapter_rejects_nonhour_keys[2026-10-04T09:00:00Z]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_adapter_rejects_nonhour_keys[2026-10-04T09:00:01Z]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_adapter_rejects_nonhour_keys[2026-10-04T09:00Z]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_adapter_rejects_nonhour_keys[2026-10-04T09:01:00Z]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_adapter_rejects_nonhour_keys[2026-10-04]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_and_provisional_keys_cannot_share_partition_identity": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_hourly_book_partitions_reuse_native_source_jobs": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_missing_vendor_checkpoint_cannot_activate_a_partial_hour[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_missing_vendor_checkpoint_cannot_activate_a_partial_hour[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_original_vendor_hour_builds_all_book_grids_without_binance[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_original_vendor_hour_builds_all_book_grids_without_binance[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_real_hour_survives_original_seed_region_without_reseeding[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_real_hour_survives_original_seed_region_without_reseeding[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_same_id_snapshot_checks_observed_prices_outside_seed[perp-False]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_same_id_snapshot_checks_observed_prices_outside_seed[perp-True]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_same_id_snapshot_checks_observed_prices_outside_seed[spot-False]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_same_id_snapshot_checks_observed_prices_outside_seed[spot-True]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_truncated_exchange_tail_cannot_complete_an_hour[perp]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
+    },
+    "tests/origo_source_native/test_book_vendor.py::test_truncated_exchange_tail_cannot_complete_an_hour[spot]": {
+      "retained": [
+        "tests/origo_source_native/test_book_sources.py::test_book_sources_register_as_canary_beside_the_four_trade_sources"
+      ],
+      "contract": "RETIRED: CryptoHFTData hourly book authority and its provider-specific replay, request and orchestration contracts are removed by #607. The retained assertion verifies provider absence and native source continuity; it does not re-prove the retired provider capability.",
+      "retired_capability": "CryptoHFTData hourly book authority",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/607"
     }
   },
   "baseline_additions": {
@@ -1534,65 +1866,18 @@
     ]
   },
   "required_nodes": [
-    "tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[spot]",
-    "tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[perp]",
-    "tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[spot]",
-    "tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[perp]",
     "tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals",
     "tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance",
     "tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof",
     "tests/origo_source_native/test_publication_ownership.py::test_trade_publisher_restart_preserves_ownership_and_files",
     "tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract",
-    "tests/origo_source_native/test_book_deploy.py::test_vendor_credential_reaches_native_jobs",
-    "tests/origo_source_native/test_book_vendor.py::test_vendor_jwt_authentication_rotates_without_url_credentials",
-    "tests/origo_source_native/test_book_vendor.py::test_vendor_authenticated_requests_keep_one_shared_budget",
-    "tests/origo_source_native/test_book_vendor.py::test_vendor_backfill_http_connections_are_bounded_and_scoped[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_vendor_backfill_http_connections_are_bounded_and_scoped[perp]",
-    "tests/origo_source_native/test_binance_daily_source_adapter.py::test_http_transfers_do_not_hold_admission_lock",
-    "tests/origo_source_native/test_binance_daily_source_adapter.py::test_transfer_failure_preserves_shared_admission",
     "tests/origo_source_native/test_dagster_instance_config.py::test_book_bulk_capacity_preserves_live_lanes",
-    "tests/origo_source_native/test_book_vendor.py::test_snapshot_presence_reads_only_original_required_columns",
     "tests/origo_source_native/test_book_deploy.py::test_native_jobs_only_rollout_expires_with_version",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_original_freshness",
-    "tests/origo_source_native/test_book_vendor.py::test_real_clock_archive_preserves_original_sequence_gap",
-    "tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[spot]",
-    "tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[perp]",
-    "tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[spot]",
-    "tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[perp]",
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_shutdown_location_loss_preserves_native_checkpoint_and_resume",
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_missing_location_exhaustion_and_other_fatal_errors_stay_visible",
     "tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch",
-    "tests/origo_source_native/test_book_history.py::test_update_only_hour_recovers_with_bounded_prefix",
-    "tests/origo_source_native/test_book_history.py::test_shallow_original_seed_recovers_without_fabricated_depth",
-    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[perp]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[preperiod-reset]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[requested-gap]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-grid-late]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-event-stale]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[event-stale]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[price-grid]",
-    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[interrupted]",
-    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[bounded-exhaustion]",
-    "tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[partial-grid-cleanup]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[spot]",
-    "tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[perp]",
-    "tests/origo_source_native/test_book_native_backfill.py::test_book_benchmark_counts_partition_coverage_separately_from_attempts"
+    "tests/origo_source_native/test_book_deploy.py::test_retired_hourly_vendor_credential_is_absent",
+    "tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws",
+    "tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build"
   ]
 }

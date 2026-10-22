@@ -22,7 +22,6 @@ services:
     ports:
       - "127.0.0.1:4000:3000"
     environment:
-      - CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:?CRYPTOHFTDATA_API_KEY must be set}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager
@@ -53,7 +52,6 @@ services:
   dagster:
     image: ${APP_IMAGE:?APP_IMAGE is required}
     environment:
-      - CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:?CRYPTOHFTDATA_API_KEY must be set}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager

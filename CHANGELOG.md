@@ -1,3 +1,7 @@
+# v3.34.55
+
+- Retire hourly vendor book history and restore local sealed-book canonical processing while retaining live collectors and native minute data.
+
 # v3.34.54
 
 - Stop automatic Copilot code review on every push; reviews remain available on request.

@@ -537,9 +537,9 @@ def test_provisional_admission_waits_for_actual_seals(
         assert tuple(p.key for p in adapter.candidates(now, day, ())) == keys
         covered = (adapter.partition(keys[0]),)
         assert tuple(p.key for p in adapter.candidates(now, day, covered)) == keys[1:]
-    from origo.sources.adapters.book_vendor import hour_partition
+    from origo.sources.contracts import Partition
 
-    midnight = hour_partition(day.strftime('%Y-%m-%dT%HZ'))
+    midnight = Partition(day.strftime('%Y-%m-%dT%HZ'), day, day + timedelta(hours=1))
     assert tuple(p.key for p in adapter.candidates(sampler.last_seal + timedelta(hours=48), day, (midnight,))) == keys
     assert adapter.candidates(day + timedelta(days=1), day + timedelta(days=1), ()) == ()
 

@@ -73,12 +73,12 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     )
     nodes = [node for group in manifest for node in group['nodes']]
     assert len(nodes) == len(set(nodes))
-    # Original 50 selectors at SHA 4855219, independently pinned for shallow checkouts.
-    assert len(nodes) == 50
+    # Retain native selectors; #607 explicitly retires hourly-provider acceptance.
+    assert len(nodes) == 46
     assert hashlib.sha256('\n'.join(sorted(nodes)).encode()).hexdigest() == (
-        '6cd091368c8edeb21b7e3c3cc4a89349724e6cdd9b5f747de3c8b53aac252864'
+        '95a78df8bdeb5c48d1db218ef10a93007600d8c0d789ec33db975dda0352d6a1'
     )
-    assert [group['expected'] for group in manifest] == [15, 4, 18, 8, 10]
+    assert [group['expected'] for group in manifest] == [15, 4, 18, 8, 4]
     additions = contract['baseline_additions']
     assert additions['sha'] == '4288d0a764eb526869cb96dbb6ddd23779927242'
     assert len(additions['nodes']) == 6
@@ -88,68 +88,21 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest() == '12391bf047bb1dc6ad8afba2414fb2f4e1a1e1bb949a9f4cc2e70d57ace55887'
+    ).encode()).hexdigest() == 'e179f839c88a6e1ab771539cab20fc698467497e2e842da141c8ab5f829fa6d4'
     assert contract['required_nodes'] == [
-        'tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[spot]',
-        'tests/origo_source_native/test_book_law.py::test_rejected_book_revision_is_not_replayed_by_audit[perp]',
-        'tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[spot]',
-        'tests/origo_source_native/test_book_history.py::test_rejected_book_revision_identity_and_retry[perp]',
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
         'tests/origo_source_native/test_binance_perp_spool.py::test_rejected_bridge_revalidation_preserves_proof',
         'tests/origo_source_native/test_publication_ownership.py::test_trade_publisher_restart_preserves_ownership_and_files',
         'tests/origo_source_native/test_workers.py::test_trade_maintenance_deploy_and_heartbeat_contract',
-        'tests/origo_source_native/test_book_deploy.py::test_vendor_credential_reaches_native_jobs',
-        'tests/origo_source_native/test_book_vendor.py::test_vendor_jwt_authentication_rotates_without_url_credentials',
-        'tests/origo_source_native/test_book_vendor.py::test_vendor_authenticated_requests_keep_one_shared_budget',
-        'tests/origo_source_native/test_book_vendor.py::test_vendor_backfill_http_connections_are_bounded_and_scoped[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_vendor_backfill_http_connections_are_bounded_and_scoped[perp]',
-        'tests/origo_source_native/test_binance_daily_source_adapter.py::test_http_transfers_do_not_hold_admission_lock',
-        'tests/origo_source_native/test_binance_daily_source_adapter.py::test_transfer_failure_preserves_shared_admission',
         'tests/origo_source_native/test_dagster_instance_config.py::test_book_bulk_capacity_preserves_live_lanes',
-        'tests/origo_source_native/test_book_vendor.py::test_snapshot_presence_reads_only_original_required_columns',
         'tests/origo_source_native/test_book_deploy.py::test_native_jobs_only_rollout_expires_with_version',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_snapshot_uses_real_exchange_clock[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_frame_inventory[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_initial_bridge[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_requires_real_tail[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_native_gap[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_real_checkpoint_after_clockless_state[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_replay_policy_invalidates_complete_revision_identity[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_nominal_archive_preserves_original_freshness',
-        'tests/origo_source_native/test_book_vendor.py::test_real_clock_archive_preserves_original_sequence_gap',
-        'tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[spot]',
-        'tests/origo_source_native/test_book_native_backfill.py::test_historical_book_404_is_terminal_without_changing_transient_retries[perp]',
-        'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[spot]',
-        'tests/origo_source_native/test_book_native_backfill.py::test_native_book_selection_completion_preserves_source_failures[perp]',
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_shutdown_location_loss_preserves_native_checkpoint_and_resume',
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_missing_location_exhaustion_and_other_fatal_errors_stay_visible',
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch',
-        'tests/origo_source_native/test_book_history.py::test_update_only_hour_recovers_with_bounded_prefix',
-        'tests/origo_source_native/test_book_history.py::test_shallow_original_seed_recovers_without_fabricated_depth',
-        'tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_quote_witness_matches_original_reference[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_quote_witness_rejects_unknown_or_crossed_state[perp]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[preperiod-reset]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[requested-gap]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-grid-late]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[first-event-stale]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[event-stale]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_warmup_preserves_requested_validation[price-grid]',
-        'tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[interrupted]',
-        'tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[bounded-exhaustion]',
-        'tests/origo_source_native/test_book_history.py::test_archive_fetch_retains_only_completed_rejection[partial-grid-cleanup]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[spot]',
-        'tests/origo_source_native/test_book_vendor.py::test_archive_reconstruction_keeps_live_seed_strict[perp]',
-        'tests/origo_source_native/test_book_native_backfill.py::test_book_benchmark_counts_partition_coverage_separately_from_attempts',
+        'tests/origo_source_native/test_book_deploy.py::test_retired_hourly_vendor_credential_is_absent',
+        'tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws',
+        'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build',
     ]
 
 

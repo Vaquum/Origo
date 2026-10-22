@@ -107,7 +107,6 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
-          CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}
           RESEND_API_KEY: test-key
           ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
@@ -143,7 +142,6 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
-          CRYPTOHFTDATA_API_KEY: ${{ secrets.CRYPTOHFTDATA_API_KEY }}
         run: |
           umask 077
           DEPLOY_ENV_FILE="/tmp/origo-deploy.env"
@@ -166,7 +164,6 @@ jobs:
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
               "ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"],
-              "CRYPTOHFTDATA_API_KEY": os.environ["CRYPTOHFTDATA_API_KEY"],
               "ORIGO_NATIVE_JOBS_ONLY": os.environ["ORIGO_NATIVE_JOBS_ONLY"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],

@@ -55,13 +55,11 @@ def request_identity(run: DagsterRun) -> str:
 
 
 def _book_backfill(run: DagsterRun) -> bool:
-    from origo.sources.contracts import CanonicalAuditPolicy
     from origo.sources.prepare import is_source_backfill
     from origo.sources.registry import SOURCE_REGISTRY
 
     return any(
-        spec.partitions.interval == 'hour'
-        and isinstance(spec.canonical, CanonicalAuditPolicy)
+        spec.key in ('binance_spot_book', 'binance_perp_book')
         and is_source_backfill(run, spec)
         for spec in SOURCE_REGISTRY
     )

@@ -1,6 +1,6 @@
 # v3.34.55
 
-- Retire hourly vendor book history and restore local sealed-book canonical processing while retaining live collectors and native minute data.
+- Retire hourly vendor book history and restore local sealed-book canonical processing while retaining live collectors and native minute data. Preserve native book backfill isolation within the existing job limits.
 
 # v3.34.54
 

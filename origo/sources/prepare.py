@@ -123,8 +123,11 @@ def is_source_backfill(run: DagsterRun, spec: RevisionedSourceSpec) -> bool:
         and run.tags.get('origo_source_reconciliation') != 'true'
         and (
             run.job_name != canonical_job
-            or ('dagster/backfill' in run.tags and spec.partitions.interval == 'hour'
-                and isinstance(spec.canonical, CanonicalAuditPolicy))
+            or ('dagster/backfill' in run.tags and (
+                spec.key in ('binance_spot_book', 'binance_perp_book')
+                or (spec.partitions.interval == 'hour'
+                    and isinstance(spec.canonical, CanonicalAuditPolicy))
+            ))
             or 'dagster/asset_partition_range_start' in run.tags
             or run.tags.get('origo_source_operation') == 'backfill'
         )

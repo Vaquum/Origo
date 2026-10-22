@@ -258,10 +258,16 @@ def test_controller_keeps_a_live_listener_through_status_changes(
 set -euo pipefail
 SECONDS=1
 listener_pid=$$
+responses=()
+while IFS= read -r response; do responses[${#responses[@]}]=$response; done < "$CONTROLLER_TRACE/statuses"
+printf '0\\n' > "$CONTROLLER_TRACE/cursor"
 python3() {
-    head -n 1 "$CONTROLLER_TRACE/statuses"
-    tail -n +2 "$CONTROLLER_TRACE/statuses" > "$CONTROLLER_TRACE/next"
-    mv "$CONTROLLER_TRACE/next" "$CONTROLLER_TRACE/statuses"
+    local cursor
+    IFS= read -r cursor < "$CONTROLLER_TRACE/cursor"
+    printf '%s\\n' "${responses[$cursor]}"
+    cursor=$((cursor+1))
+    printf '%s\\n' "$cursor" > "$CONTROLLER_TRACE/cursor"
+    if [[ $cursor -eq ${#responses[@]} ]]; then : > "$CONTROLLER_TRACE/statuses"; fi
 }
 kill() {
     [[ $1 == -0 && $2 == "$listener_pid" ]]

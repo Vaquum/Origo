@@ -19,7 +19,7 @@ The owning agent completes these operations; no operator configuration is needed
 3. Use the reviewed release source and its unchanged runtime dependencies in an
    isolated command container sharing the existing database, instance and lock
    volumes. Do not replace a live service to run cleanup. Dry-run
-   `python -m tools.retire_cryptohftdata --evidence /opt/origo/locks/retirement-608.jsonl`
+   `python /opt/app/tools/retire_cryptohftdata.py --evidence /opt/origo/locks/retirement-608.jsonl`
    first. The tool refuses nonlocal canonical specs, active book automation/work,
    unfinished mutations, unexpected source namespaces and unbounded protection rows.
    Its durable ownership manifest records exact vendor builds, referenced runs and

@@ -49,6 +49,11 @@ The owning agent completes these operations; no operator configuration is needed
    verify the original native/depth minute proofs and advancing live minutes,
    worker identity/restart counts and unrelated publication state. Report existing
    gaps honestly. A removed provider history is not repaired native history.
+8. Briefing caches live responses for 20/60 seconds and historical responses for
+   at most one hour from response construction. Cache hits do not extend expiry.
+   After that hour, a fresh book request prunes expired server entries. Already
+   loaded historical pages need a reload. No native-book file consumers or export
+   directories were found; preserve the original depth Arrow series.
 
 ## Deletion boundaries
 

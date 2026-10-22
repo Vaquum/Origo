@@ -113,9 +113,17 @@ def test_provider_pause_does_not_block_capture_process_health(
 
 
 def test_retired_hourly_vendor_credential_is_absent() -> None:
+    """Deployment and importable source code cannot restore the retired provider."""
     for filename in ('docker-compose.yml', 'docker-compose.deploy.yml',
                      '.github/workflows/deploy_on_merge.yml'):
-        assert 'CRYPTOHFTDATA_API_KEY' not in (ROOT / filename).read_text()
+        assert 'cryptohftdata' not in (ROOT / filename).read_text().lower()
+    for path in (ROOT / 'origo').rglob('*.py'):
+        assert 'cryptohftdata' not in path.read_text().lower(), path
+    for filename in ('origo/sources/adapters/book_vendor.py',
+                     'origo/sources/adapters/book_columnar.py',
+                     'origo/sources/adapters/book_replay.cpp',
+                     'tools/benchmark_book_replay.py'):
+        assert not (ROOT / filename).exists()
 
 
 def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:

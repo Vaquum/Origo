@@ -20,6 +20,7 @@ from origo.sources.contracts import Partition, StateRecord
 from origo.sources.failures import FailureLog
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.registry import SOURCE_REGISTRY
+from origo.sources.storage import SourceStore
 from tools import retire_cryptohftdata as retirement
 
 from .test_book_sources import _keys, book_runtime as book_runtime

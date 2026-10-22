@@ -14,8 +14,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from dagster import DagsterInstance, DagsterRunStatus
+from dagster._core.remote_origin import (
+    ManagedGrpcPythonEnvCodeLocationOrigin,
+    RemoteJobOrigin,
+    RemoteRepositoryOrigin,
+)
 from dagster._core.scheduler.instigation import InstigatorStatus
 from dagster._core.test_utils import create_run_for_test
+from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
 
 from origo.assets.create_origo_database import ClickHouseSettings
 from origo.sources.columnar import binary_hash
@@ -62,8 +68,19 @@ def test_retirement_refuses_nonlocal_or_nonquiescent_books(
         elif fault == 'automation':
             states[0].status = InstigatorStatus.RUNNING
         elif fault in ('run', 'not_started'):
+            job_name = f'refresh_{retirement.SOURCES[0]}_canonical_source_job'
             create_run_for_test(
-                instance, job_name=f'{retirement.SOURCES[0]}_canonical_job',
+                instance, job_name=job_name,
+                remote_job_origin=RemoteJobOrigin(
+                    RemoteRepositoryOrigin(
+                        ManagedGrpcPythonEnvCodeLocationOrigin(
+                            LoadableTargetOrigin(module_name='origo.definitions'),
+                            location_name='origo',
+                        ),
+                        '__repository__',
+                    ),
+                    job_name,
+                ),
                 tags={'origo_source_key': retirement.SOURCES[0]},
                 status=(DagsterRunStatus.NOT_STARTED if fault == 'not_started'
                         else DagsterRunStatus.QUEUED),

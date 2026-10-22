@@ -22,6 +22,6 @@ BINANCE_PERP_BOOK_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     provisional=LocalBookProvisional('perp'),
     components=book_components(),
     consumers=(),
-    orchestration=OrchestrationSpec('5 0 * * *', '* * * * *', '30 * * * *'),
+    orchestration=OrchestrationSpec('5 0 * * *', '* * * * *', '30 * * * *', canonical_concurrency=32),
     read_policy=SourceReadPolicy.AVAILABLE,
 )

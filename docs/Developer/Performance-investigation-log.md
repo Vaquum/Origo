@@ -787,3 +787,8 @@ Owner02:57monitor current bookreaders each116/116minutes0missing, both00Zcanonic
 
 - Correction: runtimeCI39852968520 stopped during collection, before the local missing-import boundary. Its installed Linux layout resolved an unrelated tools namespace, so importing the retirement command by package name failed. Load the exact repository tool file with the existing importlib pattern. Preserve both distinct failures; neither qualifies production cleanup.
 - Operator approved the narrow additional cleanup: “Yes, include the cleanup fix.” Limit it to aged temporary native payloads whose exact stored minute and four physical component proofs verify; keep immutable seals, actual gaps and complete days awaiting daily canonical retry. Existing collectors and captured database data remain protected.
+
+
+### Retain book routine capacity — 2026-10-22
+
+- Actual runtimeCI39853968391 on6ebb27d passed360ordinary cases then rejected the restored8-slot book pool. Existing admission permits31bulk runs and reserves one additional canonical slot for routine book work; lowering the pool could let bulk work occupy every book slot. Preserve the existing32-slot setting in both daily native specs. Do not weaken the capacity test or change shared queue policy. Full current-head validation remains required.

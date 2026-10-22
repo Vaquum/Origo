@@ -1,0 +1,358 @@
+# Retired CryptoHFTData investigation archive
+
+CryptoHFTData and its imported history were retired by the operator in slice #607.
+The material below is preserved as historical evidence. Its launch, quota, rollout
+and hourly-authority instructions are obsolete and must not be executed.
+Current removal controls are in [retire_cryptohftdata.md](retire_cryptohftdata.md).
+All live feeds and their collected data remain protected.
+
+---
+
+# Native book hourly authority
+
+`binance_spot_book` and `binance_perp_book` use the existing revisioned source
+framework. Sealed WebSocket minutes publish provisional depth20 (100 ms), depth200
+(one second), and the two minute metric projections. CryptoHFTData supplies hourly
+authority for the same four projections. This is the declared `hour` interval of
+the shared canonical contract; trades and aggregate trades retain `day`.
+
+## Archive reconstruction
+
+Archive replay can start from partial snapshots or unknown preperiod state. After
+an entire linked native message, surviving positive asks prove opposite bids at
+or above their prices absent; surviving positive bids prove opposite asks at or
+below their prices absent in the noncrossed venue book. Existing adjacent tick
+observations extend these known intervals. Observed positive contradictions
+reject; unknown prices outside a proved interval remain unknown. A warmup timer
+never certifies depth. Every requested grid still requires complete200-level
+proof, native continuity, actual exchange clocks and terminal data. Archive receipt may lag exchange time;
+negative receipt age still rejects. A sampled state older than five seconds still
+rejects. Live capture retains its five-second receipt-age limit.
+The live capture default still requires its original complete seed and depth.
+
+Native fetch expands original preceding inputs only on insufficient seed/depth
+proof, within the existing24-hour, following-hour, file, combined-byte and tracked
+price bounds. Requested gaps/staleness/clock/tail failures remain fatal. An
+interrupted search cannot cache an early insufficient prefix; rejected identity
+is retained only for a completed decision. Each accepted identity binds every
+actually used ordered input and all four component proofs. Failed scratch grids
+never publish. Preperiod continuity loss discards all prior knowledge before an
+actual subsequent message anchors a new chain; requested-period loss still fails.
+Preperiod updates dated after their actual receipt discard warmup state; a later
+valid native message or original snapshot must reestablish proof before output.
+Accepted replay policy remains3, preserving verified generations. Rejection policy4
+reconsiders prior cached verdicts through the existing native controls. Historical failures remain visible until actual
+accepted activation. Operators use the ordinary Dagit partition/gap/failure
+selection; no manual archive preparation or alternate runner is needed.
+
+Archive grid scratch stores one minute at a time as typed RowBinary: at most600
+depth20 rows (399600 bytes) or60 depth200 rows (385680 bytes) per insertion block.
+Each block is checked against its creation hash before consumption. Samples share
+the same verified state at coincident grids; finite ordered Float64 levels are
+certified before sealing. Scratch belongs to the fetched revision and is released
+with it. Failed prefix attempts discard their grids. Live/local spool stays JSON/gzip.
+Decoded archive frames retain the100000-row frame and tracked-price bounds; the
+1 MiB wire-byte bound applies to live byte messages.
+
+## Delivery and activation
+
+The canonical schedules run at :01, :06, ... :56 UTC. To reconstruct exchange hour H, they
+need H's receive-time file and H+1's file: closing exchange updates can arrive in
+the latter. At 12:36 UTC the candidate is therefore 10:00–11:00, using the 10Z and
+11Z files. Native calendars exclude the still-ineligible final hour. This adds
+about one hour to authoritative delivery compared with single-file acceptance;
+WebSocket minutes remain provisional and readable during that delay.
+The current candidate gets twelve discovery opportunities; selection advances at
+the next UTC hour. An older hour published after its final :56 opportunity remains
+dependent on audit, without a five-minute discovery guarantee. Each tick records
+fresh availability before checking native outstanding work, complete matching
+active component evidence, or unchanged complete rejection evidence. A skip never
+recovers a rejected input failure; explicit native manual retry remains available.
+The existing audit runs at :05, :20, :35 and :50, keeping its 15-minute cadence.
+Offset ticks avoid exact schedule coincidence; audit and canonical work can still
+race for a partition lock, and the resulting failure remains visible. Audit retries up to five requested inactive
+hours, prioritizing the latest and recent delayed hours before least-recently
+checked historical requests; persistent failures cannot permanently occupy all five slots;
+revision checks cover two recent hours and rotate through 50 older active hours.
+Both sources keep their own canonical pool, bounded to 32 canonical operations per market, with at most 31 bulk runs instance-wide.
+
+Discovery appends provider availability and original observation time to the
+existing source observation log. A fresh 404 for the latest closed hour is waiting,
+not a discovery failure. C1 reports the requested exchange hour, required closing-file hour and last check time;
+stale availability evidence becomes UNKNOWN after 20 minutes. Once availability
+is observed, activation has five minutes. An observed available file that remains
+unactivated then fails. R1 independently judges actual reader freshness and missing
+tail minutes; C2 independently counts historical missing hours. Waiting for HCD
+cannot hide either failure. Before the first observation, the existing initial
+20-minute window applies; absence of evidence after that fails.
+
+A build downloads the original current and following vendor files, retains their
+SHA-256 values, replays native update IDs and actual exchange clocks, and requires
+every grid sample in the hour. An actual exchange event must witness the final
+100-ms sample. A checkpoint cannot skip missing updates inside the requested hour;
+a tail shorter than the five-second freshness allowance still fails without that
+witness. Only complete activation masks overlapping provisional minutes.
+The ordinary component checks, dependency revalidation and atomic activation follow.
+Failure preserves the existing active/provisional state and native failure evidence.
+
+The REST file names are `binance_spot/YYYY-MM-DD/HH/BTCUSDT_orderbook.parquet`
+and `binance_futures/YYYY-MM-DD/HH/BTCUSDT_orderbook.parquet`. The provider's
+[order-book format](https://www.cryptohftdata.com/docs/rest-orderbook) carries
+snapshots and original diff-depth fields. Current files preserve receive order; legacy merged collectors preserve native ID order and their original clocks. Replay verifies
+spot `U/u` and perpetual `pu`, rejects stale/crossed/insufficient-depth states, and
+requires a real vendor checkpoint at or before the start. Historical files may require preceding vendor hours. A missing checkpoint fails visibly; no
+Binance seed or invented state repairs it. Complete hours have 36,000 depth20 rows,
+3,600 depth200 rows, and 60 rows in each minute projection. Canonical activation
+masks the overlapping provisional minutes in the existing current-reader views.
+
+Both vendor sources share the existing host-keyed transport ledger: 30 requests/minute
+anonymously and an authenticated application ceiling of 600/minute. Token mints
+and downloads share admission; stricter API-hop RateLimit policy and exhausted
+windows plus Retry-After remain binding, separately from Binance host-family quotas. Discovery,
+backfill, replay, revalidation and monitoring make zero Binance requests. Capture
+seed/connection limits and weighted Binance allowances are unchanged.
+
+## Rejected hourly revisions
+
+After full replay rejects `BOOK_SEQUENCE_GAP`, `BOOK_EVENT_STALE` or
+`BOOK_KNOWN_DEPTH_EXHAUSTED`, the adapter retains only bounded private dependency
+metadata under the existing shared lock mount. The verdict binds actual fetched
+ETags for the current, every used preceding and required following file. Scratch
+payloads and grids are removed. Other errors and early failures are not cached.
+
+Automatic audit still reads fresh metadata for selected pending and retained
+hours. It skips a matching rejected identity before build admission and audit
+recovery, logging `phase=audit_rejected_unchanged`; original failures stay open.
+An inactive rejection remains missing. A rejected replacement preserves the prior
+accepted generation and coverage. An audit containing only skipped work succeeds
+without claiming the rejected hours succeeded. Changed dependency ETags admit a
+new attempt. Missing verdict evidence permits classification once; corrupt
+existing dependency evidence retains its visible failure, including the existing
+active-hour retry block.
+
+`_REPLAY_POLICY_VERSION` participates in the compact `[replay_policy, current,
+dependencies]` digest under the unchanged `cryptohftdata-v2:` prefix. Bump it when
+replay, dependency selection or BookSampler acceptance changes. Both retained and
+rejected revisions then require revalidation. `_REJECTION_POLICY_VERSION` separately
+versions suppression verdicts; a suppression-only bump leaves accepted identity intact.
+Native explicit canonical retry always validates. Physically valid retained repair
+recovers only its repair failure when the official identity differs or the retained
+identity is rejected; canonical replacement failures remain until actual current-policy
+canonical build/reconciliation. Non-policy source recovery is unchanged. Stale evidence
+for a different current ETag cannot block a new attempt; previously unrequested failed
+backfill hours retain that retry path without automatic audit enrollment.
+
+Modern initial snapshot prefixes identify nominal `(event_time,last_update_id)`
+checkpoints using exact hour-aligned E and R=E*1000000. Same-identity copies do not
+acquire a clock from different receives. Unwitnessed hour markers fail
+`BOOK_VENDOR_CLOCK_UNPROVEN`. Validated nominal levels retain verified native cursor
+links but no exchange clock, and refresh without sampling. Real admitted updates must
+establish an initial clock at/before the first grid. Nominal following headers cannot
+finish replay; actual E>=end-100ms must witness the terminal grid. Clock-unproven and
+missing-tail complete revisions retain visible failures and unchanged-revision
+suppression. Original ID/freshness/depth/order rules and legacy replay remain.
+
+Policy migration revalidates retained coverage through existing bounded serial audits
+(recent2h, up to50 rotating older records and5 pending observations per market),
+independently of the current-hour canonical schedule. Keep bulk stopped during rollout;
+verify current-hour activation and live capture before resuming frozen unfinished spot
+selection. Input-poor legacy and modern update-only hours remain unresolved; this clock
+correction does not certify complete history or an overnight completion rate.
+
+## Operator workflow and coverage
+
+Deployment activates the generated schedules, sensors and provisional workers.
+No manual enablement or source configuration in Dagit is required. The Jobs page
+exposes `backfill_binance_spot_book_source_job` and
+`backfill_binance_perp_book_source_job` with native hourly partition selection.
+Select hours, missing/failed partitions, or retries; every launch builds all four
+canonical projections and runs ordinary completion checks.
+
+Canonical keys use `YYYY-MM-DDTHHZ`, distinct from the shared second-qualified
+provisional minute keys, so activation and failure recovery cannot collide.
+
+Native calendars begin at **2025-06-28 07:00 UTC for spot** and
+**2025-06-28 06:00 UTC for perpetual**, the first whole recorded hours after the
+provider's partial first files. File availability does not certify completeness:
+the first perpetual hour passes full replay; the first spot hour fails because its
+recording cannot prove depth200 throughout the hour. Such gaps remain failed native
+partitions and missing hours in C2. Historical yield is not assumed to be 100%.
+
+Deployment admits only the explicitly declared former book anchor,
+2026-10-04 00:00 UTC, and changes it to the registered hourly start under ordinary
+source setup under the existing exclusive maintenance fence. It records the previous/new anchor in the existing observation log,
+verifies the synchronized update, and preserves every active generation. All other
+anchor changes fail. Repeated setup is idempotent. Rolling back code requires an
+explicit corresponding calendar migration; old code rejects the expanded anchor.
+Audit retires requests before the exact first hour and former daily keys by appending
+recovery evidence; it does not delete them. C2 remains red for unfilled history.
+A full day of accepted canonical hours permits local spool payload cleanup after
+two days; incomplete days retain unacknowledged input and immutable seals remain.
+
+The existing monitor owns the mandatory R1/C1/C2 checks for both CANARY books.
+`/law` exposes source/projection evidence, reader minute counts and age, the latest
+authoritative hour/deadline, and expected/validated/missing older hours. A current
+reader cannot hide absent authoritative history. Capture health remains an
+independent operational check in the same monitor. Existing Render collectors and
+consumers remain active until a separate reviewed routing/promotion change proves
+the replacement and required consumer/history coverage. Do not retire them merely
+because this authority extension is deployed.
+
+## Real-data acceptance
+
+Original spot/perpetual provider files for **2026-10-04 09:00–10:00 UTC** prove
+complete grids and native activation. Inputs stay private; CI prepares them from
+the provider without Binance calls, and no vendor market data is committed or
+published. Provider unavailability fails acceptance rather than substituting data.
+
+Historical files before August 19, 2026 can have an outer Zstandard wrapper and
+fragmented duplicate-collector messages. The adapter streams decompression, groups
+actual rows by native ID, and uses the matched update's exchange clock for legacy
+REST snapshots. Updates precede their same-ID snapshots even when collector
+arrival order differs; a REST collector clock cannot close an exchange hour.
+An initial legacy snapshot can bind to its preceding same-ID update exactly at
+the requested boundary, using the actual exchange clock and checked quantities;
+its observed quantities and deletions outside the seed are retained through the
+same price-knowledge update used by live capture;
+otherwise it requires the normal seed bridge. Same-ID snapshots must agree with all proven prices, including observed quantities
+and deletions outside the complete interval, and extend
+known depth without discarding older proven prices. Inputs and market timestamps
+are never fabricated, sorted by a future clock, or shifted.
+
+Prelude search is bounded to 24 preceding hours, 256 MiB per expanded file and
+1 GiB combined replay input. Original and expanded inputs plus the grid coexist in
+private scratch during a build. Worst-case dependency discovery/revalidation uses
+26 metadata reads and download uses 26 files; the shared HCD ledger (30/minute anonymous, at most 600/minute authenticated) paces
+all requests. Binance demand is zero. Modern hours use the current and following
+files; historical hours can also require preceding inputs.
+The existing capacity monitor measures mounted storage; the bounded pool limits
+concurrent scratch. Full-range import remains a native operator selection.
+
+A revision binds the current object plus every ordered preceding and following
+ETag and original input hash. The v2 revision prefix makes ordinary audit recheck
+previous single-file generations against this completeness policy. Their retained
+rows remain readable, but `/law` marks their closing-input proof UNKNOWN until the
+ordinary rebuild supplies v2 evidence. Audit can wait for a newer retained hour's
+closing file without recording an outage or discarding its generation. Bounded private dependency metadata lets ordinary discovery and audit
+notice a changed predecessor; revalidation rejects it before activation. Losing
+that derived metadata can cause a rebuild, never accept changed bytes under an old
+identity. Missing files, sequence links, freshness, depth proof, bounds or scratch
+remain explicit failures.
+
+Native GUI acceptance on October 5, 2026 used the registered jobs and a real
+ClickHouse instance on a 4 GiB APFS volume. All-history selection exposed the
+expanded calendars; the ordinary date picker and partition bar selected hours,
+without typed dates, configuration or identifiers. Final-policy run
+`e1bbc9a9-0e4e-4fe5-bf6e-b4af65946dd4` rebuilt perpetual `2025-06-28T06Z`
+as generation 2, build `25c9f5d5-d80b-4cd8-a41b-1df50782e651`, using original
+05Z/06Z/07Z files. Its four products contain 36,000/3,600/60/60 rows. The terminal
+exchange event is 07:00:00.093 UTC, proving the final 06:59:59.900 sample;
+source content hash is
+`0b1fb41b5178039785f08dd3ba8fea92097a56ef3f473e00371ba3a6037c1e57`.
+
+That run activated its data in a 35-second run but its completion step rejected a
+retained earlier audit failure. Native audit retry
+`1d245530-0d26-47b7-ad3d-dffd9132b5fe` succeeded; native Re-execute all
+`a3afba2e-9736-4e98-9f06-2400e2e4dbad` then completed in 20 seconds,
+retaining generation 2. This distinguishes activation from successful completion.
+The earlier 06Z/14Z runs predate the closing-file policy and are not final-policy
+acceptance. Spot `2025-06-28T07Z` failed depth proof; native Re-execute reproduced
+the failure while retaining already accepted generations.
+
+On an Apple M1 Max with 64 GiB RAM, the final historical rebuild's ordinary
+capacity receipts measured a peak 117,448,704-byte increase on the shared mounted
+volume, including original/expanded files and replay grids. These paths share one
+volume; their receipts must not be summed. Scratch lives under the existing source
+lock mount so the monitor observes it. A separate preceding-file local replay
+measured about 294 MB peak RSS; it predates the closing-file addition and is not a
+final process-memory bound. Neither finite measurement is a universal bound.
+
+Observed single-generation hours used up to about 5.2 MB compressed for spot and
+6.5 MB for perpetual, with 52.24 MB uncompressed per market-hour. Extrapolating
+these samples over approximately 11,140 hours per market suggests about 130 GB
+compressed (1.16 TB uncompressed) for both markets combined. This is a planning
+estimate, not proof of full-range yield or production throughput. Retained
+revisions, concurrent scratch, indexes, logs and ordinary capacity reserves add
+space. Existing admission checks remain mandatory for a full native backfill.
+
+Full-history operations run spot before perpetual through the existing native
+backfill jobs. First verify a three-hour old/mid/recent readiness selection per
+market; include the genuine rejected first spot hour and unrelated valid work in
+the spot selection. Freeze the eligible cutoff and exact selected keys. Account
+accepted outcomes using this backfill's reconciled receipts joined to current
+activations and all four component proofs; bind rejected outcomes to their actual
+validation failure and complete input identity. Exhausted historical 404 retries
+are separate provider gaps. Infrastructure, canceled and unattempted hours remain
+pending. Mixed outcomes can leave the native backfill FAILED and its completion
+step skipped or blocked; retained coverage and open failures remain truthful.
+
+Cancel the native market backfill and queued/running child runs on the first
+capacity failure or a new bulk-attributable C1, R1 or capture breach. Retain the
+selection and resume through native failed/missing controls when existing bounds
+recover. Do not start perpetual while priority spot is blocked. The reviewed
+#525/#526 throughput change permits 32 canonical slots per market and 31 global
+bulk runs, with eight routine and one maintenance slot (40 total). The global bulk
+lane also governs other sources, whose source-specific pools stay unchanged.
+
+Before rollout, finish or cancel all existing bulk parents and children. The
+version-pinned controller/monitor exception retains capture/provisional/publication
+container IDs, refuses pending component additions, and refreshes the monitor
+catalog. The next version bump returns to ordinary full rollout.
+
+Launch the full selection once through native Dagit job or asset backfill controls.
+The versioned queue admits at most 16 historical book runs across both markets,
+within the existing 31 bulk / 8 routine / 1 maintenance lanes. Pending selection
+advances after terminal children and controller restart; private batches are not
+required. Ordinary current-hour refreshes and audits do not consume the book bulk
+sublimit. The 32-slot canonical pool is an upper bound, not measured safe load.
+
+Historical book HTTP 404 ends that partition attempt without hourly sleeping.
+The failure identifies the missing selected/prelude/following archive. A first
+404 is unresolved, not exhausted or a permanent provider gap. Use native failed
+partition retry after input recovery. Current-authority waiting and transport,
+408/418/429/5xx, rate-circuit and revision/generation retries keep their existing
+23-hour envelope. Replay and input bounds remain strict.
+
+For these no-file-consumer sources, an accepted child must have its own native
+receipt joined to matching active revision/build/generation and all declared
+component proofs. Unrelated historical failures keep source_health and C2 red;
+they do not turn accepted selected work into a false final-child failure. A
+selected input failure or broken child proof still fails. No Arrow is declared.
+
+Retain 100 GB reserve plus live consumption, selected maximum scratch, projected
+retained growth and 20 GB margin, 32 GB available memory and eight idle CPU
+equivalents. The original 16-run stages passed; 32 active runs failed CPU
+qualification. Cancel the parent and all queued/running children on the agreed
+capacity/live-health bounds. No new detached load controller is introduced.
+Measure attempted and accepted full-range throughput separately. The 12-hour
+per-market target remains unproved at observed legacy yield; missing provider
+anchors remain incomplete coverage, never invented data.
+
+Production acceptance must record the installed SHA/config, one native parent's
+selection hash, automatic queued successor event times, controlled restart across
+the 25-partition submission checkpoint with unsubmitted work, resumed progress
+without another parent, scheduled due-authority proof, retained worker IDs and
+six-source reader/capture evidence. Unit queue protocol tests do not replace
+this actual GUI and production proof.
+
+
+
+HCD uses the same shared ledger with a third numeric provider-spacing floor;
+legacy two-field input is accepted and Binance ledger files are unchanged.
+Waiting native requests rebook if a newly observed policy is stricter than their
+reserved rate. Both old controller containers stop before new three-field writers
+start; capture/provisional/publication containers keep running. Keep the extended
+reader in forward repairs; an old two-field HCD image is not a supported rollback.
+Native job backfills use the unchanged Dagster daemon through
+`python -m origo.orchestration.daemon run`. Missing code locations during graceful
+workspace teardown use Dagster's existing bounded retry budget, with the original
+traceback in daemon/instigation logs; persistent errors still become FAILED. Both
+Compose daemon services allow 300 seconds for thread joins and submission drain.
+Interrupted active children remain truthful native failures eligible for native
+failed retry; they are never reset to QUEUED. Arbitrary SIGKILL recovery and asset
+backfill restart qualification are not claimed. Before retiring an older unpatched
+daemon, all bulk parents and queued/active children must be terminal.
+Open PRD #525 owns actual full frozen GUI/restart qualification, including zero
+orphaned pre-restart NOT_STARTED children after resume and none at completion,
+17 retained live-worker IDs, due authority, live capture and sustained throughput.
+Implementation merge alone does not satisfy that acceptance.

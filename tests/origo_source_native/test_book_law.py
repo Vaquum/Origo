@@ -210,7 +210,9 @@ def _assert_native_selection_and_completion(
         return record.partition
 
     monkeypatch.setattr(LocalBookCanonical, 'partition', recorded_minute)
-    with DagsterInstance.ephemeral() as instance:
+    instance_root = runtime.lock_root.parent / 'completion-dagster'
+    instance_root.mkdir()
+    with DagsterInstance.local_temp(str(instance_root)) as instance:
         parent = str(uuid4())
         instance.add_backfill(PartitionBackfill(
             backfill_id=parent, status=BulkActionStatus.REQUESTED, from_failure=False, tags={},

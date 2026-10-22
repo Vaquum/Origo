@@ -22,6 +22,11 @@ The owning agent completes these operations; no operator configuration is needed
    `python -m tools.retire_cryptohftdata --evidence /opt/origo/locks/retirement-608.jsonl`
    first. The tool refuses nonlocal canonical specs, active book automation/work,
    unfinished mutations, unexpected source namespaces and unbounded protection rows.
+   Its durable ownership manifest records exact vendor builds, referenced runs and
+   events before deleting provenance. It refuses any remaining scratch database
+   whose exact name matches a recorded vendor build. Resolve only those verified
+   names before continuing; never delete databases by a broad prefix. Referenced
+   observer runs can also contain native events and are not exclusively vendor-owned.
 4. Invoke the same command with `--apply` one batch at a time. Each invocation
    appends private, durable evidence, removes at most one table/month and rechecks
    exact count/SHA256 proofs of immutable native provisional minutes. Stop on any
@@ -58,15 +63,21 @@ table is a deletion target.
 
 Protection hashes cover bounded accepted provisional minutes; they do not scan
 canonical trade days or claim an independent rehash of every historical row.
-Read/mutation admission stays at one query thread, 256 MiB and a ten-second query
-deadline. Every apply is synchronous; a timed-out mutation remains unverified and
-blocks the next invocation until inspected.
+Initiating queries use one thread, 256 MiB and a ten-second query deadline. These
+settings do not bound the background work that rewrites database parts. Qualify
+one affected-part mutation alongside the live feeds before proceeding. Every apply
+waits synchronously; a timed-out mutation remains unverified and blocks the next
+invocation until inspected.
 
 ## Native retention prerequisite
 
 The existing local daily adapter requires every captured minute. A day with a
 capture gap cannot become canonical, and its payloads would have no whole-day
-cleanup acknowledgment after hourly authority is retired. A native retention
-change requires explicit scope approval and real captured-data preservation proof.
-Until that is resolved, retirement is incomplete; available disk space alone does
-not establish indefinite live collection safety.
+cleanup acknowledgment after hourly authority is retired. The operator approved
+reclaiming temporary copies only after their live-collected data is safely stored.
+The existing native audit checks at most 64 payloads and eight old calendar days
+per invocation, only for incomplete days older than two days. It requires the exact
+seal-derived native revision and all four physical component proofs, retains the
+seal, and leaves stored rows unchanged. Complete live-captured days remain eligible
+for the existing daily build; no imported provider history is preserved by this
+rule. These live captures predate CryptoHFTData and are explicitly protected.

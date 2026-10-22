@@ -93,6 +93,8 @@ def test_retirement_dry_run_and_single_mutation_keep_protection_evidence(
     monkeypatch.setattr(retirement, 'require_no_mutations', lambda *_args: stages.append('idle'))
     deletion = retirement.Deletion('origo.source_activation_log', retirement.VENDOR, {}, 1)
     monkeypatch.setattr(retirement, 'next_deletion', lambda _stores: deletion)
+    monkeypatch.setattr(retirement, 'vendor_manifest', lambda _stores:
+                        retirement.VendorManifest((), (), (), ()))
     monkeypatch.setattr(retirement, 'protected_fingerprints', lambda _stores: ())
     monkeypatch.setattr(retirement, 'verify_protected', lambda *_args: stages.append('verified'))
     retirement.main()
@@ -181,6 +183,20 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
     runtime.failures.record(operation='provisional', partition=native.partition.key,
                             revision=native.revision, build_id=native.build_id, scope='PARTITION',
                             error_code='DELIBERATE_NATIVE_CONTROL')
+    # A real Dagit bridge uses the originating failure ID but its own observer run.
+    events = store.execute(
+        'SELECT event_id,event_time,error_code FROM origo.source_failure_log '
+        'WHERE source_key=%(source)s ORDER BY error_code', {'source': runtime.spec.key},
+    )
+    observer = str(uuid4())
+    receipts = [
+        (event, runtime.spec.key, f'{runtime.spec.key}:dagit:{event}', 0,
+         'LOGGED', observer, occurred)
+        for event, occurred, _code in events
+    ]
+    native_receipt = next(receipt for receipt, event in zip(receipts, events, strict=True)
+                          if event[2] == 'DELIBERATE_NATIVE_CONTROL')
+    store.execute('INSERT INTO origo.source_run_log VALUES', receipts)
     other = SourceStore(store.client, store.database, SOURCE_REGISTRY[0])
     FailureLog(other, runtime.lock_root, str(uuid4())).record(
         operation='canonical', partition=key, revision=vendor, build_id=vendor_build,
@@ -188,6 +204,22 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
     )
     with pytest.raises(RuntimeError, match='only the two declared'):
         retirement.next_deletion((other,))
+    scratch_names = ('source_build_' + vendor_build.hex, 'source_build_' + local_build.hex)
+    for name in scratch_names:
+        store.execute(f'CREATE DATABASE {name}')
+    try:
+        ownership = retirement.vendor_manifest((store,))
+        assert {row[3] for row in ownership.builds} == {vendor_build}
+        assert {row[1] for row in ownership.runs} >= {runtime.run_id, observer}
+        assert {row[1] for row in ownership.events} == {
+            row[0] for row in receipts if row[0] != native_receipt[0]
+        }
+        assert ownership.scratch_databases == (scratch_names[0],)
+        with pytest.raises(RuntimeError, match=scratch_names[0]):
+            retirement.require_no_vendor_scratch(ownership)
+    finally:
+        for name in scratch_names:
+            store.execute(f'DROP DATABASE {name} SYNC')
     pins = retirement.protected_fingerprints((store,))
     deletion = retirement.next_deletion((store,))
     assert deletion is not None and deletion.table.endswith('.source_activation_log')
@@ -205,6 +237,10 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
     assert store.execute(
         'SELECT error_code FROM origo.source_failure_log ORDER BY error_code'
     ) == [('DELIBERATE_NATIVE_CONTROL',), ('DELIBERATE_UNRELATED_CONTROL',)]
+    assert store.execute(
+        'SELECT * FROM origo.source_run_log WHERE source_key=%(source)s',
+        {'source': runtime.spec.key},
+    ) == [native_receipt]
     for component in runtime.spec.components:
         if not component.provisional:
             table = store.component_table(component.key)

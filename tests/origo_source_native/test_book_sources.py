@@ -22,6 +22,7 @@ from origo.sources.contracts import (
     RolloutStage,
     SourceError,
     SourceReadPolicy,
+    StateRecord,
 )
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS, BOOK_HASH_CHUNK_ROWS
@@ -93,7 +94,7 @@ def test_book_sources_register_as_canary_beside_the_four_trade_sources() -> None
         assert spec.partitions.interval == 'day'
         assert spec.orchestration.canonical_cron == '5 0 * * *'
         assert spec.orchestration.audit_cron == '30 * * * *'
-        assert spec.orchestration.canonical_concurrency == 8
+        assert spec.orchestration.canonical_concurrency == 32
         assert {component.key for component in spec.components} == {
             *BOOK_COMPONENT_KEYS,
             *(key + '_latest' for key in BOOK_COMPONENT_KEYS),
@@ -399,3 +400,148 @@ def test_book_worker_uses_the_common_frontier_keys(book_runtime: SourceRuntime) 
     # The older unrecorded anchor remains an explicit failed repair, not a tick crash.
     assert len(failed) == 1
     assert runtime.store.execute("SELECT uniqExact(error_code) FROM origo.worker_minute_log WHERE status='FAILED'") == [(1,)]
+
+
+def test_native_audit_reclaims_only_saved_payloads_from_incomplete_days(
+    book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aged accepted copies can leave an incomplete day without changing its readers."""
+    from origo.sources import book_retention, lifecycle
+    from origo.sources.adapters.book_spool import spool_bytes
+    from origo.sources.locking import source_lock
+
+    runtime = book_runtime
+    root, market = runtime.lock_root.parent / 'spool', _market(runtime)
+    keys = _keys(runtime)
+    first = runtime.build(keys[0], provisional=True)
+    assert runtime.spec.provisional is not None
+    first_path = root / market / first.partition.start.strftime('%Y-%m-%d/%H-%M.seal.gz')
+    last = runtime.spec.provisional.partition(keys[-1])
+    last_path = root / market / last.start.strftime('%Y-%m-%d/%H-%M.seal.gz')
+    assert first_path != last_path
+    assert book_retention.reclaim_native_payloads(runtime, first.partition.end + timedelta(days=1), lifecycle._partition_lock) == 0
+    assert first_path.exists() and last_path.exists()
+    now = first.partition.end + timedelta(days=3)
+
+    # Calendar-decision control only: no complete day or fabricated source seals are asserted.
+    cursor = runtime.lock_root / runtime.spec.key / 'book_retention.cursor.json'
+    with monkeypatch.context() as control:
+        control.setattr(book_retention, '_complete_day', lambda _seals: True)
+        assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert first_path.exists() and last_path.exists()
+    cursor.unlink()  # Discard only the deliberate calendar-control cursor.
+
+    expected = {component: runtime.store.rows(component, runtime.store.snapshot())
+                for component in (key + '_latest' for key in BOOK_COMPONENT_KEYS)}
+    size, packed = spool_bytes(root, market), first_path.stat().st_size
+    monkeypatch.setattr(book_retention, 'BOOK_RETENTION_BATCH_MINUTES', 1)
+    validate = SourceRuntime._validate_retained
+    validated: list[str] = []
+
+    def outside_capture_fence(self: SourceRuntime, record: StateRecord) -> None:
+        # A real capture seal must remain admissible throughout database proof validation.
+        with source_lock(root, f'book_spool_{market}', 'sealed'):
+            validated.append('capture-admitted')
+        validate(self, record)
+
+    monkeypatch.setattr(SourceRuntime, '_validate_retained', outside_capture_fence)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return now
+
+    monkeypatch.setattr(lifecycle, 'datetime', Clock)
+    assert runtime.audit() == ()  # Existing native automation owns cleanup; no new worker.
+    assert validated == ['capture-admitted']
+    assert not first_path.exists() and first_path.with_suffix('.json').exists()
+    assert last_path.exists()  # An actual unaccepted neighboring minute is never discarded.
+    assert spool_bytes(root, market) == size - packed
+    assert runtime.store.records() == (first,)
+    assert {component: runtime.store.rows(component, runtime.store.snapshot()) for component in expected} == expected
+    for _ in range(len(keys) + 1):
+        assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert spool_bytes(root, market) == size - packed
+    assert last_path.exists()
+    import json
+
+    assert json.loads(cursor.read_text())['frontier'] == (
+        first.partition.start + timedelta(days=1)
+    ).date().isoformat()
+    evidence = runtime.store.execute(
+        'SELECT complete FROM origo.source_observation_log '
+        "WHERE source_key=%(source)s AND JSONExtractString(evidence_json,'operation')='native_payload_reclaimed' ORDER BY complete",
+        {'source': runtime.spec.key},
+    )
+    assert evidence == [(0,), (1,)]
+
+
+def test_native_reclamation_keeps_payloads_when_seal_or_persisted_proof_fails(
+    book_runtime: SourceRuntime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identity, metadata and physical faults cannot authorize destruction of a copy."""
+    import json
+
+    from origo.sources import book_retention, lifecycle
+    from origo.sources.adapters.book_spool import atomic_write
+
+    runtime = book_runtime
+    root, market = runtime.lock_root.parent / 'spool', _market(runtime)
+    record = runtime.build(_keys(runtime)[0], provisional=True)
+    payload = root / market / record.partition.start.strftime('%Y-%m-%d/%H-%M.seal.gz')
+    metadata = payload.with_suffix('.json')
+    original = metadata.read_bytes()
+    now = record.partition.end + timedelta(days=3)
+    monkeypatch.setattr(book_retention, 'BOOK_RETENTION_BATCH_MINUTES', 1)
+    cursor = runtime.lock_root / runtime.spec.key / 'book_retention.cursor.json'
+
+    # Deliberate seal-identity fault; persisted source rows remain the genuine recording.
+    changed = json.loads(original)
+    changed['last_update_id'] += 1
+    atomic_write(metadata, json.dumps(changed).encode())
+    assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert payload.exists()
+    atomic_write(metadata, original)
+    cursor.unlink()
+
+    bindings = {'source': runtime.spec.key, 'partition': record.partition.key,
+                'build': record.build_id, 'hash': dict(record.component_hashes)['depth200_latest']}
+    predicate = "source_key=%(source)s AND partition_key=%(partition)s AND build_id=%(build)s AND component='depth200_latest'"
+    runtime.store.execute(
+        f'ALTER TABLE origo.source_component_log UPDATE content_hash=\'deliberate-proof-fault\' WHERE {predicate}',
+        bindings, settings={'mutations_sync': 2},
+    )
+    assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert payload.exists()
+    runtime.store.execute(
+        f'ALTER TABLE origo.source_component_log UPDATE content_hash=%(hash)s WHERE {predicate}',
+        bindings, settings={'mutations_sync': 2},
+    )
+    cursor.unlink()
+
+    runtime.store.execute(
+        f'ALTER TABLE origo.source_component_log UPDATE row_count=59 WHERE {predicate}',
+        bindings, settings={'mutations_sync': 2},
+    )
+    assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert payload.exists()
+    runtime.store.execute(
+        f'ALTER TABLE origo.source_component_log UPDATE row_count=60 WHERE {predicate}',
+        bindings, settings={'mutations_sync': 2},
+    )
+    cursor.unlink()
+
+    # A genuine grid row is deliberately removed while stored proof metadata stays unchanged.
+    runtime.store.execute(
+        f'ALTER TABLE {runtime.store.component_table("depth200_latest")} DELETE '
+        'WHERE build_id=%(build)s AND datetime=%(minute)s',
+        {'build': record.build_id, 'minute': record.partition.start}, settings={'mutations_sync': 2},
+    )
+    assert book_retention.reclaim_native_payloads(runtime, now, lifecycle._partition_lock) == 0
+    assert payload.exists() and metadata.read_bytes() == original
+    codes = {str(row[0]) for row in runtime.store.execute(
+        "SELECT error_code FROM origo.source_failure_log WHERE operation='payload_cleanup' AND event_type='FAILED'",
+    )}
+    assert codes == {'BOOK_RETENTION_IDENTITY_INVALID', 'BOOK_RETENTION_PROOF_INVALID',
+                     'RETAINED_CONTENT_INVALID'}
+    assert runtime.store.record(record.partition) == record

@@ -4,6 +4,7 @@ Run inside the deployed Dagster container after stopping book schedules/sensors 
 draining book runs/backfills. Dry-run is the default. Each --apply appends durable
 before/after evidence and deletes at most one table/month. Live collectors and
 provisional workers must keep running; this tool never takes their heavy fence.
+Query settings bound foreground reads, not background mutation resource use.
 """
 
 from __future__ import annotations
@@ -13,10 +14,10 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from dagster import DagsterInstance, RunsFilter
 from dagster._core.scheduler.instigation import InstigatorStatus
@@ -65,6 +66,14 @@ class Deletion:
         return f'ALTER TABLE {self.table} DELETE WHERE {self.predicate}'
 
 
+@dataclass(frozen=True)
+class VendorManifest:
+    builds: tuple[Row, ...]
+    runs: tuple[Row, ...]
+    events: tuple[Row, ...]
+    scratch_databases: tuple[str, ...]
+
+
 def require_quiescent(instance: DagsterInstance, specs: tuple[RevisionedSourceSpec, ...]) -> None:
     if tuple(spec.key for spec in specs) != SOURCES or any(
         not isinstance(spec.canonical, LocalBookCanonical) for spec in specs
@@ -107,6 +116,10 @@ def predicates(store: SourceStore) -> tuple[tuple[str, str, str | None], ...]:
         for name in ('source_build_log', 'source_component_log', 'source_backfill_log')
     )
     failure = f'({VENDOR} OR ({HOURLY} AND operation IN {OPERATIONS}))'
+    failure_events = (
+        f'SELECT event_id FROM {store.table("source_failure_log")} '
+        f'WHERE source_key=%(source)s AND {failure}'
+    )
     runs = ' UNION DISTINCT '.join(
         f'SELECT dagster_run_id FROM {store.table(name)} '
         f'WHERE source_key=%(source)s AND {condition} AND dagster_run_id!=\'\''
@@ -119,7 +132,7 @@ def predicates(store: SourceStore) -> tuple[tuple[str, str, str | None], ...]:
     return (
         ('source_activation_log', scoped + f'NOT provisional AND {VENDOR}', 'partition_start'),
         ('source_capacity_log', scoped + f'dagster_run_id IN ({runs})', None),
-        ('source_run_log', scoped + f"(dagster_run_id IN ({runs}) OR match(event_key,'^binance_(spot|perp)_book:canonical:[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]{{2}}Z:cryptohftdata-v[12]:'))", 'recorded_at'),
+        ('source_run_log', scoped + f"(event_id IN ({failure_events}) OR dagster_run_id IN ({runs}) OR match(event_key,'^binance_(spot|perp)_book:canonical:[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]{{2}}Z:cryptohftdata-v[12]:'))", 'recorded_at'),
         ('source_cleanup_log', scoped + f'build_id IN ({builds})', None),
         ('source_failure_log', scoped + failure, 'event_time'),
         ('source_observation_log', scoped + HOURLY, 'observed_at'),
@@ -182,6 +195,51 @@ def next_deletion(stores: tuple[SourceStore, ...]) -> Deletion | None:
                     if count:
                         return Deletion(table, predicate, params, int(str(count)))
     return None
+
+
+def vendor_manifest(stores: tuple[SourceStore, ...]) -> VendorManifest:
+    """Retain provider ownership before its identity-bearing rows can be erased."""
+    builds: list[Row] = []
+    runs: list[Row] = []
+    events: list[Row] = []
+    for store in stores:
+        params = {'source': store.spec.key}
+        builds.extend(store.execute(' UNION DISTINCT '.join(
+            f'SELECT source_key,partition_key,ifNull(revision,\'\'),build_id '
+            f'FROM {store.table(name)} WHERE source_key=%(source)s AND {VENDOR} '
+            'AND build_id IS NOT NULL'
+            for name in ('source_activation_log', 'source_build_log', 'source_component_log',
+                         'source_backfill_log', 'source_failure_log', 'source_certification_log')
+        ), params))
+        selected = {name: predicate for name, predicate, _column in predicates(store)}
+        runs.extend(store.execute(' UNION DISTINCT '.join(
+            f'SELECT source_key,dagster_run_id FROM {store.table(name)} '
+            f'WHERE {selected[name]} AND dagster_run_id!=\'\''
+            for name in ('source_activation_log', 'source_component_log', 'source_backfill_log',
+                         'source_failure_log', 'source_run_log', 'source_cleanup_log',
+                         'source_certification_log')
+        ), params))
+        events.extend(store.execute(' UNION DISTINCT '.join(
+            f'SELECT source_key,event_id FROM {store.table(name)} WHERE {selected[name]}'
+            for name in ('source_failure_log', 'source_run_log')
+        ), params))
+    names: set[str] = set()
+    for row in builds:
+        if len(row) != 4 or not isinstance(row[3], UUID):
+            raise TypeError('Vendor scratch ownership requires a concrete recorded build UUID.')
+        names.add('source_build_' + row[3].hex)
+    scratch = stores[0].execute(
+        'SELECT name FROM system.databases WHERE name IN %(names)s ORDER BY name',
+        {'names': tuple(sorted(names))},
+    ) if names else []
+    return VendorManifest(tuple(builds), tuple(runs), tuple(events),
+                          tuple(str(row[0]) for row in scratch))
+
+
+def require_no_vendor_scratch(manifest: VendorManifest) -> None:
+    if manifest.scratch_databases:
+        raise RuntimeError('Vendor-owned scratch databases require exact controlled cleanup: '
+                           + ', '.join(manifest.scratch_databases))
 
 
 def protected_fingerprints(stores: tuple[SourceStore, ...]) -> tuple[dict[str, object], ...]:
@@ -264,15 +322,18 @@ def main() -> None:
             require_no_mutations(book_stores[0])
             deletion = next_deletion(book_stores)
             pins = protected_fingerprints(protected)
+            ownership = vendor_manifest(book_stores)
             identity = str(uuid4())
             report: dict[str, object] = {
                 'id': identity, 'at': datetime.now(UTC).isoformat(), 'apply': args.apply,
                 'statement': deletion.statement if deletion else None,
                 'params': deletion.params if deletion else {},
                 'selected_rows': deletion.rows if deletion else 0, 'protected': pins,
+                'vendor_ownership': asdict(ownership),
             }
             record(args.evidence, {**report, 'phase': 'before'})
             print(json.dumps(report, default=str, sort_keys=True))
+            require_no_vendor_scratch(ownership)
             if args.apply and deletion is not None:
                 try:
                     require_quiescent(instance, specs)

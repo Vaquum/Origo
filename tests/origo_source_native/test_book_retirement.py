@@ -13,8 +13,9 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from dagster import DagsterInstance
+from dagster import DagsterInstance, DagsterRunStatus
 from dagster._core.scheduler.instigation import InstigatorStatus
+from dagster._core.test_utils import create_run_for_test
 
 from origo.assets.create_origo_database import ClickHouseSettings
 from origo.sources.columnar import binary_hash
@@ -44,29 +45,31 @@ def _stopped() -> list[SimpleNamespace]:
     ]
 
 
-@pytest.mark.parametrize('fault', ['adapter', 'automation', 'run', 'backfill'])
+@pytest.mark.parametrize('fault', ['adapter', 'automation', 'run', 'not_started', 'backfill'])
 def test_retirement_refuses_nonlocal_or_nonquiescent_books(
     monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     """Each independent writer-admission fault must prevent the cleanup boundary."""
     specs = tuple(next(spec for spec in SOURCE_REGISTRY if spec.key == key)
                   for key in retirement.SOURCES)
-    instance = MagicMock(spec=DagsterInstance)
-    instance.all_instigator_state.return_value = _stopped()
-    instance.get_runs.return_value = []
     monkeypatch.setattr(retirement, 'backfill_active', lambda *_args: fault == 'backfill')
-    if fault == 'adapter':
-        # Deliberately invalid adapter is a protocol fault, not a replacement source.
-        specs = (replace(specs[0], canonical=object()), specs[1])
-    elif fault == 'automation':
-        instance.all_instigator_state.return_value[0].status = InstigatorStatus.RUNNING
-    elif fault == 'run':
-        instance.get_runs.return_value = [SimpleNamespace(
-            tags={'origo_source_key': retirement.SOURCES[0]},
-            job_name='deliberate_pending_book_run', run_id='deliberate-control', asset_selection=(),
-        )]
-    with pytest.raises(RuntimeError):
-        retirement.require_quiescent(instance, specs)
+    with DagsterInstance.ephemeral() as instance:
+        states = _stopped()
+        monkeypatch.setattr(instance, 'all_instigator_state', lambda: states)
+        if fault == 'adapter':
+            # Deliberately invalid adapter is a protocol fault, not a replacement source.
+            specs = (replace(specs[0], canonical=object()), specs[1])
+        elif fault == 'automation':
+            states[0].status = InstigatorStatus.RUNNING
+        elif fault in ('run', 'not_started'):
+            create_run_for_test(
+                instance, job_name=f'{retirement.SOURCES[0]}_canonical_job',
+                tags={'origo_source_key': retirement.SOURCES[0]},
+                status=(DagsterRunStatus.NOT_STARTED if fault == 'not_started'
+                        else DagsterRunStatus.QUEUED),
+            )
+        with pytest.raises(RuntimeError):
+            retirement.require_quiescent(instance, specs)
 
 
 @pytest.mark.parametrize('apply', [False, True])
@@ -204,12 +207,12 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
     runtime.failures.record(operation='provisional', partition=native.partition.key,
                             revision=native.revision, build_id=native.build_id, scope='PARTITION',
                             error_code='DELIBERATE_NATIVE_CONTROL')
-    # A real Dagit bridge uses the originating failure ID but its own observer run.
+    # A completing vendor run bridges native and vendor failures under its own run ID.
     events = store.execute(
         'SELECT event_id,event_time,error_code FROM origo.source_failure_log '
         'WHERE source_key=%(source)s ORDER BY error_code', {'source': runtime.spec.key},
     )
-    observer = str(uuid4())
+    observer = runtime.run_id
     receipts = [
         (event, runtime.spec.key, f'{runtime.spec.key}:dagit:{event}', 0,
          'LOGGED', observer, occurred)
@@ -251,6 +254,11 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
         mutations.append(deletion.table)
         store.execute(deletion.statement, deletion.params, settings={'mutations_sync': 2})
         retirement.verify_protected((store,), pins)
+        assert store.execute(
+            'SELECT * FROM origo.source_run_log WHERE source_key=%(source)s '
+            'AND event_id=%(event)s',
+            {'source': runtime.spec.key, 'event': native_receipt[0]},
+        ) == [native_receipt]
         deletion = retirement.next_deletion((store,))
     assert deletion is None
     assert all('_latest_' not in table for table in mutations)

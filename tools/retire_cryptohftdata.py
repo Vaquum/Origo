@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from dagster import DagsterInstance, RunsFilter
+from dagster import DagsterInstance, DagsterRunStatus, RunsFilter
 from dagster._core.scheduler.instigation import InstigatorStatus
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -89,7 +89,7 @@ def require_quiescent(instance: DagsterInstance, specs: tuple[RevisionedSourceSp
     states = {state.instigator_name: state.status for state in instance.all_instigator_state()}
     if any(states.get(name) != InstigatorStatus.STOPPED for name in names):
         raise RuntimeError('Every book schedule and reconciliation/failure sensor must be STOPPED.')
-    for run in instance.get_runs(RunsFilter(statuses=OUTSTANDING)):
+    for run in instance.get_runs(RunsFilter(statuses=[DagsterRunStatus.NOT_STARTED, *OUTSTANDING])):
         if (run.tags.get('origo_source_key') in SOURCES
                 or any(source in run.job_name for source in SOURCES)
                 or any(source in '/'.join(key.path)
@@ -132,7 +132,7 @@ def predicates(store: SourceStore) -> tuple[tuple[str, str, str | None], ...]:
     return (
         ('source_activation_log', scoped + f'NOT provisional AND {VENDOR}', 'partition_start'),
         ('source_capacity_log', scoped + f'dagster_run_id IN ({runs})', None),
-        ('source_run_log', scoped + f"(event_id IN ({failure_events}) OR dagster_run_id IN ({runs}) OR match(event_key,'^binance_(spot|perp)_book:canonical:[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]{{2}}Z:cryptohftdata-v[12]:'))", 'recorded_at'),
+        ('source_run_log', scoped + f"(event_id IN ({failure_events}) OR (status!='LOGGED' AND dagster_run_id IN ({runs})) OR match(event_key,'^binance_(spot|perp)_book:canonical:[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]{{2}}Z:cryptohftdata-v[12]:'))", 'recorded_at'),
         ('source_cleanup_log', scoped + f'build_id IN ({builds})', None),
         ('source_failure_log', scoped + failure, 'event_time'),
         ('source_observation_log', scoped + HOURLY, 'observed_at'),

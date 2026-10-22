@@ -213,6 +213,14 @@ def test_retirement_dry_run_and_single_mutation_keep_protection_evidence(
         retirement.record(evidence, {'id': str(uuid4()), 'phase': 'unknown-apply-result'})
         with pytest.raises(RuntimeError, match='Unknown or invalid'):
             retirement.main()
+        malformed = tmp_path / 'boolean-result.jsonl'
+        retirement.record(malformed, original)
+        retirement.record(malformed, {
+            'id': original['id'], 'phase': 'after', 'protected_unchanged': True,
+            'protected': original['protected'], 'selected_rows_remaining': False,
+        })
+        with pytest.raises(RuntimeError, match='zero-row postcondition'):
+            retirement.unresolved_evidence(malformed)
 
 
 def test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables(
@@ -455,6 +463,14 @@ def test_retirement_preserves_native_and_unrelated_data(
     assert proof['outcome'] == 'applied'
     retirement.record(evidence, proof)
     assert retirement.unresolved_evidence(evidence) == ()
+    malformed = tmp_path / 'incomplete-dagster-result.jsonl'
+    retirement.record(malformed, interrupted)
+    retirement.record(malformed, {
+        'id': interrupted['id'], 'phase': 'after', 'protected_unchanged': True,
+        'protected': interrupted['protected'],
+    })
+    with pytest.raises(RuntimeError, match='complete canonical inventory'):
+        retirement.unresolved_evidence(malformed)
     retirement.verify_protected((store,), pins)
     for asset in canonical_assets:
         assert instance.get_materialized_partitions(asset) == set()

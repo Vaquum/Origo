@@ -1,4 +1,4 @@
-"""Retirement control faults use no fabricated market data or database outputs."""
+"""Retirement controls use no fabricated market data."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from dagster import DagsterInstance
@@ -131,6 +131,27 @@ def test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables(
     assert 'NOT provisional' in deletion.predicate
     assert "startsWith(ifNull(revision,''),'cryptohftdata-v1:')" in deletion.predicate
     assert "startsWith(ifNull(revision,''),'cryptohftdata-v2:')" in deletion.predicate
+
+
+def test_vendor_scratch_lookup_stays_below_query_limit_with_many_build_identities() -> None:
+    """UUID protocol controls reject a scratch lookup exceeding ClickHouse's query limit."""
+    spec = next(spec for spec in SOURCE_REGISTRY if spec.key == retirement.SOURCES[0])
+    # Deliberate identity-only controls; no market values or acceptance claims.
+    builds = [(spec.key, '', '', UUID(int=index + 1)) for index in range(10000)]
+    names = tuple('source_build_' + row[3].hex for row in builds)
+    assert len(str(names).encode()) > 262144
+    client = MagicMock()
+    client.execute.side_effect = [builds, [], [], []]
+    store = SourceStore(client, 'origo', spec)
+
+    manifest = retirement.vendor_manifest((store,))
+
+    query, params = client.execute.call_args_list[-1].args
+    assert 'system.databases' in query
+    assert params is None
+    assert len(query.encode()) < 262144
+    assert len(manifest.builds) == len(builds)
+    assert manifest.scratch_databases == ()
 
 
 def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRuntime) -> None:

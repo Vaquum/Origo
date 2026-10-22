@@ -229,11 +229,11 @@ def vendor_manifest(stores: tuple[SourceStore, ...]) -> VendorManifest:
             raise TypeError('Vendor scratch ownership requires a concrete recorded build UUID.')
         names.add('source_build_' + row[3].hex)
     scratch = stores[0].execute(
-        'SELECT name FROM system.databases WHERE name IN %(names)s ORDER BY name',
-        {'names': tuple(sorted(names))},
+        "SELECT name FROM system.databases WHERE match(name,'^source_build_[0-9a-f]{32}$') "
+        'ORDER BY name',
     ) if names else []
     return VendorManifest(tuple(builds), tuple(runs), tuple(events),
-                          tuple(str(row[0]) for row in scratch))
+                          tuple(str(row[0]) for row in scratch if str(row[0]) in names))
 
 
 def require_no_vendor_scratch(manifest: VendorManifest) -> None:

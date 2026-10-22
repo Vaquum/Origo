@@ -38,8 +38,14 @@ The owning agent completes these operations; no operator configuration is needed
    source domain markers, other quota ledgers, all native spool files and all other
    volumes. Remove the retired credential from deployment secrets and local
    deployment configuration after the release no longer references it. Delete
-   terminal vendor Dagster runs by verified run identity; never wipe an entire
-   shared asset or source history.
+   no shared Dagster run history: vendor completion runs can also contain native
+   receipts. After the database phase has no candidate, run the same command with
+   `--dagster` to inventory the two canonical assets. `--dagster --apply` uses the
+   supported exact-asset wipe only after every materialization is proven to have
+   a vendor revision and an hourly key, and every planned event has an hourly key.
+   Native daily facts, observations or unknown events refuse the wipe. Separate
+   provisional/feed assets and their tags remain. Physical historical audit tags
+   may remain behind Dagster's wipe boundary; public APIs must expose no vendor facts.
 6. Merge and deploy the validated release only after the obsolete hourly metadata
    has been removed. Bootstrap re-enables managed book automation, so deploying
    daily code first would allow daily audit/reconciliation to encounter retired

@@ -5,11 +5,17 @@ draining book runs/backfills. Dry-run is the default. Each --apply appends durab
 before/after evidence and deletes at most one table/month. Live collectors and
 provisional workers must keep running; this tool never takes their heavy fence.
 Query settings bound foreground reads, not background mutation resource use.
+
+After the database phase returns no candidate, --dagster audits the two canonical
+assets. --dagster --apply wipes their history only when every source fact is a
+vendor hourly fact. Native daily facts, observations or unknown facts refuse it.
+Separate provisional/feed assets and raw tables are preserved.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -19,10 +25,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from dagster import DagsterInstance, DagsterRunStatus, RunsFilter
+from dagster import (
+    AssetKey,
+    DagsterEventType,
+    DagsterInstance,
+    DagsterRunStatus,
+    EventRecordsFilter,
+    RunsFilter,
+)
 from dagster._core.scheduler.instigation import InstigatorStatus
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.maintenance.event_storage import OrigoSqliteEventLogStorage
 from origo.orchestration.policy import OUTSTANDING
 from origo.sources.adapters.book_local import LocalBookCanonical
 from origo.sources.columnar import binary_hash
@@ -72,6 +86,14 @@ class VendorManifest:
     runs: tuple[Row, ...]
     events: tuple[Row, ...]
     scratch_databases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalHistory:
+    asset: str
+    counts: dict[str, int]
+    partitions: tuple[str, ...]
+    sha256: str
 
 
 def require_quiescent(instance: DagsterInstance, specs: tuple[RevisionedSourceSpec, ...]) -> None:
@@ -292,6 +314,90 @@ def verify_protected(stores: tuple[SourceStore, ...], pins: tuple[dict[str, obje
             raise RuntimeError(f'Protected generation changed: {pin["table"]}')
 
 
+def dagster_inventory(instance: DagsterInstance) -> tuple[CanonicalHistory, ...]:
+    """Prove complete ownership before the supported whole-canonical-asset wipe."""
+    storage = instance.event_log_storage
+    if not isinstance(storage, OrigoSqliteEventLogStorage):
+        raise RuntimeError('Dagster retirement requires the deployed Origo event storage.')
+    inventory: list[CanonicalHistory] = []
+    for source in SOURCES:
+        asset = AssetKey(f'build_{source}_canonical_revision_origo')
+        with storage.index_connection() as database:
+            facts = database.exec_driver_sql(
+                'SELECT dagster_event_type,count(*),sum(CASE WHEN partition IS NULL '
+                'THEN 1 ELSE 0 END) FROM event_logs WHERE asset_key=? GROUP BY dagster_event_type',
+                (asset.to_string(),),
+            ).fetchall()
+        counts = {str(kind): int(count) for kind, count, _nulls in facts}
+        # ASSET_WIPED is the supported API's own receipt, permitting safe reruns.
+        markers = {'FRESHNESS_STATE_CHANGE', 'ASSET_WIPED'}
+        if (set(counts) - markers - {'ASSET_MATERIALIZATION', 'ASSET_MATERIALIZATION_PLANNED'}
+                or any(int(count) != int(nulls) for kind, count, nulls in facts
+                       if kind in markers)):
+            raise RuntimeError(f'Canonical asset has observations or unknown facts: {source}')
+        digest = hashlib.sha256()
+        partitions: set[str] = set()
+        for kind in (DagsterEventType.ASSET_MATERIALIZATION,
+                     DagsterEventType.ASSET_MATERIALIZATION_PLANNED):
+            before = None
+            scanned = 0
+            while True:
+                page = storage.get_event_records(
+                    EventRecordsFilter(kind, asset_key=asset, before_cursor=before), limit=500,
+                )
+                for item in page:
+                    event = item.event_log_entry.dagster_event
+                    partition = event.partition if event is not None else None
+                    if (not isinstance(partition, str)
+                            or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}Z', partition)):
+                        raise RuntimeError(f'Canonical asset contains native/daily/unknown facts: {source}')
+                    datetime.strptime(partition, '%Y-%m-%dT%HZ')
+                    revisions: list[str] = []
+                    if kind == DagsterEventType.ASSET_MATERIALIZATION:
+                        materialization = item.event_log_entry.asset_materialization
+                        if materialization is None:
+                            raise RuntimeError('Canonical materialization payload is absent.')
+                        for key in ('source_state', 'source_result'):
+                            if key in materialization.metadata:
+                                state = getattr(materialization.metadata[key], 'value', None)
+                                revision = state.get('revision') if isinstance(state, dict) else None
+                                if not isinstance(revision, str) or not revision.startswith(
+                                    ('cryptohftdata-v1:', 'cryptohftdata-v2:')
+                                ):
+                                    raise RuntimeError(f'Canonical provenance is native or unknown: {source}')
+                                revisions.append(revision)
+                        if not revisions:
+                            raise RuntimeError(f'Canonical provenance is absent: {source}')
+                        partitions.add(partition)
+                    digest.update(json.dumps([item.storage_id, kind.value, partition, revisions]).encode())
+                scanned += len(page)
+                if len(page) < 500:
+                    break
+                before = page[-1].storage_id
+            if scanned != counts.get(kind.value, 0):
+                raise RuntimeError(f'Canonical history changed or could not be fully decoded: {source}')
+        if partitions != instance.get_materialized_partitions(asset):
+            raise RuntimeError(f'Canonical materialization inventory changed: {source}')
+        inventory.append(CanonicalHistory(asset.to_user_string(), counts,
+                                          tuple(sorted(partitions)), digest.hexdigest()))
+    return tuple(inventory)
+
+
+def wipe_vendor_assets(
+    instance: DagsterInstance, expected: tuple[CanonicalHistory, ...],
+) -> tuple[CanonicalHistory, ...]:
+    current = dagster_inventory(instance)
+    if current != expected:
+        raise RuntimeError('Canonical ownership changed after the retirement inventory.')
+    facts = {'ASSET_MATERIALIZATION', 'ASSET_MATERIALIZATION_PLANNED'}
+    targets = [AssetKey(item.asset) for item in current if facts.intersection(item.counts)]
+    instance.wipe_assets(targets)
+    remaining = dagster_inventory(instance)
+    if any(facts.intersection(item.counts) for item in remaining):
+        raise RuntimeError('Canonical vendor facts remain after the supported wipe.')
+    return remaining
+
+
 def record(path: Path, value: dict[str, object]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     with os.fdopen(descriptor, 'a') as stream:
@@ -305,6 +411,7 @@ def record(path: Path, value: dict[str, object]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--dagster', action='store_true')
     parser.add_argument('--evidence', type=Path, required=True)
     args = parser.parse_args()
     specs = tuple(next(spec for spec in SOURCE_REGISTRY if spec.key == key) for key in SOURCES)
@@ -321,6 +428,9 @@ def main() -> None:
                               if spec.rollout_stage != RolloutStage.DORMANT)
             require_no_mutations(book_stores[0])
             deletion = next_deletion(book_stores)
+            if args.dagster and deletion is not None:
+                raise RuntimeError('Complete vendor database retirement before --dagster.')
+            canonical = dagster_inventory(instance) if args.dagster else ()
             pins = protected_fingerprints(protected)
             ownership = vendor_manifest(book_stores)
             identity = str(uuid4())
@@ -330,10 +440,34 @@ def main() -> None:
                 'params': deletion.params if deletion else {},
                 'selected_rows': deletion.rows if deletion else 0, 'protected': pins,
                 'vendor_ownership': asdict(ownership),
+                'operation': 'dagster' if args.dagster else 'rows',
+                'canonical_assets': tuple(asdict(item) for item in canonical),
             }
             record(args.evidence, {**report, 'phase': 'before'})
             print(json.dumps(report, default=str, sort_keys=True))
             require_no_vendor_scratch(ownership)
+            if args.dagster:
+                if args.apply:
+                    try:
+                        require_quiescent(instance, specs)
+                        require_no_mutations(book_stores[0])
+                        if next_deletion(book_stores) is not None:
+                            raise RuntimeError('Vendor database retirement changed before the wipe.')
+                        after = wipe_vendor_assets(instance, canonical)
+                        verify_protected(protected, pins)
+                    except Exception as error:
+                        record(args.evidence, {'id': identity, 'phase': 'failed',
+                                               'error_type': type(error).__name__,
+                                               'retirement_or_protection_unverified': True})
+                        raise
+                    record(args.evidence, {'id': identity, 'phase': 'after',
+                                           'canonical_assets': tuple(asdict(item) for item in after),
+                                           'protected': pins,
+                                           'protected_unchanged': True})
+                    print(json.dumps({'id': identity,
+                                      'canonical_assets': tuple(asdict(item) for item in after),
+                                      'protected_unchanged': True}, default=str))
+                return
             if args.apply and deletion is not None:
                 try:
                     require_quiescent(instance, specs)

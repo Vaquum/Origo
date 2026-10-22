@@ -13,7 +13,19 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from dagster import DagsterInstance, DagsterRunStatus
+from dagster import (
+    AssetKey,
+    AssetMaterialization,
+    DagsterEvent,
+    DagsterEventType,
+    DagsterInstance,
+    DagsterRunStatus,
+    Definitions,
+    EventRecordsFilter,
+    build_sensor_context,
+)
+from dagster._core.events import AssetMaterializationPlannedData
+from dagster._core.instance import RUNLESS_RUN_ID
 from dagster._core.remote_origin import (
     ManagedGrpcPythonEnvCodeLocationOrigin,
     RemoteJobOrigin,
@@ -24,6 +36,7 @@ from dagster._core.test_utils import create_run_for_test
 from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
 
 from origo.assets.create_origo_database import ClickHouseSettings
+from origo.sources.bundle import build_source_bundle
 from origo.sources.columnar import binary_hash
 from origo.sources.contracts import Partition, StateRecord
 from origo.sources.failures import FailureLog
@@ -31,6 +44,7 @@ from origo.sources.lifecycle import SourceRuntime
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.sources.storage import SourceStore
 from .test_book_sources import _keys, book_runtime as book_runtime
+from .test_dagster_metadata_maintenance import metadata_instance as metadata_instance
 
 _module_spec = importlib.util.spec_from_file_location(
     'retire_cryptohftdata', Path(__file__).resolve().parents[2] / 'tools/retire_cryptohftdata.py',
@@ -128,6 +142,14 @@ def test_retirement_dry_run_and_single_mutation_keep_protection_evidence(
                       if apply else ['quiescent', 'idle'])
     if apply:
         assert mutations[0].kwargs['settings']['mutations_sync'] == 2
+    # Dagster cleanup cannot bypass an unfinished vendor database phase.
+    monkeypatch.setattr('sys.argv', ['retirement', '--dagster', '--apply',
+                                    '--evidence', str(evidence)])
+    with pytest.raises(RuntimeError, match='database retirement'):
+        retirement.main()
+    assert len([call for call in client.execute.call_args_list
+                if call.args[0].startswith('ALTER TABLE')]) == int(apply)
+    instance.wipe_assets.assert_not_called()
 
 
 def test_retirement_visibility_precedes_proofs_and_never_selects_latest_tables(
@@ -174,7 +196,9 @@ def test_vendor_scratch_lookup_stays_below_query_limit_with_many_build_identitie
     assert manifest.scratch_databases == ()
 
 
-def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRuntime) -> None:
+def test_retirement_preserves_native_and_unrelated_data(
+    book_runtime: SourceRuntime, metadata_instance: DagsterInstance,
+) -> None:
     """Real captured values survive; only deliberately vendor-labelled provenance is removed."""
     runtime = book_runtime
     store = runtime.store
@@ -182,6 +206,39 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
     hour = native.partition.start.replace(minute=0)
     key = hour.strftime('%Y-%m-%dT%HZ')
     vendor = 'cryptohftdata-v2:' + native.revision.removeprefix('local-book-v1:')
+    instance = metadata_instance
+    canonical_assets = tuple(AssetKey(f'build_{source}_canonical_revision_origo')
+                             for source in retirement.SOURCES)
+    # Deliberate provenance controls attach the captured revision to real Dagster
+    # facts; they do not manufacture market values or full-hour acceptance.
+    for asset in canonical_assets:
+        instance.report_runless_asset_event(AssetMaterialization(
+            asset, partition=key, metadata={'source_state': {'revision': vendor}},
+            tags={'dagster/data_version': vendor},
+        ))
+        instance.report_dagster_event(DagsterEvent(
+            event_type_value=DagsterEventType.ASSET_MATERIALIZATION_PLANNED.value,
+            job_name='deliberate_retirement_protocol_control',
+            event_specific_data=AssetMaterializationPlannedData(asset, partition=key),
+        ), run_id=RUNLESS_RUN_ID)
+    preserved_assets = (
+        AssetKey(f'sync_{runtime.spec.key}_provisional_origo'),
+        AssetKey(f'{runtime.spec.key}_provisional_feed'),
+        AssetKey('deliberate_retirement_unrelated_control'),
+    )
+    for asset in preserved_assets:
+        instance.report_runless_asset_event(AssetMaterialization(
+            asset, partition=native.partition.key,
+            metadata={'source_state': {'revision': native.revision}},
+            tags={'dagster/data_version': native.revision},
+        ))
+    storage = instance.event_log_storage
+    preserved_events = {
+        asset: storage.get_event_records(EventRecordsFilter(
+            DagsterEventType.ASSET_MATERIALIZATION, asset_key=asset,
+        )) for asset in preserved_assets
+    }
+    preserved_tags = {asset: storage.get_event_tags_for_asset(asset) for asset in preserved_assets}
     vendor_build, local_build = uuid4(), uuid4()
     bindings = {'native': native.build_id, 'hour': key, 'vendor': vendor,
                 'vendor_build': vendor_build, 'start': hour, 'end': hour + timedelta(hours=1)}
@@ -296,3 +353,38 @@ def test_retirement_preserves_native_and_unrelated_data(book_runtime: SourceRunt
                                  params=params, schema_version=runtime.spec.schema_version)
             assert (count, digest) == local_counts[component.key]
             assert store.execute(f'SELECT count() FROM {table} WHERE {retirement.VENDOR}') == [(0,)]
+    ownership = retirement.dagster_inventory(instance)
+    assert all(item.partitions == (key,) and item.counts == {
+        'ASSET_MATERIALIZATION': 1, 'ASSET_MATERIALIZATION_PLANNED': 1,
+    } for item in ownership)
+    retired = retirement.wipe_vendor_assets(instance, ownership)
+    retirement.verify_protected((store,), pins)
+    for asset in canonical_assets:
+        assert instance.get_materialized_partitions(asset) == set()
+        assert storage.get_event_tags_for_asset(asset) == []
+        assert storage.get_latest_tags_by_partition(
+            asset, DagsterEventType.ASSET_MATERIALIZATION, ['dagster/data_version'],
+        ) == {}
+    for asset in preserved_assets:
+        assert storage.get_event_records(EventRecordsFilter(
+            DagsterEventType.ASSET_MATERIALIZATION, asset_key=asset,
+        )) == preserved_events[asset]
+        assert storage.get_event_tags_for_asset(asset) == preserved_tags[asset]
+    bundle = build_source_bundle(runtime.spec)
+    sensor = next(item for item in bundle.sensors if item.name.endswith('_reconciliation_sensor'))
+    with build_sensor_context(instance=instance, definitions=Definitions(
+        assets=bundle.assets, jobs=bundle.jobs, sensors=bundle.sensors,
+    )) as context:
+        assert all(request.partition_key is None
+                   for request in sensor.evaluate_tick(context).run_requests)
+    # A genuine captured native revision on a daily canonical key must refuse a
+    # later whole-asset wipe, even though its separate provisional facts survive.
+    instance.report_runless_asset_event(AssetMaterialization(
+        canonical_assets[0], partition=native.partition.start.date().isoformat(),
+        metadata={'source_state': {'revision': native.revision}},
+    ))
+    with pytest.raises(RuntimeError, match='native/daily/unknown'):
+        retirement.wipe_vendor_assets(instance, retired)
+    assert instance.get_materialized_partitions(canonical_assets[0]) == {
+        native.partition.start.date().isoformat(),
+    }

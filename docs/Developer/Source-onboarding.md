@@ -1,9 +1,8 @@
 # Source onboarding playbook
 
-**Required reading before drafting a PRD or slice that adds a data source.**
+**Required reading before drafting a PRD or task that adds a data source.**
 Authors and reviewers must apply this playbook before specifying or implementing
-the work. The [PRD template](../../.github/ISSUE_TEMPLATE/prd.yml) and
-[Slice template](../../.github/ISSUE_TEMPLATE/slice.yml) require this prerequisite.
+the work. The [PRD template](../../.github/ISSUE_TEMPLATE/prd.yml) requires this prerequisite.
 Every source uses the same native Dagster operator workflow described below.
 
 A source builds privately. One activation makes its complete component set visible. Consumers publish from a pinned state independently.
@@ -125,7 +124,7 @@ reviewer must ensure the new source's acceptance cases are actually included.
 `test_binance_daily_source_adapter.py` is the existing provider-test example.
 
 Include the source key, rollout, exact product inventory, credential/mount names
-and acceptance commands/results in the source's slice/PR. The reviewer rejects
+and acceptance commands/results in the source's issue/PR. The reviewer rejects
 manual activation/setup steps, missing products and unsupported correctness claims.
 After merge/deployment, hand the operator the generated job name; native partition controls provide the selection and coverage.
 Full-history production validation and public promotion remain separate evidence.
@@ -268,14 +267,7 @@ ORDER BY source_key, failure_key;
 
 ## Change the contract
 
-When evidence invalidates the slice, capture the failing command and exact proposed issue-body edit. Obtain explicit `zero-bang` confirmation, then update every affected assertion, signature, surface and proof before continuing:
-
-```sh
-gh issue view 309 --repo Vaquum/Origo --json body
-gh issue edit 309 --repo Vaquum/Origo --body-file approved-slice.md
-```
-
-CI success, silence, or a workaround is not approval to change the contract.
+When evidence invalidates the agreed requirement, record the failing command and proposed change in the issue. Update the affected acceptance criteria and interfaces before implementing a changed requirement. Obtain the operator's decision when it changes the requested product scope.
 
 
 Use `PYTHONPATH=. python tools/benchmark_source_backfill.py --archives <cache>
@@ -301,4 +293,4 @@ ingestion and publication, with measured dispatch latency and source rows/second
 Also test repeated requests, a failed/stalled worker and deployment recovery.
 Distinct source gaps must remain runnable; duplicate requests must not multiply;
 normal production must retain capacity; backfill throughput must meet the same
-workload's accepted baseline. Record these results in the source slice and PR.
+workload's accepted baseline. Record these results in the source issue and PR.

@@ -1,40 +1,17 @@
 # AGENTS.md
 
-## The laws
+## Pull requests
 
-Ten laws. Nine are workflow gates on every PR; the tenth is branch protection on `main`. Any failure blocks merge. No bypass.
+Every PR closes exactly one OPEN issue with `Closes #N` (or Fixes/Resolves).
+A `feat` PR's issue carries the `prd` label; other types use an ordinary issue or a voluntary PRD. PRDs stand alone. Issue titles need not match PR titles or follow Conventional Commits.
 
-1. **Every PR closes exactly one OPEN slice-labelled issue.** PR title byte-equals the issue title. Diff stays within the issue's `## Surfaces` globs. Diff touches no path in `## Out of Scope`. Issue body preserves every `> **Significance.**` blockquote from the slice template verbatim. *(pr_checks_slice)*
+PR titles and every non-merge commit follow Conventional Commits v1.0.0.
 
-2. **PR title, every non-merge commit, and the linked issue title match Conventional Commits v1.0.0.** Allowed types: `feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert`. *(pr_checks_cc)*
+Required checks preserve typing discipline, fail-loud behavior, Ruff, source-native runtime tests, CodeQL and the checked-in branch-protection snapshot. Typing and fail-loud budgets cannot be raised by the PR they gate.
 
-3. **Typing discipline never weakens.** No new `Any`, `cast(..., Any)`, `# type: ignore`, `# pyright: ignore`, or `# noqa`. Pyright error count cannot rise. `.github/typing_budget.json` cannot be raised by the PR it gates. *(pr_checks_typing)*
+Versions and CHANGELOG entries change during deliberate release preparation, not for every PR. Follow [Release policy](docs/Developer/Release-policy.md).
 
-4. **Silent-fallback patterns never grow.** No new bare `except:`, empty handler (`pass`, `...`, `return`, `return None`, `continue`, `break`), `contextlib.suppress` (or any alias chain thereof), or `errors='ignore'`. `.github/fail_loud_budget.json` cannot be raised by the PR it gates. *(pr_checks_fail_loud)*
-
-5. **Every PR bumps the version and leaves a CHANGELOG trail.** `[project].version` advances strictly forward by `MAJOR.MINOR.PATCH`. `CHANGELOG.md`'s first `# v<X.Y.Z>` header equals the new version and carries at least one content line. Bump level meets the Conventional Commits type minimum: `type!` → major, `feat` → minor, else patch. *(pr_checks_version)*
-
-6. **Ruff 0.15.11 is clean on `tools/` and `tests/tools/`.** *(pr_checks_lint)*
-
-7. **`pytest tests/origo_source_native` passes.** *(pr_checks_tests)*
-
-8. **CodeQL reports no new Python security anti-patterns.** *(PR Checks CodeQL)*
-
-9. **Live branch protection on `main` matches `.github/rulesets/main.json`.** Changing branch protection out-of-band (in the GitHub UI) blocks the next PR until the snapshot is updated in a PR of its own. *(pr_checks_ruleset)*
-
-10. **No direct push to `main`. No force-push. No branch deletion.** Branch must be up-to-date with `main` before merge. One Copilot review required; all review threads resolved. *(branch protection, server-side)*
-
-## Workflow
-
-Branch off `main`. Push to a remote branch of the same name. **Open the PR the moment the change is ready for CI to run on it — not when it feels finished.** The gates run on GitHub while you keep working locally. Don't wait for CI in the foreground.
-
-**`zero-bang` is the approving authority.** Request their review the moment the PR is open. Once every requested change is addressed, re-request `zero-bang`'s review.
-
-Each push re-runs every gate. Prefer new commits to amends — amends don't give you anything and they muddle the PR history.
-
-Merge unlocks when every required gate is green **and** the branch is up-to-date with `main`. Up-to-date is enforced server-side; rebase when main advances.
-
-When a gate fails, the gate's own output names the reason. Read the output, fix the code or the slice issue, push again. If the failure is the gate being wrong rather than the PR being wrong, fix the gate in its own PR — the ruleset drift gate (law 9) will force the matching ruleset-snapshot update so no gate relaxation side-enters.
+Use a branch and open a non-draft PR as soon as the change is ready for CI. Read failures, repair their cause and push. One approval and resolved review threads remain required. Branch protection does not require a branch update merely because `main` advanced; integrate target changes when needed to resolve conflicts or validate interacting changes. No direct push, force-push or deletion of `main`.
 
 ## Review work
 
@@ -60,7 +37,7 @@ entries; append corrections identifying the entries they supersede.
 
 ## Operator UX
 
-Before drafting or implementing any PRD or slice that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD and Slice templates require it.
+Before drafting or implementing any PRD or task that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD template requires it.
 
 Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and retry controls. The operator selects what to run through those controls. Never require the operator to type YAML, JSON, dates, identifiers, paths or configuration text into Dagit, or follow source-specific manual preparation instructions from a chat. Configuration, dependencies, preparation, automation and publication belong in versioned code. Deployment activates scheduled work and sensors for every enabled source; operators never enable them manually. Adding and backfilling a registered source automatically builds every declared projection and file output without separate operator launches. Apply this uniformly to full backfills, selected gaps, retries and other operator-facing operations across registered sources. A source PR is incomplete until this workflow is verified in the actual GUI with real data. Screenshots illustrate the required native behavior; they are not a request to build a custom interface.
 
@@ -68,21 +45,21 @@ Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and
 
 Before investigating any failure, read and follow [docs/Developer/Monitoring.md](docs/Developer/Monitoring.md): Dagit first, ClickHouse second, Docker third, the external collectors last. Every monitored fact has one store; Dagit is the investigation pane. The monitor worker is the sole detector and alert sender; its operational state is a cursor for notification and historical-import positions. The authorized /law exception is a read-only summary of the monitor's append-only observation tape, not a second truth database or detector. It is served at https://origo.vaquum.fi behind the Portal login. Do not add another dashboard, alert path or per-minute Dagster run in place of a worker receipt.
 
-## Beyond the laws
+## Engineering stance
 
-The gates check shape, scope, format, ratchets, and named test suites. They do not check whether the slice's capability actually works. The operator judges that at review time, against the following stance:
+Validate the requested capability against its stated behavior, alongside the required checks:
 
 **Radical simplicity.** The simplest code that meets the requirement wins. Complexity earns its place by naming the specific concern it addresses — not "robustness" or "future-proofing" in general.
 
-**No defensive fog.** Agents are primed to produce defensible-looking code: `try/except` that swallows everything, fallbacks for cases that don't happen, docstrings that restate the signature, comments that narrate the line, parameters that might be useful someday. None of it belongs here. The fail-loud gate (law 4) catches the AST-detectable forms mechanically; the rest is operator-caught at review.
+**No defensive fog.** Agents are primed to produce defensible-looking code: `try/except` that swallows everything, fallbacks for cases that don't happen, docstrings that restate the signature, comments that narrate the line, parameters that might be useful someday. None of it belongs here. The fail-loud gate catches the AST-detectable forms mechanically; the rest is operator-caught at review.
 
-**Minimal scope.** Touch only the files the task demands. Drive-by cleanups go in a separate slice.
+**Minimal scope.** Touch only the files the task demands. Drive-by cleanups go in a separate task.
 
 **No synthetic data.** Ever. Inventing data is not a shortcut — it corrupts everything downstream. If the real data isn't there, stop and ask.
 
-**Validate against the stated expectation.** The question is never "did it run" — it's "did it return what the slice promised."
+**Validate against the stated expectation.** The question is never "did it run" — it's "did it return what the task promised."
 
-**The smallest possible honest way always.** Slice spec, code, communication, everything, let it be the smallest possible unit size that honestly delivers what is required.
+**The smallest possible honest way always.** Task spec, code, communication, everything, let it be the smallest possible unit size that honestly delivers what is required.
 
 ## Test design
 

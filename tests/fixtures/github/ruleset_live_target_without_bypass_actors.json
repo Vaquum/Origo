@@ -44,7 +44,7 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "strict_required_status_checks_policy": true,
+        "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
@@ -60,15 +60,11 @@
             "integration_id": 15368
           },
           {
-            "context": "pr_checks_slice",
+            "context": "pr_checks_prd",
             "integration_id": 15368
           },
           {
             "context": "pr_checks_fail_loud",
-            "integration_id": 15368
-          },
-          {
-            "context": "pr_checks_version",
             "integration_id": 15368
           },
           {
@@ -93,7 +89,6 @@
         "review_draft_pull_requests": false
       }
     }
-
   ],
   "node_id": "RRS_lACqUmVwb3NpdG9yec45yhnhzgBSf4c",
   "created_at": "2025-05-11T20:27:04.532+03:00",

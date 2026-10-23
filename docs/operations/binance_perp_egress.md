@@ -74,8 +74,8 @@ and a deployment diagnostic hostname; no new listener is introduced. Any future
 listener requires explicit loopback binding review. These identifiers do not
 implement the ownership/lease work proposed in #439.
 
-If Binance's account restricts API-key source IPs, zero-bang owns adding the two
-addresses in the account security controls. This does not weaken the allowlist.
+If Binance's account restricts API-key source IPs, the account administrator adds
+the two addresses in the account security controls. This does not weaken the allowlist.
 Provider acceptance remains an observed post-deployment requirement.
 
 Future books under #399/#400 use `.167` with the same spot/FAPI budgets as its

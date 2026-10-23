@@ -4,14 +4,147 @@ import ast
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 DEPLOY_WORKFLOW: Final[Path] = REPO_ROOT / '.github' / 'workflows' / 'deploy_on_merge.yml'
+
+
+def test_release_workflow_is_manual_serialized_and_runs_trusted_main() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/pr_post_release.yml').read_text()
+    trigger = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
+    assert [line for line in trigger.splitlines() if line.startswith('  ') and not line.startswith('    ')] == ['  workflow_dispatch:']
+    assert 'group: manual-release\n  cancel-in-progress: false' in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
+    assert 'ref: main\n          fetch-depth: 0\n          persist-credentials: false' in workflow
+    assert 'python tools/release.py --repo "$GITHUB_REPOSITORY" --preparation-pr "$PREPARATION_PR"' in workflow
+    assert 'PREPARATION_PR: ${{ inputs.preparation_pr }}' in workflow
+
+
+@pytest.mark.parametrize('fault', [
+    'none', 'unmerged', 'wrong-base', 'existing-release', 'duplicate-tag', 'foreign-tag',
+    'release-failure',
+])
+def test_release_pins_merged_preparation_and_rejects_duplicate_publication(
+    tmp_path: Path, fault: str,
+) -> None:
+    repository = tmp_path / 'repo'
+    repository.mkdir()
+
+    def git(*argv: str) -> str:
+        return subprocess.run(['git', *argv], cwd=repository, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    # Real repository contents, with deliberate GitHub protocol faults below.
+    for name in ('pyproject.toml', 'CHANGELOG.md'):
+        shutil.copyfile(REPO_ROOT / name, repository / name)
+    git('init', '-q')
+    git('add', '.')
+    git('-c', 'user.name=Release protocol', '-c', 'user.email=release@example.invalid',
+        'commit', '-qm', 'Preparation protocol boundary')
+    prepared = git('rev-parse', 'HEAD')
+    shutil.copyfile(REPO_ROOT / 'README.md', repository / 'README.md')
+    git('add', '.')
+    git('-c', 'user.name=Release protocol', '-c', 'user.email=release@example.invalid',
+        'commit', '-qm', 'Intervening ordinary merge protocol boundary')
+    later = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', later)
+    version = tomllib.loads((repository / 'pyproject.toml').read_text())['project']['version']
+    tag = f'v{version}'
+    trace = tmp_path / 'gh.jsonl'
+    binaries = tmp_path / 'bin'
+    binaries.mkdir()
+    gh = binaries / 'gh'
+    gh.write_text(f'#!{sys.executable}\n' + '''
+import json, os, sys
+from pathlib import Path
+argv = sys.argv[1:]
+fault = os.environ['RELEASE_FAULT']
+tag = os.environ['RELEASE_TAG']
+state = Path(os.environ['RELEASE_STATE'])
+record = {'argv': argv}
+if argv[:2] == ['release', 'create']:
+    record['notes'] = Path(argv[argv.index('--notes-file') + 1]).read_text()
+with Path(os.environ['RELEASE_TRACE']).open('a') as handle:
+    handle.write(json.dumps(record) + '\\n')
+if argv[:2] == ['pr', 'view']:
+    print(json.dumps({'state': 'OPEN' if fault == 'unmerged' else 'MERGED',
+        'baseRefName': 'other' if fault == 'wrong-base' else 'main',
+        'mergeCommit': {'oid': os.environ['RELEASE_PREPARED']}}))
+elif argv[:4] == ['api', '--paginate', '--slurp', 'repos/Vaquum/Origo/releases']:
+    print(json.dumps([[{'tag_name': tag}]] if fault == 'existing-release' else [[]]))
+elif argv[:2] == ['api', 'repos/Vaquum/Origo/git/matching-refs/tags/' + tag]:
+    if fault == 'foreign-tag':
+        refs = [{'ref': 'refs/tags/' + tag, 'object': {'type': 'commit', 'sha': os.environ['RELEASE_LATER']}}]
+    else:
+        refs = [json.loads(state.read_text())] if state.exists() else []
+    print(json.dumps(refs))
+elif argv[:2] == ['api', 'repos/Vaquum/Origo/git/refs']:
+    if fault == 'duplicate-tag':
+        raise SystemExit('Deliberate duplicate-tag protocol rejection')
+    fields = dict(arg.split('=', 1) for arg in argv if arg.startswith(('ref=', 'sha=')))
+    state.write_text(json.dumps({'ref': fields['ref'], 'object': {'type': 'commit', 'sha': fields['sha']}}))
+    print('{}')
+elif argv[:2] == ['release', 'create']:
+    failed = state.with_suffix('.failed')
+    if fault == 'release-failure' and not failed.exists():
+        failed.touch()
+        raise SystemExit('Deliberate publication protocol failure')
+    print('Release protocol completed')
+else:
+    raise SystemExit('Unexpected GitHub protocol command: ' + repr(argv))
+''')
+    gh.chmod(0o700)
+    command = [
+        sys.executable, str(REPO_ROOT / 'tools/release.py'), '--repo', 'Vaquum/Origo',
+        '--preparation-pr', '608',
+    ]
+    environment = {
+        **os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
+        'RELEASE_FAULT': fault, 'RELEASE_TAG': tag, 'RELEASE_TRACE': str(trace),
+        'RELEASE_PREPARED': prepared, 'RELEASE_LATER': later,
+        'RELEASE_STATE': str(tmp_path / 'tag.json'),
+    }
+    result = subprocess.run(command, cwd=repository, env=environment, capture_output=True, text=True)
+    records = [json.loads(line) for line in trace.read_text().splitlines()]
+    writes = [record for record in records if '--method' in record['argv']
+              or record['argv'][:2] == ['release', 'create']]
+    assert (result.returncode == 0) is (fault == 'none'), result.stdout + result.stderr
+    if fault in {'unmerged', 'wrong-base', 'existing-release', 'foreign-tag'}:
+        assert writes == []
+        return
+    assert writes[0]['argv'] == [
+        'api', 'repos/Vaquum/Origo/git/refs', '--method', 'POST',
+        '-f', f'ref=refs/tags/{tag}', '-f', f'sha={prepared}',
+    ]
+    assert prepared != later
+    if fault == 'duplicate-tag':
+        assert len(writes) == 1
+        assert 'duplicate-tag protocol rejection' in result.stderr
+        return
+    assert len(writes) == 2
+    assert writes[1]['argv'][:7] == ['release', 'create', tag, '--repo', 'Vaquum/Origo', '--verify-tag', '--title']
+    assert writes[1]['notes'].strip() == (repository / 'CHANGELOG.md').read_text().split('\n# v', 1)[0].split('\n', 1)[1].strip()
+    if fault == 'release-failure':
+        assert 'publication protocol failure' in result.stderr
+        retry = subprocess.run(command, cwd=repository, env=environment, capture_output=True, text=True)
+        assert retry.returncode == 0, retry.stdout + retry.stderr
+        replay = [json.loads(line) for line in trace.read_text().splitlines()]
+        tag_writes = [record for record in replay if '--method' in record['argv']]
+        releases = [record for record in replay if record['argv'][:2] == ['release', 'create']]
+        assert tag_writes == writes[:1]
+        assert len(releases) == 2
+        for release in releases:
+            assert release['argv'][:-1] == writes[1]['argv'][:-1]
+            assert release['notes'] == writes[1]['notes']
 
 
 def _deployment_session() -> tuple[str, str]:

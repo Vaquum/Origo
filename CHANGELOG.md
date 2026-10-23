@@ -790,7 +790,7 @@ Completed metadata scans no longer report a growing cleanup backlog solely becau
 - Keep the existing spot and futures source-template jobs unchanged; this slice only renames the Dagster schedule definitions and their registration surface.
 
 # v1.6.1 on April 23, 2026
-- Add the repo-root `AGENTS.md` governance file with the operator-specified ten-law workflow contract and `zero-bang` approval authority.
+- Add the repo-root `AGENTS.md` governance file with the operator-specified ten-law workflow contract.
 - Add `tests/tools/test_agents_contract.py` and extend `pr_checks_ruleset` so the checked-in `AGENTS.md` file identity and workflow coverage are mechanically enforced in CI.
 
 # v1.6.0 on April 23, 2026

@@ -1,0 +1,158 @@
+name: pr_checks_prd_on_issue
+
+
+on:
+  issues:
+    types: [edited, labeled, unlabeled, closed, reopened, deleted]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  rerun_prd_gate_for_linked_prs:
+    name: pr_checks_prd_on_issue
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: write  # required to rerun the canonical pr_checks_prd run
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Find linked PRs
+        id: linked
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          ISSUE_NUM="${{ github.event.issue.number }}"
+
+          gh pr list --repo "$REPO" --state open --base main --limit 1000 \
+            --json number,body,headRefOid > open_prs.json
+
+          python3 - "$ISSUE_NUM" <<'PYEOF' > linked_prs.json
+          import json, sys
+          sys.path.insert(0, "tools")
+          from prd_gate import CLOSING_KEYWORD_RE
+          target = int(sys.argv[1])
+          with open('open_prs.json', encoding='utf-8') as fh:
+              prs = json.load(fh)
+          linked = []
+          for pr in prs:
+              body = pr.get('body') or ''
+              if any(int(m.group(1)) == target for m in CLOSING_KEYWORD_RE.finditer(body)):
+                  linked.append({
+                      'number': pr['number'],
+                      'headRefOid': pr['headRefOid'],
+                  })
+          json.dump(linked, sys.stdout)
+          PYEOF
+
+          echo "linked PRs:"
+          jq -c '.[]' linked_prs.json
+          COUNT=$(jq 'length' linked_prs.json)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Re-run PRD gate per linked PR
+        if: steps.linked.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          FAILURES=0
+
+          while IFS= read -r pr; do
+            PR_NUM=$(echo "$pr" | jq -r .number)
+            HEAD_SHA=$(echo "$pr" | jq -r .headRefOid)
+            echo "::group::re-running PRD gate for PR #$PR_NUM @ $HEAD_SHA"
+
+            gh pr view "$PR_NUM" --repo "$REPO" \
+              --json title,body,headRefOid,headRefName,headRepository > pr_view.json
+            if [ "$(jq -r '.headRefOid' pr_view.json)" != "$HEAD_SHA" ]; then
+              echo "PR #$PR_NUM moved after discovery; leave the new head to its own run"
+              echo "::endgroup::"
+              continue
+            fi
+            HEAD_BRANCH=$(jq -r '.headRefName' pr_view.json)
+            HEAD_REPO=$(jq -r '.headRepository.nameWithOwner' pr_view.json)
+
+            # Always refresh the required canonical check. Probing the gate here
+            # could leave its old success intact when issue reads fail.
+            QUIET=0
+            RUNS="[]"
+            for i in $(seq 1 21); do
+              RUNS=$(gh api \
+                "repos/$REPO/actions/workflows/pr_checks_prd.yml/runs?head_sha=$HEAD_SHA&per_page=100" \
+                --jq '.workflow_runs' \
+                | jq --arg branch "$HEAD_BRANCH" --arg repo "$HEAD_REPO" \
+                  '[.[] | select(.event == "pull_request"
+                                 and .head_branch == $branch
+                                 and .head_repository.full_name == $repo)]')
+              INFLIGHT=$(echo "$RUNS" | jq '[.[] | select(.status != "completed")] | length')
+              LIVE_HEAD=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq .headRefOid)
+              if [ "$LIVE_HEAD" != "$HEAD_SHA" ]; then
+                echo "PR #$PR_NUM moved during validation; leave the new head to its own run"
+                echo "::endgroup::"
+                continue 2
+              fi
+              if [ "$INFLIGHT" -eq 0 ]; then
+                QUIET=1
+                break
+              fi
+              echo "waiting for $INFLIGHT in-flight run(s) to settle ($i/21)..."
+              sleep 20
+            done
+            if [ "$QUIET" -ne 1 ]; then
+              echo "::error::runs still in flight for $HEAD_SHA after ~7 minutes; refusing to judge a moving target"
+              FAILURES=$((FAILURES + 1))
+              echo "::endgroup::"
+              continue
+            fi
+            CANONICAL=$(echo "$RUNS" | jq -c '[.[] | select(.status == "completed")][0] // empty')
+            if [ -z "$CANONICAL" ]; then
+              echo "::warning::no completed pr_checks_prd run for $HEAD_SHA; leaving verdict to the next pull_request event"
+              echo "::endgroup::"
+              continue
+            fi
+            RUN_ID=$(echo "$CANONICAL" | jq -r .id)
+            RERUN_OK=0
+            for attempt in 1 2 3; do
+              if gh api --method POST "repos/$REPO/actions/runs/$RUN_ID/rerun" > /dev/null; then
+                RERUN_OK=1
+                echo "canonical run $RUN_ID rerun requested (issue state changed, attempt $attempt)"
+                break
+              fi
+              echo "::warning::rerun attempt $attempt for run $RUN_ID failed; retrying"
+              sleep 15
+            done
+            if [ "$RERUN_OK" -ne 1 ]; then
+              echo "::error::rerun of canonical run $RUN_ID failed after 3 attempts; verdict for $HEAD_SHA may be stale"
+              FAILURES=$((FAILURES + 1))
+            fi
+            echo "::endgroup::"
+          done < <(jq -c '.[]' linked_prs.json)
+
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "::error::$FAILURES linked PR(s) could not be revalidated"
+            exit 1
+          fi

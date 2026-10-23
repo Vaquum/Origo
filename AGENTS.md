@@ -37,7 +37,7 @@ entries; append corrections identifying the entries they supersede.
 
 ## Operator UX
 
-Before drafting or implementing any PRD or task that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD and Task templates require it.
+Before drafting or implementing any PRD or task that adds a data source, read and apply the [source onboarding playbook](docs/Developer/Source-onboarding.md). This is a mandatory prerequisite for authors and reviewers; the PRD template requires it.
 
 Use native Dagster jobs, assets, partitions, coverage, gap/failure selection and retry controls. The operator selects what to run through those controls. Never require the operator to type YAML, JSON, dates, identifiers, paths or configuration text into Dagit, or follow source-specific manual preparation instructions from a chat. Configuration, dependencies, preparation, automation and publication belong in versioned code. Deployment activates scheduled work and sensors for every enabled source; operators never enable them manually. Adding and backfilling a registered source automatically builds every declared projection and file output without separate operator launches. Apply this uniformly to full backfills, selected gaps, retries and other operator-facing operations across registered sources. A source PR is incomplete until this workflow is verified in the actual GUI with real data. Screenshots illustrate the required native behavior; they are not a request to build a custom interface.
 
@@ -51,7 +51,7 @@ Validate the requested capability against its stated behavior, alongside the req
 
 **Radical simplicity.** The simplest code that meets the requirement wins. Complexity earns its place by naming the specific concern it addresses — not "robustness" or "future-proofing" in general.
 
-**No defensive fog.** Agents are primed to produce defensible-looking code: `try/except` that swallows everything, fallbacks for cases that don't happen, docstrings that restate the signature, comments that narrate the line, parameters that might be useful someday. None of it belongs here. The fail-loud gate (law 4) catches the AST-detectable forms mechanically; the rest is operator-caught at review.
+**No defensive fog.** Agents are primed to produce defensible-looking code: `try/except` that swallows everything, fallbacks for cases that don't happen, docstrings that restate the signature, comments that narrate the line, parameters that might be useful someday. None of it belongs here. The fail-loud gate catches the AST-detectable forms mechanically; the rest is operator-caught at review.
 
 **Minimal scope.** Touch only the files the task demands. Drive-by cleanups go in a separate task.
 

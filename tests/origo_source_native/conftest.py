@@ -47,14 +47,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     items.sort(key=lambda item: priorities[item])
 
 
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_makereport(item: pytest.Item) -> Iterator[object]:
-    report = yield
-    marker = item.get_closest_marker('xdist_group')
-    if marker is not None:
-        # Placement labels are not part of the collected contract identity.
-        report.nodeid = report.nodeid.removesuffix(f'@{marker.args[0]}')
-    return report
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    # xdist validates worker IDs before transport; normalize only at the controller.
+    if getattr(report, 'node', None) is not None:
+        report.nodeid = report.nodeid.rsplit('@', 1)[0]
 
 
 def _wait_for_clickhouse(host: str, port: int, user: str, password: str) -> None:

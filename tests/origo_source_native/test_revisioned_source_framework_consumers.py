@@ -464,6 +464,7 @@ def test_retention_refuses_unproved_visibility_and_preserves_unowned_paths(
         with pytest.raises(ValueError, match='symlink'):
             publication_retention.retain_latest(ancestor / runtime.spec.key / 'huggingface')
         assert _publication_bytes(original) == before
+        ancestor.unlink()
         with pytest.raises(SourceError) as raised:
             publication_retention.main()
         assert raised.value.code == 'SOURCE_LOCK_BUSY'

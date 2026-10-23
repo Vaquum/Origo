@@ -50,7 +50,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     # xdist validates worker IDs before transport; normalize only at the controller.
-    if getattr(report, 'node', None) is not None:
+    node = getattr(report, 'node', None)
+    if node is not None and node.config.option.dist == 'loadgroup':
         report.nodeid = report.nodeid.rsplit('@', 1)[0]
 
 

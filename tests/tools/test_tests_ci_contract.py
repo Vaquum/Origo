@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import io
@@ -9,7 +10,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 from xml.etree import ElementTree
@@ -19,6 +20,33 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_tests.yml'
 EXPECTED_TEST_COMMAND = 'pytest tests/origo_source_native -q --maxfail=1'
+
+
+@pytest.mark.parametrize(('dist', 'controller', 'suffix', 'expected_suffix'), [
+    ('loadgroup', True, '@metadata-diagnostics', ''),
+    ('load', True, '', ''),
+    ('loadgroup', False, '@metadata-diagnostics', '@metadata-diagnostics'),
+    ('no', False, '', ''),
+])
+def test_report_identity_strips_only_controller_group_suffix(
+    dist: str, controller: bool, suffix: str, expected_suffix: str,
+) -> None:
+    # Exercise the actual hook without importing Docker/Dagster runtime fixtures.
+    source = REPO_ROOT / 'tests/origo_source_native/conftest.py'
+    hook = next(node for node in ast.parse(source.read_text()).body
+                if isinstance(node, ast.FunctionDef) and node.name == 'pytest_runtest_logreport')
+    namespace = {'pytest': pytest}
+    exec(compile(ast.Module(body=[hook], type_ignores=[]), str(source), 'exec'), namespace)
+    # Deliberate protocol boundary: @ is valid inside a parameter ID.
+    nodeid = 'tests/origo_source_native/test_report.py::test_identity[value@host]'
+    report = pytest.TestReport(
+        nodeid=nodeid + suffix, location=('test_report.py', 0, 'test_identity'),
+        keywords={}, outcome='passed', longrepr=None, when='call',
+    )
+    if controller:
+        report.node = SimpleNamespace(config=SimpleNamespace(option=SimpleNamespace(dist=dist)))
+    namespace['pytest_runtest_logreport'](report)
+    assert report.nodeid == nodeid + expected_suffix
 
 
 def test_pr_checks_tests_workflow_exists() -> None:

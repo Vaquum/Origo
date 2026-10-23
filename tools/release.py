@@ -53,12 +53,19 @@ def main() -> int:
     releases = json.loads(_output('gh', 'api', '--paginate', '--slurp', f'repos/{args.repo}/releases'))
     if any(release['tag_name'] == tag for page in releases for release in page):
         raise SystemExit(f'Release {tag} already exists')
+    refs = json.loads(_output('gh', 'api', f'repos/{args.repo}/git/matching-refs/tags/{tag}'))
+    existing = next((ref for ref in refs if ref['ref'] == f'refs/tags/{tag}'), None)
+    if existing is not None and (
+        existing['object']['type'] != 'commit' or existing['object']['sha'] != commit
+    ):
+        raise SystemExit(f'Existing tag {tag} does not match the prepared commit')
     with TemporaryDirectory(prefix='origo-release-') as directory:
         notes_file = Path(directory) / 'notes.md'
         notes_file.write_text(notes, encoding='utf-8')
-        # Atomic creation rejects existing tags instead of silently reusing their target.
-        _output('gh', 'api', f'repos/{args.repo}/git/refs', '--method', 'POST',
-                '-f', f'ref=refs/tags/{tag}', '-f', f'sha={commit}')
+        # Atomic creation rejects a racing tag instead of silently reusing its target.
+        if existing is None:
+            _output('gh', 'api', f'repos/{args.repo}/git/refs', '--method', 'POST',
+                    '-f', f'ref=refs/tags/{tag}', '-f', f'sha={commit}')
         print(_output('gh', 'release', 'create', tag, '--repo', args.repo,
                       '--verify-tag', '--title', tag, '--notes-file', str(notes_file)).strip())
     return 0

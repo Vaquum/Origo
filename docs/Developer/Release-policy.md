@@ -7,9 +7,9 @@ Prepare releases deliberately; ordinary PRs do not bump `project.version` or edi
 3. Merge the release preparation through the normal required checks and retain that PR number.
 4. Open **Actions → Manual release → Run workflow**, select `main` and enter that merged preparation PR number. Review the workflow result and published release. The workflow is manual-only and serialized; ordinary merges never create releases.
 
-The workflow verifies that preparation merged into `main`, pins its immutable merge commit, checks ancestry and reads both the version and matching first changelog section from that commit. Later ordinary merges cannot enter the release. An existing release or tag fails the run; published tags are never moved or reused. No external release service or AI credential is required.
+The workflow verifies that preparation merged into `main`, pins its immutable merge commit, checks ancestry and reads both the version and matching first changelog section from that commit. Later ordinary merges cannot enter the release. An existing release or a tag at a different commit fails the run. If publication fails after creating its lightweight tag, rerun with the same preparation PR: the unchanged, unpublished tag is verified against that exact commit before publication resumes. Tags are never moved or replaced. No external release service or AI credential is required.
 
-The equivalent manual dispatch is:
+For the equivalent manual dispatch, set `RELEASE_PREPARATION_PR` to that merged PR number:
 
 ```sh
 gh workflow run pr_post_release.yml --repo Vaquum/Origo --ref main -f preparation_pr="$RELEASE_PREPARATION_PR"

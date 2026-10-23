@@ -30,7 +30,8 @@ def test_release_workflow_is_manual_serialized_and_runs_trusted_main() -> None:
 
 
 @pytest.mark.parametrize('fault', [
-    'none', 'unmerged', 'wrong-base', 'existing-release', 'duplicate-tag', 'release-failure',
+    'none', 'unmerged', 'wrong-base', 'existing-release', 'duplicate-tag', 'foreign-tag',
+    'release-failure',
 ])
 def test_release_pins_merged_preparation_and_rejects_duplicate_publication(
     tmp_path: Path, fault: str,
@@ -68,6 +69,7 @@ from pathlib import Path
 argv = sys.argv[1:]
 fault = os.environ['RELEASE_FAULT']
 tag = os.environ['RELEASE_TAG']
+state = Path(os.environ['RELEASE_STATE'])
 record = {'argv': argv}
 if argv[:2] == ['release', 'create']:
     record['notes'] = Path(argv[argv.index('--notes-file') + 1]).read_text()
@@ -79,31 +81,44 @@ if argv[:2] == ['pr', 'view']:
         'mergeCommit': {'oid': os.environ['RELEASE_PREPARED']}}))
 elif argv[:4] == ['api', '--paginate', '--slurp', 'repos/Vaquum/Origo/releases']:
     print(json.dumps([[{'tag_name': tag}]] if fault == 'existing-release' else [[]]))
+elif argv[:2] == ['api', 'repos/Vaquum/Origo/git/matching-refs/tags/' + tag]:
+    if fault == 'foreign-tag':
+        refs = [{'ref': 'refs/tags/' + tag, 'object': {'type': 'commit', 'sha': os.environ['RELEASE_LATER']}}]
+    else:
+        refs = [json.loads(state.read_text())] if state.exists() else []
+    print(json.dumps(refs))
 elif argv[:2] == ['api', 'repos/Vaquum/Origo/git/refs']:
     if fault == 'duplicate-tag':
         raise SystemExit('Deliberate duplicate-tag protocol rejection')
+    fields = dict(arg.split('=', 1) for arg in argv if arg.startswith(('ref=', 'sha=')))
+    state.write_text(json.dumps({'ref': fields['ref'], 'object': {'type': 'commit', 'sha': fields['sha']}}))
     print('{}')
 elif argv[:2] == ['release', 'create']:
-    if fault == 'release-failure':
+    failed = state.with_suffix('.failed')
+    if fault == 'release-failure' and not failed.exists():
+        failed.touch()
         raise SystemExit('Deliberate publication protocol failure')
     print('Release protocol completed')
 else:
     raise SystemExit('Unexpected GitHub protocol command: ' + repr(argv))
 ''')
     gh.chmod(0o700)
-    result = subprocess.run([
+    command = [
         sys.executable, str(REPO_ROOT / 'tools/release.py'), '--repo', 'Vaquum/Origo',
         '--preparation-pr', '608',
-    ], cwd=repository, env={
+    ]
+    environment = {
         **os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
         'RELEASE_FAULT': fault, 'RELEASE_TAG': tag, 'RELEASE_TRACE': str(trace),
-        'RELEASE_PREPARED': prepared,
-    }, capture_output=True, text=True)
+        'RELEASE_PREPARED': prepared, 'RELEASE_LATER': later,
+        'RELEASE_STATE': str(tmp_path / 'tag.json'),
+    }
+    result = subprocess.run(command, cwd=repository, env=environment, capture_output=True, text=True)
     records = [json.loads(line) for line in trace.read_text().splitlines()]
     writes = [record for record in records if '--method' in record['argv']
               or record['argv'][:2] == ['release', 'create']]
     assert (result.returncode == 0) is (fault == 'none'), result.stdout + result.stderr
-    if fault in {'unmerged', 'wrong-base', 'existing-release'}:
+    if fault in {'unmerged', 'wrong-base', 'existing-release', 'foreign-tag'}:
         assert writes == []
         return
     assert writes[0]['argv'] == [
@@ -120,6 +135,16 @@ else:
     assert writes[1]['notes'].strip() == (repository / 'CHANGELOG.md').read_text().split('\n# v', 1)[0].split('\n', 1)[1].strip()
     if fault == 'release-failure':
         assert 'publication protocol failure' in result.stderr
+        retry = subprocess.run(command, cwd=repository, env=environment, capture_output=True, text=True)
+        assert retry.returncode == 0, retry.stdout + retry.stderr
+        replay = [json.loads(line) for line in trace.read_text().splitlines()]
+        tag_writes = [record for record in replay if '--method' in record['argv']]
+        releases = [record for record in replay if record['argv'][:2] == ['release', 'create']]
+        assert tag_writes == writes[:1]
+        assert len(releases) == 2
+        for release in releases:
+            assert release['argv'][:-1] == writes[1]['argv'][:-1]
+            assert release['notes'] == writes[1]['notes']
 
 
 def _deployment_session() -> tuple[str, str]:

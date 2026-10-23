@@ -11,7 +11,7 @@ import pytest
 from dagster import AssetKey, DagsterInstance, Definitions
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources.adapters.book_local import LocalBookCanonical
+from origo.sources.adapters.book_local import LocalBookCanonical, LocalBookProvisional
 from origo.sources.adapters.book_spool import Market, payload_rows, read_payload, sealed_minutes
 from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
 from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
@@ -419,6 +419,24 @@ def test_native_audit_reclaims_only_saved_payloads_from_incomplete_days(
     last = runtime.spec.provisional.partition(keys[-1])
     last_path = root / market / last.start.strftime('%Y-%m-%d/%H-%M.seal.gz')
     assert first_path != last_path
+    # Dispatch-only controls change adapters, never the genuine captured market rows.
+    trade = next(spec for spec in SOURCE_REGISTRY if spec.key == 'binance_spot_trades')
+
+    def forbidden_retention(*_args: object) -> int:
+        raise AssertionError('An unrelated canonical adapter invoked native payload retention.')
+
+    with monkeypatch.context() as control:
+        control.setattr(book_retention, 'reclaim_native_payloads', forbidden_retention)
+        unrelated = replace(runtime, spec=replace(runtime.spec, canonical=trade.canonical))
+        assert unrelated.audit() == ()
+    for provisional, reason in (
+        (None, 'both local book adapters'),
+        (LocalBookProvisional('perp' if market == 'spot' else 'spot'), 'markets must agree'),
+    ):
+        mismatched = replace(runtime, spec=replace(runtime.spec, provisional=provisional))
+        with pytest.raises(ValueError, match=reason):
+            mismatched.audit()
+        assert first_path.exists() and last_path.exists()
     assert book_retention.reclaim_native_payloads(runtime, first.partition.end + timedelta(days=1), lifecycle._partition_lock) == 0
     assert first_path.exists() and last_path.exists()
     now = first.partition.end + timedelta(days=3)

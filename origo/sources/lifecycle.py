@@ -14,6 +14,7 @@ from .component_upgrade import ComponentUpgradeError, attach_components
 from .contracts import (
     ArchiveNotPublishedYet,
     BuildContext,
+    CanonicalAuditMaintenance,
     CanonicalAuditPolicy,
     Partition,
     Revision,
@@ -609,12 +610,8 @@ class SourceRuntime:
     def audit(self) -> tuple[str, ...]:
         self.spec.require_enabled('audit')
         self.require_shared_mount()
-        from .adapters.book_local import LocalBookCanonical
-
-        if isinstance(self.spec.canonical, LocalBookCanonical):
-            from .book_retention import reclaim_native_payloads
-
-            reclaim_native_payloads(self, datetime.now(UTC), _partition_lock)
+        if isinstance(self.spec.canonical, CanonicalAuditMaintenance):
+            self.spec.canonical.audit_maintenance(self, datetime.now(UTC), _partition_lock)
         self._retire_obsolete_requests()
         records = self.store.records(canonical_only=True)
         changed: list[str] = []

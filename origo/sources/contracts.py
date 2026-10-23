@@ -9,10 +9,13 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from dagster import AssetsDefinition, JobDefinition, ScheduleDefinition, SensorDefinition
+
+if TYPE_CHECKING:
+    from .lifecycle import SourceRuntime
 
 Row = tuple[object, ...]
 
@@ -140,6 +143,13 @@ class CanonicalAdapter(Protocol):
 @runtime_checkable
 class CanonicalAuditPolicy(Protocol):
     def rejected_revision(self, partition: Partition, revision: str) -> bool: ...
+
+
+@runtime_checkable
+class CanonicalAuditMaintenance(Protocol):
+    def audit_maintenance(
+        self, runtime: SourceRuntime, now: datetime, partition_lock: Callable[[Partition], str],
+    ) -> None: ...
 
 
 @runtime_checkable

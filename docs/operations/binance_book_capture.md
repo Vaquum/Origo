@@ -50,21 +50,22 @@ status reads load one bounded counter and never scan retained days. Capture reco
 the counter once at startup in a background thread, repairing interrupted writes.
 Acknowledged cleanup cannot race a status read. Readers release that fence after loading one bounded minute payload;
 validation and database insertion cannot block the next capture seal.
-[Hourly CryptoHFTData authority](book_hourly_authority.md) replaces provisional
-minutes, including capture gaps, through the same canonical source activation.
+The existing local canonical adapter accepts only a complete UTC day of sealed
+native minutes. Successful daily activation replaces the overlapping provisional
+minutes through the same reader views. Missing captured minutes remain explicit
+failures; no external archive or invented rows fills them.
 
 The source's `available` policy exposes verified minutes beyond a gap. Trade
-sources retain their existing `contiguous` policy. Hourly canonical activation requires all
-60 vendor-reconstructed minutes. Each registered source inherits native Dagster
-setup, schedules, sensors, failure records and retry controls. Its independent
-provisional worker builds all four declared projections automatically.
+sources retain their existing `contiguous` policy. Each independent provisional
+worker builds all four declared projections automatically.
 
 The native jobs are `backfill_binance_spot_book_source_job` and
-`backfill_binance_perp_book_source_job`. Use Jobs and native partition selection for
-all available hours, missing/failed hours or selected gaps. One launch builds every
-canonical component; retries reuse verified generations. No operator configuration
-text or separate projection launch is needed. The registered historical calendar follows the first full HCD file hours in
-June 2025; unavailable or unprovable hours remain native failures.
+`backfill_binance_perp_book_source_job`. Use Jobs and native daily partition
+selection for available, missing or failed days. One launch builds every canonical
+component; retries reuse verified generations. The local calendar starts
+2026-10-04, the first UTC day after capture began. Canonical discovery runs at
+00:05 UTC; audit runs at :30 each hour. Existing minute keys, component tables and
+current-reader interfaces are unchanged.
 
 ## Local endpoint and monitoring
 
@@ -103,11 +104,11 @@ request budgets and shared cooldown persistence. Wide component hashing uses
 2,048-row pages; a full page of original depth-200 event states measured 67 MiB
 peak query memory (2,245 states, two pages, 65 ms total on the local test instance).
 The regression ceiling is 256 MiB. Trade hash chunk sizes and identities are unchanged. They do not simulate a complete
-UTC day by inventing market rows or moving timestamps. Positive hourly authority uses original CryptoHFTData files; no new Binance
-recording or multi-day collection is needed.
+UTC day by inventing market rows or moving timestamps. A positive daily canonical
+acceptance requires an actual complete captured day; short fixtures do not establish it.
 
 Promotion and Render retirement require a separate reviewed change and production
-evidence: hourly native GUI success, capture restart and handover, minute
+evidence: daily native GUI success, capture restart and handover, minute
 publication p95/max, seed/connection demand, 429/418 attribution and existing-feed
 freshness/gap debt against comparable workload. Replay must add zero REST requests.
 Before deployment, record a finite overlap end and candidate stop/retirement policy;

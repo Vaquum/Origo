@@ -25,7 +25,6 @@ services:
     ports:
       - "4000:3000"
     environment:
-      - CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:-}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager
@@ -53,7 +52,6 @@ services:
     build: .
     image: origo-dagster:latest
     environment:
-      - CRYPTOHFTDATA_API_KEY=${CRYPTOHFTDATA_API_KEY:-}
       - DAGSTER_HOME=/opt/app
       - PYTHONPATH=/opt/app
       - DAGSTER_DEFAULT_IO_MANAGER_MODULE=origo.maintenance.io_manager

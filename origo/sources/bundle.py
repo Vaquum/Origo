@@ -430,8 +430,7 @@ def _source_asset(spec: RevisionedSourceSpec, operation: str, name: str) -> Asse
         if operation == 'canonical' and (
             context.job_def.name != f'refresh_{spec.key}_canonical_source_job'
             or context.has_partition_key_range
-            or (isinstance(spec.canonical, CanonicalAuditPolicy)
-                and is_source_backfill(context.run, spec))
+            or is_source_backfill(context.run, spec)
         ):
             from .backfill import execute_partition_backfill, publication_ready
 

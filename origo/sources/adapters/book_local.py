@@ -66,8 +66,7 @@ def fetch_sealed_partition(root: Path, market: Market, partition: Partition) -> 
 
 
 def _acknowledge(root: Path, market: Market, covered: tuple[Partition, ...], now: datetime) -> None:
-    # Hourly authority can replace missing local minutes. Payload cleanup still
-    # waits for an entire accepted day, preserving every uncovered hour.
+    # Whole-day canonical coverage permits cleanup without individual minute proofs.
     canonical = sorted((p for p in covered if not p.provisional), key=lambda p: p.start)
     days: list[Partition] = []
     for start in sorted({p.start.replace(hour=0, minute=0, second=0, microsecond=0) for p in canonical}):
@@ -135,6 +134,12 @@ class LocalBookCanonical:
                 raise SourceError(
                     'BOOK_PAYLOAD_CHANGED', 'Local book payload count changed during the build.'
                 )
+
+    @property
+    def audit_maintenance(self):
+        from ..book_retention import reclaim_native_payloads
+
+        return reclaim_native_payloads
 
 
 BOOK_CATCHUP_LOOKBACK_HOURS = 36

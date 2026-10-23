@@ -171,7 +171,7 @@ def _assert_book_native_queue_progress(home, monkeypatch):
     config = yaml.safe_load((ROOT / 'dagster.yaml').read_text())
     overrides = {key: config[key] for key in ('run_coordinator', 'run_launcher', 'run_monitoring')}
     assert overrides['run_coordinator']['config']['max_concurrent_runs'] == 40
-    selected = [(datetime(2026, 9, 1, tzinfo=UTC) + timedelta(hours=n)).strftime('%Y-%m-%dT%HZ')
+    selected = [(datetime(2026, 9, 1, tzinfo=UTC) + timedelta(days=n)).strftime('%Y-%m-%d')
                 for n in range(48)]
     parent_id = 'native-book-restart'
     home.mkdir()
@@ -257,7 +257,7 @@ def _assert_book_native_queue_progress(home, monkeypatch):
                     'refresh_binance_perp_trades_canonical_source_job',
                     'refresh_binance_spot_aggtrades_canonical_source_job',
                     'refresh_binance_perp_aggtrades_canonical_source_job'):
-            submit(instance, job=job, day='2026-10-18T07Z')
+            submit(instance, job=job, day='2026-10-18')
         origin = RemotePartitionSetOrigin(repository_origin=_repository_origin(),
                                            partition_set_name='backfill_binance_spot_book_source_job_partition_set')
         instance.add_backfill(PartitionBackfill(

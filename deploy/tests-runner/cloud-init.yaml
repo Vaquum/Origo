@@ -1,5 +1,5 @@
 #cloud-config
-hostname: origo-tests
+hostname: origo-test-runner
 users:
   - name: runner
     groups: [sudo]
@@ -11,6 +11,7 @@ package_update: true
 packages:
   - docker.io
   - git
+  - g++
   - curl
   - python3-venv
   - qemu-guest-agent

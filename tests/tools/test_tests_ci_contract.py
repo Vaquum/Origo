@@ -56,7 +56,11 @@ def test_pr_checks_tests_pins_python_and_runtime_suite_command() -> None:
     assert "inputs.runner == 'github'" in workflow
     assert 'options: [server, github]' in workflow
     assert 'head.repo.full_name != github.repository' in workflow
-    assert '["self-hosted", "linux", "x64", "origo-tests"]' in workflow
+    assert '["self-hosted", "linux", "x64", "origo-test-runner"]' in workflow
+    controller = (REPO_ROOT / 'deploy/tests-runner/controller.sh').read_text()
+    assert '--name origo-test-runner --labels origo-test-runner,origo-tests --work' in controller
+    cloud_init = (REPO_ROOT / 'deploy/tests-runner/cloud-init.yaml').read_text()
+    assert '  - g++\n' in cloud_init.split('packages:\n', 1)[1].split('runcmd:', 1)[0]
     assert '\'["ubuntu-latest"]\'' in workflow
     assert 'persist-credentials: false' in workflow
     assert 'cancel-in-progress: true' in workflow
@@ -396,7 +400,7 @@ def test_image_refresh_preserves_the_backing_image_on_failure(
     tmp_path: Path, conversion_fails: bool,
 ) -> None:
     activation = (REPO_ROOT / 'deploy/tests-runner/activate.sh').read_text()
-    conversion = activation.split('cd /var/lib/libvirt/images/origo-tests\n', 1)[1].split(
+    conversion = activation.split('cd /var/lib/libvirt/images/origo-test-runner\n', 1)[1].split(
         '\ninstall -m 644', 1,
     )[0]
     old = (REPO_ROOT / 'deploy/tests-runner/controller.sh').read_bytes()

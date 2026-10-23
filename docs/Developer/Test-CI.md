@@ -69,7 +69,8 @@ tools/provision_tests_runner.sh root@37.27.112.167 SSH_PUBLIC_KEY
 The script requires the existing KVM/libvirt tooling and default NAT network.
 It verifies the Ubuntu image checksum and the pinned GitHub runner archive
 checksum. It does not recreate an existing VM. Cloud-init prepares Python 3.11,
-Docker, Chromium's dependencies and the runner application. GitHub registration
+Docker, the C++ compiler required to install package dependencies, Chromium's
+dependencies and the runner application. GitHub registration
 uses a short-lived registration token; no GitHub PAT is installed in the guest.
 The runner executes as `runner`, with guest-only administrative access for Docker
 and browser dependency installation.

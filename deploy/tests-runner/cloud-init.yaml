@@ -11,6 +11,7 @@ package_update: true
 packages:
   - docker.io
   - git
+  - g++
   - curl
   - python3-venv
   - qemu-guest-agent

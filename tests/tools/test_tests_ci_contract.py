@@ -59,6 +59,8 @@ def test_pr_checks_tests_pins_python_and_runtime_suite_command() -> None:
     assert '["self-hosted", "linux", "x64", "origo-test-runner"]' in workflow
     controller = (REPO_ROOT / 'deploy/tests-runner/controller.sh').read_text()
     assert '--name origo-test-runner --labels origo-test-runner,origo-tests --work' in controller
+    cloud_init = (REPO_ROOT / 'deploy/tests-runner/cloud-init.yaml').read_text()
+    assert '  - g++\n' in cloud_init.split('packages:\n', 1)[1].split('runcmd:', 1)[0]
     assert '\'["ubuntu-latest"]\'' in workflow
     assert 'persist-credentials: false' in workflow
     assert 'cancel-in-progress: true' in workflow

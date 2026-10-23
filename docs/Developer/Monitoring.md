@@ -79,14 +79,11 @@ make stale market data healthy. These reads make zero Binance requests and never
 scan the spool; findings use the existing Dagit checks, log and alert path. The
 provisional workers read only sealed local minutes; their own receipts and feed
 materializations remain the native ingestion evidence.
-Archive replay samples exchange time: late provider receipt alone does not invalidate a
-sequence-continuous historical book. Live receive freshness and archive sampling, depth,
-sequence, crossing and terminal exchange-clock checks remain enforced. Archive scratch
-uses bounded RowBinary batches per depth; public table schemas stay the same.
-Hourly book C1 uses existing source observation evidence to distinguish a fresh
-unpublished HCD hour from a file that arrived but was not activated. R1 still
-checks reader rows, freshness and tail gaps; C2 counts missing historical hours.
-The monitor makes no provider request to decide availability.
+Canonical books require complete UTC days of sealed native minutes. Capture gaps
+remain explicit failures; no external archive supplies replacement data. The reader
+laws below use daily native authority, without retired-provider availability checks.
+Historical replay evidence remains in the
+[retired hourly-authority archive](../operations/book_hourly_authority.md).
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
@@ -267,19 +264,17 @@ The enabled CANARY `binance_spot_book` and `binance_perp_book` are required
 R1/C1/C2 members, using the same detector, observation tape, notifications and
 Overview/Sources/Laws/Recovery views. R1 checks a readable closed minute's physical
 600/60/1/1 rows at the selected revision/build, all four component proofs, freshness
-and missing provisional minutes since accepted hourly authority (bounded to the
-last 24 hours). HCD receive-time file H+1 contains closing exchange updates for
-hour H. C1 therefore targets the hour completed by the latest closed input file,
-records the required closing-file hour and last availability check, and permits
-fresh unpublished evidence to wait. Availability evidence expires after 20 minutes;
-activation must complete within five minutes of observed availability. C2 counts
-older distinct authoritative hours from the registered start: **2025-06-28 07Z
-spot / 06Z perpetual**. Extending the calendar does not certify unfilled history.
+and missing provisional minutes after the latest valid canonical end, or the
+registered start if none exists, bounded to the last 24 hours. C1 checks the
+previous UTC day's daily canonical activation. A missing day is NOT_DUE before
+04:30 UTC for spot or 10:30 UTC for perpetual.
+C2 counts older distinct authoritative days from **2026-10-04 UTC** for both books.
+Extending the calendar does not certify unfilled history.
 Missing or stale evidence is not a pass; invalid published inputs remain failures.
 Neither CANARY rollout nor healthy capture makes missing readers green.
 Sources lists canonical and provisional depth20, depth200 and both minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
-hourly authority and hourly coverage counts for books, retaining daily units for trades.
+daily canonical readiness and calendar coverage for both books and trades.
 
 Projection activation is not formal certification approval or a physical full-history audit.
 

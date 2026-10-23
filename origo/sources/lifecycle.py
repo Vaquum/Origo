@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 from dagster import get_dagster_logger
@@ -611,7 +612,8 @@ class SourceRuntime:
         self.spec.require_enabled('audit')
         self.require_shared_mount()
         if isinstance(self.spec.canonical, CanonicalAuditMaintenance):
-            self.spec.canonical.audit_maintenance(self, datetime.now(UTC), _partition_lock)
+            maintenance = cast(CanonicalAuditMaintenance[SourceRuntime], self.spec.canonical)
+            maintenance.audit_maintenance(self, datetime.now(UTC), _partition_lock)
         self._retire_obsolete_requests()
         records = self.store.records(canonical_only=True)
         changed: list[str] = []

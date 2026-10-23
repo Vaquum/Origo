@@ -3,11 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ..contracts import Partition, Revision, Row, SourceError
 from ..locking import source_lock
@@ -21,9 +20,6 @@ from .book_spool import (
     sealed_minutes,
     write_spool_file,
 )
-
-if TYPE_CHECKING:
-    from ..lifecycle import SourceRuntime
 
 
 def book_root() -> Path:
@@ -139,12 +135,11 @@ class LocalBookCanonical:
                     'BOOK_PAYLOAD_CHANGED', 'Local book payload count changed during the build.'
                 )
 
-    def audit_maintenance(
-        self, runtime: SourceRuntime, now: datetime, partition_lock: Callable[[Partition], str],
-    ) -> None:
+    @property
+    def audit_maintenance(self):
         from ..book_retention import reclaim_native_payloads
 
-        reclaim_native_payloads(runtime, now, partition_lock)
+        return reclaim_native_payloads
 
 
 BOOK_CATCHUP_LOOKBACK_HOURS = 36

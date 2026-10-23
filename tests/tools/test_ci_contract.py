@@ -44,3 +44,8 @@ def test_typing_gate_setup_failures_exit_2() -> None:
     assert result.returncode == 2
     assert result.stdout == ''
     assert 'typing_gate: cannot parse pyproject.toml:' in result.stderr
+
+
+def test_pull_request_template_forbids_blocking_backfills() -> None:
+    template = (REPO_ROOT / '.github/PULL_REQUEST_TEMPLATE.md').read_text(encoding='utf-8')
+    assert "- [ ] No backfill in this change blocks another source's fills" in template

@@ -4,11 +4,7 @@
 This gate enforces the Conventional Commits v1.0.0 specification on:
 
   1. The PR title.
-  2. The title of the issue the PR closes (resolved by the same
-     Closes/Fixes/Resolves #N rule the slice gate uses; if no such
-     reference exists or the issue does not exist, this check is not
-     run because the slice gate already fails the PR).
-  3. Every non-merge commit message in the PR's commit range
+  2. Every non-merge commit message in the PR's commit range
      (``$BASE..$HEAD``).
 
 Specification reference: https://www.conventionalcommits.org/en/v1.0.0/
@@ -36,10 +32,8 @@ Usage:
 
   python tools/cc_gate.py \\
     --pr-title "<pr title>" \\
-    --pr-body-file <path> \\
     --base-ref <rev> \\
-    --head-ref <rev> \\
-    --repo <owner>/<name>
+    --head-ref <rev>
 """
 
 from __future__ import annotations
@@ -48,7 +42,6 @@ import argparse
 import re
 import subprocess
 import sys
-from pathlib import Path
 from typing import Final
 
 # Allowed types per the widely-followed set (Angular convention + CC v1.0.0).
@@ -63,14 +56,6 @@ CC_RE: Final[re.Pattern[str]] = re.compile(
     r'(?:\((?P<scope>[a-z0-9._/\-]+)\))?'
     r'(?P<breaking>!)?'
     r': (?P<description>.+)$'
-)
-
-# Same closing-keyword regex as slice_gate.py; kept local so cc_gate
-# does not depend on slice_gate (they gate independent concerns and
-# should be independently invocable).
-CLOSING_KEYWORD_RE: Final[re.Pattern[str]] = re.compile(
-    r'\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b',
-    re.IGNORECASE,
 )
 
 
@@ -144,57 +129,10 @@ def list_commits(base_ref: str, head_ref: str) -> list[dict[str, object]]:
     return commits
 
 
-def fetch_issue_title(repo: str, number: int) -> str:
-    """Return the title of the issue.
-
-    Any gh failure here is a gate setup failure because linked-issue
-    title validation is part of cc_gate's own contract.
-    """
-    try:
-        result = subprocess.run(
-            [
-                'gh', 'api', f'repos/{repo}/issues/{number}',
-                '--jq', '.title',
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as exc:
-        print(f'cc_gate: gh not found: {exc}', file=sys.stderr)
-        raise SystemExit(2) from exc
-    if result.returncode != 0:
-        error_output = (
-            result.stderr.strip()
-            or result.stdout.strip()
-            or 'no error output'
-        )
-        print(
-            f'cc_gate: gh api repos/{repo}/issues/{number} failed '
-            f'(exit {result.returncode}): {error_output}',
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-    title = result.stdout.strip()
-    if not title:
-        print(
-            f'cc_gate: linked issue #{number} has an empty title payload',
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-    return title
-
-
-def find_closing_references(body: str) -> list[int]:
-    return [int(m.group(1)) for m in CLOSING_KEYWORD_RE.finditer(body)]
-
-
 def gate(
     pr_title: str,
-    pr_body: str,
     base_ref: str,
     head_ref: str,
-    repo: str,
 ) -> list[str]:
     failures: list[str] = []
 
@@ -214,44 +152,20 @@ def gate(
         if err is not None:
             failures.append(f'commit {sha[:8]} subject {subject!r} {err}.')
 
-    # Rule 3: linked issue title. Multiple refs or no refs are a
-    # slice_gate concern; cc_gate does not duplicate that failure.
-    refs = find_closing_references(pr_body)
-    if len(refs) == 1:
-        issue_title = fetch_issue_title(repo, refs[0])
-        err = check_cc(issue_title)
-        if err is not None:
-            failures.append(
-                f'linked issue #{refs[0]} title {issue_title!r} {err}.'
-            )
-
     return failures
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Conventional Commits gate')
     parser.add_argument('--pr-title', required=True)
-    parser.add_argument('--pr-body-file', required=True)
     parser.add_argument('--base-ref', required=True)
     parser.add_argument('--head-ref', required=True)
-    parser.add_argument('--repo', required=True)
     args = parser.parse_args()
-
-    try:
-        pr_body = Path(args.pr_body_file).read_text(encoding='utf-8')
-    except OSError as exc:
-        print(
-            f'cc_gate: cannot read --pr-body-file {args.pr_body_file}: {exc}',
-            file=sys.stderr,
-        )
-        return 2
 
     failures = gate(
         args.pr_title,
-        pr_body,
         args.base_ref,
         args.head_ref,
-        args.repo,
     )
 
     if failures:

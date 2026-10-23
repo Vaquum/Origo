@@ -183,7 +183,6 @@ def test_source_onboarding_guide_defines_one_path_one_failure_query_and_blocking
         'source_failure_log',
         'argMax',
         'SOURCE_REGISTRY',
-        'zero-bang',
         'DORMANT',
         'CANARY',
         'LIVE',

@@ -1,0 +1,17 @@
+name: Task
+description: Report a bug or request maintenance without a PRD.
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: Change
+      description: Describe the problem and the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: State how the result will be verified.
+    validations:
+      required: true

@@ -1,3 +1,8 @@
+# v3.34.56
+
+- Retain only the current local Hugging Face export after publication, retry or failure; reclaim superseded exports under the existing consumer lock.
+- Provide a locked maintenance dry run and cleanup for previously accumulated publication versions.
+
 # v3.34.55
 
 - Restore the isolated server runner as `origo-test-runner`, including its VM, controller and registration paths; retain the legacy scheduling label for queued jobs.

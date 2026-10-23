@@ -503,6 +503,7 @@ class SourceRuntime:
                 wait=not self.run_id.startswith('worker:'),
             ):
                 from .publication import publication_current
+                from .publication_retention import KINDS, retain_latest
 
                 # A canonical-only consumer publishes the canonical state. A consumer that
                 # declares provisional components pins the partial-day rows present now and
@@ -521,6 +522,8 @@ class SourceRuntime:
                     pinned=not consumer.canonical_only,
                 ):
                     consumer.publish(self.store, pinned, destination, allow_full=allow_full)
+                elif consumer.key in KINDS:
+                    retain_latest(Path(destination))
                 self.failures.recover(operation='consumer', consumer=consumer.key)
                 return canonical
         except Exception as error:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,7 +21,7 @@ from origo.sources.adapters import binance_daily as daily
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
 from origo.sources.contracts import Partition, RolloutStage, Snapshot, StateRecord
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.profiles import spot_consumers
+from origo.sources.profiles import consumer_base, spot_consumers
 from origo.sources.profiles.formulas.huggingface_dollar import get_binance_spot_dollar_klines
 from origo.sources.profiles.formulas.huggingface_time import (
     get_binance_spot_klines_from_1m_projection,
@@ -238,6 +240,22 @@ def test_spot_consumers_publish_public_identities_from_one_pinned_state(
         assert client.execute(
             "SELECT count() FROM origo.source_failure_log WHERE operation='consumer' AND event_type='RECOVERED'"
         ) == [(1,)]
+
+        # A changed canonical input replaces the local snapshot; a current-state
+        # publication also reclaims a killed render without rewriting current files.
+        runtime.publish('huggingface', str(huggingface))
+        assert not version.exists()
+        current = json.loads((huggingface / 'latest.json').read_text())
+        current_version = huggingface / 'versions' / current['version']
+        assert set((huggingface / 'versions').iterdir()) == {current_version}
+        preserved = _publication_bytes(huggingface)
+        orphan = huggingface / 'versions' / (snapshot.token + '-' + uuid4().hex)
+        shutil.copytree(current_version, orphan)
+        calls = list(FakeHfApi.calls)
+        runtime.publish('huggingface', str(huggingface))
+        assert not orphan.exists()
+        assert _publication_bytes(huggingface) == preserved
+        assert FakeHfApi.calls == calls
     finally:
         client.disconnect()
 
@@ -266,6 +284,191 @@ def _build_one_day(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixture_root
     runtime.setup(anchor=datetime(2020, 1, 1, tzinfo=UTC))
     runtime.build('2020-01-01')
     return spec, client, runtime
+
+
+def _publication_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in root.rglob('*') if path.is_file()
+    }
+
+
+@pytest.fixture
+def published_huggingface(
+    origo_test_env: dict[str, str], binance_fixture_server_root_url: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[SourceRuntime, Path]]:
+    spec, client, runtime = _build_one_day(tmp_path, monkeypatch, binance_fixture_server_root_url)
+    monkeypatch.setenv('HF_TOKEN', 'test-token')
+    FakeHfApi.calls = []
+    monkeypatch.setattr(spot_consumers, 'HfApi', FakeHfApi)
+    root = tmp_path / spec.key / 'huggingface'
+    try:
+        runtime.publish('huggingface', str(root))
+        yield runtime, root
+    finally:
+        client.disconnect()
+
+
+def test_huggingface_failure_cleanup_respects_committed_visibility(
+    published_huggingface: tuple[SourceRuntime, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, root = published_huggingface
+    previous = _publication_bytes(root)
+    manifest = json.loads((root / 'latest.json').read_text())
+    version = root / 'versions' / manifest['version']
+
+    def interrupted(*args: object, **kwargs: object) -> None:
+        raise OSError('Injected publication interruption')
+
+    # With no manifest, only the failing attempt is owned: an older genuine
+    # uncommitted copy must survive for explicit investigation.
+    fresh = root.parent.parent / 'first-attempt' / runtime.spec.key / 'huggingface'
+    orphan = fresh / 'versions' / version.name
+    shutil.copytree(version, orphan)
+    initial = _publication_bytes(fresh)
+    with monkeypatch.context() as patch:
+        patch.setattr(FakeHfApi, 'upload_folder', interrupted)
+        with pytest.raises(OSError, match='Injected publication interruption'):
+            runtime.publish('huggingface', str(fresh))
+    assert _publication_bytes(fresh) == initial
+    assert set((fresh / 'versions').iterdir()) == {orphan}
+
+    captured = replace(runtime.spec, canonical=CapturedArchive())
+    changed = SourceRuntime(
+        captured, SourceStore(runtime.store.client, runtime.store.database, captured),
+        runtime.lock_root, runtime.run_id,
+    )
+    changed.build('2024-12-31')
+    for target, attribute in (
+        (spot_consumers.time_snapshot, 'get_binance_spot_klines_from_1m_projection'),
+        (FakeHfApi, 'upload_folder'),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(target, attribute, interrupted)
+            with pytest.raises(OSError, match='Injected publication interruption'):
+                runtime.publish('huggingface', str(root))
+        assert _publication_bytes(root) == previous
+        assert set((root / 'versions').iterdir()) == {version}
+
+    commit = consumer_base._commit_manifest
+
+    def canonical_drift(
+        reader: SourceStore, snapshot: Snapshot, destination: Path, value: dict[str, object],
+    ) -> None:
+        changed.build('2025-01-01')
+        commit(reader, snapshot, destination, value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(consumer_base, '_commit_manifest', canonical_drift)
+        with pytest.raises(RuntimeError, match='Canonical state changed'):
+            runtime.publish('huggingface', str(root))
+    assert _publication_bytes(root) == previous
+    assert set((root / 'versions').iterdir()) == {version}
+
+    write = consumer_base._write_manifest
+
+    def lost_acknowledgement(destination: Path, value: dict[str, object]) -> None:
+        write(destination, value)
+        raise OSError('Injected lost manifest acknowledgement')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(consumer_base, '_write_manifest', lost_acknowledgement)
+        with pytest.raises(OSError, match='lost manifest acknowledgement'):
+            runtime.publish('huggingface', str(root))
+    current = json.loads((root / 'latest.json').read_text())
+    current_version = root / 'versions' / current['version']
+    assert current_version != version and not version.exists()
+    assert set((root / 'versions').iterdir()) == {current_version}
+    assert publication.publication_current(
+        runtime.spec, 'huggingface', runtime.store.snapshot(canonical_only=True).token,
+        root=root.parent.parent,
+    )
+
+
+def test_retention_refuses_unproved_visibility_and_preserves_unowned_paths(
+    published_huggingface: tuple[SourceRuntime, Path], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from origo.sources import publication_retention
+    from origo.sources.contracts import SourceError
+    from origo.sources.locking import source_lock
+
+    runtime, original = published_huggingface
+    for fault in (
+        'missing_manifest', 'malformed_manifest', 'wrong_source', 'invalid_version',
+        'empty_files', 'absolute_file', 'escaping_file', 'missing_current',
+        'missing_file', 'symlink_file', 'symlink_candidate',
+    ):
+        root = tmp_path / fault / runtime.spec.key / 'huggingface'
+        shutil.copytree(original, root)
+        manifest_path = root / 'latest.json'
+        manifest = json.loads(manifest_path.read_text())
+        current = root / 'versions' / manifest['version']
+        obsolete = current.with_name(manifest['state_token'] + '-' + uuid4().hex)
+        shutil.copytree(current, obsolete)
+        referenced = current / manifest['files'][0]['path']
+        if fault == 'missing_manifest':
+            manifest_path.unlink()
+        elif fault == 'malformed_manifest':
+            manifest_path.write_text('{deliberately invalid JSON')
+        elif fault == 'wrong_source':
+            manifest['source_key'] = 'wrong_source'
+        elif fault == 'invalid_version':
+            manifest['version'] = '../outside'
+        elif fault == 'empty_files':
+            manifest['files'] = []
+        elif fault in ('absolute_file', 'escaping_file'):
+            manifest['files'][0]['path'] = str(referenced) if fault == 'absolute_file' else '../outside'
+        elif fault == 'missing_current':
+            shutil.rmtree(current)
+        elif fault == 'missing_file':
+            referenced.unlink()
+        elif fault == 'symlink_file':
+            referenced.unlink()
+            referenced.symlink_to(obsolete / manifest['files'][0]['path'])
+        elif fault == 'symlink_candidate':
+            shutil.rmtree(obsolete)
+            obsolete.symlink_to(current, target_is_directory=True)
+        if fault not in ('missing_manifest', 'malformed_manifest'):
+            manifest_path.write_text(json.dumps(manifest))
+        before = _publication_bytes(root)
+        directories = set((root / 'versions').iterdir())
+        with source_lock(runtime.lock_root, runtime.spec.key, 'consumer_huggingface'):
+            with pytest.raises((ValueError, FileNotFoundError)):
+                publication_retention.retain_latest(root)
+        assert _publication_bytes(root) == before, fault
+        assert set((root / 'versions').iterdir()) == directories, fault
+
+    manifest = json.loads((original / 'latest.json').read_text())
+    current = original / 'versions' / manifest['version']
+    obsolete = current.with_name(manifest['state_token'] + '-' + uuid4().hex)
+    unknown = current.with_name('operator-kept')
+    shutil.copytree(current, obsolete)
+    shutil.copytree(current, unknown)
+    before = _publication_bytes(original)
+    alias = tmp_path / 'aliased' / runtime.spec.key / 'huggingface'
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(original, target_is_directory=True)
+    monkeypatch.setattr('sys.argv', [
+        'publication_retention', '--root', str(original.parent.parent),
+        '--lock-root', str(runtime.lock_root), '--apply',
+    ])
+    with source_lock(runtime.lock_root, runtime.spec.key, 'consumer_huggingface'):
+        renderer = next(consumer for consumer in runtime.spec.consumers if consumer.key == 'huggingface')
+        with pytest.raises(ValueError, match='symlink'):
+            renderer.publish(runtime.store, runtime.store.snapshot(canonical_only=True), str(alias))
+        assert _publication_bytes(original) == before
+        with pytest.raises(SourceError) as raised:
+            publication_retention.main()
+        assert raised.value.code == 'SOURCE_LOCK_BUSY'
+        assert _publication_bytes(original) == before
+        assert publication_retention.retain_latest(original, apply=False) == (obsolete,)
+        assert _publication_bytes(original) == before
+        assert publication_retention.retain_latest(original) == (obsolete,)
+        assert publication_retention.retain_latest(original) == ()
+    assert current.is_dir() and unknown.is_dir() and not obsolete.exists()
+    assert _publication_bytes(current) == _publication_bytes(unknown)
 
 
 def test_mount_render_defers_past_the_worker_month_cap(

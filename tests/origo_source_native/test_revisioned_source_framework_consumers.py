@@ -397,7 +397,7 @@ def test_retention_refuses_unproved_visibility_and_preserves_unowned_paths(
     runtime, original = published_huggingface
     for fault in (
         'missing_manifest', 'malformed_manifest', 'wrong_source', 'invalid_version',
-        'empty_files', 'absolute_file', 'escaping_file', 'missing_current',
+        'missing_files', 'absolute_file', 'escaping_file', 'missing_current',
         'missing_file', 'symlink_file', 'symlink_candidate',
     ):
         root = tmp_path / fault / runtime.spec.key / 'huggingface'
@@ -416,8 +416,8 @@ def test_retention_refuses_unproved_visibility_and_preserves_unowned_paths(
             manifest['source_key'] = 'wrong_source'
         elif fault == 'invalid_version':
             manifest['version'] = '../outside'
-        elif fault == 'empty_files':
-            manifest['files'] = []
+        elif fault == 'missing_files':
+            manifest.pop('files')
         elif fault in ('absolute_file', 'escaping_file'):
             manifest['files'][0]['path'] = str(referenced) if fault == 'absolute_file' else '../outside'
         elif fault == 'missing_current':

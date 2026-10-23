@@ -38,7 +38,7 @@ def _current_version(root: Path) -> str:
     if current.is_symlink() or not current.is_dir():
         raise ValueError('Current publication version is missing or is a symlink.')
     files = data.get('files')
-    if not isinstance(files, list) or not files:
+    if not isinstance(files, list):
         raise ValueError('Publication manifest requires current file references.')
     for entry in cast(list[object], files):
         if not isinstance(entry, dict):

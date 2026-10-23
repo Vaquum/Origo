@@ -337,22 +337,12 @@ def _execute_operation(
     if operation == 'certify':
         return {'state_token': runtime.certify(config.partition_key, review_state='PENDING').token}
     if operation.startswith('consumer_'):
-        from .prepare import publication_current
-
         consumer = operation.removeprefix('consumer_')
         if not runtime.store.canonical_ready():
             raise SourceError(
                 'SOURCE_NOT_READY',
                 'Canonical state has incomplete evidence or unresolved partition failures.',
             )
-        definition = next(item for item in spec.consumers if item.key == consumer)
-        snapshot = runtime.store.snapshot(canonical_only=definition.canonical_only)
-        if publication_current(
-            spec, consumer, snapshot.token, pinned=not definition.canonical_only
-        ):
-            runtime.failures.recover(operation='consumer', consumer=consumer)
-            return {'state_token': runtime.store.snapshot(canonical_only=True).token}
-
         destination = config.destination or str(
             Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow'))
             / spec.key

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from dagster import (
@@ -412,10 +414,18 @@ def test_one_job_prepares_verifies_and_publishes_all_files(
     assert store.snapshot().token == token
     assert FakeHfApi.calls == []
     remote = store.spec.consumers[1].key
-    manifest = json.loads(
-        (tmp_path / 'files' / store.spec.key / remote / 'latest.json').read_text()
-    )
+    publication = tmp_path / 'files' / store.spec.key / remote
+    published = (publication / 'latest.json').read_bytes()
+    manifest = json.loads(published)
     assert manifest['kind'] == remote and manifest['uploads'] == []
+    current = publication / 'versions' / manifest['version']
+    orphan = current.with_name(manifest['state_token'] + '-' + uuid4().hex)
+    shutil.copytree(current, orphan)
+    publisher = next(job for job in bundle.jobs if job.name == f'publish_{store.spec.key}_{remote}_job')
+    assert publisher.execute_in_process(instance=instance).success
+    assert set((publication / 'versions').iterdir()) == {current}
+    assert (publication / 'latest.json').read_bytes() == published
+    assert FakeHfApi.calls == []
     _assert_direct_huggingface_render(ready_job, tmp_path, monkeypatch)
     _assert_new_verified_data_requests_consumers(ready_job, tmp_path)
 

@@ -1,0 +1,38 @@
+name: Manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      preparation_pr:
+        description: Merged release-preparation PR number
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+jobs:
+  create_release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Publish prepared release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREPARATION_PR: ${{ inputs.preparation_pr }}
+        run: python tools/release.py --repo "$GITHUB_REPOSITORY" --preparation-pr "$PREPARATION_PR"

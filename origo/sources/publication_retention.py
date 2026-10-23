@@ -23,7 +23,7 @@ def _current_version(root: Path) -> str:
     identifier(root.parent.name)
     manifest = root / 'latest.json'
     versions = root / 'versions'
-    if any(path.is_symlink() for path in (root.parent, root, manifest, versions)):
+    if any(path.is_symlink() for path in (root, *root.parents, manifest, versions)):
         raise ValueError('Publication retention refuses symlink roots and manifests.')
     document: object = json.loads(manifest.read_text())
     if not isinstance(document, dict):
@@ -88,7 +88,7 @@ def finish_attempt(root: Path, build: Path) -> None:
     elif build.exists() or build.is_symlink():
         if build.parent != root / 'versions' or VERSION.fullmatch(build.name) is None:
             raise ValueError('An uncommitted render must identify its own generated directory.')
-        if any(path.is_symlink() for path in (root.parent, root, root / 'versions', build)):
+        if any(path.is_symlink() for path in (root, *root.parents, root / 'versions', build)):
             raise ValueError('An uncommitted render directory must not be a symlink.')
         shutil.rmtree(build)
 
@@ -116,7 +116,8 @@ def main() -> None:
     )))
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
-    if not args.root.is_absolute() or args.root.is_symlink() or not args.root.is_dir():
+    if (not args.root.is_absolute() or not args.root.is_dir()
+            or any(path.is_symlink() for path in (args.root, *args.root.parents))):
         raise ValueError('Publication root must be an absolute, existing directory, not a symlink.')
     for source in sorted(args.root.iterdir()):
         if source.is_symlink():

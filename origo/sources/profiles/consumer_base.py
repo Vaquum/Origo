@@ -52,9 +52,11 @@ from origo.utils.arrow_store import (
     stage_series,
 )
 
+from ..cleanup import preserve_primary_failure
 from ..contracts import Snapshot, SnapshotReader, SourceError, StateRecord
 from ..hashing import state_token
 from ..publication import publication_current
+from ..publication_retention import finish_attempt, retain_latest
 from ..storage import SourceStore
 from .consumer_inputs import (
     CONSUMED_COMPONENTS,
@@ -562,120 +564,125 @@ def huggingface(
     wrappers resolve them through their module attributes at call time; that keeps
     the formula-module patch seams working.
     """
+    unresolved = Path(destination)
+    if any(path.is_symlink() for path in (unresolved, *unresolved.parents)):
+        raise ValueError('Hugging Face publication destination must not traverse a symlink.')
     store, root = _root(destination, reader, kind, renderer_label=decl.renderer_label)
     if not snapshot.records:
         raise RuntimeError('A consumer cannot publish an empty source state.')
     previous = _previous_manifest(root)
     if _reusable_snapshot(store, snapshot, root, previous, kind):
-        _commit_manifest(store, snapshot, root, previous)
+        with preserve_primary_failure('Hugging Face retention', lambda: retain_latest(root)):
+            _commit_manifest(store, snapshot, root, previous)
         return
     end = max(record.partition.end for record in snapshot.records)
     export_end_date = (end - timedelta(days=1)).strftime('%Y-%m-%d')
     end_limit = end.strftime('%Y-%m-%d %H:%M:%S')
     build = root / 'versions' / (snapshot.token + '-' + uuid4().hex)
-    build.mkdir(parents=True)
-    api = hf_api(token=time_snapshot.get_huggingface_token()) if upload else None
-    files: list[dict[str, object]] = []
-    uploads: list[dict[str, object]] = []
-    with _pinned(store, snapshot) as database:
-        for series in decl.specs:
-            default_repo_id, repo_id_env, file_prefix, resolution_label = decl.datasets[series.name]
-            if series.family == 'time':
-                frame = time_klines(
-                    kline_size_seconds=series.size * 60,
-                    start_date_limit=decl.export_start_date,
-                    end_date_limit=end_limit,
-                    table_name='time',
-                    database_name=database,
-                )
-            else:
-                frame = dollar_klines(
-                    dollar_size=float(series.size * 1000000),
-                    start_date_limit=decl.export_start_date,
-                    end_date_limit=end_limit,
-                    table_name='dollar',
-                    database_name=database,
-                )
-            if frame.height == 0:
-                continue
-            file_name = f'{file_prefix}{export_end_date.replace("-", "")}.parquet'
-            folder = build / series.name
-            folder.mkdir()
-            parquet = folder / file_name
-            frame.write_parquet(parquet, compression='zstd')
-            digest = _sha256(parquet)
-            label = decl.label_of(series.name)
-            if series.family == 'time':
-                card = time_card(
-                    export_end_date=export_end_date,
-                    row_count=frame.height,
-                    file_name=file_name,
-                    cadence_label=label,
-                    resolution_label=resolution_label,
-                )
-            else:
-                card = dollar_card(
-                    export_end_date=export_end_date,
-                    row_count=frame.height,
-                    file_name=file_name,
-                    size_label=label,
-                    resolution_label=resolution_label,
-                    database_name=store.database,
-                )
-            (folder / 'README.md').write_text(card, encoding='utf-8')
-            (folder / 'latest.json').write_text(
-                time_snapshot.build_snapshot_metadata(
-                    export_end_date=export_end_date,
-                    file_name=file_name,
-                    row_count=frame.height,
-                    file_sha256=digest,
-                ),
-                encoding='utf-8',
-            )
-            files.append(
-                {
-                    'path': str(parquet.relative_to(build)),
-                    'row_count': frame.height,
-                    'sha256': digest,
-                }
-            )
-            if upload:
-                assert api is not None
-                repo_id = time_snapshot.get_huggingface_dataset_repo_id(
-                    repo_id_env=repo_id_env, default_repo_id=default_repo_id
-                )
-                api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
-                api.upload_folder(
-                    folder_path=str(folder),
-                    repo_id=repo_id,
-                    repo_type='dataset',
-                    commit_message=(
-                        f'Add BTCUSDT {label} {decl.commit_infix}klines snapshot '
-                        f'through {export_end_date}'
+    with preserve_primary_failure('Hugging Face retention', lambda: finish_attempt(root, build)):
+        build.mkdir(parents=True)
+        api = hf_api(token=time_snapshot.get_huggingface_token()) if upload else None
+        files: list[dict[str, object]] = []
+        uploads: list[dict[str, object]] = []
+        with _pinned(store, snapshot) as database:
+            for series in decl.specs:
+                default_repo_id, repo_id_env, file_prefix, resolution_label = decl.datasets[series.name]
+                if series.family == 'time':
+                    frame = time_klines(
+                        kline_size_seconds=series.size * 60,
+                        start_date_limit=decl.export_start_date,
+                        end_date_limit=end_limit,
+                        table_name='time',
+                        database_name=database,
+                    )
+                else:
+                    frame = dollar_klines(
+                        dollar_size=float(series.size * 1000000),
+                        start_date_limit=decl.export_start_date,
+                        end_date_limit=end_limit,
+                        table_name='dollar',
+                        database_name=database,
+                    )
+                if frame.height == 0:
+                    continue
+                file_name = f'{file_prefix}{export_end_date.replace("-", "")}.parquet'
+                folder = build / series.name
+                folder.mkdir()
+                parquet = folder / file_name
+                frame.write_parquet(parquet, compression='zstd')
+                digest = _sha256(parquet)
+                label = decl.label_of(series.name)
+                if series.family == 'time':
+                    card = time_card(
+                        export_end_date=export_end_date,
+                        row_count=frame.height,
+                        file_name=file_name,
+                        cadence_label=label,
+                        resolution_label=resolution_label,
+                    )
+                else:
+                    card = dollar_card(
+                        export_end_date=export_end_date,
+                        row_count=frame.height,
+                        file_name=file_name,
+                        size_label=label,
+                        resolution_label=resolution_label,
+                        database_name=store.database,
+                    )
+                (folder / 'README.md').write_text(card, encoding='utf-8')
+                (folder / 'latest.json').write_text(
+                    time_snapshot.build_snapshot_metadata(
+                        export_end_date=export_end_date,
+                        file_name=file_name,
+                        row_count=frame.height,
+                        file_sha256=digest,
                     ),
-                    delete_patterns=[f'{file_prefix}*.parquet'],
+                    encoding='utf-8',
                 )
-                uploads.append(
+                files.append(
                     {
-                        'series': series.name,
-                        'repo_id': repo_id,
-                        'file_name': file_name,
+                        'path': str(parquet.relative_to(build)),
                         'row_count': frame.height,
                         'sha256': digest,
                     }
                 )
-    manifest: dict[str, object] = {
-        'source_key': store.spec.key,
-        'state_token': store.canonical_token(snapshot),
-        'pinned_token': snapshot.token,
-        'active_through': end.isoformat(),
-        'kind': kind,
-        'export_end_date': export_end_date,
-        'uploads': uploads,
-        'files': files,
-        'version': build.name,
-    }
-    _commit_manifest(store, snapshot, root, manifest)
+                if upload:
+                    assert api is not None
+                    repo_id = time_snapshot.get_huggingface_dataset_repo_id(
+                        repo_id_env=repo_id_env, default_repo_id=default_repo_id
+                    )
+                    api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
+                    api.upload_folder(
+                        folder_path=str(folder),
+                        repo_id=repo_id,
+                        repo_type='dataset',
+                        commit_message=(
+                            f'Add BTCUSDT {label} {decl.commit_infix}klines snapshot '
+                            f'through {export_end_date}'
+                        ),
+                        delete_patterns=[f'{file_prefix}*.parquet'],
+                    )
+                    uploads.append(
+                        {
+                            'series': series.name,
+                            'repo_id': repo_id,
+                            'file_name': file_name,
+                            'row_count': frame.height,
+                            'sha256': digest,
+                        }
+                    )
+        manifest: dict[str, object] = {
+            'source_key': store.spec.key,
+            'state_token': store.canonical_token(snapshot),
+            'pinned_token': snapshot.token,
+            'active_through': end.isoformat(),
+            'kind': kind,
+            'export_end_date': export_end_date,
+            'uploads': uploads,
+            'files': files,
+            'version': build.name,
+        }
+        _commit_manifest(store, snapshot, root, manifest)
 
 
 def huggingface_shadow(

@@ -1,3 +1,8 @@
+# v3.34.57
+
+- Retain only the current local Hugging Face export after publication, retry or failure; reclaim superseded exports under the existing consumer lock.
+- Provide a locked maintenance dry run and cleanup for previously accumulated publication versions.
+
 # v3.34.56
 
 - Retire hourly vendor book history and restore local sealed-book canonical processing while retaining live collectors and native minute data. Preserve native book backfill isolation within the existing job limits.

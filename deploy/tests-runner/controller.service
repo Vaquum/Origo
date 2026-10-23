@@ -6,8 +6,8 @@ Requires=libvirtd.service
 
 [Service]
 Type=simple
-ExecStart=/opt/origo-tests-runner/controller.sh
-ExecStopPost=-/usr/bin/virsh destroy origo-tests
+ExecStart=/opt/origo-test-runner/controller.sh
+ExecStopPost=-/usr/bin/virsh destroy origo-test-runner
 Restart=always
 RestartSec=15
 TimeoutStopSec=20

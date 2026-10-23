@@ -166,6 +166,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             assert gates[f'book.capture.seed_budget:{key}']['thresholds'] == {'attempts_per_hour': 3}
             assert gates[f'book.capture.connection_budget:{key}']['thresholds'] == {'attempts_per_five_minutes': 5}
             assert f'provider.response_completeness.page_cap:{key}' not in gates
+            assert f'book.capture.hourly_grid:{key}' not in gates
         else:
             page_cap = int(getattr(spec.provisional, 'PAGE_CAP'))
             assert page_cap == (512 if key == 'binance_perp_trades' else 100)
@@ -177,7 +178,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             == spec.orchestration.retry_count
         )
     for spec in registry.SOURCE_REGISTRY:
-        provider_families = ('book.capture.hourly_grid', 'book.capture.sealed_payload',
+        provider_families = ('book.capture.sealed_payload',
                              'book.capture.sample_grid') if isinstance(spec.provisional, LocalBookProvisional) else (
             'provider.response_completeness.empty_minute', 'provider.response_completeness.request_contract')
         for family in (*provider_families,

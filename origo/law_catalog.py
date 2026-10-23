@@ -801,12 +801,6 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 )
             for condition, owner, description, limits in (
                 (
-                    'hourly_grid',
-                    'sources.adapters.book_vendor:replay_hour',
-                    'Canonical vendor UTC hours require all 60 validated minutes; gaps cannot activate partial authoritative data.',
-                    {'minutes': 60},
-                ),
-                (
                     'sealed_payload',
                     'sources.adapters.book_spool:read_payload',
                     'Local minute payload bytes must match their immutable SHA-256 seal.',
@@ -1042,22 +1036,22 @@ def _operational_gates(add: _AddGate) -> None:
         if spec.key not in anchors:
             continue
         market = 'SPOT' if '_spot_' in spec.key else 'PERP'
-        hourly = spec.partitions.interval == 'hour'
+        book = spec.key in ('binance_spot_book', 'binance_perp_book')
         deadline = cast(tuple[int, int], _resolve(f'law:C1_{market}_DEADLINE'))
         for predicate, condition, thresholds in (
             (
                 'R1',
-                'Reader age must be within budget and the selected fully closed covered minute must contain every required book grid.' if hourly else 'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
+                'Reader age must be within budget and the selected fully closed covered minute must contain every required book grid.' if book else 'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
                 {'budget_seconds': _threshold(f'law:R1_{market}_BUDGET_SECONDS')},
             ),
             (
                 'C1',
-                'The exchange hour completed by the latest closed receive-time file must have complete canonical proofs, including the final 100-ms sample. Unpublished required inputs are NOT_DUE with fresh native evidence; activation has five minutes after availability. Missing or stale evidence is never a pass.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'delivery_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_HOURLY_DELIVERY_GRACE_SECONDS'), 'activation_grace_seconds': _threshold('sources.adapters.book_vendor:BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS'), 'availability_max_age_seconds': _threshold('sources.adapters.book_vendor:BOOK_AVAILABILITY_MAX_AGE_SECONDS'), 'required_following_hours': spec.partitions.canonical_lag_hours, 'canonical_interval': 'hour'} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The registered anchor through the hour before C1 must contain every distinct canonical hour and active component proof. The next receive-time file completes each exchange hour; older gaps remain failures.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):

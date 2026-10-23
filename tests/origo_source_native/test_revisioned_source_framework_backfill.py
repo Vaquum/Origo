@@ -631,12 +631,12 @@ def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) ->
             ) as instance:
                 first = instance.create_run_for_job(
                     job, status=DagsterRunStatus.STARTED,
-                    tags={'dagster/partition': DAY if spec.consumers else '2026-10-04T09Z'},
+                    tags={'dagster/partition': DAY if spec.consumers else '2026-10-04'},
                 )
                 second = instance.create_run_for_job(
                     job,
                     status=DagsterRunStatus.QUEUED,
-                    tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-04T10Z'},
+                    tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-05'},
                     remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
                 )
                 pool = f'{spec.key}_canonical'

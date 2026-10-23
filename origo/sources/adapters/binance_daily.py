@@ -4,17 +4,14 @@ import fcntl
 import os
 import re
 import time
-from collections.abc import Iterator, Mapping
-from contextlib import ExitStack, contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from ipaddress import IPv4Address
-from math import ceil, isfinite
+from math import isfinite
 from pathlib import Path
-from queue import LifoQueue
-from typing import ClassVar, Literal, TextIO
+from typing import ClassVar
 from urllib.parse import urlsplit
 
 import requests
@@ -34,7 +31,6 @@ class Response:
     headers: Mapping[str, str]
     status: int
     egress_ip: str | None = None
-    resource_url: str | None = field(default=None, repr=False, compare=False)
 
 
 # Static pacing per Binance host family at 60% of the documented IP allowance,
@@ -46,40 +42,12 @@ REST_HOST_BUDGETS = {
 }
 REST_DEFAULT_BUDGET = (20, 1200)
 
-_provider_connections: ContextVar[LifoQueue[requests.Session] | None] = ContextVar(
-    'book_provider_connections', default=None
-)
-
-
-@contextmanager
-def provider_connections() -> Iterator[None]:
-    if _provider_connections.get() is not None:
-        yield
-        return
-    with ExitStack() as stack:
-        sessions: LifoQueue[requests.Session] = LifoQueue(2)
-        for _ in range(2):
-            sessions.put(stack.enter_context(requests.Session()))
-        token = _provider_connections.set(sessions)
-        try:
-            yield
-        finally:
-            _provider_connections.reset(token)
-
-
 def _request(
     url: str,
     params: Mapping[str, str | int] | None,
     headers: Mapping[str, str] | None,
     egress_ip: str | None = None,
-    method: Literal['GET', 'POST'] = 'GET',
-    *, resource_url: str | None = None,
 ) -> requests.Response:
-    target = resource_url or url
-    if resource_url is not None:
-        params = None
-        headers = {k: v for k, v in (headers or {}).items()
-                   if k.lower() not in ('authorization', 'x-api-key')}
     try:
         if egress_ip is not None:
             with requests.Session() as session:
@@ -88,26 +56,9 @@ def _request(
                 adapter.poolmanager.connection_pool_kw['source_address'] = (egress_ip, 0)
                 session.mount('https://', adapter)
                 session.mount('http://', adapter)
-                if method == 'POST':
-                    return session.post(target, params=params, headers=headers, timeout=(5, 30),
-                                        allow_redirects=False)
-                return session.get(target, params=params, headers=headers, timeout=(5, 30))
-        if method == 'POST':
-            return requests.post(target, params=params, headers=headers, timeout=(5, 30),
-                                 allow_redirects=False)
-        sessions = _provider_connections.get()
-        if sessions is not None and _budget_host(url) == 'api.cryptohftdata.com':
-            session = sessions.get()
-            try:
-                return session.get(target, params=params, headers=headers, timeout=(5, 30))
-            finally:
-                sessions.put(session)
-        return requests.get(target, params=params, headers=headers, timeout=(5, 30))
+                return session.get(url, params=params, headers=headers, timeout=(5, 30))
+        return requests.get(url, params=params, headers=headers, timeout=(5, 30))
     except requests.RequestException as error:
-        if _budget_host(url) == 'api.cryptohftdata.com':
-            raise SourceError(
-                'PROVIDER_TRANSPORT_FAILED', f'Provider request failed: {type(error).__name__}.'
-            ) from None
         raise SourceError(
             'PROVIDER_TRANSPORT_FAILED', 'Provider request did not complete.'
         ) from error
@@ -136,18 +87,11 @@ def _weighted_request(
     headers: Mapping[str, str] | None,
     weight: int,
     egress_ip: str | None = None,
-    method: Literal['GET', 'POST'] = 'GET',
-    *, resource_url: str | None = None,
 ) -> requests.Response:
     root = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
     if not root.is_absolute():
         raise ValueError('Binance request budget requires the shared absolute lock mount.')
     root.mkdir(parents=True, exist_ok=True)
-    if _budget_host(url) == 'api.cryptohftdata.com':
-        if resource_url is not None:
-            return _vendor_request(root, url, params, headers, weight, egress_ip, method,
-                                   resource_url=resource_url)
-        return _vendor_request(root, url, params, headers, weight, egress_ip, method)
     # Processes share each host/address allowance; unbound callers keep the legacy file.
     rate, backstop = REST_HOST_BUDGETS.get(_budget_host(url), REST_DEFAULT_BUDGET)
     with _budget_state_file(root, url, egress_ip).open('a+') as state:
@@ -194,96 +138,6 @@ def _weighted_request(
         return response
 
 
-def _read_budget(state: TextIO) -> tuple[float, float, float]:
-    state.seek(0)
-    saved = state.read().strip()
-    values = tuple(map(float, saved.split())) if saved else (0.0, 0.0)
-    if len(values) not in (2, 3) or not all(isfinite(value) and value >= 0 for value in values):
-        raise ValueError('The persisted provider request budget is invalid.')
-    return values[0], values[1], values[2] if len(values) == 3 else 0.0
-
-
-def _save_budget(state: TextIO, next_request: float, pause: float, provider_spacing: float) -> None:
-    state.seek(0)
-    state.truncate()
-    state.write(f'{next_request:.6f} {pause:.6f} {provider_spacing:.6f}')
-    state.flush()
-    os.fsync(state.fileno())
-
-
-def _vendor_pause(response: requests.Response, spacing: float) -> tuple[float, float]:
-    pause = 0.0
-    provider_spacing = 0.0
-    for hop in (*response.history, response):
-        retry = hop.headers.get('Retry-After')
-        if hop.status_code in (418, 429) or (500 <= hop.status_code < 600 and retry is not None):
-            if retry is None or not retry.isdigit():
-                raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Provider Retry-After is invalid.')
-            pause = max(pause, time.time() + int(retry))
-        if hop.headers.get('RateLimit-Remaining') == '0':
-            reset = hop.headers.get('RateLimit-Reset')
-            if reset is None or not reset.isdigit():
-                raise SourceError('PROVIDER_RATE_HEADER_INVALID', 'Provider RateLimit-Reset is invalid.')
-            pause = max(pause, time.time() + int(reset))
-        policy = hop.headers.get('RateLimit-Policy', '')
-        quota = re.search(r'(?:^|[;,\s])q=(\d+)', policy)
-        window = re.search(r'(?:^|[;,\s])w=(\d+)', policy)
-        limit = hop.headers.get('RateLimit-Limit')
-        reset = hop.headers.get('RateLimit-Reset')
-        if quota and window and int(quota[1]) > 0:
-            provider_spacing = max(provider_spacing, int(window[1]) / int(quota[1]))
-        elif limit and reset and limit.isdigit() and reset.isdigit() and int(limit) > 0:
-            provider_spacing = max(provider_spacing, int(reset) / int(limit))
-    return pause, ceil(provider_spacing * 1_000_000) / 1_000_000 if provider_spacing > spacing else 0.0
-
-
-def _vendor_request(
-    root: Path, url: str, params: Mapping[str, str | int] | None,
-    headers: Mapping[str, str] | None, weight: int, egress_ip: str | None,
-    method: Literal['GET', 'POST'],
-    *, resource_url: str | None = None,
-) -> requests.Response:
-    spacing = weight / REST_DEFAULT_BUDGET[0]
-    with _budget_state_file(root, url, egress_ip).open('a+') as state:
-        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-        next_request, pause, provider_spacing = _read_budget(state)
-        reserved_spacing = max(spacing, provider_spacing)
-        due = max(time.time(), next_request, pause)
-        _save_budget(state, due + reserved_spacing, pause, provider_spacing)
-        fcntl.flock(state.fileno(), fcntl.LOCK_UN)
-        while True:
-            time.sleep(max(0.0, due - time.time()))
-            fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-            next_request, pause, provider_spacing = _read_budget(state)
-            current_spacing = max(spacing, provider_spacing)
-            if time.time() >= pause and current_spacing <= reserved_spacing:
-                fcntl.flock(state.fileno(), fcntl.LOCK_UN)
-                break
-            due = max(next_request, pause, time.time())
-            reserved_spacing = current_spacing
-            _save_budget(state, due + reserved_spacing, pause, provider_spacing)
-            fcntl.flock(state.fileno(), fcntl.LOCK_UN)
-        response = (
-            _request(url, params, headers, egress_ip, method, resource_url=resource_url)
-            if resource_url is not None else
-            _request(url, params, headers, egress_ip, method)
-            if method != 'GET' else _request(url, params, headers, egress_ip)
-            if egress_ip is not None else _request(url, params, headers)
-        )
-        try:
-            beat_worker()
-            deadline, observed_spacing = _vendor_pause(response, spacing)
-            fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-            next_request, pause, provider_spacing = _read_budget(state)
-            provider_spacing = max(provider_spacing, observed_spacing)
-            _save_budget(state, max(next_request, deadline, time.time() + observed_spacing),
-                         max(pause, deadline), provider_spacing)
-        except BaseException:
-            response.close()
-            raise
-        return response
-
-
 def get_response(
     url: str,
     *,
@@ -291,47 +145,25 @@ def get_response(
     headers: Mapping[str, str] | None = None,
     weight: int = 0,
     egress_ip: str | None = None,
-    method: Literal['GET', 'POST'] = 'GET',
-    resource_url: str | None = None,
 ) -> Response:
     if weight < 0:
         raise ValueError('Binance request weight cannot be negative.')
-    if resource_url is not None and (
-        method != 'GET' or weight <= 0 or _budget_host(url) != 'api.cryptohftdata.com'
-    ):
-        raise ValueError('An issued provider object requires its weighted logical GET.')
     if egress_ip is not None:
         egress_ip = str(IPv4Address(egress_ip))
     try:
         response = (
-            _weighted_request(url, params, headers, weight, egress_ip, method,
-                              resource_url=resource_url)
-            if resource_url is not None else
-            _weighted_request(url, params, headers, weight, egress_ip, method)
-            if method != 'GET' and weight
-            else _request(url, params, headers, egress_ip, method)
-            if method != 'GET'
-            else _weighted_request(url, params, headers, weight, egress_ip)
+            _weighted_request(url, params, headers, weight, egress_ip)
             if weight
             else _request(url, params, headers, egress_ip)
             if egress_ip is not None
             else _request(url, params, headers)
         )
-        try:
-            if not 200 <= response.status_code < 300:
-                raise SourceError(
-                    f'PROVIDER_HTTP_{response.status_code}',
-                    f'Provider returned HTTP {response.status_code}.',
-                )
-            issued = response.url if (
-                _budget_host(url) == 'api.cryptohftdata.com' and method == 'GET'
-                and params is not None and 'file' in params
-            ) else None
-            return Response(response.content, dict(response.headers), response.status_code,
-                            egress_ip, issued)
-        finally:
-            if _budget_host(url) == 'api.cryptohftdata.com':
-                response.close()
+        if not 200 <= response.status_code < 300:
+            raise SourceError(
+                f'PROVIDER_HTTP_{response.status_code}',
+                f'Provider returned HTTP {response.status_code}.',
+            )
+        return Response(response.content, dict(response.headers), response.status_code, egress_ip)
     except SourceError as error:
         if egress_ip is None:
             raise

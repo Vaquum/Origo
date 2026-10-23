@@ -1,3 +1,13 @@
+# Retired CryptoHFTData investigation archive
+
+CryptoHFTData and its imported history were retired by the operator in slice #607.
+The material below is preserved as historical evidence. Its launch, quota, rollout
+and hourly-authority instructions are obsolete and must not be executed.
+Current removal controls are in [retire_cryptohftdata.md](retire_cryptohftdata.md).
+All live feeds and their collected data remain protected.
+
+---
+
 # Native book hourly authority
 
 `binance_spot_book` and `binance_perp_book` use the existing revisioned source

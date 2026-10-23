@@ -149,6 +149,26 @@ def remove_spool_payloads(root: Path, market: Market, directory: Path) -> None:
     _save_usage(root, market, size - removed)
 
 
+def remove_sealed_payload(root: Path, minute: SealedMinute) -> bool:
+    """Delete one independently acknowledged payload; retain its immutable seal."""
+    market = minute['market']
+    metadata = _path(root, market, _minute_start(minute['minute_start']))
+    with source_lock(root, f'book_spool_{market}', 'sealed', wait=True):
+        if _metadata(metadata) != minute:
+            raise SourceError('BOOK_SEAL_CHANGED', 'Book retention seal changed during validation.')
+        payload = metadata.with_suffix('.gz')
+        if not payload.exists():
+            return False
+        size, removed = _spool_bytes(root, market), payload.stat().st_size
+        if removed > size:
+            raise ValueError('Book payload exceeds accounted spool usage.')
+        payload.unlink()
+        # An interrupted counter update only overstates usage, as in day cleanup;
+        # the existing startup reconciliation repairs interrupted filesystem writes.
+        _save_usage(root, market, size - removed)
+        return True
+
+
 def seal_minute(root: Path, minute: SealedMinute, payload: bytes) -> None:
     start = _minute_start(minute['minute_start'])
     market = minute['market']

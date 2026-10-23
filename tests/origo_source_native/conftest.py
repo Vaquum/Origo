@@ -26,26 +26,17 @@ from .helpers import BINANCE_FIXTURE_ROOT, ORIGO_DATABASE
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLICKHOUSE_DOCKERFILE = REPO_ROOT / 'Dockerfile.clickhouse'
 PRIORITY_GROUPS = (
-    'book-perp',
     'metadata-diagnostics',
-    'test_book_history-test_original_historical_hour_replays_preceding_vendor_snapshot',
-    'book-spot',
     'test_orchestration-test_a_new_backfill_joins_at_the_served_frontier',
     'test_binance_perp_spool-test_spool_repair_and_canonical_replacement_preserve_outputs',
 )
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    # Immutable book preparation is shared; mutable scenarios run independently.
     priorities: dict[pytest.Item, int] = {}
     for item in items:
         group = f'{item.path.stem}-{item.originalname}'
-        params = item.callspec.params if isinstance(item, pytest.Function) and hasattr(item, 'callspec') else {}
-        if item.path.name in ('test_book_vendor.py', 'test_book_law.py') and 'original_vendor_archive' in params:
-            group = f"book-{params['original_vendor_archive']}"
-            if item.originalname != 'test_original_vendor_hour_builds_all_book_grids_without_binance':
-                group += f'-{item.originalname}'
-        elif 'diagnostic_server' in item.fixturenames:
+        if 'diagnostic_server' in item.fixturenames:
             # One real mutable diagnostic server retains its module's sequence.
             group = 'metadata-diagnostics'
         item.add_marker(pytest.mark.xdist_group(group))

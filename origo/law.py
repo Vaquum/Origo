@@ -11,12 +11,6 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
-from origo.sources.adapters.book_vendor import (
-    BOOK_AVAILABILITY_MAX_AGE_SECONDS,
-    BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS,
-    BOOK_HOURLY_DELIVERY_GRACE_SECONDS,
-    HOUR_KEY_FORMAT,
-)
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
 from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
@@ -160,8 +154,6 @@ class _Proof:
 
     def verdict(self) -> PredicateReport:
         book = self.source in ('binance_spot_book', 'binance_perp_book')
-        if book and not self.provisional and self.revision.startswith('cryptohftdata-v1:'):
-            return _result('UNKNOWN', 'book_closing_input_unverified', revision=self.revision)
         expected = tuple(key + ('_latest' if self.provisional else '') for key in BOOK_COMPONENT_KEYS) if book else PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
         extra: set[str] = (
             {'market_state_latest', 'market_state_detail_latest'} if self.provisional
@@ -294,7 +286,7 @@ def _floor(now: datetime, source: str) -> datetime:
 def _calendar(proofs: list[_Proof], slot: date | datetime, source: str | None = None) -> PredicateReport:
     start = slot if isinstance(slot, datetime) else datetime.combine(slot, datetime.min.time(), UTC)
     hourly = source is not None and _interval(source) == timedelta(hours=1)
-    key = start.strftime(HOUR_KEY_FORMAT) if hourly else start.date().isoformat()
+    key = start.strftime('%Y-%m-%dT%HZ') if hourly else start.date().isoformat()
     unit = 'hour' if hourly else 'day'
     matches = [p for p in proofs if not p.provisional and (p.key == key or p.start == start)]
     if not matches:
@@ -316,55 +308,14 @@ def _canonical_slot(source: str, now: datetime) -> datetime:
 
 
 def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
-    hourly = _interval(source) == timedelta(hours=1)
-    floor = _floor(now, source)
     slot = _canonical_slot(source, now)
-    if hourly:
-        deadline = floor + timedelta(seconds=BOOK_HOURLY_DELIVERY_GRACE_SECONDS)
-    else:
-        hour, minute = C1_PERP_DEADLINE if '_perp_' in source else C1_SPOT_DEADLINE
-        deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    hour, minute = C1_PERP_DEADLINE if '_perp_' in source else C1_SPOT_DEADLINE
+    deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     report = _calendar(proofs, slot, source)
-    unit = 'hour' if hourly else 'day'
-    if report['reason'] == f'canonical_{unit}_missing' and (now < deadline or (hourly and slot < _history_anchor(source))):
+    if report['reason'] == 'canonical_day_missing' and now < deadline:
         report = _result('NOT_DUE', 'archive_not_due')
-    report['evidence'].update({unit: slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat(), 'deadline': deadline.isoformat(), 'canonical_interval': unit})
-    if hourly:
-        report['evidence']['required_following_hours'] = 1
-        report['evidence']['following_hour'] = (slot + timedelta(hours=1)).strftime(HOUR_KEY_FORMAT)
+    report['evidence'].update(day=slot.date().isoformat(), deadline=deadline.isoformat(), canonical_interval='day')
     return report
-
-
-def _book_c1(query: _Queries, database: str, proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
-    report = _c1(proofs, source, now)
-    if report['reason'] not in ('canonical_hour_missing', 'archive_not_due'):
-        return report
-    slot = _canonical_slot(source, now)
-    rows = query(f"""SELECT argMax(complete, observed_at), max(observed_at),
-        minOrNullIf(observed_at, complete=1)
-        FROM {database}.source_observation_log
-        WHERE source_key=%(source)s AND partition_key=%(partition)s
-          AND JSONHas(evidence_json, 'provider_available')
-        HAVING count()>0""",
-        {'source': source, 'partition': slot.strftime(HOUR_KEY_FORMAT)})
-    if not rows:
-        return report
-    available, observed, first_available = rows[0]
-    observed = _utc(observed)
-    evidence = dict(report['evidence'])
-    evidence['deadline'] = None
-    evidence.update(provider_available=bool(available), provider_observed_at=observed.isoformat(),
-                    authority_delay_seconds=(now - slot - timedelta(hours=1)).total_seconds())
-    if not 0 <= (now - observed).total_seconds() <= BOOK_AVAILABILITY_MAX_AGE_SECONDS:
-        return _result('UNKNOWN', 'archive_availability_stale', **evidence)
-    if not available:
-        if first_available is not None:
-            return _result('FAIL', 'published_archive_unavailable', **evidence)
-        return _result('NOT_DUE', 'archive_not_published', **evidence)
-    deadline = _utc(first_available) + timedelta(seconds=BOOK_CANONICAL_ACTIVATION_GRACE_SECONDS)
-    evidence['deadline'] = deadline.isoformat()
-    return _result('NOT_DUE' if now < deadline else 'FAIL',
-                   'archive_activation_pending' if now < deadline else 'canonical_hour_missing', **evidence)
 
 
 def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
@@ -378,8 +329,6 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
     expected = max(0, int((_canonical_slot(source, now) - start) / interval))
     evidence: dict[str, Scalar] = dict(anchor=anchor.isoformat(), stored_anchor=stored.isoformat() if stored else None)
     evidence.update({f'expected_{unit}s': expected, f'valid_{unit}s': 0, f'first_invalid_{unit}': None})
-    if hourly:
-        evidence['required_following_hours'] = 1
     if stored != start:
         return _result('UNKNOWN', 'anchor_mismatch', **evidence)
     valid = 0
@@ -395,7 +344,7 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
             valid += 1
         elif first is None:
             first = result
-            evidence[f'first_invalid_{unit}'] = slot.strftime(HOUR_KEY_FORMAT) if hourly else slot.date().isoformat()
+            evidence[f'first_invalid_{unit}'] = slot.strftime('%Y-%m-%dT%HZ') if hourly else slot.date().isoformat()
         elif result['status'] == 'FAIL' and first['status'] != 'FAIL':
             first = result
     evidence[f'valid_{unit}s'] = valid
@@ -426,7 +375,7 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
             'reason': 'validated_activation' if proof else 'component_proof_missing',
             'gate_ids': [], 'dagit_url': None,
         }
-        if (record is not None and component.key in (('depth20', 'depth200', 'depth20_1m', 'depth200_1m', 'depth20_latest', 'depth200_latest', 'depth20_1m_latest', 'depth200_1m_latest') if spec.partitions.interval == 'hour' else ('raw', 'raw_latest'))
+        if (record is not None and component.key in (('depth20', 'depth200', 'depth20_1m', 'depth200_1m', 'depth20_latest', 'depth200_latest', 'depth20_1m_latest', 'depth200_1m_latest') if spec.key in ('binance_spot_book', 'binance_perp_book') else ('raw', 'raw_latest'))
                 and record.build == r1['evidence'].get('build_id')
                 and r1['evidence'].get('row_count') is not None):
             observation.update(
@@ -589,15 +538,16 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
     optional: set[str] = cube | ({'market_state_detail', 'market_state_detail_latest'} if cube else set[str]())
     canonical = {c.key for c in spec.components if not c.provisional}
     provisional = declared - canonical
-    expected_canonical = set(BOOK_COMPONENT_KEYS) if spec.partitions.interval == 'hour' else set(CANONICAL_COMPONENTS)
-    expected_provisional = {key + '_latest' for key in BOOK_COMPONENT_KEYS} if spec.partitions.interval == 'hour' else set(PROVISIONAL_COMPONENTS)
+    book = spec.key in ('binance_spot_book', 'binance_perp_book')
+    expected_canonical = set(BOOK_COMPONENT_KEYS) if book else set(CANONICAL_COMPONENTS)
+    expected_provisional = {key + '_latest' for key in BOOK_COMPONENT_KEYS} if book else set(PROVISIONAL_COMPONENTS)
     if (not expected_canonical <= canonical or not expected_provisional <= provisional
             or canonical - expected_canonical - {key for key in optional if not key.endswith('_latest')}
             or provisional - expected_provisional - {key for key in optional if key.endswith('_latest')}):
         names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
         return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)
-    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if spec.partitions.interval == 'hour' else None
+    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if book else None
     proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '', tail_start)
     def observed(call: Callable[[], PredicateReport]) -> PredicateReport:
         try:
@@ -607,7 +557,7 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
             return _result('UNKNOWN', 'evaluation_timeout' if isinstance(error, TimeoutError) else 'evidence_unavailable')
 
     predicates: dict[LawPredicate, PredicateReport] = {
-        'C1': observed(lambda: _book_c1(query, database, proofs, spec.key, now)) if spec.partitions.interval == 'hour' else _c1(proofs, spec.key, now),
+        'C1': _c1(proofs, spec.key, now),
         'R1': observed(lambda: _r1(query, database, spec, now, edges, proofs)),
         'C2': observed(lambda: _c2(query, database, proofs, spec.key, now)),
     }

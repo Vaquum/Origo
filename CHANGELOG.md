@@ -1,3 +1,7 @@
+# v3.34.56
+
+- Retire hourly vendor book history and restore local sealed-book canonical processing while retaining live collectors and native minute data. Preserve native book backfill isolation within the existing job limits.
+
 # v3.34.55
 
 - Restore the isolated server runner as `origo-test-runner`, including its VM, controller and registration paths; retain the legacy scheduling label for queued jobs.

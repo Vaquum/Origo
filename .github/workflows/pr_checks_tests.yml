@@ -21,7 +21,7 @@ permissions:
 jobs:
   pr_checks_tests:
     name: pr_checks_tests
-    runs-on: ${{ fromJSON((inputs.runner == 'github' || vars.ORIGO_TESTS_RUNNER == 'github' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && '["ubuntu-latest"]' || '["self-hosted", "linux", "x64", "origo-tests"]') }}
+    runs-on: ${{ fromJSON((inputs.runner == 'github' || vars.ORIGO_TESTS_RUNNER == 'github' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && '["ubuntu-latest"]' || '["self-hosted", "linux", "x64", "origo-test-runner"]') }}
     timeout-minutes: 60
 
     steps:
@@ -39,7 +39,7 @@ jobs:
       - name: Register Python shared library
         run: |
           set -o pipefail
-          python -c 'import sys; print(sys.base_prefix + "/lib")' | sudo tee /etc/ld.so.conf.d/origo-tests-python.conf
+          python -c 'import sys; print(sys.base_prefix + "/lib")' | sudo tee /etc/ld.so.conf.d/origo-test-runner-python.conf
           sudo ldconfig
 
       - name: Install package and test dependencies

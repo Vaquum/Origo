@@ -30,7 +30,9 @@ The source/dependency/fixture evidence and phase reports are retained as artifac
 ShellCheck runs in the existing parallel lint job; CI contracts retain their
 existing ruleset-job owner.
 
-Same-repository PRs and workflow dispatch use the `origo-tests` self-hosted label.
+Same-repository PRs and workflow dispatch use the `origo-test-runner` self-hosted label.
+The runner also retains the legacy `origo-tests` label so already queued jobs
+remain eligible during the rename.
 Fork PRs run the same complete suite and verifier on GitHub with two workers.
 Setting repository variable `ORIGO_TESTS_RUNNER=github` provides the complete
 hosted route during a server outage; rerun pending work after setting it.
@@ -45,10 +47,10 @@ a cleared environment; they must work without inheriting `LD_LIBRARY_PATH`.
 
 ## Runner
 
-The runner lives in the KVM domain `origo-tests` on `37.27.112.167`: 12 vCPUs,
-24 GiB RAM, a 100 GiB private disk and Ubuntu 24.04. The host controller owns boot
-and allows one instance. It has no host mounts, host Docker socket, production volumes or production
-credentials. `deploy/tests-runner/isolation.xml` blocks guest connections to
+The runner lives in the KVM domain `origo-test-runner` on `37.27.112.167`: 12 vCPUs,
+24 GiB RAM, a 100 GiB private disk and Ubuntu 24.04. The host controller service
+`origo-test-runner` owns boot and allows one instance. It has no host mounts, host
+Docker socket, production volumes or production credentials. `deploy/tests-runner/isolation.xml` blocks guest connections to
 private networks, link-local addresses, the host and its public aliases, and
 IPv6. DNS, DHCP and replies to host-initiated administrative SSH are allowed.
 The Docker daemon and all test containers are inside the guest.
@@ -67,7 +69,8 @@ tools/provision_tests_runner.sh root@37.27.112.167 SSH_PUBLIC_KEY
 The script requires the existing KVM/libvirt tooling and default NAT network.
 It verifies the Ubuntu image checksum and the pinned GitHub runner archive
 checksum. It does not recreate an existing VM. Cloud-init prepares Python 3.11,
-Docker, Chromium's dependencies and the runner application. GitHub registration
+Docker, the C++ compiler required to install package dependencies, Chromium's
+dependencies and the runner application. GitHub registration
 uses a short-lived registration token; no GitHub PAT is installed in the guest.
 The runner executes as `runner`, with guest-only administrative access for Docker
 and browser dependency installation.
@@ -80,7 +83,7 @@ deploy/tests-runner/activate.sh SERVER SSH_ADMIN_KEY APP_ID INSTALLATION_ID APP_
 
 The repository-only `Vaquum Origo Tests Runner` App needs Administration write
 and mandatory Metadata read. Its PEM key lives only at
-`/etc/origo-tests-runner/app.pem` (0600, parent 0700). The controller caches an
+`/etc/origo-test-runner/app.pem` (0600, parent 0700). The controller caches an
 installation token on the host and gives the guest its runner-registration token.
 Registration is ephemeral: each listener accepts one job. A pre-job hook baked
 into the clean image admits only Origo's `pr_checks_tests` job, with a

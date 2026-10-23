@@ -59,11 +59,11 @@ def main() -> None:
     claims = encode(json.dumps({'iat': now - 60, 'exp': now + 540, 'iss': os.environ['APP_ID']}).encode())
     payload = f'{header}.{claims}'
     signature = subprocess.run(
-        ['openssl', 'dgst', '-sha256', '-sign', '/etc/origo-tests-runner/app.pem'],
+        ['openssl', 'dgst', '-sha256', '-sign', '/etc/origo-test-runner/app.pem'],
         input=payload.encode(), check=True, capture_output=True,
     ).stdout
     jwt = f'{payload}.{encode(signature)}'
-    cache = Path('/run/origo-tests-runner-token.json')
+    cache = Path('/run/origo-test-runner-token.json')
     access = json.loads(cache.read_text()) if cache.exists() else {'expires_at': '1970-01-01T00:00:00Z'}
     if datetime.fromisoformat(access['expires_at'].replace('Z', '+00:00')).timestamp() < now + 60:
         access = request(f"app/installations/{os.environ['INSTALLATION_ID']}/access_tokens", jwt, {
@@ -75,11 +75,11 @@ def main() -> None:
         raise TypeError('GitHub did not return an installation token')
     if args.status:
         runners = request(f'repos/{REPOSITORY}/actions/runners', token)['runners']
-        matches = [runner for runner in runners if runner['name'] == 'origo-tests']
+        matches = [runner for runner in runners if runner['name'] == 'origo-test-runner']
         if not matches:
             print('absent')
         elif len(matches) != 1:
-            raise ValueError('More than one Origo tests runner is registered')
+            raise ValueError('More than one Origo test runner is registered')
         else:
             print('busy' if matches[0]['busy'] else matches[0]['status'])
         return

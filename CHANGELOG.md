@@ -1,3 +1,8 @@
+# v3.34.55
+
+- Restore the isolated server runner as `origo-test-runner`, including its VM, controller and registration paths; retain the legacy scheduling label for queued jobs.
+- Install the C++ compiler before cloud-init builds the runner's package dependencies.
+
 # v3.34.54
 
 - Stop automatic Copilot code review on every push; reviews remain available on request.

@@ -93,32 +93,11 @@ jobs:
               echo "::endgroup::"
               continue
             fi
-            jq -r '.title' pr_view.json > pr_title.txt
-            jq -r '.body // ""' pr_view.json > pr_body.txt
             HEAD_BRANCH=$(jq -r '.headRefName' pr_view.json)
             HEAD_REPO=$(jq -r '.headRepository.nameWithOwner' pr_view.json)
 
-            PR_TITLE=$(cat pr_title.txt)
-            set +e
-            GATE_OUT=$(python tools/prd_gate.py \
-              --pr-title "$PR_TITLE" \
-              --pr-body-file pr_body.txt \
-              --repo "$REPO" 2>&1)
-            GATE_EXIT=$?
-            set -e
-            echo "$GATE_OUT"
-            if [ "$GATE_EXIT" -eq 2 ]; then
-              echo "::error::PRD gate setup failed for PR #$PR_NUM; refusing to leave a possibly stale verdict unflagged"
-              FAILURES=$((FAILURES + 1))
-              echo "::endgroup::"
-              continue
-            fi
-            if [ "$GATE_EXIT" -eq 0 ]; then
-              CONCLUSION="success"
-            else
-              CONCLUSION="failure"
-            fi
-
+            # Always refresh the required canonical check. Probing the gate here
+            # could leave its old success intact when issue reads fail.
             QUIET=0
             RUNS="[]"
             for i in $(seq 1 21); do
@@ -156,18 +135,11 @@ jobs:
               continue
             fi
             RUN_ID=$(echo "$CANONICAL" | jq -r .id)
-            RUN_CONCLUSION=$(echo "$CANONICAL" | jq -r .conclusion)
-            if [ "$RUN_CONCLUSION" = "$CONCLUSION" ]; then
-              echo "canonical run $RUN_ID already $CONCLUSION"
-              echo "::endgroup::"
-              continue
-            fi
-
             RERUN_OK=0
             for attempt in 1 2 3; do
               if gh api --method POST "repos/$REPO/actions/runs/$RUN_ID/rerun" > /dev/null; then
                 RERUN_OK=1
-                echo "canonical run $RUN_ID rerun requested ($RUN_CONCLUSION -> expected $CONCLUSION, attempt $attempt)"
+                echo "canonical run $RUN_ID rerun requested (issue state changed, attempt $attempt)"
                 break
               fi
               echo "::warning::rerun attempt $attempt for run $RUN_ID failed; retrying"

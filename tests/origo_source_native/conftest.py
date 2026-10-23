@@ -32,6 +32,8 @@ PRIORITY_GROUPS = (
 )
 
 
+# Group markers must exist before xdist appends them to worker collection IDs.
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     priorities: dict[pytest.Item, int] = {}
     for item in items:

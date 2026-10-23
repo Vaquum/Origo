@@ -539,7 +539,7 @@ def diagnostic_server(
         port = sock.getsockname()[1]
     image = subprocess.run(
         ['docker', 'build', '--quiet', '-f', str(ROOT / 'Dockerfile.clickhouse'), str(ROOT)],
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
         check=True,
     ).stdout.strip()

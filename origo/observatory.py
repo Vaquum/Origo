@@ -135,7 +135,7 @@ class ObservationFrame(TypedDict):
     observations: list[NotificationObservation]
     omitted_groups: int | None
     complete: bool
-    notification_transitions: NotRequired[list['NotificationTransition']]
+    notification_transitions: NotRequired[list[NotificationTransition]]
 
 
 class NotificationTransition(TypedDict):
@@ -347,7 +347,8 @@ def _cards(current: Document, catalog: Document, coverage: Coverage) -> list[Sum
                   f"{'' if item.get('complete') else ' · incomplete'} · through {_utc(cov['window_end'])}"
                   f"{' · latest read unavailable' if cov['reason'] == 'latest_read_unavailable' else ''}") if item else 'Not recorded in this observation'
         return formatted, cov, detail
-    nodes = [node for source in sources.values() for node in _objects(source.get('projections')) if node.get('lane') == 'consumer']
+    nodes = [node for source in sources.values() if source.get('rollout_stage') != 'DORMANT'
+             for node in _objects(source.get('projections')) if node.get('lane') == 'consumer']
     projections = {str(node.get('id')): node for node in _objects(report.get('projections'))}
     output_states = ['UNKNOWN' if unavailable else _publication_status(projections.get(str(node.get('id')), {})) for node in nodes]
     current_count, pending, failed, unknown = (output_states.count(state) for state in ('PASS', 'EXPECTED_WAIT', 'FAIL', 'UNKNOWN'))
@@ -422,7 +423,8 @@ def measurement_trend(current: NotificationObservation, current_at: str,
     elif family in ('C2', 'M2'):
         description = f'{delta:+g} validated {"hours" if metric == "valid_hours" else "days"} in the checked calendar · point-to-point observation; this does not establish recovery.'
     else:
-        description = ('0s · unchanged' if delta == 0 else f"{'−' if delta < 0 else '+'}{duration(abs(delta))} · {'less lag' if delta < 0 else 'more lag'}") + ' · point-to-point observation'
+        sign = '\N{MINUS SIGN}' if delta < 0 else '+'
+        description = ('0s · unchanged' if delta == 0 else f"{sign}{duration(abs(delta))} · {'less lag' if delta < 0 else 'more lag'}") + ' · point-to-point observation'
     return {'value': delta, 'unit': 'minutes' if family == 'D1' else ('hours' if metric == 'valid_hours' else 'days') if family in ('C2', 'M2') else 'seconds', 'current_at': current_at,
             'previous_at': previous_at, 'description': description, 'unavailable_reason': None}
 
@@ -574,7 +576,7 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
         episode.last_event = episode.last_seen = slot
         episode.observations += 1
         episode.quiet_seconds = 0
-    elif not verified or observation is not None and observation['status'] == 'UNKNOWN':
+    elif not verified or (observation is not None and observation['status'] == 'UNKNOWN'):
         episode.status, episode.verification = 'UNKNOWN', 'unverified'
         episode.quiet_seconds = 0
         if not episode.active:
@@ -584,7 +586,7 @@ def _event(episode: _Episode, observation: NotificationObservation | None, frame
         elif previous_verification != 'unverified':
             episode.transition(slot, 'Unverified; event history incomplete')
     else:
-        if episode.last_read_end is None or read_start is not None and _instant(read_start) >= _instant(episode.last_read_end):
+        if episode.last_read_end is None or (read_start is not None and _instant(read_start) >= _instant(episode.last_read_end)):
             episode.quiet_seconds = (episode.quiet_seconds if read_start == episode.last_read_end else 0) + read_seconds
         else:
             episode.quiet_seconds = 0
@@ -859,7 +861,7 @@ def decode_observation_record(raw: bytes) -> tuple[ObservationFrame, Document | 
             raise ValueError('invalid_notification_identity')
         if observation.get('kind') not in ('condition', 'event_stream') or observation.get('status') not in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT', 'NO_NEW_EVENTS'):
             raise ValueError('invalid_notification_state')
-        if not isinstance(observation.get('complete'), bool) or observation.get('eligible') is not None and not isinstance(observation['eligible'], bool):
+        if not isinstance(observation.get('complete'), bool) or (observation.get('eligible') is not None and not isinstance(observation['eligible'], bool)):
             raise ValueError('invalid_notification_eligibility')
         if observation.get('read_window_key') is not None and not isinstance(observation['read_window_key'], str):
             raise ValueError('invalid_notification_read_reference')

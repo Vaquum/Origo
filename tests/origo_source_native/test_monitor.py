@@ -8,6 +8,7 @@ import os
 import socket
 import time
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,12 +21,13 @@ from dagster import Failure
 
 from origo.alerts.email import AlertSettings, DeliveryError, send_alert
 from origo.alerts.summary import GLOBAL_INTERVAL_SECONDS
-from origo.observatory import LAW_NAMES
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
+from origo.observatory import LAW_NAMES
 from origo.sources.adapters.book_spool import Market
+from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import (
@@ -61,6 +63,8 @@ class _Recorder(ThreadingHTTPServer):
         self.history_rows = True
         self.history_malformed = False
         self.history_calls: list[str] = []
+        self.render_status: dict[str, bytes] = {}
+        self.render_offline: set[str] = set()
         self.email_status = 200
 
 
@@ -73,7 +77,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:  # noqa: N802 - http.server API
+    def do_POST(self) -> None:
         server = cast(_Recorder, self.server)
         length = int(self.headers.get('Content-Length', '0'))
         payload = self.rfile.read(length)
@@ -105,8 +109,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._respond(404, {'error': self.path})
 
-    def do_GET(self) -> None:  # noqa: N802 - http.server API
+    def do_GET(self) -> None:
         server = cast(_Recorder, self.server)
+        if self.path in ('/render/A/status', '/render/B/status'):
+            server.history_calls.append(self.path)
+            replica = self.path.split('/')[2]
+            if self.headers.get('Authorization') != 'Bearer recorded-status-token':
+                self._respond(401, {})
+            elif replica in server.render_offline:
+                self._respond(503, {})
+            else:
+                self._respond(200, server.render_status[replica])
+            return
         if self.path == '/healthz':
             self._respond(200, b'ok\n')
             return
@@ -120,7 +134,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._respond(404, {'error': self.path})
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server API
+    def log_message(self, format: str, *args: object) -> None:
         return None
 
 
@@ -189,7 +203,8 @@ def _monitor(
     if publication_root is None:
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
-    workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY if spec.provisional is not None]
+    workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY
+               if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT]
     for feed in (*workers, 'market_state_api', 'perp_capture', 'book_capture_spot', 'book_capture_perp'):
         heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
         if not heartbeat.exists():
@@ -528,7 +543,7 @@ def test_send_alert_posts_to_resend(recorder: _Recorder) -> None:
                           'html': '<p>body line</p>'}, separators=(',', ':')).encode()
     acknowledgement = send_alert(payload, api_key=settings.resend_api_key,
                                  api_url=settings.resend_api_url, idempotency_key='stored-batch')
-    (path, body), = [(path, body) for path, body in recorder.posts if path == '/emails']
+    (_path, body), = [(path, body) for path, body in recorder.posts if path == '/emails']
     assert acknowledgement.startswith('email-')
     assert body['_authorization'] == 'Bearer test-key'
     # Resend's edge rejects the default urllib agent with 403 (Cloudflare error 1010).
@@ -1638,8 +1653,12 @@ def test_publication_policy_evidence_reuses_existing_decisions(
     monitor._law_findings(NOW, findings)
     assert monitor.pending_report is not None
     outputs = [item for item in monitor.pending_report['projections'] if ':consumer:' in item['id']]
-    assert len(outputs) == 10
+    assert {item['id'] for item in outputs} == {
+        node['id'] for source in monitor.catalog['sources'] for node in source['projections']
+        if node['lane'] == 'consumer'
+    }
     assert all(item['publication_policy'] == monitor.publication_policy[item['id']] for item in outputs)
+    assert monitor.publication_policy['binance_spot_top20_v1:consumer:arrow']['reason'] == 'not_applicable'
 
 
 def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:
@@ -2039,9 +2058,10 @@ def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_
 def test_book_capture_health_uses_bounded_local_evidence(
     recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
 ) -> None:
-    from origo.workers import book_capture
-    from .test_book_capture import replay
     from origo.sources.adapters.book_spool import object_mapping
+    from origo.workers import book_capture
+
+    from .test_book_capture import replay
 
     def forbidden(*args: object, **kwargs: object) -> object:
         pytest.fail('Monitor and health reads must never request Binance data.')
@@ -2070,3 +2090,52 @@ def test_book_capture_health_uses_bounded_local_evidence(
     assert 'exceeds 16 KiB' in monitor._book_capture_findings(now)[0].detail
     path.unlink()
     assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'
+
+
+def test_render_status_uses_original_clocks_and_isolates_replica_failures(
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two bounded status reads reject stale/future source clocks even when ready is true."""
+    monitor = _monitor(recorder, tmp_path)
+    root = REPO_ROOT / 'tests/fixtures/render_book'
+    provenance = json.loads((root / 'status-provenance.json').read_bytes())
+    now = max(datetime.fromisoformat(entry['captured_at']) for entry in provenance)
+    for entry in provenance:
+        replica = entry['collector']
+        raw = (root / entry['file']).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == entry['sha256']
+        recorder.render_status[replica] = raw
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_URL', _url(recorder) + f'/render/{replica}')
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_TOKEN', 'recorded-status-token')
+    # DORMANT registration performs no external status requests.
+    assert monitor._render_book_findings(now) == [] and recorder.history_calls == []
+    specs = tuple(replace(spec, rollout_stage=RolloutStage.CANARY) for spec in SOURCE_REGISTRY
+                  if spec.key.endswith('_top20_v1'))
+    monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', specs)
+    assert monitor._render_book_findings(now) == []
+    assert sorted(recorder.history_calls) == ['/render/A/status', '/render/B/status']
+    assert len(monitor.book_evidence) == 4
+    recorder.render_offline.add('A')
+    assert {finding.key for finding in monitor._render_book_findings(now)} == {
+        'collector_book:A:spot', 'collector_book:A:perp',
+    }
+    assert monitor.condition_states['collector_book:B:spot'][2] is True
+    recorder.render_offline.clear()
+    original = recorder.render_status['B']
+    # Deliberate status protocol faults; these are never accepted market observations.
+    for field, value in (
+        ('durable_exchange_time', int(now.timestamp() * 1_000_000) - 6_000_000),
+        ('durable_observed_at', int(now.timestamp() * 1_000_000) + 2_000_000),
+        ('committed_at', 0),
+        ('last_received_at', 'wrong-clock-unit'),
+        ('ready', False),
+    ):
+        document = json.loads(original)
+        document['markets'][0][field] = value
+        recorder.render_status['B'] = json.dumps(document).encode()
+        failures = monitor._render_book_findings(now)
+        assert [finding.key for finding in failures] == ['collector_book:B:spot']
+        assert monitor.condition_states['collector_book:B:perp'][2] is True
+    recorder.render_status['B'] = original + b' ' * (16 * 1024)
+    oversized = monitor._render_book_findings(now)
+    assert len(oversized) == 2 and all('byte bound' in finding.detail for finding in oversized)

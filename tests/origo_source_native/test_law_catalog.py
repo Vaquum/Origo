@@ -29,11 +29,12 @@ from origo.law_catalog import (
     unknown_observations,
 )
 from origo.sources import registry
-from origo.sources.adapters.book_local import BOOK_CATCHUP_LOOKBACK_HOURS, LocalBookProvisional
 from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
 )
+from origo.sources.adapters.book_local import BOOK_CATCHUP_LOOKBACK_HOURS, LocalBookProvisional
+from origo.sources.adapters.render_book import RenderBookProvisional
 from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import RolloutStage, Row, SourceError
 from origo.sources.dagit import (
@@ -133,6 +134,8 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
                 'lookback_hours': BOOK_CATCHUP_LOOKBACK_HOURS,
             }
+        elif isinstance(spec.provisional, RenderBookProvisional):
+            assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {'lookback_hours': 48}
         else:
             assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
                 'lookback_hours': PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
@@ -167,6 +170,13 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             assert gates[f'book.capture.connection_budget:{key}']['thresholds'] == {'attempts_per_five_minutes': 5}
             assert f'provider.response_completeness.page_cap:{key}' not in gates
             assert f'book.capture.hourly_grid:{key}' not in gates
+        elif isinstance(spec.provisional, RenderBookProvisional):
+            assert gates[f'book.capture.sample_grid:{key}']['thresholds'] == {
+                'depth20_samples': 60, 'canonical_seconds': 3600,
+            }
+            assert gates[f'book.capture.hour_pin:{key}']['thresholds'] == {'finality_delay_seconds': 300}
+            assert f'provider.response_completeness.page_cap:{key}' not in gates
+            assert f'provider.archive_availability:{key}' not in gates
         else:
             page_cap = int(getattr(spec.provisional, 'PAGE_CAP'))
             assert page_cap == (512 if key == 'binance_perp_trades' else 100)
@@ -178,9 +188,14 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             == spec.orchestration.retry_count
         )
     for spec in registry.SOURCE_REGISTRY:
-        provider_families = ('book.capture.sealed_payload',
-                             'book.capture.sample_grid') if isinstance(spec.provisional, LocalBookProvisional) else (
-            'provider.response_completeness.empty_minute', 'provider.response_completeness.request_contract')
+        if isinstance(spec.provisional, LocalBookProvisional):
+            provider_families = ('book.capture.sealed_payload', 'book.capture.sample_grid')
+        elif isinstance(spec.provisional, RenderBookProvisional):
+            provider_families = ('book.capture.segment_integrity', 'book.capture.sample_grid',
+                                 'book.capture.hour_pin', 'book.capture.cache_bound')
+        else:
+            provider_families = ('provider.response_completeness.empty_minute',
+                                 'provider.response_completeness.request_contract')
         for family in (*provider_families,
             'sensor.retry.terminal_state',
             'sensor.reconciliation.native_run',
@@ -694,7 +709,8 @@ def test_publication_observation_checks_real_token_and_artifacts(
     published = json.loads(manifest.read_text())
 
     def observe() -> dict[str, ProjectionObservation]:
-        expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
+        expected = {spec.key for spec in registry.SOURCE_REGISTRY
+                    if spec.consumers and spec.rollout_stage != RolloutStage.DORMANT}
         requested: list[str] = []
         admin = runtime.store.client.execute
         reader = LawClient(get_clickhouse_settings())

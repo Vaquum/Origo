@@ -215,6 +215,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 def build_catalog(deployed_sha: str) -> LawCatalog:
     from origo.law import LAW_ANCHORS, LAW_INVENTORY, MARKET_STATE_SOURCE
     from origo.sources.adapters.book_local import LocalBookProvisional
+    from origo.sources.adapters.render_book import RenderBookProvisional
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -267,6 +268,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
     for spec in SOURCE_REGISTRY:
         key = spec.key
         local_book = isinstance(spec.provisional, LocalBookProvisional)
+        render_book = isinstance(spec.provisional, RenderBookProvisional)
         nodes: list[ProjectionDescriptor] = [
             {
                 'id': f'{key}:{component.key}',
@@ -359,7 +361,9 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         for check, condition in (
             (
                 'official_revision',
-                'Local seals must revalidate the activated revision.'
+                'The immutable Render input pin must revalidate the activated revision.'
+                if render_book
+                else 'Local seals must revalidate the activated revision.'
                 if local_book
                 else 'The official archive must revalidate the activated revision.',
             ),
@@ -431,8 +435,8 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ('canonical_mask', 'Canonical partitions replace overlapping provisional minutes.'),
             (
                 'first_gap',
-                'Sealed provisional intervals remain readable beyond a gap.'
-                if local_book
+                'Available provisional intervals remain readable beyond a gap.'
+                if local_book or render_book
                 else 'Provisional partitions after the first missing interval are excluded from current readers.',
             ),
         ):
@@ -445,7 +449,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 evidence='source_current_partitions; source_anchor_log',
                 cadence='periodic',
             )
-        if not local_book:
+        if not local_book and not render_book:
             add(
                 f'provider.archive_availability:{key}',
                 [key],
@@ -660,7 +664,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     role='defer',
                     evidence='source_failure_log RENDER_DEFERRED',
                 )
-        if spec.provisional is not None and not local_book:
+        if spec.provisional is not None and not local_book and not render_book:
             add(
                 f'provider.response_completeness.request_contract:{key}',
                 [key],
@@ -752,26 +756,31 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     evidence='source_observation_log; source_failure_log; worker_minute_log',
                 )
 
-        if local_book:
+        if local_book or render_book:
+            candidate_owner = (
+                'sources.adapters.render_book:RenderBookProvisional.candidates' if render_book
+                else 'sources.adapters.book_local:LocalBookProvisional.candidates'
+            )
             for condition, owner, description, limits in (
                 (
                     'closed',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Only sealed closed minutes at or after the source anchor are eligible.',
+                    candidate_owner,
+                    'Only closed minutes at or after the source anchor are eligible.',
                     {},
                 ),
                 (
                     'covered',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
+                    candidate_owner,
                     'Already covered minutes are excluded.',
                     {},
                 ),
                 (
                     'catchup',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
+                    candidate_owner,
+                    'Admit the latest missing minute before bounded historical catch-up.' if render_book
+                    else 'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
                     {
-                        'lookback_hours': _threshold(
+                        'lookback_hours': 48 if render_book else _threshold(
                             'sources.adapters.book_local:BOOK_CATCHUP_LOOKBACK_HOURS'
                         )
                     },
@@ -797,8 +806,31 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     description,
                     limits,
                     role='defer',
-                    evidence='local book seals; worker_minute_log',
+                    evidence='immutable Render segments; worker_minute_log' if render_book
+                    else 'local book seals; worker_minute_log',
                 )
+        if render_book:
+            for condition, owner, description, limits in (
+                ('segment_integrity', 'RenderBookCache.validate_segment',
+                 'Immutable payloads must match identity, schema, timestamp units, count, bytes and SHA256.', {}),
+                ('sample_grid', 'RenderBookCache.revision',
+                 'Every minute/hour requires actual observations for every exchange second; no carry-forward.',
+                 {'depth20_samples': 60, 'canonical_seconds': 3600}),
+                ('hour_pin', 'RenderBookCanonical.fetch',
+                 'End plus five minutes pins complete eligible originals; an accepted pin remains immutable.',
+                 {'finality_delay_seconds': 300}),
+                ('cache_bound', 'RenderBookCache._usage',
+                 'Unreclaimed replica input is bounded; accepted database proofs precede payload cleanup.',
+                 {'replica_bytes': _threshold('sources.adapters.render_book:MAX_REPLICA_CACHE_BYTES'),
+                  'replica_files': _threshold('sources.adapters.render_book:MAX_REPLICA_CACHE_FILES')}),
+            ):
+                add(
+                    f'book.capture.{condition}:{key}', [key],
+                    'sources.adapters.render_book:' + owner,
+                    'Render book acquisition and activation', description, limits,
+                    evidence='immutable Render manifests; source_component_log; source_failure_log; worker_minute_log',
+                )
+        if local_book:
             for condition, owner, description, limits in (
                 (
                     'sealed_payload',
@@ -975,7 +1007,7 @@ def _operational_gates(add: _AddGate) -> None:
         ),
         'collectors_serving': (
             '_collector_findings',
-            'Each configured collector must serve the selected closed minute.',
+            'Each configured collector must serve the selected closed minute; enabled Render replicas must report fresh durable exchange and receipt clocks.',
         ),
         'no_error_logs': (
             '_log_findings',
@@ -997,6 +1029,10 @@ def _operational_gates(add: _AddGate) -> None:
             limits['heartbeat_seconds'] = _threshold('workers.runtime:HEARTBEAT_MAX_AGE_SECONDS')
         elif name == 'collectors_serving':
             limits['timeout_seconds'] = _threshold('workers.monitor:PROBE_TIMEOUT_SECONDS')
+            limits['render_timeout_seconds'] = _threshold('workers.monitor:RENDER_STATUS_TIMEOUT_SECONDS')
+            limits['render_max_bytes'] = _threshold('workers.monitor:RENDER_STATUS_MAX_BYTES')
+            limits['render_age_seconds'] = _threshold('workers.monitor:RENDER_STATUS_MAX_AGE_SECONDS')
+            limits['render_future_seconds'] = _threshold('workers.monitor:RENDER_STATUS_FUTURE_SECONDS')
         elif name == 'queue_bounded':
             default = (
                 inspect.signature(
@@ -1032,11 +1068,13 @@ def _operational_gates(add: _AddGate) -> None:
             evidence='Dagit origo_monitor asset-check evaluation',
         )
     anchors = _mapping(_resolve('law:LAW_ANCHORS'))
+    book_grids = _mapping(_resolve('law:BOOK_MINUTE_GRIDS'))
     for spec in SOURCE_REGISTRY:
         if spec.key not in anchors:
             continue
         market = 'SPOT' if '_spot_' in spec.key else 'PERP'
-        book = spec.key in ('binance_spot_book', 'binance_perp_book')
+        book = spec.key in book_grids
+        hourly = spec.partitions.interval == 'hour'
         deadline = cast(tuple[int, int], _resolve(f'law:C1_{market}_DEADLINE'))
         for predicate, condition, thresholds in (
             (
@@ -1046,12 +1084,12 @@ def _operational_gates(add: _AddGate) -> None:
             ),
             (
                 'C1',
-                'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'The latest UTC hour due at hour end plus five minutes must have complete validated canonical proofs.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'delay_seconds': 300} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The frozen anchor through the hour before the latest due hour must contain every distinct canonical hour and active component proof.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):
@@ -1639,7 +1677,7 @@ def observe_publications(
     deadline: float,
 ) -> list[ProjectionObservation]:
     """Compare manifests to the real reader-selected state; inspect file metadata only."""
-    from origo.sources.contracts import identifier
+    from origo.sources.contracts import RolloutStage, identifier
     from origo.sources.hashing import state_token
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.sources.storage import SourceStore
@@ -1672,7 +1710,7 @@ def observe_publications(
 
     result: list[ProjectionObservation] = []
     for spec in SOURCE_REGISTRY:
-        if not spec.consumers:
+        if not spec.consumers or spec.rollout_stage == RolloutStage.DORMANT:
             continue
         rows = read(
             f'SELECT partition_key, provisional, partition_start, partition_end, '

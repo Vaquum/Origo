@@ -82,7 +82,7 @@ def _keys(runtime: SourceRuntime) -> tuple[str, ...]:
 
 
 def test_book_sources_register_as_canary_beside_the_four_trade_sources() -> None:
-    assert len(SOURCE_REGISTRY) == 6
+    assert len(SOURCE_REGISTRY) == 8
     assert (
         len([spec for spec in SOURCE_REGISTRY if spec.key.endswith(('trades', 'aggtrades'))]) == 4
     )
@@ -382,10 +382,10 @@ def test_spool_accounting_waits_for_payload_cleanup(
 
 
 def test_book_worker_uses_the_common_frontier_keys(book_runtime: SourceRuntime) -> None:
-    from origo.workers.provisional import ProvisionalFeed
-    from origo.workers.report import Reporter
     from origo.workers.dagster_reader import DagsterReader
+    from origo.workers.provisional import ProvisionalFeed
     from origo.workers.receipts import ensure_monitoring_tables
+    from origo.workers.report import Reporter
 
     runtime = book_runtime
     keys = _keys(runtime)

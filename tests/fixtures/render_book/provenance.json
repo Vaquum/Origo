@@ -1,0 +1,46 @@
+{
+  "window": [
+    "2026-10-24T13:00:00Z",
+    "2026-10-24T14:00:00Z"
+  ],
+  "captured_on": "2026-10-25",
+  "format": "unmodified collector NDJSON and segment sidecars; gzip packaging only",
+  "files": [
+    {
+      "file": "A-spot.tar.gz",
+      "sha256": "02cf8308f767227f289f3958dcccdcd75ffa869dd5335a950ac8c53bc4d8f3c1",
+      "bytes": 268891,
+      "replica": "A",
+      "market": "spot",
+      "segments": 61,
+      "source": "https://binance-book-collector-a.onrender.com/segments/spot"
+    },
+    {
+      "file": "A-perp.tar.gz",
+      "sha256": "a3945a1416a40e94aeda7d950082a80b81444bb0482ba8496df275dc654864c5",
+      "bytes": 377842,
+      "replica": "A",
+      "market": "perp",
+      "segments": 61,
+      "source": "https://binance-book-collector-a.onrender.com/segments/perp"
+    },
+    {
+      "file": "B-spot.tar.gz",
+      "sha256": "86130feb70efcd8d5744a0e593d172aa252871f01750dd2ec0dc6e7082b5c3d2",
+      "bytes": 268330,
+      "replica": "B",
+      "market": "spot",
+      "segments": 61,
+      "source": "https://binance-book-collector-b.onrender.com/segments/spot"
+    },
+    {
+      "file": "B-perp.tar.gz",
+      "sha256": "e574e32e0d0acb83f3a0909f3d2bbae53e62bced073745a974b003eae4351079",
+      "bytes": 377825,
+      "replica": "B",
+      "market": "perp",
+      "segments": 61,
+      "source": "https://binance-book-collector-b.onrender.com/segments/perp"
+    }
+  ]
+}

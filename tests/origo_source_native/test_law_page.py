@@ -957,6 +957,7 @@ def test_paginated_history_retains_each_original_catalog_definition(
         more.wait_for(state='hidden')
         loaded = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
         assert len(loaded['events']) == page.PAGE_SIZE + 2
+        assert loaded['definitions_limited'] is False, loaded
         assert {item['catalog_version'] for item in loaded['definitions']} == {str(report['catalog_version']), *(catalog['version'] for catalog in catalogs)}
         for position, threshold in ((0, 201), (-1, 200)):
             item = tab.locator('#detail .event').nth(position)
@@ -1172,11 +1173,11 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     catalog = _prepared_catalog(str(baseline['deployed_sha']))
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
-    assert len(current) == 23
+    assert len(current) == 29
     original_ids = {str(gate['id']) for gate in original}
     assert {gate['id'] for gate in current} - original_ids == {
         'law.M1:binance_spot_trades', 'law.M2:binance_spot_trades',
-        *(f'law.{predicate}:{source}' for source in ('binance_spot_book', 'binance_perp_book') for predicate in ('R1', 'C1', 'C2'))}
+        *(f'law.{predicate}:{source}' for source in ('binance_spot_book', 'binance_perp_book', 'binance_spot_top20_v1', 'binance_perp_top20_v1') for predicate in ('R1', 'C1', 'C2'))}
     # The accepted legacy law contract stays unchanged. Its implementation hash
     # advances with the additive proof evaluator; old evidence retains its version.
     current_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
@@ -1185,7 +1186,7 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
                            'code': {'path': page._object(gate['code'])['path']}} for gate in original if gate['id'] != 'law.inventory']
     assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
     inventory = next(gate for gate in current if gate['id'] == 'law.inventory')
-    assert {source['id'] for source in catalog['sources']} == set(law.LAW_INVENTORY)
+    assert {source['id'] for source in catalog['sources'] if source['rollout_stage'] != 'DORMANT'} == set(law.LAW_INVENTORY)
     assert inventory['condition'] == 'Frozen law members remain required; every enabled registered source needs an explicit law mapping.'
     report = page._object(baseline['report'])
     before = page._sample_brief(report)
@@ -1311,7 +1312,10 @@ def test_overview_totals_match_catalog_and_observed_evidence(
                         assert f"{horizon} · ≥ {values['count']} observed" in tab.locator('#detail').inner_text()
                         assert str(values['window_end']) in tab.locator('#detail').inner_text()
                 tab.locator('[data-close]').click()
-            outputs = [item for item in page._objects(operational_report['projections']) if ':consumer:' in str(item['id'])]
+            active_sources = {source['id'] for source in _prepared_catalog(SHA)['sources']
+                              if source['rollout_stage'] != 'DORMANT'}
+            outputs = [item for item in page._objects(operational_report['projections'])
+                       if ':consumer:' in str(item['id']) and str(item['id']).split(':')[0] in active_sources]
             assert outputs and all('publication_policy' in item for item in outputs)
             for remove_policy in (False, True):
                 if remove_policy:

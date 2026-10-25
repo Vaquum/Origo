@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, runtime_checkable
@@ -141,6 +141,14 @@ class CanonicalAdapter(Protocol):
 @runtime_checkable
 class CanonicalAuditPolicy(Protocol):
     def rejected_revision(self, partition: Partition, revision: str) -> bool: ...
+
+
+@runtime_checkable
+class CanonicalRecoveryPolicy(Protocol):
+    @property
+    def recovery_window(self) -> timedelta: ...
+
+    def recovery_identity(self, partition: Partition) -> str: ...
 
 
 @runtime_checkable
@@ -306,9 +314,12 @@ class ConsumerSpec:
     publish: ConsumerRenderer
     canonical_only: bool = False
     public: bool = False
+    verify_file_bytes: int | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
+        if self.verify_file_bytes is not None and self.verify_file_bytes < 1:
+            raise ValueError('File verification requires a positive per-file byte bound.')
 
 
 @dataclass(frozen=True)

@@ -85,6 +85,18 @@ laws below use daily native authority, without retired-provider availability che
 Historical replay evidence remains in the
 [retired hourly-authority archive](../operations/book_hourly_authority.md).
 
+Render top20 source definitions are registered DORMANT until their deployment is
+qualified. When enabled, their existing provisional workers import the newest
+closed minute before bounded cursor catch-up; hourly jobs reconcile retained A/B
+originals. The monitor makes one authenticated `/status` request per replica per
+tick, concurrently, with five-second deadlines and16-KiB response bounds. Each
+market must be durably ready with original receive, durable observation, exchange
+and commit clocks less than five seconds old and no more than one second ahead.
+Fresh HTTP delivery does not refresh those clocks. Replica/market failures use
+the existing `collectors_serving` check, law tape and notification path; the
+independent replica remains separately observed. These probes make no Binance
+requests. Disabled definitions perform no external status I/O.
+
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
 - **Heartbeat.** It touches `market_state_api.heartbeat` at start and after every tick. The
@@ -272,6 +284,11 @@ C2 counts older distinct authoritative days from **2026-10-04 UTC** for both boo
 Extending the calendar does not certify unfilled history.
 Missing or stale evidence is not a pass; invalid published inputs remain failures.
 Neither CANARY rollout nor healthy capture makes missing readers green.
+Enabled `binance_spot_top20_v1` and `binance_perp_top20_v1` use the same reader
+laws with60snapshots/one metric row per minute. C1 requires the latest UTC hour
+due at hour end plus five minutes, with3600actual observations and60minute
+metrics. C2 checks every older hour from2026-10-24T13:00Z. A common missing
+second remains a failed hour; no carried observation supplies coverage.
 Sources lists canonical and provisional depth20, depth200 and both minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
 daily canonical readiness and calendar coverage for both books and trades.

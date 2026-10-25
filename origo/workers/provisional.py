@@ -32,12 +32,17 @@ from typing import Literal, cast
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
-from origo.sources.adapters.binance_provisional import BinanceProvisionalBase
 from origo.sources.adapters.binance_perp_spool import (
     acknowledge_spooled_revision,
     classify_spooled_partition,
     cleanup_spool,
     spooled_repair_identity,
+)
+from origo.sources.adapters.binance_provisional import BinanceProvisionalBase
+from origo.sources.adapters.render_book import (
+    REPLICAS,
+    RenderBookEndpoint,
+    RenderBookProvisional,
 )
 from origo.sources.bundle import SourceRunConfig, execute_source
 from origo.sources.contracts import (
@@ -488,6 +493,56 @@ class ProvisionalFeed:
         self._beat()
         return processed, failed
 
+    def _import_books(
+        self, store: SourceStore, spec: RevisionedSourceSpec, now: datetime, *, tail: bool,
+    ) -> tuple[list[str], list[str]]:
+        adapter = spec.provisional
+        if not isinstance(adapter, RenderBookProvisional):
+            raise ValueError('Render import requires a top20 source.')
+        cache = adapter.cache
+
+        def read(replica: str) -> tuple[int, int]:
+            endpoint = replace(RenderBookEndpoint.configured(replica), deadline=time.monotonic() + 12)
+            if tail:
+                return cache.sync_tail(replica, endpoint.read)
+            return cache.sync(replica, endpoint.read, max_segments=8), 0
+
+        processed: list[str] = []
+        failed: list[str] = []
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {replica: pool.submit(read, replica) for replica in REPLICAS}
+            started = time.monotonic()
+            for replica, future in futures.items():
+                series = f'{spec.key}:import:{replica}'
+                count, code, message = 0, '', ''
+                try:
+                    count, pruned = future.result()
+                    previous = cache.cursor(replica)
+                    if tail and 0 < previous < pruned:
+                        evidence = json.dumps({'operation': 'render_retention_gap', 'replica': replica,
+                                               'previous_cursor': previous, 'pruned_through': pruned})
+                        store.execute(
+                            f'INSERT INTO {store.table("source_observation_log")} VALUES',
+                            [(spec.key, f'retention:{replica}:{previous}:{pruned}', evidence, 0, now)],
+                        )
+                        cache.resume_retained(replica, previous, pruned)
+                        code, message = 'RENDER_EXPIRED', 'Expired input was recorded; import resumes at retained history.'
+                except Exception as error:
+                    code, message = failure_code(error), str(error)
+                    if code != 'RENDER_IMPORT_BUDGET':
+                        log.exception('source=%s replica=%s Render import failed', spec.key, replica)
+                deferred = code == 'RENDER_IMPORT_BUDGET'
+                record_receipt(
+                    store.client, store.database, feed=self.name, series=series,
+                    minute=now.replace(second=0, microsecond=0), rows=count, sha256='',
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    status='REJECTED' if deferred else 'FAILED' if code else 'OK',
+                    error_code=code, error=message,
+                )
+                (failed if code and not deferred else processed).append(series)
+                self._beat()
+        return processed, failed
+
     def tick(self, now: datetime) -> TickOutcome:
         tick_started = time.monotonic()
         now = now.astimezone(UTC)
@@ -514,8 +569,16 @@ class ProvisionalFeed:
                         built, broken = self._repair(store, spec, now)
                         published, unpublished = [], []
                     else:
+                        if isinstance(spec.provisional, RenderBookProvisional):
+                            imported, unavailable = self._import_books(store, spec, now, tail=True)
+                            processed.extend(imported)
+                            failed.extend(unavailable)
                         built, broken = self._build_intervals(store, spec, now)
                         published, unpublished = ([], []) if split else self._publish(store, spec, now)
+                        if isinstance(spec.provisional, RenderBookProvisional):
+                            imported, unavailable = self._import_books(store, spec, now, tail=False)
+                            processed.extend(imported)
+                            failed.extend(unavailable)
                     processed.extend([*built, *published])
                     failed.extend([*broken, *unpublished])
                     if self.role is None:

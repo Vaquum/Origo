@@ -28,6 +28,8 @@ LAW_INVENTORY = (
     'binance_perp_trades', 'binance_perp_aggtrades',
     'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
     'binance_spot_book', 'binance_perp_book',
+    *(spec.key for spec in SOURCE_REGISTRY
+      if spec.key.endswith('_top20_v1') and spec.rollout_stage != RolloutStage.DORMANT),
 )
 LAW_ANCHORS = {
     'binance_spot_trades': date(2017, 8, 17),
@@ -36,6 +38,13 @@ LAW_ANCHORS = {
     'binance_perp_aggtrades': date(2019, 12, 31),
     'binance_spot_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_spot_book').partitions.start,
     'binance_perp_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_perp_book').partitions.start,
+    **{spec.key: spec.partitions.start for spec in SOURCE_REGISTRY if spec.key.endswith('_top20_v1')},
+}
+BOOK_MINUTE_GRIDS = {
+    **{f'binance_{market}_book': tuple(zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1), strict=True))
+       for market in ('spot', 'perp')},
+    **{f'binance_{market}_top20_v1': (('depth20', 60), ('depth20_1m', 1))
+       for market in ('spot', 'perp')},
 }
 R1_SPOT_BUDGET_SECONDS = 180
 R1_PERP_BUDGET_SECONDS = 300
@@ -153,8 +162,8 @@ class _Proof:
         return matches[0] if len(matches) == 1 and matches[0][2] == self.hashes.get(key) else None
 
     def verdict(self) -> PredicateReport:
-        book = self.source in ('binance_spot_book', 'binance_perp_book')
-        expected = tuple(key + ('_latest' if self.provisional else '') for key in BOOK_COMPONENT_KEYS) if book else PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
+        grid = BOOK_MINUTE_GRIDS.get(self.source)
+        expected = tuple(key + ('_latest' if self.provisional else '') for key, _ in grid) if grid else PROVISIONAL_COMPONENTS if self.provisional else CANONICAL_COMPONENTS
         extra: set[str] = (
             {'market_state_latest', 'market_state_detail_latest'} if self.provisional
             else {'market_state', 'market_state_detail'}
@@ -165,13 +174,12 @@ class _Proof:
             return _result('UNKNOWN', 'proof_inventory_invalid')
         if any(self.component(key) is None for key in expected):
             return _result('UNKNOWN', 'proof_identity_or_hash_invalid')
-        raw = self.component(('depth20' if book else 'raw') + ('_latest' if self.provisional else ''))
+        raw = self.component(('depth20' if grid else 'raw') + ('_latest' if self.provisional else ''))
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
-        if book:
+        if grid:
             minutes = (self.end - self.start).total_seconds() / 60
-            counts = {'depth20': 600, 'depth200': 60, 'depth20_1m': 1, 'depth200_1m': 1}
-            for key, count in counts.items():
+            for key, count in grid:
                 component = self.component(key + ('_latest' if self.provisional else ''))
                 if component is None or component[1] != minutes * count:
                     return _result('FAIL', 'book_component_grid_incomplete', component=key, expected_rows=int(minutes * count), actual_rows=component[1] if component else None)
@@ -236,8 +244,8 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
     evidence.update(proof['evidence'])
     if proof['status'] != 'PASS':
         return _result(proof['status'], proof['reason'], **evidence)
-    book = spec.key in ('binance_spot_book', 'binance_perp_book')
-    keys = BOOK_COMPONENT_KEYS if book else ('raw',)
+    grid = BOOK_MINUTE_GRIDS.get(spec.key)
+    keys = tuple(key for key, _ in grid) if grid else ('raw',)
     counts: dict[str, int] = {}
     for component_key in keys:
         raw = next(component for component in spec.components
@@ -250,16 +258,16 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
             'minute': _utc(minute), 'end': _utc(minute) + timedelta(minutes=1),
         })
         counts[component_key] = int(str(rows[0][0]))
-        if book:
+        if grid:
             evidence['rows_' + component_key] = counts[component_key]
     evidence['row_count'] = counts[keys[0]]
-    if book:
-        for component_key, expected in zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1)):
+    if grid:
+        for component_key, expected in grid:
             if counts[component_key] != expected:
                 return _result('FAIL', 'reader_book_grid_incomplete', component=component_key, **evidence)
     elif not evidence['row_count']:
         return _result('FAIL', 'reader_minute_empty', **evidence)
-    if book:
+    if grid:
         canonical_end = max((p.end for p in proofs if not p.provisional and p.verdict()['status'] == 'PASS'),
                             default=spec.partitions.start)
         tail_start = max(canonical_end, now.replace(second=0, microsecond=0) - timedelta(days=1))
@@ -309,6 +317,15 @@ def _canonical_slot(source: str, now: datetime) -> datetime:
 
 def _c1(proofs: list[_Proof], source: str, now: datetime) -> PredicateReport:
     slot = _canonical_slot(source, now)
+    if _interval(source) == timedelta(hours=1):
+        first_due = _history_anchor(source) + timedelta(hours=1, minutes=5)
+        if now < first_due:
+            return _result('NOT_DUE', 'hour_not_due', deadline=first_due.isoformat(), canonical_interval='hour')
+        report = _calendar(proofs, slot, source)
+        report['evidence'].update(hour=slot.strftime('%Y-%m-%dT%HZ'),
+                                  deadline=(slot + timedelta(hours=1, minutes=5)).isoformat(),
+                                  canonical_interval='hour')
+        return report
     hour, minute = C1_PERP_DEADLINE if '_perp_' in source else C1_SPOT_DEADLINE
     deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     report = _calendar(proofs, slot, source)
@@ -375,7 +392,9 @@ def _projections(spec: RevisionedSourceSpec, proofs: list[_Proof], now: datetime
             'reason': 'validated_activation' if proof else 'component_proof_missing',
             'gate_ids': [], 'dagit_url': None,
         }
-        if (record is not None and component.key in (('depth20', 'depth200', 'depth20_1m', 'depth200_1m', 'depth20_latest', 'depth200_latest', 'depth20_1m_latest', 'depth200_1m_latest') if spec.key in ('binance_spot_book', 'binance_perp_book') else ('raw', 'raw_latest'))
+        grid = BOOK_MINUTE_GRIDS.get(spec.key)
+        reader_components = tuple(key + suffix for key, _ in grid for suffix in ('', '_latest')) if grid else ('raw', 'raw_latest')
+        if (record is not None and component.key in reader_components
                 and record.build == r1['evidence'].get('build_id')
                 and r1['evidence'].get('row_count') is not None):
             observation.update(
@@ -538,16 +557,16 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
     optional: set[str] = cube | ({'market_state_detail', 'market_state_detail_latest'} if cube else set[str]())
     canonical = {c.key for c in spec.components if not c.provisional}
     provisional = declared - canonical
-    book = spec.key in ('binance_spot_book', 'binance_perp_book')
-    expected_canonical = set(BOOK_COMPONENT_KEYS) if book else set(CANONICAL_COMPONENTS)
-    expected_provisional = {key + '_latest' for key in BOOK_COMPONENT_KEYS} if book else set(PROVISIONAL_COMPONENTS)
+    grid = BOOK_MINUTE_GRIDS.get(spec.key)
+    expected_canonical = {key for key, _ in grid} if grid else set(CANONICAL_COMPONENTS)
+    expected_provisional = {key + '_latest' for key, _ in grid} if grid else set(PROVISIONAL_COMPONENTS)
     if (not expected_canonical <= canonical or not expected_provisional <= provisional
             or canonical - expected_canonical - {key for key in optional if not key.endswith('_latest')}
             or provisional - expected_provisional - {key for key in optional if key.endswith('_latest')}):
         names: tuple[LawPredicate, ...] = ('R1', 'C1', 'C2', 'M1', 'M2') if cube else ('R1', 'C1', 'C2')
         return {'source_key': spec.key, 'predicates': {name: _result('UNKNOWN', 'profile_mismatch') for name in names}}, []
     edges = _edge(query, database, spec.key, now)
-    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if book else None
+    tail_start = now.replace(second=0, microsecond=0) - timedelta(days=1) if grid else None
     proofs = _proofs(query, database, spec.key, str(edges[0][3]) if len(edges) == 1 else '', tail_start)
     def observed(call: Callable[[], PredicateReport]) -> PredicateReport:
         try:

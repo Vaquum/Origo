@@ -25,10 +25,35 @@ from socketserver import ThreadingMixIn
 from typing import cast
 
 from origo.observatory import (
-    Document as Document, Json as Json, LAW_NAMES, LAW_COPY, THEME,
-    MAX_SUMMARY_BYTES, OPERATIONS as OPERATIONS, OPERATION_RECORD as OPERATION_RECORD,
-    build_summary, decode_observation_record, consecutive_window as consecutive_window,
-    operation_sample as _operation_sample, operations_totals as _operations_totals,
+    LAW_COPY,
+    LAW_NAMES,
+    MAX_SUMMARY_BYTES,
+    THEME,
+    build_summary,
+    decode_observation_record,
+)
+from origo.observatory import (
+    OPERATION_RECORD as OPERATION_RECORD,
+)
+from origo.observatory import (
+    OPERATIONS as OPERATIONS,
+)
+from origo.observatory import (
+    Document as Document,
+)
+from origo.observatory import (
+    Json as Json,
+)
+from origo.observatory import (
+    consecutive_window as consecutive_window,
+)
+from origo.observatory import (
+    operation_sample as _operation_sample,
+)
+from origo.observatory import (
+    operations_totals as _operations_totals,
+)
+from origo.observatory import (
     sample_brief as _sample_brief,
 )
 
@@ -492,7 +517,7 @@ class TapeCache:
                 if (summary.get('law_sample_ref') is not None or summary.get('status') != 'UNKNOWN'
                         or any(card.get('status') != 'UNKNOWN' for card in _objects(summary.get('cards')) if card.get('id') in (*LAW_NAMES, 'clear'))
                         or observed_at < slot or observed_at >= slot + timedelta(minutes=1)
-                        or report and slot <= _instant(report.get('sampling_slot'))):
+                        or (report and slot <= _instant(report.get('sampling_slot')))):
                     raise ValueError('invalid_independent_operator_summary')
                 sidecar = self.root / f'notification-observations-{slot.date().isoformat()}.jsonl'
                 if sidecar.is_symlink():
@@ -520,7 +545,7 @@ class TapeCache:
                     or summary.get('observed_at') != report.get('evaluation_end')):
                 raise ValueError('operator_summary_evidence_mismatch')
             age = (now - _instant(summary.get('observed_at'))).total_seconds()
-            if age < -5 or age >= 120 or current.get('reason') and not independent:
+            if age < -5 or age >= 120 or (current.get('reason') and not independent):
                 reason = str(current.get('reason') or 'stale_report')
             else:
                 return summary
@@ -870,7 +895,7 @@ function lawSummary(k){const ids=requiredLaws().filter(id=>family(id)===k),resul
 const num=v=>typeof v==='number'&&Number.isFinite(v)?v:null,shown=v=>num(v)===null?'—':v.toLocaleString('en-US'),monitorEvidence=id=>!data.reason?event('monitor.'+id)?.evidence||{}:{};
 function operationalTotal(metric,horizon='60m'){const v=data?.operations_history?.[metric]?.[horizon];return v&&num(v.count)!==null?`${data.reason?'Historical ':''}${v.complete?'':'≥ '}${shown(v.count)}`:'Not recorded'}
 function coverage(v){return v?`${shown(v.observed_slots)} / ${shown(v.expected_slots)} samples · ${duration(v.covered_seconds)} covered${v.complete?'':' · incomplete'} · through ${utc(v.window_end)}${v.reason==='latest_read_unavailable'?' · latest read unavailable':''}`:'Not recorded in this observation'}
-function outputCounts(){const nodes=sources().flatMap(s=>s.projections).filter(p=>p.lane==='consumer'),states=nodes.map(p=>publicationState(p).status);return {nodes,current:states.filter(s=>s==='CURRENT').length,pending:states.filter(s=>s==='WAITING'||s==='INACTIVE').length,failed:states.filter(s=>s==='FAILED'||s==='STALE').length,unknown:states.filter(s=>s==='UNKNOWN').length}}
+function outputCounts(){const nodes=sources().filter(s=>s.rollout_stage!=='DORMANT').flatMap(s=>s.projections).filter(p=>p.lane==='consumer'),states=nodes.map(p=>publicationState(p).status);return {nodes,current:states.filter(s=>s==='CURRENT').length,pending:states.filter(s=>s==='WAITING'||s==='INACTIVE').length,failed:states.filter(s=>s==='FAILED'||s==='STALE').length,unknown:states.filter(s=>s==='UNKNOWN').length}}
 function summaryCard(card){const unavailable=Boolean(data.reason)&&data.operator_summary?.law_observed!==false||data.reason==='observation_service_unavailable'||num(data.operator_summary_age_seconds)===null||data.operator_summary_age_seconds>=120;const status=unavailable?'UNKNOWN':card.status;const value=unavailable?(card.value.includes(' / ')?'Unknown / '+card.value.split(' / ').slice(1).join(' / '):'Unknown'):card.value;const primary=Object.hasOwn(LAW_NAMES,card.id),tag=primary?'h2':'h3';return `<button class="${primary?'overview-card':'overview-secondary'}" data-overview="${esc(card.id)}">${primary?'':badge(status)}<${tag}>${esc(card.label)}</${tag}>${primary?badge(status):''}<div class="overview-value">${esc(value)}</div><div class="overview-reason">${esc(card.explanation)}</div></button>`}
 function renderOverview(){const cards=data.operator_summary?.cards||[],checks=['dagster_reachable','queue_bounded','workers_alive','collectors_serving','no_error_logs','publication_current','data_current'].map(k=>event('monitor.'+k).outcome),inventory=event('law.inventory');return `<div class="overview-grid">${cards.slice(0,6).map(summaryCard).join('')}</div><div class="overview-secondary-grid">${cards.slice(6).map(summaryCard).join('')}</div><div class="status-band" id="monitor-band"><strong>Monitor checks · data laws are separate</strong><span>${checks.filter(s=>s==='PASS').length} pass · ${checks.filter(s=>s==='FAIL').length} fail · ${checks.filter(s=>!['PASS','FAIL'].includes(s)).length} unknown</span></div><div class="status-band" id="inventory-band"><strong>Required data-law coverage</strong><span>${requiredLaws().length?`${requiredLaws().length} obligations`:'Membership unavailable'} · inventory ${badge(inventory.outcome)}</span></div>${renderIncidents()}`}
 function renderIncidents(){const summary=data.operator_summary,incidents=summary?.incidents||[];if(!incidents.length&&!summary?.omitted_groups)return '';return `<section class="summary-incidents"><h2>Observed incidents</h2>${incidents.map(incident=>`<details class="summary-incident"><summary>${esc(incident.label)} ${badge(incident.status)}</summary>${(incident.display_lines||[]).slice(1).map(line=>`<p>${esc(line)}</p>`).join('')}</details>`).join('')}<p class="muted">${summary.omitted_groups===null?'Additional groups unknown':esc(summary.omitted_groups)+' recorded groups omitted'}. Coverage: ${esc(summary.coverage.observed_slots)} / ${esc(summary.coverage.expected_slots)} minute checks.</p></section>`}

@@ -35,6 +35,7 @@ import urllib.request
 import zlib
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from importlib import import_module
@@ -42,15 +43,20 @@ from pathlib import Path
 from types import FrameType
 from typing import Literal, cast
 
+import aiohttp
+
 from origo.alerts.email import AlertSettings
 from origo.alerts.summary import (
-    DeliveryReceipt, LostInterval, PendingNotification, add_loss_interval, attempt_delivery,
-    plan_notification, prune_unsent, validate_delivery_receipt, validate_lost_intervals, validate_pending,
-)
-from origo.observatory import (
-    Document, Json, Measurement, NotificationObservation, ObservationFrame, ObservedRead, OperatorSummary,
-    build_summary, consecutive_window, decode_observation_record, lifecycle_transitions,
-    operation_sample as _operation_sample, operations_totals, sample_brief as _sample_brief,
+    DeliveryReceipt,
+    LostInterval,
+    PendingNotification,
+    add_loss_interval,
+    attempt_delivery,
+    plan_notification,
+    prune_unsent,
+    validate_delivery_receipt,
+    validate_lost_intervals,
+    validate_pending,
 )
 from origo.assets.build_depth_snapshot_store_arrow import (
     depth_snapshot_chunk_relative_path,
@@ -83,15 +89,36 @@ from origo.law_catalog import (
     projection_gate_evaluations,
     unknown_observations,
 )
-from origo.sources.contracts import Client, RolloutStage, identifier
+from origo.observatory import (
+    Document,
+    Json,
+    Measurement,
+    NotificationObservation,
+    ObservationFrame,
+    ObservedRead,
+    OperatorSummary,
+    build_summary,
+    consecutive_window,
+    decode_observation_record,
+    lifecycle_transitions,
+    operations_totals,
+)
+from origo.observatory import (
+    operation_sample as _operation_sample,
+)
+from origo.observatory import (
+    sample_brief as _sample_brief,
+)
+from origo.sources.adapters.book_spool import BOOK_SPOOL_MAX_BYTES, object_mapping
+from origo.sources.adapters.render_book import REPLICAS, RenderBookEndpoint
+from origo.sources.contracts import Client, RolloutStage, SourceError, identifier
 from origo.sources.registry import SOURCE_REGISTRY
 
+from .book_capture import BOOK_MAX_EVENT_AGE_SECONDS, STATUS_MAX_BYTES, status_path
 from .dagster_reader import DagsterReader, RunFailure
 from .depth import DEPTH_SPECS, DepthFeed
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
-from .book_capture import BOOK_MAX_EVENT_AGE_SECONDS, STATUS_MAX_BYTES, status_path
-from origo.sources.adapters.book_spool import BOOK_SPOOL_MAX_BYTES, object_mapping
 from .runtime import (
     HEARTBEAT_MAX_AGE_SECONDS,
     TickOutcome,
@@ -128,6 +155,10 @@ PERP_CAPTURE_FEED = 'perp_capture'
 CAPTURE_STATUS_BYTES = 16 * 1024
 CAPTURE_SPOOL_BYTES = 16 * 1024**3
 PROBE_TIMEOUT_SECONDS = 10
+RENDER_STATUS_TIMEOUT_SECONDS = 5
+RENDER_STATUS_MAX_BYTES = 16 * 1024
+RENDER_STATUS_MAX_AGE_SECONDS = 5
+RENDER_STATUS_FUTURE_SECONDS = 1
 # ClickHouse rows are read up to this far behind the clock: Vector delivers a log line
 # seconds after its stamp and a worker stamps a receipt before inserting it, so a row
 # stamped just before a read and inserted after it must still fall inside a later window.
@@ -1320,6 +1351,8 @@ class Monitor:
                 if name not in values:
                     continue
                 threshold = values.get('budget_seconds') if name == 'age_seconds' else values.get('max_missing') if name == 'missing_slots' else values.get('grace_seconds') if name == 'lag_seconds' else values.get('queue_threshold') if name == 'queued_runs' else values.get('expected_days') if name == 'valid_days' else HEARTBEAT_MAX_AGE_SECONDS if name in ('committed_age_seconds', 'response_age_seconds', 'durable_capture_age_seconds') else CAPTURE_SPOOL_BYTES if name == 'spool_bytes' else None
+                if name in ('committed_age_seconds', 'durable_capture_age_seconds', 'last_event_age_seconds', 'last_received_age_seconds') and 'budget_seconds' in values:
+                    threshold = values['budget_seconds']
                 measurements.append(Measurement(
                     name=name, value=value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None,
                     unit='seconds' if name.endswith('_seconds') else 'minutes' if name in ('missing_slots', 'expected_slots') else {'run_failure': 'failed runs', 'check_failed': 'failed check evaluations', 'failed_receipts': 'failed receipts', 'error_logs': 'error lines'}.get(check, 'events') if name == 'event_count' else 'workers' if name.startswith('workers_') else 'collectors' if name.startswith('collectors_') else 'runs' if name in ('queued_runs', 'queue_threshold') else 'daemons' if name == 'unhealthy_daemons' else 'rows' if name == 'raw_proof_rows' else 'bytes' if name == 'spool_bytes' else 'weight' if name == 'seed_weight' else 'attempts' if name in ('seed_total', 'connection_total') else 'days',
@@ -1370,7 +1403,7 @@ class Monitor:
                 continue
             source, _, consumer = group.partition(':consumer:')
             identity = f'publication:{source}:{consumer}'
-            status = 'EXPECTED_WAIT' if policy['reason'] == 'backfill_active' or policy['reason'] == 'within_budget' and (policy['lag_seconds'] or 0) > 0 else 'UNKNOWN' if policy['reason'] in ('unknown', 'unreadable') else 'FAIL' if policy['reason'] == 'stale' else 'PASS'
+            status = 'EXPECTED_WAIT' if policy['reason'] == 'backfill_active' or (policy['reason'] == 'within_budget' and (policy['lag_seconds'] or 0) > 0) else 'UNKNOWN' if policy['reason'] in ('unknown', 'unreadable') else 'FAIL' if policy['reason'] == 'stale' else 'PASS'
             prior = observations.get(identity)
             observations[identity] = observation(identity, 'publication_current', f'{source} · {consumer}', status, prior['detector_keys'] if prior else [], evidence=policy)
         # Explicit clearance only when the responsible original read completed. Removed
@@ -1433,7 +1466,7 @@ class Monitor:
             unresolved = pending is not None and pending['attempt_started_at'] is not None and pending['last_completion_at'] is None
             reversed_clock = cursor.clock_checked_at > timestamp
             # The process was absent: elapsed wall time does not prove elapsed real time.
-            prior_dispatch = cursor.last_delivery is not None or pending is not None and pending['first_dispatch_at'] is not None
+            prior_dispatch = cursor.last_delivery is not None or (pending is not None and pending['first_dispatch_at'] is not None)
             if unresolved or reversed_clock or prior_dispatch:
                 cursor.next_distinct_at = max(cursor.next_distinct_at, timestamp + 3610)
                 if pending and (pending['first_dispatch_at'] is not None or reversed_clock):
@@ -1765,11 +1798,70 @@ class Monitor:
         if capture is not None:
             findings.append(capture)
         findings.extend(self._book_capture_findings(datetime.now(UTC)))
+        findings.extend(self._render_book_findings(datetime.now(UTC)))
         expected = len(self.probes) + 1 + len(self.book_evidence)
         self.tick_evidence['collectors_serving'] = {
             'collectors_serving': expected - len(findings),
             'collectors_expected': expected,
         }
+        return findings
+
+    def _render_book_findings(self, now: datetime) -> list[Finding]:
+        markets = tuple(market for market in ('spot', 'perp') if any(
+            spec.key == f'binance_{market}_top20_v1' and spec.rollout_stage != RolloutStage.DORMANT
+            for spec in SOURCE_REGISTRY
+        ))
+        if not markets:
+            return []
+
+        def read(replica: str) -> tuple[Mapping[str, object], datetime]:
+            started = time.monotonic()
+            endpoint = RenderBookEndpoint.configured(replica)
+            endpoint = RenderBookEndpoint(endpoint.url, endpoint.token,
+                                          started + RENDER_STATUS_TIMEOUT_SECONDS)
+            raw = endpoint.read('/status', RENDER_STATUS_MAX_BYTES)
+            return object_mapping(json.loads(raw)), now + timedelta(seconds=time.monotonic() - started)
+
+        findings: list[Finding] = []
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending = {replica: pool.submit(read, replica) for replica in REPLICAS}
+            for replica, response in pending.items():
+                for market in markets:
+                    key = f'collector_book:{replica}:{market}'
+                    evidence: dict[str, int | float | None] = {'budget_seconds': RENDER_STATUS_MAX_AGE_SECONDS}
+                    self.book_evidence[key] = evidence
+                    try:
+                        status, completed_at = response.result()
+                        if status.get('collector') != replica:
+                            raise ValueError('Render status collector identity is invalid')
+                        values = status.get('markets')
+                        if not isinstance(values, list):
+                            raise ValueError('Render status markets are absent')
+                        rows = [object_mapping(value) for value in cast(list[object], values)]
+                        selected = [row for row in rows if row.get('market') == market]
+                        if len(selected) != 1:
+                            raise ValueError('Render status market identity is absent or duplicated')
+                        row = selected[0]
+                        for field, measurement in (
+                            ('last_received_at', 'last_received_age_seconds'),
+                            ('durable_observed_at', 'durable_capture_age_seconds'),
+                            ('durable_exchange_time', 'last_event_age_seconds'),
+                            ('committed_at', 'committed_age_seconds'),
+                        ):
+                            stamp = row.get(field)
+                            if type(stamp) is not int or stamp <= 0:
+                                raise ValueError(f'Render {field} is not a positive microsecond timestamp')
+                            age = (completed_at.timestamp() * 1_000_000 - stamp) / 1_000_000
+                            evidence[measurement] = age
+                            if not -RENDER_STATUS_FUTURE_SECONDS <= age < RENDER_STATUS_MAX_AGE_SECONDS:
+                                raise ValueError(f'Render {field} is stale or in the future')
+                        if row.get('ready') is not True or row.get('error'):
+                            raise ValueError('Render capture is not durably ready')
+                    except (SourceError, aiohttp.ClientError, OSError, ValueError, TypeError, TimeoutError) as error:
+                        findings.append(Finding(key, 'collectors_serving', f'Render {replica} {market} unavailable',
+                                                f'{type(error).__name__}: {error}'[:300]))
+                    self.condition_states[key] = ('collectors_serving', f'Render {replica} {market}',
+                                                  not any(finding.key == key for finding in findings))
         return findings
 
     def _log_findings(self, cursor: Cursor, window_end: datetime) -> list[Finding]:

@@ -27,6 +27,7 @@ from .top20 import top20_components
 
 SOURCE = 'binance_spot_top20_v1'
 ARROW_MAX_BYTES = 16 * 1024**2
+ARROW_STALE_AFTER = timedelta(seconds=180)
 
 
 @runtime_checkable

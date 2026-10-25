@@ -160,6 +160,59 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
             assert compose.count('command: python -m origo.workers.provisional --role repair') == 1
 
 
+def test_render_book_rollback_preserves_unrelated_workers_and_refuses_incomplete_retirement(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    script = REPO_ROOT / 'deploy/retire_render_top20_workers.sh'
+    docker = r'''
+set -euo pipefail
+function docker() {
+    printf '%s\n' "$*" >> "$TRACE"
+    case "$*" in
+      'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=dagster')
+        printf 'controller\n' ;;
+      'exec -i controller python -')
+        cat > "$STATE/admission.py"
+        if [ "$FAULT" = active ]; then return 1; fi ;;
+      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=provisional-binance-'*'-top20')
+        service="${@: -1}"
+        service="${service##*=}"
+        if [ ! -e "$STATE/$service" ] || [ "$FAULT" = remains ]; then printf '%s\n' "$service"; fi ;;
+      'stop provisional-binance-'*'-top20')
+        if [ "$FAULT" = stop ]; then return 1; fi ;;
+      'rm provisional-binance-'*'-top20')
+        if [ "$FAULT" = remove ]; then return 1; fi
+        touch "$STATE/${@: -1}" ;;
+      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
+        printf 'monitor\n' ;;
+      'volume ls -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.volume=worker-heartbeats')
+        printf 'test-heartbeats\n' ;;
+      'inspect --format {{.Image}} monitor') printf 'source-aware-image\n' ;;
+      'run --rm --pull=never --network none --mount type=volume,source=test-heartbeats,target=/heartbeats --entrypoint rm source-aware-image -f /heartbeats/provisional_binance_spot_top20_v1.heartbeat /heartbeats/provisional_binance_perp_top20_v1.heartbeat') ;;
+      *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
+    esac
+}
+'''
+    for fault in ('none', 'active', 'stop', 'remove', 'remains'):
+        state = tmp_path / fault
+        state.mkdir()
+        trace = state / 'trace'
+        result = subprocess.run(
+            ['bash', '-c', docker + '\nsource "$SCRIPT"'],
+            env={**os.environ, 'PROJECT_NAME': 'test', 'FAULT': fault, 'STATE': str(state),
+                 'TRACE': str(trace), 'SCRIPT': str(script)},
+            capture_output=True, text=True, timeout=10,
+        )
+        calls = trace.read_text().splitlines()
+        assert (result.returncode == 0) is (fault == 'none'), result.stderr
+        wipes = [call for call in calls if call.startswith('run ')]
+        assert bool(wipes) is (fault == 'none')
+        assert not any(call.startswith(('stop ', 'rm ')) and '-top20' not in call for call in calls)
+        if fault == 'active':
+            assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
+
+
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
     import os
     import subprocess

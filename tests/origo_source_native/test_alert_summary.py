@@ -949,7 +949,10 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
                 'render_age_seconds': 5, 'render_future_seconds': 1}
         else:
             assert current['condition'] == previous['condition']
-            assert current['thresholds'] == previous['thresholds']
+            assert current['thresholds'] == (
+                {**page._object(previous['thresholds']), 'top20_arrow_seconds': 180}
+                if previous['id'] == 'monitor.publication_current' else previous['thresholds']
+            )
     original_ids = {str(gate['id']) for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
     rebuilt_ids = {gate['id'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
     assert original_ids <= rebuilt_ids and len(original_ids) == 17

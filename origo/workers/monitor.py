@@ -112,6 +112,12 @@ from origo.observatory import (
 from origo.sources.adapters.book_spool import BOOK_SPOOL_MAX_BYTES, object_mapping
 from origo.sources.adapters.render_book import REPLICAS, RenderBookEndpoint
 from origo.sources.contracts import Client, RolloutStage, SourceError, identifier
+from origo.sources.profiles.top20_arrow import (
+    ARROW_MAX_BYTES,
+    ARROW_STALE_AFTER,
+    publish_top20_arrow,
+)
+from origo.sources.publication import file_sha256_matches
 from origo.sources.registry import SOURCE_REGISTRY
 
 from .book_capture import BOOK_MAX_EVENT_AGE_SECONDS, STATUS_MAX_BYTES, status_path
@@ -1941,16 +1947,19 @@ class Monitor:
                     grace = CANONICAL_PUBLICATION_STALE_AFTER
                 else:
                     start, end = oldest, current
-                    grace = PINNED_PUBLICATION_STALE_AFTER
+                    grace = ARROW_STALE_AFTER if consumer.publish is publish_top20_arrow else PINNED_PUBLICATION_STALE_AFTER
                 policy = policies[f'{spec.key}:consumer:{consumer.key}']
                 policy.update(grace_seconds=grace.total_seconds(), state_through=end.isoformat())
                 manifest = self.publication_root / spec.key / consumer.key / 'latest.json'
                 try:
-                    published = _utc(
-                        datetime.fromisoformat(
-                            str(json.loads(manifest.read_text())['active_through'])
-                        )
-                    )
+                    document = object_mapping(json.loads(manifest.read_text()))
+                    published = _utc(datetime.fromisoformat(str(document['active_through'])))
+                    if consumer.publish is publish_top20_arrow:
+                        target = self.arrow_root / spec.key / 'latest.arrow'
+                        digest = str(document.get('sha256'))
+                        if (document.get('files') != [{'path': str(target), 'sha256': digest}]
+                                or not file_sha256_matches(target, digest, ARROW_MAX_BYTES)):
+                            raise ValueError('Top20 Arrow bytes do not match the committed manifest.')
                     policy['published_through'] = published.isoformat()
                 except FileNotFoundError:
                     # Never published: the span of the state itself is the lag, so a

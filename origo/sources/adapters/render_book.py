@@ -627,10 +627,16 @@ class RenderBookProvisional:
             while minute < end:
                 missing.discard(minute)
                 minute += timedelta(minutes=1)
+        newest = closed - timedelta(minutes=1)
+        if newest in missing:
+            partition = self.partition(newest.strftime('%Y-%m-%dT%H:%M:%SZ'))
+            if not any(_integer(entry.get('max_exchange_time')) >= _micros(closed) - 1_000_000
+                       for entry in self.cache.entries(partition)):
+                missing.remove(newest)
         recent = closed - timedelta(minutes=2)
         ordered = sorted((minute for minute in missing if minute >= recent), reverse=True)
         ordered.extend(sorted(minute for minute in missing if minute < recent))
-        return tuple(self.partition(minute.strftime('%Y-%m-%dT%H:%M:%SZ')) for minute in ordered[:8])
+        return tuple(self.partition(minute.strftime('%Y-%m-%dT%H:%M:%SZ')) for minute in ordered)
 
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
         return self.cache.revision(partition, self.cache.entries(partition))
@@ -648,6 +654,7 @@ def _reclaim_render_payloads(
     cursor = root / 'cleanup-cursor.json'
     reclaimed, charged = 0, 0
     verified: set[str] = set()
+    reported_expiry: set[str] = set()
     with source_lock(runtime.lock_root, runtime.spec.key, 'heavy'):
         after = str(json.loads(cursor.read_bytes())) if cursor.exists() else ''
         candidates = sorted(
@@ -677,6 +684,7 @@ def _reclaim_render_payloads(
                     if end - start > timedelta(hours=96):
                         raise SourceError('RENDER_RETENTION_SPAN', 'Segment clock span exceeds cleanup bounds.')
                     complete = True
+                    expired: list[str] = []
                     while start <= end:
                         if start >= runtime.spec.partitions.start:
                             key = start.strftime('%Y-%m-%dT%HZ')
@@ -684,20 +692,33 @@ def _reclaim_render_payloads(
                                 partition = adapter.partition(key)
                                 record = runtime.store.record(partition)
                                 if record is None:
-                                    complete = False
-                                    break
-                                if adapter.discover(partition) != record.revision:
-                                    raise SourceError('RENDER_PIN_CHANGED', 'Retention requires the accepted input pin.')
-                                runtime.validate_retained(record)
-                                verified.add(key)
+                                    if start >= cutoff:
+                                        complete = False
+                                        break
+                                    expired.append(key)
+                                else:
+                                    if adapter.discover(partition) != record.revision:
+                                        raise SourceError('RENDER_PIN_CHANGED', 'Retention requires the accepted input pin.')
+                                    runtime.validate_retained(record)
+                                    verified.add(key)
                         start += timedelta(hours=1)
                     if not complete:
                         continue
                     payload = path.with_suffix('.ndjson')
                     if payload.exists():
                         cache.validate_segment(replica, metadata, payload.read_bytes())
+                    for key in expired:
+                        if key not in reported_expiry:
+                            runtime.failures.record(
+                                operation='input_expiry', scope='PARTITION', partition=key,
+                                error_code='RENDER_INPUT_EXPIRED',
+                                message='Unaccepted hour outlived the 48-hour recovery window; '
+                                        'original manifests are retained in cleanup observations.',
+                            )
+                            reported_expiry.add(key)
                     evidence = {'operation': 'render_payload_reclaimed', 'manifest': dict(metadata),
-                                'verified_hours': sorted(verified), 'removed_bytes': size if payload.exists() else 0}
+                                'verified_hours': sorted(verified), 'expired_unaccepted_hours': expired,
+                                'removed_bytes': size if payload.exists() else 0}
                     runtime.store.execute(
                         f'INSERT INTO {runtime.store.table("source_observation_log")} VALUES',
                         [(runtime.spec.key, str(relative), json.dumps({**evidence, 'phase': 'prepared'}), 0, now)],

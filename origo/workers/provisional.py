@@ -60,6 +60,7 @@ from .dagster_reader import DagsterReader, DagsterUnreachable
 from .receipts import (
     ensure_monitoring_tables,
     failed_attempts,
+    failed_attempts_between,
     reconcile_died_receipts,
     record_receipt,
 )
@@ -149,9 +150,10 @@ class ProvisionalFeed:
         series: str,
         minute: datetime | None = None,
         token: str | None = None,
+        prior: tuple[int, datetime | None] | None = None,
     ) -> bool:
         """Retry required work indefinitely, after a bounded exponential delay."""
-        attempts, last_failed = failed_attempts(
+        attempts, last_failed = prior if prior is not None else failed_attempts(
             store.client, store.database, feed=self.name, series=series, minute=minute, token=token
         )
         if attempts == 0 or last_failed is None:
@@ -274,7 +276,8 @@ class ProvisionalFeed:
             # Spend one bounded bridge allowance on the actual reader gap, even
             # outside the ordinary candidate lookback. Pending work has no receipt.
             adapter.repair_pending(adapter.partition(frontier))
-        if frontier is not None and all(partition.key != frontier for partition in ordered):
+        if (not isinstance(adapter, RenderBookProvisional) and frontier is not None
+                and all(partition.key != frontier for partition in ordered)):
             gap_start = datetime.strptime(frontier, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
             if not any(interval.start <= gap_start < interval.end for interval in covered):
                 ordered.insert(1, adapter.partition(frontier))
@@ -287,6 +290,12 @@ class ProvisionalFeed:
                 and store.missing_components(record, enabled=enabled)
             ]
             ordered.extend(missing[:PROVISIONAL_MAX_WORKERS])
+        render = isinstance(adapter, RenderBookProvisional)
+        retries = failed_attempts_between(
+            store.client, store.database, feed=self.name, series=spec.key,
+            start=min(partition.start for partition in ordered),
+            end=max(partition.start for partition in ordered),
+        ) if render and ordered else {}
         admitted = [
             partition
             for partition in ordered
@@ -300,8 +309,11 @@ class ProvisionalFeed:
                 spec,
                 series=spec.key,
                 minute=partition.start,
+                prior=retries.get(partition.start, (0, None)) if render else None,
             )
         ]
+        if render:
+            admitted = admitted[:8]
         if not admitted:
             return [], []
 

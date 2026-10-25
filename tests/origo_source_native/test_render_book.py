@@ -16,7 +16,15 @@ from uuid import uuid4
 import polars as pl
 import pyarrow as pa
 import pytest
-from dagster import DagsterInstance, Definitions, RunRequest, build_sensor_context
+from dagster import DagsterInstance, DagsterRunStatus, Definitions, RunRequest, build_sensor_context
+from dagster import job as dagster_job
+from dagster._core.remote_origin import RemoteInstigatorOrigin, RemoteJobOrigin
+from dagster._core.scheduler.instigation import (
+    InstigatorState,
+    InstigatorStatus,
+    InstigatorType,
+    SensorInstigatorData,
+)
 
 from origo import law
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
@@ -38,9 +46,11 @@ from origo.sources.contracts import (
     SourceError,
 )
 from origo.sources.lifecycle import SourceRuntime
+from origo.sources.prepare import prepare_source
 from origo.sources.profiles import top20_arrow
 from origo.sources.storage import SourceStore
 from origo.workers import provisional as worker
+from origo.workers.monitor import Monitor
 from origo.workers.receipts import ensure_monitoring_tables
 
 from .test_provisional_worker import _Dagster, _Reporter
@@ -217,7 +227,7 @@ def runtime(
     declared = top20_source(market)
     spec = replace(
         declared,
-        rollout_stage=RolloutStage.CANARY,
+        rollout_stage=RolloutStage.LIVE,
         orchestration=replace(declared.orchestration, retry_count=0),
     )
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
@@ -385,11 +395,25 @@ def test_hourly_recovery_and_activation(
     ] == actual
     assert runtime.reconcile(HOUR) == repaired
 
-    # Actual retention verifies the accepted hour and preserves unaccepted overlap.
+    # Retention verifies accepted data and protects overlap within the recovery window.
     before = set(cache.root.glob(f'{market}/*/*/*.ndjson'))
-    assert canonical.audit_maintenance(runtime, START + timedelta(days=3), lambda p: p.key) > 0
+    assert canonical.audit_maintenance(runtime, START + timedelta(hours=49), lambda p: p.key) > 0
     remaining = set(cache.root.glob(f'{market}/*/*/*.ndjson'))
     assert remaining and remaining < before
+    assert runtime.reconcile(HOUR) == runtime.build(HOUR) == repaired
+    # Expired unaccepted overlap is recorded before its payloads leave the live cache.
+    assert canonical.audit_maintenance(runtime, START + timedelta(days=3), lambda p: p.key) > 0
+    assert not set(cache.root.glob(f'{market}/*/*/*.ndjson'))
+    assert runtime.store.execute(
+        "SELECT DISTINCT partition_key FROM origo.source_failure_log "
+        "WHERE source_key=%(source)s AND error_code='RENDER_INPUT_EXPIRED'",
+        {'source': runtime.spec.key},
+    ) == [('2026-10-24T14Z',)]
+    evidence = runtime.store.execute(
+        'SELECT evidence_json FROM origo.source_observation_log WHERE source_key=%(source)s '
+        "AND partition_key LIKE 'A/%%'", {'source': runtime.spec.key},
+    )
+    assert any('2026-10-24T14Z' in json.loads(str(row[0]))['expired_unaccepted_hours'] for row in evidence)
     assert runtime.reconcile(HOUR) == runtime.build(HOUR) == repaired
     runtime.store.execute(
         f"ALTER TABLE {table} DELETE WHERE partition_key='{HOUR}' AND datetime='2026-10-24 13:21:00' SETTINGS mutations_sync=2"
@@ -449,6 +473,48 @@ def test_replica_gap_conditions(
             RenderBookCanonical(RenderBookCache(tmp_path, market)).fetch(partition).key
             == revision.key
         )
+
+
+@pytest.mark.parametrize('runtime', ['spot'], indirect=True)
+def test_expired_incomplete_cache_releases_live_import_capacity(
+    runtime: SourceRuntime,
+    recordings: dict[tuple[str, Market], RecordedFeed],
+    tmp_path: Path,
+) -> None:
+    """Expired arrival buckets cannot exhaust live intake; original observations stay unchanged."""
+    canonical = cast(RenderBookCanonical, runtime.spec.canonical)
+    cache = canonical.cache
+    feed = _feed(recordings, 'A', 'spot')
+    original = feed.entries[20]
+    payload = feed.payloads[int(str(original['id']))]
+    # Filesystem-capacity replay: only segment IDs/seal clocks vary, never market rows/clocks.
+    # This exercises97arrival buckets; it does not claim97hours of market coverage.
+    for index in range(97):
+        metadata = {**original, 'id': index + 1,
+                    'closed_at': int((START + timedelta(hours=index + 1)).timestamp()) * 1_000_000}
+        cache.validate_segment('A', metadata, payload)
+        directory = cache.directory('A', metadata)
+        directory.mkdir(parents=True)
+        (directory / f'{index + 1:020}.ndjson').write_bytes(payload)
+        (directory / f'{index + 1:020}.json').write_text(json.dumps(metadata, sort_keys=True, separators=(',', ':')))
+    with pytest.raises(SourceError) as failure:
+        cache.sync_tail('A', feed.read)
+    assert failure.value.code == 'RENDER_CACHE_FULL'
+    assert canonical.audit_maintenance(runtime, START + timedelta(hours=146), lambda p: p.key) == 97
+    assert not list(cache.root.glob('spot/A/*/*.ndjson'))
+    assert runtime.store.execute(
+        "SELECT count() FROM origo.source_observation_log WHERE source_key=%(source)s "
+        "AND JSONExtractString(evidence_json,'phase')='completed'",
+        {'source': runtime.spec.key},
+    ) == [(97,)]
+    assert cache.sync_tail('A', feed.read) == (2, 0)
+    key = '2026-10-24T13:59:00Z'
+    runtime.build(key, provisional=True)
+    assert runtime.store.execute(
+        f'SELECT count(),uniqExact(datetime) FROM origo.{runtime.spec.key}_depth20_current'
+    ) == [(60, 60)]
+    runtime.publish('arrow', str(tmp_path / 'publications' / runtime.spec.key / 'arrow'))
+    assert pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow').height == 60
 
 
 def test_transport_restart_and_expiry(
@@ -628,7 +694,7 @@ def test_provisional_fallback_and_late_recovery(
     )
     assert canonical.candidate(START + timedelta(hours=1, minutes=5)).start == START
     candidates = provisional.candidates(START + timedelta(hours=1), START, (minute,))
-    assert len(candidates) == 8
+    assert len(candidates) == 59
     assert candidates[0].start == START + timedelta(minutes=59)
     assert candidates[1].start == START + timedelta(minutes=58)
     assert candidates[2].start == START
@@ -656,7 +722,7 @@ def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A never-requested hour builds automatically when late genuine replica input heals it."""
+    """Native recovery heals a missing hour; scoped rollback preserves its accepted state."""
     cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
     a = _feed(recordings, 'A', cache.market)
     a.omitted = _gap(a, 21)
@@ -701,6 +767,71 @@ def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
         ).success
         assert runtime.store.record(cast(RenderBookCanonical, runtime.spec.canonical).partition(HOUR))
         assert requests() == []
+
+        prepare_source(runtime.spec, instance)
+        for state in instance.all_instigator_state():
+            if state.instigator_type == InstigatorType.SENSOR:
+                instance.update_instigator_state(state.with_data(SensorInstigatorData(cursor='retained-cursor')))
+        before = {state.instigator_name: state for state in instance.all_instigator_state()}
+        origin = next(iter(before.values())).origin
+        unrelated_state = InstigatorState(
+            RemoteInstigatorOrigin(origin.repository_origin, 'unrelated_control_sensor'),
+            InstigatorType.SENSOR, InstigatorStatus.RUNNING, SensorInstigatorData(cursor='unchanged'),
+        )
+        instance.add_instigator_state(unrelated_state)
+
+        @dagster_job
+        def unrelated_control() -> None:
+            pass
+
+        # Deliberate orchestration controls; no market observations are fabricated.
+        unrelated_run = instance.create_run_for_job(
+            unrelated_control, status=DagsterRunStatus.QUEUED,
+            remote_job_origin=RemoteJobOrigin(origin.repository_origin, unrelated_control.name),
+        )
+        queued = instance.create_run_for_job(
+            job, status=DagsterRunStatus.QUEUED, tags=recovered.tags,
+            remote_job_origin=RemoteJobOrigin(origin.repository_origin, job.name),
+        )
+        if runtime.spec.consumers:
+            runtime.publish('arrow', str(tmp_path / 'publications' / runtime.spec.key / 'arrow'))
+        snapshot = runtime.store.snapshot()
+        pin = cache.root / cache.market / 'hours' / f'{HOUR}.json'
+        retained_files = {path: path.read_bytes() for path in tmp_path.rglob('latest.*')}
+        retained_files[pin] = pin.read_bytes()
+        cursors = {path: path.read_bytes() for path in cache.root.rglob('cursor.json')}
+        assert cursors
+        script = Path(__file__).parents[2] / 'deploy/retire_render_top20_workers.sh'
+        namespace: dict[str, object] = {'__name__': 'rollback_contract'}
+        exec(compile(script.read_text().split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0], str(script), 'exec'), namespace)
+        pause = cast(Callable[[DagsterInstance], None], namespace['pause_top20_admission'])
+        with pytest.raises(RuntimeError, match='work remains active'):
+            pause(instance)
+        instance.report_run_canceled(queued)
+        for _ in range(2):
+            pause(instance)
+            after = {state.instigator_name: state for state in instance.all_instigator_state()}
+            for name, state in before.items():
+                assert after[name].status == InstigatorStatus.STOPPED
+                assert after[name].instigator_data == state.instigator_data
+            assert after[unrelated_state.instigator_name] == unrelated_state
+            assert instance.get_run_by_id(unrelated_run.run_id).status == DagsterRunStatus.QUEUED
+            assert runtime.store.snapshot() == snapshot
+            assert all(path.read_bytes() == payload for path, payload in {**retained_files, **cursors}.items())
+
+        floor_spec = replace(runtime.spec, rollout_stage=RolloutStage.DORMANT,
+                             consumers=tuple(replace(c, public=False) for c in runtime.spec.consumers))
+        floor = SourceRuntime(floor_spec, SourceStore(runtime.store.client, 'origo', floor_spec),
+                              runtime.lock_root, 'rollback-proof')
+        for record in snapshot.records:
+            floor.validate_retained(record)
+        prepare_source(floor_spec, instance, check=True)
+        floor_bundle = build_source_bundle(floor_spec)
+        floor_definitions = Definitions(assets=floor_bundle.assets, jobs=floor_bundle.jobs,
+                                        sensors=floor_bundle.sensors)
+        floor_sensor = next(s for s in floor_bundle.sensors if s.name == sensor.name)
+        with build_sensor_context(instance=instance, definitions=floor_definitions) as context:
+            assert floor_sensor.evaluate_tick(context).run_requests == []
 
 
 def test_http_retrieval_uses_authentication_and_transfer_bounds(
@@ -764,6 +895,9 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         outcome = feed.tick(now)
         minute = f'2026-10-24T13:{ready}:00Z'
         assert f'{runtime.spec.key}:{minute}' in outcome.processed
+        sealing = (now.replace(second=0) - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        assert f'{runtime.spec.key}:{sealing}' not in outcome.failed
+        assert sum(event.startswith('build:2026-') for event in recorded_server.events) <= 8
         assert recorded_server.events.index(f'build:{minute}') < recorded_server.events.index(
             f'B/segments/{cache.market}?after={previous}'
         )
@@ -778,6 +912,37 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         arrow = pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow')
         assert arrow.height == 120
         assert arrow['exchange_time_us'].max() // 60_000_000 == int((START + timedelta(minutes=58)).timestamp()) // 60
+
+
+@pytest.mark.parametrize('runtime', ['spot'], indirect=True)
+def test_retrying_missing_prefix_does_not_starve_ready_minutes(
+    runtime: SourceRuntime,
+    recordings: dict[tuple[str, Market], RecordedFeed],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed prefix in backoff cannot consume the eight admitted minute slots."""
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    original = _feed(recordings, 'A', 'spot')
+    original.omitted = set().union(*(_gap(original, minute) for minute in range(8)))
+    cache.sync('A', original.read)
+    ensure_monitoring_tables(runtime.store.client, runtime.store.database)
+    feed = worker_feed(runtime.spec, tmp_path, _Dagster(), _Reporter())
+    now = START + timedelta(hours=1, minutes=1, seconds=2)
+    candidates = RenderBookProvisional.candidates
+    target = f'{runtime.spec.key}:2026-10-24T13:10:00Z'
+    with monkeypatch.context() as fault:
+        # Deliberate admission fault: restore the former truncation before retry filtering.
+        fault.setattr(RenderBookProvisional, 'candidates', lambda self, *args: candidates(self, *args)[:8])
+        feed._build_intervals(runtime.store, runtime.spec, now)
+        blocked, _ = feed._build_intervals(runtime.store, runtime.spec, now)
+        assert target not in blocked
+    recovered, failed = feed._build_intervals(runtime.store, runtime.spec, now)
+    assert target in recovered and len(recovered) + len(failed) <= 8
+    assert runtime.store.execute(
+        f'SELECT count() FROM origo.{runtime.spec.key}_depth20_current '
+        "WHERE datetime>='2026-10-24 13:10:00' AND datetime<'2026-10-24 13:11:00'"
+    ) == [(60,)]
 
 
 @pytest.mark.parametrize('runtime', ['spot'], indirect=True)
@@ -799,6 +964,16 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     original_file = target.read_bytes()
     original_manifest = (destination / 'latest.json').read_bytes()
     assert pl.read_ipc(target).height == 120
+    monitor = Monitor(
+        dagster=_Dagster(), client=runtime.store.client, database='origo',
+        heartbeat_dir=tmp_path / 'heartbeats', probes=(), settings=None,
+        reporter=_Reporter(), cursor_path=tmp_path / 'monitor.json',
+        publication_root=tmp_path / 'source-files', law_client=runtime.store.client,
+        law_root=tmp_path / 'law', arrow_root=tmp_path / 'arrow',
+    )
+    assert monitor._publication_findings() == []
+    policy = f'{runtime.spec.key}:consumer:arrow'
+    assert monitor.publication_policy[policy]['grace_seconds'] == 180
     runtime.build('2026-10-24T13:23:00Z', provisional=True)
     render = top20_arrow._frame
 
@@ -817,7 +992,11 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     assert failure.value.code == 'GENERATION_CHANGED'
     assert target.read_bytes() == original_file
     assert (destination / 'latest.json').read_bytes() == original_manifest
+    assert [finding.key for finding in monitor._publication_findings()] == [
+        f'publication_stale:{runtime.spec.key}:arrow'
+    ]
     runtime.publish('arrow', str(destination))
+    assert monitor._publication_findings() == []
     with pa.ipc.open_file(target) as arrow:
         assert arrow.num_record_batches == 1
         table = arrow.read_all()
@@ -840,8 +1019,17 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     assert target.stat().st_mtime_ns == unchanged
     # Deliberate file corruption, preserving the source generations and manifest.
     target.write_bytes(target.read_bytes() + b'x')
+    assert [finding.key for finding in monitor._publication_findings()] == [
+        f'publication_manifest_unreadable:{runtime.spec.key}:arrow'
+    ]
     runtime.publish('arrow', str(destination))
     repaired = pl.read_ipc(target)
     assert repaired.equals(pl.from_arrow(table))
     manifest = json.loads((destination / 'latest.json').read_bytes())
     assert manifest['files'][0]['sha256'] == hashlib.sha256(target.read_bytes()).hexdigest()
+    target.unlink()
+    assert [finding.key for finding in monitor._publication_findings()] == [
+        f'publication_manifest_unreadable:{runtime.spec.key}:arrow'
+    ]
+    runtime.publish('arrow', str(destination))
+    assert monitor._publication_findings() == []

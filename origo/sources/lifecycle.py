@@ -453,6 +453,9 @@ class SourceRuntime:
                     details={'staging_database': database},
                 )
 
+    def validate_retained(self, record: StateRecord) -> None:
+        self._validate_retained(record)
+
     def _validate_retained(self, record: StateRecord) -> None:
         components = self.store.accepted_components(record)
         expected = dict(record.component_hashes)

@@ -6,6 +6,7 @@ from .binance_perp_trades import BINANCE_PERP_TRADES_SPEC
 from .binance_spot_aggtrades import BINANCE_SPOT_AGGTRADES_SPEC
 from .binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from .binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from .binance_top20 import BINANCE_PERP_TOP20_SPEC, BINANCE_SPOT_TOP20_SPEC
 from .contracts import RevisionedSourceSpec
 
 SOURCE_REGISTRY: Final[tuple[RevisionedSourceSpec, ...]] = (
@@ -15,4 +16,6 @@ SOURCE_REGISTRY: Final[tuple[RevisionedSourceSpec, ...]] = (
     BINANCE_PERP_AGGTRADES_SPEC,
     BINANCE_SPOT_BOOK_SPEC,
     BINANCE_PERP_BOOK_SPEC,
+    BINANCE_SPOT_TOP20_SPEC,
+    BINANCE_PERP_TOP20_SPEC,
 )

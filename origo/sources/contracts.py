@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, runtime_checkable
@@ -141,6 +141,14 @@ class CanonicalAdapter(Protocol):
 @runtime_checkable
 class CanonicalAuditPolicy(Protocol):
     def rejected_revision(self, partition: Partition, revision: str) -> bool: ...
+
+
+@runtime_checkable
+class CanonicalRecoveryPolicy(Protocol):
+    @property
+    def recovery_window(self) -> timedelta: ...
+
+    def recovery_identity(self, partition: Partition) -> str: ...
 
 
 @runtime_checkable

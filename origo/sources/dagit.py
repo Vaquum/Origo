@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -14,8 +14,8 @@ from dagster import (
     DagsterEventType,
     DagsterRunStatus,
     DailyPartitionsDefinition,
-    HourlyPartitionsDefinition,
     DefaultSensorStatus,
+    HourlyPartitionsDefinition,
     JobDefinition,
     RunRequest,
     RunsFilter,
@@ -28,7 +28,7 @@ from dagster._core.storage.dagster_run import RunRecord
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 
-from .contracts import RevisionedSourceSpec, RolloutStage
+from .contracts import CanonicalRecoveryPolicy, RevisionedSourceSpec, RolloutStage
 from .failures import REMOVED_PARITY_CODES
 from .lifecycle import SourceRuntime
 from .storage import SourceStore
@@ -282,7 +282,17 @@ def build_reconciliation_sensor(
                 DagsterEventType.ASSET_MATERIALIZATION,
                 ['dagster/data_version'],
             )
-            keys = sorted(set(current) | materialized)
+            due: set[str] = set()
+            adapter = spec.canonical
+            if isinstance(adapter, CanonicalRecoveryPolicy):
+                if spec.partitions.interval != 'hour':
+                    raise ValueError('Bounded canonical recovery requires hourly partitions.')
+                latest_partition = adapter.candidate(datetime.now(UTC))
+                start = max(spec.partitions.start, latest_partition.end - adapter.recovery_window)
+                while start <= latest_partition.start:
+                    due.add(start.strftime('%Y-%m-%dT%HZ'))
+                    start += timedelta(hours=1)
+            keys = sorted(set(current) | materialized | due)
             changed = [
                 key
                 for key in keys
@@ -337,6 +347,8 @@ def build_reconciliation_sensor(
                 if any(record.dagster_run.status in _ACTIVE for record in runs):
                     continue
                 authority = current.get(key, 'MISSING')
+                if key not in current and isinstance(adapter, CanonicalRecoveryPolicy):
+                    authority += ':' + adapter.recovery_identity(adapter.partition(key))
                 if missing.get(key):
                     authority += ':components=' + ','.join(missing[key])
                 latest_record = runs[0] if runs else None
@@ -375,7 +387,11 @@ def build_reconciliation_sensor(
                         job_name=canonical_job.name,
                         partition_key=key,
                         run_key=f'{spec.key}:reconcile:{key}:{tick}',
-                        run_config={'ops': {asset_name: {'config': {'reconcile_only': True}}}},
+                        run_config={'ops': {asset_name: {'config': {
+                            'reconcile_only': not (
+                                key not in current and isinstance(adapter, CanonicalRecoveryPolicy)
+                            ),
+                        }}}},
                         tags={
                             'origo_source_key': spec.key,
                             'origo_source_operation': 'canonical',

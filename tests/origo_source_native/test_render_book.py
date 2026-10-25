@@ -5,7 +5,7 @@ import json
 import tarfile
 import time
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,28 +14,32 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from dagster import DagsterInstance, Definitions, RunRequest, build_sensor_context
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources import capacity, dagit
 from origo.sources.adapters import render_book
-from origo.sources.adapters.book_spool import Market
 from origo.sources.adapters.render_book import (
+    Market,
     RenderBookCache,
     RenderBookCanonical,
     RenderBookEndpoint,
     RenderBookProvisional,
 )
+from origo.sources.binance_top20 import top20_source
+from origo.sources.bundle import SourceRunConfig, build_source_bundle
 from origo.sources.contracts import (
-    OrchestrationSpec,
-    PartitionPolicy,
     RevisionedSourceSpec,
     RolloutStage,
     SourceError,
-    SourceNames,
-    SourceReadPolicy,
 )
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.profiles.top20 import top20_components
 from origo.sources.storage import SourceStore
+from origo.workers import provisional as worker
+from origo.workers.receipts import ensure_monitoring_tables
+
+from .test_provisional_worker import _Dagster, _Reporter
+from .test_provisional_worker import _feed as worker_feed
 
 FIXTURE = Path(__file__).parents[1] / 'fixtures' / 'render_book'
 HOUR = '2026-10-24T13Z'
@@ -54,13 +58,16 @@ class RecordedFeed:
 
     def read(self, path: str, limit: int) -> bytes:
         self.calls.append(path)
-        if '?after=' in path:
-            after = int(path.rsplit('=', 1)[1])
+        if '?after=' in path or '?tail=' in path:
+            tail = '?tail=' in path
+            after = 0 if tail else int(path.rsplit('=', 1)[1])
             entries = [
                 m
                 for m in self.entries
                 if int(str(m['id'])) > after and int(str(m['id'])) not in self.omitted
             ][:100]
+            if tail:
+                entries = entries[-2:]
             payload = json.dumps(
                 {
                     'collector': self.replica,
@@ -69,6 +76,7 @@ class RecordedFeed:
                     'pruned_through': 0,
                     'has_more': False,
                     'next_cursor': entries[-1]['id'] if entries else after,
+                    'tail': tail,
                 }
             ).encode()
         else:
@@ -108,6 +116,51 @@ def _feed(
 ) -> RecordedFeed:
     source = recordings[replica, market]
     return RecordedFeed(replica, market, source.entries, source.payloads)
+
+
+@dataclass
+class RecordedServer:
+    url: str
+    feeds: dict[tuple[str, Market], RecordedFeed]
+    offline: set[str] = field(default_factory=set)
+    events: list[str] = field(default_factory=list)
+
+
+@pytest.fixture
+def recorded_server(recordings: dict[tuple[str, Market], RecordedFeed]) -> Iterator[RecordedServer]:
+    state = RecordedServer('', {key: _feed(recordings, *key) for key in recordings})
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            replica, path = self.path[1:].split('/', 1)
+            path = '/' + path
+            state.events.append(replica + path)
+            if self.headers.get('Authorization') != 'Bearer local-proof-token':
+                self.send_error(401)
+            elif replica in state.offline:
+                self.send_error(503)
+            elif path == '/expired':
+                self.send_error(410)
+            elif path == '/slow':
+                time.sleep(0.2)  # Deliberate transport stall; no fabricated observation.
+            else:
+                market = cast(Market, path.split('/')[2].split('?')[0])
+                payload = state.feeds[replica, market].read(path, 64 * 1024**2)
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    state.url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        yield state
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def _gap(feed: RecordedFeed, minute: int) -> set[int]:
@@ -154,20 +207,12 @@ def runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[SourceRuntime]:
     market = cast(Market, request.param)
-    cache = RenderBookCache(tmp_path / 'cache', market)
-    key = f'binance_{market}_top20_v1'
-    spec = RevisionedSourceSpec(
-        key=key,
+    monkeypatch.setenv('ORIGO_RENDER_BOOK_ROOT', str(tmp_path / 'cache'))
+    declared = top20_source(market)
+    spec = replace(
+        declared,
         rollout_stage=RolloutStage.CANARY,
-        schema_version=1,
-        names=SourceNames(key),
-        partitions=PartitionPolicy(START.date(), interval='hour', first_hour=13),
-        canonical=RenderBookCanonical(cache),
-        provisional=RenderBookProvisional(cache),
-        components=top20_components(),
-        consumers=(),
-        orchestration=OrchestrationSpec('5 * * * *', '* * * * *', '30 * * * *', retry_count=0),
-        read_policy=SourceReadPolicy.AVAILABLE,
+        orchestration=replace(declared.orchestration, retry_count=0),
     )
     monkeypatch.setenv('ORIGO_SOURCE_LOCK_DIR', str(tmp_path / 'locks'))
     client = make_clickhouse_client(get_clickhouse_settings())
@@ -306,6 +351,18 @@ def test_hourly_recovery_and_activation(
     ] == actual
     assert runtime.reconcile(HOUR) == repaired
 
+    # Actual retention verifies the accepted hour and preserves unaccepted overlap.
+    before = set(cache.root.glob(f'{market}/*/*/*.ndjson'))
+    assert canonical.audit_maintenance(runtime, START + timedelta(days=3), lambda p: p.key) > 0
+    remaining = set(cache.root.glob(f'{market}/*/*/*.ndjson'))
+    assert remaining and remaining < before
+    assert runtime.reconcile(HOUR) == runtime.build(HOUR) == repaired
+    runtime.store.execute(
+        f"ALTER TABLE {table} DELETE WHERE partition_key='{HOUR}' AND datetime='2026-10-24 13:21:00' SETTINGS mutations_sync=2"
+    )
+    with pytest.raises(FileNotFoundError):
+        runtime.repair(HOUR)
+
 
 @pytest.mark.parametrize('market', ['spot', 'perp'])
 @pytest.mark.parametrize('condition', ['A_gap', 'B_gap', 'complementary', 'shared', 'A_offline'])
@@ -412,6 +469,32 @@ def test_transport_restart_and_expiry(
     assert RenderBookCache(other.root, 'spot').sync('A', first.read) == 61
     assert len([path for path in first.calls if '?after=' not in path]) == 61
 
+    bounded = RenderBookCache(tmp_path / 'bounded', 'spot')
+    replay = _feed(recordings, 'A', 'spot')
+    assert bounded.sync('A', replay.read, max_segments=2) == 2
+    assert bounded.cursor('A') == int(str(replay.entries[1]['id']))
+    assert bounded.sync('A', replay.read, max_segments=2) == 2
+    assert bounded.cursor('A') == int(str(replay.entries[3]['id']))
+    assert len([path for path in replay.calls if '?after=' not in path]) == 4
+
+    live = RenderBookCache(tmp_path / 'live', 'spot')
+    live_feed = _feed(recordings, 'A', 'spot')
+    assert live.sync_tail('A', live_feed.read) == (2, 0)
+    assert live.cursor('A') == 0
+    provisional = RenderBookProvisional(live)
+    assert provisional.fetch(provisional.partition('2026-10-24T13:59:00Z')).row_count == 60
+    assert live.sync('A', live_feed.read, max_segments=2) == 2
+    assert live.cursor('A') == int(str(live_feed.entries[1]['id']))
+    assert len([p for p in live_feed.calls if '?' not in p]) == 4
+
+    full = RenderBookCache(tmp_path / 'full', 'spot')
+    with monkeypatch.context() as limit:
+        limit.setattr(render_book, 'MAX_REPLICA_CACHE_BYTES', 1)
+        with pytest.raises(SourceError) as failure:
+            full.sync('A', _feed(recordings, 'A', 'spot').read)
+    assert failure.value.code == 'RENDER_CACHE_FULL'
+    assert full.cursor('A') == 0
+
 
 def test_integrity_conflict_and_pin(
     recordings: dict[tuple[str, Market], RecordedFeed],
@@ -497,67 +580,138 @@ def test_provisional_fallback_and_late_recovery(
         hours=1
     )
     assert canonical.candidate(START + timedelta(hours=1, minutes=5)).start == START
-    assert len(provisional.candidates(START + timedelta(hours=1), START, (minute,))) == 59
+    candidates = provisional.candidates(START + timedelta(hours=1), START, (minute,))
+    assert len(candidates) == 8
+    assert candidates[0].start == START + timedelta(minutes=59)
+    assert candidates[1].start == START
+    assert minute not in candidates
     with pytest.raises(ValueError, match='exact UTC minute'):
         provisional.partition('2026-10-24T13:21:01Z')
 
 
-def test_adapter_does_not_register_or_replace_sources() -> None:
+def test_top20_sources_are_isolated_until_rollout() -> None:
     from origo.sources.registry import SOURCE_REGISTRY
 
-    assert not any('top20_v1' in spec.key for spec in SOURCE_REGISTRY)
-    assert {spec.key for spec in SOURCE_REGISTRY if spec.key.endswith('_book')} == {
-        'binance_spot_book',
-        'binance_perp_book',
-    }
+    sources = tuple(spec for spec in SOURCE_REGISTRY if spec.key.endswith('_top20_v1'))
+    assert {spec.key for spec in sources} == {'binance_spot_top20_v1', 'binance_perp_top20_v1'}
+    for spec in sources:
+        assert spec.rollout_stage == RolloutStage.DORMANT
+        assert spec.partitions.start == START and spec.partitions.interval == 'hour'
+        assert {c.key for c in spec.components} == {
+            'depth20', 'depth20_1m', 'depth20_latest', 'depth20_1m_latest',
+        }
+
+
+def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
+    runtime: SourceRuntime,
+    recordings: dict[tuple[str, Market], RecordedFeed],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A never-requested hour builds automatically when late genuine replica input heals it."""
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    a = _feed(recordings, 'A', cache.market)
+    a.omitted = _gap(a, 21)
+    cache.sync('A', a.read)
+    assert runtime.store.execute('SELECT count() FROM origo.source_discovery_log') == [(0,)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return START + timedelta(hours=1, minutes=6)
+
+    monkeypatch.setattr(dagit, 'datetime', Clock)
+    # Isolated test filesystems use their real free space, with a 1 MiB test reserve.
+    monkeypatch.setattr(capacity, '_volumes', lambda owner: (capacity._Volume('local-test', tmp_path),))
+    monkeypatch.setattr(capacity, 'CAPACITY_RESERVE_BYTES', 1024**2)
+    source = build_source_bundle(runtime.spec)
+    definitions = Definitions(assets=source.assets, jobs=source.jobs, sensors=source.sensors)
+    sensor = next(s for s in source.sensors if s.name.endswith('_reconciliation_sensor'))
+    asset = f'build_{runtime.spec.key}_canonical_revision_origo'
+    job = next(j for j in source.jobs if j.name == f'refresh_{runtime.spec.key}_canonical_source_job')
+    (tmp_path / 'dagster-recovery').mkdir()
+    with DagsterInstance.local_temp(str(tmp_path / 'dagster-recovery')) as instance:
+        def requests() -> list[RunRequest]:
+            with build_sensor_context(instance=instance, definitions=definitions) as context:
+                return [r for r in sensor.evaluate_tick(context).run_requests if r.partition_key]
+
+        request = next(r for r in requests() if r.partition_key == HOUR)
+        assert request.run_config['ops'][asset]['config']['reconcile_only'] is False
+        failed = job.execute_in_process(
+            instance=instance, partition_key=HOUR, tags=request.tags,
+            run_config=request.run_config, raise_on_error=False,
+        )
+        assert not failed.success
+        assert instance.get_run_by_id(failed.run_id).tags['origo_source_verdict'] == 'RENDER_SECONDS_MISSING'
+        assert requests() == []
+        cache.sync('B', _feed(recordings, 'B', cache.market).read)
+        recovered = next(r for r in requests() if r.partition_key == HOUR)
+        assert recovered.tags['origo_source_authority'] != request.tags['origo_source_authority']
+        assert job.execute_in_process(
+            instance=instance, partition_key=HOUR, tags=recovered.tags,
+            run_config=recovered.run_config,
+        ).success
+        assert runtime.store.record(cast(RenderBookCanonical, runtime.spec.canonical).partition(HOUR))
+        assert requests() == []
 
 
 def test_http_retrieval_uses_authentication_and_transfer_bounds(
-    recordings: dict[tuple[str, Market], RecordedFeed],
+    recorded_server: RecordedServer,
     tmp_path: Path,
 ) -> None:
     """The real HTTP reader imports genuine files and rejects oversized/error responses."""
-    feed = _feed(recordings, 'A', 'spot')
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            if self.headers.get('Authorization') != 'Bearer local-proof-token':
-                self.send_error(401)
-            elif self.path == '/expired':
-                self.send_error(410)
-            else:
-                payload = feed.read(self.path, 64 * 1024**2)
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f'http://127.0.0.1:{server.server_port}'
+    base = recorded_server.url + '/A'
     endpoint = RenderBookEndpoint(base, 'local-proof-token')
-    try:
-        cache = RenderBookCache(tmp_path, 'spot')
-        assert cache.sync('A', endpoint.read) == 61
-        assert (
-            RenderBookCanonical(cache).fetch(RenderBookCanonical(cache).partition(HOUR)).row_count
-            == 3600
-        )
-        for reader, path, limit, expected in (
-            (
-                RenderBookEndpoint(base, 'wrong').read,
-                '/segments/spot?after=0',
-                1024**2,
-                'RENDER_HTTP',
-            ),
-            (endpoint.read, '/expired', 1024**2, 'RENDER_EXPIRED'),
-            (endpoint.read, '/segments/spot?after=0', 1, 'RENDER_TRANSFER_BOUND'),
-        ):
-            with pytest.raises(SourceError) as failure:
-                reader(path, limit)
-            assert failure.value.code == expected
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    cache = RenderBookCache(tmp_path, 'spot')
+    assert cache.sync('A', endpoint.read) == 61
+    assert RenderBookCanonical(cache).fetch(RenderBookCanonical(cache).partition(HOUR)).row_count == 3600
+    for reader, path, limit, expected in (
+        (RenderBookEndpoint(base, 'wrong').read, '/segments/spot?after=0', 1024**2, 'RENDER_HTTP'),
+        (endpoint.read, '/expired', 1024**2, 'RENDER_EXPIRED'),
+        (endpoint.read, '/segments/spot?after=0', 1, 'RENDER_TRANSFER_BOUND'),
+        (
+            replace(endpoint, deadline=time.monotonic() + 0.05).read,
+            '/slow', 1024**2, 'RENDER_IMPORT_BUDGET',
+        ),
+    ):
+        with pytest.raises(SourceError) as failure:
+            reader(path, limit)
+        assert failure.value.code == expected
+
+
+def test_worker_imports_current_minute_before_bounded_recovery(
+    runtime: SourceRuntime,
+    recorded_server: RecordedServer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable replica and an old cursor cannot block the real minute worker's live input."""
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    ensure_monitoring_tables(runtime.store.client, runtime.store.database)
+    recorded_server.offline.add('A')
+    for replica in ('A', 'B'):
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_URL', recorded_server.url + '/' + replica)
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_TOKEN', 'local-proof-token')
+    execute = worker.execute_source
+
+    def build(
+        spec: RevisionedSourceSpec, operation: str, config: SourceRunConfig, *, run_id: str,
+    ) -> dict[str, object]:
+        recorded_server.events.append(f'build:{config.partition_key}')
+        return execute(spec, operation, config, run_id=run_id)
+
+    monkeypatch.setattr(worker, 'execute_source', build)
+    feed = worker_feed(runtime.spec, tmp_path, _Dagster(), _Reporter())
+    outcome = feed.tick(START + timedelta(hours=1))
+    minute = '2026-10-24T13:59:00Z'
+    assert f'{runtime.spec.key}:{minute}' in outcome.processed
+    assert recorded_server.events.index(f'build:{minute}') < recorded_server.events.index(
+        f'B/segments/{cache.market}?after=0'
+    )
+    assert cache.cursor('A') == 0
+    assert cache.cursor('B') == int(str(recorded_server.feeds['B', cache.market].entries[7]['id']))
+    raw = runtime.store.table(runtime.spec.names.prefix + '_depth20_current')
+    assert runtime.store.execute(
+        f"SELECT count(), uniqExact(collector), any(collector) FROM {raw} "
+        "WHERE datetime>='2026-10-24 13:59:00' AND datetime<'2026-10-24 14:00:00'"
+    ) == [(60, 1, 'B')]

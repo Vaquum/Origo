@@ -63,6 +63,7 @@ class _Recorder(ThreadingHTTPServer):
         self.history_rows = True
         self.history_malformed = False
         self.history_calls: list[str] = []
+        self.render_calls: list[str] = []
         self.render_status: dict[str, bytes] = {}
         self.render_offline: set[str] = set()
         self.email_status = 200
@@ -112,14 +113,24 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         server = cast(_Recorder, self.server)
         if self.path in ('/render/A/status', '/render/B/status'):
-            server.history_calls.append(self.path)
+            server.render_calls.append(self.path)
             replica = self.path.split('/')[2]
             if self.headers.get('Authorization') != 'Bearer recorded-status-token':
                 self._respond(401, {})
             elif replica in server.render_offline:
                 self._respond(503, {})
             else:
-                self._respond(200, server.render_status[replica])
+                payload = server.render_status.get(replica)
+                if payload is None:
+                    # Operational availability control; the clock contract uses captured bytes below.
+                    stamp = int(time.time() * 1_000_000)
+                    payload = json.dumps({'collector': replica, 'markets': [
+                        {'market': market, 'ready': True, 'error': '',
+                         'last_received_at': stamp, 'durable_observed_at': stamp,
+                         'durable_exchange_time': stamp, 'committed_at': stamp}
+                        for market in ('spot', 'perp')
+                    ]}).encode()
+                self._respond(200, payload)
             return
         if self.path == '/healthz':
             self._respond(200, b'ok\n')
@@ -139,11 +150,14 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture()
-def recorder() -> Iterator[_Recorder]:
+def recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Recorder]:
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
         port = probe.getsockname()[1]
     server = _Recorder(('127.0.0.1', port))
+    for replica in ('A', 'B'):
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_URL', _url(server) + f'/render/{replica}')
+        monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_TOKEN', 'recorded-status-token')
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -412,12 +426,12 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == expected
-    assert len(monitor._heartbeats()) == 10
+    assert len(monitor._heartbeats()) == 12
     monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
     split = _monitor(recorder, tmp_path / 'split')
     roles = ('trade_publication_binance_spot_trades',
              'trade_publication_binance_perp_trades', 'perp_repair_binance_perp_trades')
-    assert len(split._heartbeats()) == 13
+    assert len(split._heartbeats()) == 15
     for name in roles[:2]:
         touch_heartbeat(heartbeat_path(split.heartbeat_dir, name))
     stale_role = heartbeat_path(split.heartbeat_dir, roles[2])
@@ -929,7 +943,8 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert len(report['gates']) < len(monitor.catalog['gates'])
     assert all(event['reason'] != 'not_observed' for event in report['gates'])
     assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
-    assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
+    # Preserve the former 8-KiB-per-feed envelope as two additional feeds become active.
+    assert len(json.dumps(report, separators=(',', ':')).encode()) < 8 * 1024 * len(report['inventory'])
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     email = _emails(recorder)[0]
     assert 'Live source data is fresh' in email['text'] and 'Depth minutes are complete' in email['text']
@@ -1517,7 +1532,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 10 and workers['workers_expected'] == 11
+    assert workers['workers_fresh'] == 12 and workers['workers_expected'] == 13
     assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
@@ -1526,7 +1541,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 4
+    assert evidence('collectors_serving')['collectors_serving'] == 8
     assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
@@ -1547,9 +1562,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 11
+    assert evidence('workers_alive')['workers_expected'] == 13
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 10
+    assert evidence('workers_alive')['workers_fresh'] == 12
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
@@ -1577,7 +1592,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
 
     catalog = build_catalog('58b45deee0602e7524c2efcba4e532174ad40902')
     required = catalog['law_gate_ids']
-    assert len(required) == 22 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
+    assert len(required) == 28 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
     monkeypatch.setattr('origo.sources.registry.SOURCE_REGISTRY', ())
     assert build_catalog(catalog['deployed_sha'])['law_gate_ids'] == required
     client.execute('SYSTEM START TTL MERGES origo.container_log')
@@ -1658,7 +1673,7 @@ def test_publication_policy_evidence_reuses_existing_decisions(
         if node['lane'] == 'consumer'
     }
     assert all(item['publication_policy'] == monitor.publication_policy[item['id']] for item in outputs)
-    assert monitor.publication_policy['binance_spot_top20_v1:consumer:arrow']['reason'] == 'not_applicable'
+    assert monitor.publication_policy['binance_spot_top20_v1:consumer:arrow']['reason'] == 'unknown'
 
 
 def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:
@@ -2108,12 +2123,15 @@ def test_render_status_uses_original_clocks_and_isolates_replica_failures(
         monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_URL', _url(recorder) + f'/render/{replica}')
         monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_TOKEN', 'recorded-status-token')
     # DORMANT registration performs no external status requests.
-    assert monitor._render_book_findings(now) == [] and recorder.history_calls == []
+    monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', tuple(
+        replace(spec, rollout_stage=RolloutStage.DORMANT) for spec in SOURCE_REGISTRY
+    ))
+    assert monitor._render_book_findings(now) == [] and recorder.render_calls == []
     specs = tuple(replace(spec, rollout_stage=RolloutStage.CANARY) for spec in SOURCE_REGISTRY
                   if spec.key.endswith('_top20_v1'))
     monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', specs)
     assert monitor._render_book_findings(now) == []
-    assert sorted(recorder.history_calls) == ['/render/A/status', '/render/B/status']
+    assert sorted(recorder.render_calls) == ['/render/A/status', '/render/B/status']
     assert len(monitor.book_evidence) == 4
     recorder.render_offline.add('A')
     assert {finding.key for finding in monitor._render_book_findings(now)} == {

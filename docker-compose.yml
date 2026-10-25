@@ -91,6 +91,8 @@ services:
       - ORIGO_LAW_PAGE_URL=http://law:8485/healthz
       - ORIGO_LAW_APP_IMAGE=${APP_IMAGE:-local}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - ORIGO_RENDER_BOOK_A_TOKEN=${ORIGO_RENDER_BOOK_A_TOKEN:?ORIGO_RENDER_BOOK_A_TOKEN is required}
+      - ORIGO_RENDER_BOOK_B_TOKEN=${ORIGO_RENDER_BOOK_B_TOKEN:?ORIGO_RENDER_BOOK_B_TOKEN is required}
       # Alerts stay disabled locally: the monitor logs findings when ORIGO_ALERT_* is unset.
       - ORIGO_ALERT_RESEND_API_KEY=${ORIGO_ALERT_RESEND_API_KEY:-}
       - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-}
@@ -252,6 +254,44 @@ services:
       - source-publications:/opt/origo/shadow
       - worker-heartbeats:/opt/origo/heartbeats
       - book-spool:/var/lib/origo-book-spool
+
+  provisional-binance-spot-top20: &render-book-worker
+    build: .
+    image: origo-dagster:latest
+    environment: &render-book-environment
+      PYTHONPATH: /opt/app
+      DAGSTER_WEBSERVER_URL: http://dagit:3000
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      ORIGO_PROVISIONAL_SOURCE: binance_spot_top20_v1
+      ORIGO_RENDER_BOOK_A_TOKEN: ${ORIGO_RENDER_BOOK_A_TOKEN:?ORIGO_RENDER_BOOK_A_TOKEN is required}
+      ORIGO_RENDER_BOOK_B_TOKEN: ${ORIGO_RENDER_BOOK_B_TOKEN:?ORIGO_RENDER_BOOK_B_TOKEN is required}
+      POLARS_MAX_THREADS: "1"
+    volumes:
+      - .:/opt/app:ro
+      - ./arrow_data:/opt/arrow
+      - source-locks:/opt/origo/locks
+      - source-publications:/opt/origo/shadow
+      - worker-heartbeats:/opt/origo/heartbeats
+      - book-spool:/var/lib/origo-book-spool
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    command: python -m origo.workers.provisional
+    cpus: 1
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-m", "origo.workers.provisional", "--check"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  provisional-binance-perp-top20:
+    <<: *render-book-worker
+    environment:
+      <<: *render-book-environment
+      ORIGO_PROVISIONAL_SOURCE: binance_perp_top20_v1
 
   book-capture-spot:
     build: .

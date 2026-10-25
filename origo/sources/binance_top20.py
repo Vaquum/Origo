@@ -30,14 +30,14 @@ def top20_source(market: Market) -> RevisionedSourceSpec:
     )
     return RevisionedSourceSpec(
         key=key,
-        rollout_stage=RolloutStage.DORMANT,
+        rollout_stage=RolloutStage.LIVE,
         schema_version=1,
         names=SourceNames(key),
         partitions=PartitionPolicy(date(2026, 10, 24), interval='hour', first_hour=13),
         canonical=RenderBookCanonical(cache),
         provisional=RenderBookProvisional(cache),
         components=top20_components(),
-        consumers=(ConsumerSpec('arrow', publish_top20_arrow, verify_file_bytes=ARROW_MAX_BYTES),)
+        consumers=(ConsumerSpec('arrow', publish_top20_arrow, public=True, verify_file_bytes=ARROW_MAX_BYTES),)
         if market == 'spot' else (),
         orchestration=OrchestrationSpec('5 * * * *', '* * * * *', '30 * * * *', canonical_concurrency=2),
         read_policy=SourceReadPolicy.AVAILABLE,

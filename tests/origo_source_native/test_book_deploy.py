@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,7 +14,9 @@ from origo.sources.adapters import binance_daily
 from origo.sources.adapters.book_spool import Market
 from origo.sources.lifecycle import SourceRuntime
 from origo.workers.book_capture import AttemptBudget
-from .test_book_sources import _keys, book_runtime as book_runtime
+
+from .test_book_sources import _keys
+from .test_book_sources import book_runtime as book_runtime
 from .test_dagster_metadata_maintenance import metadata_instance as metadata_instance
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -135,6 +141,35 @@ def test_capture_and_provisional_services_deploy_as_disjoint_units(filename: str
         assert capture['cpus'] == 1 and capture['mem_limit'] == '512m'
         assert 'book-spool:/var/lib/origo-book-spool' in worker['volumes']
         assert 'book-spool:/var/lib/origo-book-spool' in capture['volumes']
+        render = services[f'provisional-binance-{market}-top20']
+        assert render['command'] == 'python -m origo.workers.provisional'
+        assert render['environment']['ORIGO_PROVISIONAL_SOURCE'] == f'binance_{market}_top20_v1'
+        assert render['environment']['POLARS_MAX_THREADS'] == '1'
+        assert render['cpus'] == 1 and render['mem_limit'] == '2g'
+        assert 'book-spool:/var/lib/origo-book-spool' in render['volumes']
+        assert {'source-locks:/opt/origo/locks', 'source-publications:/opt/origo/shadow',
+                'worker-heartbeats:/opt/origo/heartbeats'} <= set(render['volumes'])
+        assert any(volume.endswith(':/opt/arrow') for volume in render['volumes'])
+        assert not any(key.startswith(('BINANCE_', 'HUGGINGFACE_')) for key in render['environment'])
+        assert set(render['depends_on']) == {'clickhouse'}
+        assert render['healthcheck']['test'] == ['CMD', 'python', '-m', 'origo.workers.provisional', '--check']
+    # Render the actual Compose boundary using isolated configuration values, without starting services.
+    variables = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)', (ROOT / filename).read_text()))
+    environment = {**os.environ, **{key: 'isolated' for key in variables},
+                   'APP_IMAGE': 'origo:test', 'CLICKHOUSE_IMAGE': 'origo-clickhouse:test'}
+    rendered = json.loads(subprocess.check_output(
+        ['docker', 'compose', '-f', str(ROOT / filename), 'config', '--format', 'json'],
+        env=environment, text=True,
+    ))['services']
+    for market in ('spot', 'perp'):
+        assert set(rendered[f'provisional-binance-{market}-top20']['environment']) == {
+            'PYTHONPATH', 'DAGSTER_WEBSERVER_URL', 'CLICKHOUSE_PASSWORD', 'ORIGO_PROVISIONAL_SOURCE',
+            'ORIGO_RENDER_BOOK_A_TOKEN', 'ORIGO_RENDER_BOOK_B_TOKEN', 'POLARS_MAX_THREADS',
+        }
+    for replica in ('A', 'B'):
+        key = f'ORIGO_RENDER_BOOK_{replica}_TOKEN'
+        assert key in rendered['monitor']['environment']
+        assert all(key not in rendered[name]['environment'] for name in ('dagster', 'dagit'))
     assert services['book-capture-spot']['ports'] == ['127.0.0.1:8088:8088']
     assert 'ports' not in services['book-capture-perp']
     for job_service in ('dagster', 'dagit'):
@@ -143,6 +178,10 @@ def test_capture_and_provisional_services_deploy_as_disjoint_units(filename: str
     workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
     assert workflow.count('ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}') == 2
     assert '"ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"]' in workflow
+    for replica in ('A', 'B'):
+        token = f'ORIGO_RENDER_BOOK_{replica}_TOKEN'
+        assert workflow.count(f'{token}: ${{{{ secrets.{token} }}}}') == 2
+        assert f'"{token}": os.environ["{token}"]' in workflow
     for market in ('spot', 'perp'):
         assert (
             f'book-capture-{market} provisional-binance' in workflow
@@ -193,6 +232,7 @@ def test_provider_pause_does_not_block_capture_process_health(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
 ) -> None:
     from datetime import UTC, datetime, timedelta
+
     from origo.workers import book_capture
     from origo.workers.runtime import heartbeat_path, touch_heartbeat
 
@@ -323,6 +363,11 @@ exec(sys.argv[1])
     stub = r'''
 set -euo pipefail
 PROJECT_NAME=test
+function python3() {
+  [ "$1" = deploy/render_top20_deploy.py ]
+  printf '%s\n' "$*" >> "$CALLS"
+  [ "$CASE" != preservation-failed ]
+}
 function docker() {
   printf '%s\n' "$*" >> "$CALLS"
   case "$*" in
@@ -357,7 +402,8 @@ function docker() {
 '''
     for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), (next_version, 'full'),
                           (pinned, 'retired-hourly'), (next_version, 'retired-hourly-full'),
-                          (pinned, 'preflight-failed'), (pinned, 'stop-failed'), (pinned, 'unretired')):
+                          (pinned, 'preflight-failed'), (pinned, 'preservation-failed'),
+                          (pinned, 'stop-failed'), (pinned, 'unretired')):
         (tmp_path / 'pyproject.toml').write_text(
             f'[project]\nversion={json.dumps(version)}\n[tool.origo.release]\nnative_jobs_only_version={json.dumps(pinned)}\n')
         mode = subprocess.run([sys.executable, '-c', mode_code], cwd=tmp_path,
@@ -368,11 +414,12 @@ function docker() {
         result = subprocess.run(['bash', '-s'], input=stub + script, cwd=tmp_path,
                                 env={**os.environ, 'CASE': case, 'CALLS': str(calls),
                                      'REPLACED': str(replaced), 'ORIGO_NATIVE_JOBS_ONLY': mode,
+                                     'DEPLOY_DIR': str(tmp_path),
                                      'PYTHON': sys.executable, 'READINESS_DRIVER': str(driver),
                                      'READY_ARGV': str(ready_argv)},
                                 text=True, capture_output=True)
         observed = calls.read_text()
-        if case in ('preflight-failed', 'stop-failed', 'retired-hourly', 'retired-hourly-full'):
+        if case in ('preflight-failed', 'preservation-failed', 'stop-failed', 'retired-hourly', 'retired-hourly-full'):
             assert result.returncode != 0 and not replaced.exists()
             if case.startswith('retired-hourly'):
                 assert 'stop dagster dagit' not in observed
@@ -384,7 +431,8 @@ function docker() {
             assert '--legacy-before' in observed
             assert 'origo.sources.rollout' in observed
             if mode == 'true':
-                assert '--force-recreate dagster dagit monitor' in observed
+                assert '--force-recreate dagster dagit monitor law' in observed
+                assert observed.index('render_top20_deploy.py check') < observed.index('stop dagster dagit')
                 assert observed.index('stop dagster dagit') < observed.index('--force-recreate dagster dagit monitor')
                 assert '--force-recreate dagster dagit provisional-worker' not in observed
                 assert 'up -d --no-deps perp-capture' not in observed and 'setup' not in observed
@@ -394,3 +442,4 @@ function docker() {
                 assert 'up -d --no-deps perp-capture' in observed and 'setup' in observed
     assert 'backfill_active(instance, spec)' in script
     assert 'groups - SourceStore(client, settings.database, spec).enabled_groups()' in script
+    assert workflow.index('python3 - capture') < workflow.index('scp docker-compose.deploy.yml')

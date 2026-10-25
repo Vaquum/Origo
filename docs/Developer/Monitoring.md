@@ -85,8 +85,8 @@ laws below use daily native authority, without retired-provider availability che
 Historical replay evidence remains in the
 [retired hourly-authority archive](../operations/book_hourly_authority.md).
 
-Render top20 source definitions are registered DORMANT until their deployment is
-qualified. When enabled, their existing provisional workers import the newest
+Render top20 sources run as `provisional-binance-spot-top20` and
+`provisional-binance-perp-top20`, using the existing provisional worker. They import the newest
 closed minute before bounded cursor catch-up; hourly jobs reconcile retained A/B
 originals. The monitor makes one authenticated `/status` request per replica per
 tick, concurrently, with five-second deadlines and16-KiB response bounds. Each
@@ -96,6 +96,21 @@ Fresh HTTP delivery does not refresh those clocks. Replica/market failures use
 the existing `collectors_serving` check, law tape and notification path; the
 independent replica remains separately observed. These probes make no Binance
 requests. Disabled definitions perform no external status I/O.
+
+During warm-up, existing book readers and producers remain active. Before replacing
+deployment inputs, `deploy/render_top20_deploy.py` pins the disabled image, matching
+Compose and required environment under `.render-top20-floor` (credentials mode0600).
+It records all16 protected service identities/restarts/start times and existing accepted
+frontiers, rechecks them after preparation and requires frontier progress after verification.
+Dagster, Dagit, monitor and the read-only law renderer are the declared replacements.
+From the deployment directory, warm-up rollback is
+`python3 deploy/render_top20_deploy.py rollback "$PWD" "$PROJECT_NAME"`.
+It validates the pinned inputs before changing admission, refuses active new-source
+native work, retires only the two new worker services before removing their heartbeat
+files, then restores the four controllers with normal DORMANT preparation and component
+compatibility. It preserves cache, accepted generations, pins, Arrow, cursors and all
+volumes. Repeating rollback does not recreate the new workers. After a consumer switches,
+restore its previous reader before using this warm-up rollback.
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:

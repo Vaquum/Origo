@@ -107,6 +107,8 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
+          ORIGO_RENDER_BOOK_A_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_A_TOKEN }}
+          ORIGO_RENDER_BOOK_B_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_B_TOKEN }}
           RESEND_API_KEY: test-key
           ORIGO_ALERT_EMAIL_TO: ${{ env.ORIGO_ALERT_EMAIL_TO }}
         run: docker compose -f docker-compose.deploy.yml config > /dev/null
@@ -125,10 +127,15 @@ jobs:
 
       - name: Upload deploy compose file
         run: |
+          if [ "$ORIGO_NATIVE_JOBS_ONLY" = true ]; then
+            ssh "$ORIGO_USER@$ORIGO_HOST" "python3 - capture '$DEPLOY_DIR' '$PROJECT_NAME'" < deploy/render_top20_deploy.py
+          fi
           ssh "$ORIGO_USER@$ORIGO_HOST" "mkdir -p '$DEPLOY_DIR/deploy'"
           scp docker-compose.deploy.yml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/docker-compose.deploy.yml"
           scp deploy/vector.yaml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/vector.yaml"
           scp deploy/60-origo-egress.yaml deploy/prepare_binance_egress.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
+          scp deploy/retire_render_top20_workers.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
+          scp deploy/render_top20_deploy.py "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
 
       - name: Deploy updated images
         env:
@@ -142,6 +149,8 @@ jobs:
           BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
+          ORIGO_RENDER_BOOK_A_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_A_TOKEN }}
+          ORIGO_RENDER_BOOK_B_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_B_TOKEN }}
         run: |
           umask 077
           DEPLOY_ENV_FILE="/tmp/origo-deploy.env"
@@ -164,6 +173,8 @@ jobs:
               "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
               "ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"],
+              "ORIGO_RENDER_BOOK_A_TOKEN": os.environ["ORIGO_RENDER_BOOK_A_TOKEN"],
+              "ORIGO_RENDER_BOOK_B_TOKEN": os.environ["ORIGO_RENDER_BOOK_B_TOKEN"],
               "ORIGO_NATIVE_JOBS_ONLY": os.environ["ORIGO_NATIVE_JOBS_ONLY"],
               "HUGGINGFACE_DATASET_REPO_ID": os.environ["HUGGINGFACE_DATASET_REPO_ID"],
               "PROJECT_NAME": os.environ["PROJECT_NAME"],
@@ -243,6 +254,9 @@ jobs:
               client.disconnect()
           PYTHON
           fi
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            python3 deploy/render_top20_deploy.py check "$DEPLOY_DIR" "$PROJECT_NAME"
+          fi
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" != true ]; then
           bash deploy/prepare_binance_egress.sh
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python provisional-binance-perp-trades -c '
@@ -293,12 +307,13 @@ jobs:
           # Retiring the container also retires its local child run processes.
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
             docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml stop dagster dagit </dev/null
-            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --wait --wait-timeout 600 --force-recreate dagster dagit monitor \
+            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --wait --wait-timeout 600 --force-recreate dagster dagit monitor law \
               || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
+            docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --no-deps --wait --wait-timeout 600 provisional-binance-spot-top20 provisional-binance-perp-top20 </dev/null
           else
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \
+          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20 \
             || { docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml logs --tail 200 dagster; exit 1; }
           fi
           # Bootstrap runs before the daemon and the healthcheck passes on persisted state,
@@ -440,6 +455,9 @@ jobs:
             exit 1
           fi
           wait "$verifier"
+          if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
+            python3 deploy/render_top20_deploy.py verify "$DEPLOY_DIR" "$PROJECT_NAME"
+          fi
           echo 'post-up: deployment verified'
           REMOTE
 

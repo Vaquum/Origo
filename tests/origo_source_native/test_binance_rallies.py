@@ -585,6 +585,24 @@ def test_top20_export_pins_generations_and_preserves_source_clocks(
             rallies = _rallies(tables)
             lower, upper = rallies['first_snapshot_time'].min(), rallies['last_snapshot_time'].max()
             assert pl.from_arrow(tables['book.arrow']).equals(expected.filter(pl.col('exchange_time').is_between(lower, upper)))
+            book = pl.from_arrow(tables['book.arrow'])
+            rally = rallies.row(0, named=True)
+            rally_book = book.filter(
+                pl.col('exchange_time').is_between(rally['first_snapshot_time'], rally['last_snapshot_time'])
+            )
+            assert rally_book['exchange_time'][-1] == rally['last_snapshot_time']
+            # The superseded receipt-clock recipe drops the final genuine observation.
+            assert book.filter(pl.col('observed_at').is_between(
+                rally['first_snapshot_time'], rally['last_snapshot_time'],
+            )).height < rally_book.height
+            joined = rallies.join_where(
+                book,
+                pl.col('exchange_time') >= pl.col('first_snapshot_time'),
+                pl.col('exchange_time') <= pl.col('last_snapshot_time'),
+            )
+            assert dict(joined.group_by('rally_id').len().rows()) == dict(
+                zip(rallies['rally_id'].to_list(), _selected(tables)[1], strict=True)
+            )
             assert tables['book.arrow'].schema.field('exchange_time').type == pa.timestamp('us', tz='UTC')
             assert tables['book.arrow'].schema.field('observed_at').type == pa.timestamp('us', tz='UTC')
             metadata = json.loads(tables['book.arrow'].schema.metadata[METADATA_KEY.encode()])['sources']['book']

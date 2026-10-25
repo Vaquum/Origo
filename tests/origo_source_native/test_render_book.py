@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import tarfile
-from collections.abc import Iterator, Mapping
+import time
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -183,6 +184,7 @@ def runtime(
 def test_hourly_recovery_and_activation(
     runtime: SourceRuntime,
     recordings: dict[tuple[str, Market], RecordedFeed],
+    record_property: Callable[[str, object], None],
 ) -> None:
     """A skipped provisional minute is restored by the real hourly build and repair path."""
     canonical = cast(RenderBookCanonical, runtime.spec.canonical)
@@ -208,7 +210,9 @@ def test_hourly_recovery_and_activation(
         'SELECT partition_key, revision, build_id, generation FROM origo.source_activation_log '
         'WHERE provisional=1 ORDER BY partition_key'
     )
+    started = time.monotonic()
     record = runtime.build(HOUR)
+    record_property('canonical_build_seconds', time.monotonic() - started)
     assert record.generation == 1
     assert runtime.store.execute(f'SELECT count(), uniqExact(datetime) FROM {raw_view}') == [
         (3600, 3600)
@@ -224,7 +228,53 @@ def test_hourly_recovery_and_activation(
         )
     ]
     assert actual == list(_expected(recordings, market).values())
+    stored = runtime.store.execute(
+        'SELECT exchange_time_us, observed_at_us, last_update_id, collector, session, sequence, '
+        f'transaction_time_us, first_update_id, previous_update_id, bids, asks FROM {raw_view} ORDER BY datetime'
+    )
+    for row, original in zip(stored, actual, strict=True):
+        assert row[:9] == tuple(
+            original.get(key, 0)
+            for key in (
+                'exchange_time',
+                'observed_at',
+                'update_id',
+                'collector',
+                'session',
+                'sequence',
+                'transaction_time',
+                'first_update_id',
+                'previous_update_id',
+            )
+        )
+        assert row[9:] == tuple(
+            [(float(price), float(quantity)) for price, quantity in original[side]]
+            for side in ('bids', 'asks')
+        )
+    minute_ends = {int(str(row['exchange_time'])) // 60_000_000: row for row in actual}
+    metrics = runtime.store.execute(
+        'SELECT source_timestamp_ms, book_mid_price, book_spread_bps, book_bid_depth_20_notional, '
+        f'book_ask_depth_20_notional, book_imbalance_20 FROM {metric_view} ORDER BY datetime'
+    )
+    for row, original in zip(metrics, minute_ends.values(), strict=True):
+        bids, asks = original['bids'], original['asks']
+        mid = (float(bids[0][0]) + float(asks[0][0])) / 2
+        bid_value = sum(float(p) * float(q) for p, q in bids)
+        ask_value = sum(float(p) * float(q) for p, q in asks)
+        assert row[0] == int(original['exchange_time']) // 1000
+        assert row[1:] == pytest.approx(
+            (
+                mid,
+                (float(asks[0][0]) - float(bids[0][0])) / mid * 10000,
+                bid_value,
+                ask_value,
+                (bid_value - ask_value) / (bid_value + ask_value),
+            ),
+            rel=1e-12,
+        )
+    started = time.monotonic()
     assert runtime.build(HOUR) == runtime.reconcile(HOUR) == record
+    record_property('unchanged_build_and_reconciliation_seconds', time.monotonic() - started)
     assert (
         runtime.store.execute(
             'SELECT partition_key, revision, build_id, generation FROM origo.source_activation_log '
@@ -240,7 +290,9 @@ def test_hourly_recovery_and_activation(
     with pytest.raises(SourceError) as failure:
         runtime.reconcile(HOUR)
     assert failure.value.code == 'RETAINED_CONTENT_INVALID'
+    started = time.monotonic()
     repaired = runtime.repair(HOUR)
+    record_property('repair_seconds', time.monotonic() - started)
     assert repaired.generation > record.generation
     assert repaired.component_hashes == record.component_hashes
     assert runtime.store.execute(f'SELECT count(), uniqExact(datetime) FROM {raw_view}') == [

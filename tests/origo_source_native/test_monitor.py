@@ -203,7 +203,8 @@ def _monitor(
     if publication_root is None:
         publication_root = tmp_path / 'shadow'
         publication_root.mkdir(parents=True, exist_ok=True)
-    workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY if spec.provisional is not None]
+    workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY
+               if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT]
     for feed in (*workers, 'market_state_api', 'perp_capture', 'book_capture_spot', 'book_capture_perp'):
         heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
         if not heartbeat.exists():
@@ -1652,8 +1653,12 @@ def test_publication_policy_evidence_reuses_existing_decisions(
     monitor._law_findings(NOW, findings)
     assert monitor.pending_report is not None
     outputs = [item for item in monitor.pending_report['projections'] if ':consumer:' in item['id']]
-    assert len(outputs) == 10
+    assert {item['id'] for item in outputs} == {
+        node['id'] for source in monitor.catalog['sources'] for node in source['projections']
+        if node['lane'] == 'consumer'
+    }
     assert all(item['publication_policy'] == monitor.publication_policy[item['id']] for item in outputs)
+    assert monitor.publication_policy['binance_spot_top20_v1:consumer:arrow']['reason'] == 'not_applicable'
 
 
 def test_market_state_laws_share_existing_alert_holds(tmp_path: Path) -> None:

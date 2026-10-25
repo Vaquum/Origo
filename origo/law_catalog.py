@@ -1054,6 +1054,7 @@ def _operational_gates(add: _AddGate) -> None:
             limits['canonical_seconds'] = cast(
                 timedelta, getattr(monitor, 'CANONICAL_PUBLICATION_STALE_AFTER')
             ).total_seconds()
+            limits['top20_arrow_seconds'] = cast(timedelta, getattr(monitor, 'ARROW_STALE_AFTER')).total_seconds()
         elif name == 'no_error_logs':
             limits['delivery_lag_seconds'] = _threshold('workers.monitor:DELIVERY_LAG_SECONDS')
         add(

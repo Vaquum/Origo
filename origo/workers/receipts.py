@@ -217,6 +217,20 @@ def failed_attempts(
     return count, (_utc(rows[0][1]) if count else None)
 
 
+def failed_attempts_between(
+    client: Client, database: str, *, feed: str, series: str,
+    start: datetime, end: datetime,
+) -> dict[datetime, tuple[int, datetime | None]]:
+    rows = client.execute(
+        f"""SELECT minute, count(), max(recorded_at) FROM {identifier(database)}.{WORKER_MINUTE_LOG}
+        WHERE feed=%(feed)s AND series=%(series)s AND minute >= %(start)s
+          AND minute <= %(end)s AND status='FAILED' GROUP BY minute""",
+        {'feed': feed, 'series': series, 'start': _utc(start).replace(tzinfo=None),
+         'end': _utc(end).replace(tzinfo=None)},
+    )
+    return {_utc(row[0]): (int(str(row[1])), _utc(row[2])) for row in rows}
+
+
 def error_log_rows_since(
     client: Client, database: str, since: datetime, until: datetime
 ) -> list[LogRow]:

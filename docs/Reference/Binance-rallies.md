@@ -1,10 +1,10 @@
 # Binance rally export
 
-`origo.query.binance_rallies.export_binance_rallies` finds Binance BTCUSDT spot rallies and writes them to three Arrow files, with their trades and depth-200 order book. A rally is a UTC minute from which the price reaches 30 basis points above the last trade before that minute, within 240 minutes. You select rallies by a UTC time range or by rally ID, and each rally's rows can include a lead-in of minutes before it.
+`origo.query.binance_rallies.export_binance_rallies` finds Binance BTCUSDT spot rallies and writes them to three Arrow files, with their trades and top20 order book. A rally is a UTC minute from which the price reaches 30 basis points above the last trade before that minute, within 240 minutes. You select rallies by a UTC time range or by rally ID, and each rally's rows can include a lead-in of minutes before it.
 
-Only spot is available. Perpetual retrieval is tracked separately in [slice #490](https://github.com/Vaquum/Origo/issues/490), after Origo has a native perpetual order book.
+This exporter serves spot. Perpetual retrieval is tracked separately in [slice #490](https://github.com/Vaquum/Origo/issues/490).
 
-The exporter uses the shared [rally detector](../Developer/Rally-detection.md) with the fixed spot preset. Its `r30v1` IDs, 30-bps Float64 comparator, 240-minute exclusive deadline, lead-in, book retrieval and Arrow schemas remain unchanged. For parameterized First hit, Controlled advance and Swing with exact cube memberships, use the [cube rally endpoint](Market-state-cube-queries.md#exact-rally-discovery). That endpoint publishes event contributions and diagnostics; this exporter retains its separate trade/book files and lead-in contract.
+The exporter uses the shared [rally detector](../Developer/Rally-detection.md) with the fixed spot preset. Its `r30v1` IDs, 30-bps Float64 comparator, 240-minute exclusive deadline, lead-in and trade schema are unchanged. Books use the versioned top20 source with separate exchange/receipt microseconds; snapshot bounds use exchange microseconds. For parameterized First hit, Controlled advance and Swing with exact cube memberships, use the [cube rally endpoint](Market-state-cube-queries.md#exact-rally-discovery). That endpoint publishes event contributions and diagnostics; this exporter retains its separate trade/book files and lead-in contract.
 
 The export reads Origo's ClickHouse, which listens only on the production host. It therefore runs inside the production Dagster container.
 
@@ -64,20 +64,20 @@ These commands run on your own machine. Set `ORIGO_HOST` to your SSH destination
        pl.col('trade_id').is_between(rally['first_trade_id'], rally['hit_trade_id'])
    )
    rally_book = book.filter(
-       pl.col('observed_at').is_between(rally['first_snapshot_time'], rally['last_snapshot_time'])
+       pl.col('exchange_time').is_between(rally['first_snapshot_time'], rally['last_snapshot_time'])
    )
    ```
 
-The window holds four rallies:
+The window holds four rallies. Their book files are empty because this historical example predates top20 capture on 2026-10-24 at 13:00 UTC:
 
 | `rally_id` | anchor | reference price | hit price | time to hit | trades | snapshots |
 |---|---|---|---|---|---|---|
-| `binance:spot:BTCUSDT:r30v1:t1782560340` | 11:39 | 60,209.74 | 60,390.72 | 6 min 38.810458 s | 17,385 | 699 |
-| `binance:spot:BTCUSDT:r30v1:t1782560460` | 11:41 | 60,220.61 | 60,401.55 | 4 min 39.007212 s | 15,276 | 579 |
-| `binance:spot:BTCUSDT:r30v1:t1782560520` | 11:42 | 60,224.79 | 60,405.52 | 3 min 39.095231 s | 13,852 | 519 |
-| `binance:spot:BTCUSDT:r30v1:t1782560580` | 11:43 | 60,233.28 | 60,413.99 | 2 min 40.878016 s | 11,628 | 461 |
+| `binance:spot:BTCUSDT:r30v1:t1782560340` | 11:39 | 60,209.74 | 60,390.72 | 6 min 38.810458 s | 17,385 | 0 |
+| `binance:spot:BTCUSDT:r30v1:t1782560460` | 11:41 | 60,220.61 | 60,401.55 | 4 min 39.007212 s | 15,276 | 0 |
+| `binance:spot:BTCUSDT:r30v1:t1782560520` | 11:42 | 60,224.79 | 60,405.52 | 3 min 39.095231 s | 13,852 | 0 |
+| `binance:spot:BTCUSDT:r30v1:t1782560580` | 11:43 | 60,233.28 | 60,413.99 | 2 min 40.878016 s | 11,628 | 0 |
 
-The rallies overlap. Together they span 17,962 trades and 701 snapshots, and the files hold each trade and snapshot once, however many rallies share it.
+The rallies overlap. Together they span 17,962 trades and zero top20 snapshots, and the files hold each trade and snapshot once, however many rallies share it.
 
 Every whole minute is judged as its own anchor. One price move therefore usually yields several overlapping rallies, each with its own reference price, target and hit.
 
@@ -133,7 +133,7 @@ rally_id = f'binance:spot:BTCUSDT:r30v1:t{int(anchor.timestamp())}'
 
 `minutes_before` (default `0`) starts each rally's rows that many minutes before its anchor. The lead-in is context only: it never changes which rallies are found, or their IDs, references or hits. It counts toward the [48-hour read limit](#limits-and-performance).
 
-In the quick start, `minutes_before=5` moves the 11:39 rally's start to 11:34:00. Its rows begin with the trade at 11:34:00.159108 and the snapshot at 11:34:00.395.
+In the quick start, `minutes_before=5` moves the 11:39 rally's start to 11:34:00. Its trades begin at 11:34:00.159108; its book bounds are null because the rally predates top20 capture.
 
 ### Where rows start: `boundary`
 
@@ -142,22 +142,20 @@ Each rally's rows start at `s` = anchor − `minutes_before`:
 - `'after'` (default): the first trade and the first snapshot at or after `s`.
 - `'before'`: the last trade and the last snapshot before `s`. Use it when you need the state in force at `s`: the last traded price and the book as it stood.
 
-Rows end at the hit: the hit trade, and the last snapshot at or before the hit time. Nothing after the hit is exported.
+Rows end at the hit: the hit trade, and the last snapshot whose `exchange_time` is at or before the hit time. Receipt time remains available separately as `observed_at`.
 
-With `'before'` and a one-minute lead-in, the ID example above starts the 11:43 rally at two records:
-- trade 6453967737, the last trade before 11:42:00;
-- the snapshot observed at 11:41:59.392.
+With `'before'` and a one-minute lead-in, the ID example above starts the 11:43 rally at trade 6453967737, the last trade before 11:42:00. Its book bounds remain null.
 
 A rally can have no rows to start from in a file. Its bounds for that file are then null, and it has no rows there:
 - **`'before'`, no trade in the 24 hours before `s`:** `first_trade_id` is null.
 - **`'before'`, no snapshot in the 24 hours before `s`:** the snapshot bounds are null.
-- **`'after'`, no snapshot between `s` and the hit:** the snapshot bounds are null. This covers every rally that hits before the book begins on 2026-06-15.
+- **`'after'`, no snapshot between `s` and the hit:** the snapshot bounds are null. This covers every rally that hits before top20 capture begins on 2026-10-24 at 13:00 UTC.
 
 ## Working with the files
 
 A rally's rows are:
 - in `trades.arrow`, the trades with `first_trade_id ≤ trade_id ≤ hit_trade_id`;
-- in `book.arrow`, the snapshots with `first_snapshot_time ≤ observed_at ≤ last_snapshot_time`.
+- in `book.arrow`, the snapshots with `first_snapshot_time ≤ exchange_time ≤ last_snapshot_time`.
 
 A null bound selects no rows. The recipes below use the frames from the quick start.
 
@@ -179,18 +177,18 @@ rally_trades = rallies.join_where(
 )
 rally_book = rallies.join_where(
     book,
-    pl.col('observed_at') >= pl.col('first_snapshot_time'),
-    pl.col('observed_at') <= pl.col('last_snapshot_time'),
+    pl.col('exchange_time') >= pl.col('first_snapshot_time'),
+    pl.col('exchange_time') <= pl.col('last_snapshot_time'),
 )
 ```
 
-This repeats shared rows once per rally. In the quick-start window, 17,962 trades become 58,141 rows and 701 snapshots become 2,258 rows.
+This repeats shared rows once per rally. In the historical quick-start window, 17,962 trades become 58,141 rows; the top20 book remains empty.
 
 **Best bid, best ask and mid.** Bids run from the highest price and asks from the lowest, so the first level of each side is the top of the book:
 
 ```python
 top = book.select(
-    'observed_at',
+    'exchange_time', 'observed_at',
     best_bid=pl.col('bids').list.first().struct.field('price'),
     best_ask=pl.col('asks').list.first().struct.field('price'),
 ).with_columns(mid=(pl.col('best_bid') + pl.col('best_ask')) / 2)
@@ -310,8 +308,8 @@ Each export directory holds three Arrow IPC files, the Feather v2 format, with Z
 | `hit_price` | `float64` | no | Its price. |
 | `time_to_hit` | `duration[us]` | no | `hit_time` − `anchor_time`. |
 | `first_trade_id` | `uint64` | yes | The first trade of the rally's rows. |
-| `first_snapshot_time` | `timestamp[ms, UTC]` | yes | The first snapshot of the rally's rows. |
-| `last_snapshot_time` | `timestamp[ms, UTC]` | yes | The last snapshot at or before `hit_time`. |
+| `first_snapshot_time` | `timestamp[us, UTC]` | yes | The first snapshot's exchange time. |
+| `last_snapshot_time` | `timestamp[us, UTC]` | yes | The last snapshot's exchange time at or before `hit_time`. |
 
 **`trades.arrow`** holds every trade of any exported rally once, ordered by `trade_id`. No column is nullable:
 
@@ -325,14 +323,15 @@ Each export directory holds three Arrow IPC files, the Feather v2 format, with Z
 | `is_buyer_maker` | `bool` | True when the buyer was the maker, so the taker sold. |
 | `is_best_match` | `bool` | Binance's best-match flag. |
 
-**`book.arrow`** holds every order-book snapshot of any exported rally once, ordered by `observed_at`. No column is nullable:
+**`book.arrow`** holds every order-book snapshot of any exported rally once, ordered by `exchange_time`. No column is nullable:
 
 | Column | Type | Meaning |
 |---|---|---|
-| `observed_at` | `timestamp[ms, UTC]` | When the depth collector received the snapshot, on the collector's clock. |
+| `exchange_time` | `timestamp[us, UTC]` | The original Binance event time. Book bounds and ordering use this column. |
+| `observed_at` | `timestamp[us, UTC]` | The original collector receipt time, preserved through ingestion and export. |
 | `last_update_id` | `uint64` | Binance's `lastUpdateId` for the snapshot. |
-| `bids` | `list<struct<price: float64, quantity: float64>>` | 200 bid levels, highest price first. |
-| `asks` | `list<struct<price: float64, quantity: float64>>` | 200 ask levels, lowest price first. |
+| `bids` | `list<struct<price: float64, quantity: float64>>` | 20 bid levels, highest price first. |
+| `asks` | `list<struct<price: float64, quantity: float64>>` | 20 ask levels, lowest price first. |
 
 ### Metadata
 
@@ -343,7 +342,7 @@ All three files carry the same JSON document under the schema metadata key `orig
 | `definition` | The rally definition: `version`, `market`, `symbol`, `target_bps`, `max_time_to_hit_minutes`, `horizon_grid_minutes` and `lookback_hours`. |
 | `request` | In ID mode, `rally_ids` (canonical, in anchor order). In range mode, `start` and `end`. Always `boundary` and `minutes_before`. |
 | `sources.trades` | The `source`, `binance_spot_trades`, and the `partitions` read, each with its `partition_key`, `provisional` flag, `revision` and `build_id`. |
-| `sources.book` | The `table`, read with `FINAL`. `spans` lists the inclusive spans read. `last_before` lists the `[from, to)` windows searched for the last snapshot before a start; it is empty with `boundary='after'`. |
+| `sources.book` | The `source`, `depth`, `time_column`, `timestamp_unit` and pinned `partitions` with their revision/build IDs. `spans` lists inclusive exchange-time spans. `last_before` lists the `[from, to)` exchange-time windows searched for the last snapshot before a start; it is empty with `boundary='after'`. |
 
 The quick-start export records:
 
@@ -367,9 +366,12 @@ The quick-start export records:
   "sources": {
     "book": {
       "last_before": [],
-      "read": "FINAL",
+      "depth": 20,
+      "partitions": [],
       "spans": [["2026-06-27T11:34:00+00:00", "2026-06-27T11:45:40.878016+00:00"]],
-      "table": "origo.binance_spot_depth200_snapshots"
+      "source": "binance_spot_top20_v1",
+      "time_column": "exchange_time",
+      "timestamp_unit": "us"
     },
     "trades": {
       "partitions": [
@@ -401,14 +403,14 @@ The 2026-06-26 partition appears because the reference search looks back 24 hour
 - Provisional minutes where no archive is active yet, which covers the current day. They trail the clock by a few minutes, and the day's archive replaces them once Origo activates it.
 - Each request pins the partitions that are current when it starts, and reads only those.
 
-**The book** is `origo.binance_spot_depth200_snapshots`, read with `FINAL`: one snapshot per second since 2026-06-15 14:31 UTC, with 200 levels a side.
+**The book** comes from pinned `binance_spot_top20_v1` canonical hours and provisional minutes: one original observation per exchange second, with 20 levels a side. The source cohort begins on 2026-10-24 at 13:00 UTC. Older book data is not combined with this source.
 
-**Clocks:** trade timestamps are Binance's. `observed_at` is the collector's receive time. A rally's book bounds compare the two clocks directly.
+**Clocks:** trade timestamps and book `exchange_time` are Binance's. `observed_at` is the original collector receipt time. Book bounds compare exchange timestamps. Filtering receipt timestamps against those bounds can exclude the final snapshot.
 
 **Precision:**
 - Trade timestamps are in microseconds in the daily archives from 2025-01-01.
 - They are in milliseconds before 2025 and in provisional minutes.
-- `observed_at` is in milliseconds.
+- Both book clocks and book bounds retain microseconds.
 
 The export adds no data checks of its own: it exports what the sources hold, gaps included.
 
@@ -420,14 +422,14 @@ One request reads at most 48 hours of trades, lead-in included:
 
 Split larger requests.
 
-Measured on production on 2026-09-24, inside the container:
+Historical measurements of the retired depth200 reader, taken on production on 2026-09-24:
 
 | Request | Rallies | Trades | Snapshots | Files | Time |
 |---|---|---|---|---|---|
 | 2026-06-27 11:39–11:55 with `minutes_before=5` | 4 | 17,962 | 701 | 0.6 MB | 0.7 s |
 | 2026-09-22 12:00–18:00 | 276 | 1,114,387 | 21,189 | 26 MB | 3.0 s |
 
-The 6-hour export peaked at 0.9 GB of memory. The book makes up most of the file size.
+That historical 6-hour export peaked at 0.9 GB of memory. These measurements do not measure the replacement top20 reader.
 
 ### Reproducibility
 
@@ -439,4 +441,4 @@ Sources change in two ways:
 
 `sources.trades.partitions` tells whether two exports read the same trades. After such a change, a rally ID can resolve to a different reference or hit, or stop being a rally.
 
-The book table is not revisioned. `sources.book.spans` records what was read.
+`sources.book.partitions` records the selected book revisions and build IDs. Canonical hours can replace provisional minutes between exports; each export keeps one pinned set for its book reads. `sources.book.spans` records the exchange-time spans read.

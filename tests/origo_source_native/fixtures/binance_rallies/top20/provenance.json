@@ -1,0 +1,58 @@
+{
+  "source": "Vaquum/binance-book-collector A/B, BTCUSDT Spot",
+  "start": "2026-10-24T14:24:00+00:00",
+  "end": "2026-10-24T14:32:00+00:00",
+  "notes": "Original sealed regional segment bytes and metadata; actual Origo provisional output supplies the expected book rows. Trade excerpt is read-only from accepted Origo Spot trade generation. Original IDs, prices, quantities and exchange/receipt clocks are unchanged. Seeded test partition metadata is an operational control; no full-day authority is asserted for the trade excerpt.",
+  "trade_partition": [
+    {
+      "key": "2026-10-24",
+      "revision": "1dd3797e95e0fb1534c9d67ec68db32bbb6f99ef4ed46a571cfb04010658565f",
+      "build_id": "cda7aa43-e771-48c8-9fa3-346c1e712de6",
+      "provisional": false
+    }
+  ],
+  "files": [
+    {
+      "file": "spot-A.tar.gz",
+      "replica": "A",
+      "market": "spot",
+      "sha256": "ca7b2bbda7a785a4848be2364596d24bb0310e200fa1504d27ba7bc72f4b7435",
+      "segments": [
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102
+      ]
+    },
+    {
+      "file": "spot-B.tar.gz",
+      "replica": "B",
+      "market": "spot",
+      "sha256": "64c3a1a624d39e885871733bd6e2969cd3fb6dc79780040e246547e0b85cf42f",
+      "segments": [
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98
+      ]
+    }
+  ],
+  "trades": {
+    "rows": 70413,
+    "sha256": "09b0c779bcc0d12a361c899dcd5605973d77e07e50dfb329619a4bde90d231df"
+  },
+  "books": {
+    "rows": 480,
+    "sha256": "8b32ed4da7d5e9066389ce07fb031b97e4dffaf58911fb5f8cbf1d8982ad63a1"
+  }
+}

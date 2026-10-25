@@ -1,19 +1,20 @@
 """Acceptance tests for the Binance spot rally export (#314), on authentic data only.
 
 The 2017-08-17 day is the official Binance archive already used by the source tests; the
-2026-06-27 11:38-11:55 UTC excerpt is Origo's own spot trades and depth-200 snapshots,
+2026-06-27 11:38-11:55 UTC excerpt supplies the unchanged historical trade/rally contracts,
 captured read-only from production (see fixtures/binance_rallies/provenance.json).
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from itertools import count
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import polars as pl
@@ -25,12 +26,6 @@ from dagster import materialize
 
 import origo.query.binance_rallies as rallies_module
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
-from origo.sources.adapters.binance_spot_rest import BinanceSpotProvisional
-from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
-from origo.sources.contracts import Partition, Revision, StateRecord
-from origo.sources.hashing import content_hash
-from origo.sources.lifecycle import SourceRuntime
-from origo.sources.storage import SourceStore
 from origo.query.binance_rallies import (
     BOOK_FIELDS,
     METADATA_KEY,
@@ -39,8 +34,22 @@ from origo.query.binance_rallies import (
     TRADE_FIELDS,
     export_binance_rallies,
 )
+from origo.sources.adapters.binance_spot_rest import BinanceSpotProvisional
+from origo.sources.adapters.render_book import (
+    Market,
+    RenderBookCache,
+    RenderBookCanonical,
+    RenderBookProvisional,
+)
+from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.binance_top20 import top20_source
+from origo.sources.contracts import Partition, Revision, StateRecord
+from origo.sources.hashing import content_hash
+from origo.sources.lifecycle import SourceRuntime
+from origo.sources.storage import SourceStore
 
 from .helpers import BINANCE_FIXTURE_ROOT, SEED_BUILD_ID, SEED_REVISION, seed_spot_source
+from .test_render_book import RecordedFeed, load_recordings
 
 FIXTURES = Path(__file__).parent / 'fixtures' / 'binance_rallies'
 EXPECTED = json.loads((FIXTURES / 'expected.json').read_text())
@@ -48,7 +57,7 @@ DAY_2017 = (
     BINANCE_FIXTURE_ROOT / 'spot' / 'daily' / 'trades' / 'revisioned' / 'BTCUSDT-trades-2017-08-17.csv'
 )
 TRADES_2026 = FIXTURES / 'BTCUSDT-spot-trades-2026-06-27T1138-1155.parquet'
-BOOK_2026 = FIXTURES / 'BTCUSDT-spot-depth200-2026-06-27T1138-1155.parquet'
+TOP20 = FIXTURES / 'top20'
 MICROSECOND = timedelta(microseconds=1)
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 LEVELS = pa.list_(pa.struct([pa.field('price', pa.float64()), pa.field('quantity', pa.float64())]))
@@ -63,8 +72,8 @@ TYPES = {
     'hit_price': pa.float64(),
     'time_to_hit': pa.duration('us'),
     'first_trade_id': pa.uint64(),
-    'first_snapshot_time': pa.timestamp('ms', tz='UTC'),
-    'last_snapshot_time': pa.timestamp('ms', tz='UTC'),
+    'first_snapshot_time': pa.timestamp('us', tz='UTC'),
+    'last_snapshot_time': pa.timestamp('us', tz='UTC'),
     'trade_id': pa.uint64(),
     'timestamp': pa.timestamp('us', tz='UTC'),
     'price': pa.float64(),
@@ -72,7 +81,8 @@ TYPES = {
     'quote_quantity': pa.float64(),
     'is_buyer_maker': pa.bool_(),
     'is_best_match': pa.bool_(),
-    'observed_at': pa.timestamp('ms', tz='UTC'),
+    'exchange_time': pa.timestamp('us', tz='UTC'),
+    'observed_at': pa.timestamp('us', tz='UTC'),
     'last_update_id': pa.uint64(),
     'bids': LEVELS,
     'asks': LEVELS,
@@ -117,27 +127,8 @@ def _reactivate_2017() -> None:
         client.disconnect()
 
 
-def _omit_book_before(moment: str) -> None:
-    """Drop the authentic snapshots observed before ``moment`` (UTC) from the test book."""
-    client = make_clickhouse_client(get_clickhouse_settings())
-    try:
-        client.execute(
-            'DELETE FROM origo.binance_spot_depth200_snapshots '
-            f"WHERE datetime < toDateTime64('{moment}', 3, 'UTC')"
-        )
-    finally:
-        client.disconnect()
-
-
 def _fixture_trades() -> pl.DataFrame:
     return pl.read_parquet(TRADES_2026)
-
-
-def _fixture_book() -> pl.DataFrame:
-    rename = pl.element().struct.rename_fields(['price', 'quantity'])
-    return pl.read_parquet(BOOK_2026).with_columns(
-        pl.col('bids').list.eval(rename), pl.col('asks').list.eval(rename)
-    )
 
 
 class _ExcerptMinutes(BinanceSpotProvisional):
@@ -151,33 +142,13 @@ class _ExcerptMinutes(BinanceSpotProvisional):
         return Revision(digest, digest, '{}', len(rows), lambda: iter(rows))
 
 
-def _create_book(origo_assets: dict[str, Any]) -> None:
-    created = materialize(
-        [
-            origo_assets['create_origo_database'],
-            origo_assets['create_binance_spot_depth200_snapshots_table_origo'],
-        ]
-    )
-    assert created.success
-    book = [
-        (observed_at, source_ms, update_id, [tuple(level.values()) for level in bids],
-         [tuple(level.values()) for level in asks])
-        for observed_at, source_ms, update_id, bids, asks in pl.read_parquet(BOOK_2026).iter_rows()
-    ]
-    client = make_clickhouse_client(get_clickhouse_settings())
-    try:
-        client.execute(
-            """INSERT INTO origo.binance_spot_depth200_snapshots
-            (datetime, source_timestamp_ms, last_update_id, bids, asks) VALUES""",
-            book,
-        )
-    finally:
-        client.disconnect()
+def _create_database(origo_assets: dict[str, Any]) -> None:
+    assert materialize([origo_assets['create_origo_database']]).success
 
 
 @pytest.fixture()
 def rally_data(origo_test_env: dict[str, str], origo_assets: dict[str, Any]) -> None:
-    _create_book(origo_assets)
+    _create_database(origo_assets)
     for day in ('2017-08-17', '2026-06-27'):
         seed_spot_source(day)
     trades_2026 = [
@@ -233,7 +204,7 @@ def _selected(tables: dict[str, pa.Table]) -> tuple[list[int], list[int]]:
     for rally in _rallies(tables).iter_rows(named=True):
         ids = pl.col('trade_id').is_between(rally['first_trade_id'], rally['hit_trade_id'])
         trade_counts.append(trades.filter(ids).height)
-        times = pl.col('observed_at').is_between(
+        times = pl.col('exchange_time').is_between(
             rally['first_snapshot_time'], rally['last_snapshot_time']
         )
         snapshot_counts.append(book.filter(times).height)
@@ -385,16 +356,16 @@ def test_three_file_export(rally_data: None, tmp_path: Path) -> None:
          'build_id': str(SEED_BUILD_ID)}
     ]
     assert described['sources']['book'] == {
-        'table': 'origo.binance_spot_depth200_snapshots',
-        'read': 'FINAL',
+        'source': 'binance_spot_top20_v1', 'depth': 20, 'time_column': 'exchange_time',
+        'timestamp_unit': 'us', 'partitions': [],
         'spans': [['2026-06-27T11:39:00+00:00', '2026-06-27T11:45:40.878016+00:00']],
         'last_before': [],
     }
 
     trades, book = tables['trades.arrow'], tables['book.arrow']
     assert trades.num_rows == 10_369 == len(set(trades['trade_id'].to_pylist()))
-    assert book.num_rows == 401 == len(set(book['observed_at'].to_pylist()))
-    assert _selected(tables) == ([9792, 7611, 6443, 5909], [399, 279, 219, 161])
+    assert book.num_rows == 0  # Historical rallies predate the top20 source cohort.
+    assert _selected(tables) == ([9792, 7611, 6443, 5909], [0, 0, 0, 0])
 
     source = _fixture_trades().filter(pl.col('trade_id').is_between(6453964086, 6453974454))
     assert pl.from_arrow(trades).equals(
@@ -404,12 +375,8 @@ def test_three_file_export(rally_data: None, tmp_path: Path) -> None:
             pl.col('is_best_match').cast(pl.Boolean),
         )
     )
-    snapshots = _fixture_book().filter(
-        pl.col('datetime').is_between(_at('11:39:00.394'), _at('11:45:40.392'))
-    )
-    assert pl.from_arrow(book).equals(
-        snapshots.select(pl.col('datetime').alias('observed_at'), 'last_update_id', 'bids', 'asks')
-    )
+    assert _rallies(tables)['first_snapshot_time'].null_count() == 4
+    assert _rallies(tables)['last_snapshot_time'].null_count() == 4
 
 
 def test_boundary_setting(rally_data: None, tmp_path: Path) -> None:
@@ -420,84 +387,35 @@ def test_boundary_setting(rally_data: None, tmp_path: Path) -> None:
     ]
     ra, rb = _rallies(after), _rallies(before)
     assert ra.select(detection).equals(rb.select(detection))
-
     source = _fixture_trades()
-    snapshots = _fixture_book()
     for rally_after, rally_before in zip(ra.iter_rows(named=True), rb.iter_rows(named=True)):
         anchor = rally_after['anchor_time']
         assert rally_after['first_trade_id'] == source.filter(pl.col('datetime') >= anchor)['trade_id'].min()
         assert rally_before['first_trade_id'] == rally_before['reference_trade_id']
-        assert rally_after['first_snapshot_time'] == snapshots.filter(pl.col('datetime') >= anchor)['datetime'].min()
-        assert rally_before['first_snapshot_time'] == snapshots.filter(pl.col('datetime') < anchor)['datetime'].max()
-        assert rally_after['last_snapshot_time'] == rally_before['last_snapshot_time']
-    assert rb['first_snapshot_time'][0] == _at('11:38:59.392')
-    book_reads = json.loads(before['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])
-    assert book_reads['sources']['book']['last_before'] == [
-        ['2026-06-26T11:39:00+00:00', '2026-06-27T11:39:00+00:00']
-    ]
-    assert book_reads['sources']['book']['spans'] == [
-        ['2026-06-27T11:38:59.392000+00:00', '2026-06-27T11:45:40.878016+00:00']
-    ]
-    assert rb['last_snapshot_time'].to_list() == [
-        _at('11:45:38.393'), _at('11:45:38.393'), _at('11:45:38.393'), _at('11:45:40.392')
-    ]
-    assert (after['trades.arrow'].num_rows, after['book.arrow'].num_rows) == (10_369, 401)
-    assert (before['trades.arrow'].num_rows, before['book.arrow'].num_rows) == (10_370, 402)
-    assert _selected(before) == ([9793, 7612, 6444, 5910], [400, 280, 220, 162])
-
-    # The 11:39 hit is the first of nine trades sharing its timestamp; the eight after it
-    # stay in trades.arrow for the later rallies but outside the 11:39 rally's bounds.
+    assert (after['trades.arrow'].num_rows, before['trades.arrow'].num_rows) == (10_369, 10_370)
+    assert _selected(before) == ([9793, 7612, 6444, 5910], [0, 0, 0, 0])
+    # The first hit shares a timestamp with eight later genuine trades.
     first = ra.row(0, named=True)
     assert first['hit_trade_id'] == 6453973877
     shared = source.filter(pl.col('datetime') == first['hit_time'])['trade_id'].to_list()
     assert shared == list(range(6453973877, 6453973886))
-    trade_ids = set(after['trades.arrow']['trade_id'].to_pylist())
-    assert set(shared) <= trade_ids
-    assert all(trade_id > first['hit_trade_id'] for trade_id in shared[1:])
-
-    # minutes_before moves each rally's start ahead of its anchor and the boundary applies
-    # there; detection and IDs do not change.
+    assert set(shared) <= set(after['trades.arrow']['trade_id'].to_pylist())
     padded_after = _window(tmp_path, minutes_before=1)
     padded_before = _window(tmp_path, boundary='before', minutes_before=1)
     pa_rallies, pb_rallies = _rallies(padded_after), _rallies(padded_before)
     assert pa_rallies.select(detection).equals(ra.select(detection))
     assert pb_rallies.select(detection).equals(ra.select(detection))
-    assert pa_rallies['first_trade_id'].to_list() == [
-        6453962827, 6453965058, 6453966483, 6453967738
-    ]
-    assert pa_rallies['first_snapshot_time'].to_list() == [
-        _at('11:38:00.393'), _at('11:40:00.393'), _at('11:41:00.393'), _at('11:42:00.392')
-    ]
-    assert (padded_after['trades.arrow'].num_rows, padded_after['book.arrow'].num_rows) == (
-        11_628, 461
-    )
-    # Nothing precedes 11:38 in the data, so with 'before' the 11:39 rally has no record to
-    # start from and gets no rows; the others start at the last record before their start.
+    assert pa_rallies['first_trade_id'].to_list() == [6453962827, 6453965058, 6453966483, 6453967738]
     assert pb_rallies['first_trade_id'].to_list() == [None, 6453965057, 6453966482, 6453967737]
-    assert pb_rallies['first_snapshot_time'].to_list() == [
-        None, _at('11:39:59.393'), _at('11:40:59.396'), _at('11:41:59.392')
-    ]
-    assert pb_rallies.row(0, named=True)['last_snapshot_time'] is None
-    assert (padded_before['trades.arrow'].num_rows, padded_before['book.arrow'].num_rows) == (
-        9_398, 342
-    )
-    padded_ids = _export(
-        tmp_path, rally_ids=ra['rally_id'].to_list(), boundary='before', minutes_before=1
-    )
+    assert (padded_after['trades.arrow'].num_rows, padded_before['trades.arrow'].num_rows) == (11_628, 9_398)
+    for tables in (after, before, padded_after, padded_before):
+        assert tables['book.arrow'].num_rows == 0
+        assert _rallies(tables)['first_snapshot_time'].null_count() == 4
+        assert _rallies(tables)['last_snapshot_time'].null_count() == 4
+    padded_ids = _export(tmp_path, rally_ids=ra['rally_id'].to_list(), boundary='before', minutes_before=1)
     for name in OUTPUT_FILENAMES:
         assert padded_ids[name].equals(padded_before[name])
-    metadata = padded_before['rallies.arrow'].schema.metadata[METADATA_KEY.encode()]
-    assert json.loads(metadata)['request']['minutes_before'] == 1
-
-    # Without the snapshots before 11:39 the 11:39 rally has no snapshot to start from with
-    # 'before', so it has no book rows; 'after' still starts it at 11:39:00.394.
-    _omit_book_before('2026-06-27 11:39:00')
-    gap_before, gap_after = _rallies(_window(tmp_path, boundary='before')), _rallies(_window(tmp_path))
-    assert gap_before.row(0, named=True)['first_snapshot_time'] is None
-    assert gap_before.row(0, named=True)['last_snapshot_time'] is None
-    for column in ('first_snapshot_time', 'last_snapshot_time'):
-        assert gap_before[column][1:].to_list() == rb[column][1:].to_list()
-        assert gap_after[column].to_list() == ra[column].to_list()
+    assert json.loads(padded_before['rallies.arrow'].schema.metadata[METADATA_KEY.encode()])['request']['minutes_before'] == 1
 
 
 def test_empty_and_invalid_selectors(rally_data: None, tmp_path: Path) -> None:
@@ -566,7 +484,7 @@ def test_provisional_minutes(
 ) -> None:
     """The excerpt built as provisional minutes through the real runtime exports as canonical,
     at the provisional tail's millisecond precision."""
-    _create_book(origo_assets)
+    _create_database(origo_assets)
     client = make_clickhouse_client(get_clickhouse_settings())
     try:
         spec = replace(BINANCE_SPOT_TRADES_SPEC, provisional=_ExcerptMinutes())
@@ -599,4 +517,121 @@ def test_provisional_minutes(
             pl.col('is_best_match').cast(pl.Boolean),
         )
     )
-    assert tables['book.arrow'].num_rows == 401
+    assert tables['book.arrow'].num_rows == 0
+
+
+@pytest.fixture(scope='module')
+def top20_recordings() -> dict[tuple[str, Market], RecordedFeed]:
+    return load_recordings(TOP20)
+
+
+def test_top20_export_pins_generations_and_preserves_source_clocks(
+    origo_test_env: dict[str, str], origo_assets: dict[str, Any], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, top20_recordings: dict[tuple[str, Market], RecordedFeed],
+) -> None:
+    """Actual source builds/export on real post-cohort data; old book tables are absent."""
+    _create_database(origo_assets)
+    provenance = json.loads((TOP20 / 'provenance.json').read_text())
+    for name in ('trades', 'books'):
+        assert hashlib.sha256((TOP20 / f'{name}.parquet').read_bytes()).hexdigest() == provenance[name]['sha256']
+    monkeypatch.setenv('ORIGO_RENDER_BOOK_ROOT', str(tmp_path / 'cache'))
+    spec = top20_source('spot')
+    cache = cast(RenderBookCanonical, spec.canonical).cache
+    for replica in ('A', 'B'):
+        cache.sync(replica, top20_recordings[replica, 'spot'].read)
+    seed_spot_source('2026-10-24')
+    client = make_clickhouse_client(get_clickhouse_settings())
+    captured_trades = pl.read_parquet(TOP20 / 'trades.parquet')
+    try:
+        # The accepted-day seed is an operational test control; only authentic rows are inserted.
+        native_rows = []
+        for trade_id, moment, price, quantity, quote, maker, best in captured_trades.iter_rows():
+            native_rows.append((date(2026, 10, 24), '2026-10-24', SEED_REVISION, SEED_BUILD_ID,
+                                trade_id, price, quantity, quote, int((moment - EPOCH) // MICROSECOND),
+                                int(maker), int(best), moment))
+        client.execute('''INSERT INTO origo.binance_spot_trades_raw_revisions
+            (source_date,partition_key,revision,build_id,trade_id,price,quantity,quote_quantity,
+             timestamp,is_buyer_maker,is_best_match,datetime) VALUES''', native_rows)
+        runtime = SourceRuntime(spec, SourceStore(client, 'origo', spec), tmp_path / 'locks', str(uuid4()))
+        runtime.setup()
+        for minute in range(24, 32):
+            runtime.build(f'2026-10-24T14:{minute}:00Z', provisional=True)
+        repeated = '2026-10-24T14:26:00Z'
+        first = runtime.store.record(spec.provisional.partition(repeated))
+        current = first
+        assert first is not None
+        assert client.execute("SELECT count() FROM system.tables WHERE database='origo' AND name LIKE '%depth200%'") == [(0,)]
+        reader = rallies_module._Reader(rallies_module._connect(), 'origo')
+        try:
+            low, high = (_at('14:26', '2026-10-24'), _at('14:27', '2026-10-24'))
+            pins = reader.partitions(rallies_module._utc_us(low), rallies_module._utc_us(high), source=spec.key)
+            assert reader.book(pins, rallies_module._utc_us(low), rallies_module._utc_us(high)).height == 60
+        finally:
+            reader.client.close()
+        ids = ['binance:spot:BTCUSDT:r30v1:t1792851900', 'binance:spot:BTCUSDT:r30v1:t1792851960']
+        after = _export(tmp_path, rally_ids=ids)
+        before = _export(tmp_path, rally_ids=ids, boundary='before')
+        ra, rb = _rallies(after), _rallies(before)
+        assert ra['rally_id'].to_list() == ids and ra['hit_trade_id'].to_list() == [6788469126, 6788461615]
+        assert ra.select('rally_id', 'reference_trade_id', 'hit_trade_id').equals(rb.select('rally_id', 'reference_trade_id', 'hit_trade_id'))
+        golden = pl.read_parquet(TOP20 / 'books.parquet')
+        rename = pl.element().struct.rename_fields(['price', 'quantity'])
+        expected = golden.select(
+            pl.col('exchange_time_us').cast(pl.Datetime('us', 'UTC')).alias('exchange_time'),
+            pl.col('observed_at_us').cast(pl.Datetime('us', 'UTC')).alias('observed_at'),
+            'last_update_id', pl.col('bids').list.eval(rename), pl.col('asks').list.eval(rename),
+        )
+        for tables in (after, before):
+            rallies = _rallies(tables)
+            lower, upper = rallies['first_snapshot_time'].min(), rallies['last_snapshot_time'].max()
+            assert pl.from_arrow(tables['book.arrow']).equals(expected.filter(pl.col('exchange_time').is_between(lower, upper)))
+            book = pl.from_arrow(tables['book.arrow'])
+            rally = rallies.row(0, named=True)
+            rally_book = book.filter(
+                pl.col('exchange_time').is_between(rally['first_snapshot_time'], rally['last_snapshot_time'])
+            )
+            assert rally_book['exchange_time'][-1] == rally['last_snapshot_time']
+            # The superseded receipt-clock recipe drops the final genuine observation.
+            assert book.filter(pl.col('observed_at').is_between(
+                rally['first_snapshot_time'], rally['last_snapshot_time'],
+            )).height < rally_book.height
+            joined = rallies.join_where(
+                book,
+                pl.col('exchange_time') >= pl.col('first_snapshot_time'),
+                pl.col('exchange_time') <= pl.col('last_snapshot_time'),
+            )
+            assert dict(joined.group_by('rally_id').len().rows()) == dict(
+                zip(rallies['rally_id'].to_list(), _selected(tables)[1], strict=True)
+            )
+            assert tables['book.arrow'].schema.field('exchange_time').type == pa.timestamp('us', tz='UTC')
+            assert tables['book.arrow'].schema.field('observed_at').type == pa.timestamp('us', tz='UTC')
+            metadata = json.loads(tables['book.arrow'].schema.metadata[METADATA_KEY.encode()])['sources']['book']
+            assert metadata['source'] == spec.key and metadata['depth'] == 20
+            assert next(p for p in metadata['partitions'] if p['partition_key'] == repeated)['build_id'] == str(current.build_id)
+        assert rb['first_snapshot_time'][0] < _at('14:25', '2026-10-24') < pl.from_arrow(before['book.arrow'])['observed_at'][0]
+        missing = _export(tmp_path, rally_ids=ids, boundary='before', minutes_before=2)
+        assert missing['book.arrow'].num_rows == 0
+        assert _rallies(missing)['first_snapshot_time'].null_count() == 2
+        # Replay the genuine B originals as a new provisional generation; retain the old rows.
+        peer_cache = RenderBookCache(tmp_path / 'peer-cache', 'spot')
+        peer_cache.sync('B', top20_recordings['B', 'spot'].read)
+        peer_spec = replace(spec, provisional=RenderBookProvisional(peer_cache))
+        peer = SourceRuntime(peer_spec, runtime.store, tmp_path / 'locks', str(uuid4()))
+        changed = peer.build(repeated, provisional=True)
+        assert changed.build_id != first.build_id
+        reader = rallies_module._Reader(rallies_module._connect(), 'origo')
+        try:
+            low, high = (_at('14:26', '2026-10-24'), _at('14:27', '2026-10-24'))
+            pins = reader.partitions(rallies_module._utc_us(low), rallies_module._utc_us(high), source=spec.key)
+            selected = reader.book(pins, rallies_module._utc_us(low), rallies_module._utc_us(high))
+            assert selected.height == 60
+            expected_peer = peer_spec.provisional.fetch(peer_spec.provisional.partition(repeated))
+            assert selected['observed_at'].dt.epoch('us').to_list() == [row[2] for row in expected_peer.rows()]
+        finally:
+            reader.client.close()
+        replaced = _export(tmp_path, rally_ids=ids)
+        metadata = json.loads(replaced['book.arrow'].schema.metadata[METADATA_KEY.encode()])['sources']['book']
+        assert next(p for p in metadata['partitions'] if p['partition_key'] == repeated)['build_id'] == str(changed.build_id)
+
+    finally:
+        client.disconnect()

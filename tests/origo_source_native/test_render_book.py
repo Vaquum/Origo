@@ -101,12 +101,11 @@ class RecordedFeed:
         return payload
 
 
-@pytest.fixture(scope='module')
-def recordings() -> dict[tuple[str, Market], RecordedFeed]:
-    provenance = json.loads((FIXTURE / 'provenance.json').read_text())
+def load_recordings(root: Path) -> dict[tuple[str, Market], RecordedFeed]:
+    provenance = json.loads((root / 'provenance.json').read_text())
     result: dict[tuple[str, Market], RecordedFeed] = {}
     for file in provenance['files']:
-        path = FIXTURE / file['file']
+        path = root / file['file']
         assert hashlib.sha256(path.read_bytes()).hexdigest() == file['sha256']
         with tarfile.open(path) as archive:
             contents: dict[str, bytes] = {}
@@ -125,6 +124,11 @@ def recordings() -> dict[tuple[str, Market], RecordedFeed]:
         key = file['replica'], file['market']
         result[key] = RecordedFeed(*key, entries, payloads)
     return result
+
+
+@pytest.fixture(scope='module')
+def recordings() -> dict[tuple[str, Market], RecordedFeed]:
+    return load_recordings(FIXTURE)
 
 
 def _feed(

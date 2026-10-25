@@ -7,6 +7,11 @@ price x 1.003 comes within 240 minutes. An export writes three Arrow IPC files:
 start ``minutes_before`` ahead of its anchor, at the first record at or after that instant
 (``boundary='after'``) or the last record before it (``boundary='before'``), and end at its hit.
 
+Books come from pinned ``binance_spot_top20_v1`` generations. ``book.arrow`` preserves
+the original exchange and receipt microseconds; rally book bounds use exchange time
+at that same precision. Its metadata declares depth20 and the selected generations.
+Historical rallies before the new source cohort have no book rows.
+
 ClickHouse is reachable only on the production host, so exports run inside an Origo
 container there, for example::
 
@@ -64,12 +69,12 @@ TRADE_FIELDS = (
     'trade_id', 'timestamp', 'price', 'quantity', 'quote_quantity',
     'is_buyer_maker', 'is_best_match',
 )
-BOOK_FIELDS = ('observed_at', 'last_update_id', 'bids', 'asks')
+BOOK_FIELDS = ('exchange_time', 'observed_at', 'last_update_id', 'bids', 'asks')
 OUTPUT_FILENAMES = ('rallies.arrow', 'trades.arrow', 'book.arrow')
 METADATA_KEY = 'origo.rallies'
 
 TRADES_SOURCE = 'binance_spot_trades'
-BOOK_TABLE = 'binance_spot_depth200_snapshots'
+BOOK_SOURCE = 'binance_spot_top20_v1'
 
 Boundary = Literal['after', 'before']
 
@@ -92,7 +97,8 @@ _TRADES = {
     'is_best_match': pl.Boolean,
 }
 _BOOK = {
-    'observed_at': pl.Datetime('ms', 'UTC'),
+    'exchange_time': pl.Datetime('us', 'UTC'),
+    'observed_at': pl.Datetime('us', 'UTC'),
     'last_update_id': pl.UInt64,
     'bids': _LEVELS,
     'asks': _LEVELS,
@@ -193,7 +199,12 @@ def export_binance_rallies(
     reader = _Reader(_connect(), _database())
     try:
         rallies, trades, partitions = _detect_all(reader, request, windows)
-        book, bounds, book_reads = _book_rows(reader, rallies, request.boundary)
+        book_partitions = reader.partitions(
+            min(rally.start for rally in rallies) - (_LOOKBACK if request.boundary == 'before' else 0),
+            max(rally.hit_time for rally in rallies) + 1,
+            source=BOOK_SOURCE,
+        ) if rallies else []
+        book, bounds, book_reads = _book_rows(reader, rallies, request.boundary, book_partitions)
     finally:
         reader.client.close()
     metadata = {
@@ -216,7 +227,16 @@ def export_binance_rallies(
                     for part in partitions
                 ],
             },
-            'book': {'table': f'{reader.database}.{BOOK_TABLE}', 'read': 'FINAL', **book_reads},
+            'book': {
+                'source': BOOK_SOURCE, 'depth': 20, 'time_column': 'exchange_time',
+                'timestamp_unit': 'us',
+                'partitions': [
+                    {'partition_key': part.key, 'provisional': part.provisional,
+                     'revision': part.revision, 'build_id': part.build_id}
+                    for part in book_partitions
+                ],
+                **book_reads,
+            },
         },
     }
     frames = (_rally_frame(rallies, bounds), _trade_rows(trades, rallies), book)
@@ -302,8 +322,8 @@ class _Reader:
         body = self.client.raw_query(query, parameters, fmt='ArrowStream')
         return pl.read_ipc_stream(io.BytesIO(body))
 
-    def partitions(self, low: int, high: int) -> list[_Partition]:
-        """The trade partitions current now that overlap [low, high)."""
+    def partitions(self, low: int, high: int, *, source: str = TRADES_SOURCE) -> list[_Partition]:
+        """The source partitions current now that overlap [low, high)."""
         frame = self.frame(
             f"""SELECT partition_key, toBool(provisional) AS provisional, revision,
                 toString(build_id) AS build_id,
@@ -314,7 +334,7 @@ class _Reader:
               AND partition_start < fromUnixTimestamp64Micro({{high:Int64}}, 'UTC')
               AND partition_end > fromUnixTimestamp64Micro({{low:Int64}}, 'UTC')
             ORDER BY partition_start, provisional""",
-            {'source': TRADES_SOURCE, 'low': low, 'high': high},
+            {'source': source, 'low': low, 'high': high},
         )
         return [
             _Partition(str(key), bool(provisional), str(revision), str(build), int(start), int(end))
@@ -356,20 +376,33 @@ class _Reader:
             },
         )
 
-    def book(self, low: int, high: int, *, last: bool = False) -> pl.DataFrame:
-        """Snapshots observed in [low, high], or only the last one before high."""
+    def book(self, pinned: Sequence[_Partition], low: int, high: int, *, last: bool = False) -> pl.DataFrame:
+        """Pinned top20 observations by exchange time in [low, high], or the last before high."""
+        parts = [part for part in pinned if part.start <= high and part.end > low]
+        if not parts:
+            return pl.DataFrame(schema=_BOOK)
         until = '<' if last else '<='
-        order = 'datetime DESC LIMIT 1' if last else 'datetime'
-        return self.frame(
-            f"""SELECT toDateTime64(datetime, 3, 'UTC') AS observed_at, last_update_id,
+        selects = ' UNION ALL '.join(
+            f"""SELECT fromUnixTimestamp64Micro(exchange_time_us, 'UTC') AS exchange_time,
+                fromUnixTimestamp64Micro(observed_at_us, 'UTC') AS observed_at, last_update_id,
                 CAST(bids, 'Array(Tuple(price Float64, quantity Float64))') AS bids,
                 CAST(asks, 'Array(Tuple(price Float64, quantity Float64))') AS asks
-            FROM {self.database}.{BOOK_TABLE} FINAL
-            WHERE datetime >= fromUnixTimestamp64Micro({{low:Int64}}, 'UTC')
-              AND datetime {until} fromUnixTimestamp64Micro({{high:Int64}}, 'UTC')
-            ORDER BY {order}""",
-            {'low': low, 'high': high},
+            FROM {self.database}.{BOOK_SOURCE}_{component}_revisions
+            WHERE source_date BETWEEN toDate(fromUnixTimestamp64Micro({{low:Int64}}, 'UTC'))
+                              AND toDate(fromUnixTimestamp64Micro({{high:Int64}}, 'UTC'))
+              AND (partition_key, revision, toString(build_id))
+                  IN {{{name}:Array(Tuple(String, String, String))}}
+              AND datetime >= toStartOfSecond(fromUnixTimestamp64Micro({{low:Int64}}, 'UTC'))
+              AND datetime <= toStartOfSecond(fromUnixTimestamp64Micro({{high:Int64}}, 'UTC'))
+              AND exchange_time_us >= {{low:Int64}} AND exchange_time_us {until} {{high:Int64}}"""
+            for component, name in (('depth20', 'canonical'), ('depth20_latest', 'provisional'))
         )
+        order = 'exchange_time DESC LIMIT 1' if last else 'exchange_time'
+        return self.frame(f'SELECT * FROM ({selects}) ORDER BY {order}', {
+            'canonical': [(part.key, part.revision, part.build_id) for part in parts if not part.provisional],
+            'provisional': [(part.key, part.revision, part.build_id) for part in parts if part.provisional],
+            'low': low, 'high': high,
+        })
 
 
 def _detect_all(
@@ -493,7 +526,7 @@ def _trade_rows(trades: pl.DataFrame, rallies: Sequence[_Rally]) -> pl.DataFrame
 
 
 def _book_rows(
-    reader: _Reader, rallies: Sequence[_Rally], boundary: Boundary
+    reader: _Reader, rallies: Sequence[_Rally], boundary: Boundary, pinned: Sequence[_Partition]
 ) -> tuple[pl.DataFrame, list[tuple[int, int] | None], dict[str, list[list[str]]]]:
     """Snapshots of the rallies, each once, each rally's first and last snapshot time, and
     the book reads: inclusive `spans` and the `[from, to)` windows searched for `last_before`."""
@@ -502,15 +535,15 @@ def _book_rows(
     for low, high in _spans([(rally.start, rally.hit_time) for rally in rallies]):
         if boundary == 'before':
             reads['last_before'].append([_iso(low - _LOOKBACK), _iso(low)])
-            carry_in = reader.book(low - _LOOKBACK, low, last=True)
+            carry_in = reader.book(pinned, low - _LOOKBACK, low, last=True)
             if carry_in.height:
-                low = int(carry_in['observed_at'].dt.epoch('us')[0])
+                low = int(carry_in['exchange_time'].dt.epoch('us')[0])
         reads['spans'].append([_iso(low), _iso(high)])
-        frames.append(reader.book(low, high))
+        frames.append(reader.book(pinned, low, high))
     # A span's before-anchor snapshot repeats the previous span's last one across a book gap.
-    book = pl.concat(frames).unique('observed_at', keep='first', maintain_order=True)
-    book = book.sort('observed_at')
-    times = book['observed_at'].dt.epoch('us').to_numpy()
+    book = pl.concat(frames).unique('exchange_time', keep='first', maintain_order=True)
+    book = book.sort('exchange_time')
+    times = book['exchange_time'].dt.epoch('us').to_numpy()
     keep = np.zeros(len(times), dtype=bool)
     bounds: list[tuple[int, int] | None] = []
     for rally in rallies:
@@ -556,8 +589,8 @@ def _rally_frame(
             'hit_price': [rally.hit_price for rally in rallies],
             'time_to_hit': [rally.hit_time - rally.anchor for rally in rallies],
             'first_trade_id': [rally.first_trade_id for rally in rallies],
-            'first_snapshot_time': [None if span is None else span[0] // 1000 for span in bounds],
-            'last_snapshot_time': [None if span is None else span[1] // 1000 for span in bounds],
+            'first_snapshot_time': [None if span is None else span[0] for span in bounds],
+            'last_snapshot_time': [None if span is None else span[1] for span in bounds],
         },
         schema={
             'rally_id': pl.String,
@@ -579,13 +612,13 @@ def _rally_frame(
         .dt.replace_time_zone('UTC'),
         pl.col('time_to_hit').cast(pl.Duration('us')),
         pl.col('first_snapshot_time', 'last_snapshot_time')
-        .cast(pl.Datetime('ms'))
+        .cast(pl.Datetime('us'))
         .dt.replace_time_zone('UTC'),
     )
 
 
 def _schemas(metadata: str) -> tuple[object, object, object]:
-    micros, millis = pa.timestamp('us', tz='UTC'), pa.timestamp('ms', tz='UTC')
+    micros = pa.timestamp('us', tz='UTC')
     uint64, float64, boolean = pa.uint64(), pa.float64(), pa.bool_()
     levels = pa.list_(pa.struct([pa.field('price', float64), pa.field('quantity', float64)]))
     types = {
@@ -599,8 +632,8 @@ def _schemas(metadata: str) -> tuple[object, object, object]:
         'hit_price': float64,
         'time_to_hit': pa.duration('us'),
         'first_trade_id': uint64,
-        'first_snapshot_time': millis,
-        'last_snapshot_time': millis,
+        'first_snapshot_time': micros,
+        'last_snapshot_time': micros,
         'trade_id': uint64,
         'timestamp': micros,
         'price': float64,
@@ -608,7 +641,8 @@ def _schemas(metadata: str) -> tuple[object, object, object]:
         'quote_quantity': float64,
         'is_buyer_maker': boolean,
         'is_best_match': boolean,
-        'observed_at': millis,
+        'exchange_time': micros,
+        'observed_at': micros,
         'last_update_id': uint64,
         'bids': levels,
         'asks': levels,

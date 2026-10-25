@@ -511,6 +511,19 @@ def test_transport_restart_and_expiry(
     assert bounded.cursor('A') == int(str(replay.entries[3]['id']))
     assert len([path for path in replay.calls if '?after=' not in path]) == 4
 
+    # Deliberate inventory-order fault using unchanged genuine segment metadata.
+    unordered = RenderBookCache(tmp_path / 'unordered', 'spot')
+    page = _feed(recordings, 'A', 'spot')
+    page.entries = (page.entries[1], page.entries[0])
+    with pytest.raises(SourceError) as failure:
+        unordered.sync('A', page.read, max_segments=1)
+    assert failure.value.code == 'RENDER_CURSOR'
+    assert unordered.cursor('A') == 0
+    assert page.calls == ['/segments/spot?after=0']
+    corrected = _feed(recordings, 'A', 'spot')
+    assert unordered.sync('A', corrected.read, max_segments=2) == 2
+    assert unordered.cursor('A') == int(str(corrected.entries[1]['id']))
+
     live = RenderBookCache(tmp_path / 'live', 'spot')
     live_feed = _feed(recordings, 'A', 'spot')
     assert live.sync_tail('A', live_feed.read) == (2, 0)

@@ -433,14 +433,12 @@ class RenderBookCache:
                 entries = _objects(page.get('segments'))
                 if len(entries) > 100 or type(page.get('has_more')) is not bool:
                     raise SourceError('RENDER_FORMAT', 'Invalid bounded inventory page.')
-                if _integer(page.get('next_cursor')) != (
-                    _integer(entries[-1].get('id')) if entries else after
-                ):
-                    raise SourceError('RENDER_CURSOR', 'Inventory next cursor does not match its segments.')
-                for metadata in entries:
-                    identifier = _integer(metadata.get('id'))
-                    if identifier <= after:
-                        raise SourceError('RENDER_CURSOR', 'Segment cursor does not advance.')
+                identifiers = tuple(_integer(entry.get('id')) for entry in entries)
+                if ((identifiers and identifiers[0] <= after)
+                        or tuple(sorted(set(identifiers))) != identifiers
+                        or _integer(page.get('next_cursor')) != (identifiers[-1] if identifiers else after)):
+                    raise SourceError('RENDER_CURSOR', 'Inventory IDs or next cursor are invalid.')
+                for metadata, identifier in zip(entries, identifiers, strict=True):
                     used = self._save(replica, metadata, read, used)
                     atomic_write(
                         self.root / self.market / replica / 'cursor.json', _json(identifier)

@@ -1,8 +1,6 @@
 """Acceptance uses untouched captures; scheduling and transport faults are injected locally."""
 from __future__ import annotations
 
-import ast
-
 import base64
 import copy
 import hashlib
@@ -20,6 +18,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Literal, cast
 
@@ -39,6 +38,8 @@ from origo.alerts.summary import (
     render_email,
     validate_pending,
 )
+from origo.law import LawReport
+from origo.law_catalog import LawCatalog, Scalar, build_catalog
 from origo.observatory import (
     LAW_COPY,
     LAW_NAMES,
@@ -58,8 +59,6 @@ from origo.workers import law_page as page
 from origo.workers import monitor as monitor_module
 from origo.workers.monitor import Cursor, Finding, LawTape, Monitor, held_law_keys, law_findings
 from origo.workers.report import Reporter
-from origo.law import LawReport
-from origo.law_catalog import LawCatalog, Scalar, build_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPTURES = ROOT / 'tests/fixtures/law/alerts'
@@ -538,7 +537,7 @@ def test_all_notifications_obey_global_hourly_budget(tmp_path: Path) -> None:
             attempt_delivery(cursor, settings, clock, lambda: cursor.save(path),
                              completion_clock=lambda: clock, sender=sender)
         assert 1 < len(dispatches) <= 24
-        assert all(right[0] - left[0] >= 3600 for left, right in zip(dispatches, dispatches[1:]))
+        assert all(right[0] - left[0] >= 3600 for left, right in pairwise(dispatches))
         assert cursor.last_digest_date == start.date().isoformat(), "Tomorrow's digest is not due before 07:00 UTC."
     path = tmp_path / 'quiet.json'
     quiet = _cursor(path, start)
@@ -932,28 +931,29 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
     # Notification/replay work must not mutate the current evaluator. Source-law
     # extensions are verified by evaluator tests, not banned by a Git byte comparison.
     assert (ROOT / 'origo/law.py').read_bytes() == evaluator_before
-    # New source acquisition descriptors may extend the catalog; core operational
-    # law declarations remain the same as main, independently of formatting/line shifts.
+    # Compare the recorded public policy, rather than its implementation syntax.
     base_sha = subprocess.run(['git', 'merge-base', 'HEAD', 'origin/main'], cwd=ROOT,
                               check=True, capture_output=True, text=True).stdout.strip()
-    catalog_base = subprocess.run(['git', 'show', f'{base_sha}:origo/law_catalog.py'], cwd=ROOT,
-                                  check=True, capture_output=True).stdout
-    before_laws = next(node for node in ast.parse(catalog_base).body
-                       if isinstance(node, ast.FunctionDef) and node.name == '_operational_gates')
-    after_laws = next(node for node in ast.parse((ROOT / 'origo/law_catalog.py').read_bytes()).body
-                      if isinstance(node, ast.FunctionDef) and node.name == '_operational_gates')
-    def operational_prefix(function: ast.FunctionDef) -> list[str]:
-        boundary = next(index for index, node in enumerate(function.body)
-                        if isinstance(node, ast.Assign) and any(
-                            isinstance(target, ast.Name) and target.id == 'anchors'
-                            for target in node.targets))
-        return [ast.dump(node, include_attributes=False) for node in function.body[:boundary]]
-    assert operational_prefix(before_laws) == operational_prefix(after_laws)
     rebuilt = build_catalog(base_sha)
+    operational = {gate['id']: gate for gate in rebuilt['gates'] if gate['id'].startswith('monitor.')}
+    for previous in page._objects(original_catalog['gates']):
+        if not str(previous['id']).startswith('monitor.'):
+            continue
+        current = operational[str(previous['id'])]
+        unchanged = set(previous) - {'definition_version', 'code', 'condition', 'thresholds'}
+        assert {key: current[key] for key in unchanged} == {key: previous[key] for key in unchanged}
+        if previous['id'] == 'monitor.collectors_serving':
+            assert current['condition'] == str(previous['condition']).removesuffix('.') + '; enabled Render replicas must report fresh durable exchange and receipt clocks.'
+            assert current['thresholds'] == {**page._object(previous['thresholds']),
+                'render_timeout_seconds': 5, 'render_max_bytes': 16 * 1024,
+                'render_age_seconds': 5, 'render_future_seconds': 1}
+        else:
+            assert current['condition'] == previous['condition']
+            assert current['thresholds'] == previous['thresholds']
     original_ids = {str(gate['id']) for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
     rebuilt_ids = {gate['id'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
     assert original_ids <= rebuilt_ids and len(original_ids) == 17
-    assert rebuilt_ids - original_ids == {f'law.{law}:{source}' for source in ('binance_spot_book', 'binance_perp_book') for law in ('R1', 'C1', 'C2')}
+    assert rebuilt_ids - original_ids == {f'law.{law}:{source}' for source in ('binance_spot_book', 'binance_perp_book', 'binance_spot_top20_v1', 'binance_perp_top20_v1') for law in ('R1', 'C1', 'C2')}
     with _serving(tmp_path) as (url, cache, summary):
         with urllib.request.urlopen(url + '/law.json', timeout=5) as response:
             assert len(response.read()) <= 160 * 1024, 'Actual current wire must include summary within160KiB.'

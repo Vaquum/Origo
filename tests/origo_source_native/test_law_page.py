@@ -957,6 +957,7 @@ def test_paginated_history_retains_each_original_catalog_definition(
         more.wait_for(state='hidden')
         loaded = tab.evaluate("getHistory(historyKey('law.R1:binance_spot_trades'))")
         assert len(loaded['events']) == page.PAGE_SIZE + 2
+        assert loaded['definitions_limited'] is False, loaded
         assert {item['catalog_version'] for item in loaded['definitions']} == {str(report['catalog_version']), *(catalog['version'] for catalog in catalogs)}
         for position, threshold in ((0, 201), (-1, 200)):
             item = tab.locator('#detail .event').nth(position)

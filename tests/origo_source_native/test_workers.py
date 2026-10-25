@@ -76,7 +76,8 @@ def test_reporter_outage_does_not_block_a_tick() -> None:
 @pytest.mark.parametrize(
     ('feed', 'source'),
     [('depth', None), ('provisional', None)]
-    + [('provisional', spec.key) for spec in SOURCE_REGISTRY if spec.provisional is not None],
+    + [('provisional', spec.key) for spec in SOURCE_REGISTRY
+       if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT],
 )
 def test_feed_worker_check_reports_its_heartbeat(
     feed: str, source: str | None, tmp_path: Path

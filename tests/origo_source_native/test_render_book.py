@@ -964,6 +964,10 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     original_file = target.read_bytes()
     original_manifest = (destination / 'latest.json').read_bytes()
     assert pl.read_ipc(target).height == 120
+    # The production source stays DORMANT; only this isolated monitor owns a public output.
+    monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', (
+        replace(runtime.spec, consumers=tuple(replace(c, public=True) for c in runtime.spec.consumers)),
+    ))
     monitor = Monitor(
         dagster=_Dagster(), client=runtime.store.client, database='origo',
         heartbeat_dir=tmp_path / 'heartbeats', probes=(), settings=None,

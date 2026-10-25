@@ -1,3 +1,7 @@
+# v3.35.0
+
+- Add an unregistered Render top20 adapter and genuine local Spot/perpetual hourly recovery qualification.
+
 # v3.34.57
 
 - Retain only the current local Hugging Face export after publication, retry or failure; reclaim superseded exports under the existing consumer lock.

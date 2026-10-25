@@ -215,6 +215,7 @@ def code_location(owner: object, deployed_sha: str) -> CodeLocation | None:
 def build_catalog(deployed_sha: str) -> LawCatalog:
     from origo.law import LAW_ANCHORS, LAW_INVENTORY, MARKET_STATE_SOURCE
     from origo.sources.adapters.book_local import LocalBookProvisional
+    from origo.sources.adapters.render_book import RenderBookProvisional
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -267,6 +268,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
     for spec in SOURCE_REGISTRY:
         key = spec.key
         local_book = isinstance(spec.provisional, LocalBookProvisional)
+        render_book = isinstance(spec.provisional, RenderBookProvisional)
         nodes: list[ProjectionDescriptor] = [
             {
                 'id': f'{key}:{component.key}',
@@ -359,7 +361,9 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
         for check, condition in (
             (
                 'official_revision',
-                'Local seals must revalidate the activated revision.'
+                'The immutable Render input pin must revalidate the activated revision.'
+                if render_book
+                else 'Local seals must revalidate the activated revision.'
                 if local_book
                 else 'The official archive must revalidate the activated revision.',
             ),
@@ -431,8 +435,8 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
             ('canonical_mask', 'Canonical partitions replace overlapping provisional minutes.'),
             (
                 'first_gap',
-                'Sealed provisional intervals remain readable beyond a gap.'
-                if local_book
+                'Available provisional intervals remain readable beyond a gap.'
+                if local_book or render_book
                 else 'Provisional partitions after the first missing interval are excluded from current readers.',
             ),
         ):
@@ -445,7 +449,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 evidence='source_current_partitions; source_anchor_log',
                 cadence='periodic',
             )
-        if not local_book:
+        if not local_book and not render_book:
             add(
                 f'provider.archive_availability:{key}',
                 [key],
@@ -660,7 +664,7 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     role='defer',
                     evidence='source_failure_log RENDER_DEFERRED',
                 )
-        if spec.provisional is not None and not local_book:
+        if spec.provisional is not None and not local_book and not render_book:
             add(
                 f'provider.response_completeness.request_contract:{key}',
                 [key],
@@ -752,26 +756,31 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     evidence='source_observation_log; source_failure_log; worker_minute_log',
                 )
 
-        if local_book:
+        if local_book or render_book:
+            candidate_owner = (
+                'sources.adapters.render_book:RenderBookProvisional.candidates' if render_book
+                else 'sources.adapters.book_local:LocalBookProvisional.candidates'
+            )
             for condition, owner, description, limits in (
                 (
                     'closed',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Only sealed closed minutes at or after the source anchor are eligible.',
+                    candidate_owner,
+                    'Only closed minutes at or after the source anchor are eligible.',
                     {},
                 ),
                 (
                     'covered',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
+                    candidate_owner,
                     'Already covered minutes are excluded.',
                     {},
                 ),
                 (
                     'catchup',
-                    'sources.adapters.book_local:LocalBookProvisional.candidates',
-                    'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
+                    candidate_owner,
+                    'Admit the latest missing minute before bounded historical catch-up.' if render_book
+                    else 'Sealed closed lookback minutes and older retained sealed minutes remain candidates.',
                     {
-                        'lookback_hours': _threshold(
+                        'lookback_hours': 48 if render_book else _threshold(
                             'sources.adapters.book_local:BOOK_CATCHUP_LOOKBACK_HOURS'
                         )
                     },
@@ -797,8 +806,31 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                     description,
                     limits,
                     role='defer',
-                    evidence='local book seals; worker_minute_log',
+                    evidence='immutable Render segments; worker_minute_log' if render_book
+                    else 'local book seals; worker_minute_log',
                 )
+        if render_book:
+            for condition, owner, description, limits in (
+                ('segment_integrity', 'RenderBookCache.validate_segment',
+                 'Immutable payloads must match identity, schema, timestamp units, count, bytes and SHA256.', {}),
+                ('sample_grid', 'RenderBookCache.revision',
+                 'Every minute/hour requires actual observations for every exchange second; no carry-forward.',
+                 {'depth20_samples': 60, 'canonical_seconds': 3600}),
+                ('hour_pin', 'RenderBookCanonical.fetch',
+                 'End plus five minutes pins complete eligible originals; an accepted pin remains immutable.',
+                 {'finality_delay_seconds': 300}),
+                ('cache_bound', 'RenderBookCache._usage',
+                 'Unreclaimed replica input is bounded; accepted database proofs precede payload cleanup.',
+                 {'replica_bytes': _threshold('sources.adapters.render_book:MAX_REPLICA_CACHE_BYTES'),
+                  'replica_files': _threshold('sources.adapters.render_book:MAX_REPLICA_CACHE_FILES')}),
+            ):
+                add(
+                    f'book.capture.{condition}:{key}', [key],
+                    'sources.adapters.render_book:' + owner,
+                    'Render book acquisition and activation', description, limits,
+                    evidence='immutable Render manifests; source_component_log; source_failure_log; worker_minute_log',
+                )
+        if local_book:
             for condition, owner, description, limits in (
                 (
                     'sealed_payload',

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, Protocol, cast
 from uuid import uuid4
 
 import aiohttp
@@ -18,8 +18,10 @@ import aiohttp
 from ..contracts import (
     Partition,
     Revision,
+    RevisionedSourceSpec,
     Row,
     SourceError,
+    StateRecord,
     beat_worker,
     failure_code,
     failure_message,
@@ -32,8 +34,37 @@ MAX_REPLICA_CACHE_BYTES = 8 * 1024**3
 MAX_REPLICA_CACHE_FILES = 20_000
 REPLICAS = ('A', 'B')
 
-if TYPE_CHECKING:
-    from ..lifecycle import SourceRuntime
+class _RetentionStore(Protocol):
+    def table(self, name: str) -> str: ...
+
+    def execute(self, query: str, params: object | None = None) -> list[Row]: ...
+
+    def record(self, partition: Partition) -> StateRecord | None: ...
+
+
+class _RetentionFailures(Protocol):
+    def record(
+        self, *, operation: str, scope: str, partition: str,
+        error_code: str, message: str,
+    ) -> str: ...
+
+    def recover(self, *, operation: str, partition: str) -> int: ...
+
+
+class _RetentionRuntime(Protocol):
+    @property
+    def spec(self) -> RevisionedSourceSpec: ...
+
+    @property
+    def store(self) -> _RetentionStore: ...
+
+    @property
+    def lock_root(self) -> Path: ...
+
+    @property
+    def failures(self) -> _RetentionFailures: ...
+
+    def validate_retained(self, record: StateRecord) -> None: ...
 
 
 def atomic_write(path: Path, payload: bytes) -> None:
@@ -516,7 +547,7 @@ class RenderBookCanonical:
     @property
     def audit_maintenance(
         self,
-    ) -> Callable[[SourceRuntime, datetime, Callable[[Partition], str]], int]:
+    ) -> Callable[[_RetentionRuntime, datetime, Callable[[Partition], str]], int]:
         return _reclaim_render_payloads
 
     def candidate(self, now: datetime) -> Partition:
@@ -608,7 +639,7 @@ class RenderBookProvisional:
 
 
 def _reclaim_render_payloads(
-    runtime: SourceRuntime, now: datetime, partition_lock: Callable[[Partition], str],
+    runtime: _RetentionRuntime, now: datetime, partition_lock: Callable[[Partition], str],
 ) -> int:
     adapter = runtime.spec.canonical
     if not isinstance(adapter, RenderBookCanonical):

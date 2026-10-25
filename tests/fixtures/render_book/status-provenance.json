@@ -1,0 +1,16 @@
+[
+  {
+    "collector": "A",
+    "url": "https://binance-book-collector-a.onrender.com/status",
+    "captured_at": "2026-10-25T10:59:31.851002+00:00",
+    "file": "status-A.json",
+    "sha256": "b177c0ac465ba5033e7c56dd44ff4566e64799eebe9aa5cdf5fecfab2050eb7f"
+  },
+  {
+    "collector": "B",
+    "url": "https://binance-book-collector-b.onrender.com/status",
+    "captured_at": "2026-10-25T10:59:32.387627+00:00",
+    "file": "status-B.json",
+    "sha256": "48440096178865cb4bd8aaf2fd11d96395419c19e6bebe1979cb8c9fe6ed6ad8"
+  }
+]

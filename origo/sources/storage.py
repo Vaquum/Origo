@@ -734,9 +734,11 @@ class SourceStore:
             result.extend(
                 self.execute(
                     f"""SELECT {names} FROM {self.component_table(component)}
-                WHERE partition_key=%(partition)s AND revision=%(revision)s AND build_id=%(build)s
+                WHERE source_date=%(source_date)s AND partition_key=%(partition)s
+                  AND revision=%(revision)s AND build_id=%(build)s
                 ORDER BY {', '.join(specification.primary_key)}""",
                     {
+                        'source_date': record.partition.start.date(),
                         'partition': record.partition.key,
                         'revision': record.revision,
                         'build': record.build_id,

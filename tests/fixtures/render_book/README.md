@@ -15,7 +15,11 @@ an isolated database minute. The conflicting-identity test deliberately duplicat
 one genuine observation with a changed receipt clock, updating the test transport
 manifest; it is a named protocol fault, never accepted market history.
 
-The tests qualify the adapter/cache, canonical input pin, top20/minute components
-and existing SourceRuntime build/reconcile/repair path. They do not register a
-source or qualify production scheduling, consumer routing, deployment, retention
-cleanup or long-outage recovery.
+The tests qualify the adapter/cache, canonical input pin, top20/minute components,
+registered hourly recovery, retained-content cleanup and Spot Arrow publication
+through the existing source runtime. Production routing, deployment, GUI behavior
+and shared-worker headroom require separate qualification.
+
+`status-A.json` and `status-B.json` are original authenticated `/status` responses.
+`status-provenance.json` records their capture times, URLs and exact SHA256 values.
+Monitor tests replay them and identify deliberate clock/readiness protocol faults.

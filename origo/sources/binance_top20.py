@@ -10,6 +10,7 @@ from .adapters.render_book import (
     RenderBookProvisional,
 )
 from .contracts import (
+    ConsumerSpec,
     OrchestrationSpec,
     PartitionPolicy,
     RevisionedSourceSpec,
@@ -18,6 +19,7 @@ from .contracts import (
     SourceReadPolicy,
 )
 from .profiles.top20 import top20_components
+from .profiles.top20_arrow import ARROW_MAX_BYTES, publish_top20_arrow
 
 
 def top20_source(market: Market) -> RevisionedSourceSpec:
@@ -35,7 +37,8 @@ def top20_source(market: Market) -> RevisionedSourceSpec:
         canonical=RenderBookCanonical(cache),
         provisional=RenderBookProvisional(cache),
         components=top20_components(),
-        consumers=(),
+        consumers=(ConsumerSpec('arrow', publish_top20_arrow, verify_file_bytes=ARROW_MAX_BYTES),)
+        if market == 'spot' else (),
         orchestration=OrchestrationSpec('5 * * * *', '* * * * *', '30 * * * *', canonical_concurrency=2),
         read_policy=SourceReadPolicy.AVAILABLE,
     )

@@ -13,10 +13,14 @@ from threading import Thread
 from typing import cast
 from uuid import uuid4
 
+import polars as pl
+import pyarrow as pa
 import pytest
 from dagster import DagsterInstance, Definitions, RunRequest, build_sensor_context
 
+from origo import law
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.law_catalog import build_catalog
 from origo.sources import capacity, dagit
 from origo.sources.adapters import render_book
 from origo.sources.adapters.render_book import (
@@ -34,6 +38,7 @@ from origo.sources.contracts import (
     SourceError,
 )
 from origo.sources.lifecycle import SourceRuntime
+from origo.sources.profiles import top20_arrow
 from origo.sources.storage import SourceStore
 from origo.workers import provisional as worker
 from origo.workers.receipts import ensure_monitoring_tables
@@ -208,6 +213,7 @@ def runtime(
 ) -> Iterator[SourceRuntime]:
     market = cast(Market, request.param)
     monkeypatch.setenv('ORIGO_RENDER_BOOK_ROOT', str(tmp_path / 'cache'))
+    monkeypatch.setenv('LOCAL_ARROW_DIR', str(tmp_path / 'arrow'))
     declared = top20_source(market)
     spec = replace(
         declared,
@@ -230,6 +236,7 @@ def test_hourly_recovery_and_activation(
     runtime: SourceRuntime,
     recordings: dict[tuple[str, Market], RecordedFeed],
     record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A skipped provisional minute is restored by the real hourly build and repair path."""
     canonical = cast(RenderBookCanonical, runtime.spec.canonical)
@@ -263,6 +270,33 @@ def test_hourly_recovery_and_activation(
         (3600, 3600)
     ]
     assert runtime.store.execute(f'SELECT count() FROM {metric_view}') == [(60,)]
+    # Genuine activated rows certify the hourly law; deliberate proof faults do not.
+    monkeypatch.setattr(law, 'SOURCE_REGISTRY', (runtime.spec,))
+    query = law._Queries(runtime.store.client)
+    proofs = law._proofs(query, 'origo', runtime.spec.key, str(record.build_id))
+    assert len(proofs) == 1 and proofs[0].verdict()['status'] == 'PASS'
+    shortened = replace(proofs[0], components=tuple(
+        (key, count - 1, digest, completed) if key == 'depth20' else (key, count, digest, completed)
+        for key, count, digest, completed in proofs[0].components
+    ))
+    assert shortened.verdict()['reason'] == 'book_component_grid_incomplete'
+    before_due = START + timedelta(hours=1, minutes=4, seconds=59)
+    now = START + timedelta(hours=1, minutes=5)
+    assert law._c1([], runtime.spec.key, before_due)['status'] == 'NOT_DUE'
+    assert law._c1([], runtime.spec.key, now)['reason'] == 'canonical_hour_missing'
+    c1 = law._c1(proofs, runtime.spec.key, now)
+    assert c1['status'] == 'PASS' and c1['evidence']['canonical_interval'] == 'hour'
+    c2 = law._c2(query, 'origo', proofs, runtime.spec.key, now + timedelta(hours=2))
+    assert c2['status'] == 'FAIL' and c2['reason'] == 'canonical_hour_missing'
+    assert c2['evidence']['expected_hours'] == 2 and c2['evidence']['valid_hours'] == 1
+    assert c2['evidence']['first_invalid_hour'] == '2026-10-24T14Z'
+    edges = law._edge(query, 'origo', runtime.spec.key, record.partition.end)
+    r1 = law._r1(query, 'origo', runtime.spec, record.partition.end, edges, proofs)
+    assert r1['status'] == 'PASS'
+    assert r1['evidence']['rows_depth20'] == 60 and r1['evidence']['rows_depth20_1m'] == 1
+    gates = {gate['id']: gate for gate in build_catalog('0' * 40)['gates']}
+    assert gates[f'law.C1:{runtime.spec.key}']['thresholds'] == {'delay_seconds': 300}
+    assert 'canonical hour' in gates[f'law.C2:{runtime.spec.key}']['condition']
     assert runtime.store.execute(
         f"SELECT count() FROM {raw_view} WHERE toStartOfMinute(datetime)='2026-10-24 13:21:00'"
     ) == [(60,)]
@@ -715,3 +749,70 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         f"SELECT count(), uniqExact(collector), any(collector) FROM {raw} "
         "WHERE datetime>='2026-10-24 13:59:00' AND datetime<'2026-10-24 14:00:00'"
     ) == [(60, 1, 'B')]
+
+
+@pytest.mark.parametrize('runtime', ['spot'], indirect=True)
+def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
+    runtime: SourceRuntime,
+    recordings: dict[tuple[str, Market], RecordedFeed],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real canonical activation rejects a stale render; retry repairs the bounded Arrow file."""
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    for replica in ('A', 'B'):
+        cache.sync(replica, _feed(recordings, replica, 'spot').read)
+    for minute in (20, 22):
+        runtime.build(f'2026-10-24T13:{minute}:00Z', provisional=True)
+    destination = tmp_path / 'source-files' / runtime.spec.key / 'arrow'
+    target = tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow'
+    runtime.publish('arrow', str(destination))
+    original_file = target.read_bytes()
+    original_manifest = (destination / 'latest.json').read_bytes()
+    assert pl.read_ipc(target).height == 120
+    runtime.build('2026-10-24T13:23:00Z', provisional=True)
+    render = top20_arrow._frame
+
+    def activate_hour(
+        reader: top20_arrow._BookReader, snapshot: top20_arrow.Snapshot,
+        start: datetime, end: datetime,
+    ) -> pl.DataFrame:
+        frame = render(reader, snapshot, start, end)
+        runtime.build(HOUR)
+        return frame
+
+    with monkeypatch.context() as transition:
+        transition.setattr(top20_arrow, '_frame', activate_hour)
+        with pytest.raises(SourceError) as failure:
+            runtime.publish('arrow', str(destination))
+    assert failure.value.code == 'GENERATION_CHANGED'
+    assert target.read_bytes() == original_file
+    assert (destination / 'latest.json').read_bytes() == original_manifest
+    runtime.publish('arrow', str(destination))
+    with pa.ipc.open_file(target) as arrow:
+        assert arrow.num_record_batches == 1
+        table = arrow.read_all()
+        assert table.schema.field('bids').type.list_size == 20
+    rows = table.to_pylist()
+    expected = list(_expected(recordings, 'spot').values())[-1800:]
+    assert len(rows) == 1800
+    for row, original in zip(rows, expected, strict=True):
+        assert row['canonical'] is True
+        assert json.loads(row['original_snapshot']) == original
+        assert row['ts'] == original['exchange_time'] * 1000
+        assert row['source_timestamp_ms'] == original['exchange_time'] // 1000
+        assert row['observed_at_us'] == original['observed_at']
+        for side in ('bids', 'asks'):
+            assert [(level['price'], level['qty']) for level in row[side]] == [
+                (float(price), float(qty)) for price, qty in original[side]
+            ]
+    unchanged = target.stat().st_mtime_ns
+    runtime.publish('arrow', str(destination))
+    assert target.stat().st_mtime_ns == unchanged
+    # Deliberate file corruption, preserving the source generations and manifest.
+    target.write_bytes(target.read_bytes() + b'x')
+    runtime.publish('arrow', str(destination))
+    repaired = pl.read_ipc(target)
+    assert repaired.equals(pl.from_arrow(table))
+    manifest = json.loads((destination / 'latest.json').read_bytes())
+    assert manifest['files'][0]['sha256'] == hashlib.sha256(target.read_bytes()).hexdigest()

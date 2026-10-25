@@ -314,9 +314,12 @@ class ConsumerSpec:
     publish: ConsumerRenderer
     canonical_only: bool = False
     public: bool = False
+    verify_file_bytes: int | None = None
 
     def __post_init__(self) -> None:
         identifier(self.key)
+        if self.verify_file_bytes is not None and self.verify_file_bytes < 1:
+            raise ValueError('File verification requires a positive per-file byte bound.')
 
 
 @dataclass(frozen=True)

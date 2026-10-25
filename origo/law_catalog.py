@@ -1007,7 +1007,7 @@ def _operational_gates(add: _AddGate) -> None:
         ),
         'collectors_serving': (
             '_collector_findings',
-            'Each configured collector must serve the selected closed minute.',
+            'Each configured collector must serve the selected closed minute; enabled Render replicas must report fresh durable exchange and receipt clocks.',
         ),
         'no_error_logs': (
             '_log_findings',
@@ -1029,6 +1029,10 @@ def _operational_gates(add: _AddGate) -> None:
             limits['heartbeat_seconds'] = _threshold('workers.runtime:HEARTBEAT_MAX_AGE_SECONDS')
         elif name == 'collectors_serving':
             limits['timeout_seconds'] = _threshold('workers.monitor:PROBE_TIMEOUT_SECONDS')
+            limits['render_timeout_seconds'] = _threshold('workers.monitor:RENDER_STATUS_TIMEOUT_SECONDS')
+            limits['render_max_bytes'] = _threshold('workers.monitor:RENDER_STATUS_MAX_BYTES')
+            limits['render_age_seconds'] = _threshold('workers.monitor:RENDER_STATUS_MAX_AGE_SECONDS')
+            limits['render_future_seconds'] = _threshold('workers.monitor:RENDER_STATUS_FUTURE_SECONDS')
         elif name == 'queue_bounded':
             default = (
                 inspect.signature(
@@ -1064,11 +1068,13 @@ def _operational_gates(add: _AddGate) -> None:
             evidence='Dagit origo_monitor asset-check evaluation',
         )
     anchors = _mapping(_resolve('law:LAW_ANCHORS'))
+    book_grids = _mapping(_resolve('law:BOOK_MINUTE_GRIDS'))
     for spec in SOURCE_REGISTRY:
         if spec.key not in anchors:
             continue
         market = 'SPOT' if '_spot_' in spec.key else 'PERP'
-        book = spec.key in ('binance_spot_book', 'binance_perp_book')
+        book = spec.key in book_grids
+        hourly = spec.partitions.interval == 'hour'
         deadline = cast(tuple[int, int], _resolve(f'law:C1_{market}_DEADLINE'))
         for predicate, condition, thresholds in (
             (
@@ -1078,12 +1084,12 @@ def _operational_gates(add: _AddGate) -> None:
             ),
             (
                 'C1',
-                'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
-                {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
+                'The latest UTC hour due at hour end plus five minutes must have complete validated canonical proofs.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                {'delay_seconds': 300} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The frozen anchor through the hour before the latest due hour must contain every distinct canonical hour and active component proof.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):
@@ -1671,7 +1677,7 @@ def observe_publications(
     deadline: float,
 ) -> list[ProjectionObservation]:
     """Compare manifests to the real reader-selected state; inspect file metadata only."""
-    from origo.sources.contracts import identifier
+    from origo.sources.contracts import RolloutStage, identifier
     from origo.sources.hashing import state_token
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.sources.storage import SourceStore
@@ -1704,7 +1710,7 @@ def observe_publications(
 
     result: list[ProjectionObservation] = []
     for spec in SOURCE_REGISTRY:
-        if not spec.consumers:
+        if not spec.consumers or spec.rollout_stage == RolloutStage.DORMANT:
             continue
         rows = read(
             f'SELECT partition_key, provisional, partition_start, partition_end, '

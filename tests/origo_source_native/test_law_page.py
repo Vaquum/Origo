@@ -1172,11 +1172,11 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
     catalog = _prepared_catalog(str(baseline['deployed_sha']))
     original = page._objects(baseline['law_descriptors'])
     current = [gate for gate in catalog['gates'] if gate['id'].startswith('law.')]
-    assert len(current) == 23
+    assert len(current) == 29
     original_ids = {str(gate['id']) for gate in original}
     assert {gate['id'] for gate in current} - original_ids == {
         'law.M1:binance_spot_trades', 'law.M2:binance_spot_trades',
-        *(f'law.{predicate}:{source}' for source in ('binance_spot_book', 'binance_perp_book') for predicate in ('R1', 'C1', 'C2'))}
+        *(f'law.{predicate}:{source}' for source in ('binance_spot_book', 'binance_perp_book', 'binance_spot_top20_v1', 'binance_perp_top20_v1') for predicate in ('R1', 'C1', 'C2'))}
     # The accepted legacy law contract stays unchanged. Its implementation hash
     # advances with the additive proof evaluator; old evidence retains its version.
     current_semantics = [{**{key: value for key, value in gate.items() if key != 'definition_version'},
@@ -1185,7 +1185,7 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
                            'code': {'path': page._object(gate['code'])['path']}} for gate in original if gate['id'] != 'law.inventory']
     assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
     inventory = next(gate for gate in current if gate['id'] == 'law.inventory')
-    assert {source['id'] for source in catalog['sources']} == set(law.LAW_INVENTORY)
+    assert {source['id'] for source in catalog['sources'] if source['rollout_stage'] != 'DORMANT'} == set(law.LAW_INVENTORY)
     assert inventory['condition'] == 'Frozen law members remain required; every enabled registered source needs an explicit law mapping.'
     report = page._object(baseline['report'])
     before = page._sample_brief(report)

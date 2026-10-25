@@ -319,13 +319,20 @@ def test_replica_gap_conditions(
     cache = RenderBookCache(tmp_path, market)
     for replica in ('A', 'B'):
         feed = _feed(recordings, replica, market)
-        if condition == 'A_offline' and replica == 'A':
-            feed.omitted = {int(str(entry['id'])) for entry in feed.entries}
         if condition in ('A_gap', 'complementary', 'shared') and replica == 'A':
             feed.omitted = _gap(feed, 21)
         if condition in ('B_gap', 'complementary', 'shared') and replica == 'B':
             feed.omitted = _gap(feed, 21 if condition == 'shared' else 41)
-        cache.sync(replica, feed.read)
+        if condition == 'A_offline' and replica == 'A':
+
+            def unavailable(path: str, limit: int) -> bytes:
+                raise OSError('deliberate replica outage')
+
+            with pytest.raises(OSError, match='deliberate replica outage'):
+                cache.sync(replica, unavailable)
+            assert cache.cursor(replica) == 0
+        else:
+            cache.sync(replica, feed.read)
     adapter = RenderBookCanonical(cache)
     partition = adapter.partition(HOUR)
     if condition == 'shared':
@@ -385,6 +392,8 @@ def test_transport_restart_and_expiry(
     with pytest.raises(SourceError) as failure:
         restarted.sync('A', expired)
     assert failure.value.code == 'RENDER_EXPIRED'
+    retained = RenderBookCanonical(restarted)
+    assert retained.fetch(retained.partition(HOUR)).row_count == 3600
 
     other = RenderBookCache(tmp_path / 'ack-loss', 'spot')
     first = _feed(recordings, 'A', 'spot')

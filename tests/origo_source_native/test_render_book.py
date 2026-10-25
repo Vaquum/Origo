@@ -617,7 +617,8 @@ def test_provisional_fallback_and_late_recovery(
     candidates = provisional.candidates(START + timedelta(hours=1), START, (minute,))
     assert len(candidates) == 8
     assert candidates[0].start == START + timedelta(minutes=59)
-    assert candidates[1].start == START
+    assert candidates[1].start == START + timedelta(minutes=58)
+    assert candidates[2].start == START
     assert minute not in candidates
     with pytest.raises(ValueError, match='exact UTC minute'):
         provisional.partition('2026-10-24T13:21:01Z')
@@ -719,7 +720,7 @@ def test_worker_imports_current_minute_before_bounded_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unavailable replica and an old cursor cannot block the real minute worker's live input."""
+    """Delayed sealing cannot starve recent complete minutes behind historical catch-up."""
     cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
     ensure_monitoring_tables(runtime.store.client, runtime.store.database)
     recorded_server.offline.add('A')
@@ -735,20 +736,35 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         return execute(spec, operation, config, run_id=run_id)
 
     monkeypatch.setattr(worker, 'execute_source', build)
-    feed = worker_feed(runtime.spec, tmp_path, _Dagster(), _Reporter())
-    outcome = feed.tick(START + timedelta(hours=1))
-    minute = '2026-10-24T13:59:00Z'
-    assert f'{runtime.spec.key}:{minute}' in outcome.processed
-    assert recorded_server.events.index(f'build:{minute}') < recorded_server.events.index(
-        f'B/segments/{cache.market}?after=0'
-    )
-    assert cache.cursor('A') == 0
-    assert cache.cursor('B') == int(str(recorded_server.feeds['B', cache.market].entries[7]['id']))
+    now = replay_start = START + timedelta(minutes=59, seconds=2)
+    # Receipts use wall time; advance the retry clock with the replayed minute ticks.
+    feed = worker_feed(runtime.spec, tmp_path, _Dagster(), _Reporter(),
+                       clock=lambda: datetime.now(UTC) + (now - replay_start))
+    available = recorded_server.feeds['B', cache.market]
+    for tick, ready in enumerate((57, 58), 1):
+        now = START + timedelta(minutes=ready + 2, seconds=2)
+        # Original collector close clocks determine availability; no future seal is served.
+        available.omitted = {int(str(entry['id'])) for entry in available.entries
+                             if int(str(entry['closed_at'])) > int(now.timestamp()) * 1_000_000}
+        recorded_server.events.clear()
+        previous = cache.cursor('B')
+        outcome = feed.tick(now)
+        minute = f'2026-10-24T13:{ready}:00Z'
+        assert f'{runtime.spec.key}:{minute}' in outcome.processed
+        assert recorded_server.events.index(f'build:{minute}') < recorded_server.events.index(
+            f'B/segments/{cache.market}?after={previous}'
+        )
+        assert cache.cursor('A') == 0
+        assert cache.cursor('B') == int(str(available.entries[8 * tick - 1]['id']))
     raw = runtime.store.table(runtime.spec.names.prefix + '_depth20_current')
     assert runtime.store.execute(
         f"SELECT count(), uniqExact(collector), any(collector) FROM {raw} "
-        "WHERE datetime>='2026-10-24 13:59:00' AND datetime<'2026-10-24 14:00:00'"
-    ) == [(60, 1, 'B')]
+        "WHERE datetime>='2026-10-24 13:57:00' AND datetime<'2026-10-24 13:59:00'"
+    ) == [(120, 1, 'B')]
+    if cache.market == 'spot':
+        arrow = pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow')
+        assert arrow.height == 120
+        assert arrow['exchange_time_us'].max() // 60_000_000 == int((START + timedelta(minutes=58)).timestamp()) // 60
 
 
 @pytest.mark.parametrize('runtime', ['spot'], indirect=True)

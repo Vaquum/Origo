@@ -629,9 +629,9 @@ class RenderBookProvisional:
             while minute < end:
                 missing.discard(minute)
                 minute += timedelta(minutes=1)
-        ordered = sorted(missing)
-        if ordered:
-            ordered.insert(0, ordered.pop())
+        recent = closed - timedelta(minutes=2)
+        ordered = sorted((minute for minute in missing if minute >= recent), reverse=True)
+        ordered.extend(sorted(minute for minute in missing if minute < recent))
         return tuple(self.partition(minute.strftime('%Y-%m-%dT%H:%M:%SZ')) for minute in ordered[:8])
 
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:

@@ -184,6 +184,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
 
 def test_workflow_executes_verification_and_all_provenance_checks() -> None:
     workflow = TESTS_WORKFLOW.read_text()
+    assert 'uses: docker/setup-compose-action@v1\n        with:\n          version: v2.35.0' in workflow
     steps = re.split(r'(?m)^      - name: ', workflow)[1:]
     assert steps
     assert all('        if:' not in step for step in steps[:-1])

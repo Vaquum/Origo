@@ -17,7 +17,7 @@ from dagster import DagsterInstance, DagsterRunStatus
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.adapters.render_book import RenderBookProvisional, object_mapping
 from origo.sources.contracts import Client, identifier
-from origo.sources.profiles.top20_arrow import ARROW_MAX_BYTES
+from origo.sources.profiles.top20_arrow import ARROW_MAX_BYTES, current_input_token
 from origo.sources.publication import file_sha256_matches
 from origo.workers.provisional import ProvisionalFeed, selected_specs
 from origo.workers.receipts import WORKER_MINUTE_LOG
@@ -109,6 +109,10 @@ def _render_conditions(client: Client, database: str, keys: Sequence[str], now: 
                     or document.get('files') != [{'path': str(target), 'sha256': digest}]
                     or not file_sha256_matches(target, digest, ARROW_MAX_BYTES)):
                 raise ValueError('committed Arrow file does not match its manifest')
+            if document.get('input_token') != current_input_token(
+                client, database, int(str(document['window_start_us'])), int(str(document['window_end_us'])),
+            ):
+                raise ValueError('committed Arrow inputs differ from the selected window')
             frame = pl.read_ipc(target, columns=['exchange_time_us', 'observed_at_us'])
             minute = int(cast(datetime, ready[0][0]).replace(tzinfo=UTC).timestamp()) if ready else 0
             published = frame.filter(pl.col('exchange_time_us').is_between(

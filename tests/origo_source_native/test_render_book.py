@@ -988,7 +988,7 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     original_file = target.read_bytes()
     original_manifest = (destination / 'latest.json').read_bytes()
     assert pl.read_ipc(target).height == 120
-    # The production source stays DORMANT; only this isolated monitor owns a public output.
+    # Only this isolated monitor owns the public output under test.
     monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', (
         replace(runtime.spec, consumers=tuple(replace(c, public=True) for c in runtime.spec.consumers)),
     ))
@@ -1045,6 +1045,22 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     unchanged = target.stat().st_mtime_ns
     runtime.publish('arrow', str(destination))
     assert target.stat().st_mtime_ns == unchanged
+    # Deliberate input-identity fault keeps valid file bytes and identical publication clocks.
+    manifest_path = destination / 'latest.json'
+    committed_manifest = manifest_path.read_bytes()
+    wrong_input = json.loads(committed_manifest)
+    wrong_input['input_token'] = '0' * 64
+    manifest_path.write_text(json.dumps(wrong_input))
+    assert [finding.key for finding in monitor._publication_findings()] == [
+        f'publication_stale:{runtime.spec.key}:arrow'
+    ]
+    assert monitor.publication_policy[policy]['reason'] == 'stale'
+    assert any('inputs differ' in condition for condition in _render_conditions(
+        runtime.store.client, 'origo', (runtime.spec.key,), START + timedelta(hours=1),
+    ))
+    manifest_path.write_bytes(committed_manifest)
+    assert monitor._publication_findings() == []
+    assert _render_conditions(runtime.store.client, 'origo', (runtime.spec.key,), START + timedelta(hours=1)) == []
     # Deliberate file corruption, preserving the source generations and manifest.
     target.write_bytes(target.read_bytes() + b'x')
     assert [finding.key for finding in monitor._publication_findings()] == [

@@ -151,7 +151,11 @@ def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
                 assert 'ORIGO_WORKER_HEARTBEAT' not in service['environment']
                 assert 'source-locks:/opt/origo/locks' in service['volumes']
                 assert 'source-publications:/opt/origo/shadow' in service['volumes']
-                if path.name == 'docker-compose.deploy.yml':
+                if service['environment']['ORIGO_PROVISIONAL_SOURCE'] in {
+                    'binance_spot_top20_v1', 'binance_perp_top20_v1',
+                }:
+                    assert service['cpus'] == 1 and service['mem_limit'] == '2g'
+                elif path.name == 'docker-compose.deploy.yml':
                     assert service['mem_limit'] == '16g'
         workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
         launch = next(

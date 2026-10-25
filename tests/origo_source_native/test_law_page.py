@@ -1249,11 +1249,12 @@ def test_overview_totals_match_catalog_and_observed_evidence(
         tab.goto(url+'/law')
         tab.locator('.overview-card').first.wait_for()
         assert tab.locator('.overview-card').count() == 6
-        for key, numerator, denominator in (('R1', 4, 6), ('C1', 2, 6), ('C2', 4, 6), ('D1', 2880, 2880)):
+        for key, numerator, denominator in (('R1', 4, 8), ('C1', 2, 8), ('C2', 4, 8), ('D1', 2880, 2880)):
             text = _figure(tab, key).replace(',', '')
             assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
         assert 'not due' in _figure(tab, 'C1').lower()
-        output_count = len([item for item in page._objects(report['projections']) if ':consumer:' in str(item['id'])])
+        output_count = sum(node['lane'] == 'consumer' for source in _prepared_catalog(SHA)['sources']
+                           if source.get('rollout_stage') != 'DORMANT' for node in source['projections'])
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == f'Unknown / {output_count}'
         assert 'unknown' in _figure(tab, 'queue').lower() or 'not recorded' in _figure(tab, 'queue').lower()
         assert 'Monitor checks' in tab.locator('#monitor-band').inner_text()
@@ -1401,26 +1402,26 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         tab = browser.new_page()
         tab.goto(url+'/law?view=gates&family=law.R1')
         tab.locator('.gate').first.wait_for()
-        assert tab.locator('.gate').count() == 6 and tab.locator('#gate-family').input_value() == 'R1'
+        assert tab.locator('.gate').count() == 8 and tab.locator('#gate-family').input_value() == 'R1'
         assert tab.evaluate('state.view') == 'laws'
         assert tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
         tab.locator('#gate-family').select_option('C1')
         tab.go_back()
         tab.wait_for_function("() => state.family === 'R1'")
-        assert tab.locator('.gate').count() == 6 and tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
+        assert tab.locator('.gate').count() == 8 and tab.locator('.law-group').get_attribute('data-law-family') == 'R1'
         tab.go_forward()
         tab.wait_for_function("() => state.family === 'C1'")
-        assert tab.locator('.gate').count() == 6 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
+        assert tab.locator('.gate').count() == 8 and tab.locator('.law-group').get_attribute('data-law-family') == 'C1'
         tab.goto(url+'/law?view=gates')
         tab.locator('.gate').first.wait_for()
-        assert tab.locator('.law-group').count() == 6 and tab.locator('.gate').count() == 22
+        assert tab.locator('.law-group').count() == 6 and tab.locator('.gate').count() == 28
         assert tab.evaluate("state.view") == 'laws'
         assert all(str(gate).startswith('law.') for gate in tab.locator('.gate [data-gate]').evaluate_all('(items)=>items.map(x=>x.dataset.gate)'))
         # Catalog envelope corruption cannot add an obligation or remove a required denominator.
         tab.evaluate("()=>{const extra=structuredClone(descriptor('law.R1:binance_spot_trades'));extra.id+=':outside-inventory';data.catalog.gates.push(extra);render()}")
-        assert tab.locator('.gate').count() == 22
+        assert tab.locator('.gate').count() == 28
         tab.evaluate("()=>{data.catalog.gates=data.catalog.gates.filter(g=>g.id!=='law.R1:binance_spot_trades');data.last_report.feeds=data.last_report.feeds.filter(f=>f.source_key!=='binance_spot_trades');render()}")
-        assert tab.locator('.gate').count() == 22
+        assert tab.locator('.gate').count() == 28
         assert 'unknown' in tab.locator('.gate').filter(has=tab.locator('[data-gate="law.R1:binance_spot_trades"]')).inner_text().lower()
         tab.reload()
         tab.locator('.gate').first.wait_for()
@@ -1438,7 +1439,7 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         tab.goto(url+'/law?view=gates&gate=monitor.queue_bounded')
         tab.wait_for_function('() => data !== null')
         assert 'runtime' in tab.locator('#detail').inner_text().lower() or 'runtime' in tab.locator('#message').inner_text().lower()
-        assert tab.locator('.gate').count() <= 22
+        assert tab.locator('.gate').count() <= 28
         browser.close()
 
 
@@ -1523,15 +1524,15 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
         assert 'current' in node.inner_text().lower()
         _refresh_protocol_summary(tab)  # The shared adapter now owns Overview rollups.
         tab.locator('[data-view="overview"]').click()
-        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '1 / 10'
-        assert '9 unknown' in _figure(tab, 'outputs')
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '1 / 11'
+        assert '10 unknown' in _figure(tab, 'outputs')
         tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='FAILED';p.reason='artifact_missing';render()}")
         assert node.locator('.FAIL,.FAILED').count() == 1
         _refresh_protocol_summary(tab)
         tab.locator('[data-view="overview"]').click()
-        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '0 / 10'
-        assert '9 unknown' in _figure(tab, 'outputs')
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == '0 / 11'
+        assert '10 unknown' in _figure(tab, 'outputs')
         tab.locator('[data-view="sources"]').click()
         tab.evaluate("()=>{const p=data.last_report.projections.find(p=>p.id==='binance_perp_trades:consumer:mount');p.status='STALE';p.reason='publication_state_changed';p.publication_policy.reason='within_budget';const f=data.last_report.feeds.find(f=>f.source_key==='binance_perp_trades');f.predicates.R1.status='FAIL';render()}")
         assert source.locator('.source-head .FAIL').count() == 1
@@ -1556,7 +1557,7 @@ def test_overview_unknowns_override_stale_or_mismatched_numbers(production_servi
         assert 'Age of this sample' in tab.locator('body').inner_text()
         assert 'not recorded' in _figure(tab, 'queue').lower() or 'unknown' in _figure(tab, 'queue').lower()
         tab.evaluate("()=>{window.originalStages=structuredClone(data.last_report.projections);for(const p of data.last_report.projections){p.status='UNKNOWN';p.reason='not_observed'}render()}")
-        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 10'
+        assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == 'Unknown / 11'
         assert tab.locator('#metrics .metric strong').nth(1).inner_text() == f'Unknown / {stages}'
         tab.evaluate("()=>{const known=originalStages.find(p=>!p.id.includes(':consumer:')&&p.status==='CURRENT');Object.assign(data.last_report.projections.find(p=>p.id===known.id),known);render()}")
         assert tab.locator('#metrics .metric strong').nth(1).inner_text() == f'1 / {stages}'

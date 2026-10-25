@@ -154,15 +154,19 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = (REPO_ROOT / name).read_text()
         assert 'ORIGO_WORKER_HEARTBEAT' not in compose
-        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == (8 if name == 'docker-compose.deploy.yml' else 6)
+        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == (10 if name == 'docker-compose.deploy.yml' else 8)
         if name == 'docker-compose.deploy.yml':
             assert compose.count('command: python -m origo.workers.provisional --role publication') == 2
             assert compose.count('command: python -m origo.workers.provisional --role repair') == 1
 
 
 def test_render_book_rollback_preserves_unrelated_workers_and_refuses_incomplete_retirement(tmp_path: Path) -> None:
+    import importlib.util
+    import json
     import os
     import subprocess
+
+    import pytest
 
     script = REPO_ROOT / 'deploy/retire_render_top20_workers.sh'
     docker = r'''
@@ -212,6 +216,90 @@ function docker() {
         if fault == 'active':
             assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
 
+    specification = importlib.util.spec_from_file_location('render_top20_deploy', REPO_ROOT / 'deploy/render_top20_deploy.py')
+    assert specification is not None and specification.loader is not None
+    guard = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(guard)
+    root = tmp_path / 'deployment'
+    root.mkdir()
+    compose = root / 'docker-compose.deploy.yml'
+    compose.write_text('services:\n  dagster:\n    image: ${APP_IMAGE}\n'
+                       '    environment:\n      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}\n')
+    # Named process/frontier controls exercise deployment faults; they claim no market observations.
+    members = {name: {'service': name, 'id': name, 'restarts': 0, 'started': 'original-start',
+                      'running': True, 'image': 'floor', 'image_id': 'pinned-floor', 'hostname': name}
+               for name in guard.PROTECTED | set(guard.CONTROLLERS)}
+    source = {'frontiers': {'existing_control': '2026-10-24 13:00:00'},
+              'stages': ['DORMANT', 'DORMANT']}
+    calls: list[tuple[str, ...]] = []
+
+    def command(*arguments: str, source: str | None = None,
+                environment: dict[str, str] | None = None) -> str:
+        calls.append(arguments)
+        if arguments[:3] == ('docker', 'ps', '-aq'):
+            return '\n'.join(members)
+        if arguments[:2] == ('docker', 'inspect'):
+            return '\n'.join(json.dumps(row) for row in members.values())
+        if arguments[:2] == ('docker', 'exec'):
+            if 'source_active_partitions' in source:
+                return json.dumps(state)
+            return json.dumps({'CLICKHOUSE_PASSWORD': 'controller-value' if arguments[3] in guard.CONTROLLERS else 'retained-worker-value'})
+        if arguments[0] == 'bash':
+            assert environment['PROJECT_NAME'] == 'test'
+            for name in guard.CONTROLLERS:
+                members[name]['id'] += '-restored'
+            state['stages'] = ['DORMANT', 'DORMANT']
+            return ''
+        assert arguments[:2] in (('docker', 'image'), ('docker', 'compose'))
+        return ''
+
+    state = source
+    guard.run = command
+    guard.main('capture', root, 'test')
+    floor = root / '.render-top20-floor'
+    pinned = (floor / 'docker-compose.deploy.yml').read_bytes()
+    assert (floor / 'environment.json').stat().st_mode & 0o777 == 0o600
+    assert json.loads((floor / 'environment.json').read_text())['CLICKHOUSE_PASSWORD'] == 'controller-value'
+    compose.write_text('active replacement Compose')
+    guard.main('check', root, 'test')
+    assert (floor / 'docker-compose.deploy.yml').read_bytes() == pinned
+    for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted'), ('running', False)):
+        original = members['depth-worker'][key]
+        members['depth-worker'][key] = invalid
+        with pytest.raises(RuntimeError):
+            guard.main('check', root, 'test')
+        members['depth-worker'][key] = original
+    missing = members.pop('depth-worker')
+    with pytest.raises(RuntimeError, match='membership'):
+        guard.main('capture', root, 'test')
+    members['depth-worker'] = missing
+    state['frontiers']['existing_control'] = '2026-10-24 12:59:00'
+    with pytest.raises(RuntimeError, match='regressed'):
+        guard.main('check', root, 'test')
+    state['frontiers']['existing_control'] = '2026-10-24 13:00:00'
+    with pytest.raises(RuntimeError, match='did not advance'):
+        guard.main('verify', root, 'test')
+    state['frontiers']['existing_control'] = '2026-10-24 13:01:00'
+    guard.main('verify', root, 'test')
+    for name in ('docker-compose.deploy.yml', 'environment.json'):
+        path = floor / name
+        original = path.read_bytes()
+        path.write_bytes(original + b'x')
+        calls.clear()
+        with pytest.raises(RuntimeError, match='Pinned book rollback input changed'):
+            guard.main('rollback', root, 'test')
+        assert not any(call[0] == 'bash' for call in calls)
+        path.write_bytes(original)
+    for _ in range(2):
+        state['stages'] = ['LIVE', 'LIVE']
+        calls.clear()
+        guard.main('rollback', root, 'test')
+        assert any(call[0] == 'bash' for call in calls)
+        restores = [call for call in calls if 'up' in call]
+        assert len(restores) == 1 and restores[0][-4:] == guard.CONTROLLERS
+        assert str(floor / 'docker-compose.deploy.yml') in restores[0]
+        assert restores[0][restores[0].index('--project-directory') + 1] == str(root)
+
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
     import os
@@ -242,7 +330,7 @@ function docker() {
         printf '%s\n' 'old-ui ui-host' ;;
       'inspect --format {{.Id}} '*)
         printf '%s\n' "${@: -1}" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -314,7 +402,7 @@ function docker() {
         printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
         printf 'up\n' >> "$CALLS" ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -427,7 +515,7 @@ function docker() {
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
@@ -705,7 +793,7 @@ def test_market_state_api_is_deployed_on_loopback_with_bounded_resources() -> No
     assert '  market-state:\n    # Compose-managed with a pinned name' in deploy[1]
     assert 'name: tdw-control-plane_market-state' in deploy[1]
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert 'provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book \\' in workflow
+    assert 'provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20 \\' in workflow
     test_all_published_ports_bind_loopback()
 
 

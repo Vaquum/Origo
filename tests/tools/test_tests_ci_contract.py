@@ -171,7 +171,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_render_book.py::test_transport_restart_and_expiry',
         'tests/origo_source_native/test_render_book.py::test_integrity_conflict_and_pin',
         'tests/origo_source_native/test_render_book.py::test_provisional_fallback_and_late_recovery',
-        'tests/origo_source_native/test_render_book.py::test_top20_sources_are_isolated_until_rollout',
+        'tests/origo_source_native/test_render_book.py::test_top20_sources_declare_live_top20_products',
         'tests/origo_source_native/test_render_book.py::test_native_recovery_discovers_unrequested_hour_and_retries_new_input[spot]',
         'tests/origo_source_native/test_render_book.py::test_native_recovery_discovers_unrequested_hour_and_retries_new_input[perp]',
         'tests/origo_source_native/test_render_book.py::test_http_retrieval_uses_authentication_and_transfer_bounds',
@@ -184,6 +184,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
 
 def test_workflow_executes_verification_and_all_provenance_checks() -> None:
     workflow = TESTS_WORKFLOW.read_text()
+    assert 'uses: docker/setup-compose-action@v1\n        with:\n          version: v2.35.0' in workflow
     steps = re.split(r'(?m)^      - name: ', workflow)[1:]
     assert steps
     assert all('        if:' not in step for step in steps[:-1])

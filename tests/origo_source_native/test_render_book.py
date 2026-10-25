@@ -29,6 +29,7 @@ from dagster._core.scheduler.instigation import (
 from origo import law
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.law_catalog import build_catalog
+from origo.orchestration.verify_deploy import _render_conditions
 from origo.sources import capacity, dagit
 from origo.sources.adapters import render_book
 from origo.sources.adapters.render_book import (
@@ -703,13 +704,13 @@ def test_provisional_fallback_and_late_recovery(
         provisional.partition('2026-10-24T13:21:01Z')
 
 
-def test_top20_sources_are_isolated_until_rollout() -> None:
+def test_top20_sources_declare_live_top20_products() -> None:
     from origo.sources.registry import SOURCE_REGISTRY
 
     sources = tuple(spec for spec in SOURCE_REGISTRY if spec.key.endswith('_top20_v1'))
     assert {spec.key for spec in sources} == {'binance_spot_top20_v1', 'binance_perp_top20_v1'}
     for spec in sources:
-        assert spec.rollout_stage == RolloutStage.DORMANT
+        assert spec.rollout_stage == RolloutStage.LIVE
         assert spec.partitions.start == START and spec.partitions.interval == 'hour'
         assert {c.key for c in spec.components} == {
             'depth20', 'depth20_1m', 'depth20_latest', 'depth20_1m_latest',
@@ -867,6 +868,7 @@ def test_worker_imports_current_minute_before_bounded_recovery(
     """Delayed sealing cannot starve recent complete minutes behind historical catch-up."""
     cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
     ensure_monitoring_tables(runtime.store.client, runtime.store.database)
+    monkeypatch.setenv('ORIGO_SOURCE_PUBLICATION_ROOT', str(tmp_path / 'source-files'))
     recorded_server.offline.add('A')
     for replica in ('A', 'B'):
         monkeypatch.setenv(f'ORIGO_RENDER_BOOK_{replica}_URL', recorded_server.url + '/' + replica)
@@ -903,6 +905,7 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         )
         assert cache.cursor('A') == 0
         assert cache.cursor('B') == int(str(available.entries[8 * tick - 1]['id']))
+        assert _render_conditions(runtime.store.client, 'origo', (runtime.spec.key,), now) == []
     raw = runtime.store.table(runtime.spec.names.prefix + '_depth20_current')
     assert runtime.store.execute(
         f"SELECT count(), uniqExact(collector), any(collector) FROM {raw} "
@@ -912,6 +915,27 @@ def test_worker_imports_current_minute_before_bounded_recovery(
         arrow = pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow')
         assert arrow.height == 120
         assert arrow['exchange_time_us'].max() // 60_000_000 == int((START + timedelta(minutes=58)).timestamp()) // 60
+        target = tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow'
+        committed = target.read_bytes()
+        target.write_bytes(committed + b'x')  # Deliberate file fault; originals and manifest are intact.
+        assert any('Arrow is not ready' in condition for condition in _render_conditions(
+            runtime.store.client, 'origo', (runtime.spec.key,), now,
+        ))
+        target.write_bytes(committed)
+    assert _render_conditions(runtime.store.client, 'origo', (runtime.spec.key,), now + timedelta(minutes=3))
+    # Deliberate stored-component faults; restore the exact captured database rows after each check.
+    for component, predicate in (('depth20_latest', "datetime='2026-10-24 13:58:10'"),
+                                 ('depth20_1m_latest', "datetime='2026-10-24 13:58:00'")):
+        table = runtime.store.component_table(component)
+        original = runtime.store.execute(f'SELECT * FROM {table} WHERE {predicate}')
+        assert len(original) == 1
+        runtime.store.client.execute(f'ALTER TABLE {table} DELETE WHERE {predicate}',
+                                     settings={'mutations_sync': 2})
+        assert any('no complete current' in condition for condition in _render_conditions(
+            runtime.store.client, 'origo', (runtime.spec.key,), now,
+        ))
+        runtime.store.execute(f'INSERT INTO {table} VALUES', original)
+        assert _render_conditions(runtime.store.client, 'origo', (runtime.spec.key,), now) == []
 
 
 @pytest.mark.parametrize('runtime', ['spot'], indirect=True)
@@ -964,7 +988,7 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     original_file = target.read_bytes()
     original_manifest = (destination / 'latest.json').read_bytes()
     assert pl.read_ipc(target).height == 120
-    # The production source stays DORMANT; only this isolated monitor owns a public output.
+    # Only this isolated monitor owns the public output under test.
     monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', (
         replace(runtime.spec, consumers=tuple(replace(c, public=True) for c in runtime.spec.consumers)),
     ))
@@ -1021,6 +1045,22 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     unchanged = target.stat().st_mtime_ns
     runtime.publish('arrow', str(destination))
     assert target.stat().st_mtime_ns == unchanged
+    # Deliberate input-identity fault keeps valid file bytes and identical publication clocks.
+    manifest_path = destination / 'latest.json'
+    committed_manifest = manifest_path.read_bytes()
+    wrong_input = json.loads(committed_manifest)
+    wrong_input['input_token'] = '0' * 64
+    manifest_path.write_text(json.dumps(wrong_input))
+    assert [finding.key for finding in monitor._publication_findings()] == [
+        f'publication_stale:{runtime.spec.key}:arrow'
+    ]
+    assert monitor.publication_policy[policy]['reason'] == 'stale'
+    assert any('inputs differ' in condition for condition in _render_conditions(
+        runtime.store.client, 'origo', (runtime.spec.key,), START + timedelta(hours=1),
+    ))
+    manifest_path.write_bytes(committed_manifest)
+    assert monitor._publication_findings() == []
+    assert _render_conditions(runtime.store.client, 'origo', (runtime.spec.key,), START + timedelta(hours=1)) == []
     # Deliberate file corruption, preserving the source generations and manifest.
     target.write_bytes(target.read_bytes() + b'x')
     assert [finding.key for finding in monitor._publication_findings()] == [

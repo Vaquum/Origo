@@ -5,20 +5,22 @@ import io
 import json
 import os
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 import polars as pl
 
 from ..adapters.render_book import atomic_write, object_mapping
 from ..contracts import (
+    Client,
     ComponentSpec,
     Partition,
     Row,
     Snapshot,
     SnapshotReader,
     SourceError,
+    identifier,
 )
 from ..hashing import content_hash
 from ..locking import source_lock
@@ -56,6 +58,27 @@ def _input(snapshot: Snapshot, start: datetime, end: datetime) -> str:
     for record in sorted(_window(snapshot, start, end).records, key=lambda r: r.partition.key):
         component = 'depth20_latest' if record.partition.provisional else 'depth20'
         rows.append((record.partition.key, dict(record.component_hashes)[component]))
+    return content_hash(rows, schema_version=1)
+
+
+def current_input_token(client: Client, database: str, start_us: int, end_us: int) -> str:
+    if end_us - start_us != 1800_000_000 or end_us % 60_000_000:
+        raise ValueError('Top20 Arrow must declare its thirty-minute UTC window.')
+    start, end = (datetime.fromtimestamp(value // 1_000_000, UTC) for value in (start_us, end_us))
+    selected = client.execute(
+        f"""SELECT partition_key,provisional,component_hashes
+        FROM {identifier(database)}.source_current_partitions
+        WHERE source_key=%(source)s AND partition_key >= %(prefix)s
+          AND partition_end > %(start)s AND partition_start < %(end)s ORDER BY partition_key""",
+        {'source': SOURCE, 'prefix': start.strftime('%Y-%m-%dT%H'),
+         'start': start.replace(tzinfo=None), 'end': end.replace(tzinfo=None)},
+        settings={'readonly': 1, 'max_threads': 1, 'max_execution_time': 10},
+    )
+    rows: list[Row] = [(SOURCE, start, end)]
+    for key, provisional, encoded in selected:
+        hashes = dict((pair[0], pair[1]) for pair in cast(list[list[str]], json.loads(str(encoded))))
+        component = 'depth20_latest' if int(str(provisional)) else 'depth20'
+        rows.append((key, hashes[component]))
     return content_hash(rows, schema_version=1)
 
 

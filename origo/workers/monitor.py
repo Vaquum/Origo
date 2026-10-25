@@ -115,6 +115,7 @@ from origo.sources.contracts import Client, RolloutStage, SourceError, identifie
 from origo.sources.profiles.top20_arrow import (
     ARROW_MAX_BYTES,
     ARROW_STALE_AFTER,
+    current_input_token,
     publish_top20_arrow,
 )
 from origo.sources.publication import file_sha256_matches
@@ -1951,6 +1952,7 @@ class Monitor:
                 policy = policies[f'{spec.key}:consumer:{consumer.key}']
                 policy.update(grace_seconds=grace.total_seconds(), state_through=end.isoformat())
                 manifest = self.publication_root / spec.key / consumer.key / 'latest.json'
+                input_changed = False
                 try:
                     document = object_mapping(json.loads(manifest.read_text()))
                     published = _utc(datetime.fromisoformat(str(document['active_through'])))
@@ -1960,6 +1962,10 @@ class Monitor:
                         if (document.get('files') != [{'path': str(target), 'sha256': digest}]
                                 or not file_sha256_matches(target, digest, ARROW_MAX_BYTES)):
                             raise ValueError('Top20 Arrow bytes do not match the committed manifest.')
+                        input_changed = document.get('input_token') != current_input_token(
+                            self.client, self.database,
+                            int(str(document['window_start_us'])), int(str(document['window_end_us'])),
+                        )
                     policy['published_through'] = published.isoformat()
                 except FileNotFoundError:
                     # Never published: the span of the state itself is the lag, so a
@@ -1977,15 +1983,15 @@ class Monitor:
                     )
                     continue
                 policy.update(lag_seconds=(end - published).total_seconds(),
-                              reason='stale' if end - published > grace else 'within_budget')
-                if end - published > grace:
+                              reason='stale' if input_changed or end - published > grace else 'within_budget')
+                if input_changed or end - published > grace:
                     findings.append(
                         Finding(
                             f'publication_stale:{spec.key}:{consumer.key}',
                             'publication_current',
                             f'{spec.key} {consumer.key} publication stale',
-                            f'published through {published.isoformat()}, '
-                            f'state through {end.isoformat()}.',
+                            'Published Arrow inputs differ from the selected window.' if input_changed else
+                            f'published through {published.isoformat()}, state through {end.isoformat()}.',
                         )
                     )
         self.publication_policy = policies

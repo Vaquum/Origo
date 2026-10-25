@@ -15,7 +15,9 @@ from dagster import DagsterInstance, DagsterRunStatus
 from dagster._core.test_utils import create_run_for_test, instance_for_test
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.orchestration import verify_deploy as verification
 from origo.orchestration.verify_deploy import verify_deploy
+from origo.sources.adapters.render_book import RenderBookProvisional
 from origo.sources.contracts import Client
 from origo.workers.provisional import selected_specs
 from origo.workers.receipts import ensure_monitoring_tables, record_receipt
@@ -197,9 +199,12 @@ class _Time:
 
 
 def test_verifier_needs_the_launched_run_and_a_fresh_receipt_from_every_enabled_source(
-    origo_test_env: dict[str, str], instance: DagsterInstance
+    origo_test_env: dict[str, str], instance: DagsterInstance, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keys = tuple(spec.key for spec in selected_specs({}))
+    # This owner qualifies receipts; Render delivery uses genuine rows in test_render_book.
+    specs = tuple(spec for spec in selected_specs({}) if not isinstance(spec.provisional, RenderBookProvisional))
+    monkeypatch.setattr(verification, 'selected_specs', lambda environment: specs)
+    keys = tuple(spec.key for spec in specs)
     assert len(keys) >= 4
     victim = keys[0]
     succeeded = create_run_for_test(instance, job_name=JOB, status=DagsterRunStatus.SUCCESS).run_id
@@ -281,7 +286,7 @@ def test_verifier_needs_the_launched_run_and_a_fresh_receipt_from_every_enabled_
 def test_verifier_process_exits_nonzero_and_names_each_unmet_condition(
     origo_test_env: dict[str, str], tmp_path: Path
 ) -> None:
-    keys = tuple(spec.key for spec in selected_specs({}))
+    keys = tuple(spec.key for spec in selected_specs({}) if not isinstance(spec.provisional, RenderBookProvisional))
     with instance_for_test(temp_dir=str(tmp_path)) as instance:
         run_id = create_run_for_test(instance, job_name=JOB, status=DagsterRunStatus.SUCCESS).run_id
         since = datetime.now(UTC) - timedelta(seconds=30)
@@ -294,7 +299,16 @@ def test_verifier_process_exits_nonzero_and_names_each_unmet_condition(
             def run() -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
                     [
-                        sys.executable, '-m', 'origo.orchestration.verify_deploy', '--run-id', run_id,
+                        sys.executable, '-c', '''
+import sys
+from origo.orchestration import verify_deploy as verification
+from origo.sources.adapters.render_book import RenderBookProvisional
+specs = verification.selected_specs({})
+verification.selected_specs = lambda environment: tuple(
+    spec for spec in specs if not isinstance(spec.provisional, RenderBookProvisional)
+)
+sys.exit(verification.main(sys.argv[1:]))
+''', '--run-id', run_id,
                         '--since', str(int(since.timestamp())), '--deadline-seconds', '2',
                     ],
                     cwd=ROOT, capture_output=True, text=True, timeout=300,

@@ -2,15 +2,23 @@
 enabled provisional source built a fresh minute after the deploy. It only reads."""
 
 import argparse
+import json
+import os
 import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import cast
 
+import polars as pl
 from dagster import DagsterInstance, DagsterRunStatus
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters.render_book import RenderBookProvisional, object_mapping
 from origo.sources.contracts import Client, identifier
+from origo.sources.profiles.top20_arrow import ARROW_MAX_BYTES, current_input_token
+from origo.sources.publication import file_sha256_matches
 from origo.workers.provisional import ProvisionalFeed, selected_specs
 from origo.workers.receipts import WORKER_MINUTE_LOG
 
@@ -52,6 +60,73 @@ def _source_conditions(
     ]
 
 
+def _render_conditions(client: Client, database: str, keys: Sequence[str], now: datetime) -> list[str]:
+    now = now.astimezone(UTC)
+    end = now.replace(second=0, microsecond=0)
+    start = end - timedelta(minutes=2)
+    parameters = {'start': start.replace(tzinfo=None), 'end': end.replace(tzinfo=None),
+                  'date': start.date(), 'last_date': end.date(),
+                  'prefix': start.strftime('%Y-%m-%dT%H')}
+    unmet: list[str] = []
+    for key in keys:
+        def current(component: str, fields: str) -> str:
+            return ' UNION ALL '.join(
+                f"""SELECT {fields} FROM {identifier(database)}.{identifier(key + '_' + component + suffix + '_revisions')} d
+                INNER JOIN (SELECT partition_key,revision,build_id
+                    FROM {identifier(database)}.source_current_partitions
+                    WHERE source_key=%(source)s AND partition_key >= %(prefix)s
+                      AND provisional={provisional}) a
+                  ON d.partition_key=a.partition_key AND d.revision=a.revision AND d.build_id=a.build_id
+                WHERE source_date >= %(date)s AND source_date <= %(last_date)s
+                  AND datetime >= %(start)s AND datetime < %(end)s"""
+                for provisional, suffix in ((0, ''), (1, '_latest'))
+            )
+
+        parameters['source'] = key
+        rows = client.execute(
+            'SELECT toStartOfMinute(datetime) AS minute,count(),uniqExact(datetime),'
+            'min(exchange_time_us),max(exchange_time_us) FROM ('
+            + current('depth20', 'datetime,exchange_time_us')
+            + ') GROUP BY minute ORDER BY minute DESC', parameters,
+            settings={'readonly': 1, 'max_threads': 1, 'max_execution_time': 10},
+        )
+        complete = [row for row in rows if row[1:3] == (60, 60)
+                    and int(str(row[3])) >= int(cast(datetime, row[0]).replace(tzinfo=UTC).timestamp()) * 1_000_000
+                    and int(str(row[4])) < (int(cast(datetime, row[0]).replace(tzinfo=UTC).timestamp()) + 60) * 1_000_000]
+        metrics = client.execute(current('depth20_1m', 'datetime,source_timestamp_ms'), parameters,
+                                 settings={'readonly': 1, 'max_threads': 1, 'max_execution_time': 10})
+        ready = [row for row in complete if (row[0], int(str(row[4])) // 1000) in metrics]
+        if not ready:
+            unmet.append(f'source {key} has no complete current 60-second minute with its metric')
+        if key != 'binance_spot_top20_v1':
+            continue
+        target = Path(os.environ.get('LOCAL_ARROW_DIR', '/opt/arrow')) / key / 'latest.arrow'
+        manifest = Path(os.environ.get('ORIGO_SOURCE_PUBLICATION_ROOT', '/opt/origo/shadow')) / key / 'arrow/latest.json'
+        try:
+            document = object_mapping(json.loads(manifest.read_bytes()))
+            digest = str(document.get('sha256'))
+            if (document.get('source_key') != key or document.get('depth') != 20
+                    or document.get('files') != [{'path': str(target), 'sha256': digest}]
+                    or not file_sha256_matches(target, digest, ARROW_MAX_BYTES)):
+                raise ValueError('committed Arrow file does not match its manifest')
+            if document.get('input_token') != current_input_token(
+                client, database, int(str(document['window_start_us'])), int(str(document['window_end_us'])),
+            ):
+                raise ValueError('committed Arrow inputs differ from the selected window')
+            frame = pl.read_ipc(target, columns=['exchange_time_us', 'observed_at_us'])
+            minute = int(cast(datetime, ready[0][0]).replace(tzinfo=UTC).timestamp()) if ready else 0
+            published = frame.filter(pl.col('exchange_time_us').is_between(
+                minute * 1_000_000, (minute + 60) * 1_000_000, closed='left'))
+            if (not 0 < frame.height <= 1800 or document.get('rows') != frame.height
+                    or published.height != 60
+                    or (published['exchange_time_us'] // 1_000_000).n_unique() != 60
+                    or published['exchange_time_us'].max() != ready[0][4]):
+                raise ValueError('committed Arrow does not contain the current complete minute')
+        except (OSError, ValueError, KeyError, pl.exceptions.PolarsError) as error:
+            unmet.append(f'source {key} Arrow is not ready: {error}')
+    return unmet
+
+
 def verify_deploy(
     instance: DagsterInstance,
     client: Client,
@@ -66,11 +141,13 @@ def verify_deploy(
 ) -> list[str]:
     """Return the unmet conditions; an empty list means the deployment is verified."""
     keys = tuple(spec.key for spec in selected_specs({}))
+    render_keys = tuple(spec.key for spec in selected_specs({}) if isinstance(spec.provisional, RenderBookProvisional))
     deadline = clock() + deadline_seconds
     while True:
         run_unmet, run_final = _run_condition(instance, run_id)
         unmet = [] if run_unmet is None else [run_unmet]
         unmet.extend(_source_conditions(client, database, keys, since))
+        unmet.extend(_render_conditions(client, database, render_keys, datetime.now(UTC)))
         if not unmet or run_final or clock() >= deadline:
             return unmet
         sleep(min(poll_seconds, deadline - clock()))

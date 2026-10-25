@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import subprocess
-import sys
 from time import monotonic
 from typing import cast
 from unittest.mock import Mock
@@ -13,6 +13,9 @@ from unittest.mock import Mock
 import pytest
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.sources.adapters import binance_perp_spool as spool
+from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
+from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
 from origo.sources.contracts import (
     WORKER_HEARTBEAT_ENV,
     Client,
@@ -20,11 +23,8 @@ from origo.sources.contracts import (
     RevisionedSourceSpec,
     RolloutStage,
 )
-from origo.sources.storage import SourceStore
 from origo.sources.lifecycle import SourceRuntime
-from origo.sources.binance_perp_trades import BINANCE_PERP_TRADES_SPEC
-from origo.sources.adapters.binance_perp_rest import BinancePerpProvisional
-from origo.sources.adapters import binance_perp_spool as spool
+from origo.sources.storage import SourceStore
 from origo.workers import provisional
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.receipts import (
@@ -36,9 +36,10 @@ from origo.workers.report import Reporter
 from origo.workers.runtime import TickOutcome, touch_heartbeat, utc_now
 
 from .helpers import ORIGO_DATABASE
+from .test_binance_perp_spool import _append, _partition
+from .test_binance_perp_spool import responses as responses
 from .test_provisional_worker import ANCHOR, KEY, NOW, RECEIPTS, Query
 from .test_provisional_worker import spot as spot
-from .test_binance_perp_spool import responses as responses, _append, _partition
 
 
 def _feed(
@@ -56,7 +57,8 @@ def test_source_selector_accepts_only_enabled_provisional_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     enabled = provisional.selected_specs({})
-    assert len(enabled) == 6
+    assert len(enabled) == 8
+    assert {"binance_spot_top20_v1", "binance_perp_top20_v1"} <= {spec.key for spec in enabled}
     for spec in enabled:
         assert provisional.selected_specs({'ORIGO_PROVISIONAL_SOURCE': spec.key}) == (spec,)
     for source in ('', 'unknown'):

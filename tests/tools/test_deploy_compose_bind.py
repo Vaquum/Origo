@@ -224,7 +224,9 @@ function docker() {
     root.mkdir()
     compose = root / 'docker-compose.deploy.yml'
     compose.write_text('services:\n  dagster:\n    image: ${APP_IMAGE}\n'
-                       '    environment:\n      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}\n')
+                       '    environment:\n      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}\n'
+                       '  monitor:\n    image: ${APP_IMAGE}\n'
+                       '    environment:\n      ORIGO_ALERT_RESEND_API_KEY: ${RESEND_API_KEY:?required}\n')
     # Named process/frontier controls exercise deployment faults; they claim no market observations.
     members = {name: {'service': name, 'id': name, 'restarts': 0, 'started': 'original-start',
                       'running': True, 'image': 'floor', 'image_id': 'pinned-floor', 'hostname': name}
@@ -243,7 +245,11 @@ function docker() {
         if arguments[:2] == ('docker', 'exec'):
             if 'source_active_partitions' in source:
                 return json.dumps(state)
-            return json.dumps({'CLICKHOUSE_PASSWORD': 'controller-value' if arguments[3] in guard.CONTROLLERS else 'retained-worker-value'})
+            values = {'CLICKHOUSE_PASSWORD': 'controller-value' if arguments[3] in guard.CONTROLLERS else 'retained-worker-value'}
+            if arguments[3] == 'monitor':
+                assert 'ORIGO_ALERT_RESEND_API_KEY' in source
+                values['ORIGO_ALERT_RESEND_API_KEY'] = 'alert-value'
+            return json.dumps(values)
         if arguments[0] == 'bash':
             assert environment['PROJECT_NAME'] == 'test'
             for name in guard.CONTROLLERS:
@@ -251,6 +257,8 @@ function docker() {
             state['stages'] = ['DORMANT', 'DORMANT']
             return ''
         assert arguments[:2] in (('docker', 'image'), ('docker', 'compose'))
+        if 'config' in arguments:
+            assert environment['RESEND_API_KEY'] == 'alert-value'
         return ''
 
     state = source

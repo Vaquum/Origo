@@ -17,6 +17,7 @@ PROTECTED = {
     'perp-capture', 'perp-repair',
 }
 CONTROLLERS = ('dagster', 'dagit', 'monitor', 'law')
+ENVIRONMENT_ALIASES = {'ORIGO_ALERT_RESEND_API_KEY': 'RESEND_API_KEY'}
 
 
 def run(*arguments: str, source: str | None = None, environment: dict[str, str] | None = None) -> str:
@@ -99,13 +100,14 @@ def capture_floor(root: Path, project: str, members: dict[str, dict[str, object]
     if state['stages'] != ['DORMANT', 'DORMANT']:
         raise RuntimeError('The initial book rollback floor must declare both sources DORMANT.')
     content = (root / 'docker-compose.deploy.yml').read_bytes()
-    keys = sorted(set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)', content.decode())))
+    keys = sorted(set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)', content.decode())) | ENVIRONMENT_ALIASES.keys())
     environment: dict[str, str] = {}
     for service in (*CONTROLLERS, 'depth-worker', 'book-capture-spot', 'perp-capture'):
         selected = json.loads(run('docker', 'exec', '-i', str(members[service]['id']), 'python', '-',
                                  source='import json,os\nkeys='+repr(keys)+
                                  '\nprint(json.dumps({key:os.environ[key] for key in keys if key in os.environ}))'))
         for key, value in selected.items():
+            key = ENVIRONMENT_ALIASES.get(key, key)
             if service in CONTROLLERS and key in environment and environment[key] != value:
                 raise RuntimeError(f'Inconsistent rollback environment: {key}')
             environment.setdefault(key, value)

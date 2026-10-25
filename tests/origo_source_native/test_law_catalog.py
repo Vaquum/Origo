@@ -709,7 +709,8 @@ def test_publication_observation_checks_real_token_and_artifacts(
     published = json.loads(manifest.read_text())
 
     def observe() -> dict[str, ProjectionObservation]:
-        expected = {spec.key for spec in registry.SOURCE_REGISTRY if spec.consumers}
+        expected = {spec.key for spec in registry.SOURCE_REGISTRY
+                    if spec.consumers and spec.rollout_stage != RolloutStage.DORMANT}
         requested: list[str] = []
         admin = runtime.store.client.execute
         reader = LawClient(get_clickhouse_settings())

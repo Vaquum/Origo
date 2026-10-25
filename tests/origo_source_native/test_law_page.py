@@ -1311,7 +1311,10 @@ def test_overview_totals_match_catalog_and_observed_evidence(
                         assert f"{horizon} · ≥ {values['count']} observed" in tab.locator('#detail').inner_text()
                         assert str(values['window_end']) in tab.locator('#detail').inner_text()
                 tab.locator('[data-close]').click()
-            outputs = [item for item in page._objects(operational_report['projections']) if ':consumer:' in str(item['id'])]
+            active_sources = {source['id'] for source in _prepared_catalog(SHA)['sources']
+                              if source['rollout_stage'] != 'DORMANT'}
+            outputs = [item for item in page._objects(operational_report['projections'])
+                       if ':consumer:' in str(item['id']) and str(item['id']).split(':')[0] in active_sources]
             assert outputs and all('publication_policy' in item for item in outputs)
             for remove_policy in (False, True):
                 if remove_policy:

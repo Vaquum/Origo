@@ -120,7 +120,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest() == '12b8b6832eecc1c8b66f08025e6a82eb4a3c60ab0d71afb2e7ead9d6c50c1b59'
+    ).encode()).hexdigest() == '4c6ccfa52c424f48231b6da2a2617eff0e61945d3eb3cd4d11d1ae82aac12cf1'
     assert contract['required_nodes'] == [
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',

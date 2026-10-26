@@ -2054,6 +2054,41 @@
       "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
       "retired_capability": "Legacy depth/Arrow operator jobs",
       "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_publish_btc_briefing_feed.py::test_sensor_is_registered_in_definitions": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters the obsolete BTC report jobs and sensors after reader cutover. Retained owners prove no named or implicit admission and preserve unrelated publisher admission; this does not claim the removed publisher still runs."
+    },
+    "tests/origo_source_native/test_publish_btc_briefing_feed.py::test_job_is_registered_in_definitions": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters the obsolete BTC report jobs and sensors after reader cutover. Retained owners prove no named or implicit admission and preserve unrelated publisher admission; this does not claim the removed publisher still runs."
+    },
+    "tests/origo_source_native/test_publish_btc_briefing_history.py::test_history_sensor_is_registered": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters the obsolete BTC report jobs and sensors after reader cutover. Retained owners prove no named or implicit admission and preserve unrelated publisher admission; this does not claim the removed publisher still runs."
+    },
+    "tests/origo_source_native/test_publish_btc_briefing_history.py::test_history_job_is_registered": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters the obsolete BTC report jobs and sensors after reader cutover. Retained owners prove no named or implicit admission and preserve unrelated publisher admission; this does not claim the removed publisher still runs."
+    },
+    "tests/origo_source_native/test_publish_btc_briefing_history.py::test_history_sensor_requests_the_partition_the_feed_just_published": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 removes obsolete BTC publisher admission; no feed materialization can launch the unregistered history job. Retained owners prove no named or implicit admission and reject in-flight retired work."
     }
   },
   "baseline_additions": {

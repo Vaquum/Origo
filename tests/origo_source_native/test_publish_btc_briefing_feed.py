@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import inspect
 import json
 from collections.abc import Callable
@@ -421,11 +420,6 @@ def test_duplicated_minute_alone_raises(
         _build_feed_for_day(DAY)
 
 
-def test_job_is_registered_in_definitions() -> None:
-    definitions_module = importlib.import_module('origo.definitions')
-    assert 'publish_btc_briefing_feed_job' in [
-        job.name for job in definitions_module.defs.jobs
-    ]
 
 
 def _install_recording_hf_api(
@@ -497,12 +491,6 @@ def test_dataset_card_scopes_the_contract_to_each_file() -> None:
     assert f'latest snapshot uses `{FEED_VERSION}`' in card
 
 
-def test_sensor_is_registered_in_definitions() -> None:
-    definitions_module = importlib.import_module('origo.definitions')
-    assert any(
-        sensor.name == 'publish_btc_briefing_feed_sensor'
-        for sensor in definitions_module.defs.sensors
-    )
 
 
 def test_publish_uploads_feed_snapshot_with_latest_pointer(

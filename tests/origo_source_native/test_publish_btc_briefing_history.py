@@ -13,10 +13,8 @@ import pytest
 from dagster import (
     AssetMaterialization,
     DagsterInstance,
-    MaterializeResult,
     RunRequest,
     SkipReason,
-    asset,
     build_sensor_context,
     materialize,
 )
@@ -344,17 +342,8 @@ def test_asset_is_daily_partitioned() -> None:
     )
 
 
-def test_history_job_is_registered() -> None:
-    definitions_module = importlib.import_module('origo.definitions')
-    assert 'publish_btc_briefing_history_job' in [job.name for job in definitions_module.defs.jobs]
 
 
-def test_history_sensor_is_registered() -> None:
-    definitions_module = importlib.import_module('origo.definitions')
-    assert any(
-        sensor.name == 'publish_btc_briefing_history_sensor'
-        for sensor in definitions_module.defs.sensors
-    )
 
 
 def _history_sensor_tick(instance: DagsterInstance) -> tuple[list[RunRequest], str | None]:
@@ -368,29 +357,6 @@ def _history_sensor_tick(instance: DagsterInstance) -> tuple[list[RunRequest], s
     return list(tick.run_requests), tick.skip_message
 
 
-def test_history_sensor_requests_the_partition_the_feed_just_published() -> None:
-    # The run request has to carry the feed materialization's own partition:
-    # that is the whole point of hanging the history off the feed instead of
-    # off a clock.
-    @asset(name='publish_btc_briefing_feed', partitions_def=daily_partitions)
-    def source_feed() -> MaterializeResult:
-        return MaterializeResult()
-
-    with DagsterInstance.ephemeral() as instance:
-        source_result = materialize(
-            [source_feed],
-            partition_key='2024-03-05',
-            instance=instance,
-        )
-        assert source_result.success
-        run_requests, _ = _history_sensor_tick(instance)
-
-    assert [(request.partition_key, request.run_key) for request in run_requests] == [
-        (
-            '2024-03-05',
-            f'publish_btc_briefing_history::2024-03-05::{source_result.run_id}',
-        )
-    ]
 
 
 def test_history_sensor_skips_until_the_briefing_feed_materializes() -> None:

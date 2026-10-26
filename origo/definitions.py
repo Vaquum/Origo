@@ -297,6 +297,7 @@ from .sources.registry import SOURCE_REGISTRY
 
 _registered_source_bundles = tuple(
     build_source_bundle(spec) for spec in SOURCE_REGISTRY
+    if spec.key not in ('binance_spot_book', 'binance_perp_book')
 )
 
 defs = Definitions.merge(

@@ -75,7 +75,7 @@ def test_reporter_outage_does_not_block_a_tick() -> None:
 
 @pytest.mark.parametrize(
     ('feed', 'source'),
-    [('depth', None), ('provisional', None)]
+    [('provisional', None)]
     + [('provisional', spec.key) for spec in SOURCE_REGISTRY
        if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT],
 )
@@ -100,6 +100,16 @@ def test_no_per_minute_schedules_or_run_status_feed_sensors_remain() -> None:
     assert all(schedule.cron_schedule != '* * * * *' for schedule in repository.schedule_defs)
     names = {sensor.name for sensor in defs.sensors}
     assert 'depth_snapshot_store_source_sensor' not in names
+    assert not any(name.startswith(('binance_spot_book_', 'binance_perp_book_')) for name in names)
+    assert not {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'} & names
+    assert not any(any(family in job.name for family in ('binance_spot_book', 'binance_perp_book',
+                       'binance_spot_depth20', 'binance_spot_depth200',
+                       'build_depth_snapshot_store_arrow', 'publish_btc_briefing'))
+                   for job in repository.get_all_jobs())
+    assert not any(any(family in key.to_user_string() for family in ('binance_spot_book',
+                       'binance_perp_book', 'binance_spot_depth20',
+                       'binance_spot_depth200', 'build_depth_snapshot_store_arrow', 'publish_btc_briefing'))
+                   for key in repository.asset_graph.get_all_asset_keys())
     assert 'binance_spot_trades_mount_sensor' in names
     assert not [name for name in names if name.endswith('_freshness_sensor')]
     assert 'binance_spot_trades_huggingface_sensor' in names
@@ -114,7 +124,8 @@ def test_live_feed_assets_carry_the_freshness_policy() -> None:
     expected = FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW)
     assert LIVE_FEED_FRESHNESS_WINDOW == timedelta(minutes=5)
     for key in (
-        'binance_spot_depth_live_feed',
+        'binance_spot_top20_v1_provisional_feed',
+        'binance_perp_top20_v1_provisional_feed',
         'binance_spot_trades_provisional_feed',
         'binance_perp_trades_provisional_feed',
         'binance_spot_aggtrades_provisional_feed',
@@ -139,7 +150,8 @@ def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
         assigned = [service['environment']['ORIGO_PROVISIONAL_SOURCE'] for service in provisional.values()]
         assert set(assigned) == sources and len(assigned) == len(sources)
         assert services['provisional-worker']['environment']['ORIGO_PROVISIONAL_SOURCE'] == 'binance_spot_trades'
-        for name, service in {'depth-worker': services['depth-worker'], **provisional}.items():
+        assert 'depth-worker' not in services
+        for name, service in provisional.items():
             feed = 'depth' if name == 'depth-worker' else 'provisional'
             assert service['healthcheck']['test'] == [
                 'CMD', 'python', '-m', f'origo.workers.{feed}', '--check'
@@ -160,10 +172,10 @@ def test_compose_and_deploy_assign_every_provisional_source_once() -> None:
         workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
         launch = next(
             line for line in workflow.splitlines()
-            if 'up -d --wait' in line and 'depth-worker' in line
+            if 'up -d --wait' in line and 'clickhouse dagster dagit' in line
         ).split()
         assert set(provisional) <= set(launch)
-        assert 'depth-worker' in launch and 'provisional-worker' in launch
+        assert 'depth-worker' not in launch and 'provisional-worker' in launch
 
 
 def test_trade_maintenance_deploy_and_heartbeat_contract(
@@ -173,7 +185,7 @@ def test_trade_maintenance_deploy_and_heartbeat_contract(
 
     services = yaml.safe_load((REPO_ROOT / 'docker-compose.deploy.yml').read_text())['services']
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    launch = next(line for line in workflow.splitlines() if 'up -d --wait' in line and 'depth-worker' in line)
+    launch = next(line for line in workflow.splitlines() if 'up -d --wait' in line and 'clickhouse dagster dagit' in line)
     monkeypatch.setenv('ORIGO_HEARTBEAT_DIR', str(tmp_path))
     monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '0')
     for name, role, source, feed in (
@@ -205,7 +217,7 @@ def test_trade_maintenance_deploy_and_heartbeat_contract(
     assert 'ORIGO_TRADE_MAINTENANCE=1' in services['monitor']['environment']
     local = yaml.safe_load((REPO_ROOT / 'docker-compose.yml').read_text())['services']
     assert not {'perp-repair', 'publication-binance-spot-trades', 'publication-binance-perp-trades'} & local.keys()
-    for role, source in (('repair', 'binance_spot_trades'), ('publication', 'binance_spot_book'),
+    for role, source in (('repair', 'binance_spot_trades'), ('publication', 'binance_spot_top20_v1'),
                          ('publication', None), ('unknown', 'binance_perp_trades')):
         if source is None:
             monkeypatch.delenv('ORIGO_PROVISIONAL_SOURCE', raising=False)

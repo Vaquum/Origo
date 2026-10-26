@@ -987,6 +987,7 @@ def _mapping(value: object) -> dict[str, object]:
 
 def _operational_gates(add: _AddGate) -> None:
     from origo.sources.adapters.binance_daily import REST_DEFAULT_BUDGET, REST_HOST_BUDGETS
+    from origo.sources.contracts import RolloutStage
     from origo.sources.registry import SOURCE_REGISTRY
     from origo.workers.depth import DEPTH_SPECS
 
@@ -1071,7 +1072,7 @@ def _operational_gates(add: _AddGate) -> None:
     anchors = _mapping(_resolve('law:LAW_ANCHORS'))
     book_grids = _mapping(_resolve('law:BOOK_MINUTE_GRIDS'))
     for spec in SOURCE_REGISTRY:
-        if spec.key not in anchors:
+        if spec.key not in anchors or spec.rollout_stage == RolloutStage.DORMANT:
             continue
         market = 'SPOT' if '_spot_' in spec.key else 'PERP'
         book = spec.key in book_grids

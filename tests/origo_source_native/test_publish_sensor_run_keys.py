@@ -81,8 +81,6 @@ def test_a_partitionless_materialization_is_skipped() -> None:
 
 def test_existing_publish_sensors_are_unchanged() -> None:
     existing = {
-        'publish_btc_briefing_feed_sensor',
-        'publish_btc_briefing_history_sensor',
         'binance_spot_trades_huggingface_sensor',
         'binance_perp_trades_huggingface_sensor',
         'binance_spot_aggtrades_huggingface_sensor',
@@ -90,6 +88,7 @@ def test_existing_publish_sensors_are_unchanged() -> None:
     }
     names = {sensor.name for sensor in defs.sensors}
     assert existing <= names
+    assert not {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'} & names
     # Minute publication stays in workers; the mount sensor only admits deferred bulk work.
     assert 'depth_snapshot_store_source_sensor' not in names
     assert 'binance_spot_trades_mount_sensor' in names

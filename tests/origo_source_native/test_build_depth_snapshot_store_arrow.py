@@ -7,10 +7,10 @@ import multiprocessing
 import os
 import time
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from multiprocessing.synchronize import Event
-from typing import Self
 from pathlib import Path
+from typing import Self
 
 import polars as pl
 import pyarrow as pa
@@ -21,7 +21,6 @@ from dagster import DagsterInstance, ExecuteInProcessResult, materialize
 os.environ.setdefault('CLICKHOUSE_PASSWORD', 'import-guard')
 
 import origo.assets.build_depth_snapshot_store_arrow as depth_store
-from origo.utils.arrow_store import BarSeriesBuild, series_store_dir
 from origo.assets.build_depth_snapshot_store_arrow import (
     DEPTH20_SOURCE_JOB_NAME,
     DEPTH200_SOURCE_JOB_NAME,
@@ -36,9 +35,10 @@ from origo.assets.build_depth_snapshot_store_arrow import (
     publish_depth_snapshot_chunk,
     spec_for_depth_snapshot_series,
 )
+from origo.utils.arrow_store import BarSeriesBuild, series_store_dir
 
 FIXTURES = Path(__file__).parent / 'fixtures' / 'depth_arrow_retention'
-BASE = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
+BASE = datetime(2026, 9, 15, 8, tzinfo=UTC)
 _ACTUAL_CUTOFF = depth_store._retention_cutoff
 SOURCE_PARTITION_KEY = '2026-09-15T08:20:00+0000'
 
@@ -580,28 +580,8 @@ def test_depth_snapshot_partition_run_request_maps_source_jobs() -> None:
         depth_snapshot_store_partition_run_request('other_job', 'run-other', SOURCE_PARTITION_KEY)
 
 
-def test_definitions_wires_depth_snapshot_arrow_job(origo_definitions_module: object) -> None:
-    job = getattr(origo_definitions_module, 'build_depth_snapshot_store_arrow_job')
-    asset_def = getattr(origo_definitions_module, 'build_depth_snapshot_store_arrow')
-
-    assert job.name == 'build_depth_snapshot_store_arrow_job'
-    assert asset_def.partitions_def.get_partition_keys() == list(DEPTH_SNAPSHOT_SERIES)
 
 
-def test_definitions_keep_the_depth_source_jobs_for_operators_without_a_chunk_sensor(
-    origo_definitions_module: object,
-) -> None:
-    defs = getattr(origo_definitions_module, 'defs')
-    depth20_job = getattr(origo_definitions_module, 'refresh_binance_spot_depth20_data_source_job')
-    depth200_job = getattr(
-        origo_definitions_module, 'refresh_binance_spot_depth200_data_source_job'
-    )
-
-    assert depth20_job.name == DEPTH20_SOURCE_JOB_NAME
-    assert depth200_job.name == DEPTH200_SOURCE_JOB_NAME
-    # The depth worker publishes each minute's chunk itself; nothing watches these jobs.
-    assert not hasattr(origo_definitions_module, 'depth_snapshot_store_source_sensor')
-    assert 'depth_snapshot_store_source_sensor' not in {sensor.name for sensor in defs.sensors}
 
 
 def test_expired_asset_skips_source_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

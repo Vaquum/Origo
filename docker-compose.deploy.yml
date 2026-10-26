@@ -31,10 +31,6 @@ services:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
-      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
-      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
     volumes:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
@@ -62,10 +58,6 @@ services:
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN is required}
       - BINANCE_API_KEY=${BINANCE_API_KEY:?BINANCE_API_KEY is required}
       - HUGGINGFACE_DATASET_REPO_ID=${HUGGINGFACE_DATASET_REPO_ID:?HUGGINGFACE_DATASET_REPO_ID is required}
-      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
-      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
     volumes:
       - dagster-instance:/opt/dagster-instance
       - source-locks:/opt/origo/locks
@@ -98,10 +90,6 @@ services:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
       - ORIGO_RENDER_BOOK_A_TOKEN=${ORIGO_RENDER_BOOK_A_TOKEN:?ORIGO_RENDER_BOOK_A_TOKEN is required}
       - ORIGO_RENDER_BOOK_B_TOKEN=${ORIGO_RENDER_BOOK_B_TOKEN:?ORIGO_RENDER_BOOK_B_TOKEN is required}
-      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
-      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
       - ORIGO_ALERT_RESEND_API_KEY=${RESEND_API_KEY:?RESEND_API_KEY is required}
       - ORIGO_ALERT_EMAIL_FROM=${ORIGO_ALERT_EMAIL_FROM:-onboarding@resend.dev}
       - ORIGO_ALERT_EMAIL_TO=${ORIGO_ALERT_EMAIL_TO:?ORIGO_ALERT_EMAIL_TO is required}
@@ -164,33 +152,6 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
-    restart: unless-stopped
-
-  depth-worker:
-    image: ${APP_IMAGE:?APP_IMAGE is required}
-    environment:
-      - PYTHONPATH=/opt/app
-      - DAGSTER_WEBSERVER_URL=http://dagit:3000
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
-      - BINANCE_SPOT_DEPTH20_BASE_URL=${BINANCE_SPOT_DEPTH20_BASE_URL:?BINANCE_SPOT_DEPTH20_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH20_AUTH_TOKEN=${BINANCE_SPOT_DEPTH20_AUTH_TOKEN:?BINANCE_SPOT_DEPTH20_AUTH_TOKEN is required}
-      - BINANCE_SPOT_DEPTH200_BASE_URL=${BINANCE_SPOT_DEPTH200_BASE_URL:?BINANCE_SPOT_DEPTH200_BASE_URL is required}
-      - BINANCE_SPOT_DEPTH200_AUTH_TOKEN=${BINANCE_SPOT_DEPTH200_AUTH_TOKEN:?BINANCE_SPOT_DEPTH200_AUTH_TOKEN is required}
-    volumes:
-      - tdw-arrow:/opt/arrow
-      - source-locks:/opt/origo/locks
-      - worker-heartbeats:/opt/origo/heartbeats
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    command: python -m origo.workers.depth
-    mem_limit: 3g
-    healthcheck:
-      test: ["CMD", "python", "-m", "origo.workers.depth", "--check"]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 60s
     restart: unless-stopped
 
   provisional-worker: &provisional-worker
@@ -301,20 +262,6 @@ services:
       <<: *provisional-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_aggtrades
 
-  provisional-binance-spot-book:
-    <<: *provisional-worker
-    environment:
-      <<: *provisional-environment
-      ORIGO_PROVISIONAL_SOURCE: binance_spot_book
-      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
-    volumes:
-      - tdw-parquet:/opt/parquet
-      - tdw-arrow:/opt/arrow
-      - source-locks:/opt/origo/locks
-      - source-publications:/opt/origo/shadow
-      - worker-heartbeats:/opt/origo/heartbeats
-      - book-spool:/var/lib/origo-book-spool
-
   provisional-binance-spot-top20: &render-book-worker
     image: ${APP_IMAGE:?APP_IMAGE is required}
     environment: &render-book-environment
@@ -350,73 +297,6 @@ services:
     environment:
       <<: *render-book-environment
       ORIGO_PROVISIONAL_SOURCE: binance_perp_top20_v1
-
-  book-capture-spot:
-    image: ${APP_IMAGE:?APP_IMAGE is required}
-    environment:
-      PYTHONPATH: /opt/app
-      PYTHONDONTWRITEBYTECODE: "1"
-      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
-      ORIGO_SOURCE_LOCK_DIR: /opt/origo/locks
-      ORIGO_BOOK_TOP20_TOKEN: ${ORIGO_BOOK_TOP20_TOKEN:?ORIGO_BOOK_TOP20_TOKEN is required}
-    ports:
-      - "127.0.0.1:8088:8088"
-    volumes:
-      - book-spool:/var/lib/origo-book-spool
-      - source-locks:/opt/origo/locks
-      - worker-heartbeats:/opt/origo/heartbeats
-    command: python -m origo.workers.book_capture --market spot
-    cpus: 1
-    mem_limit: 512m
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    healthcheck:
-      test: ["CMD", "python", "-m", "origo.workers.book_capture", "--market", "spot", "--check"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 120s
-    restart: unless-stopped
-
-  provisional-binance-perp-book:
-    <<: *provisional-worker
-    environment:
-      <<: *provisional-environment
-      ORIGO_PROVISIONAL_SOURCE: binance_perp_book
-      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
-    volumes:
-      - tdw-parquet:/opt/parquet
-      - tdw-arrow:/opt/arrow
-      - source-locks:/opt/origo/locks
-      - source-publications:/opt/origo/shadow
-      - worker-heartbeats:/opt/origo/heartbeats
-      - book-spool:/var/lib/origo-book-spool
-
-  book-capture-perp:
-    image: ${APP_IMAGE:?APP_IMAGE is required}
-    environment:
-      PYTHONPATH: /opt/app
-      PYTHONDONTWRITEBYTECODE: "1"
-      ORIGO_BOOK_SPOOL_ROOT: /var/lib/origo-book-spool
-      ORIGO_SOURCE_LOCK_DIR: /opt/origo/locks
-    volumes:
-      - book-spool:/var/lib/origo-book-spool
-      - source-locks:/opt/origo/locks
-      - worker-heartbeats:/opt/origo/heartbeats
-    command: python -m origo.workers.book_capture --market perp
-    cpus: 1
-    mem_limit: 512m
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    healthcheck:
-      test: ["CMD", "python", "-m", "origo.workers.book_capture", "--market", "perp", "--check"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 120s
-    restart: unless-stopped
 
   perp-capture:
     image: ${APP_IMAGE:?APP_IMAGE is required}

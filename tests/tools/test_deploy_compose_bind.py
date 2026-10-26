@@ -154,7 +154,7 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
     for name in ('docker-compose.yml', 'docker-compose.deploy.yml'):
         compose = (REPO_ROOT / name).read_text()
         assert 'ORIGO_WORKER_HEARTBEAT' not in compose
-        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == (10 if name == 'docker-compose.deploy.yml' else 8)
+        assert compose.count('ORIGO_PROVISIONAL_SOURCE:') == (8 if name == 'docker-compose.deploy.yml' else 6)
         if name == 'docker-compose.deploy.yml':
             assert compose.count('command: python -m origo.workers.provisional --role publication') == 2
             assert compose.count('command: python -m origo.workers.provisional --role repair') == 1
@@ -178,43 +178,62 @@ function docker() {
         printf 'controller\n' ;;
       'exec -i controller python -')
         cat > "$STATE/admission.py"
-        if [ "$FAULT" = active ]; then return 1; fi ;;
-      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=provisional-binance-'*'-top20')
+        if [ "$FAULT" = active ]; then return 1; fi
+        if [ "$FAULT" = drain ] && [[ $(< "$STATE/admission.py") == *book_root* ]]; then return 1; fi ;;
+      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor'|'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
+        printf 'monitor\n' ;;
+      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service='*)
         service="${@: -1}"
         service="${service##*=}"
         if [ ! -e "$STATE/$service" ] || [ "$FAULT" = remains ]; then printf '%s\n' "$service"; fi ;;
-      'stop provisional-binance-'*'-top20')
+      'stop '*)
         if [ "$FAULT" = stop ]; then return 1; fi ;;
-      'rm provisional-binance-'*'-top20')
+      'rm '*)
         if [ "$FAULT" = remove ]; then return 1; fi
         touch "$STATE/${@: -1}" ;;
-      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
-        printf 'monitor\n' ;;
       'volume ls -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.volume=worker-heartbeats')
         printf 'test-heartbeats\n' ;;
       'inspect --format {{.Image}} monitor') printf 'source-aware-image\n' ;;
-      'run --rm --pull=never --network none --mount type=volume,source=test-heartbeats,target=/heartbeats --entrypoint rm source-aware-image -f /heartbeats/provisional_binance_spot_top20_v1.heartbeat /heartbeats/provisional_binance_perp_top20_v1.heartbeat') ;;
+      'run --rm --pull=never --network none --mount type=volume,source=test-heartbeats,target=/heartbeats --entrypoint rm source-aware-image -f '*) ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
 }
 '''
-    for fault in ('none', 'active', 'stop', 'remove', 'remains'):
-        state = tmp_path / fault
-        state.mkdir()
-        trace = state / 'trace'
-        result = subprocess.run(
-            ['bash', '-c', docker + '\nsource "$SCRIPT"'],
-            env={**os.environ, 'PROJECT_NAME': 'test', 'FAULT': fault, 'STATE': str(state),
-                 'TRACE': str(trace), 'SCRIPT': str(script)},
-            capture_output=True, text=True, timeout=10,
-        )
-        calls = trace.read_text().splitlines()
-        assert (result.returncode == 0) is (fault == 'none'), result.stderr
-        wipes = [call for call in calls if call.startswith('run ')]
-        assert bool(wipes) is (fault == 'none')
-        assert not any(call.startswith(('stop ', 'rm ')) and '-top20' not in call for call in calls)
-        if fault == 'active':
-            assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
+    for script, services, heartbeats in (
+        (script, {'provisional-binance-spot-top20', 'provisional-binance-perp-top20'},
+         {'provisional_binance_spot_top20_v1.heartbeat', 'provisional_binance_perp_top20_v1.heartbeat'}),
+        (REPO_ROOT / 'deploy/retire_legacy_book_workers.sh',
+         {'depth-worker', 'book-capture-spot', 'book-capture-perp', 'provisional-binance-spot-book', 'provisional-binance-perp-book'},
+         {'depth.heartbeat', 'book_capture_spot.heartbeat', 'book_capture_perp.heartbeat',
+          'provisional_binance_spot_book.heartbeat', 'provisional_binance_perp_book.heartbeat'}),
+    ):
+        for fault in (('none', 'active', 'stop', 'remove', 'remains', 'drain')
+                      if script.name == 'retire_legacy_book_workers.sh' else ('none', 'active', 'stop', 'remove', 'remains')):
+            state = tmp_path / (script.stem + '-' + fault)
+            state.mkdir()
+            trace = state / 'trace'
+            result = subprocess.run(
+                ['bash', '-c', docker + '\nsource "$SCRIPT"'],
+                env={**os.environ, 'PROJECT_NAME': 'test', 'FAULT': fault, 'STATE': str(state),
+                     'TRACE': str(trace), 'SCRIPT': str(script)},
+                capture_output=True, text=True, timeout=10,
+            )
+            calls = trace.read_text().splitlines()
+            assert (result.returncode == 0) is (fault == 'none'), result.stderr
+            wipes = [call for call in calls if call.startswith('run ')]
+            assert bool(wipes) is (fault == 'none')
+            assert all(call.split()[1] in services for call in calls if call.startswith(('stop ', 'rm ')))
+            if fault == 'none':
+                assert {call.split()[1] for call in calls if call.startswith('rm ')} == services
+                assert {Path(word).name for word in wipes[0].split() if word.startswith('/heartbeats/')} == heartbeats
+            if fault == 'active':
+                assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
+            if fault == 'drain':
+                assert {call.split()[1] for call in calls if call.startswith('stop ')} == {'book-capture-spot', 'book-capture-perp'}
+            if fault == 'none' and script.name == 'retire_legacy_book_workers.sh':
+                stopped = [call.split()[1] for call in calls if call.startswith('stop ')]
+                assert stopped[:2] == ['book-capture-spot', 'book-capture-perp']
+                assert stopped[-1] == 'depth-worker'
 
     specification = importlib.util.spec_from_file_location('render_top20_deploy', REPO_ROOT / 'deploy/render_top20_deploy.py')
     assert specification is not None and specification.loader is not None
@@ -308,6 +327,38 @@ function docker() {
         assert str(floor / 'docker-compose.deploy.yml') in restores[0]
         assert restores[0][restores[0].index('--project-directory') + 1] == str(root)
 
+    state['stages'] = ['LIVE', 'LIVE']
+    state['legacy_stages'] = ['DORMANT', 'DORMANT']
+    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
+    for service in guard.RENDER_WORKERS:
+        members[service] = dict(members['provisional-worker'], service=service, id=service)
+    for service in guard.RETIRED:
+        del members[service]
+    guard.main('capture', root, 'test')
+    retained = json.loads((root / '.render-top20-before.json').read_text())['containers']
+    assert set(retained) == (guard.PROTECTED - guard.RETIRED) | guard.RENDER_WORKERS
+    state['frontiers']['binance_spot_book'] = '2026-10-24 12:59:00'
+    with pytest.raises(RuntimeError, match='regressed'):
+        guard.main('check', root, 'test')
+    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
+    for service in guard.RENDER_WORKERS:
+        for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted')):
+            original = members[service][key]
+            members[service][key] = invalid
+            with pytest.raises(RuntimeError, match='protected worker'):
+                guard.main('check', root, 'test')
+            members[service][key] = original
+        missing = members.pop(service)
+        with pytest.raises(RuntimeError, match='must remain running'):
+            guard.main('capture', root, 'test')
+        members[service] = missing
+    guard.main('check', root, 'test')
+    (root / '.book-reader-cutover.json').write_text('{}')
+    calls.clear()
+    with pytest.raises(RuntimeError, match='readers have switched'):
+        guard.main('rollback', root, 'test')
+    assert not calls
+
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:
     import os
@@ -338,7 +389,7 @@ function docker() {
         printf '%s\n' 'old-ui ui-host' ;;
       'inspect --format {{.Id}} '*)
         printf '%s\n' "${@: -1}" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state provisional-binance-spot-top20 provisional-binance-perp-top20')
         return 0 ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -410,7 +461,7 @@ function docker() {
         printf '%s\n' "${@: -1}" ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state provisional-binance-spot-top20 provisional-binance-perp-top20')
         printf 'up\n' >> "$CALLS" ;;
       'ps -aq --no-trunc')
         if [ "$RETIREMENT_CASE" = inventory-error ]; then return 1; fi
@@ -523,7 +574,7 @@ function docker() {
         return 0 ;;
       'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 --force-recreate dagster dagit provisional-worker')
         printf 'recreate\n' >> "$CALLS" ;;
-      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20')
+      'compose -p test -f docker-compose.deploy.yml up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state provisional-binance-spot-top20 provisional-binance-perp-top20')
         printf 'up\n' >> "$CALLS" ;;
       *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
     esac
@@ -738,7 +789,7 @@ def test_law_volume_port_and_credentials_are_isolated() -> None:
 
 def test_law_deploy_preserves_workers_egress_preflight_and_recovery() -> None:
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector depth-worker provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book'
+    command = 'up -d --wait --wait-timeout 600 clickhouse dagster dagit monitor vector provisional-worker provisional-binance-perp-trades publication-binance-spot-trades publication-binance-perp-trades perp-repair provisional-binance-spot-aggtrades provisional-binance-perp-aggtrades law market-state'
     assert command in workflow
     assert workflow.index('bash deploy/prepare_binance_egress.sh') < workflow.index(command)
     assert workflow.index(command) < workflow.index('python -m origo.orchestration.recovery')
@@ -801,7 +852,7 @@ def test_market_state_api_is_deployed_on_loopback_with_bounded_resources() -> No
     assert '  market-state:\n    # Compose-managed with a pinned name' in deploy[1]
     assert 'name: tdw-control-plane_market-state' in deploy[1]
     workflow = (REPO_ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert 'provisional-binance-perp-aggtrades law market-state book-capture-spot book-capture-perp provisional-binance-spot-book provisional-binance-perp-book provisional-binance-spot-top20 provisional-binance-perp-top20 \\' in workflow
+    assert 'provisional-binance-perp-aggtrades law market-state provisional-binance-spot-top20 provisional-binance-perp-top20 \\' in workflow
     test_all_published_ports_bind_loopback()
 
 

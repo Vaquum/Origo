@@ -124,7 +124,7 @@ DEPTH200_LIVE_RECONCILIATION_SPEC = DepthLiveReconciliationSpec(
     sync_asset='sync_binance_spot_depth200_snapshots_to_origo',
     projection_asset='refresh_binance_spot_depth200_1m_origo',
 )
-DEPTH_SPECS = (DEPTH20_LIVE_RECONCILIATION_SPEC, DEPTH200_LIVE_RECONCILIATION_SPEC)
+DEPTH_SPECS: tuple[DepthLiveReconciliationSpec, ...] = ()
 
 
 def _required_env_value(name: str) -> str:

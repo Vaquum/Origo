@@ -187,6 +187,24 @@ def _objects(value: Json) -> list[Document]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def retired_book_condition(group: str, catalog: Document) -> bool:
+    if not catalog:
+        return False
+    if group.startswith('law:'):
+        group = group.replace('law:', 'law.', 1)
+    sources = {'binance_spot_book', 'binance_perp_book',
+               'binance_spot_depth20_1m', 'binance_spot_depth200_1m'}
+    if any(str(source.get('id')) in sources and source.get('rollout_stage') != 'DORMANT'
+           for source in _objects(catalog.get('sources'))):
+        return False
+    return (group.startswith('law.') and group.partition(':')[2] in sources) or group in {
+        'heartbeat_stale:depth', 'heartbeat_stale:book_capture_spot',
+        'heartbeat_stale:book_capture_perp', 'heartbeat_stale:provisional_binance_spot_book',
+        'heartbeat_stale:provisional_binance_perp_book', 'collector_book:spot',
+        'collector_book:perp', 'collector_silent:depth20', 'collector_silent:depth200',
+    }
+
+
 def _text(value: Json) -> str | None:
     return value if isinstance(value, str) else None
 
@@ -314,6 +332,8 @@ def _cards(current: Document, catalog: Document, coverage: Coverage) -> list[Sum
     cards: list[SummaryCard] = []
     for family, title in LAW_NAMES.items():
         members = [key for key in required if key.startswith(f'law.{family}:')]
+        if family == 'D1' and not members:
+            continue
         results = [_object(_object(feeds.get(key.split(':', 1)[1], {}).get('predicates')).get(family))
                    if key in descriptors and not unavailable else {} for key in members]
         states: list[SummaryStatus] = [_status(result.get('status')) for result in results]
@@ -664,12 +684,13 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
     fault = bool(current.get('reason')) or stale
     effective = {**current, 'reason': current.get('reason') or ('stale_report' if stale else ''), 'evidence_expired': stale}
     cards = _cards(effective, catalog, coverage)
-    status = 'UNKNOWN' if fault else _rollup([card['status'] for card in cards[:6]])
+    status = 'UNKNOWN' if fault else _rollup([card['status'] for card in cards if card['id'] in LAW_NAMES])
     inventory = next((item for item in _objects(report.get('gates')) if item.get('gate_id') == 'law.inventory'), Document())
     if not fault:
         status = _rollup([status, _status(inventory.get('outcome'))])
     incidents = sorted((_incident(key, episode, frames, now) for key, episode in episodes.items()
-                        if episode.active or episode.observations or episode.was_recovered), key=incident_rank)
+                        if (episode.active or episode.observations or episode.was_recovered)
+                        and not retired_book_condition(key, catalog)), key=incident_rank)
     omitted = None if any(frame['omitted_groups'] is None for frame in frames) else max((frame['omitted_groups'] or 0 for frame in frames), default=0)
     summary: OperatorSummary = {'schema_version': 1, 'sampling_slot': _text(report.get('sampling_slot')) or (frames[-1]['sampling_slot'] if frames else None),
         'catalog_version': _text(catalog.get('version')), 'observed_at': observed_at, 'prepared_at': now.isoformat(),

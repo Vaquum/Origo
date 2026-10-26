@@ -72,7 +72,11 @@ MAX_GATE_DAYS = 20_000
 OWN_GATE = 'monitor.data_current'
 CORE_SOURCES = (
     'binance_spot_trades', 'binance_spot_aggtrades', 'binance_perp_trades',
-    'binance_perp_aggtrades', 'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
+    'binance_perp_aggtrades',
+)
+BOOK_SOURCES = (
+    ('binance_spot_depth20_1m', 'binance_spot_depth200_1m'),
+    ('binance_spot_top20_v1', 'binance_perp_top20_v1'),
 )
 log = logging.getLogger(__name__)
 
@@ -125,12 +129,14 @@ def _valid_report(report: Document) -> bool:
         if (not isinstance(inventory, list) or not all(isinstance(key, str) for key in inventory)
                 or len(inventory) != len(set(str(key) for key in inventory))
                 or not set(CORE_SOURCES) <= set(str(key) for key in inventory)
+                or not any(set(pair) <= set(inventory) for pair in BOOK_SOURCES)
                 or set(feeds) != set(inventory) or len(feeds) != len(_objects(report.get('feeds')))):
             return False
         for source in feeds:
             predicates = _object(feeds[source].get('predicates'))
             required = ('D1',) if source.endswith('_1m') else ('R1', 'C1', 'C2')
-            if not predicates or (source in CORE_SOURCES and not set(required) <= set(predicates)):
+            if not predicates or ((source in CORE_SOURCES or any(source in pair for pair in BOOK_SOURCES))
+                                  and not set(required) <= set(predicates)):
                 return False
             for key in predicates:
                 state = str(_object(predicates.get(key)).get('status'))
@@ -496,8 +502,11 @@ class TapeCache:
                     raise ValueError('operator_summary_exceeds_limit')
                 candidate = _decode(raw)
                 cards = _objects(candidate.get('cards'))
-                expected = [*LAW_NAMES, 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear']
-                if (candidate.get('schema_version') != 1 or [card.get('id') for card in cards] != expected
+                families = [card.get('id') for card in cards if card.get('id') in LAW_NAMES]
+                expected = [*families, 'outputs', 'workers', 'queue', 'collectors', 'errors', 'clear']
+                if (candidate.get('schema_version') != 1
+                        or families not in (list(LAW_NAMES), [key for key in LAW_NAMES if key != 'D1'])
+                        or [card.get('id') for card in cards] != expected
                         or candidate.get('status') not in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT')
                         or any(not isinstance(card.get('value'), str) or not isinstance(card.get('label'), str)
                                or card.get('status') not in ('PASS', 'FAIL', 'UNKNOWN', 'EXPECTED_WAIT') for card in cards)):
@@ -897,7 +906,7 @@ function operationalTotal(metric,horizon='60m'){const v=data?.operations_history
 function coverage(v){return v?`${shown(v.observed_slots)} / ${shown(v.expected_slots)} samples · ${duration(v.covered_seconds)} covered${v.complete?'':' · incomplete'} · through ${utc(v.window_end)}${v.reason==='latest_read_unavailable'?' · latest read unavailable':''}`:'Not recorded in this observation'}
 function outputCounts(){const nodes=sources().filter(s=>s.rollout_stage!=='DORMANT').flatMap(s=>s.projections).filter(p=>p.lane==='consumer'),states=nodes.map(p=>publicationState(p).status);return {nodes,current:states.filter(s=>s==='CURRENT').length,pending:states.filter(s=>s==='WAITING'||s==='INACTIVE').length,failed:states.filter(s=>s==='FAILED'||s==='STALE').length,unknown:states.filter(s=>s==='UNKNOWN').length}}
 function summaryCard(card){const unavailable=Boolean(data.reason)&&data.operator_summary?.law_observed!==false||data.reason==='observation_service_unavailable'||num(data.operator_summary_age_seconds)===null||data.operator_summary_age_seconds>=120;const status=unavailable?'UNKNOWN':card.status;const value=unavailable?(card.value.includes(' / ')?'Unknown / '+card.value.split(' / ').slice(1).join(' / '):'Unknown'):card.value;const primary=Object.hasOwn(LAW_NAMES,card.id),tag=primary?'h2':'h3';return `<button class="${primary?'overview-card':'overview-secondary'}" data-overview="${esc(card.id)}">${primary?'':badge(status)}<${tag}>${esc(card.label)}</${tag}>${primary?badge(status):''}<div class="overview-value">${esc(value)}</div><div class="overview-reason">${esc(card.explanation)}</div></button>`}
-function renderOverview(){const cards=data.operator_summary?.cards||[],checks=['dagster_reachable','queue_bounded','workers_alive','collectors_serving','no_error_logs','publication_current','data_current'].map(k=>event('monitor.'+k).outcome),inventory=event('law.inventory');return `<div class="overview-grid">${cards.slice(0,6).map(summaryCard).join('')}</div><div class="overview-secondary-grid">${cards.slice(6).map(summaryCard).join('')}</div><div class="status-band" id="monitor-band"><strong>Monitor checks · data laws are separate</strong><span>${checks.filter(s=>s==='PASS').length} pass · ${checks.filter(s=>s==='FAIL').length} fail · ${checks.filter(s=>!['PASS','FAIL'].includes(s)).length} unknown</span></div><div class="status-band" id="inventory-band"><strong>Required data-law coverage</strong><span>${requiredLaws().length?`${requiredLaws().length} obligations`:'Membership unavailable'} · inventory ${badge(inventory.outcome)}</span></div>${renderIncidents()}`}
+function renderOverview(){const cards=data.operator_summary?.cards||[],checks=['dagster_reachable','queue_bounded','workers_alive','collectors_serving','no_error_logs','publication_current','data_current'].map(k=>event('monitor.'+k).outcome),inventory=event('law.inventory');return `<div class="overview-grid">${cards.filter(c=>Object.hasOwn(LAW_NAMES,c.id)).map(summaryCard).join('')}</div><div class="overview-secondary-grid">${cards.filter(c=>!Object.hasOwn(LAW_NAMES,c.id)).map(summaryCard).join('')}</div><div class="status-band" id="monitor-band"><strong>Monitor checks · data laws are separate</strong><span>${checks.filter(s=>s==='PASS').length} pass · ${checks.filter(s=>s==='FAIL').length} fail · ${checks.filter(s=>!['PASS','FAIL'].includes(s)).length} unknown</span></div><div class="status-band" id="inventory-band"><strong>Required data-law coverage</strong><span>${requiredLaws().length?`${requiredLaws().length} obligations`:'Membership unavailable'} · inventory ${badge(inventory.outcome)}</span></div>${renderIncidents()}`}
 function renderIncidents(){const summary=data.operator_summary,incidents=summary?.incidents||[];if(!incidents.length&&!summary?.omitted_groups)return '';return `<section class="summary-incidents"><h2>Observed incidents</h2>${incidents.map(incident=>`<details class="summary-incident"><summary>${esc(incident.label)} ${badge(incident.status)}</summary>${(incident.display_lines||[]).slice(1).map(line=>`<p>${esc(line)}</p>`).join('')}</details>`).join('')}<p class="muted">${summary.omitted_groups===null?'Additional groups unknown':esc(summary.omitted_groups)+' recorded groups omitted'}. Coverage: ${esc(summary.coverage.observed_slots)} / ${esc(summary.coverage.expected_slots)} minute checks.</p></section>`}
 async function loadOverview(){const key='days|'+data?.checked_at+'|'+data?.history_loading;if(overviewKey===key||requests.has(key))return;const version=report().catalog_version;try{const result=await historyTask(key,async signal=>{const response=await fetch('/law/gates.json',{signal});if(!response.ok)throw Error('Law history unavailable');return response.json()});if(version!==report().catalog_version)return;if(result.catalog_version!==version)throw Error('History catalog mismatch');const rows={};for(const id of requiredLaws()){const g=descriptor(id)||{cadence:'periodic'},days=blankDays(g,result.days,result.end),indexed=new Map(days.map(d=>[d.day,d]));for(const row of result.gates[id]||[]){const day=indexed.get(row[0]);if(day)Object.assign(day,{pass_count:row[1],fail_count:row[2],wait_count:row[3],unknown_count:row[4],evaluation_count:row[5],observed_slots:row[6],expected_slots:row[7],not_observed:false})}rows[id]=days}data.gate_days=rows;overviewKey=key;if(state.view==='laws')renderContent()}catch(error){if(error.name!=='AbortError')$('#message').textContent='Law history unavailable. Current observations remain visible.'}}
 function gateCard(g){const days=data.gate_days?.[g.id]||[],ev=event(g.id),id=g.id,name=lawName(g);if(state.source&&lawSource(id)!==state.source||state.family&&family(id)!==state.family||state.search&&!JSON.stringify([name,g.name,g.condition,g.scope]).toLowerCase().includes(state.search.toLowerCase())||state.attention==='1'&&!['FAIL','UNKNOWN'].includes(lawResult(id).status))return '';return `<article class="gate" data-law-id="${esc(id)}"><div class="gate-heading"><button data-gate="${esc(id)}">${esc(name)} · ${esc(label(source(lawSource(id))?.name||lawSource(id)))}</button><span class="info-wrap"><button class="info" aria-label="About ${esc(name)}" aria-expanded="false" data-info>i</button><span class="tooltip" role="tooltip">${tooltip(g)}</span></span>${badge(lawResult(id).status)}</div><div class="heatmap" aria-label="30-day observations for ${esc(name)}">${days.map(d=>{const gap=d.not_observed||d.expected_slots!=null&&d.observed_slots<d.expected_slots,kind=d.fail_count?'fail':d.unknown_count||gap?'gap':d.wait_count?'wait':'pass';return `<button class="day ${kind}" data-day="${esc(d.day)}" data-gate-day="${esc(id)}" title="${esc(d.day)} UTC · ${d.evaluation_count} evaluations · ${d.fail_count} failed${gap?' · observation gaps':''}" aria-label="${esc(d.day)}: ${d.fail_count} failed, ${d.evaluation_count} evaluations${gap?', observation gaps':''}"></button>`}).join('')}</div><div class="gate-meta"><span>${esc(days[0]?.day||'History loading')} → today · gaps remain visible</span><span>${esc(utc(ev?.evaluated_at))}</span></div></article>`}

@@ -14,7 +14,7 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
   with original identities and times; it does not replace those authoritative stores.
 - **One pane.** Dagit is where an operator looks first. The external asset
   `origo_monitor` carries the seven checks the monitor evaluates every minute; the live
-  feed assets (`binance_spot_depth_live_feed`, `<source>_provisional_feed`) carry a
+  feed assets (`<source>_provisional_feed`) carry a
   five-minute freshness policy the daemon evaluates without a run. If a fact is not
   visible in Dagit, it is visible in ClickHouse; the monitor's e-mail says which.
 - **One detector.** The monitor runs outside the Dagster process, as its own Compose
@@ -28,12 +28,6 @@ tests in `tests/origo_source_native/test_monitor.py` hold its headings and rules
 The minute paths run outside the Dagster queue as Compose services with heartbeats,
 one tick per minute, restarted by the watchdog when a tick hangs:
 
-- `depth-worker` (`origo.workers.depth`) brings every minute of the last fifteen to
-  completion for depth20 and depth200: raw snapshots from the collector, the 1m
-  projection row and the Arrow chunk, each only when absent. A minute the collector does
-  not serve yet is left for the next tick; a minute that fails stays a candidate for the
-  rest of the lookback and its receipt names the error. The per-minute Dagster jobs stay
-  for operators (backfills, repairs) and nothing schedules them.
 - Each enabled source has its own provisional worker (`origo.workers.provisional`),
   selected by the deployment's `ORIGO_PROVISIONAL_SOURCE`. Each process has its own
   watchdog and `provisional_<source>.heartbeat`, so slow work in one source cannot
@@ -70,20 +64,27 @@ existing R1/data_current reader law remains independent and red while readers la
 The status file lives on the shared heartbeat volume; the monitor never mounts the
 capture spool. Capture failures use the existing Dagit checks, logs and alert path.
 
-Native Binance books have separate `book-capture-spot` and `book-capture-perp` processes.
-The monitor expects `book_capture_<market>.heartbeat` for each enabled book source.
-`collectors_serving` reads each `book_capture_<market>.status.json` once, capped at
-16 KiB: verified sequence state, exchange/receive ages, durable seal age, spool use,
-seed attempts/charged weight and connection attempts. A fresh heartbeat does not
-make stale market data healthy. These reads make zero Binance requests and never
-scan the spool; findings use the existing Dagit checks, log and alert path. The
-provisional workers read only sealed local minutes; their own receipts and feed
-materializations remain the native ingestion evidence.
-Canonical books require complete UTC days of sealed native minutes. Capture gaps
-remain explicit failures; no external archive supplies replacement data. The reader
-laws below use daily native authority, without retired-provider availability checks.
-Historical replay evidence remains in the
-[retired hourly-authority archive](../operations/book_hourly_authority.md).
+The superseded native Spot/perpetual book definitions remain DORMANT while their
+final Spot depth20 archive is verified. Deployment stops their schedules and sensors,
+and both obsolete daily BTC publisher sensors, without changing saved cursors. It
+refuses active old book runs or backfills. Legacy depth/Arrow/BTC assets and jobs are unregistered, so neither named jobs nor
+implicit asset materialization can admit old writes. The old depth feed has no active law or
+freshness asset. The monitor ignores the five retired worker heartbeat names and
+makes no requests to the old depth20/depth200 endpoints. Retired condition groups do
+not carry forward into current incidents; their historical frames remain available.
+Existing evidence retention, including the14-day container-log TTL, is unchanged.
+
+After that deployment is verified, `deploy/retire_legacy_book_workers.sh` checks
+DORMANT admission and quiescence again, then stops the two native capture workers first. Every retained sealed minute must
+match its exact accepted native revision before the provisional workers stop. Missing
+keys are retried within180seconds using bounded key selections; timeout preserves the
+remaining workers for an idempotent retry. The last closed legacy Spot20 minute must
+have raw and projected rows before depth stops last. Stored row counts do not assert
+upstream completeness. It removes
+only those five heartbeat files after confirming every process is gone. Tables,
+spools, historical files and the replacement cache remain in place until the final
+Spot depth20 delta has been downloaded, hashed and read back locally. This pause is
+the archive boundary, before the separate obsolete-code/storage retirement.
 
 Render top20 sources run as `provisional-binance-spot-top20` and
 `provisional-binance-perp-top20`, using the existing provisional worker. They import the newest
@@ -100,8 +101,11 @@ requests. Disabled definitions perform no external status I/O.
 During warm-up, existing book readers and producers remain active. Before replacing
 deployment inputs, `deploy/render_top20_deploy.py` pins the disabled image, matching
 Compose and required environment under `.render-top20-floor` (credentials mode0600).
-It records all16 protected service identities/restarts/start times and existing accepted
+It records the retained service identities/restarts/start times and accepted
 frontiers, rechecks them after preparation and requires frontier progress after verification.
+After qualification, both new top20 workers join that protected set. Old book workers
+may be absent only after their declarations become DORMANT; their old frontiers become
+non-regression obligations at that boundary.
 Dagster, Dagit, monitor and the read-only law renderer are the declared replacements.
 From the deployment directory, warm-up rollback is
 `python3 deploy/render_top20_deploy.py rollback "$PWD" "$PROJECT_NAME"`.
@@ -109,8 +113,14 @@ It validates the pinned inputs before changing admission, refuses active new-sou
 native work, retires only the two new worker services before removing their heartbeat
 files, then restores the four controllers with normal DORMANT preparation and component
 compatibility. It preserves cache, accepted generations, pins, Arrow, cursors and all
-volumes. Repeating rollback does not recreate the new workers. After a consumer switches,
-restore its previous reader before using this warm-up rollback.
+volumes. Repeating rollback does not recreate the new workers. After reader cutover, the recorded `.book-reader-cutover.json` marker refuses this
+warm-up rollback before changing any process. Recovery must preserve the qualified
+source workers and the readers already using them.
+
+Later top20 adapter updates use the existing deliberate full-release path; ordinary
+native-only controller deployments retain their worker image bindings. Recovery from
+an interrupted pause repeats the current deployment/helper; it preserves all stored
+book data and the replacement workers.
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
@@ -159,7 +169,7 @@ feed's liveness in the pane and the monitor's `workers_alive` is what alerts.
 | Did market state queries succeed, and were idle results reclaimed | `origo.worker_minute_log` (feed `market_state_api`) and the service's `lifecycle.sqlite` | `market_state_query_service` in Dagit; `origo_monitor:workers_alive` for `FAILED` receipts |
 | Why did a source build or publication fail | `origo.source_failure_log` | `binance_spot_trades_failure_sensor` output in Dagit; the table itself |
 | What did a container print | `origo.container_log` (14 days) | `SELECT * FROM origo.container_log WHERE service = ... ORDER BY timestamp` |
-| Are the depth collectors serving | The collectors' history endpoints | `origo_monitor:collectors_serving` |
+| Are the Render collectors serving | Each replica's authenticated `/status` | `origo_monitor:collectors_serving` |
 | What did the monitor send and when | `origo_monitor` check metadata and the e-mail | The asset's Checks tab; the mailbox |
 
 ## Investigation order

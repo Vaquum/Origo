@@ -31,46 +31,12 @@ from dagster import (
 
 from .orchestration.recovery import recover_orchestration_job
 
-from .assets.publish_btc_briefing_feed import publish_btc_briefing_feed
-from .assets.publish_btc_briefing_history import publish_btc_briefing_history
 from .assets.create_origo_database import (
     create_origo_database,
     get_clickhouse_settings as get_origo_clickhouse_settings,
     make_clickhouse_client as make_origo_clickhouse_client,
 )
-from .assets.create_binance_spot_depth20_1m_table_origo import (
-    create_binance_spot_depth20_1m_table_origo,
-)
-from .assets.create_binance_spot_depth20_snapshots_table_origo import (
-    create_binance_spot_depth20_snapshots_table_origo,
-)
-from .assets.create_binance_spot_depth200_1m_table_origo import (
-    create_binance_spot_depth200_1m_table_origo,
-)
-from .assets.create_binance_spot_depth200_snapshots_table_origo import (
-    create_binance_spot_depth200_snapshots_table_origo,
-)
-from .assets.refresh_binance_spot_depth20_1m_origo import (
-    refresh_binance_spot_depth20_1m_origo,
-    repair_binance_spot_depth20_1m_history_origo,
-)
-from .assets.refresh_binance_spot_depth200_1m_origo import (
-    refresh_binance_spot_depth200_1m_origo,
-)
-from .assets.sync_binance_spot_depth20_snapshots_to_origo import (
-    sync_binance_spot_depth20_snapshots_to_origo,
-)
-from .assets.reconcile_binance_spot_depth20_partition_state_origo import (
-    reconcile_binance_spot_depth20_partition_state_origo,
-)
-from .assets.sync_binance_spot_depth200_snapshots_to_origo import (
-    sync_binance_spot_depth200_snapshots_to_origo,
-)
-from .assets.reconcile_binance_spot_depth200_partition_state_origo import (
-    reconcile_binance_spot_depth200_partition_state_origo,
-)
 from .assets.build_depth_snapshot_store_arrow import build_depth_snapshot_store_arrow
-from .workers.depth import LIVE_FEED_ASSET as DEPTH_LIVE_FEED_ASSET
 from .workers.market_state_api import ASSET as MARKET_STATE_QUERY_ASSET
 from .workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 
@@ -216,7 +182,7 @@ def _partitioned_run_request(
 @asset_sensor(
     asset_key=AssetKey("build_binance_spot_trades_canonical_revision_origo"),
     job=publish_btc_briefing_feed_job,
-    default_status=DefaultSensorStatus.RUNNING,
+    default_status=DefaultSensorStatus.STOPPED,
 )
 def publish_btc_briefing_feed_sensor(
     context: object,
@@ -255,7 +221,7 @@ def _publish_btc_briefing_history_run_request(
 @asset_sensor(
     asset_key=AssetKey("publish_btc_briefing_feed"),
     job=publish_btc_briefing_history_job,
-    default_status=DefaultSensorStatus.RUNNING,
+    default_status=DefaultSensorStatus.STOPPED,
 )
 def publish_btc_briefing_history_sensor(
     context: object,
@@ -299,16 +265,6 @@ def origo_monitor_checks() -> Iterator[AssetCheckResult]:
 # The live feeds: external assets the workers materialize every tick. Their freshness
 # policy is the feed's liveness in Dagit, evaluated by the daemon without a run; the
 # monitor's heartbeat check is what alerts on a stalled worker.
-binance_spot_depth_live_feed = AssetsDefinition(
-    specs=[
-        AssetSpec(
-            DEPTH_LIVE_FEED_ASSET,
-            group_name='live_feeds',
-            description='The depth worker materializes this every tick for depth20 and depth200.',
-            freshness_policy=FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW),
-        )
-    ]
-)
 market_state_query_service = AssetsDefinition(
     specs=[
         AssetSpec(
@@ -322,52 +278,10 @@ market_state_query_service = AssetsDefinition(
 
 
 defs = Definitions(
-    assets=[origo_monitor,
-            binance_spot_depth_live_feed,
-            market_state_query_service,
-            create_origo_database,
-            create_binance_spot_depth20_snapshots_table_origo,
-            create_binance_spot_depth20_1m_table_origo,
-            create_binance_spot_depth200_snapshots_table_origo,
-            create_binance_spot_depth200_1m_table_origo,
-            sync_binance_spot_depth20_snapshots_to_origo,
-            refresh_binance_spot_depth20_1m_origo,
-            repair_binance_spot_depth20_1m_history_origo,
-            reconcile_binance_spot_depth20_partition_state_origo,
-            sync_binance_spot_depth200_snapshots_to_origo,
-            refresh_binance_spot_depth200_1m_origo,
-            reconcile_binance_spot_depth200_partition_state_origo,
-            publish_btc_briefing_feed,
-            publish_btc_briefing_history,
-            build_depth_snapshot_store_arrow],
-
-    schedules=[
-    ],
-
+    assets=[origo_monitor, market_state_query_service, create_origo_database],
     asset_checks=[origo_monitor_checks],
-
-    sensors=[
-        publish_btc_briefing_feed_sensor,
-        publish_btc_briefing_history_sensor,
-    ],
-
-    jobs=[create_origo_database_job,
-          create_binance_spot_depth20_snapshots_table_origo_job,
-          create_binance_spot_depth20_1m_table_origo_job,
-          create_binance_spot_depth200_snapshots_table_origo_job,
-          create_binance_spot_depth200_1m_table_origo_job,
-          refresh_binance_spot_depth20_data_source_job,
-          refresh_binance_spot_depth200_data_source_job,
-          backfill_binance_spot_depth20_data_source_job,
-          backfill_binance_spot_depth200_data_source_job,
-          repair_binance_spot_depth20_projection_job,
-          repair_binance_spot_depth200_projection_job,
-          repair_binance_spot_depth20_1m_history_job,
-          reconcile_binance_spot_depth20_partition_state_origo_job,
-          reconcile_binance_spot_depth200_partition_state_origo_job,
-          publish_btc_briefing_feed_job,
-          publish_btc_briefing_history_job,
-          build_depth_snapshot_store_arrow_job])
+    jobs=[create_origo_database_job],
+)
 
 # TODO: Put everything in to same order in all segments of the code
 
@@ -383,6 +297,7 @@ from .sources.registry import SOURCE_REGISTRY
 
 _registered_source_bundles = tuple(
     build_source_bundle(spec) for spec in SOURCE_REGISTRY
+    if spec.key not in ('binance_spot_book', 'binance_perp_book')
 )
 
 defs = Definitions.merge(

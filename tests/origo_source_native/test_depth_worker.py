@@ -87,7 +87,7 @@ def test_candidate_minutes_cover_the_lookback_oldest_first_within_the_partition_
     ]
     with pytest.raises(RuntimeError, match='at least one minute'):
         candidate_minutes(spec, now, 0)
-    assert {item.series for item in DEPTH_SPECS} == {'depth20_snapshots', 'depth200_snapshots'}
+    assert DEPTH_SPECS == ()  # The retained codec is not a deployed feed.
     assert DepthFeed.lookback_minutes == depth.DEPTH_SOURCE_LOOKBACK_MINUTES == 15
 
 

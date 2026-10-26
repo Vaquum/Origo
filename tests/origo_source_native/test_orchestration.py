@@ -694,7 +694,8 @@ def test_startup_recovery_completes_outside_captured_logging(origo_test_env, tmp
         for module, job_name, day, arguments in commands:
             kept, redundant = (
                 create_run_for_test(
-                    instance, status=DagsterRunStatus.QUEUED, tags={'dagster/partition': day}
+                    instance, job_name='refresh_binance_spot_trades_canonical_source_job',
+                    status=DagsterRunStatus.QUEUED, tags={'dagster/partition': day}
                 )
                 for _ in range(2)
             )

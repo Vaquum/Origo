@@ -49,6 +49,7 @@ def book_runtime(
     # The recorded minute is historical test input; only the partition calendar differs.
     spec = replace(
         declared,
+        rollout_stage=RolloutStage.CANARY,
         partitions=PartitionPolicy((first - timedelta(days=1)).date()),
         canonical=LocalBookCanonical(market),
         orchestration=replace(declared.orchestration, retry_count=0),
@@ -81,13 +82,13 @@ def _keys(runtime: SourceRuntime) -> tuple[str, ...]:
     )
 
 
-def test_book_sources_register_as_canary_beside_the_four_trade_sources() -> None:
+def test_old_book_sources_remain_declared_dormant_until_archive() -> None:
     assert len(SOURCE_REGISTRY) == 8
     assert (
         len([spec for spec in SOURCE_REGISTRY if spec.key.endswith(('trades', 'aggtrades'))]) == 4
     )
     for spec in SPECS:
-        assert spec in SOURCE_REGISTRY and spec.rollout_stage == RolloutStage.CANARY
+        assert spec in SOURCE_REGISTRY and spec.rollout_stage == RolloutStage.DORMANT
         assert spec.read_policy == SourceReadPolicy.AVAILABLE
         assert isinstance(spec.canonical, LocalBookCanonical)
         assert spec.partitions.start == datetime(2026, 10, 4, tzinfo=UTC)
@@ -110,8 +111,8 @@ def test_book_sources_register_as_canary_beside_the_four_trade_sources() -> None
         assert repository.has_job(f'backfill_{spec.key}_source_job')
         assert not repository.has_schedule_def(f'{spec.key}_provisional_schedule')
         assert repository.asset_graph.get(AssetKey(f'{spec.key}_provisional_feed'))
-        assert all(schedule.default_status.value == 'RUNNING' for schedule in bundle.schedules)
-        assert all(sensor.default_status.value == 'RUNNING' for sensor in bundle.sensors)
+        assert all(schedule.default_status.value == 'STOPPED' for schedule in bundle.schedules)
+        assert all(sensor.default_status.value == 'STOPPED' for sensor in bundle.sensors)
 
 
 def test_sealed_minutes_build_both_depths_and_minute_rows_idempotently(

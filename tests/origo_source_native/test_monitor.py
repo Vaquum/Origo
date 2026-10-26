@@ -353,14 +353,14 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
 
 
 def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Path) -> None:
-    stale = heartbeat_path(tmp_path / 'heartbeats', 'depth')
+    stale = heartbeat_path(tmp_path / 'heartbeats', 'market_state_api')
     touch_heartbeat(stale)
     old = NOW.timestamp() - 600
     os.utime(stale, (old, old))
     outcome = _monitor(recorder, tmp_path, dagster_url='http://127.0.0.1:1').tick(NOW)
     assert 'dagster_unreachable' in outcome.failed
     # The other sources are still evaluated in the same tick and every check is written.
-    assert 'heartbeat_stale:depth' in outcome.failed
+    assert 'heartbeat_stale:market_state_api' in outcome.failed
     assert {post['check_name'] for post in _check_posts(recorder)} == set(MONITOR_CHECK_NAMES)
     assert 'dagster_unreachable' in _emails(recorder)[0]['text']
     # The failure cursor did not move while Dagit was down: the same cursor file, a
@@ -388,13 +388,13 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         )
         fresh = heartbeat_path(tmp_path / 'heartbeats', 'provisional_binance_spot_trades')
         touch_heartbeat(fresh)
-        stale = heartbeat_path(tmp_path / 'heartbeats', 'depth')
+        stale = heartbeat_path(tmp_path / 'heartbeats', 'market_state_api')
         touch_heartbeat(stale)
         old = time.time() - 181
         os.utime(stale, (old, old))
         tick_time = datetime.now(UTC) + timedelta(seconds=DELIVERY_LAG_SECONDS + 30)
         outcome = _monitor(recorder, tmp_path, client=client).tick(tick_time)
-        assert 'heartbeat_stale:depth' in outcome.failed
+        assert 'heartbeat_stale:market_state_api' in outcome.failed
         assert 'heartbeat_stale:provisional_binance_spot_trades' not in outcome.failed
         assert 'receipt_failed:depth:depth20_snapshots' in outcome.failed
         assert 'receipt_failed:depth:depth200_snapshots' not in outcome.failed
@@ -416,22 +416,45 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     missing = 'provisional_binance_perp_trades'
     stale = 'provisional_binance_spot_trades'
     heartbeat_path(directory, missing).unlink()
-    retired = heartbeat_path(directory, 'provisional')
-    touch_heartbeat(retired)
     old = NOW.timestamp() - 181
-    for path in (retired, heartbeat_path(directory, stale)):
+    for name in ('provisional', 'depth', 'book_capture_spot', 'book_capture_perp',
+                 'provisional_binance_spot_book', 'provisional_binance_perp_book', stale):
+        path = heartbeat_path(directory, name)
+        touch_heartbeat(path)
         os.utime(path, (old, old))
     outcome = monitor.tick(NOW)
     expected = {
         f'heartbeat_stale:{missing}', f'heartbeat_stale:{stale}'
     }
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == expected
-    assert len(monitor._heartbeats()) == 12
+    assert len(monitor._heartbeats()) == 8
+    # Named metadata faults model incidents recorded before this deployment.
+    # Their historical frames remain; they cannot become current UNKNOWN obligations.
+    from copy import deepcopy
+
+    frame = deepcopy(monitor.notification_history.observations()[-1])
+    frame['sampling_slot'] = (NOW + timedelta(minutes=1)).isoformat()
+    frame.pop('notification_transitions', None)
+    template = next(item for item in frame['observations'] if item['group_id'] == f'heartbeat_stale:{missing}')
+    retired_groups = {'heartbeat_stale:depth', 'law.R1:binance_spot_book',
+                      'law:R1:binance_spot_book', 'collector_book:spot'}
+    frame['observations'].extend({**deepcopy(template), 'group_id': group, 'scope': group,
+                                  'detector_keys': [group], 'measurements': []} for group in sorted(retired_groups))
+    monitor.notification_history.append(frame, None, NOW + timedelta(minutes=1))
+    recorded = monitor.notification_history.frames[frame['sampling_slot']]
+    monitor.tick(NOW + timedelta(minutes=2))
+    current = monitor.notification_history.observations()[-1]
+    assert not retired_groups & {item['group_id'] for item in current['observations']}
+    assert monitor.notification_history.frames[frame['sampling_slot']] == recorded
+    summary = json.loads((monitor.law_tape.root / 'operator-summary.json').read_text())
+    incidents = {item['group_id'] for item in summary['incidents']}
+    assert not retired_groups & incidents
+    assert f'heartbeat_stale:{missing}' in incidents
     monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
     split = _monitor(recorder, tmp_path / 'split')
     roles = ('trade_publication_binance_spot_trades',
              'trade_publication_binance_perp_trades', 'perp_repair_binance_perp_trades')
-    assert len(split._heartbeats()) == 15
+    assert len(split._heartbeats()) == 11
     for name in roles[:2]:
         touch_heartbeat(heartbeat_path(split.heartbeat_dir, name))
     stale_role = heartbeat_path(split.heartbeat_dir, roles[2])
@@ -509,7 +532,9 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert email['_authorization'] == 'Bearer test-key'
     assert email['to'] == ['operator@example.test']
     assert 'Dagit checks recorded.' in email['text']
-    assert all(title in email['text'] and html.escape(title) in email['html'] for title in LAW_NAMES.values())
+    assert all(title in email['text'] and html.escape(title) in email['html']
+               for family, title in LAW_NAMES.items() if family != 'D1')
+    assert LAW_NAMES['D1'] not in email['text']
     assert email['_idempotency_key']
     recorded_keys = ', '.join(post['metadata']['keys'] for post in checks)
     assert all(key in recorded_keys for key in outcome.failed)
@@ -943,11 +968,13 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert len(report['gates']) < len(monitor.catalog['gates'])
     assert all(event['reason'] != 'not_observed' for event in report['gates'])
     assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
-    # Preserve the former 8-KiB-per-feed envelope as two additional feeds become active.
-    assert len(json.dumps(report, separators=(',', ':')).encode()) < 8 * 1024 * len(report['inventory'])
+    # Dormant declarations still carry historical projection metadata until physical retirement.
+    # The per-declaration bound is below the previous ten-feed 80-KiB total ceiling.
+    assert len(json.dumps(report, separators=(',', ':')).encode()) < 8 * 1024 * len(monitor.catalog['sources'])
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     email = _emails(recorder)[0]
-    assert 'Live source data is fresh' in email['text'] and 'Depth minutes are complete' in email['text']
+    assert 'Live source data is fresh' in email['text']
+    assert 'Depth minutes are complete' not in email['text']
     assert 'Evidence: samples-' in email['text']
 
 
@@ -1532,8 +1559,8 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         return next(event['evidence'] for event in report['gates'] if event['gate_id'] == f'monitor.{check}')
 
     workers, logs = evidence('workers_alive'), evidence('no_error_logs')
-    assert workers['workers_fresh'] == 12 and workers['workers_expected'] == 13
-    assert workers['workers_unknown'] == 1 and workers['failed_receipts'] == 1
+    assert workers['workers_fresh'] == 8 and workers['workers_expected'] == 8
+    assert workers['workers_unknown'] == 0 and workers['failed_receipts'] == 1
     assert logs['error_lines'] == 1
     for measured in (workers, logs):
         assert measured['window_start'] == since.replace(microsecond=0).isoformat()
@@ -1541,7 +1568,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 8
+    assert evidence('collectors_serving')['collectors_serving'] == 6
     assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
@@ -1562,9 +1589,9 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     touch_heartbeat(heartbeat_path(monitor.heartbeat_dir, 'depth'))
     heartbeat_path(monitor.heartbeat_dir, 'provisional_binance_spot_trades').unlink()
     monitor.tick(now + timedelta(minutes=1))
-    assert evidence('workers_alive')['workers_expected'] == 13
+    assert evidence('workers_alive')['workers_expected'] == 8
     assert evidence('workers_alive')['workers_unknown'] == 1
-    assert evidence('workers_alive')['workers_fresh'] == 12
+    assert evidence('workers_alive')['workers_fresh'] == 7
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
     assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
@@ -1592,7 +1619,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
 
     catalog = build_catalog('58b45deee0602e7524c2efcba4e532174ad40902')
     required = catalog['law_gate_ids']
-    assert len(required) == 28 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
+    assert len(required) == 20 and {identity.split(':', 1)[1] for identity in required} == set(LAW_INVENTORY)
     monkeypatch.setattr('origo.sources.registry.SOURCE_REGISTRY', ())
     assert build_catalog(catalog['deployed_sha'])['law_gate_ids'] == required
     client.execute('SYSTEM START TTL MERGES origo.container_log')
@@ -1637,7 +1664,8 @@ def test_publication_policy_evidence_reuses_existing_decisions(
     }
     assert monitor.publication_policy[f'{source}:consumer:huggingface']['reason'] == 'unknown'
     assert monitor.publication_policy['binance_perp_aggtrades:consumer:mount']['reason'] == 'not_applicable'
-    assert monitor.publication_policy['binance_spot_depth20_1m:consumer:arrow']['reason'] == 'not_applicable'
+    assert 'binance_spot_depth20_1m:consumer:arrow' not in monitor.publication_policy
+    assert monitor.publication_policy['binance_spot_top20_v1:consumer:arrow']['reason'] == 'unknown'
 
     _manifest(root, source, 'mount', end - timedelta(hours=3, seconds=1))
     assert monitor._publication_findings()[0].key == f'publication_stale:{source}:mount'
@@ -2092,7 +2120,8 @@ def test_book_capture_health_uses_bounded_local_evidence(
     status['committed_at'] = now.isoformat()
     path.write_text(json.dumps(status))
     # Isolate the recorded acquisition evidence for this market.
-    monitor_book_registry = tuple(spec for spec in SOURCE_REGISTRY if spec.key == f'binance_{market}_book')
+    monitor_book_registry = tuple(replace(spec, rollout_stage=RolloutStage.CANARY)
+                                  for spec in SOURCE_REGISTRY if spec.key == f'binance_{market}_book')
     monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', monitor_book_registry)
     assert monitor._book_capture_findings(now) == []
     assert monitor.book_evidence[f'collector_book:{market}']['spool_bytes']

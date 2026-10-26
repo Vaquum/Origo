@@ -268,7 +268,13 @@ def test_c2_checks_frozen_older_calendar_throughout_day(canonical_case: LawCase)
 
 
 @pytest.fixture()
-def captured_depth_minute(law_case: LawCase) -> tuple[str, datetime]:
+def captured_depth_minute(law_case: LawCase, monkeypatch: pytest.MonkeyPatch) -> tuple[str, datetime]:
+    from origo.workers import depth
+
+    retired = (depth.DEPTH20_LIVE_RECONCILIATION_SPEC, depth.DEPTH200_LIVE_RECONCILIATION_SPEC)
+    monkeypatch.setattr(depth, 'DEPTH_SPECS', retired)
+    monkeypatch.setattr(law, 'DEPTH_SPECS', retired)
+    monkeypatch.setattr(law, 'LAW_INVENTORY', (*law.LAW_INVENTORY, *(s.projection_table_name for s in retired)))
     from origo.assets import create_binance_spot_depth200_1m_table_origo as projection
     from origo.assets import create_binance_spot_depth200_snapshots_table_origo as raw
     from origo.assets import refresh_binance_spot_depth200_1m_origo as refresh
@@ -532,7 +538,9 @@ def test_projection_status_requires_its_own_current_evidence(law_case: LawCase) 
 def test_new_depth_declaration_requires_explicit_law_coverage(
     law_case: LawCase, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    unsupported = replace(law.DEPTH_SPECS[0], projection_table_name='new_depth_1m')
+    from origo.workers.depth import DEPTH20_LIVE_RECONCILIATION_SPEC
+
+    unsupported = replace(DEPTH20_LIVE_RECONCILIATION_SPEC, projection_table_name='new_depth_1m')
     monkeypatch.setattr(law, 'DEPTH_SPECS', (*law.DEPTH_SPECS, unsupported))
     report = law_case.report(START)
     assert 'new_depth_1m' in report['inventory']

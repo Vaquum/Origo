@@ -102,6 +102,7 @@ from origo.observatory import (
     decode_observation_record,
     lifecycle_transitions,
     operations_totals,
+    retired_book_condition,
 )
 from origo.observatory import (
     operation_sample as _operation_sample,
@@ -1418,6 +1419,8 @@ class Monitor:
         for previous in ([self.notification_history.decode(self.notification_history.frames[max(self.notification_history.frames)])[0]] if self.notification_history.frames else []):
             for prior in previous['observations']:
                 group, check = prior['group_id'], prior['check']
+                if retired_book_condition(group, cast(Document, self.catalog) if self.catalog else {}):
+                    continue
                 if group in observations or prior['kind'] == 'event_stream':
                     continue
                 healthy = reads.get(check, False) and not group.startswith(('law.', 'heartbeat_stale:'))
@@ -1606,7 +1609,10 @@ class Monitor:
         return findings, True
 
     def _heartbeats(self) -> list[Path]:
-        ignored = {heartbeat_path(self.heartbeat_dir, name) for name in (self.name, 'provisional')}
+        ignored = {heartbeat_path(self.heartbeat_dir, name) for name in (
+            self.name, 'provisional', 'depth', 'book_capture_spot', 'book_capture_perp',
+            'provisional_binance_spot_book', 'provisional_binance_perp_book',
+        )}
         expected = {
             heartbeat_path(self.heartbeat_dir, f'provisional_{spec.key}')
             for spec in SOURCE_REGISTRY
@@ -2003,14 +2009,7 @@ def build_monitor(environ: dict[str, str]) -> Monitor:
     client = make_clickhouse_client(settings)
     ensure_monitoring_tables(client, settings.database)
     heartbeat_dir = heartbeat_directory()
-    probes = tuple(
-        CollectorProbe(name, base_env, token_env)
-        for name, base_env, token_env in (
-            ('depth20', 'BINANCE_SPOT_DEPTH20_BASE_URL', 'BINANCE_SPOT_DEPTH20_AUTH_TOKEN'),
-            ('depth200', 'BINANCE_SPOT_DEPTH200_BASE_URL', 'BINANCE_SPOT_DEPTH200_AUTH_TOKEN'),
-        )
-        if environ.get(base_env) and environ.get(token_env)
-    )
+    probes: tuple[CollectorProbe, ...] = ()
     alert_settings = AlertSettings.from_environment(environ)
     if alert_settings is None:
         log.warning('alerts disabled: ORIGO_ALERT_* is not set; findings are logged only')

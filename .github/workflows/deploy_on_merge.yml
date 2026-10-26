@@ -440,7 +440,6 @@ jobs:
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
             python3 deploy/render_top20_deploy.py verify "$DEPLOY_DIR" "$PROJECT_NAME"
           fi
-          bash deploy/retire_legacy_book_files.sh
           echo 'post-up: deployment verified'
           REMOTE
 

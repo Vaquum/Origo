@@ -45,7 +45,6 @@ def _catalog_template(deployed_sha: str) -> LawCatalog:
             (BASELINE.parent / 'catalog-before-book-retirement.json.gz').read_bytes()
         )))
     return build_catalog(deployed_sha)
-    return build_catalog(deployed_sha)
 
 
 def _prepared_catalog(deployed_sha: str) -> LawCatalog:

@@ -10,6 +10,7 @@ def test_all_enabled_source_sensors_run(
     origo_definitions_module: object,
 ) -> None:
     defs = getattr(origo_definitions_module, 'defs')
+    registered = {sensor.name for sensor in defs.sensors}
     not_running = {
         sensor.name
         for sensor in defs.sensors
@@ -21,4 +22,11 @@ def test_all_enabled_source_sensors_run(
         if source.rollout_stage.value == 'DORMANT'
         for sensor in build_source_bundle(source).sensors
     }
-    assert not_running == expected_stopped
+    assert not_running == expected_stopped & registered
+    expected_running = {
+        sensor.name
+        for source in SOURCE_REGISTRY
+        if source.rollout_stage.value != 'DORMANT'
+        for sensor in build_source_bundle(source).sensors
+    }
+    assert expected_running <= registered

@@ -100,6 +100,7 @@ def test_no_per_minute_schedules_or_run_status_feed_sensors_remain() -> None:
     assert all(schedule.cron_schedule != '* * * * *' for schedule in repository.schedule_defs)
     names = {sensor.name for sensor in defs.sensors}
     assert 'depth_snapshot_store_source_sensor' not in names
+    assert not any(name.startswith(('binance_spot_book_', 'binance_perp_book_')) for name in names)
     assert not {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'} & names
     assert not any(any(family in job.name for family in ('binance_spot_book', 'binance_perp_book',
                        'binance_spot_depth20', 'binance_spot_depth200',

@@ -955,8 +955,15 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
             )
     original_ids = {str(gate['id']) for gate in page._objects(original_catalog['gates']) if str(gate['id']).startswith('law.')}
     rebuilt_ids = {gate['id'] for gate in rebuilt['gates'] if gate['id'].startswith('law.')}
-    assert original_ids <= rebuilt_ids and len(original_ids) == 17
-    assert rebuilt_ids - original_ids == {f'law.{law}:{source}' for source in ('binance_spot_book', 'binance_perp_book', 'binance_spot_top20_v1', 'binance_perp_top20_v1') for law in ('R1', 'C1', 'C2')}
+    assert len(original_ids) == 17
+    assert original_ids - rebuilt_ids == {
+        'law.D1:binance_spot_depth20_1m', 'law.D1:binance_spot_depth200_1m',
+    }
+    assert rebuilt_ids - original_ids == {
+        f'law.{law}:{source}'
+        for source in ('binance_spot_top20_v1', 'binance_perp_top20_v1')
+        for law in ('R1', 'C1', 'C2')
+    }
     with _serving(tmp_path) as (url, cache, summary):
         with urllib.request.urlopen(url + '/law.json', timeout=5) as response:
             assert len(response.read()) <= 160 * 1024, 'Actual current wire must include summary within160KiB.'

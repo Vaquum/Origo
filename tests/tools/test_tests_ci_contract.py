@@ -120,7 +120,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest() == '91a836430b56c515de8f11a36197f073d8ffc32aa2d94a0ad9720ab5acc0e14d'
+    ).encode()).hexdigest() == '12b8b6832eecc1c8b66f08025e6a82eb4a3c60ab0d71afb2e7ead9d6c50c1b59'
     assert contract['required_nodes'] == [
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
@@ -180,6 +180,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_render_book.py::test_retrying_missing_prefix_does_not_starve_ready_minutes[spot]',
         'tests/origo_source_native/test_render_book.py::test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output[spot]',
         'tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence',
+        'tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain',
     ]
 
 

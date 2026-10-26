@@ -1937,6 +1937,123 @@
       "contract": "RETIRED: legacy book capture/provisional/depth deployment is paused by #632 after reader cutover. Retained cases verify DORMANT declarations, replacement worker inputs and refusal while old work is active. They do not re-prove the removed deployment.",
       "retired_capability": "Legacy book writer deployment and active source admission",
       "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_table_creation_jobs_are_registered": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_data_source_job_is_registered_without_a_schedule": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_projection_repair_job_is_projection_only": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_backfill_job_is_manual_data_source_only": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_reconcile_job_reports_existing_table_minutes": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth20_data_source_template.py::test_binance_spot_depth20_history_repair_reprojects_every_minute": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth200_data_source_template.py::test_binance_spot_depth200_table_creation_jobs_are_registered": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth200_data_source_template.py::test_binance_spot_depth200_data_source_job_is_registered_without_a_schedule": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth200_data_source_template.py::test_binance_spot_depth200_projection_repair_job_is_projection_only": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth200_data_source_template.py::test_binance_spot_depth200_backfill_job_is_manual_data_source_only": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_origo_binance_spot_depth200_data_source_template.py::test_binance_spot_depth200_reconcile_job_reports_existing_table_minutes": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_build_depth_snapshot_store_arrow.py::test_definitions_wires_depth_snapshot_arrow_job": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
+    },
+    "tests/origo_source_native/test_build_depth_snapshot_store_arrow.py::test_definitions_keep_the_depth_source_jobs_for_operators_without_a_chunk_sensor": {
+      "retained": [
+        "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain",
+        "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+      ],
+      "contract": "RETIRED: #632 unregisters legacy depth/Arrow creation, manual ingest, repair and backfill jobs after reader cutover. Retained owners prove their absence from both named-job and implicit-asset admission and refusal while old work is active. They do not re-prove removed operator capabilities.",
+      "retired_capability": "Legacy depth/Arrow operator jobs",
+      "retirement_issue": "https://github.com/Vaquum/Origo/issues/632"
     }
   },
   "baseline_additions": {
@@ -2008,6 +2125,7 @@
     "tests/origo_source_native/test_render_book.py::test_worker_imports_current_minute_before_bounded_recovery[perp]",
     "tests/origo_source_native/test_render_book.py::test_retrying_missing_prefix_does_not_starve_ready_minutes[spot]",
     "tests/origo_source_native/test_render_book.py::test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output[spot]",
-    "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence"
+    "tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence",
+    "tests/origo_source_native/test_workers.py::test_no_per_minute_schedules_or_run_status_feed_sensors_remain"
   ]
 }

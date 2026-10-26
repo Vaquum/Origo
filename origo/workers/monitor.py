@@ -1606,7 +1606,10 @@ class Monitor:
         return findings, True
 
     def _heartbeats(self) -> list[Path]:
-        ignored = {heartbeat_path(self.heartbeat_dir, name) for name in (self.name, 'provisional')}
+        ignored = {heartbeat_path(self.heartbeat_dir, name) for name in (
+            self.name, 'provisional', 'depth', 'book_capture_spot', 'book_capture_perp',
+            'provisional_binance_spot_book', 'provisional_binance_perp_book',
+        )}
         expected = {
             heartbeat_path(self.heartbeat_dir, f'provisional_{spec.key}')
             for spec in SOURCE_REGISTRY
@@ -2003,14 +2006,7 @@ def build_monitor(environ: dict[str, str]) -> Monitor:
     client = make_clickhouse_client(settings)
     ensure_monitoring_tables(client, settings.database)
     heartbeat_dir = heartbeat_directory()
-    probes = tuple(
-        CollectorProbe(name, base_env, token_env)
-        for name, base_env, token_env in (
-            ('depth20', 'BINANCE_SPOT_DEPTH20_BASE_URL', 'BINANCE_SPOT_DEPTH20_AUTH_TOKEN'),
-            ('depth200', 'BINANCE_SPOT_DEPTH200_BASE_URL', 'BINANCE_SPOT_DEPTH200_AUTH_TOKEN'),
-        )
-        if environ.get(base_env) and environ.get(token_env)
-    )
+    probes: tuple[CollectorProbe, ...] = ()
     alert_settings = AlertSettings.from_environment(environ)
     if alert_settings is None:
         log.warning('alerts disabled: ORIGO_ALERT_* is not set; findings are logged only')

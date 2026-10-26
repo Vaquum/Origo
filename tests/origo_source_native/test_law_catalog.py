@@ -107,6 +107,9 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
     gates = {gate['id']: gate for gate in catalog['gates']}
     assert len(gates) == len(catalog['gates'])
     for family in GATE_FAMILIES:
+        if family.startswith('depth.'):
+            assert not any(key.startswith(family) for key in gates)
+            continue
         assert any(
             key == family or key.startswith(family + '.') or key.startswith(family + ':')
             for key in gates

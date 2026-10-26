@@ -120,7 +120,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
     assert len(set(contract['baseline_nodes']) | set(additions['nodes'])) == 1058
     assert hashlib.sha256(json.dumps(
         contract['consolidations'], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest() == 'f4904447c9c236340149fab136ed9bb1c263c50af1b180e3bbeb4ae2e6542a6c'
+    ).encode()).hexdigest() == '91a836430b56c515de8f11a36197f073d8ffc32aa2d94a0ad9720ab5acc0e14d'
     assert contract['required_nodes'] == [
         'tests/origo_source_native/test_current_partition_recovery.py::test_trade_state_selection_matches_retained_intervals',
         'tests/origo_source_native/test_provisional_isolation.py::test_trade_ingestion_does_not_wait_for_maintenance',
@@ -133,7 +133,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_missing_location_exhaustion_and_other_fatal_errors_stay_visible',
         'tests/origo_source_native/test_daemon_backfill_restart.py::test_native_daemon_entrypoint_dispatch',
         'tests/origo_source_native/test_book_deploy.py::test_retired_hourly_vendor_credential_is_absent',
-        'tests/origo_source_native/test_book_law.py::test_book_sources_are_required_daily_reader_laws',
+        'tests/origo_source_native/test_book_law.py::test_dormant_book_sources_have_no_required_reader_laws',
         'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[spot]',
         'tests/origo_source_native/test_book_law.py::test_native_daily_backfill_orders_completion_after_canonical_build[perp]',
         'tests/origo_source_native/test_book_sources.py::test_native_audit_reclaims_only_saved_payloads_from_incomplete_days[spot]',
@@ -179,6 +179,7 @@ def test_acceptance_manifest_preserves_original_entry_points() -> None:
         'tests/origo_source_native/test_render_book.py::test_worker_imports_current_minute_before_bounded_recovery[perp]',
         'tests/origo_source_native/test_render_book.py::test_retrying_missing_prefix_does_not_starve_ready_minutes[spot]',
         'tests/origo_source_native/test_render_book.py::test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output[spot]',
+        'tests/origo_source_native/test_book_deploy.py::test_book_pause_stops_only_retired_admission_and_requires_quiescence',
     ]
 
 

@@ -72,7 +72,11 @@ MAX_GATE_DAYS = 20_000
 OWN_GATE = 'monitor.data_current'
 CORE_SOURCES = (
     'binance_spot_trades', 'binance_spot_aggtrades', 'binance_perp_trades',
-    'binance_perp_aggtrades', 'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
+    'binance_perp_aggtrades',
+)
+BOOK_SOURCES = (
+    ('binance_spot_depth20_1m', 'binance_spot_depth200_1m'),
+    ('binance_spot_top20_v1', 'binance_perp_top20_v1'),
 )
 log = logging.getLogger(__name__)
 
@@ -125,12 +129,14 @@ def _valid_report(report: Document) -> bool:
         if (not isinstance(inventory, list) or not all(isinstance(key, str) for key in inventory)
                 or len(inventory) != len(set(str(key) for key in inventory))
                 or not set(CORE_SOURCES) <= set(str(key) for key in inventory)
+                or not any(set(pair) <= set(inventory) for pair in BOOK_SOURCES)
                 or set(feeds) != set(inventory) or len(feeds) != len(_objects(report.get('feeds')))):
             return False
         for source in feeds:
             predicates = _object(feeds[source].get('predicates'))
             required = ('D1',) if source.endswith('_1m') else ('R1', 'C1', 'C2')
-            if not predicates or (source in CORE_SOURCES and not set(required) <= set(predicates)):
+            if not predicates or ((source in CORE_SOURCES or any(source in pair for pair in BOOK_SOURCES))
+                                  and not set(required) <= set(predicates)):
                 return False
             for key in predicates:
                 state = str(_object(predicates.get(key)).get('status'))

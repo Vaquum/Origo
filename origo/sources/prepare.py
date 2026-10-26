@@ -134,6 +134,33 @@ def is_source_backfill(run: DagsterRun, spec: RevisionedSourceSpec) -> bool:
     )
 
 
+def retire_book_admission(instance: DagsterInstance, *, check: bool = False) -> None:
+    from .registry import SOURCE_REGISTRY
+
+    sensors = {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'}
+    for state in instance.all_instigator_state():
+        if state.name in sensors and state.status != InstigatorStatus.STOPPED:
+            if check:
+                raise RuntimeError(f'Retired book publisher remains enabled: {state.name}')
+            instance.update_instigator_state(state.with_status(InstigatorStatus.STOPPED))
+    if check:
+        return
+    sources = {'binance_spot_book', 'binance_perp_book'}
+    for spec in SOURCE_REGISTRY:
+        if spec.key in sources and backfill_active(instance, spec):
+            raise RuntimeError(f'Retired book backfill remains active: {spec.key}')
+    names = (*sources, 'binance_spot_depth20', 'binance_spot_depth200',
+             'publish_btc_briefing', 'build_depth_snapshot_store_arrow')
+    for run in instance.get_runs(RunsFilter(statuses=[
+        DagsterRunStatus.NOT_STARTED, DagsterRunStatus.QUEUED, DagsterRunStatus.STARTING,
+        DagsterRunStatus.STARTED, DagsterRunStatus.CANCELING,
+    ])):
+        identities = (run.job_name, run.tags.get('origo_source_key', ''),
+                      *(key.to_user_string() for key in (run.asset_selection or ())))
+        if any(name in identity for name in names for identity in identities):
+            raise RuntimeError(f'Retired book work remains active: {run.run_id}')
+
+
 def _native_backfills(
     instance: DagsterInstance,
     spec: RevisionedSourceSpec,
@@ -204,6 +231,7 @@ def main() -> None:
             if not args.check:
                 configure_source_pool(spec, instance)
             prepare_source(spec, instance, check=args.check)
+        retire_book_admission(instance, check=args.check)
 
 
 if __name__ == '__main__':

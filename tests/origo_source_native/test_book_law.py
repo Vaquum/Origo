@@ -109,16 +109,13 @@ def test_canary_books_have_the_same_reader_law_contract(
     _assert_declared_history_migration_preserves_existing_generation(runtime)
 
 
-def test_book_sources_are_required_daily_reader_laws() -> None:
+def test_dormant_book_sources_have_no_required_reader_laws() -> None:
     catalog = build_catalog('6ac86db9fbe11e53e0fa3fb4470fc7fd8f78bb70')
     gates = {gate['id']: gate for gate in catalog['gates']}
-    for source, deadline in (('binance_spot_book', '04:30'), ('binance_perp_book', '10:30')):
+    for source in ('binance_spot_book', 'binance_perp_book'):
         for predicate in ('R1', 'C1', 'C2'):
             key = f'law.{predicate}:{source}'
-            assert key in catalog['law_gate_ids'] and gates[key]['cadence'] == 'periodic'
-        assert gates[f'law.C1:{source}']['thresholds'] == {'deadline_utc': deadline}
-        assert gates[f'law.C2:{source}']['thresholds'] == {'anchor': '2026-10-04 00:00:00+00:00'}
-        assert f'book.capture.hourly_grid:{source}' not in gates
+            assert key not in catalog['law_gate_ids'] and key not in gates
 
 
 def test_native_daily_backfill_orders_completion_after_canonical_build(

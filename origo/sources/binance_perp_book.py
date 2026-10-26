@@ -14,7 +14,7 @@ from .profiles.book import BOOK_FIRST_DAY, book_components
 
 BINANCE_PERP_BOOK_SPEC: Final[RevisionedSourceSpec] = RevisionedSourceSpec(
     key='binance_perp_book',
-    rollout_stage=RolloutStage.CANARY,
+    rollout_stage=RolloutStage.DORMANT,
     schema_version=1,
     names=SourceNames('binance_perp_book'),
     partitions=PartitionPolicy(BOOK_FIRST_DAY, previous_starts=(datetime(2025, 6, 28, 6, tzinfo=UTC),)),

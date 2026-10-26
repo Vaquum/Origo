@@ -17,6 +17,11 @@ PROTECTED = {
     'perp-capture', 'perp-repair',
 }
 CONTROLLERS = ('dagster', 'dagit', 'monitor', 'law')
+RETIRED = {
+    'depth-worker', 'book-capture-spot', 'book-capture-perp',
+    'provisional-binance-spot-book', 'provisional-binance-perp-book',
+}
+RENDER_WORKERS = {'provisional-binance-spot-top20', 'provisional-binance-perp-top20'}
 ENVIRONMENT_ALIASES = {'ORIGO_ALERT_RESEND_API_KEY': 'RESEND_API_KEY'}
 
 
@@ -37,11 +42,13 @@ def containers(project: str) -> dict[str, dict[str, object]]:
     for line in run('docker', 'inspect', '--format', template, *ids).splitlines():
         item = json.loads(line)
         service = item['service']
-        if service in PROTECTED | set(CONTROLLERS):
+        if service in RETIRED and item['running'] is not True:
+            continue
+        if service in PROTECTED | set(CONTROLLERS) | RENDER_WORKERS:
             if service in result or item['running'] is not True:
                 raise RuntimeError(f'Expected one running container: {service}')
             result[service] = item
-    if not PROTECTED | set(CONTROLLERS) <= result.keys():
+    if not (PROTECTED - RETIRED) | set(CONTROLLERS) <= result.keys():
         raise RuntimeError('Protected deployment service membership is incomplete.')
     return result
 
@@ -51,14 +58,17 @@ def source_state(controller: str) -> dict[str, object]:
 import json
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources.binance_top20 import BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC
+from origo.sources.registry import SOURCE_REGISTRY
 settings = get_clickhouse_settings()
 client = make_clickhouse_client(settings)
 try:
     rows = client.execute('SELECT source_key,max(partition_end) FROM '+settings.database+
                           '.source_active_partitions GROUP BY source_key',
                           settings={'readonly':1,'max_threads':1,'max_execution_time':10})
-    print(json.dumps({'frontiers': {key: str(end) for key,end in rows if not key.endswith('_top20_v1')},
-                      'stages': [s.rollout_stage.value for s in (BINANCE_SPOT_TOP20_SPEC,BINANCE_PERP_TOP20_SPEC)]}))
+    print(json.dumps({'frontiers': {key: str(end) for key,end in rows},
+                      'stages': [s.rollout_stage.value for s in (BINANCE_SPOT_TOP20_SPEC,BINANCE_PERP_TOP20_SPEC)],
+                      'legacy_stages': [s.rollout_stage.value for s in SOURCE_REGISTRY
+                                        if s.key in ('binance_spot_book','binance_perp_book')]}))
 finally:
     client.disconnect()
 '''))
@@ -132,6 +142,8 @@ def capture_floor(root: Path, project: str, members: dict[str, dict[str, object]
 def main(mode: str, root: Path, project: str) -> None:
     baseline = root / '.render-top20-before.json'
     if mode == 'rollback':
+        if (root / '.book-reader-cutover.json').exists():
+            raise RuntimeError('Book readers have switched; the DORMANT warm-up rollback is retired.')
         floor = root / '.render-top20-floor'
         environment = {**floor_environment(floor), 'PROJECT_NAME': project}
         run('bash', str(root / 'deploy/retire_render_top20_workers.sh'), environment=environment)
@@ -143,12 +155,21 @@ def main(mode: str, root: Path, project: str) -> None:
     members = containers(project)
     state = source_state(str(members['dagit']['id']))
     if mode == 'capture':
+        if state.get('legacy_stages') != ['DORMANT', 'DORMANT'] and not RETIRED <= members.keys():
+            raise RuntimeError('Existing book writer membership is incomplete before its declared pause.')
+        if state['stages'] == ['LIVE', 'LIVE'] and not RENDER_WORKERS <= members.keys():
+            raise RuntimeError('Qualified Render book workers must remain running.')
         capture_floor(root, project, members, state)
-        save(baseline, {'containers': {key: members[key] for key in sorted(PROTECTED)},
-                        'frontiers': state['frontiers']})
+        frontiers = {key: end for key, end in state['frontiers'].items()
+                     if state.get('legacy_stages') != ['DORMANT', 'DORMANT']
+                     or key not in ('binance_spot_book', 'binance_perp_book')}
+        save(baseline, {'containers': {key: members[key] for key in sorted(
+            (PROTECTED | RENDER_WORKERS) & members.keys())}, 'frontiers': frontiers})
     else:
         previous = json.loads(baseline.read_text())
-        if previous['containers'] != {key: members[key] for key in sorted(PROTECTED)}:
+        expected = {key: value for key, value in previous['containers'].items()
+                    if mode != 'rollback' or key not in RENDER_WORKERS}
+        if expected != {key: members.get(key) for key in expected}:
             raise RuntimeError('A protected worker identity, restart count or start time changed.')
         if any(str(state['frontiers'].get(key, '')) < end for key, end in previous['frontiers'].items()):
             raise RuntimeError('An existing accepted source frontier regressed.')

@@ -205,7 +205,8 @@ def test_missing_malformed_or_stale_report_is_unknown(tape: tuple[Path, page.Doc
         record[mutation] = [] if mutation == 'inventory' else 999
         _write(path, [record])
         assert cache.current(now)['status'] == 'UNKNOWN'
-    for mutation in ('future_end', 'wrong_slot', 'missing_inventory_feed', 'unsupported_live_unknown'):
+    for mutation in ('future_end', 'wrong_slot', 'missing_inventory_feed', 'missing_book_pair',
+                     'incomplete_book_laws', 'unsupported_live_unknown'):
         record = copy.deepcopy(original)
         if mutation == 'future_end':
             record['evaluation_end'] = (now + timedelta(days=1)).isoformat()
@@ -213,6 +214,13 @@ def test_missing_malformed_or_stale_report_is_unknown(tape: tuple[Path, page.Doc
             record['sampling_slot'] = (page._instant(original['sampling_slot']) - timedelta(minutes=1)).isoformat()
         elif mutation == 'missing_inventory_feed':
             record['feeds'] = page._objects(record['feeds'])[1:]
+        elif mutation == 'missing_book_pair':
+            removed = set(page.BOOK_SOURCES[1])
+            record['inventory'] = [key for key in cast(list[page.Json], record['inventory']) if key not in removed]
+            record['feeds'] = [feed for feed in page._objects(record['feeds']) if feed['source_key'] not in removed]
+        elif mutation == 'incomplete_book_laws':
+            book = next(feed for feed in page._objects(record['feeds']) if feed['source_key'] == page.BOOK_SOURCES[1][0])
+            del page._object(book['predicates'])['R1']
         else:
             # Corrupt protocol envelopes use genuine UNKNOWN predicate evidence; no market rows change.
             unknown = next(predicate for feed in page._objects(original['feeds'])

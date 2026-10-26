@@ -4,7 +4,7 @@ from pydantic import Field
 from origo.orchestration.recovery import recover_queue
 
 from .backfill import source_job
-from .prepare import configure_source_pool, prepare_source
+from .prepare import configure_source_pool, prepare_source, retire_book_admission
 from .registry import SOURCE_REGISTRY
 
 
@@ -21,6 +21,7 @@ def prepare_registered_sources(context: OpExecutionContext, config: PreparationC
             'source=%s phase=preparation_started stage=%s', spec.key, spec.rollout_stage
         )
         prepare_source(spec, context.instance)
+    retire_book_admission(context.instance)
     context.add_output_metadata(
         {'registered_sources': [spec.key for spec in SOURCE_REGISTRY], **config.queue_counts}
     )

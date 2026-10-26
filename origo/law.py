@@ -26,8 +26,6 @@ LAW_SAMPLE_NAME = 'samples-%Y-%m-%d.jsonl'
 LAW_INVENTORY = (
     'binance_spot_trades', 'binance_spot_aggtrades',
     'binance_perp_trades', 'binance_perp_aggtrades',
-    'binance_spot_depth20_1m', 'binance_spot_depth200_1m',
-    'binance_spot_book', 'binance_perp_book',
     *(spec.key for spec in SOURCE_REGISTRY
       if spec.key.endswith('_top20_v1') and spec.rollout_stage != RolloutStage.DORMANT),
 )

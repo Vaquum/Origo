@@ -314,6 +314,8 @@ def _cards(current: Document, catalog: Document, coverage: Coverage) -> list[Sum
     cards: list[SummaryCard] = []
     for family, title in LAW_NAMES.items():
         members = [key for key in required if key.startswith(f'law.{family}:')]
+        if family == 'D1' and not members:
+            continue
         results = [_object(_object(feeds.get(key.split(':', 1)[1], {}).get('predicates')).get(family))
                    if key in descriptors and not unavailable else {} for key in members]
         states: list[SummaryStatus] = [_status(result.get('status')) for result in results]

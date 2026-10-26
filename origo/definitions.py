@@ -70,7 +70,6 @@ from .assets.reconcile_binance_spot_depth200_partition_state_origo import (
     reconcile_binance_spot_depth200_partition_state_origo,
 )
 from .assets.build_depth_snapshot_store_arrow import build_depth_snapshot_store_arrow
-from .workers.depth import LIVE_FEED_ASSET as DEPTH_LIVE_FEED_ASSET
 from .workers.market_state_api import ASSET as MARKET_STATE_QUERY_ASSET
 from .workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 
@@ -216,7 +215,7 @@ def _partitioned_run_request(
 @asset_sensor(
     asset_key=AssetKey("build_binance_spot_trades_canonical_revision_origo"),
     job=publish_btc_briefing_feed_job,
-    default_status=DefaultSensorStatus.RUNNING,
+    default_status=DefaultSensorStatus.STOPPED,
 )
 def publish_btc_briefing_feed_sensor(
     context: object,
@@ -255,7 +254,7 @@ def _publish_btc_briefing_history_run_request(
 @asset_sensor(
     asset_key=AssetKey("publish_btc_briefing_feed"),
     job=publish_btc_briefing_history_job,
-    default_status=DefaultSensorStatus.RUNNING,
+    default_status=DefaultSensorStatus.STOPPED,
 )
 def publish_btc_briefing_history_sensor(
     context: object,
@@ -299,16 +298,6 @@ def origo_monitor_checks() -> Iterator[AssetCheckResult]:
 # The live feeds: external assets the workers materialize every tick. Their freshness
 # policy is the feed's liveness in Dagit, evaluated by the daemon without a run; the
 # monitor's heartbeat check is what alerts on a stalled worker.
-binance_spot_depth_live_feed = AssetsDefinition(
-    specs=[
-        AssetSpec(
-            DEPTH_LIVE_FEED_ASSET,
-            group_name='live_feeds',
-            description='The depth worker materializes this every tick for depth20 and depth200.',
-            freshness_policy=FreshnessPolicy.time_window(fail_window=LIVE_FEED_FRESHNESS_WINDOW),
-        )
-    ]
-)
 market_state_query_service = AssetsDefinition(
     specs=[
         AssetSpec(
@@ -323,7 +312,6 @@ market_state_query_service = AssetsDefinition(
 
 defs = Definitions(
     assets=[origo_monitor,
-            binance_spot_depth_live_feed,
             market_state_query_service,
             create_origo_database,
             create_binance_spot_depth20_snapshots_table_origo,

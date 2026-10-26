@@ -37,6 +37,25 @@ BASELINE = Path(__file__).parents[1] / 'fixtures/law/overview-baseline-58b45de.j
 
 @cache
 def _catalog_template(deployed_sha: str) -> LawCatalog:
+    baseline = json.loads(BASELINE.read_bytes())
+    if deployed_sha == baseline['deployed_sha']:
+        from dataclasses import replace
+
+        from origo.sources import registry
+        from origo.sources.contracts import RolloutStage
+        from origo.workers import depth
+
+        # Historical GUI replay keeps the pre-pause declaration envelope and original evidence.
+        legacy_depth = (depth.DEPTH20_LIVE_RECONCILIATION_SPEC, depth.DEPTH200_LIVE_RECONCILIATION_SPEC)
+        legacy = tuple(replace(spec, rollout_stage=RolloutStage.CANARY)
+                       if spec.key in ('binance_spot_book', 'binance_perp_book') else spec
+                       for spec in registry.SOURCE_REGISTRY)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(registry, 'SOURCE_REGISTRY', legacy)
+            patch.setattr(depth, 'DEPTH_SPECS', legacy_depth)
+            patch.setattr(law, 'LAW_INVENTORY', (*law.LAW_INVENTORY, 'binance_spot_book',
+                          'binance_perp_book', *(spec.projection_table_name for spec in legacy_depth)))
+            return build_catalog(deployed_sha)
     return build_catalog(deployed_sha)
 
 
@@ -1194,7 +1213,8 @@ def test_named_laws_preserve_original_definitions_and_clear_window() -> None:
                            'code': {'path': page._object(gate['code'])['path']}} for gate in original if gate['id'] != 'law.inventory']
     assert sorted(current_semantics, key=lambda gate: str(gate['id'])) == sorted(original_semantics, key=lambda gate: str(gate['id']))
     inventory = next(gate for gate in current if gate['id'] == 'law.inventory')
-    assert {source['id'] for source in catalog['sources'] if source['rollout_stage'] != 'DORMANT'} == set(law.LAW_INVENTORY)
+    current_catalog = _prepared_catalog(SHA)
+    assert {source['id'] for source in current_catalog['sources'] if source['rollout_stage'] != 'DORMANT'} == set(law.LAW_INVENTORY)
     assert inventory['condition'] == 'Frozen law members remain required; every enabled registered source needs an explicit law mapping.'
     report = page._object(baseline['report'])
     before = page._sample_brief(report)
@@ -1261,7 +1281,7 @@ def test_overview_totals_match_catalog_and_observed_evidence(
             text = _figure(tab, key).replace(',', '')
             assert re.search(rf'{numerator}\s*/\s*{denominator}', text), text
         assert 'not due' in _figure(tab, 'C1').lower()
-        output_count = sum(node['lane'] == 'consumer' for source in _prepared_catalog(SHA)['sources']
+        output_count = sum(node['lane'] == 'consumer' for source in _prepared_catalog(str(report['deployed_sha']))['sources']
                            if source.get('rollout_stage') != 'DORMANT' for node in source['projections'])
         assert tab.locator('[data-overview="outputs"] .overview-value').inner_text() == f'Unknown / {output_count}'
         assert 'unknown' in _figure(tab, 'queue').lower() or 'not recorded' in _figure(tab, 'queue').lower()
@@ -1291,6 +1311,8 @@ def test_overview_totals_match_catalog_and_observed_evidence(
             tab = browser.new_page()
             tab.goto(f'http://127.0.0.1:{server.server_port}/law')
             tab.locator('.overview-card').first.wait_for()
+            assert tab.locator('.overview-card').count() == 5
+            assert tab.locator('[data-overview="D1"]').count() == 0
             for key, gate, numerator, denominator in (
                 ('workers', 'workers_alive', 'workers_fresh', 'workers_expected'),
                 ('collectors', 'collectors_serving', 'collectors_serving', 'collectors_expected'),
@@ -1552,8 +1574,8 @@ def test_wait_and_publication_presentations_preserve_raw_evidence(production_ser
 
 
 def test_overview_unknowns_override_stale_or_mismatched_numbers(production_serving: tuple[str, page.TapeCache, page.Document, datetime]) -> None:
-    url, _, _, _ = production_serving
-    stages = sum(len(source['projections']) for source in _prepared_catalog(SHA)['sources'])
+    url, _, report, _ = production_serving
+    stages = sum(len(source['projections']) for source in _prepared_catalog(str(report['deployed_sha']))['sources'])
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         tab = browser.new_page()

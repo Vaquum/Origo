@@ -666,7 +666,7 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
     fault = bool(current.get('reason')) or stale
     effective = {**current, 'reason': current.get('reason') or ('stale_report' if stale else ''), 'evidence_expired': stale}
     cards = _cards(effective, catalog, coverage)
-    status = 'UNKNOWN' if fault else _rollup([card['status'] for card in cards[:6]])
+    status = 'UNKNOWN' if fault else _rollup([card['status'] for card in cards if card['id'] in LAW_NAMES])
     inventory = next((item for item in _objects(report.get('gates')) if item.get('gate_id') == 'law.inventory'), Document())
     if not fault:
         status = _rollup([status, _status(inventory.get('outcome'))])

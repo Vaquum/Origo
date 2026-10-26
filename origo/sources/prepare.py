@@ -153,8 +153,10 @@ def retire_book_admission(instance: DagsterInstance, *, check: bool = False) -> 
             BulkActionStatus.REQUESTED, BulkActionStatus.CANCELING, BulkActionStatus.FAILING,
         ]), cursor=cursor, limit=25)
         for backfill in page:
-            if any(name in key.to_user_string() for name in names
-                   for key in (backfill.asset_selection or ())):
+            identities = [key.to_user_string() for key in (backfill.asset_selection or ())]
+            if backfill.partition_set_origin is not None:
+                identities.append(backfill.partition_set_origin.partition_set_name)
+            if any(name in identity for name in names for identity in identities):
                 raise RuntimeError(f'Retired book backfill remains active: {backfill.backfill_id}')
         if len(page) < 25:
             break

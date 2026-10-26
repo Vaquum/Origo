@@ -55,14 +55,21 @@ def request_identity(run: DagsterRun) -> str:
 
 
 def _book_backfill(run: DagsterRun) -> bool:
-    from origo.sources.prepare import is_source_backfill
-    from origo.sources.registry import SOURCE_REGISTRY
-
-    return any(
-        spec.key in ('binance_spot_book', 'binance_perp_book')
-        and is_source_backfill(run, spec)
-        for spec in SOURCE_REGISTRY
-    )
+    # Retired native runs keep their original queue classification without live specs.
+    for source in ('binance_spot_book', 'binance_perp_book'):
+        if run.job_name == f'backfill_{source}_source_job':
+            return True
+        canonical = f'refresh_{source}_canonical_source_job'
+        if (run.job_name == canonical or any(
+            key.to_user_string() == f'build_{source}_canonical_revision_origo'
+            for key in (run.asset_selection or ())
+        )) and run.tags.get('origo_source_reconciliation') != 'true' and (
+            run.job_name != canonical or 'dagster/backfill' in run.tags
+            or 'dagster/asset_partition_range_start' in run.tags
+            or run.tags.get('origo_source_operation') == 'backfill'
+        ):
+            return True
+    return False
 
 
 def bulk_share(run: DagsterRun) -> str | None:

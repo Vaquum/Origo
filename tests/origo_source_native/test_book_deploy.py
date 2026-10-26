@@ -26,6 +26,7 @@ def test_book_pause_stops_only_retired_admission_and_requires_quiescence(
         ManagedGrpcPythonEnvCodeLocationOrigin,
         RemoteInstigatorOrigin,
         RemoteRepositoryOrigin,
+        RemotePartitionSetOrigin,
     )
     from dagster._core.scheduler.instigation import (
         InstigatorState,
@@ -66,16 +67,21 @@ def test_book_pause_stops_only_retired_admission_and_requires_quiescence(
             retire_book_admission(instance)
         instance.report_run_canceled(run)
         retire_book_admission(instance)
-    backfill = PartitionBackfill(
-        backfill_id='retired-book-admission-control', status=BulkActionStatus.REQUESTED,
-        from_failure=False, tags={}, backfill_timestamp=0.0,
-        asset_selection=[AssetKey('build_binance_perp_book_canonical_revision_origo')],
-    )
-    instance.add_backfill(backfill)
-    with pytest.raises(RuntimeError, match='book backfill remains active'):
+    for selection, origin in (
+        ([AssetKey('build_binance_perp_book_canonical_revision_origo')], None),
+        (None, RemotePartitionSetOrigin(repository_origin=repository,
+              partition_set_name='backfill_binance_spot_book_source_job_partition_set')),
+    ):
+        backfill = PartitionBackfill(
+            backfill_id='retired-book-' + ('asset' if selection else 'job'),
+            status=BulkActionStatus.REQUESTED, from_failure=False, tags={}, backfill_timestamp=0.0,
+            asset_selection=selection, partition_set_origin=origin,
+        )
+        instance.add_backfill(backfill)
+        with pytest.raises(RuntimeError, match='book backfill remains active'):
+            retire_book_admission(instance)
+        instance.update_backfill(backfill.with_status(BulkActionStatus.CANCELED))
         retire_book_admission(instance)
-    instance.update_backfill(backfill.with_status(BulkActionStatus.CANCELED))
-    retire_book_admission(instance)
     retire_book_admission(instance, check=True)
     assert instance.get_run_by_id(unrelated.run_id).status == DagsterRunStatus.NOT_STARTED
 

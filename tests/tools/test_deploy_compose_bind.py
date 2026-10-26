@@ -179,7 +179,7 @@ function docker() {
       'exec -i controller python -')
         cat > "$STATE/admission.py"
         if [ "$FAULT" = active ]; then return 1; fi
-        if [ "$FAULT" = drain ] && rg -q book_root "$STATE/admission.py"; then return 1; fi ;;
+        if [ "$FAULT" = drain ] && [[ $(< "$STATE/admission.py") == *book_root* ]]; then return 1; fi ;;
       'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor'|'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
         printf 'monitor\n' ;;
       'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service='*)

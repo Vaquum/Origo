@@ -57,11 +57,14 @@ def test_source_selector_accepts_only_enabled_provisional_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     enabled = provisional.selected_specs({})
-    assert len(enabled) == 8
-    assert {"binance_spot_top20_v1", "binance_perp_top20_v1"} <= {spec.key for spec in enabled}
+    assert {spec.key for spec in enabled} == {
+        'binance_spot_trades', 'binance_spot_aggtrades',
+        'binance_perp_trades', 'binance_perp_aggtrades',
+        'binance_spot_top20_v1', 'binance_perp_top20_v1',
+    }
     for spec in enabled:
         assert provisional.selected_specs({'ORIGO_PROVISIONAL_SOURCE': spec.key}) == (spec,)
-    for source in ('', 'unknown'):
+    for source in ('', 'unknown', 'binance_spot_book', 'binance_perp_book'):
         with pytest.raises(ValueError, match='Unknown or disabled provisional source'):
             provisional.build_feed({'ORIGO_PROVISIONAL_SOURCE': source})
     for disabled in (

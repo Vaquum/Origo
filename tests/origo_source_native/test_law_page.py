@@ -1449,7 +1449,9 @@ def test_named_laws_filter_history_and_legacy_links(production_serving: tuple[st
         info.focus()
         tooltip = tab.locator('.gate .tooltip').first
         assert tooltip.is_visible() and 'threshold' in tooltip.inner_text().lower()
-        assert '/blob/58b45deee0602e7524c2efcba4e532174ad40902/' in str(tooltip.locator('a').get_attribute('href'))
+        # The captured catalog retains its genuine code SHA; the older report is not relabelled.
+        catalog_sha = _prepared_catalog(str(json.loads(BASELINE.read_bytes())['deployed_sha']))['deployed_sha']
+        assert f'/blob/{catalog_sha}/' in str(tooltip.locator('a').get_attribute('href'))
         tab.locator('[data-law-id="law.D1:binance_spot_depth200_1m"] .day').last.click()
         tab.locator('#detail .event').first.wait_for()
         tab.locator('#detail .event details').first.locator('summary').click()

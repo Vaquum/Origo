@@ -190,9 +190,11 @@ def _objects(value: Json) -> list[Document]:
 def retired_book_condition(group: str, catalog: Document) -> bool:
     if not catalog:
         return False
+    if group.startswith('law:'):
+        group = group.replace('law:', 'law.', 1)
     sources = {'binance_spot_book', 'binance_perp_book',
                'binance_spot_depth20_1m', 'binance_spot_depth200_1m'}
-    if any(source.get('id') in sources and source.get('rollout_stage') != 'DORMANT'
+    if any(str(source.get('id')) in sources and source.get('rollout_stage') != 'DORMANT'
            for source in _objects(catalog.get('sources'))):
         return False
     return (group.startswith('law.') and group.partition(':')[2] in sources) or group in {

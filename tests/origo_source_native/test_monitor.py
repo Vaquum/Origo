@@ -436,7 +436,8 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     frame['sampling_slot'] = (NOW + timedelta(minutes=1)).isoformat()
     frame.pop('notification_transitions', None)
     template = next(item for item in frame['observations'] if item['group_id'] == f'heartbeat_stale:{missing}')
-    retired_groups = {'heartbeat_stale:depth', 'law.R1:binance_spot_book', 'collector_book:spot'}
+    retired_groups = {'heartbeat_stale:depth', 'law.R1:binance_spot_book',
+                      'law:R1:binance_spot_book', 'collector_book:spot'}
     frame['observations'].extend({**deepcopy(template), 'group_id': group, 'scope': group,
                                   'detector_keys': [group], 'measurements': []} for group in sorted(retired_groups))
     monitor.notification_history.append(frame, None, NOW + timedelta(minutes=1))
@@ -531,7 +532,9 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     assert email['_authorization'] == 'Bearer test-key'
     assert email['to'] == ['operator@example.test']
     assert 'Dagit checks recorded.' in email['text']
-    assert all(title in email['text'] and html.escape(title) in email['html'] for title in LAW_NAMES.values())
+    assert all(title in email['text'] and html.escape(title) in email['html']
+               for family, title in LAW_NAMES.items() if family != 'D1')
+    assert LAW_NAMES['D1'] not in email['text']
     assert email['_idempotency_key']
     recorded_keys = ', '.join(post['metadata']['keys'] for post in checks)
     assert all(key in recorded_keys for key in outcome.failed)

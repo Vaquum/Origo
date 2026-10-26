@@ -160,18 +160,22 @@ def main(mode: str, root: Path, project: str) -> None:
         if state['stages'] == ['LIVE', 'LIVE'] and not RENDER_WORKERS <= members.keys():
             raise RuntimeError('Qualified Render book workers must remain running.')
         capture_floor(root, project, members, state)
-        frontiers = {key: end for key, end in state['frontiers'].items()
-                     if state.get('legacy_stages') != ['DORMANT', 'DORMANT']
-                     or key not in ('binance_spot_book', 'binance_perp_book')}
+        frozen = {key: end for key, end in state['frontiers'].items()
+                  if state.get('legacy_stages') == ['DORMANT', 'DORMANT']
+                  and key in ('binance_spot_book', 'binance_perp_book')}
+        frontiers = {key: end for key, end in state['frontiers'].items() if key not in frozen}
         save(baseline, {'containers': {key: members[key] for key in sorted(
-            (PROTECTED | RENDER_WORKERS) & members.keys())}, 'frontiers': frontiers})
+            (PROTECTED | RENDER_WORKERS) & members.keys())}, 'frontiers': frontiers,
+            'frozen_frontiers': frozen})
     else:
         previous = json.loads(baseline.read_text())
         expected = {key: value for key, value in previous['containers'].items()
                     if mode != 'rollback' or key not in RENDER_WORKERS}
         if expected != {key: members.get(key) for key in expected}:
             raise RuntimeError('A protected worker identity, restart count or start time changed.')
-        if any(str(state['frontiers'].get(key, '')) < end for key, end in previous['frontiers'].items()):
+        if any(str(state['frontiers'].get(key, '')) < end for key, end in {
+            **previous['frontiers'], **previous['frozen_frontiers'],
+        }.items()):
             raise RuntimeError('An existing accepted source frontier regressed.')
         if mode == 'verify' and any(str(state['frontiers'].get(key, '')) <= end
                                     for key, end in previous['frontiers'].items()):

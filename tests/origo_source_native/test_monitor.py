@@ -428,6 +428,27 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     }
     assert {key for key in outcome.failed if key.startswith('heartbeat_stale:')} == expected
     assert len(monitor._heartbeats()) == 8
+    # Named metadata faults model incidents recorded before this deployment.
+    # Their historical frames remain; they cannot become current UNKNOWN obligations.
+    from copy import deepcopy
+
+    frame = deepcopy(monitor.notification_history.observations()[-1])
+    frame['sampling_slot'] = (NOW + timedelta(minutes=1)).isoformat()
+    frame.pop('notification_transitions', None)
+    template = next(item for item in frame['observations'] if item['group_id'] == f'heartbeat_stale:{missing}')
+    retired_groups = {'heartbeat_stale:depth', 'law.R1:binance_spot_book', 'collector_book:spot'}
+    frame['observations'].extend({**deepcopy(template), 'group_id': group, 'scope': group,
+                                  'detector_keys': [group], 'measurements': []} for group in sorted(retired_groups))
+    monitor.notification_history.append(frame, None, NOW + timedelta(minutes=1))
+    recorded = monitor.notification_history.frames[frame['sampling_slot']]
+    monitor.tick(NOW + timedelta(minutes=2))
+    current = monitor.notification_history.observations()[-1]
+    assert not retired_groups & {item['group_id'] for item in current['observations']}
+    assert monitor.notification_history.frames[frame['sampling_slot']] == recorded
+    summary = json.loads((monitor.law_tape.root / 'operator-summary.json').read_text())
+    incidents = {item['group_id'] for item in summary['incidents']}
+    assert not retired_groups & incidents
+    assert f'heartbeat_stale:{missing}' in incidents
     monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
     split = _monitor(recorder, tmp_path / 'split')
     roles = ('trade_publication_binance_spot_trades',

@@ -111,8 +111,8 @@ def test_old_book_sources_remain_declared_dormant_until_archive() -> None:
         assert repository.has_job(f'backfill_{spec.key}_source_job')
         assert not repository.has_schedule_def(f'{spec.key}_provisional_schedule')
         assert repository.asset_graph.get(AssetKey(f'{spec.key}_provisional_feed'))
-        assert all(schedule.default_status.value == 'RUNNING' for schedule in bundle.schedules)
-        assert all(sensor.default_status.value == 'RUNNING' for sensor in bundle.sensors)
+        assert all(schedule.default_status.value == 'STOPPED' for schedule in bundle.schedules)
+        assert all(sensor.default_status.value == 'STOPPED' for sensor in bundle.sensors)
 
 
 def test_sealed_minutes_build_both_depths_and_minute_rows_idempotently(

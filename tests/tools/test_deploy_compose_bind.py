@@ -178,7 +178,8 @@ function docker() {
         printf 'controller\n' ;;
       'exec -i controller python -')
         cat > "$STATE/admission.py"
-        if [ "$FAULT" = active ]; then return 1; fi ;;
+        if [ "$FAULT" = active ]; then return 1; fi
+        if [ "$FAULT" = drain ] && rg -q book_root "$STATE/admission.py"; then return 1; fi ;;
       'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor'|'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
         printf 'monitor\n' ;;
       'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service='*)
@@ -206,7 +207,8 @@ function docker() {
          {'depth.heartbeat', 'book_capture_spot.heartbeat', 'book_capture_perp.heartbeat',
           'provisional_binance_spot_book.heartbeat', 'provisional_binance_perp_book.heartbeat'}),
     ):
-        for fault in ('none', 'active', 'stop', 'remove', 'remains'):
+        for fault in (('none', 'active', 'stop', 'remove', 'remains', 'drain')
+                      if script.name == 'retire_legacy_book_workers.sh' else ('none', 'active', 'stop', 'remove', 'remains')):
             state = tmp_path / (script.stem + '-' + fault)
             state.mkdir()
             trace = state / 'trace'
@@ -226,6 +228,12 @@ function docker() {
                 assert {Path(word).name for word in wipes[0].split() if word.startswith('/heartbeats/')} == heartbeats
             if fault == 'active':
                 assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
+            if fault == 'drain':
+                assert {call.split()[1] for call in calls if call.startswith('stop ')} == {'book-capture-spot', 'book-capture-perp'}
+            if fault == 'none' and script.name == 'retire_legacy_book_workers.sh':
+                stopped = [call.split()[1] for call in calls if call.startswith('stop ')]
+                assert stopped[:2] == ['book-capture-spot', 'book-capture-perp']
+                assert stopped[-1] == 'depth-worker'
 
     specification = importlib.util.spec_from_file_location('render_top20_deploy', REPO_ROOT / 'deploy/render_top20_deploy.py')
     assert specification is not None and specification.loader is not None
@@ -321,6 +329,7 @@ function docker() {
 
     state['stages'] = ['LIVE', 'LIVE']
     state['legacy_stages'] = ['DORMANT', 'DORMANT']
+    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
     for service in guard.RENDER_WORKERS:
         members[service] = dict(members['provisional-worker'], service=service, id=service)
     for service in guard.RETIRED:
@@ -328,6 +337,10 @@ function docker() {
     guard.main('capture', root, 'test')
     retained = json.loads((root / '.render-top20-before.json').read_text())['containers']
     assert set(retained) == (guard.PROTECTED - guard.RETIRED) | guard.RENDER_WORKERS
+    state['frontiers']['binance_spot_book'] = '2026-10-24 12:59:00'
+    with pytest.raises(RuntimeError, match='regressed'):
+        guard.main('check', root, 'test')
+    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
     for service in guard.RENDER_WORKERS:
         for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted')):
             original = members[service][key]

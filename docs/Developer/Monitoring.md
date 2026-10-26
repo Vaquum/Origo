@@ -67,14 +67,20 @@ capture spool. Capture failures use the existing Dagit checks, logs and alert pa
 The superseded native Spot/perpetual book definitions remain DORMANT while their
 final Spot depth20 archive is verified. Deployment stops their schedules and sensors,
 and both obsolete daily BTC publisher sensors, without changing saved cursors. It
-refuses active old book runs or backfills. The old depth feed has no active law or
+refuses active old book runs or backfills. Legacy depth/Arrow/BTC assets and jobs are unregistered, so neither named jobs nor
+implicit asset materialization can admit old writes. The old depth feed has no active law or
 freshness asset. The monitor ignores the five retired worker heartbeat names and
-makes no requests to the old depth20/depth200 endpoints. Historical receipts and law
-evidence remain available.
+makes no requests to the old depth20/depth200 endpoints. Retired condition groups do
+not carry forward into current incidents; their historical frames remain available.
+Existing evidence retention, including the14-day container-log TTL, is unchanged.
 
 After that deployment is verified, `deploy/retire_legacy_book_workers.sh` checks
-DORMANT admission and quiescence again, then stops/removes only the old depth worker,
-two native book capture workers and two native book provisional workers. It removes
+DORMANT admission and quiescence again, then stops the two native capture workers first. Every retained sealed minute must
+match its exact accepted native revision before the provisional workers stop. Missing
+keys are retried within180seconds using bounded key selections; timeout preserves the
+remaining workers for an idempotent retry. The last closed legacy Spot20 minute must
+have raw and projected rows before depth stops last. Stored row counts do not assert
+upstream completeness. It removes
 only those five heartbeat files after confirming every process is gone. Tables,
 spools, historical files and the replacement cache remain in place until the final
 Spot depth20 delta has been downloaded, hashed and read back locally. This pause is
@@ -98,8 +104,8 @@ Compose and required environment under `.render-top20-floor` (credentials mode06
 It records the retained service identities/restarts/start times and accepted
 frontiers, rechecks them after preparation and requires frontier progress after verification.
 After qualification, both new top20 workers join that protected set. Old book workers
-may be absent only after their declarations become DORMANT; their old frontiers cease
-to be progress obligations at that boundary.
+may be absent only after their declarations become DORMANT; their old frontiers become
+non-regression obligations at that boundary.
 Dagster, Dagit, monitor and the read-only law renderer are the declared replacements.
 From the deployment directory, warm-up rollback is
 `python3 deploy/render_top20_deploy.py rollback "$PWD" "$PROJECT_NAME"`.
@@ -110,6 +116,11 @@ compatibility. It preserves cache, accepted generations, pins, Arrow, cursors an
 volumes. Repeating rollback does not recreate the new workers. After reader cutover, the recorded `.book-reader-cutover.json` marker refuses this
 warm-up rollback before changing any process. Recovery must preserve the qualified
 source workers and the readers already using them.
+
+Later top20 adapter updates use the existing deliberate full-release path; ordinary
+native-only controller deployments retain their worker image bindings. Recovery from
+an interrupted pause repeats the current deployment/helper; it preserves all stored
+book data and the replacement workers.
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:

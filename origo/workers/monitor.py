@@ -102,6 +102,7 @@ from origo.observatory import (
     decode_observation_record,
     lifecycle_transitions,
     operations_totals,
+    retired_book_condition,
 )
 from origo.observatory import (
     operation_sample as _operation_sample,
@@ -1418,6 +1419,8 @@ class Monitor:
         for previous in ([self.notification_history.decode(self.notification_history.frames[max(self.notification_history.frames)])[0]] if self.notification_history.frames else []):
             for prior in previous['observations']:
                 group, check = prior['group_id'], prior['check']
+                if retired_book_condition(group, cast(Document, self.catalog) if self.catalog else {}):
+                    continue
                 if group in observations or prior['kind'] == 'event_stream':
                     continue
                 healthy = reads.get(check, False) and not group.startswith(('law.', 'heartbeat_stale:'))

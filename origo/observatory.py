@@ -187,6 +187,22 @@ def _objects(value: Json) -> list[Document]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def retired_book_condition(group: str, catalog: Document) -> bool:
+    if not catalog:
+        return False
+    sources = {'binance_spot_book', 'binance_perp_book',
+               'binance_spot_depth20_1m', 'binance_spot_depth200_1m'}
+    if any(source.get('id') in sources and source.get('rollout_stage') != 'DORMANT'
+           for source in _objects(catalog.get('sources'))):
+        return False
+    return (group.startswith('law.') and group.partition(':')[2] in sources) or group in {
+        'heartbeat_stale:depth', 'heartbeat_stale:book_capture_spot',
+        'heartbeat_stale:book_capture_perp', 'heartbeat_stale:provisional_binance_spot_book',
+        'heartbeat_stale:provisional_binance_perp_book', 'collector_book:spot',
+        'collector_book:perp', 'collector_silent:depth20', 'collector_silent:depth200',
+    }
+
+
 def _text(value: Json) -> str | None:
     return value if isinstance(value, str) else None
 
@@ -671,7 +687,8 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
     if not fault:
         status = _rollup([status, _status(inventory.get('outcome'))])
     incidents = sorted((_incident(key, episode, frames, now) for key, episode in episodes.items()
-                        if episode.active or episode.observations or episode.was_recovered), key=incident_rank)
+                        if (episode.active or episode.observations or episode.was_recovered)
+                        and not retired_book_condition(key, catalog)), key=incident_rank)
     omitted = None if any(frame['omitted_groups'] is None for frame in frames) else max((frame['omitted_groups'] or 0 for frame in frames), default=0)
     summary: OperatorSummary = {'schema_version': 1, 'sampling_slot': _text(report.get('sampling_slot')) or (frames[-1]['sampling_slot'] if frames else None),
         'catalog_version': _text(catalog.get('version')), 'observed_at': observed_at, 'prepared_at': now.isoformat(),

@@ -100,6 +100,13 @@ def test_no_per_minute_schedules_or_run_status_feed_sensors_remain() -> None:
     assert all(schedule.cron_schedule != '* * * * *' for schedule in repository.schedule_defs)
     names = {sensor.name for sensor in defs.sensors}
     assert 'depth_snapshot_store_source_sensor' not in names
+    assert not {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'} & names
+    assert not any(any(family in job.name for family in ('binance_spot_depth20', 'binance_spot_depth200',
+                       'build_depth_snapshot_store_arrow', 'publish_btc_briefing'))
+                   for job in repository.get_all_jobs())
+    assert not any(any(family in key.to_user_string() for family in ('binance_spot_depth20',
+                       'binance_spot_depth200', 'build_depth_snapshot_store_arrow', 'publish_btc_briefing'))
+                   for key in repository.asset_graph.get_all_asset_keys())
     assert 'binance_spot_trades_mount_sensor' in names
     assert not [name for name in names if name.endswith('_freshness_sensor')]
     assert 'binance_spot_trades_huggingface_sensor' in names

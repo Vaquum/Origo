@@ -12,10 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from origo.sources.contracts import Client, RevisionedSourceSpec, RolloutStage, Row, identifier
-from origo.sources.profiles.book import BOOK_COMPONENT_KEYS
 from origo.sources.profiles.market_state import BASE_TIME_US, CUBE_START
 from origo.sources.registry import SOURCE_REGISTRY
-from origo.workers.depth import DEPTH_SPECS
 
 if TYPE_CHECKING:
     from origo.law_catalog import GateEvaluation, ProjectionObservation, ProjectionStatus
@@ -34,13 +32,9 @@ LAW_ANCHORS = {
     'binance_spot_aggtrades': date(2017, 8, 17),
     'binance_perp_trades': date(2019, 9, 8),
     'binance_perp_aggtrades': date(2019, 12, 31),
-    'binance_spot_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_spot_book').partitions.start,
-    'binance_perp_book': next(s for s in SOURCE_REGISTRY if s.key == 'binance_perp_book').partitions.start,
     **{spec.key: spec.partitions.start for spec in SOURCE_REGISTRY if spec.key.endswith('_top20_v1')},
 }
 BOOK_MINUTE_GRIDS = {
-    **{f'binance_{market}_book': tuple(zip(BOOK_COMPONENT_KEYS, (600, 60, 1, 1), strict=True))
-       for market in ('spot', 'perp')},
     **{f'binance_{market}_top20_v1': (('depth20', 60), ('depth20_1m', 1))
        for market in ('spot', 'perp')},
 }
@@ -48,9 +42,6 @@ R1_SPOT_BUDGET_SECONDS = 180
 R1_PERP_BUDGET_SECONDS = 300
 C1_SPOT_DEADLINE = (4, 30)
 C1_PERP_DEADLINE = (10, 30)
-D1_EXPECTED_SLOTS = 1440
-D1_MAX_MISSING_SLOTS = 2
-D1_DELIVERY_GRACE_SECONDS = 60
 CANONICAL_COMPONENTS = ('raw', 'time', 'dollar', 'volume', 'tick', 'imbalance', 'aligned')
 PROVISIONAL_COMPONENTS = ('raw_latest', 'time_latest', 'dollar_latest')
 MARKET_STATE_SOURCE = 'binance_spot_trades'
@@ -592,19 +583,6 @@ def _trade(query: _Queries, database: str, spec: RevisionedSourceSpec, now: date
     return {'source_key': spec.key, 'predicates': predicates}, observations
 
 
-def _depth(query: _Queries, database: str, source: str, now: datetime) -> FeedReport:
-    end = (now - timedelta(seconds=D1_DELIVERY_GRACE_SECONDS)).replace(second=0, microsecond=0)
-    rows = query(f"""SELECT uniqExact(datetime), maxOrNull(datetime) FROM {database}.{identifier(source)}
-        WHERE datetime>=%(start)s AND datetime<%(end)s AND toStartOfMinute(datetime)=datetime""",
-        {'start': end - timedelta(minutes=D1_EXPECTED_SLOTS), 'end': end})
-    missing = D1_EXPECTED_SLOTS - int(str(rows[0][0]))
-    newest = _utc(rows[0][1]).isoformat() if rows[0][1] is not None else None
-    return {'source_key': source, 'predicates': {'D1': _result(
-        'PASS' if missing <= D1_MAX_MISSING_SLOTS else 'FAIL',
-        'depth_complete' if missing <= D1_MAX_MISSING_SLOTS else 'depth_minutes_missing',
-        newest_minute=newest, expected_slots=D1_EXPECTED_SLOTS, missing_slots=missing,
-        max_missing=D1_MAX_MISSING_SLOTS, delivery_grace_seconds=D1_DELIVERY_GRACE_SECONDS,
-        window_end=end.isoformat())}}
 
 
 def evaluate(client: Client, database: str, now: datetime) -> LawReport:
@@ -612,8 +590,7 @@ def evaluate(client: Client, database: str, now: datetime) -> LawReport:
     database = identifier(database)
     query = _Queries(client)
     specs = {spec.key: spec for spec in SOURCE_REGISTRY}
-    depths = {spec.projection_table_name for spec in DEPTH_SPECS}
-    enabled = {spec.key for spec in SOURCE_REGISTRY if spec.rollout_stage != RolloutStage.DORMANT} | depths
+    enabled = {spec.key for spec in SOURCE_REGISTRY if spec.rollout_stage != RolloutStage.DORMANT}
     inventory = list(LAW_INVENTORY) + sorted(enabled - set(LAW_INVENTORY))
     feeds: list[FeedReport] = []
     projections: list[ProjectionObservation] = []
@@ -624,8 +601,6 @@ def evaluate(client: Client, database: str, now: datetime) -> LawReport:
             if source in LAW_ANCHORS and source in specs:
                 feed, observations = _trade(query, database, specs[source], now)
                 projections.extend(observations)
-            elif source in depths and source in LAW_INVENTORY:
-                feed = _depth(query, database, source, now)
             else:
                 feed = {'source_key': source, 'predicates': {'inventory': _result('UNKNOWN', 'inventory_uncovered')}}
         except Exception as error:

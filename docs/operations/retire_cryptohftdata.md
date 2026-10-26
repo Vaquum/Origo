@@ -1,3 +1,12 @@
+# Retired book implementation
+
+Retired by #631 after reader cutover and verified local Spot depth20 archival.
+The commands below are historical evidence and must not be run. Current books
+use the two regional Render top20 replicas through the registered sources. See
+[Monitoring](../Developer/Monitoring.md) for the deployed path.
+
+---
+
 # Retire hourly vendor book history
 
 This retirement removes only CryptoHFTData hourly authority. The independent

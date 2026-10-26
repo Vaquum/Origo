@@ -21,9 +21,29 @@ from .contracts import (
 from .profiles.top20 import top20_components
 from .profiles.top20_arrow import ARROW_MAX_BYTES, publish_top20_arrow
 
+RETIRED_BOOK_COMPONENTS: Final[dict[str, frozenset[str]]] = {
+    f'binance_{market}_book': frozenset(
+        f'{component}{suffix}'
+        for component in ('depth20', 'depth200', 'depth20_1m', 'depth200_1m')
+        for suffix in ('', '_latest')
+    )
+    for market in ('spot', 'perp')
+}
+
 
 def top20_source(market: Market) -> RevisionedSourceSpec:
     key = f'binance_{market}_top20_v1'
+    retired = f'binance_{market}_book'
+    retired_tables = tuple(
+        f'{retired}_{component}_{suffix}'
+        for suffix in ('current', 'revisions')
+        for component in sorted(RETIRED_BOOK_COMPONENTS[retired])
+    )
+    if market == 'spot':
+        retired_tables += (
+            'binance_spot_depth20_snapshots', 'binance_spot_depth20_1m',
+            'binance_spot_depth200_snapshots', 'binance_spot_depth200_1m',
+        )
     cache = RenderBookCache(
         Path(os.environ.get('ORIGO_RENDER_BOOK_ROOT', '/var/lib/origo-book-spool/render-top20-v1')),
         market,
@@ -41,6 +61,7 @@ def top20_source(market: Market) -> RevisionedSourceSpec:
         if market == 'spot' else (),
         orchestration=OrchestrationSpec('5 * * * *', '* * * * *', '30 * * * *', canonical_concurrency=2),
         read_policy=SourceReadPolicy.AVAILABLE,
+        retired_tables=retired_tables,
     )
 
 

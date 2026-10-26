@@ -377,6 +377,35 @@ def test_hourly_recovery_and_activation(
         == activation_history
     )
 
+    # Deliberate obsolete schema artifacts exercise the real bootstrap retirement.
+    # No old market records are invented; the accepted replacement rows are genuine.
+    retired = runtime.spec.retired_tables
+    for name in retired:
+        if not name.endswith('_current'):
+            runtime.store.execute(f'CREATE TABLE origo.{name} (retired_control UInt8) ENGINE=Memory')
+    for name in retired:
+        if name.endswith('_current'):
+            target = name.removesuffix('_current') + '_revisions'
+            runtime.store.execute(f'CREATE VIEW origo.{name} AS SELECT * FROM origo.{target}')
+    historical = runtime.store.execute(
+        'SELECT partition_key,revision,build_id,generation FROM origo.source_activation_log '
+        'ORDER BY partition_key,generation'
+    )
+    for _ in range(2):
+        runtime.setup()
+        assert not runtime.store.execute(
+            "SELECT name FROM system.tables WHERE database='origo' AND name IN %(names)s",
+            {'names': retired},
+        )
+        assert runtime.store.execute(
+            'SELECT partition_key,revision,build_id,generation FROM origo.source_activation_log '
+            'ORDER BY partition_key,generation'
+        ) == historical
+        assert runtime.store.record(record.partition) == record
+        assert [json.loads(str(row[0])) for row in runtime.store.execute(
+            f'SELECT original_snapshot FROM {raw_view} ORDER BY datetime'
+        )] == actual
+
     table = runtime.store.component_table('depth20')
     runtime.store.execute(
         f"ALTER TABLE {table} DELETE WHERE partition_key='{HOUR}' AND toStartOfMinute(datetime)='2026-10-24 13:21:00' SETTINGS mutations_sync=2"
@@ -727,7 +756,7 @@ def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Native recovery heals a missing hour; scoped rollback preserves its accepted state."""
+    """Native recovery heals a missing hour; repeated live preparation preserves its accepted state."""
     cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
     a = _feed(recordings, 'A', cache.market)
     a.omitted = _gap(a, 21)
@@ -806,37 +835,21 @@ def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
         retained_files[pin] = pin.read_bytes()
         cursors = {path: path.read_bytes() for path in cache.root.rglob('cursor.json')}
         assert cursors
-        script = Path(__file__).parents[2] / 'deploy/retire_render_top20_workers.sh'
-        namespace: dict[str, object] = {'__name__': 'rollback_contract'}
-        exec(compile(script.read_text().split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0], str(script), 'exec'), namespace)
-        pause = cast(Callable[[DagsterInstance], None], namespace['pause_top20_admission'])
-        with pytest.raises(RuntimeError, match='work remains active'):
-            pause(instance)
-        instance.report_run_canceled(queued)
+        # Warm-up rollback is retired. Ordinary preparation preserves the LIVE
+        # workers' accepted state and never cancels their queued work.
         for _ in range(2):
-            pause(instance)
+            prepare_source(runtime.spec, instance)
             after = {state.instigator_name: state for state in instance.all_instigator_state()}
             for name, state in before.items():
-                assert after[name].status == InstigatorStatus.STOPPED
+                assert after[name].status == InstigatorStatus.RUNNING
                 assert after[name].instigator_data == state.instigator_data
             assert after[unrelated_state.instigator_name] == unrelated_state
             assert instance.get_run_by_id(unrelated_run.run_id).status == DagsterRunStatus.QUEUED
+            assert instance.get_run_by_id(queued.run_id).status == DagsterRunStatus.QUEUED
             assert runtime.store.snapshot() == snapshot
             assert all(path.read_bytes() == payload for path, payload in {**retained_files, **cursors}.items())
-
-        floor_spec = replace(runtime.spec, rollout_stage=RolloutStage.DORMANT,
-                             consumers=tuple(replace(c, public=False) for c in runtime.spec.consumers))
-        floor = SourceRuntime(floor_spec, SourceStore(runtime.store.client, 'origo', floor_spec),
-                              runtime.lock_root, 'rollback-proof')
-        for record in snapshot.records:
-            floor.validate_retained(record)
-        prepare_source(floor_spec, instance, check=True)
-        floor_bundle = build_source_bundle(floor_spec)
-        floor_definitions = Definitions(assets=floor_bundle.assets, jobs=floor_bundle.jobs,
-                                        sensors=floor_bundle.sensors)
-        floor_sensor = next(s for s in floor_bundle.sensors if s.name == sensor.name)
-        with build_sensor_context(instance=instance, definitions=floor_definitions) as context:
-            assert floor_sensor.evaluate_tick(context).run_requests == []
+            for record in snapshot.records:
+                runtime.validate_retained(record)
 
 
 def test_http_retrieval_uses_authentication_and_transfer_bounds(
@@ -998,7 +1011,7 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     ))
     monitor = Monitor(
         dagster=_Dagster(), client=runtime.store.client, database='origo',
-        heartbeat_dir=tmp_path / 'heartbeats', probes=(), settings=None,
+        heartbeat_dir=tmp_path / 'heartbeats', settings=None,
         reporter=_Reporter(), cursor_path=tmp_path / 'monitor.json',
         publication_root=tmp_path / 'source-files', law_client=runtime.store.client,
         law_root=tmp_path / 'law', arrow_root=tmp_path / 'arrow',

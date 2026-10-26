@@ -160,13 +160,12 @@ def test_queue_preserves_backfill_and_routine_capacity() -> None:
 
 
 def test_book_bulk_capacity_preserves_live_lanes() -> None:
-    from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
-    from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
+    from origo.sources.binance_top20 import BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC
 
     config = _validated_instance_config()['run_coordinator']['config']
     limits = {item['value']: item['limit'] for item in config['tag_concurrency_limits']
               if item['key'] == 'origo/workload'}
     assert limits == {'backfill': 31, 'routine': 8, 'maintenance': 1}
     assert config['max_concurrent_runs'] == config['dequeue_num_workers'] == sum(limits.values()) == 40
-    for spec in (BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
-        assert spec.orchestration.canonical_concurrency == limits['backfill'] + 1 == 32
+    for spec in (BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC):
+        assert spec.orchestration.canonical_concurrency == 2 < limits['backfill']

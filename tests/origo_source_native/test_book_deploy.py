@@ -10,10 +10,7 @@ import pytest
 import yaml
 from dagster import DagsterInstance
 
-from origo.sources.lifecycle import SourceRuntime
 
-from .test_book_sources import _keys
-from .test_book_sources import book_runtime as book_runtime
 from .test_dagster_metadata_maintenance import metadata_instance as metadata_instance
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +26,7 @@ def test_book_pause_stops_only_retired_admission_and_requires_quiescence(
         ManagedGrpcPythonEnvCodeLocationOrigin,
         RemoteInstigatorOrigin,
         RemoteRepositoryOrigin,
+        RemotePartitionSetOrigin,
     )
     from dagster._core.scheduler.instigation import (
         InstigatorState,
@@ -47,13 +45,14 @@ def test_book_pause_stops_only_retired_admission_and_requires_quiescence(
             LoadableTargetOrigin(module_name='origo.definitions'), location_name='origo'),
         '__repository__',
     )
-    retired = ('publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor')
+    retired = ('publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor',
+               'binance_spot_book_reconciliation_sensor', 'binance_perp_book_failure_sensor')
     for name in (*retired, 'binance_spot_trades_reconciliation_sensor'):
         instance.add_instigator_state(InstigatorState(
             RemoteInstigatorOrigin(repository, name), InstigatorType.SENSOR,
             InstigatorStatus.RUNNING, SensorInstigatorData(cursor='preserved-cursor'),
         ))
-    with pytest.raises(RuntimeError, match='publisher remains enabled'):
+    with pytest.raises(RuntimeError, match='admission remains enabled'):
         retire_book_admission(instance, check=True)
     retire_book_admission(instance)
     for state in instance.all_instigator_state():
@@ -68,122 +67,25 @@ def test_book_pause_stops_only_retired_admission_and_requires_quiescence(
             retire_book_admission(instance)
         instance.report_run_canceled(run)
         retire_book_admission(instance)
-    backfill = PartitionBackfill(
-        backfill_id='retired-book-admission-control', status=BulkActionStatus.REQUESTED,
-        from_failure=False, tags={}, backfill_timestamp=0.0,
-        asset_selection=[AssetKey('build_binance_perp_book_canonical_revision_origo')],
-    )
-    instance.add_backfill(backfill)
-    with pytest.raises(RuntimeError, match='book backfill remains active'):
+    for selection, origin in (
+        ([AssetKey('build_binance_perp_book_canonical_revision_origo')], None),
+        (None, RemotePartitionSetOrigin(repository_origin=repository,
+              partition_set_name='backfill_binance_spot_book_source_job_partition_set')),
+    ):
+        backfill = PartitionBackfill(
+            backfill_id='retired-book-' + ('asset' if selection else 'job'),
+            status=BulkActionStatus.REQUESTED, from_failure=False, tags={}, backfill_timestamp=0.0,
+            asset_selection=selection, partition_set_origin=origin,
+        )
+        instance.add_backfill(backfill)
+        with pytest.raises(RuntimeError, match='book backfill remains active'):
+            retire_book_admission(instance)
+        instance.update_backfill(backfill.with_status(BulkActionStatus.CANCELED))
         retire_book_admission(instance)
-    instance.update_backfill(backfill.with_status(BulkActionStatus.CANCELED))
-    retire_book_admission(instance)
     retire_book_admission(instance, check=True)
     assert instance.get_run_by_id(unrelated.run_id).status == DagsterRunStatus.NOT_STARTED
 
 
-def test_daily_book_deployment_refuses_retired_metadata_before_bootstrap(
-    book_runtime: SourceRuntime, metadata_instance: DagsterInstance,
-) -> None:
-    """Retired metadata blocks deployment; exact cleanup preserves captured native facts."""
-    import importlib.util
-    import sys
-    from datetime import timedelta
-    from unittest.mock import MagicMock
-
-    from dagster import AssetKey, AssetMaterialization, DagsterEvent, DagsterEventType
-    from dagster._core.events import AssetMaterializationPlannedData
-    from dagster._core.instance import RUNLESS_RUN_ID
-
-    specification = importlib.util.spec_from_file_location(
-        'book_deploy_preflight', ROOT / 'tools/book_deploy_preflight.py',
-    )
-    assert specification is not None and specification.loader is not None
-    preflight = importlib.util.module_from_spec(specification)
-    sys.modules[specification.name] = preflight
-    specification.loader.exec_module(preflight)
-    runtime = book_runtime
-    instance = metadata_instance
-    store = runtime.store
-    native = runtime.build(_keys(runtime)[-1], provisional=True)
-    hour = native.partition.start.replace(minute=0)
-    key = hour.strftime('%Y-%m-%dT%HZ')
-    client = MagicMock(wraps=store.client)
-
-    def guarded() -> None:
-        preflight.require_retired_history(instance, client, store.database)
-
-    guarded()
-    # Explicit metadata controls reuse the captured identity. They assert neither
-    # provider provenance nor a complete native hour/day of market data.
-    for version, partition in (('v1', native.partition.start.date().isoformat()), ('v2', key)):
-        vendor = f'cryptohftdata-{version}:' + native.revision.removeprefix('local-book-v1:')
-        store.execute(
-            'INSERT INTO origo.source_build_log SELECT source_key,%(partition)s,0,'
-            '%(start)s,%(end)s,%(revision)s,build_id,started_at FROM origo.source_build_log '
-            'WHERE build_id=%(build)s AND provisional',
-            {'partition': partition, 'start': hour, 'end': hour + timedelta(hours=1),
-             'revision': vendor, 'build': native.build_id},
-        )
-        with pytest.raises(RuntimeError, match='Retired book metadata'):
-            guarded()
-        store.execute(
-            'ALTER TABLE origo.source_build_log DELETE WHERE build_id=%(build)s '
-            'AND revision=%(revision)s', {'build': native.build_id, 'revision': vendor},
-            settings={'mutations_sync': 2},
-        )
-        guarded()
-    # An hourly canonical key is also forbidden when its revision is native.
-    store.execute(
-        'INSERT INTO origo.source_build_log SELECT source_key,%(partition)s,0,'
-        '%(start)s,%(end)s,revision,build_id,started_at FROM origo.source_build_log '
-        'WHERE build_id=%(build)s AND provisional',
-        {'partition': key, 'start': hour, 'end': hour + timedelta(hours=1), 'build': native.build_id},
-    )
-    with pytest.raises(RuntimeError, match='Retired book metadata'):
-        guarded()
-    store.execute(
-        'ALTER TABLE origo.source_build_log DELETE WHERE partition_key=%(partition)s '
-        'AND NOT provisional', {'partition': key}, settings={'mutations_sync': 2},
-    )
-    for table, values in (
-        ('source_discovery_log', (runtime.spec.key, key, hour)),
-        ('source_observation_log', (runtime.spec.key, key, '{}', 0, hour)),
-    ):
-        store.execute(f'INSERT INTO origo.{table} VALUES', [values])
-        with pytest.raises(RuntimeError, match='Retired book metadata'):
-            guarded()
-        store.execute(
-            f'ALTER TABLE origo.{table} DELETE WHERE source_key=%(source)s '
-            'AND partition_key=%(partition)s', {'source': runtime.spec.key, 'partition': key},
-            settings={'mutations_sync': 2},
-        )
-        guarded()
-    canonical = AssetKey(f'build_{runtime.spec.key}_canonical_revision_origo')
-    feed = AssetKey(f'{runtime.spec.key}_provisional_feed')
-    instance.report_runless_asset_event(AssetMaterialization(feed, partition=native.partition.key))
-    for planned in (False, True):
-        if planned:
-            instance.report_dagster_event(DagsterEvent(
-                event_type_value=DagsterEventType.ASSET_MATERIALIZATION_PLANNED.value,
-                job_name='deliberate_retirement_partition_control',
-                event_specific_data=AssetMaterializationPlannedData(canonical, partition=key),
-            ), run_id=RUNLESS_RUN_ID)
-        else:
-            instance.report_runless_asset_event(AssetMaterialization(canonical, partition=key))
-        with pytest.raises(RuntimeError, match='Retired hourly canonical Dagster facts'):
-            guarded()
-        instance.wipe_assets([canonical])
-        guarded()
-    instance.report_runless_asset_event(AssetMaterialization(
-        canonical, partition=native.partition.start.date().isoformat(),
-    ))
-    guarded()
-    assert instance.get_materialized_partitions(feed) == {native.partition.key}
-    assert store.record(native.partition) == native
-    assert all(call.args[0].startswith('SELECT ') and call.kwargs['settings']['readonly'] == 1
-               and call.kwargs['settings']['max_threads'] == 1
-               for call in client.execute.call_args_list)
 
 
 @pytest.mark.parametrize('filename', ['docker-compose.yml', 'docker-compose.deploy.yml'])
@@ -226,8 +128,7 @@ def test_only_render_book_workers_are_deployed_with_exact_inputs(filename: str) 
         assert 'book-spool:/var/lib/origo-book-spool' in services[job_service]['volumes']
     assert 'book-spool' in compose['volumes']
     workflow = (ROOT / '.github/workflows/deploy_on_merge.yml').read_text()
-    assert workflow.count('ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}') == 2
-    assert '"ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"]' in workflow
+    assert 'ORIGO_BOOK_TOP20_TOKEN' not in workflow
     for replica in ('A', 'B'):
         token = f'ORIGO_RENDER_BOOK_{replica}_TOKEN'
         assert workflow.count(f'{token}: ${{{{ secrets.{token} }}}}') == 2
@@ -268,7 +169,7 @@ def test_native_jobs_only_rollout_expires_with_version(tmp_path: Path) -> None:
     next_version = f'{major}.{minor}.{patch + 1}'
     mode_code = workflow.split('          python3 - <<\'PYTHON\' >> "$GITHUB_ENV"\n', 1)[1].split('          PYTHON', 1)[0]
     mode_code = textwrap.dedent(mode_code)
-    start = workflow.index('          # Retired hourly authority')
+    start = workflow.index('          # Before any container is replaced')
     end = workflow.index("          echo 'post-up: ClickHouse smoke test starting'", start)
     script = textwrap.dedent(workflow[start:end])
     import shlex
@@ -349,8 +250,6 @@ function python3() {
 function docker() {
   printf '%s\n' "$*" >> "$CALLS"
   case "$*" in
-    *' run --rm --no-deps -T --entrypoint python dagster /opt/app/tools/book_deploy_preflight.py')
-      [[ "$CASE" != retired-hourly* ]] ;;
     *' run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility') return 0 ;;
     *' run --rm --no-deps -T --entrypoint python dagster -')
       cat >/dev/null
@@ -379,7 +278,6 @@ function docker() {
 }
 '''
     for version, case in ((pinned, 'ok'), (pinned, 'ok-again'), (next_version, 'full'),
-                          (pinned, 'retired-hourly'), (next_version, 'retired-hourly-full'),
                           (pinned, 'preflight-failed'), (pinned, 'preservation-failed'),
                           (pinned, 'stop-failed'), (pinned, 'unretired')):
         (tmp_path / 'pyproject.toml').write_text(
@@ -397,11 +295,8 @@ function docker() {
                                      'READY_ARGV': str(ready_argv)},
                                 text=True, capture_output=True)
         observed = calls.read_text()
-        if case in ('preflight-failed', 'preservation-failed', 'stop-failed', 'retired-hourly', 'retired-hourly-full'):
+        if case in ('preflight-failed', 'preservation-failed', 'stop-failed'):
             assert result.returncode != 0 and not replaced.exists()
-            if case.startswith('retired-hourly'):
-                assert 'stop dagster dagit' not in observed
-                assert 'origo.sources.rollout' not in observed
         elif case == 'unretired':
             assert result.returncode != 0 and 'origo.sources.rollout' not in observed
         else:
@@ -421,3 +316,47 @@ function docker() {
     assert 'backfill_active(instance, spec)' in script
     assert 'groups - SourceStore(client, settings.database, spec).enabled_groups()' in script
     assert workflow.index('python3 - capture') < workflow.index('scp docker-compose.deploy.yml')
+
+
+def test_book_file_retirement_preserves_shared_stores_and_refuses_old_tables(
+    origo_test_env: dict[str, str], metadata_instance: DagsterInstance,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The actual cleanup body rejects retained old tables and only removes its fixed paths."""
+    from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+    from origo.sources.binance_top20 import BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC
+    from origo.sources.storage import SourceStore
+
+    client = make_clickhouse_client(get_clickhouse_settings())
+    try:
+        for spec in (BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC):
+            SourceStore(client, 'origo', spec).setup(anchor=spec.partitions.start)
+        from contextlib import nullcontext
+
+        monkeypatch.setattr(DagsterInstance, 'get', lambda: nullcontext(metadata_instance))
+        script = (ROOT / 'deploy/retire_legacy_book_files.sh').read_text()
+        body = script.split("<<'PYTHON'\n", 1)[1].split('\nPYTHON', 1)[0]
+        for deployed, local in (('/var/lib/origo-book-spool', 'spool'),
+                                ('/opt/arrow', 'arrow'), ('/opt/origo/heartbeats', 'heartbeats')):
+            body = body.replace(deployed, str(tmp_path / local))
+        removed = [tmp_path / path for path in (
+            'spool/spot', 'spool/perp', 'arrow/depth20_snapshots', 'arrow/depth200_snapshots')]
+        preserved = [tmp_path / path for path in (
+            'spool/render-top20-v1', 'arrow/binance_spot_top20_v1', 'arrow/bars',
+            'heartbeats/provisional_binance_spot_top20_v1')]
+        # Explicit filesystem control markers; they make no market-data claim.
+        for directory in (*removed, *preserved):
+            directory.mkdir(parents=True)
+            (directory / 'cleanup-control.txt').write_text('preserve exact bytes')
+        client.execute('CREATE TABLE origo.binance_spot_depth20_snapshots (control UInt8) ENGINE=Memory')
+        with pytest.raises(AssertionError):
+            exec(compile(body, str(ROOT / 'deploy/retire_legacy_book_files.sh'), 'exec'), {})
+        assert all(path.exists() for path in (*removed, *preserved))
+        client.execute('DROP TABLE origo.binance_spot_depth20_snapshots')
+        for _ in range(2):
+            exec(compile(body, str(ROOT / 'deploy/retire_legacy_book_files.sh'), 'exec'), {})
+            assert not any(path.exists() for path in removed)
+            assert all((path / 'cleanup-control.txt').read_text() == 'preserve exact bytes'
+                       for path in preserved)
+    finally:
+        client.disconnect()

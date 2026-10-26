@@ -1,3 +1,12 @@
+# Retired book implementation
+
+Retired by #631 after reader cutover and verified local Spot depth20 archival.
+The commands below are historical evidence and must not be run. Current books
+use the two regional Render top20 replicas through the registered sources. See
+[Monitoring](../Developer/Monitoring.md) for the deployed path.
+
+---
+
 # Native Binance book capture
 
 `binance_spot_book` and `binance_perp_book` start as CANARY sources beside the

@@ -135,22 +135,32 @@ def is_source_backfill(run: DagsterRun, spec: RevisionedSourceSpec) -> bool:
 
 
 def retire_book_admission(instance: DagsterInstance, *, check: bool = False) -> None:
-    from .registry import SOURCE_REGISTRY
-
     sensors = {'publish_btc_briefing_feed_sensor', 'publish_btc_briefing_history_sensor'}
     for state in instance.all_instigator_state():
-        if state.name in sensors and state.status != InstigatorStatus.STOPPED:
+        retired = state.name in sensors or state.name.startswith(('binance_spot_book_', 'binance_perp_book_'))
+        if retired and state.status != InstigatorStatus.STOPPED:
             if check:
-                raise RuntimeError(f'Retired book publisher remains enabled: {state.name}')
+                raise RuntimeError(f'Retired book admission remains enabled: {state.name}')
             instance.update_instigator_state(state.with_status(InstigatorStatus.STOPPED))
     if check:
         return
     sources = {'binance_spot_book', 'binance_perp_book'}
-    for spec in SOURCE_REGISTRY:
-        if spec.key in sources and backfill_active(instance, spec):
-            raise RuntimeError(f'Retired book backfill remains active: {spec.key}')
     names = (*sources, 'binance_spot_depth20', 'binance_spot_depth200',
              'publish_btc_briefing', 'build_depth_snapshot_store_arrow')
+    cursor = None
+    while True:
+        page = instance.get_backfills(filters=BulkActionsFilter(statuses=[
+            BulkActionStatus.REQUESTED, BulkActionStatus.CANCELING, BulkActionStatus.FAILING,
+        ]), cursor=cursor, limit=25)
+        for backfill in page:
+            identities = [key.to_user_string() for key in (backfill.asset_selection or ())]
+            if backfill.partition_set_origin is not None:
+                identities.append(backfill.partition_set_origin.partition_set_name)
+            if any(name in identity for name in names for identity in identities):
+                raise RuntimeError(f'Retired book backfill remains active: {backfill.backfill_id}')
+        if len(page) < 25:
+            break
+        cursor = page[-1].backfill_id
     for run in instance.get_runs(RunsFilter(statuses=[
         DagsterRunStatus.NOT_STARTED, DagsterRunStatus.QUEUED, DagsterRunStatus.STARTING,
         DagsterRunStatus.STARTED, DagsterRunStatus.CANCELING,
@@ -227,11 +237,11 @@ def main() -> None:
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     with DagsterInstance.get() as instance:
+        retire_book_admission(instance, check=args.check)
         for spec in SOURCE_REGISTRY:
             if not args.check:
                 configure_source_pool(spec, instance)
             prepare_source(spec, instance, check=args.check)
-        retire_book_admission(instance, check=args.check)
 
 
 if __name__ == '__main__':

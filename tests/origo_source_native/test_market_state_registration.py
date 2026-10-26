@@ -602,6 +602,33 @@ def test_deployment_refuses_an_image_that_cannot_read_activated_components(
     monkeypatch.setattr(compatibility, 'SOURCE_REGISTRY', (runtime.spec,))
     assert compatibility.undeclared_components() == {}
 
+    # Deliberate historical activation metadata reuses a genuine build. Only the
+    # exact retired component inventory is readable without a live source spec.
+    record = runtime.store.record(runtime.spec.canonical.partition(_DAY))
+    assert record is not None
+    from origo.sources.binance_top20 import RETIRED_BOOK_COMPONENTS
+
+    for retired, components in RETIRED_BOOK_COMPONENTS.items():
+        runtime.store.execute(
+            'INSERT INTO origo.source_activation_log SELECT %(source)s,partition_key,'
+            'provisional,partition_start,partition_end,generation,revision,build_id,activation_id,'
+            '%(hashes)s,dagster_run_id,activated_at '
+            'FROM origo.source_activation_log WHERE source_key=%(original)s LIMIT 1',
+            {'source': retired, 'original': runtime.spec.key,
+             'hashes': json.dumps([(key, 'historical-control') for key in sorted(components)])},
+        )
+    assert compatibility.undeclared_components() == {}
+    runtime.store.execute(
+        'INSERT INTO origo.source_activation_log SELECT source_key,partition_key,provisional,'
+        'partition_start,partition_end,generation+1,revision,build_id,activation_id,'
+        '%(hashes)s,dagster_run_id,activated_at FROM origo.source_activation_log '
+        "WHERE source_key='binance_spot_book' LIMIT 1",
+        {'hashes': json.dumps([('unrecognized_retired_component', 'deliberate-control')])},
+    )
+    assert compatibility.undeclared_components() == {
+        'binance_spot_book': ['unrecognized_retired_component'],
+    }
+
     workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/deploy_on_merge.yml').read_text()
     guard = workflow.index('dagster -m origo.sources.compatibility')
     assert workflow.index('docker-compose.deploy.yml pull') < guard < workflow.index(' up -d ')

@@ -1009,10 +1009,11 @@ def test_frozen_acceptance_protocol_and_report_verdict(tmp_path: Path) -> None:
     benchmark = cast(Benchmark, importlib.import_module('tools.benchmark_market_state_rallies'))
     failure_policy = cast(Callable[[object, object], bool], getattr(benchmark, '_workload_failure'))
     # Scalar policy probes; no production receipt or resource report is fabricated.
-    for feed in ('market_state_api', 'provisional', 'depth'):
+    for feed in ('market_state_api', 'provisional'):
         assert failure_policy(feed, 'FAILED')
         assert not failure_policy(feed, 'OK')
         assert not failure_policy(feed, 'REJECTED')
+    assert not failure_policy('depth', 'FAILED')  # Retired receipts are not a live workload.
     assert not failure_policy('unrelated', 'FAILED')
     assert not failure_policy(None, 'FAILED')
     assert not failure_policy('market_state_api', None)

@@ -1,3 +1,12 @@
+# Retired book implementation
+
+Retired by #631 after reader cutover and verified local Spot depth20 archival.
+The commands below are historical evidence and must not be run. Current books
+use the two regional Render top20 replicas through the registered sources. See
+[Monitoring](../Developer/Monitoring.md) for the deployed path.
+
+---
+
 # Depth Arrow retention
 
 Depth20 and depth200 minute IPC chunks are a live cache. The publisher keeps chunks at or after `floor(now_UTC, minute) - 30 minutes`, plus the exact current `latest.json` target even when stale. The 15-minute source repair window fits inside that window. Source rows remain in ClickHouse; historical exports are separate from this cache.

@@ -64,27 +64,20 @@ existing R1/data_current reader law remains independent and red while readers la
 The status file lives on the shared heartbeat volume; the monitor never mounts the
 capture spool. Capture failures use the existing Dagit checks, logs and alert path.
 
-The superseded native Spot/perpetual book definitions remain DORMANT while their
-final Spot depth20 archive is verified. Deployment stops their schedules and sensors,
-and both obsolete daily BTC publisher sensors, without changing saved cursors. It
-refuses active old book runs or backfills. Legacy depth/Arrow/BTC assets and jobs are unregistered, so neither named jobs nor
-implicit asset materialization can admit old writes. The old depth feed has no active law or
-freshness asset. The monitor ignores the five retired worker heartbeat names and
-makes no requests to the old depth20/depth200 endpoints. Retired condition groups do
-not carry forward into current incidents; their historical frames remain available.
-Existing evidence retention, including the14-day container-log TTL, is unchanged.
+The superseded native books, legacy depth worker and obsolete daily BTC publishers
+are retired. Their jobs, assets and source declarations are absent. Deployment
+refuses active old book work and any reappearing old worker container. The monitor
+ignores their five heartbeat names and makes no request to old depth endpoints.
+Historical law frames, source activation/component/failure records, worker receipts
+and existing evidence retention (including the14-day container-log TTL) remain intact.
+Retired condition groups do not carry forward into current incidents.
 
-After that deployment is verified, `deploy/retire_legacy_book_workers.sh` checks
-DORMANT admission and quiescence again, then stops the two native capture workers first. Every retained sealed minute must
-match its exact accepted native revision before the provisional workers stop. Missing
-keys are retried within180seconds using bounded key selections; timeout preserves the
-remaining workers for an idempotent retry. The last closed legacy Spot20 minute must
-have raw and projected rows before depth stops last. Stored row counts do not assert
-upstream completeness. It removes
-only those five heartbeat files after confirming every process is gone. Tables,
-spools, historical files and the replacement cache remain in place until the final
-Spot depth20 delta has been downloaded, hashed and read back locally. This pause is
-the archive boundary, before the separate obsolete-code/storage retirement.
+The final Spot depth20 archive is verified locally before the retirement deployment.
+Existing source setup removes exactly the36 obsolete table/view objects. After
+verification, `deploy/retire_legacy_book_files.sh` removes only the old Spot/perp
+spools, depth20/depth200 Arrow directories, five heartbeats and two capture status
+files. It preserves the entire `render-top20-v1` cache, new Spot Arrow and bar files.
+No depth200 or perpetual history is archived.
 
 Render top20 sources run as `provisional-binance-spot-top20` and
 `provisional-binance-perp-top20`, using the existing provisional worker. They import the newest
@@ -98,29 +91,14 @@ the existing `collectors_serving` check, law tape and notification path; the
 independent replica remains separately observed. These probes make no Binance
 requests. Disabled definitions perform no external status I/O.
 
-During warm-up, existing book readers and producers remain active. Before replacing
-deployment inputs, `deploy/render_top20_deploy.py` pins the disabled image, matching
-Compose and required environment under `.render-top20-floor` (credentials mode0600).
-It records the retained service identities/restarts/start times and accepted
-frontiers, rechecks them after preparation and requires frontier progress after verification.
-After qualification, both new top20 workers join that protected set. Old book workers
-may be absent only after their declarations become DORMANT; their old frontiers become
-non-regression obligations at that boundary.
-Dagster, Dagit, monitor and the read-only law renderer are the declared replacements.
-From the deployment directory, warm-up rollback is
-`python3 deploy/render_top20_deploy.py rollback "$PWD" "$PROJECT_NAME"`.
-It validates the pinned inputs before changing admission, refuses active new-source
-native work, retires only the two new worker services before removing their heartbeat
-files, then restores the four controllers with normal DORMANT preparation and component
-compatibility. It preserves cache, accepted generations, pins, Arrow, cursors and all
-volumes. Repeating rollback does not recreate the new workers. After reader cutover, the recorded `.book-reader-cutover.json` marker refuses this
-warm-up rollback before changing any process. Recovery must preserve the qualified
-source workers and the readers already using them.
-
-Later top20 adapter updates use the existing deliberate full-release path; ordinary
-native-only controller deployments retain their worker image bindings. Recovery from
-an interrupted pause repeats the current deployment/helper; it preserves all stored
-book data and the replacement workers.
+`deploy/render_top20_deploy.py` captures retained worker identities, restart counts,
+start times and accepted frontiers before deployment. It requires both qualified
+top20 workers LIVE and running. Native-only deployment replaces only Dagster, Dagit,
+monitor and law; the13 retained workers, including both top20 workers, keep their
+identities and advance. The two old native book frontiers must remain exactly frozen.
+Warm-up rollback is removed. After verification, the obsolete floor directory and
+its image tag are removed. Later top20 adapter updates use deliberate full releases;
+ordinary native-only deployments retain their worker image bindings.
 
 The market state query service (`origo.workers.market_state_api`, Compose service
 `market-state`) is an observed worker of the same kind:
@@ -290,33 +268,22 @@ mismatches within existing coverage-lag policy are pending, never exact-current;
 known data failures take precedence. Equal-frontier revision mismatch has no
 revision-age timeout in the existing policy. Dagit destinations are linked only
 when an operator-facing URL is recorded; otherwise the exact asset/check is text.
-Source/projection inventory comes from source and depth declarations, never UI lists.
+Source/projection inventory comes from registered source declarations, never UI lists.
 
-`data_current` evaluates R1 (readable selected minute and reader end), C1 (the latest due
-canonical activation at the source's declared interval), C2 (older canonical calendar) and D1
-(distinct depth minutes with a 60-second delivery grace). Worker liveness cannot make missing reader data green.
-Spot/perp freshness budgets are initially 180/300 seconds. Missing daily archives are
-NOT_DUE before 04:30/10:30 UTC respectively; arrivals are validated immediately.
-The enabled CANARY `binance_spot_book` and `binance_perp_book` are required
-R1/C1/C2 members, using the same detector, observation tape, notifications and
-Overview/Sources/Laws/Recovery views. R1 checks a readable closed minute's physical
-600/60/1/1 rows at the selected revision/build, all four component proofs, freshness
-and missing provisional minutes after the latest valid canonical end, or the
-registered start if none exists, bounded to the last 24 hours. C1 checks the
-previous UTC day's daily canonical activation. A missing day is NOT_DUE before
-04:30 UTC for spot or 10:30 UTC for perpetual.
-C2 counts older distinct authoritative days from **2026-10-04 UTC** for both books.
-Extending the calendar does not certify unfilled history.
-Missing or stale evidence is not a pass; invalid published inputs remain failures.
-Neither CANARY rollout nor healthy capture makes missing readers green.
+`data_current` evaluates R1 (readable selected minute and reader end), C1 (latest due
+canonical activation), C2 (older canonical calendar), and the separate cube laws below.
+Worker liveness cannot make missing reader data green. Spot/perp freshness budgets
+are180/300seconds. Missing daily trade archives are NOT_DUE before04:30/10:30UTC.
+Historical reports retain D1 and the retired native book descriptors; current
+inventory contains only the four trade sources and two qualified top20 sources.
 Enabled `binance_spot_top20_v1` and `binance_perp_top20_v1` use the same reader
 laws with60snapshots/one metric row per minute. C1 requires the latest UTC hour
 due at hour end plus five minutes, with3600actual observations and60minute
 metrics. C2 checks every older hour from2026-10-24T13:00Z. A common missing
 second remains a failed hour; no carried observation supplies coverage.
-Sources lists canonical and provisional depth20, depth200 and both minute metrics,
+Sources lists canonical and provisional depth20 and minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
-daily canonical readiness and calendar coverage for both books and trades.
+hourly book and daily trade canonical readiness and calendar coverage.
 
 Projection activation is not formal certification approval or a physical full-history audit.
 
@@ -460,7 +427,7 @@ to a host gate. No host is inferred from a source name.
 Overview adds no database queries, collector probes or exchange calls. Per-tick
 scalar counts reuse the monitor's existing reads and reset to unknown on failed
 reads. The worker denominator includes enabled provisional workers, the single
-shared depth worker, and already-discovered heartbeat members; missing required
+raw-perp capture and already-discovered heartbeat members; missing required
 members stay unknown. Queue zero is never inferred from unreachable Dagster.
 
 Error lines and failed receipts show 60-minute observed totals, with 24-hour detail.

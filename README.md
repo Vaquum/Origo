@@ -29,7 +29,7 @@
 
 *Event-sourced Bitcoin market data platform that turns raw Binance archives into checksum-verified trade tables, rebuildable bar projections, and replayable research datasets.*
 
-Origo ingests Binance BTCUSDT market data into ClickHouse under Dagster orchestration, records every ingested source file in a checksum ledger, and rebuilds every daily-partitioned projection deterministically from that raw record; the rolling `_latest` tables and live depth snapshots capture the span after the last daily load and sit outside that rebuild guarantee. The Dagster deployment in this repository is Origo's control plane — the term names that orchestration component, not the project. The project evolves from tdw-control-plane, this repository's original identity.
+Origo ingests Binance BTCUSDT market data into ClickHouse under Dagster orchestration, records every ingested source file in a checksum ledger, and rebuilds every daily-partitioned projection deterministically from that raw record; the rolling `_latest` tables capture the span after the last daily load and sit outside that rebuild guarantee. The Dagster deployment in this repository is Origo's control plane — the term names that orchestration component, not the project. The project evolves from tdw-control-plane, this repository's original identity.
 
 ## What Origo Is Not
 
@@ -48,7 +48,7 @@ In the wider Vaquum architecture, Origo sits upstream as the data layer. Limen c
 - Revisioned perp source: checksum-verified Binance USDT-M perpetual BTCUSDT daily trade archives (from 2019-09-08) built per day into raw trades, 1-minute klines, dollar, volume, tick and dollar-imbalance bars and the aligned 1-minute rows, with provisional minute intervals covering the open day, activation history, reconciliation and rollback
 - Revisioned spot aggregate source (CANARY): checksum-verified Binance BTCUSDT daily aggregate-trade archives (from 2017-08-17) built per day into raw aggregates, 1-minute klines, dollar, volume, tick and dollar-imbalance bars and the aligned 1-minute rows, with provisional minute intervals covering the open day; tick bars count aggregate events and dollar bars accumulate aggregate notional
 - Revisioned perp aggregate source (CANARY): checksum-verified Binance USDT-M perpetual BTCUSDT daily aggregate-trade archives (from 2019-12-31) built per day into raw aggregates, 1-minute klines, dollar, volume, tick and dollar-imbalance bars and the aligned 1-minute rows, with provisional minute intervals covering the open day; tick bars count aggregate events and dollar bars accumulate aggregate notional
-- Binance spot order-book depth snapshots (20- and 200-level) with 1-minute projections and per-minute reconciliation
+- Binance Spot and USDT-M perpetual top20 books: one real snapshot per second, minute delivery and hourly reconciliation from independent Render replicas
 - BTCUSDT spot market state cube from 2021-01-01: pinned sparse Arrow queries with quote/base volume, trade counts, path, dwell and OHLC measures; exact First hit, Controlled advance and Swing rally memberships with local filter/grid/replay reuse
 - Hugging Face publishing of twelve kline datasets (six time intervals and six dollar-bar sizes), the local monthly Parquet mirror of the same series and the versioned mmap-ready Arrow bar store, all published by the revisioned spot source from one pinned state
 - Ratcheted CI gates on every PR: strict pyright typing, fail-loud (no silent fallbacks), Conventional Commits, and version plus CHANGELOG trails
@@ -66,7 +66,7 @@ cd Origo
 export CLICKHOUSE_PASSWORD=<choose-a-password>
 ```
 
-Supported runtime: the containers run Python 3.11 (`python:3.11.12`) and the package requires Python `>=3.11`; the host needs Docker with Compose. `CLICKHOUSE_PASSWORD` is the only variable without a default — `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, and `CLICKHOUSE_DATABASE` default to the in-network values (`clickhouse`, `9000` native / `8123` HTTP, `default`, `origo`). `HF_TOKEN` and `HUGGINGFACE_DATASET_REPO_ID` are needed only for Hugging Face publishing, and the `BINANCE_SPOT_DEPTH20_*` / `BINANCE_SPOT_DEPTH200_*` pairs only for the live depth collectors; `docker-compose.deploy.yml` requires them all, the local `docker-compose.yml` does not. The local compose file passes `CLICKHOUSE_PASSWORD` only to the ClickHouse server, so the commands below inject it into the Dagster container with `-e`.
+Supported runtime: the containers run Python 3.11 (`python:3.11.12`) and the package requires Python `>=3.11`; the host needs Docker with Compose. `CLICKHOUSE_PASSWORD` is the only variable without a default — `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, and `CLICKHOUSE_DATABASE` default to the in-network values (`clickhouse`, `9000` native / `8123` HTTP, `default`, `origo`). `HF_TOKEN` and `HUGGINGFACE_DATASET_REPO_ID` are needed only for Hugging Face publishing, and `ORIGO_RENDER_BOOK_A_TOKEN` / `ORIGO_RENDER_BOOK_B_TOKEN` authenticate the two top20 replicas. The deployment requires the publishing and collector credentials. The local compose file passes `CLICKHOUSE_PASSWORD` only to the ClickHouse server, so the commands below inject it into the Dagster container with `-e`.
 
 1. Start the stack:
 

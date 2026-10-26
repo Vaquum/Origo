@@ -943,7 +943,8 @@ def test_monitor_pipeline_preserves_law_and_resource_contracts(tmp_path: Path, m
         unchanged = set(previous) - {'definition_version', 'code', 'condition', 'thresholds'}
         assert {key: current[key] for key in unchanged} == {key: previous[key] for key in unchanged}
         if previous['id'] == 'monitor.collectors_serving':
-            assert current['condition'] == str(previous['condition']).removesuffix('.') + '; enabled Render replicas must report fresh durable exchange and receipt clocks.'
+            assert current['condition'] == ('Raw-perp capture must report fresh durable acquisition; '
+                                            'enabled Render replicas must report fresh durable exchange and receipt clocks.')
             assert current['thresholds'] == {**page._object(previous['thresholds']),
                 'render_timeout_seconds': 5, 'render_max_bytes': 16 * 1024,
                 'render_age_seconds': 5, 'render_future_seconds': 1}

@@ -782,7 +782,7 @@ def test_source_tick_failure_does_not_stop_later_sources(
     try:
         monitor = Monitor(
             dagster=cast(DagsterReader, dagster), client=client, database=ORIGO_DATABASE,
-            heartbeat_dir=tmp_path, probes=(), settings=None, reporter=cast(Reporter, reporter),
+            heartbeat_dir=tmp_path, settings=None, reporter=cast(Reporter, reporter),
             cursor_path=tmp_path / 'cursor.json', publication_root=tmp_path,
             law_client=client, law_root=tmp_path / 'law',
         )
